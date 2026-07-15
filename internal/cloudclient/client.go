@@ -1376,10 +1376,19 @@ func (c *Client) GetSpawnSite(ctx context.Context, id string) (SpawnSite, error)
 // mints a genuinely new releases/<build_id>/ instead of returning the cached
 // (possibly failed) deployment. Without it {force:true} the body stays the empty
 // object and the deploy is idempotent on identical content+config (charter D36).
-func (c *Client) DeploySpawnSite(ctx context.Context, id string, force bool) (SiteDeployment, error) {
+func (c *Client) DeploySpawnSite(ctx context.Context, id string, force bool, via, domain string) (SiteDeployment, error) {
 	req := map[string]any{}
 	if force {
 		req["force"] = true
+	}
+	// cf-in-front (D57): a `via`/`domain` pair asks the control plane to bind the
+	// domain through Cloudflare (DNS + orange-cloud proxy) before the build. Ride
+	// the body ONLY when set — a plain deploy stays byte-identical (mirror force).
+	if via != "" {
+		req["via"] = via
+	}
+	if domain != "" {
+		req["domain"] = domain
 	}
 	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/deploy", true, req)
 	if err != nil {

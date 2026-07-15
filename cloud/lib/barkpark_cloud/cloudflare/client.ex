@@ -32,11 +32,13 @@ defmodule BarkparkCloud.Cloudflare.Client do
       given the token the user just pasted, confirm it is live and active
       (`GET /user/tokens/verify`) BEFORE it is stored. Returns
       `{:ok, %{status: "active"}}` for a good token, `{:error, term}` otherwise.
-    * `upsert_dns_record/2` — create-or-update a DNS record in a zone (point the
-      custom domain at the origin). Returns `{:ok, %{record_id:, name:}}`.
-    * `ensure_zone_proxied/2` — flip a DNS record to PROXIED (the orange cloud),
+    * `upsert_dns_record/3` — create-or-update a DNS record in a zone (point the
+      custom domain at the origin), authenticating with the threaded `token`.
+      Returns `{:ok, %{record_id:, name:}}`.
+    * `ensure_zone_proxied/3` — flip a DNS record to PROXIED (the orange cloud),
       so traffic rides Cloudflare's CDN + DDoS shield instead of hitting the
-      origin directly. Returns `{:ok, %{proxied: true}}`.
+      origin directly, authenticating with the threaded `token`. Returns
+      `{:ok, %{proxied: true}}`.
     * `create_origin_ca_cert/2` — mint a Cloudflare Origin CA certificate for a
       set of hostnames from a CSR, so the origin can present a cert Cloudflare
       trusts end-to-end (Full/Strict TLS). Returns `{:ok, %{id:, certificate:}}`.
@@ -74,19 +76,26 @@ defmodule BarkparkCloud.Cloudflare.Client do
   @callback verify_token(token) :: {:ok, %{status: String.t()}} | {:error, term}
 
   @doc """
-  Create-or-update a DNS `record` in `zone_id`. When `record` carries an `:id`
-  it updates that record; otherwise it creates one. Returns
-  `{:ok, %{record_id: id, name: name}}` or `{:error, term}`.
+  Create-or-update a DNS `record` in `zone_id`, authenticating with `token`.
+  When `record` carries an `:id` it updates that record; otherwise it creates
+  one. Returns `{:ok, %{record_id: id, name: name}}` or `{:error, term}`.
+
+  The `token` is THREADED as the first argument (D52) rather than read from
+  global config: a per-team credential is resolved at call time and passed in,
+  so concurrent deploys for different teams can never race over a shared
+  `Application.put_env`.
   """
-  @callback upsert_dns_record(zone_id, dns_record) ::
+  @callback upsert_dns_record(token, zone_id, dns_record) ::
               {:ok, %{record_id: String.t(), name: String.t()}} | {:error, term}
 
   @doc """
-  Flip the DNS record `record_id` in `zone_id` to PROXIED (orange cloud), so
-  traffic rides Cloudflare's CDN + DDoS shield. Returns
-  `{:ok, %{proxied: true}}` or `{:error, term}`.
+  Flip the DNS record `record_id` in `zone_id` to PROXIED (orange cloud),
+  authenticating with `token`, so traffic rides Cloudflare's CDN + DDoS shield.
+  Returns `{:ok, %{proxied: true}}` or `{:error, term}`. `token` is threaded as
+  the first argument (D52) for the same per-team-credential reason as
+  `upsert_dns_record/3`.
   """
-  @callback ensure_zone_proxied(zone_id, record_id :: String.t()) ::
+  @callback ensure_zone_proxied(token, zone_id, record_id :: String.t()) ::
               {:ok, %{proxied: boolean()}} | {:error, term}
 
   @doc """

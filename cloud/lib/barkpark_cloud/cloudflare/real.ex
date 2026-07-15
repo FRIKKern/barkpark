@@ -11,9 +11,9 @@ defmodule BarkparkCloud.Cloudflare.Real do
     * `verify_token/1` — `GET /user/tokens/verify` (Bearer the token being
       verified). The connect-time credential check: a live token answers
       `{"result":{"status":"active"}}`.
-    * `upsert_dns_record/2` — `POST /zones/:zone/dns_records` to create, or
+    * `upsert_dns_record/3` — `POST /zones/:zone/dns_records` to create, or
       `PUT /zones/:zone/dns_records/:id` to update when the record carries an id.
-    * `ensure_zone_proxied/2` — `PATCH /zones/:zone/dns_records/:id` with
+    * `ensure_zone_proxied/3` — `PATCH /zones/:zone/dns_records/:id` with
       `{"proxied": true}` (the orange-cloud flip).
     * `create_origin_ca_cert/2` — `POST /certificates` with the hostnames + CSR.
 
@@ -21,13 +21,14 @@ defmodule BarkparkCloud.Cloudflare.Real do
 
   `verify_token/1` verifies the token PASSED to it (the credential the user just
   handed over), so it authenticates with that argument — it never reads config.
-  The other three act on an already-connected instance, so they resolve the
-  stored token via the private `token/0` (from config for this scaffold;
-  per-instance Vault-decrypt plumbing is a LATER slice — the pure builders take
-  the token as an argument so that slice only has to change how `token/0`
-  sources it). Both `token/0` and `request/1` FAIL CLOSED
-  (`{:error, :not_configured}` / `{:error, :http_client_not_configured}`) and
-  NEVER touch the wire unconfigured.
+  The DNS callbacks (`upsert_dns_record/3`, `ensure_zone_proxied/3`) now THREAD a
+  per-team token in as their first argument (D52): the control plane resolves the
+  team's Cloudflare credential at call time and hands it down, so concurrent
+  deploys for different teams never race over a shared `Application.put_env`.
+  `create_origin_ca_cert/2` still resolves a config token via the private
+  `token/0` (the TLS slice threads its own credential later). `present_token/1`,
+  `token/0`, and `request/1` all FAIL CLOSED (`{:error, :not_configured}` /
+  `{:error, :http_client_not_configured}`) and NEVER touch the wire unconfigured.
 
   ## Injectable HTTP client — €0 in tests, no new dep
 
@@ -42,13 +43,12 @@ defmodule BarkparkCloud.Cloudflare.Real do
 
   ## NOTE for the live-wiring slice
 
-  Two refinements belong to the later "wire Cloudflare live" slice, NOT this
-  pure scaffold: (1) `ensure_zone_proxied/2` emits a `:patch` request, so the
-  shared `Billing.HttpClient.to_httpc/1` needs a `:patch` clause added then (it
-  is never reached in the suite — `request/1` fails closed on the absent client
-  first); (2) Cloudflare Origin CA historically authenticates with the Origin CA
-  key (`X-Auth-User-Service-Key`) rather than a Bearer token — this scaffold
-  uses Bearer uniformly and the live slice adjusts the header if needed.
+  `ensure_zone_proxied/3` emits a `:patch` request; the shared
+  `Billing.HttpClient.to_httpc/1` gained its `:patch` clause in this slice (D59)
+  so the proxied flip maps to a real `:httpc` PATCH. One refinement still belongs
+  to a later slice: Cloudflare Origin CA historically authenticates with the
+  Origin CA key (`X-Auth-User-Service-Key`) rather than a Bearer token — this
+  module uses Bearer uniformly and the TLS slice adjusts the header if needed.
   """
   @behaviour BarkparkCloud.Cloudflare.Client
 
@@ -73,8 +73,9 @@ defmodule BarkparkCloud.Cloudflare.Real do
   end
 
   @impl true
-  def upsert_dns_record(zone_id, record) when is_binary(zone_id) and is_map(record) do
-    with {:ok, token} <- token(),
+  def upsert_dns_record(token, zone_id, record)
+      when is_binary(zone_id) and is_map(record) do
+    with {:ok, token} <- present_token(token),
          {:ok, decoded} <- request(upsert_dns_record_request(token, zone_id, record)) do
       case decoded do
         %{"result" => %{"id" => id, "name" => name}} when is_binary(id) ->
@@ -87,9 +88,9 @@ defmodule BarkparkCloud.Cloudflare.Real do
   end
 
   @impl true
-  def ensure_zone_proxied(zone_id, record_id)
+  def ensure_zone_proxied(token, zone_id, record_id)
       when is_binary(zone_id) and is_binary(record_id) do
-    with {:ok, token} <- token(),
+    with {:ok, token} <- present_token(token),
          {:ok, decoded} <- request(ensure_zone_proxied_request(token, zone_id, record_id)) do
       case decoded do
         %{"result" => %{"proxied" => proxied}} -> {:ok, %{proxied: proxied}}
@@ -199,13 +200,17 @@ defmodule BarkparkCloud.Cloudflare.Real do
   # Fails closed (no raise) when the API token is unset, so an accidental
   # invocation of a connected-instance callback without credentials returns an
   # error instead of crashing. `verify_token/1` bypasses this — it authenticates
-  # with the token passed to it.
+  # with the token passed to it. Still used by `create_origin_ca_cert/2` (config
+  # token); the DNS callbacks now thread a per-team token in (D52).
   defp token do
-    case config()[:token] do
-      token when is_binary(token) and token != "" -> {:ok, token}
-      _ -> {:error, :not_configured}
-    end
+    present_token(config()[:token])
   end
+
+  # Fail-closed guard for a THREADED token (D52): a blank/nil token argument is
+  # `:not_configured` BEFORE any request is built, so a caller that failed to
+  # resolve a per-team credential never reaches the wire.
+  defp present_token(token) when is_binary(token) and token != "", do: {:ok, token}
+  defp present_token(_), do: {:error, :not_configured}
 
   # Resolve the injected HTTP client and perform the request. NEVER reaches the
   # wire in tests (no client configured → fail closed). On a 2xx, decode the JSON
