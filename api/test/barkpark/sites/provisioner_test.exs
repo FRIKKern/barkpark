@@ -35,10 +35,18 @@ defmodule Barkpark.Sites.ProvisionerTest do
     File.write!(Path.join(template, "src/lib/barkpark.ts"), "// content fetch\n")
     File.write!(Path.join(template, ".gitignore"), "dist\n")
 
-    put_cfg(sites_dir: sites, template_dir: template)
+    # A stand-in for templates/next-starter (charter D63/D71) — a distinct
+    # package.json + next.config so a runtime_target=node deploy provably lands
+    # THIS tree, never the astro one.
+    node_template = Path.join(base, "node-template")
+    File.mkdir_p!(Path.join(node_template, "app"))
+    File.write!(Path.join(node_template, "package.json"), ~s({"name":"next-stub"}))
+    File.write!(Path.join(node_template, "next.config.mjs"), "export default {}\n")
+
+    put_cfg(sites_dir: sites, template_dir: template, node_template_dir: node_template)
     on_exit(fn -> File.rm_rf(base) end)
 
-    {:ok, sites: sites, template: template}
+    {:ok, sites: sites, template: template, node_template: node_template}
   end
 
   defp put_cfg(overrides) do
@@ -53,15 +61,20 @@ defmodule Barkpark.Sites.ProvisionerTest do
   end
 
   defp deploy(slug, opts \\ []) do
-    {:ok, req} =
-      DeployRequest.new(%{
+    params =
+      %{
         "slug" => slug,
         "build_id" => Keyword.get(opts, :build_id, "b1"),
         "mode" => Keyword.get(opts, :mode, "deploy")
-      })
+      }
+      |> maybe_put("runtime_target", Keyword.get(opts, :runtime_target))
 
+    {:ok, req} = DeployRequest.new(params)
     req
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # ── the happy path: template → <sites_dir>/<slug>/src ────────────────────
 
@@ -137,7 +150,13 @@ defmodule Barkpark.Sites.ProvisionerTest do
 
   describe "fail-closed" do
     test "a missing template dir → {:error, {:provision_failed, _}}, no src left" do
-      put_cfg(template_dir: Path.join(System.tmp_dir!(), "bp-no-such-template-#{System.unique_integer([:positive])}"))
+      put_cfg(
+        template_dir:
+          Path.join(
+            System.tmp_dir!(),
+            "bp-no-such-template-#{System.unique_integer([:positive])}"
+          )
+      )
 
       assert {:error, {:provision_failed, {:template_not_found, _}}} =
                Provisioner.provision(deploy("no-template"))
@@ -153,7 +172,9 @@ defmodule Barkpark.Sites.ProvisionerTest do
       # …drop the marker so the next provision would try to re-materialize…
       File.rm!(Path.join(src, ".bp-provisioned"))
       # …then point the template at nothing so re-materialization fails.
-      put_cfg(template_dir: Path.join(System.tmp_dir!(), "gone-#{System.unique_integer([:positive])}"))
+      put_cfg(
+        template_dir: Path.join(System.tmp_dir!(), "gone-#{System.unique_integer([:positive])}")
+      )
 
       assert {:error, {:provision_failed, _}} = Provisioner.provision(deploy("survivor"))
 
@@ -172,6 +193,45 @@ defmodule Barkpark.Sites.ProvisionerTest do
       put_cfg(sites_dir: file_path)
 
       assert {:error, {:provision_failed, _}} = Provisioner.provision(deploy("under-a-file"))
+    end
+  end
+
+  # ── runtime_target template selection (charter D63/D71) ──────────────────
+
+  describe "runtime_target selection" do
+    test "a node/nextjs deploy materializes the next-starter template, not astro" do
+      assert Provisioner.provision(deploy("next-blog", runtime_target: "node")) == :ok
+
+      src = Provisioner.src_dir("next-blog")
+      # The NODE template landed — the distinct package.json name proves it is
+      # next-starter, never the astro-starter default.
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"next-stub"})
+      assert File.exists?(Path.join(src, "next.config.mjs"))
+      refute File.exists?(Path.join(src, "astro.config.mjs"))
+      # Same framework-agnostic idempotency guard is written for node too.
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+      refute File.exists?(src <> ".partial")
+    end
+
+    test "a default (static) deploy still materializes the astro-starter template" do
+      assert Provisioner.provision(deploy("astro-blog")) == :ok
+
+      src = Provisioner.src_dir("astro-blog")
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      refute File.exists?(Path.join(src, "next.config.mjs"))
+    end
+
+    test "a node deploy is idempotent — the marker guards a re-copy just like static" do
+      assert Provisioner.provision(deploy("next-idem", runtime_target: "node")) == :ok
+
+      src = Provisioner.src_dir("next-idem")
+      File.write!(Path.join(src, "package.json"), ~s({"name":"locally-edited-next"}))
+
+      # Second node deploy: marker seen, disk untouched (build cache preserved).
+      assert Provisioner.provision(deploy("next-idem", build_id: "b2", runtime_target: "node")) ==
+               :ok
+
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"locally-edited-next"})
     end
   end
 

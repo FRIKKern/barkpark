@@ -4,17 +4,29 @@ defmodule Barkpark.Sites.Provisioner do
   site exists" and "there is something on the box for BUILD to compile"
   (site-spawner charter D33/D34).
 
-  A content-bound static site has no `github_repo` and no `artifact_url`: its
-  source IS the shipped `templates/astro-starter/` template, which fetches
-  Barkpark content at build time over the internal link and bakes the HEALTH
-  markers. Nothing materialized that template onto the box, so `deploy/
-  site-deploy.sh` walked PLAN and then died at BUILD with
-  `no site source dir /opt/barkpark/sites/<slug>/src` (exit 10).
+  A content-bound site has no `github_repo` and no `artifact_url`: its source IS
+  a shipped starter template, which fetches Barkpark content at build time over
+  the internal link and bakes the HEALTH markers. Nothing materialized that
+  template onto the box, so `deploy/site-deploy.sh` walked PLAN and then died at
+  BUILD with `no site source dir /opt/barkpark/sites/<slug>/src` (exit 10).
+
+  ## Which template (charter D63/D71)
+
+  The template is selected by the request's `runtime_target` — the second axis
+  of the deploy engine:
+
+    * `:static` (default) → `templates/astro-starter` — the Astro symlink-swap
+      site the box has always built;
+    * `:node` → `templates/next-starter` — the Next.js node-slot SSR site.
+
+  Everything BELOW the selection (partial-rename atomicity, the `.bp-provisioned`
+  marker, self-heal, fail-closed) is framework-agnostic and identical for both.
 
   `provision/1` runs INLINE at the top of `DeployRunner.start_run/2`, for a
-  `deploy` only (a `rollback` is a pure symlink repoint — the source is already
-  there, and re-materializing it would be both pointless and destructive), and
-  copies the template into `<sites_dir>/<slug>/src` BEFORE the deploy port opens.
+  `deploy` only (a `rollback` is a pure symlink/slot repoint — the source is
+  already there, and re-materializing it would be both pointless and
+  destructive), and copies the selected template into `<sites_dir>/<slug>/src`
+  BEFORE the deploy port opens.
 
   ## The path formula (identical to site-deploy.sh)
 
@@ -51,10 +63,12 @@ defmodule Barkpark.Sites.Provisioner do
 
   # Same default as site-deploy.sh's `${BARKPARK_SITES_DIR:-/opt/barkpark/sites}`.
   @default_sites_dir "/opt/barkpark/sites"
-  # Default template path, relative to the repo root. The BEAM's cwd is api/
-  # under both `mix phx.server` and start.sh, so its parent is the repo root —
-  # the same assumption DeployRunner.run_cd/0 makes for `bash deploy/…`.
-  @default_template_subpath "templates/astro-starter"
+  # Default template paths, relative to the repo root, keyed by runtime_target.
+  # The BEAM's cwd is api/ under both `mix phx.server` and start.sh, so its
+  # parent is the repo root — the same assumption DeployRunner.run_cd/0 makes
+  # for `bash deploy/…`.
+  @default_static_template_subpath "templates/astro-starter"
+  @default_node_template_subpath "templates/next-starter"
   # Written INSIDE src after the rename — its presence is the idempotency guard.
   @marker ".bp-provisioned"
 
@@ -73,13 +87,13 @@ defmodule Barkpark.Sites.Provisioner do
   @spec provision(DeployRequest.t()) :: :ok | {:error, {:provision_failed, term()}}
   def provision(%DeployRequest{mode: :rollback}), do: :ok
 
-  def provision(%DeployRequest{mode: :deploy, slug: slug}) do
+  def provision(%DeployRequest{mode: :deploy, slug: slug, runtime_target: runtime_target}) do
     src = src_dir(slug)
 
     if provisioned?(src) do
       :ok
     else
-      materialize(src, template_dir())
+      materialize(src, template_dir(runtime_target))
     end
   rescue
     # A bang File op (cp_r!/mkdir_p!/rm_rf! on unwritable/absent paths) raises —
@@ -133,8 +147,19 @@ defmodule Barkpark.Sites.Provisioner do
 
   defp sites_dir, do: Keyword.get(config(), :sites_dir) || @default_sites_dir
 
-  defp template_dir, do: Keyword.get(config(), :template_dir) || default_template_dir()
+  # Template selection by runtime_target (charter D63/D71). Each target has its
+  # own overridable config key so a test can point either at a tmp stand-in; the
+  # legacy `:template_dir` key remains the STATIC override (backward-compatible).
+  defp template_dir(:node),
+    do:
+      Keyword.get(config(), :node_template_dir) ||
+        default_template_dir(@default_node_template_subpath)
 
-  defp default_template_dir,
-    do: Path.join(Path.dirname(File.cwd!()), @default_template_subpath)
+  defp template_dir(_static),
+    do:
+      Keyword.get(config(), :template_dir) ||
+        default_template_dir(@default_static_template_subpath)
+
+  defp default_template_dir(subpath),
+    do: Path.join(Path.dirname(File.cwd!()), subpath)
 end

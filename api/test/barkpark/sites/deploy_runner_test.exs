@@ -34,8 +34,20 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     File.mkdir_p!(template)
     File.write!(Path.join(template, "package.json"), ~s({"name":"stub"}))
 
+    # A node stand-in template too (charter D63) so a runtime_target=node deploy
+    # provisions successfully before its port opens — otherwise a node dispatch
+    # test would die at provision, never reaching command_for.
+    node_template = Path.join(base, "node-template")
+    File.mkdir_p!(node_template)
+    File.write!(Path.join(node_template, "package.json"), ~s({"name":"node-stub"}))
+
     prior = Application.get_env(:barkpark, Provisioner)
-    Application.put_env(:barkpark, Provisioner, sites_dir: sites, template_dir: template)
+
+    Application.put_env(:barkpark, Provisioner,
+      sites_dir: sites,
+      template_dir: template,
+      node_template_dir: node_template
+    )
 
     on_exit(fn ->
       if prior,
@@ -88,6 +100,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         "mode" => Keyword.get(opts, :mode, "deploy")
       }
       |> maybe_put("content_rev", Keyword.get(opts, :content_rev))
+      |> maybe_put("runtime_target", Keyword.get(opts, :runtime_target))
       |> maybe_put("env", Keyword.get(opts, :env))
 
     {:ok, request} = DeployRequest.new(params)
@@ -525,6 +538,62 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
   end
 
+  # ── runtime_target dispatch (charter D63 — the second serve-backend) ──────
+
+  describe "runtime_target" do
+    test "a node deploy runs the node engine script; static runs the static one" do
+      put_cfg(
+        enabled: true,
+        command: stub("echo STATIC_DEPLOY_RAN; exit 0"),
+        node_command: stub("echo NODE_DEPLOY_RAN; exit 0")
+      )
+
+      # Default (absent) runtime_target ⇒ :static ⇒ the static engine.
+      assert DeployRunner.trigger(req("rt-static")) == {:ok, :started}
+      assert %{state: :done, runtime_target: :static} = st = await_done("rt-static")
+      assert Enum.any?(st.log, &String.contains?(&1, "STATIC_DEPLOY_RAN"))
+      refute Enum.any?(st.log, &String.contains?(&1, "NODE_DEPLOY_RAN"))
+
+      # runtime_target=node ⇒ the node-slot SSR engine.
+      assert DeployRunner.trigger(req("rt-node", runtime_target: "node")) == {:ok, :started}
+      assert %{state: :done, runtime_target: :node} = nd = await_done("rt-node")
+      assert Enum.any?(nd.log, &String.contains?(&1, "NODE_DEPLOY_RAN"))
+      refute Enum.any?(nd.log, &String.contains?(&1, "STATIC_DEPLOY_RAN"))
+    end
+
+    test "a node rollback runs the node rollback script, not the static one" do
+      put_cfg(
+        enabled: true,
+        rollback_command: stub("echo STATIC_ROLLBACK_RAN; exit 0"),
+        node_rollback_command: stub("echo NODE_ROLLBACK_RAN; exit 0")
+      )
+
+      assert DeployRunner.trigger(req("rt-node-rb", mode: "rollback", runtime_target: "node")) ==
+               {:ok, :started}
+
+      assert %{state: :done, mode: :rollback, runtime_target: :node} =
+               rolled = await_done("rt-node-rb")
+
+      assert Enum.any?(rolled.log, &String.contains?(&1, "NODE_ROLLBACK_RAN"))
+      refute Enum.any?(rolled.log, &String.contains?(&1, "STATIC_ROLLBACK_RAN"))
+    end
+
+    test "the default node engine script is deploy/site-deploy-node.sh (argv, not env)" do
+      # No config override: prove the SHIPPED default command names the node
+      # script — the box's real dispatch when the CP sends runtime_target=node.
+      # A node rollback (no build_id, no provision) exercises the argv without
+      # needing the script to exist: bash reports "No such file" and exits
+      # non-zero, but the log carries the exact path we dispatched to.
+      put_cfg(enabled: true)
+
+      assert DeployRunner.trigger(req("rt-default", mode: "rollback", runtime_target: "node")) ==
+               {:ok, :started}
+
+      assert %{state: :done} = status = await_done("rt-default")
+      assert Enum.any?(status.log, &String.contains?(&1, "deploy/site-deploy-node.sh"))
+    end
+  end
+
   # ── status ──────────────────────────────────────────────────────────────
 
   describe "status/1" do
@@ -556,8 +625,10 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # Point the template at nothing — provision fails fail-closed, so the
       # deploy must never start (exactly like a missing executable does).
       Application.put_env(:barkpark, Provisioner,
-        sites_dir: Path.join(System.tmp_dir!(), "bp-dr-fail-#{System.unique_integer([:positive])}"),
-        template_dir: Path.join(System.tmp_dir!(), "bp-no-template-#{System.unique_integer([:positive])}")
+        sites_dir:
+          Path.join(System.tmp_dir!(), "bp-dr-fail-#{System.unique_integer([:positive])}"),
+        template_dir:
+          Path.join(System.tmp_dir!(), "bp-no-template-#{System.unique_integer([:positive])}")
       )
 
       put_cfg(enabled: true, command: stub("exit 0"))
@@ -623,6 +694,34 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
     test "rejects an unknown mode (never String.to_atom on request data)" do
       assert {:error, "invalid_mode", _} = DeployRequest.new(%{"slug" => "s", "mode" => "nuke"})
+    end
+
+    test "runtime_target defaults to :static and accepts the closed enum (charter D63)" do
+      # Absent ⇒ :static (backward-compatible with every pre-node caller).
+      assert {:ok, %DeployRequest{runtime_target: :static}} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b1"})
+
+      assert {:ok, %DeployRequest{runtime_target: :static}} =
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "runtime_target" => "static"
+               })
+
+      assert {:ok, %DeployRequest{runtime_target: :node}} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "runtime_target" => "node"})
+    end
+
+    test "rejects an unknown runtime_target (never String.to_atom on request data)" do
+      # An open string here would reach an engine-script argv and, later, a
+      # systemd slot unit NAME — so a garbage value is a 400, never an atom.
+      for bad <- ["docker", "Node", "node ", "", "systemctl-injected"] do
+        assert {:error, "invalid_runtime_target", message} =
+                 DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "runtime_target" => bad})
+
+        assert message =~ "static"
+        assert message =~ "node"
+      end
     end
 
     test "rejects an unknown env var rather than silently dropping it" do
