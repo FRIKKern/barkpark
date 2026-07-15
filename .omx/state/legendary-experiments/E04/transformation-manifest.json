@@ -1,0 +1,438 @@
+{
+  "assignment_id": "E04",
+  "schema_version": "legendary-e04-transformations/v1",
+  "units": [
+    {
+      "canonical_sha256": "e9c347e90a7e3d4adcb3c1af659b2f1293faa11d052037562ee1141336cc2f82",
+      "id": "component-reference",
+      "kind": "paper",
+      "preimage_sha256": "94931918178fc765311938228830d7b9cee5bb4fb44e5b4cf1e55cfbc1ccdaf0",
+      "semantic_hash_after": "d108cf1ac0adb5ccd6f712124b75cfa17eab04cf968f8b1fa4357418e492c12c",
+      "semantic_hash_before": "d108cf1ac0adb5ccd6f712124b75cfa17eab04cf968f8b1fa4357418e492c12c",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "b1bf47acb3cce34adb0496601899f0464ecce094e32864c7e281b70289d43507",
+      "id": "choosing-your-site-framework",
+      "kind": "paper",
+      "preimage_sha256": "30996b56fb3772b226020cc19a93fdbbd6c94b220c87aed57156b04b9cf30fcc",
+      "semantic_hash_after": "aecbf9066e0f2fd6b21bd3416047c71ed8783fde62da8d0cfc3b1b59afafa25c",
+      "semantic_hash_before": "aecbf9066e0f2fd6b21bd3416047c71ed8783fde62da8d0cfc3b1b59afafa25c",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "8216300ea70a3a1df46de3cde9e9d85f0d652fbc57b3a8a97e798c3642354dea",
+      "id": "wave-deck",
+      "kind": "paper",
+      "preimage_sha256": "af024ff6ace089e7a6746c4c70234afa92438eea7e86dfdd9d85d58ddc164243",
+      "semantic_hash_after": "798517dfd20638bc0a93e3535aeaaddbd87854c89a3a1d8999f1ea5a34bbab96",
+      "semantic_hash_before": "798517dfd20638bc0a93e3535aeaaddbd87854c89a3a1d8999f1ea5a34bbab96",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "99c2f8676301e3499a8ce18beb065b2fbb5be54a25e7248ec8d01aa1dc9d5f14",
+      "id": "aesthetic-unification-epic-wave-2026-07-11",
+      "kind": "paper",
+      "preimage_sha256": "dcf0a173dd10254d837a083f55d82ce763de081cfa83f0c7294c1b6494c8f14c",
+      "semantic_hash_after": "681a5bd11fde12c90fdfdf55f7ebec4e50746d408a8239f4ca6cf3f28e18961a",
+      "semantic_hash_before": "681a5bd11fde12c90fdfdf55f7ebec4e50746d408a8239f4ca6cf3f28e18961a",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "c8d869453f73dcb8784bc4ab3e2ff2f0b4e1947486a395c2bc33de1bc237dbd3",
+      "id": "authoring-excellence-wave-2026-07-13",
+      "kind": "paper",
+      "preimage_sha256": "d9c3a47786d7c8640f67344a453b1be1755be4225f720ff8f63e7558d360bfec",
+      "semantic_hash_after": "dc14967f0de126b744a3517810a29fcad67848a41026468f34a8e06ccb07a9de",
+      "semantic_hash_before": "dc14967f0de126b744a3517810a29fcad67848a41026468f34a8e06ccb07a9de",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "8442da9ad18ff09d420b44ee852fb5d292715612c3f9dd91a84f3a157ad15715",
+      "id": "authoring-excellence-wave-2026-07-13b",
+      "kind": "paper",
+      "preimage_sha256": "44be7b7b5198c5768294dcbeba10403a2150f62c2a0b70f9f9399b3359b34b17",
+      "semantic_hash_after": "ed3f2c7fea0a7bad4ada3c679d9a99bb7fb5edbc3bfe608d6af0ea433ba0ecda",
+      "semantic_hash_before": "ed3f2c7fea0a7bad4ada3c679d9a99bb7fb5edbc3bfe608d6af0ea433ba0ecda",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "b43b858e48b76660a8e6b74e2c0f749adaf25618377f7d8fbd5087457b93d8f4",
+      "id": "bp-mcp-serve-epic-wave-2026-07-11",
+      "kind": "paper",
+      "preimage_sha256": "ebe4d8698e5719afef08c066e3fba869e81afd958fb9c26d7cf674aa05076be2",
+      "semantic_hash_after": "ba0a60a0c85e2c52e64e0ac460b0b2920ffbcf201b901a411d5394977647fbd7",
+      "semantic_hash_before": "ba0a60a0c85e2c52e64e0ac460b0b2920ffbcf201b901a411d5394977647fbd7",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "cf83acf8af2e6e9e791446f809a2a62e50d7dcb459ab8afa59b02b2b8fbd141f",
+      "id": "cloud-console-wave-2026-07-11",
+      "kind": "paper",
+      "preimage_sha256": "990d4adbf9266e9b2df1eeeb25d94a9f8bdce3ea795453c409d8e86c1d06ac39",
+      "semantic_hash_after": "29b80d8982f96f0ef71aa84325d7fdf655d55e98b50053239284d9ee17e8cd78",
+      "semantic_hash_before": "29b80d8982f96f0ef71aa84325d7fdf655d55e98b50053239284d9ee17e8cd78",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "2da8e670b73faad004a9995956c7bb3254e94cad146abb298f25d8c1ef4a114f",
+      "id": "pd-everything-editable-wave-2026-07-11",
+      "kind": "paper",
+      "preimage_sha256": "b2ab42d6d8f34d20524f0d9682448493b75f13e0444ba147745b884a7f04e086",
+      "semantic_hash_after": "6c556ffa905654e8da04418893e51c4ed85f64881350e8b74ba7705031aa1a0d",
+      "semantic_hash_before": "6c556ffa905654e8da04418893e51c4ed85f64881350e8b74ba7705031aa1a0d",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "567aa0992fcd54a07a2e4dc00e38a8bd18b5751d9197b9f7608bd68b7d01f561",
+      "id": "perfect-plan-build-wave-5-2026-07-14",
+      "kind": "paper",
+      "preimage_sha256": "045a88cfc26746bcf20a8fe6878674b31fd7846f5a63019947c65e851096f336",
+      "semantic_hash_after": "9bcf4b1497494065194b128e4b7f9913d02f98a095e080ca04fa465dedc00373",
+      "semantic_hash_before": "9bcf4b1497494065194b128e4b7f9913d02f98a095e080ca04fa465dedc00373",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "e4d9d6b02d66da71720edfdafb6e5eab717395d75b278e7de5887d6c5fa95efd",
+      "id": "onboarding-composition-wave-2026-07-14",
+      "kind": "paper",
+      "preimage_sha256": "b3b30a06677b183f81f7290ae3238e31609d95cdcff7fd3bfebd3205ab5854df",
+      "semantic_hash_after": "003c36a576cbb2e9487c5cde15607479ab29979c365eb5d7ffb5ee85e5ab7d95",
+      "semantic_hash_before": "003c36a576cbb2e9487c5cde15607479ab29979c365eb5d7ffb5ee85e5ab7d95",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "c6954d496af28102908aa24fe0164edc7553157a594561f091614ad66f01bf1d",
+      "id": "autorebuild-proof-164347",
+      "kind": "paper",
+      "preimage_sha256": "89c3e260acd733e8455dc0d49a6735416242dd2f36723686688075792cb2c1bf",
+      "semantic_hash_after": "4dc136643f99e728fede2607b912f9fa4fbafd51f08b0b7462549e58b5522363",
+      "semantic_hash_before": "4dc136643f99e728fede2607b912f9fa4fbafd51f08b0b7462549e58b5522363",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "632a2d09496c2b373a49a9a22cbe5acd6464fc220c791fcf3f9fe1958cd1319e",
+      "id": "adv-narrow-width",
+      "kind": "adversarial",
+      "preimage_sha256": "edd35c37716c845a482532fdb344ef1bfc5d15a947cbcdf831b7b49ab40d723a",
+      "semantic_hash_after": "4967088ee32012f2357386b5ac0615dda2571d2e6c281cdc55617445d52392d6",
+      "semantic_hash_before": "4967088ee32012f2357386b5ac0615dda2571d2e6c281cdc55617445d52392d6",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "b4c5b99c7dd9ae27d0f170587fae98dc4c5c3d33059406328df12954016a08a4",
+      "id": "adv-long-content",
+      "kind": "adversarial",
+      "preimage_sha256": "34d2f52f4533523d87dc0e3c63b66b1792a875902a58eb14991353c5cd1b339d",
+      "semantic_hash_after": "637d6e4b7d73148a4ed8f370b96414c96404e15b346bb7aea6d0f30e1286132f",
+      "semantic_hash_before": "637d6e4b7d73148a4ed8f370b96414c96404e15b346bb7aea6d0f30e1286132f",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "3d388388ce0ab201b0165a1a1312d27d163bcb509acd6107351910fc21c9517d",
+      "id": "adv-nested-list-table",
+      "kind": "adversarial",
+      "preimage_sha256": "9eca5c664f97ca57fb17fc372177f280d84c4c0549b7bdaece298775c4832c4d",
+      "semantic_hash_after": "5bce32e42f0de635c8757ce4b6c23f50fea6f282ba403da4afd7604581ed49dd",
+      "semantic_hash_before": "5bce32e42f0de635c8757ce4b6c23f50fea6f282ba403da4afd7604581ed49dd",
+      "status": "accepted"
+    },
+    {
+      "canonical_sha256": "a6acfce9216487c2d4d351e7ed831b897a8dcaf28d4be8742869fee1d24063c6",
+      "id": "adv-long-token",
+      "kind": "adversarial",
+      "preimage_sha256": "589dc927de5a084533926ca096135b5b1d4a9c369fc7c6adccbc8c0bf59a07e9",
+      "semantic_hash_after": "aea944044e59fba345675bfe17cd37796a79bf4432b6b7d7a40f32c2af0b247d",
+      "semantic_hash_before": "aea944044e59fba345675bfe17cd37796a79bf4432b6b7d7a40f32c2af0b247d",
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "e4645f041e9d0d61c8de72f44a50d840e6a2f7d449144163c0bc6b9c25fa7f9e",
+      "class": "executable",
+      "id": "au-w6-brand-mark",
+      "kind": "task",
+      "preimage_sha256": "51fc765c0e4a4d4973ab0005a794b24101d218409b0dab44ceeff586303dd72a",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "989b0a366c54f6f11f65db5e85dc2787c7940b8d4dd2e7ff6d7c308f113054ad",
+      "class": "executable",
+      "id": "au-w6-visual-audit",
+      "kind": "task",
+      "preimage_sha256": "de4ec576e88cdbff89e39fdfe0661ecc99a0f6f56e0336df15ac836225cc4d8e",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "4d24ed48be32b673a0f44579863ec5ccca850c26bc92b1efac79dce4018126d4",
+      "class": "executable",
+      "id": "drafts.paper-editor-parity-wave3",
+      "kind": "task",
+      "preimage_sha256": "8227ad8f7d94b947afe41860894fce901826e8138295336a5b9b02639ee4d856",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "26652a1d5c0eb6b14c213dd42e3c2804570f75925d6942fecd1087b2abf30342",
+      "class": "goal",
+      "id": "drafts.task-a54820a835b6d0e2",
+      "kind": "task",
+      "preimage_sha256": "f64ea718f8d6b19f98c5a80ffa558fd3131cc896ecfe98add4cd3c5af3754c69",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority",
+        "children"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "0d64f61454ce2f414da655ce7a7f8057a26ef1dff7941329f96fde76969ed2a4",
+      "class": "goal",
+      "id": "task-1bb04ac51efec9af",
+      "kind": "task",
+      "preimage_sha256": "c8ce3840b640445df7a3dfb8397e19a3a25a2163a78ae3e3e0504606f09c2e46",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority",
+        "children"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "f3f3aa91fb86467eccee32b329a147824bf403445f55136a9f43251e479827c7",
+      "class": "goal",
+      "id": "ag-deny-matrix-residual-coverage",
+      "kind": "task",
+      "preimage_sha256": "ad9a6a67fc4b765f387fa48676e550e26b3b3b6d242f2ac1aa1e9c9380d1cf89",
+      "required_fields": [
+        "title",
+        "description",
+        "acceptance_criteria",
+        "lifecycle_status",
+        "priority",
+        "children"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "65e5875f664a47ea5b467f6e07a305f9768098091efa2423c7c39c98c08be665",
+      "class": "decision_or_human_gate",
+      "id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+      "kind": "task",
+      "preimage_sha256": "7882f6ed320d13177e24d979dcd837e8de4c872984bd30e0bc0c1b031b5f1744",
+      "required_fields": [
+        "title",
+        "description",
+        "decision_required",
+        "lifecycle_status",
+        "evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "0c9a7786863657fb032ee403650c2232199967397facd1bdf1dd90f8f1acafea",
+      "class": "decision_or_human_gate",
+      "id": "pd-everything-editable",
+      "kind": "task",
+      "preimage_sha256": "ee250ed46a1f554d53f15440ce3d15bdde180a888a56f05d4d65823cb05e0f0d",
+      "required_fields": [
+        "title",
+        "description",
+        "decision_required",
+        "lifecycle_status",
+        "evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "43737603df5de0a1861fedd96d9b994997a70e796b952fc9f7a31ba1ad3f6a15",
+      "class": "decision_or_human_gate",
+      "id": "task-4e4a53b101a97051",
+      "kind": "task",
+      "preimage_sha256": "d09357281ba7c09de09cdfad583bbf237784642f436858a72501f7606174a7ff",
+      "required_fields": [
+        "title",
+        "description",
+        "decision_required",
+        "lifecycle_status",
+        "evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "1f8aaca0b0435b74d4899ea7b21bafa0569135d12784f6572a333f6f61273341",
+      "class": "done_or_cancelled_history",
+      "id": "ag-studio-access-panel-countdown",
+      "kind": "task",
+      "preimage_sha256": "580560b4856ab1b52d57ba3d40ee6615037c80a96d5c454a68de30fc27d6991c",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "completion_evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "2ee1b8351f33ab13a27a369d16aae91556cd433ed11aa21ec1c47c9d4225f4a1",
+      "class": "done_or_cancelled_history",
+      "id": "drafts.probe-rail-move",
+      "kind": "task",
+      "preimage_sha256": "af9130a85b71c2cc618055bfacbb5f5bb353f3d2a82c1d51cfb7049e13ddfbba",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "completion_evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "7b10ef48844adb26538131999a4c6f92c4770673f39d7069c03d4a4d1f3785d2",
+      "class": "done_or_cancelled_history",
+      "id": "era-w8-epic-rollup",
+      "kind": "task",
+      "preimage_sha256": "b394b9b5effa0d4225de5895123cf96d82f942d5ad006ad4be9af9845c531cb8",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "completion_evidence"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "0120a89455e849f6a86e81d349095cc0529deb895dc9d7541920cb7379351fd8",
+      "class": "deferred",
+      "id": "ag-broadcast-revoked-residual",
+      "kind": "task",
+      "preimage_sha256": "d08206ebee02d075ce7e4639a89d859b24440817392bf207703c9190b4a064c5",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "defer_reason",
+        "revisit_trigger"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "282e178ff040093e7b327edd896ec6227dd2b45cc67349e1726b83e859426edb",
+      "class": "deferred",
+      "id": "dwb",
+      "kind": "task",
+      "preimage_sha256": "37aff13417d939f7912f979b2e5eca6a2c808db46954ba7ea6a9b60a20bb474e",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "defer_reason",
+        "revisit_trigger"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "76556a74196dc77d38adbb3d3618cebd456f6117d81b154a099e0c1c9ed3065b",
+      "class": "deferred",
+      "id": "hq-heatmap-live-lever",
+      "kind": "task",
+      "preimage_sha256": "76cf79a36dc804c1982f6f60e9a20cafe21c87ddf3789acf2039de47af568298",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "defer_reason",
+        "revisit_trigger"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "a97bf2650f6df3ec3a0d65ccc6c14042ef0fc34aae3ced69adfbff1cdfa76d1d",
+      "class": "probe",
+      "id": "drafts.task-0f79e6c78378b9aa",
+      "kind": "task",
+      "preimage_sha256": "63575ada5f9b1d33bdddfafcb0c19003b29b1d15698d94d64363fb825f047fe4",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "probe_question",
+        "retirement_rule"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "0eb5eec77a9e159e3283e0d49705b0d7e0dfc2dedfb4e3fc6217755f2aea6804",
+      "class": "probe",
+      "id": "drafts.task-823a80389028877b",
+      "kind": "task",
+      "preimage_sha256": "7f112533586d7c794ecd6d480f4189cc486a7998cfdf3c232f9e3be2784dd269",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "probe_question",
+        "retirement_rule"
+      ],
+      "status": "accepted"
+    },
+    {
+      "canonical_fields_sha256": "7c42714a8c0023c9a5697445b0ecd3958434e1c97b3f035275f733fe4b01d6c6",
+      "class": "probe",
+      "id": "drafts.task-859af59466f08494",
+      "kind": "task",
+      "preimage_sha256": "9e7c4c627fb8f2b00502b920d8ff00fc525a1373a27f903bcb77c5cfea88aa6b",
+      "required_fields": [
+        "title",
+        "description",
+        "lifecycle_status",
+        "probe_question",
+        "retirement_rule"
+      ],
+      "status": "accepted"
+    },
+    {
+      "id": "adv-missing-fields",
+      "kind": "adversarial",
+      "preimage_sha256": "201c5ae6d548a04326051e8871c3ff1f5f98ab3a1769098554365f882aa68414",
+      "reasons": [
+        "empty_or_schema_failure"
+      ],
+      "status": "quarantined"
+    },
+    {
+      "id": "adv-malformed-legacy",
+      "kind": "adversarial",
+      "preimage_sha256": "ad1c4b8f97d4ebaf8ca96123e33022ed2219c5f733668919e164ba0422c98dfb",
+      "reasons": [
+        "malformed_source"
+      ],
+      "status": "quarantined"
+    }
+  ]
+}
