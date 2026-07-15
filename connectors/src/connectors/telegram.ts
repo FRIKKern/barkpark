@@ -73,23 +73,21 @@ async function validateTelegramToken(
   apiBase: string,
 ): Promise<ConnectValidation> {
   // Shape first: `<digits>:<secret>`. A bare word is not a token, and asking
-  // Telegram about it is a round trip we can spend on nothing.
-  //
-  // The regex, and NOT `telegramBotIdFromToken`, is the guard here — and that is a
-  // deliberate correction, not a duplication. `telegramBotIdFromToken("not-a-token")`
-  // returns "not-a-token": it splits on ":" and only rejects an EMPTY first
-  // segment, so it accepts any non-empty string. That is harmless where it is used
-  // (deriving a key from a token that has already been proven good) and useless as
-  // a paste-time check. Tightening it is a separate change with its own callers to
-  // consider; filed as `connectors-telegram-token-shape-guard`.
-  if (!/^\d+:.+$/.test(botToken.trim())) {
+  // Telegram about it is a round trip we can spend on nothing. The shape check
+  // now lives in `telegramBotIdFromToken` itself, which throws on anything that
+  // is not `<digits>:<secret>` — so there is ONE guard, not a regex here kept in
+  // lockstep with the parser. A malformed paste is caught while deriving the bot
+  // id and surfaced as the same human-readable refusal, never a raw stack trace.
+  let botId: string;
+  try {
+    botId = telegramBotIdFromToken(botToken);
+  } catch {
     return {
       ok: false,
       reason:
         'that does not look like a Telegram bot token — @BotFather issues them as "<bot_id>:<secret>", e.g. 123456789:AAE…',
     };
   }
-  const botId = telegramBotIdFromToken(botToken);
 
   let response: Response;
   try {
@@ -141,13 +139,22 @@ async function validateTelegramToken(
  * A Telegram bot token is `<bot_id>:<secret>`. The bot id is the stable,
  * non-secret half — it is the install key in `connector_installs`, so the
  * routing table never stores a raw secret as its primary key.
+ *
+ * The shape is enforced HERE, not by a separate regex at the call site
+ * (connectors-telegram-token-shape-guard): the bot id must be digits and there
+ * must be a secret. `telegramBotIdFromToken("not-a-token")` and `("abc:secret")`
+ * both throw, so a paste error cannot slip past as a "valid" install key and
+ * then fail only at the first poll (D53). Callers that surface this to a human
+ * (connect.validate) catch the throw and turn it into a typed refusal.
  */
 export function telegramBotIdFromToken(botToken: string): string {
-  const botId = botToken.split(":")[0]?.trim();
-  if (!botId) {
-    throw new Error('invalid Telegram bot token: expected "<bot_id>:<secret>"');
+  const match = /^(\d+):.+$/.exec(botToken.trim());
+  if (!match) {
+    throw new Error(
+      'invalid Telegram bot token: expected "<bot_id>:<secret>" where <bot_id> is digits',
+    );
   }
-  return botId;
+  return match[1] as string;
 }
 
 export function createTelegramConnector(
