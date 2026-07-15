@@ -265,6 +265,11 @@ TARGET
 
 FLAGS
   -o json          emit one machine-readable JSON object on stdout
-  -o yaml          emit one machine-readable YAML document on stdout`
+  -o yaml          emit one machine-readable YAML document on stdout
+
+SEE ALSO
+  bp doctor --onboarding   client-readiness receipt for THIS machine (bp on PATH,
+                           CLI freshness, target instance + team, auth tier, the
+                           8-tool MCP catalog, and a read-only tool-call proof)`
 	out.outf("%s", help)
 }

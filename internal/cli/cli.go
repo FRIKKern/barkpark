@@ -365,6 +365,14 @@ func Execute(args []string) int {
 		// gate against the active/named server and report each check (cloud-13).
 		// Exits non-zero if any check fails. Its own flags are not globals, so they
 		// arrive in rest.
+		// `bp doctor --onboarding` is the D3 client-readiness receipt (a
+		// disjoint mode, doctor_onboarding.go); plain `bp doctor` stays the
+		// remote-server health gate. Check the mode BEFORE the shared --help so
+		// the onboarding receipt gets its OWN help text (it still honours -h via
+		// its own arg scan).
+		if doctorOnboardingRequested(rest[1:]) {
+			return runDoctorOnboarding(out, g, ctx, rest[1:])
+		}
 		if g.help {
 			printDoctorHelp(out)
 			return exitOK
