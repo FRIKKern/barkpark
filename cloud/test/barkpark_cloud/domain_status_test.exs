@@ -28,7 +28,7 @@ defmodule BarkparkCloud.DomainStatusTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, DomainStatus, FailureCopy, Registry, Repo}
-  alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.Registry.{Barkpark, Site}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -676,6 +676,159 @@ defmodule BarkparkCloud.DomainStatusTest do
     end
   end
 
+  # ── Site-aware check/2: estate = the site's domains, mode from the record ──
+  #
+  # These build in-memory %Site{} structs (no DB) exactly like `fixture_barkpark`,
+  # so they exercise the estate + mode branch without needing the
+  # `cf-edge-binding-schema` migration. `serving_mode` is attached with `Map.put`
+  # — the same value `Map.get(site, :serving_mode)` reads once the column lands —
+  # so a row that PREDATES the column (the field genuinely absent) degrades to
+  # :direct, the standalone-first fallback.
+
+  @site_domain "shop.example.com"
+
+  defp site_struct(opts) do
+    site =
+      struct(Site, %{
+        id: "33333333-4444-5555-6666-777777777777",
+        domains: Keyword.get(opts, :domains, [@site_domain]),
+        barkpark: %Barkpark{host: Keyword.get(opts, :box, @host)}
+      })
+
+    case Keyword.get(opts, :mode) do
+      nil -> site
+      mode -> Map.put(site, :serving_mode, mode)
+    end
+  end
+
+  describe "DomainStatus.check/2 — Site estate, :direct mode" do
+    test "a :direct site's domain compares addr == box exactly (all green)" do
+      result =
+        DomainStatus.check(site_struct(mode: :direct),
+          dns: dns_map(%{@site_domain => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      assert result.ok == true
+      assert result.instance == %{id: "33333333-4444-5555-6666-777777777777", host: @host}
+      assert [dom] = result.domains
+      assert dom.kind == "custom"
+      assert dom.host == @site_domain
+      assert Enum.map(dom.stages, & &1.stage) == ~w(dns_found points_here tls serving)
+      assert dom.overall == "ok"
+      assert stage(dom, "points_here").status == "ok"
+      assert stage(dom, "points_here").evidence =~ @host
+    end
+
+    test "a :direct site resolving ELSEWHERE fails points_here (the box-mismatch red)" do
+      result =
+        DomainStatus.check(site_struct(mode: :direct),
+          dns: dns_map(%{@site_domain => [{198, 51, 100, 9}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = custom(result)
+      assert dom.overall == "failed"
+      ph = stage(dom, "points_here")
+      assert ph.status == "failed"
+      assert ph.evidence =~ "198.51.100.9"
+      assert is_binary(ph.remediation)
+      # downstream of the failed rung is skipped, never probed-and-red
+      assert stage(dom, "tls").status == "pending"
+      assert stage(dom, "serving").status == "pending"
+    end
+
+    test "a nil serving_mode (legacy row) degrades to :direct — fail-closed" do
+      # serving_mode is now a real Site column (default "direct"), so the struct
+      # always HAS the key. The fail-closed case that still matters is a row whose
+      # serving_mode is nil (a pre-CF legacy row read before backfill): it must
+      # degrade to :direct, never crash or assume proxied.
+      site = %{site_struct(domains: [@site_domain]) | serving_mode: nil}
+      assert is_nil(site.serving_mode)
+
+      result =
+        DomainStatus.check(site,
+          dns: dns_map(%{@site_domain => [{198, 51, 100, 9}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      # Behaves EXACTLY as :direct: a non-box address is a real failure.
+      assert stage(custom(result), "points_here").status == "failed"
+    end
+
+    test "a site with no domains yet is an empty estate, overall ok" do
+      result = DomainStatus.check(site_struct(domains: []), dns: dns_map(%{}))
+      assert result.domains == []
+      assert result.ok == true
+    end
+  end
+
+  describe "DomainStatus.check/2 — Site :cf_proxied mode" do
+    test "points_here is :proxied (informational, no remediation); tls + serving still run" do
+      result =
+        DomainStatus.check(site_struct(mode: :cf_proxied),
+          # CF anycast edge — NOT the box origin.
+          dns: dns_map(%{@site_domain => [{104, 16, 0, 1}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = custom(result)
+      ph = stage(dom, "points_here")
+      assert ph.status == "proxied"
+      assert ph.remediation == nil
+      assert ph.evidence =~ "Cloudflare"
+      # the proxy rung does not block the chain — TLS/serving probe the CF edge
+      assert stage(dom, "tls").status == "ok"
+      assert stage(dom, "serving").status == "ok"
+      # an informational :proxied rung does not count against overall/ok
+      assert dom.overall == "ok"
+      assert result.ok == true
+    end
+
+    test "mode is read FROM THE RECORD, never inferred from the IP: the SAME resolved" <>
+           " address that fails :direct is :proxied under :cf_proxied" do
+      resolved = %{@site_domain => [{198, 51, 100, 9}]}
+      seams = [tls: tls_const({:ok, valid_cert()}), http: http_const({:ok, 200})]
+
+      direct =
+        DomainStatus.check(site_struct(mode: :direct), [dns: dns_map(resolved)] ++ seams)
+
+      proxied =
+        DomainStatus.check(site_struct(mode: :cf_proxied), [dns: dns_map(resolved)] ++ seams)
+
+      assert stage(custom(direct), "points_here").status == "failed"
+      assert stage(custom(proxied), "points_here").status == "proxied"
+    end
+
+    test "even resolving to the BOX IP is :proxied, never :ok — mode wins over the IP" do
+      # The strongest "never inferred from the IP" proof: a :cf_proxied domain
+      # that happens to resolve straight to the box origin is STILL reported
+      # :proxied (informational), not the :direct :ok match — because the mode is
+      # read from the record, not computed from the address.
+      result =
+        DomainStatus.check(site_struct(mode: :cf_proxied),
+          dns: dns_map(%{@site_domain => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      assert stage(custom(result), "points_here").status == "proxied"
+    end
+
+    test "a :cf_proxied domain whose DNS hasn't propagated is still pending (not proxied)" do
+      # No resolution yet — dns_found is pending, so points_here is SKIPPED into
+      # pending, never prematurely labelled proxied.
+      result = DomainStatus.check(site_struct(mode: :cf_proxied), dns: dns_map(%{}))
+      dom = custom(result)
+      assert stage(dom, "dns_found").status == "pending"
+      assert stage(dom, "points_here").status == "pending"
+    end
+  end
+
   # ── the route ──
 
   describe "GET /v1/barkparks/:id/domain-status" do
@@ -742,6 +895,89 @@ defmodule BarkparkCloud.DomainStatusTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/domain-status", nil)
       assert conn.status == 401
     end
+  end
+
+  # ── the Site route ──
+
+  describe "GET /v1/sites/:id/domain-status" do
+    # Same config-seam fake as the barkparks route: check/1 reads the config
+    # seams, so program a per-process RouteFake and point the three seam keys at
+    # it.
+    setup do
+      prev = %{
+        dns: Application.get_env(:barkpark_cloud, :domain_status_dns),
+        tls: Application.get_env(:barkpark_cloud, :domain_status_tls),
+        http: Application.get_env(:barkpark_cloud, :domain_status_http)
+      }
+
+      Application.put_env(:barkpark_cloud, :domain_status_dns, &__MODULE__.RouteFake.dns/2)
+      Application.put_env(:barkpark_cloud, :domain_status_tls, &__MODULE__.RouteFake.tls/2)
+      Application.put_env(:barkpark_cloud, :domain_status_http, &__MODULE__.RouteFake.http/1)
+
+      on_exit(fn ->
+        Application.put_env(:barkpark_cloud, :domain_status_dns, prev.dns)
+        Application.put_env(:barkpark_cloud, :domain_status_tls, prev.tls)
+        Application.put_env(:barkpark_cloud, :domain_status_http, prev.http)
+      end)
+
+      :ok
+    end
+
+    test "returns the green Site envelope for the owner (custom domain vs the box)" do
+      {user, team} = user_with_team()
+      site = live_site(team, %{domains: [@site_domain]})
+
+      __MODULE__.RouteFake.program(
+        dns: %{@site_domain => [{203, 0, 113, 10}]},
+        tls: %{@site_domain => {:ok, valid_cert()}},
+        http: %{("https://" <> @site_domain) => {:ok, 200}}
+      )
+
+      conn = call(:get, "/v1/sites/#{site.id}/domain-status", session_token(user))
+      assert conn.status == 200
+
+      body = json_body(conn)
+      assert body["ok"] == true
+      assert body["instance"]["id"] == site.id
+      assert [dom] = body["domains"]
+      assert dom["kind"] == "custom"
+      assert dom["host"] == @site_domain
+      assert Enum.map(dom["stages"], & &1["stage"]) == ~w(dns_found points_here tls serving)
+      assert Enum.all?(dom["stages"], &(&1["status"] == "ok"))
+    end
+
+    test "a wrong-team / nonexistent / malformed id is the SAME 404 (no leak, no CastError)" do
+      {_owner, team_a} = user_with_team()
+      site = live_site(team_a)
+      {intruder, _team_b} = user_with_team()
+
+      c1 = call(:get, "/v1/sites/#{site.id}/domain-status", session_token(intruder))
+      c2 = call(:get, "/v1/sites/not-a-uuid/domain-status", session_token(intruder))
+
+      assert c1.status == 404
+      assert c2.status == 404
+    end
+
+    test "no auth → 401" do
+      {_u, team} = user_with_team()
+      site = live_site(team)
+      conn = call(:get, "/v1/sites/#{site.id}/domain-status", nil)
+      assert conn.status == 401
+    end
+  end
+
+  # A live Site on a box at @host, with one or more custom domains.
+  defp live_site(team, attrs \\ %{}) do
+    bp = live_barkpark(team)
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        bp,
+        Enum.into(attrs, %{name: "Site #{n}", slug: "site-#{n}", domains: [@site_domain]})
+      )
+
+    site
   end
 
   # A per-process programmable fake for the route (check/1 runs in the test
