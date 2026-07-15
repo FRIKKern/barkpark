@@ -1,0 +1,30 @@
+{
+  "assignment_id": "E10",
+  "measurement_policy": "Upstream accepted frozen measurements are preserved; ordinary E10 verification reports current elapsed time to stdout and does not rewrite tracked evidence.",
+  "schema_version": "legendary-e10-timing/v1",
+  "upstream": {
+    "E07": {
+      "assignment_id": "E07",
+      "candidates": 3,
+      "cells": 540,
+      "fixtures": 36,
+      "immutable": true,
+      "measurement": "original_e07_run",
+      "policy": "original measured evidence retained; live replay timing is isolated in ignored .replay/timing.json",
+      "schema_version": "legendary-e07-timing/v2",
+      "wall_seconds": 0.056781
+    },
+    "E08": {
+      "assignment_id": "E08",
+      "attack_wall_nanoseconds": 55809958,
+      "measurement_policy": "frozen observed local wall time; ordinary replay does not rewrite",
+      "schema_version": "legendary-e08-timing/v1"
+    },
+    "E09": {
+      "candidate_runs": 6,
+      "policy": "Frozen representative measurement; ordinary replay writes current timing only to .replay/timing.json.",
+      "representative_total_wall_seconds": 3.974586,
+      "schema_version": "legendary-e09-timing/v1"
+    }
+  }
+}
