@@ -8,7 +8,11 @@ import {
   consumePendingConnect,
   stagePendingConnect,
 } from "./connect/pending-connect.js";
-import { loadConfig, type BridgeConfig } from "./config.js";
+import {
+  loadConfig,
+  DEFAULT_MOUNT_RECONCILE_INTERVAL_MS,
+  type BridgeConfig,
+} from "./config.js";
 import {
   createConnectorRegistry,
   type ConnectorRegistry,
@@ -45,6 +49,10 @@ import type { ConnectDeps } from "./http/connect.js";
 import type { LinearOAuthCallbackDeps } from "./oauth/linear-oauth.js";
 import type { SlackOAuthCallbackDeps } from "./oauth/slack-oauth.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
+import {
+  createMountReconcile,
+  type MountReconcile,
+} from "./http/mount-reconcile.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
 import {
@@ -327,6 +335,13 @@ export interface Bridge {
   /** The inbound HTTP listener, or undefined when `config.webhook.enabled` is false. */
   webhookServer?: WebhookServer;
   /**
+   * The periodic DB reconcile (D83) that lets a second replica rediscover an
+   * install written by the first. Always present — at `intervalMs: 0` its timer
+   * simply never arms — so a boot test can drive `reconcileOnce()` deterministically
+   * instead of waiting for a tick.
+   */
+  mountReconcile: MountReconcile;
+  /**
    * Mount an install that appeared AFTER boot — no restart. This is what makes
    * an OAuth "Add to Slack" callback work: upsertInstall (row) -> addInstall
    * (Chat + webhook mount) and the very next provider event routes. Without it
@@ -380,6 +395,12 @@ function linearDepsFromEnv(
 export interface StartBridgeOverrides {
   registry?: ConnectorRegistry;
   chatClientForInstall?: BridgeDeps["chatClientForInstall"];
+  /**
+   * Force the mount-reconcile interval (ms), overriding `config`. A boot test
+   * passes `0` to arm nothing and drive `bridge.mountReconcile?.reconcileOnce()`
+   * by hand — the timing-free way to prove convergence.
+   */
+  mountReconcileIntervalMs?: number;
 }
 
 /**
@@ -581,6 +602,40 @@ export async function startBridge(
   }
 
   /**
+   * THE REPLICA-REDISCOVERY RECONCILE (D83). Boot mounted every row THIS process
+   * can see, and `addInstall` mounts anything a connect/OAuth request handled HERE
+   * lands — but a horizontally-scaled bridge has more than one process, and the
+   * mount index is per-process in-memory. This periodic pass re-reads
+   * `connector_installs` and converges the webhook mounts through the very same
+   * `addInstall`/`removeInstall` paths, so a row another replica wrote becomes
+   * routable here without a restart. `intervalMs: 0` disables it (single replica).
+   * It enumerates ONLY webhook connectors: converging a poll/socket channel from a
+   * rediscovered row would start a SECOND poll loop against the same bot — the
+   * separate `connectors-replica-socket-poll-safety` hazard, never this loop.
+   */
+  const mountReconcileIntervalMs =
+    overrides.mountReconcileIntervalMs ??
+    config.mountReconcileIntervalMs ??
+    DEFAULT_MOUNT_RECONCILE_INTERVAL_MS;
+  const mountReconcile = createMountReconcile(
+    {
+      registry,
+      installs,
+      mounts,
+      addInstall,
+      removeInstall: takeDown,
+    },
+    { intervalMs: mountReconcileIntervalMs },
+  );
+  mountReconcile.start();
+  if (mountReconcileIntervalMs > 0) {
+    console.log(
+      `[bridge] mount reconcile armed — re-reading connector_installs every ` +
+        `${mountReconcileIntervalMs}ms so a second replica rediscovers new installs`,
+    );
+  }
+
+  /**
    * The connect loop's deps (D50/D51) — built ONLY when the bridge has a connect
    * secret. Absent ⇒ `connect` is undefined ⇒ the routes are not mounted and every
    * one of their paths is the same opaque 404 as any unknown route.
@@ -732,6 +787,9 @@ export async function startBridge(
     mounted,
     mounts,
     webhookServer,
+    // Always exposed even at interval 0: `start()` self-guards the timer, so a
+    // boot test can drive `reconcileOnce()` by hand without any tick firing.
+    mountReconcile,
 
     addInstall,
 
@@ -745,6 +803,7 @@ export async function startBridge(
     mount: addInstall,
 
     async shutdown() {
+      mountReconcile.stop();
       await webhookServer?.close();
       for (const install of mounted) {
         await install.connector.stopListening?.(install.adapter);
