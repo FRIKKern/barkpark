@@ -3719,7 +3719,7 @@
           : "";
         return;
       }
-      box.innerHTML = sites.map(siteRow).join("");
+      box.innerHTML = sites.map(function (s) { return siteRow(s, bp); }).join("");
       wireSiteRows(box);
     });
   }
@@ -3732,8 +3732,32 @@
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
       });
     });
+    // The "Visit ↗" link opens the LIVE site — it must NOT also trigger the
+    // row's drill-into-detail navigation, so swallow the bubble.
+    scope.querySelectorAll(".site-open").forEach(function (a) {
+      a.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
   }
-  function siteRow(s) {
+  // The live URL of a spawned site: `<instance>/sites/<slug>/`. The DETAIL
+  // surface serializes it as `s.url` (the CP loads the instance there); the LIST
+  // surfaces skip that N+1, so we reconstruct it from the instance the row
+  // already carries. Null when neither is available (never invent a dead link).
+  function siteLiveUrl(s, bp) {
+    if (s && s.url) return s.url;
+    if (bp && bp.url && s && s.slug) {
+      return String(bp.url).replace(/\/+$/, "") + "/sites/" + esc(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
+    }
+    return null;
+  }
+  // A "Visit ↗" anchor to the live site, opened in a new tab. Empty string when
+  // there is no URL, so callers can concatenate unconditionally.
+  function siteOpenLink(url) {
+    return url
+      ? '<a class="site-open" href="' + esc(url) + '" target="_blank" rel="noopener" title="Open the live site">Visit&nbsp;&#8599;</a>'
+      : "";
+  }
+
+  function siteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
     var repo = s.github_repo
@@ -3744,6 +3768,7 @@
       '<div class="site-name">' + esc(domain) + "</div>" +
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
+        siteOpenLink(siteLiveUrl(s, bp)) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -5164,6 +5189,7 @@
       '<div class="site-name">' + esc(domain) + "</div>" +
       '<div class="site-meta">' + fw + ' &middot; on <span class="site-inst">' + inst + "</span></div>" +
       '</div><div class="fleet-badges">' +
+        siteOpenLink(siteLiveUrl(s, bp)) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -5268,9 +5294,14 @@
         '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>"
       : "";
     var previewsFlag = site.previews_enabled === false ? "Off" : "On";
+    var live = siteLiveUrl(site, bp);
+    var liveLine = live
+      ? ' &middot; <a class="site-open" href="' + esc(live) + '" target="_blank" rel="noopener">' + esc(live) + "&nbsp;&#8599;</a>"
+      : "";
     return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
-        '<div class="fleet-url">' + sub + "</div></div>" +
+        '<div class="fleet-url">' + sub + liveLine + "</div></div>" +
         '<div class="fleet-badges">' +
+          (live ? '<a class="btn btn-ghost btn-sm site-open" href="' + esc(live) + '" target="_blank" rel="noopener">Visit&nbsp;&#8599;</a>' : "") +
           '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
