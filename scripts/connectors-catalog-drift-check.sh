@@ -29,10 +29,14 @@
 #         connectors/src/connectors/<p>.ts   → "<p> paste"
 #       - oauth providers have an <p>-oauth.ts callback in
 #         connectors/src/oauth/                → "<p> oauth"
+#     A TOOL connector (`direction: "tool"` — GitHub, connectors D69) also has a
+#     `connect: {` member but is NOT a channel and is EXCLUDED — catalog.ex is
+#     the CHANNEL catalog and omits it, so counting it would false-drift.
 #
 # `--selftest` proves the tripwire in temp files (plants nothing in the tree):
 # an agreeing catalog+bridge stays green; a bridge that drops one provider's
-# connect member (catalog still claims it) reds.
+# connect member (catalog still claims it) reds; a tool-direction connector is
+# excluded from the channel set.
 
 set -euo pipefail
 
@@ -83,7 +87,17 @@ extract_bridge() {
         # lives inside it). A helper file (e.g. gateway.ts) has no such member
         # and is excluded by construction — presence of the member IS the
         # definition of paste-connectable.
-        if grep -Eq '^[[:space:]]*connect:[[:space:]]*\{' "$f"; then
+        #
+        # BUT a TOOL connector (`direction: "tool"` — GitHub, connectors D69, the
+        # epic's OTHER direction) ALSO declares a `connect: {` paste member (its
+        # PAT is pasted the same way), yet it is NOT a channel and never appears
+        # in the Studio CHANNEL catalog (catalog.ex declares only channels). So a
+        # file that declares `direction: "tool"` is EXCLUDED here — the channel
+        # catalog mirrors CHANNEL connectors only. A `direction: "both"` connector
+        # is still a channel and stays. (When a tool CATALOG lands, this gate gets
+        # a tool-set companion; today catalog.ex has no tool section to mirror.)
+        if grep -Eq '^[[:space:]]*connect:[[:space:]]*\{' "$f" &&
+           ! grep -Eq '^[[:space:]]*direction:[[:space:]]*"tool"' "$f"; then
           base="$(basename "$f" .ts)"
           echo "$base paste"
         fi
@@ -161,6 +175,18 @@ EOF
 // shared helper — NO connect member, must be excluded
 export function mount() {}
 EOF
+  # A TOOL connector (connectors D69): it HAS a `connect: {` paste member (a PAT
+  # is pasted), but `direction: "tool"` means it is NOT a channel and must be
+  # EXCLUDED from the channel-catalog connectable set — the catalog omits it, so
+  # a naive extractor would false-drift on it. This proves the tool exclusion.
+  cat > "$tmp/agree/connectors/github.ts" <<'EOF'
+export const githubConnector = {
+    direction: "tool",
+    connect: {
+      mode: "paste",
+    },
+};
+EOF
   cat > "$tmp/agree/oauth/slack-oauth.ts" <<'EOF'
 export function slackCallback() {}
 EOF
@@ -187,6 +213,11 @@ EOF
   if printf '%s\n' "$cat_set" | grep -q '^teams '; then
     echo "SELFTEST FAIL: a nil connect_mode leaked into the connectable set"; return 1
   fi
+  # The TOOL connector (github, direction:"tool") must NOT appear on the bridge
+  # side — it has a connect member but is not a channel (connectors D69).
+  if printf '%s\n' "$agree_set" | grep -q '^github '; then
+    echo "SELFTEST FAIL: a tool-direction connector leaked into the channel connectable set"; return 1
+  fi
   if [ "$cat_set" != "$agree_set" ]; then
     echo "SELFTEST FAIL: an agreeing catalog+bridge was reported as drift"
     echo "  catalog: [$(flat "$cat_set")]"
@@ -196,7 +227,7 @@ EOF
   if [ "$cat_set" = "$drift_set" ]; then
     echo "SELFTEST FAIL: a dropped connect member went undetected"; return 1
   fi
-  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded"
+  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded"
 }
 
 if [ "${1:-}" = "--selftest" ]; then
