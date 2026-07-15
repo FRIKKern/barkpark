@@ -116,9 +116,15 @@ defmodule BarkparkCloud.Web.SiteCfDeployTest do
         )
 
       conn =
-        call(:post, "/v1/sites/#{site.id}/deploy", %{via: "cloudflare", domain: "blog.example.com"}, token)
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{via: "cloudflare", domain: "blog.example.com"},
+          token
+        )
 
-      assert conn.status == 201, "expected the deploy to land, got #{conn.status}: #{conn.resp_body}"
+      assert conn.status == 201,
+             "expected the deploy to land, got #{conn.status}: #{conn.resp_body}"
 
       # The A record was written at the BOX ORIGIN, threaded through the resolved
       # per-team token (not global config), and flipped PROXIED (orange cloud).
@@ -133,7 +139,12 @@ defmodule BarkparkCloud.Web.SiteCfDeployTest do
       token = login_token(user)
 
       conn =
-        call(:post, "/v1/sites/#{site.id}/deploy", %{via: "cloudflare", domain: "blog.example.com"}, token)
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{via: "cloudflare", domain: "blog.example.com"},
+          token
+        )
 
       assert conn.status == 409
       assert json_body(conn)["error"] == "no_cloudflare_provider"

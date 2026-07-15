@@ -4779,91 +4779,91 @@ defmodule BarkparkCloud.Web.Router do
       # no-op: the standalone deploy path below is byte-identical to today. A
       # missing/unreadable CF provider fails closed here and NEVER half-binds.
       with {:cont, site} <- maybe_bind_cloudflare(conn, site) do
-      cond do
-        site.kind == "static" ->
-          deploy_static_site(conn, site)
+        cond do
+          site.kind == "static" ->
+            deploy_static_site(conn, site)
 
-        # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
-        # connected repo can never build regardless of fleet — the row would sit
-        # "queued" forever as an eternal dashboard spinner. Refuse it up front so
-        # no un-buildable row is ever minted.
-        is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) ->
-          json(conn, 422, %{
-            error: "no_build_source",
-            detail: "upload an artifact (bp deploy) or connect a GitHub repo"
-          })
+          # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
+          # connected repo can never build regardless of fleet — the row would sit
+          # "queued" forever as an eternal dashboard spinner. Refuse it up front so
+          # no un-buildable row is ever minted.
+          is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) ->
+            json(conn, 422, %{
+              error: "no_build_source",
+              detail: "upload an artifact (bp deploy) or connect a GitHub repo"
+            })
 
-        true ->
-          attrs = %{
-            git_ref: conn.body_params["git_ref"],
-            artifact_url: conn.body_params["artifact_url"]
-          }
+          true ->
+            attrs = %{
+              git_ref: conn.body_params["git_ref"],
+              artifact_url: conn.body_params["artifact_url"]
+            }
 
-          # manual-deploy-no-dedup: a double-click or client retry must not mint a
-          # duplicate queued build. When a git_ref is present, coalesce onto any
-          # already-active (queued|building|pushing) PRODUCTION deploy of this
-          # exact ref and 200 the existing row — the same "active" definition the
-          # GitHub webhook path (handle_production_push) uses via
-          # find_active_deployment/2. An artifact-only deploy (no ref) can't be
-          # coalesced and always mints a fresh row.
-          existing =
-            case attrs.git_ref do
-              ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
-              _ -> nil
-            end
-
-          case existing do
-            %{} = deployment ->
-              json(conn, 200, %{deployment: deployment_json(deployment)})
-
-            nil ->
-              case Registry.create_deployment(site, attrs) do
-                {:ok, deployment} ->
-                  # activity-audit-log: a deploy request ENQUEUES a queued row the
-                  # off-box builder later walks — a relay, so the audit is a
-                  # post-commit best-effort record_audit/1 (never rolls the queued
-                  # row back). Only a FRESHLY minted row is audited; a coalesced /
-                  # lost-race 200 re-uses an existing row and stamps nothing (no
-                  # double-audit on a double-click). Detail carries git_ref + whether
-                  # an artifact was supplied, never the artifact bytes.
-                  _ =
-                    Accounts.record_audit(%{
-                      team_id: site.team_id,
-                      actor_user_id: conn.assigns.current_user.id,
-                      action: "site.deploy_requested",
-                      target_type: "deployment",
-                      target_id: deployment.id,
-                      metadata: %{
-                        site_id: site.id,
-                        git_ref: attrs.git_ref,
-                        has_artifact: not is_nil(attrs.artifact_url)
-                      }
-                    })
-
-                  push_event(site.team_id, "deployments")
-                  push_event(site.team_id, "audit")
-                  json(conn, 201, %{deployment: deployment_json(deployment)})
-
-                {:error, %Ecto.Changeset{errors: errs} = cs} ->
-                  # A lost race: a concurrent double-click won the active
-                  # site+ref partial-unique index between our lookup and this
-                  # INSERT. Recover its row as a 200 duplicate rather than
-                  # surfacing the constraint error (mirrors the webhook path).
-                  winner =
-                    if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
-                      Registry.find_active_deployment(site.id, attrs.git_ref)
-                    end
-
-                  case winner do
-                    %{} = deployment ->
-                      json(conn, 200, %{deployment: deployment_json(deployment)})
-
-                    _ ->
-                      json(conn, 422, %{error: "invalid", details: errors(cs)})
-                  end
+            # manual-deploy-no-dedup: a double-click or client retry must not mint a
+            # duplicate queued build. When a git_ref is present, coalesce onto any
+            # already-active (queued|building|pushing) PRODUCTION deploy of this
+            # exact ref and 200 the existing row — the same "active" definition the
+            # GitHub webhook path (handle_production_push) uses via
+            # find_active_deployment/2. An artifact-only deploy (no ref) can't be
+            # coalesced and always mints a fresh row.
+            existing =
+              case attrs.git_ref do
+                ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
+                _ -> nil
               end
-          end
-      end
+
+            case existing do
+              %{} = deployment ->
+                json(conn, 200, %{deployment: deployment_json(deployment)})
+
+              nil ->
+                case Registry.create_deployment(site, attrs) do
+                  {:ok, deployment} ->
+                    # activity-audit-log: a deploy request ENQUEUES a queued row the
+                    # off-box builder later walks — a relay, so the audit is a
+                    # post-commit best-effort record_audit/1 (never rolls the queued
+                    # row back). Only a FRESHLY minted row is audited; a coalesced /
+                    # lost-race 200 re-uses an existing row and stamps nothing (no
+                    # double-audit on a double-click). Detail carries git_ref + whether
+                    # an artifact was supplied, never the artifact bytes.
+                    _ =
+                      Accounts.record_audit(%{
+                        team_id: site.team_id,
+                        actor_user_id: conn.assigns.current_user.id,
+                        action: "site.deploy_requested",
+                        target_type: "deployment",
+                        target_id: deployment.id,
+                        metadata: %{
+                          site_id: site.id,
+                          git_ref: attrs.git_ref,
+                          has_artifact: not is_nil(attrs.artifact_url)
+                        }
+                      })
+
+                    push_event(site.team_id, "deployments")
+                    push_event(site.team_id, "audit")
+                    json(conn, 201, %{deployment: deployment_json(deployment)})
+
+                  {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                    # A lost race: a concurrent double-click won the active
+                    # site+ref partial-unique index between our lookup and this
+                    # INSERT. Recover its row as a 200 duplicate rather than
+                    # surfacing the constraint error (mirrors the webhook path).
+                    winner =
+                      if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
+                        Registry.find_active_deployment(site.id, attrs.git_ref)
+                      end
+
+                    case winner do
+                      %{} = deployment ->
+                        json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                      _ ->
+                        json(conn, 422, %{error: "invalid", details: errors(cs)})
+                    end
+                end
+            end
+        end
       else
         # maybe_bind_cloudflare already sent the fail-closed response (409/422/502).
         {:halt, conn} -> conn
@@ -8541,7 +8541,8 @@ defmodule BarkparkCloud.Web.Router do
         {:halt,
          json(conn, 422, %{
            error: "cloudflare_domain_required",
-           detail: "`--via cloudflare` needs a `--domain` (the custom hostname to point at this box)"
+           detail:
+             "`--via cloudflare` needs a `--domain` (the custom hostname to point at this box)"
          })}
 
       true ->
@@ -8566,14 +8567,16 @@ defmodule BarkparkCloud.Web.Router do
         {:halt,
          json(conn, 409, %{
            error: "no_cloudflare_provider",
-           detail: "connect Cloudflare first: `bp provider add cloudflare` (the box keeps serving standalone until you do)"
+           detail:
+             "connect Cloudflare first: `bp provider add cloudflare` (the box keeps serving standalone until you do)"
          })}
 
       {:error, _reason} ->
         {:halt,
          json(conn, 409, %{
            error: "cloudflare_credential_unreadable",
-           detail: "the stored Cloudflare credential could not be read — reconnect it with `bp provider add cloudflare`"
+           detail:
+             "the stored Cloudflare credential could not be read — reconnect it with `bp provider add cloudflare`"
          })}
     end
   end
@@ -8627,7 +8630,8 @@ defmodule BarkparkCloud.Web.Router do
             {:halt,
              json(conn, 502, %{
                error: "cloudflare_bind_failed",
-               detail: "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
+               detail:
+                 "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
              })}
         end
     end

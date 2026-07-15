@@ -81,7 +81,9 @@ defmodule BarkparkCloud.CloudflareTest do
 
     test "an existing :id makes the upsert an update (keeps the id)" do
       rec = %{id: "rec_existing", type: "A", name: "a.example.com", content: "203.0.113.9"}
-      assert {:ok, %{record_id: "rec_existing"}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+
+      assert {:ok, %{record_id: "rec_existing"}} =
+               Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
     end
 
     test "a fail- zone id is rejected" do
@@ -108,7 +110,9 @@ defmodule BarkparkCloud.CloudflareTest do
     end
 
     test "a fail- token is rejected as an invalid credential (fail-closed)" do
-      assert {:error, :invalid_token} = Cloudflare.ensure_zone_proxied("fail-token", "zone1", "rec_1")
+      assert {:error, :invalid_token} =
+               Cloudflare.ensure_zone_proxied("fail-token", "zone1", "rec_1")
+
       assert Fake.proxied() == []
     end
   end
