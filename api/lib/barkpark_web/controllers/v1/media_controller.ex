@@ -46,7 +46,10 @@ defmodule BarkparkWeb.V1.MediaController do
       source: SearchIntel.source(conn, "explorer"),
       record: SearchIntel.should_record?(conn),
       tags: SearchIntel.tags(conn),
-      metadata: search_metadata(meta)
+      metadata: search_metadata(meta),
+      # Stamp the resolved tenant at ingest so the crystallizer rolls this event
+      # up on its OWN row instead of merging tenants that share a scope.
+      workspace_id: workspace_id(conn)
     ]
 
     record_result =
@@ -96,7 +99,9 @@ defmodule BarkparkWeb.V1.MediaController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    opts = [period: period]
+    # `:search_settings_admin` pipeline derives the caller's OWN workspace before
+    # AssignDefaultScope, so insights read the caller's tenant roll-up.
+    opts = [period: period, workspace_id: workspace_id(conn)]
 
     opts =
       case SearchIntel.parse_period_start(params["periodStart"]) do
@@ -181,7 +186,8 @@ defmodule BarkparkWeb.V1.MediaController do
         dataset,
         SearchIntel.actor_key(conn),
         prefix,
-        limit: limit
+        limit: limit,
+        workspace_id: workspace_id(conn)
       )
 
     json(conn, %{
@@ -195,7 +201,8 @@ defmodule BarkparkWeb.V1.MediaController do
       actor_key: SearchIntel.actor_key(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
-      disabled: SearchIntel.recording_disabled?(conn)
+      disabled: SearchIntel.recording_disabled?(conn),
+      workspace_id: workspace_id(conn)
     ]
 
     case MediaIntelligence.record_interaction(dataset, params, record_opts) do
