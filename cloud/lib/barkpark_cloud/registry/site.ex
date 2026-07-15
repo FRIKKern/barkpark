@@ -45,6 +45,18 @@ defmodule BarkparkCloud.Registry.Site do
   @frameworks @container_frameworks ++ @static_frameworks
   @scale_modes ~w(always_on zero)
 
+  # site-spawner W6 (charter D51): the CF-in-front edge-binding enums.
+  #
+  #   * @serving_modes — how the box is fronted. "direct" is the standalone
+  #     default (the box answers on its own origin, TODAY's behavior); "cf_proxied"
+  #     means an orange-cloud CF record fronts the box.
+  #   * @tls_modes — how TLS terminates at the box origin. "on_demand" is the
+  #     standalone default (box Caddy on-demand ACME); "cf_internal" is Caddy
+  #     `tls internal` under CF Full (526-avoidance, charter D55); "cf_origin_ca"
+  #     is a CF Origin-CA cert on disk under CF Full Strict (deferred hardening).
+  @serving_modes ~w(direct cf_proxied)
+  @tls_modes ~w(on_demand cf_internal cf_origin_ca)
+
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
   # Two segments separated by one slash; each segment is letters/digits/_/-/.
   @github_repo_format ~r/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
@@ -101,6 +113,35 @@ defmodule BarkparkCloud.Registry.Site do
     # branch_mismatch no-op).
     field :previews_enabled, :boolean, default: true
 
+    # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
+    # OWN domain (blog.example.com), bound to THIS deployed site through the user's
+    # CF account — the OPPOSITE of `Barkpark.custom_host` (platform own-zone, box
+    # instance, `*.barkpark.cloud`-locked). One CF-bound domain per site (v1 =
+    # singular `--domain`). Every field is nullable/defaulted so a pure-standalone
+    # site (no CF account connected) is byte-identical to today (charter D58
+    # standalone-degrade).
+    #
+    #   * cf_domain    — the user's hostname fronting this site.
+    #   * cf_zone_id   — the CF zone the DNS writer targets.
+    #   * cf_record_id — the CF DNS record the writer created (idempotent re-write
+    #     + teardown handle).
+    #   * serving_mode — "direct" (box answers on its own origin — TODAY's default,
+    #     the standalone path) | "cf_proxied" (orange-cloud CF record fronts the
+    #     box). Drives the box's TLS render (mergeSite) and the domain-status rung.
+    #   * tls_mode     — "on_demand" (box Caddy on-demand ACME — TODAY's default) |
+    #     "cf_internal" (Caddy `tls internal` under CF Full — 526-avoidance,
+    #     charter D55) | "cf_origin_ca" (CF Origin-CA cert on disk under CF Full
+    #     Strict — DEFERRED hardening).
+    #   * cf_cert_path / cf_key_path — on-disk CF Origin-CA cert+key paths
+    #     (populated only by the deferred origin-CA provisioning path).
+    field :cf_domain, :string
+    field :cf_zone_id, :string
+    field :cf_record_id, :string
+    field :serving_mode, :string, default: "direct"
+    field :tls_mode, :string, default: "on_demand"
+    field :cf_cert_path, :string
+    field :cf_key_path, :string
+
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -114,6 +155,8 @@ defmodule BarkparkCloud.Registry.Site do
   def frameworks, do: @frameworks
   def kinds, do: @kinds
   def scale_modes, do: @scale_modes
+  def serving_modes, do: @serving_modes
+  def tls_modes, do: @tls_modes
   def domain_format, do: @domain_format
 
   @doc """
@@ -230,6 +273,52 @@ defmodule BarkparkCloud.Registry.Site do
   def runtime_changeset(site, attrs) do
     site
     |> cast(attrs, [:port, :current_deployment_id])
+  end
+
+  @doc """
+  site-spawner W6 (charter D51): NARROW changeset for the Cloudflare-in-front
+  edge binding. Casts ONLY the CF columns — it can never rename, re-team, or
+  re-point the site's runtime (containment, mirroring `custom_host_changeset`).
+  The two mode enums are inclusion-validated so a bad `serving_mode` /
+  `tls_mode` is a validation error, never a silent bad row that the box render
+  (mergeSite) or the domain-status rung would then misinterpret.
+
+  `cf_domain` is normalized (lower-cased, trimmed, trailing-dot stripped) exactly
+  like `domains`, and validated against the generic `@domain_format` — a user's
+  own arbitrary hostname (blog.example.com), NOT zone-locked to the platform.
+  """
+  def cf_binding_changeset(site, attrs) do
+    site
+    |> cast(attrs, [
+      :cf_domain,
+      :cf_zone_id,
+      :cf_record_id,
+      :serving_mode,
+      :tls_mode,
+      :cf_cert_path,
+      :cf_key_path
+    ])
+    |> update_change(:cf_domain, &normalize_domain/1)
+    |> validate_inclusion(:serving_mode, @serving_modes)
+    |> validate_inclusion(:tls_mode, @tls_modes)
+    |> validate_cf_domain()
+  end
+
+  # A CF-bound domain, when present, must be a well-formed generic hostname (the
+  # user's own domain — not zone-locked). A nil cf_domain (pure-standalone, or a
+  # binding that only flips serving_mode) is left alone.
+  defp validate_cf_domain(changeset) do
+    case get_field(changeset, :cf_domain) do
+      nil ->
+        changeset
+
+      d when is_binary(d) ->
+        if String.length(d) <= 253 and Regex.match?(@domain_format, d) do
+          changeset
+        else
+          add_error(changeset, :cf_domain, "invalid domain: #{inspect(d)}")
+        end
+    end
   end
 
   defp normalize_domains(changeset) do

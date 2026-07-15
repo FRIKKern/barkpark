@@ -3481,6 +3481,62 @@ defmodule BarkparkCloud.Registry do
   def reveal_site_read_token(%Site{read_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
 
+  @doc """
+  site-spawner W6 (charter D51): persist the Cloudflare-in-front edge binding on
+  `site` — the seam the DNS writer (S4) and the domain-status rung (S5) bind to.
+
+  Writes through the NARROW `Site.cf_binding_changeset/2` (containment: only the
+  CF columns move; it can never rename or re-team the site), inside a transaction
+  so the multi-column edge binding (domain + zone + record + serving_mode +
+  tls_mode) lands atomically or not at all — a half-persisted binding (e.g. a
+  serving_mode flipped to `cf_proxied` without its `cf_record_id`) would leave
+  the box's TLS render and the status rung reading an inconsistent row.
+
+  `attrs` carries any subset of the CF fields; the two mode enums are
+  inclusion-validated, so a bad value is `{:error, changeset}`, never a bad row.
+  With no CF account connected NOTHING calls this, so the standalone path is
+  untouched and the row keeps its `direct`/`on_demand` defaults (charter D58).
+
+  Returns `{:ok, %Site{}}` or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec set_cf_binding(Site.t(), map()) ::
+          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def set_cf_binding(%Site{} = site, attrs) when is_map(attrs) do
+    Repo.transaction(fn ->
+      case site |> Site.cf_binding_changeset(attrs) |> Repo.update() do
+        {:ok, updated} -> updated
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  site-spawner W6 (charter D51): read `site`'s Cloudflare edge binding as a plain
+  map — the reader the DNS writer and the domain-status rung resolve mode from
+  (never the resolved IP, charter D56). A pure-standalone site returns its
+  `direct`/`on_demand` defaults with nil CF handles.
+  """
+  @spec cf_binding(Site.t()) :: %{
+          cf_domain: String.t() | nil,
+          cf_zone_id: String.t() | nil,
+          cf_record_id: String.t() | nil,
+          serving_mode: String.t(),
+          tls_mode: String.t(),
+          cf_cert_path: String.t() | nil,
+          cf_key_path: String.t() | nil
+        }
+  def cf_binding(%Site{} = site) do
+    %{
+      cf_domain: site.cf_domain,
+      cf_zone_id: site.cf_zone_id,
+      cf_record_id: site.cf_record_id,
+      serving_mode: site.serving_mode,
+      tls_mode: site.tls_mode,
+      cf_cert_path: site.cf_cert_path,
+      cf_key_path: site.cf_key_path
+    }
+  end
+
   @doc "List a Team's sites across all of its barkparks, newest first."
   @spec list_sites_for_team(Team.t() | binary()) :: [Site.t()]
   def list_sites_for_team(team) do
