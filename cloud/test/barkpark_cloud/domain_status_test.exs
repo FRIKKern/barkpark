@@ -740,10 +740,13 @@ defmodule BarkparkCloud.DomainStatusTest do
       assert stage(dom, "serving").status == "pending"
     end
 
-    test "an absent serving_mode (pre-migration row) degrades to :direct — fail-closed" do
-      site = site_struct(domains: [@site_domain])
-      # The column genuinely does not exist on this struct.
-      refute Map.has_key?(site, :serving_mode)
+    test "a nil serving_mode (legacy row) degrades to :direct — fail-closed" do
+      # serving_mode is now a real Site column (default "direct"), so the struct
+      # always HAS the key. The fail-closed case that still matters is a row whose
+      # serving_mode is nil (a pre-CF legacy row read before backfill): it must
+      # degrade to :direct, never crash or assume proxied.
+      site = %{site_struct(domains: [@site_domain]) | serving_mode: nil}
+      assert is_nil(site.serving_mode)
 
       result =
         DomainStatus.check(site,
