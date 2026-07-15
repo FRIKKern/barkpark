@@ -403,17 +403,37 @@ do_retire_node() { # <current-slot>
 # the shim: an asdf shim with no version set exits non-zero and would crash-loop
 # the slot unit). Mirrors instance-deploy.sh resolve_node_bin. Non-fatal — if node
 # cannot be resolved the slot simply fails HEALTH (fail closed).
+# Place the resolved node binary AT $NODE_LINK as a real file — a COPY, never a
+# symlink. asdf installs node under $HOME/.asdf (i.e. /root/.asdf for the deploy
+# user), but the slot unit hardens with ProtectHome=yes, which hides /root inside
+# the service's mount namespace — so a symlinked ExecStart resolves to a node
+# under the now-invisible /root and dies 203/EXEC ("Failed to execute"). Node is a
+# single self-contained ~150M binary (bundled ICU etc.), so a copy outside /root
+# runs standalone and keeps ProtectHome=yes intact (tenant SSR code cannot read
+# /root/.ssh, secrets, …). Copy only when the bytes differ, so a redeploy on an
+# unchanged node version is a cheap no-op. (BindReadOnlyPaths=/root/.asdf does NOT
+# help — the ProtectHome tmpfs over /root shadows the bind.)
+place_node() { # <src node binary>
+  local src="$1"
+  [ -n "$src" ] && [ -x "$src" ] || return 1
+  if [ ! -e "$NODE_LINK" ] || [ -L "$NODE_LINK" ] || ! cmp -s "$src" "$NODE_LINK"; then
+    install -m 0755 "$src" "$NODE_LINK.tmp.$$" 2>/dev/null || return 1
+    mv -f "$NODE_LINK.tmp.$$" "$NODE_LINK" 2>/dev/null || { rm -f "$NODE_LINK.tmp.$$"; return 1; }
+  fi
+  return 0
+}
+
 ensure_node_link() {
   local d b
   if command -v asdf >/dev/null 2>&1; then
     d="$(asdf where nodejs 2>/dev/null || true)"
-    [ -n "$d" ] && [ -x "$d/bin/node" ] && { ln -sfn "$d/bin/node" "$NODE_LINK" 2>/dev/null || true; return 0; }
+    [ -n "$d" ] && place_node "$d/bin/node" && return 0
   fi
   # shellcheck disable=SC2012  # asdf install dirs are version strings, ls|sort -V is the right tool (mirrors instance-deploy.sh)
   b="$(ls -1d "$HOME"/.asdf/installs/nodejs/*/bin/node 2>/dev/null | sort -V | tail -1)"
-  [ -n "$b" ] && [ -x "$b" ] && { ln -sfn "$b" "$NODE_LINK" 2>/dev/null || true; return 0; }
+  [ -n "$b" ] && place_node "$b" && return 0
   b="$(command -v node 2>/dev/null || true)"
-  [ -n "$b" ] && "$b" -v >/dev/null 2>&1 && { ln -sfn "$b" "$NODE_LINK" 2>/dev/null || true; return 0; }
+  [ -n "$b" ] && "$b" -v >/dev/null 2>&1 && place_node "$b" && return 0
   log "WARN: no usable node (asdf nodejs not installed, none on PATH) — $NODE_LINK not refreshed; the slot will fail HEALTH if it cannot start"
   return 0
 }
