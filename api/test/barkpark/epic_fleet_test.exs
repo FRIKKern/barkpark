@@ -28,11 +28,13 @@ defmodule Barkpark.EpicFleetTest do
       assert EpicFleet.digest(left) == EpicFleet.digest(right)
 
       attrs = assignment_attrs(scope, "build-1", left)
-      assert {:ok, assignment} = EpicFleet.create_assignment(attrs)
+      assert {:ok, assignment, :created} = EpicFleet.create_assignment_with_status(attrs)
       assert assignment.snapshot == left
       assert assignment.snapshot_digest == EpicFleet.digest(left)
 
-      assert {:ok, replay} = EpicFleet.create_assignment(%{attrs | snapshot: right})
+      assert {:ok, replay, :replayed} =
+               EpicFleet.create_assignment_with_status(%{attrs | snapshot: right})
+
       assert replay.id == assignment.id
 
       changed = put_in(left, ["policy", "effort"], "medium")
@@ -41,6 +43,29 @@ defmodule Barkpark.EpicFleetTest do
                EpicFleet.create_assignment(%{attrs | snapshot: changed})
 
       assert Repo.aggregate(Assignment, :count) == 1
+    end
+
+    test "concurrent exact inserts report one creator and replay all losers", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      attrs = assignment_attrs(scope, "build-concurrent")
+
+      outcomes =
+        1..12
+        |> Task.async_stream(
+          fn _ -> EpicFleet.create_assignment_with_status(attrs) end,
+          max_concurrency: 12,
+          ordered: false,
+          timeout: 5_000
+        )
+        |> Enum.map(fn {:ok, outcome} -> outcome end)
+
+      assert 1 == Enum.count(outcomes, &match?({:ok, %Assignment{}, :created}, &1))
+      assert 11 == Enum.count(outcomes, &match?({:ok, %Assignment{}, :replayed}, &1))
+
+      assert outcomes
+             |> Enum.map(fn {:ok, assignment, _status} -> assignment.id end)
+             |> Enum.uniq()
+             |> length() == 1
     end
 
     test "database rejects assignment UPDATE", %{scope: scope} do

@@ -90,6 +90,7 @@ defmodule BarkparkWeb.CycleFleetController do
         {:error, reason}
         when reason in [
                :assignment_conflict,
+               :assignment_task_conflict,
                :assignment_already_replaced,
                :replacement_scope_mismatch,
                :replacement_phase_mismatch,

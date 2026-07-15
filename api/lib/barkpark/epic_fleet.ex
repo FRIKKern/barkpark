@@ -62,13 +62,24 @@ defmodule Barkpark.EpicFleet do
   @spec create_assignment(map()) ::
           {:ok, Assignment.t()} | {:error, Ecto.Changeset.t() | atom()}
   def create_assignment(attrs) when is_map(attrs) do
+    case create_assignment_with_status(attrs) do
+      {:ok, assignment, _status} -> {:ok, assignment}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  @spec create_assignment_with_status(map()) ::
+          {:ok, Assignment.t(), :created | :replayed}
+          | {:error, Ecto.Changeset.t() | atom()}
+  def create_assignment_with_status(attrs) when is_map(attrs) do
     attrs = select_attrs(attrs, @assignment_fields)
     snapshot = Map.get(attrs, :snapshot, %{})
     attrs = Map.merge(attrs, %{snapshot: snapshot, snapshot_digest: digest(snapshot)})
 
     with :ok <- validate_replacement(attrs) do
       case Repo.insert(Assignment.insert_changeset(attrs), on_conflict: :nothing) do
-        {:ok, _candidate} -> reconcile_assignment(attrs)
+        {:ok, candidate} -> reconcile_assignment_with_status(candidate, attrs)
         {:error, changeset} -> {:error, changeset}
       end
     end
@@ -255,6 +266,17 @@ defmodule Barkpark.EpicFleet do
       is_nil(existing) -> {:error, :assignment_conflict}
       assignment_replay?(existing, attrs) -> {:ok, existing}
       true -> {:error, :assignment_conflict}
+    end
+  end
+
+  defp reconcile_assignment_with_status(candidate, attrs) do
+    case reconcile_assignment(attrs) do
+      {:ok, assignment} ->
+        status = if assignment.id == candidate.id, do: :created, else: :replayed
+        {:ok, assignment, status}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

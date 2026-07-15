@@ -245,6 +245,15 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     binding = Repo.get!(AssignmentTask, assignment_id)
     assert binding.task_id == task.id
 
+    omitted_replay =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", Map.delete(params, "task_id"))
+      |> json_response(201)
+
+    assert omitted_replay == created
+    assert Repo.get!(AssignmentTask, assignment_id).task_id == task.id
+
     replayed =
       build_conn()
       |> bearer(token)
@@ -260,26 +269,62 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       build_conn()
       |> bearer(token)
       |> post(base <> "/assignments", Map.put(params, "task_id", other_task.id))
-      |> json_response(422)
+      |> json_response(409)
 
-    assert conflict["error"]["details"]["reason"] == ":assignment_task_conflict"
+    assert conflict["error"]["details"]["reason"] == "assignment_task_conflict"
     assert Repo.get!(AssignmentTask, assignment_id).task_id == task.id
+
+    unbound_params = %{
+      "assignment_id" => "survey-unbound",
+      "phase" => "survey",
+      "agent_type" => "epic-surveyor",
+      "effort" => "medium",
+      "snapshot_json" => "{}"
+    }
+
+    unbound =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", unbound_params)
+      |> json_response(201)
+
+    refute Repo.get(AssignmentTask, unbound["assignment"]["id"])
+
+    retroactive =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", Map.put(unbound_params, "task_id", task.id))
+      |> json_response(409)
+
+    assert retroactive["error"]["details"]["reason"] == "assignment_task_conflict"
+    refute Repo.get(AssignmentTask, unbound["assignment"]["id"])
   end
 
-  test "missing and cross-project Task authority roll back scoped assignments", %{
+  test "invalid or cross-scope Task authority rolls back scoped assignments", %{
     workspace: workspace,
     project: project,
     token: token
   } do
     other_project = create_project!(workspace, "cycle-task-binding-other")
-    foreign_task = create_task!(workspace, other_project, "foreign")
+    foreign_task = create_document!(workspace, other_project, "foreign")
+    non_task = create_document!(workspace, project, "not-task", "paper")
+    other_workspace = create_workspace!("cycle-task-binding-foreign-workspace")
+    other_workspace_project = create_project!(other_workspace, "cycle-task-binding-foreign")
+
+    other_workspace_task =
+      create_document!(other_workspace, other_workspace_project, "foreign-workspace")
+
     epic_id = "cycle-task-authority-#{System.unique_integer([:positive])}"
     base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
     open_epic(base, token, ["unit-1"])
 
     for {logical_id, task_id} <- [
+          {"empty-task", ""},
+          {"malformed-task", "not-a-uuid"},
           {"missing-task", Ecto.UUID.generate()},
-          {"foreign-task", foreign_task.id}
+          {"non-task", non_task.id},
+          {"foreign-project-task", foreign_task.id},
+          {"foreign-workspace-task", other_workspace_task.id}
         ] do
       rejected =
         build_conn()
@@ -997,17 +1042,20 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     }
   end
 
-  defp create_task!(workspace, project, suffix) do
+  defp create_task!(workspace, project, suffix),
+    do: create_document!(workspace, project, suffix)
+
+  defp create_document!(workspace, project, suffix, type \\ "task") do
     {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
 
     %Document{}
     |> Document.changeset(%{
       doc_id: "drafts.cycle-http-task-#{suffix}-#{System.unique_integer([:positive])}",
-      type: "task",
+      type: type,
       dataset: "production",
       title: "Cycle HTTP Task #{suffix}",
       status: "draft",
-      content: %{"kind" => "task", "lifecycle_status" => "open"},
+      content: %{"kind" => type, "lifecycle_status" => "open"},
       rev: Ecto.UUID.generate(),
       workspace_id: workspace.id,
       project_id: project.id,
