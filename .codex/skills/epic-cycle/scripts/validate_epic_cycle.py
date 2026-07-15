@@ -405,8 +405,9 @@ def validate_ledger(
         if not nonempty_string(effort):
             errors.append(f"{prefix} fleet_assignment effort is invalid")
             attempts_valid = False
-        if assignment.get("phase") == "build" and effort != "high":
-            errors.append(f"{prefix} Build effort is not exactly high")
+        effort_phase = assignment.get("phase")
+        if effort_phase in {"build", "review"} and effort != "high":
+            errors.append(f"{prefix} {effort_phase.title()} effort is not exactly high")
             attempts_valid = False
         if nonempty_string(attempt_id):
             projections[attempt_id] = assignment
@@ -416,11 +417,19 @@ def validate_ledger(
             errors.append(f"{prefix} digest does not match canonical attempt content")
             attempts_valid = False
 
-    if attempts_valid and attempts != sorted(
-        attempts, key=lambda attempt: (attempt["ordinal"], attempt["attempt_id"])
-    ):
-        errors.append("fleet ledger attempts are not in canonical order")
-        attempts_valid = False
+    if attempts_valid:
+        ordinals = [attempt["ordinal"] for attempt in attempts]
+        if len(set(ordinals)) != len(ordinals):
+            errors.append("fleet ledger attempt ordinals are not unique")
+            attempts_valid = False
+        if sorted(ordinals) != list(range(1, len(attempts) + 1)):
+            errors.append("fleet ledger attempt ordinals are not contiguous from 1")
+            attempts_valid = False
+        if attempts != sorted(
+            attempts, key=lambda attempt: (attempt["ordinal"], attempt["attempt_id"])
+        ):
+            errors.append("fleet ledger attempts are not in canonical order")
+            attempts_valid = False
 
     if manifest != sanitized(manifest) or attempts != sanitized(attempts):
         errors.append("fleet ledger contains unredacted secret fields")
@@ -463,6 +472,28 @@ def validate_ledger(
         stable_keys = ("phase", "assignment_id", "agent_type", "model_reasoning_effort")
         if any(predecessor_assignment[key] != assignment[key] for key in stable_keys):
             errors.append(f"fleet ledger replacement changes assignment identity for {attempt['attempt_id']!r}")
+
+    attempts_by_assignment: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for attempt in attempts:
+        assignment = projections[attempt["attempt_id"]]
+        assignment_key = (assignment["phase"], assignment["assignment_id"])
+        attempts_by_assignment.setdefault(assignment_key, []).append(attempt)
+    for (fleet_phase, assignment_id), logical_attempts in attempts_by_assignment.items():
+        if len(logical_attempts) == 1:
+            continue
+        logical_ids = {attempt["attempt_id"] for attempt in logical_attempts}
+        roots = [attempt for attempt in logical_attempts if attempt["replaces_attempt_id"] is None]
+        leaves = [attempt for attempt in logical_attempts if attempt["attempt_id"] not in replaced_by]
+        links_stay_with_assignment = all(
+            attempt["replaces_attempt_id"] is None
+            or attempt["replaces_attempt_id"] in logical_ids
+            for attempt in logical_attempts
+        )
+        if len(roots) != 1 or len(leaves) != 1 or not links_stay_with_assignment:
+            errors.append(
+                f"fleet ledger logical assignment {fleet_phase + '/' + assignment_id!r} attempts "
+                "do not form one linear replacement chain with exactly one terminal leaf"
+            )
 
     projection = paper_fleet(paper) or {}
     leaves = [attempt for attempt in attempts if attempt["attempt_id"] not in replaced_by]
