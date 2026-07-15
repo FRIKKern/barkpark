@@ -10,7 +10,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (29 today; the three
+    * **E1** — every table carrying a `workspace_id` column (32 today; the three
+      epic-cycle ledgers `cycle_waves` / `epic_assignments` /
+      `epic_benchmark_experiments` ride the generic path; the three
       registered Chat host / execution tables are workspace-owned, the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
       column with no FK to `workspaces`, `roles` is one, both
@@ -66,9 +68,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # attribution promoted `workspace_id` into their primary keys, moving the whole
   # dormant family from E3 → E1 (export keys `WHERE workspace_id=$ws`, delete
   # rides the FK cascade — the same clean path every other E1 table uses).
+  # cycle_waves / epic_assignments / epic_benchmark_experiments carry a
+  # workspace_id column (the epic-cycle / cycle-fleet ledgers). They ride the
+  # generic E1 path like every other workspace_id table — exported via
+  # `WHERE workspace_id = $ws` and torn down the same way — so a workspace's own
+  # cycle/assignment/benchmark rows travel in its bundle and never orphan on
+  # teardown. Pinned here to clear the partition sentinel (they were live-detected
+  # but unpinned, which is exactly what the sentinel raises on).
   @pinned_e1 ~w(
     access_grants api_tokens audit_events audit_export_sinks chat_execution_events
-    chat_execution_leases data_keys documents media_files mutation_events paper_events
+    chat_execution_leases cycle_waves data_keys documents epic_assignments
+    epic_benchmark_experiments media_files mutation_events paper_events
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
