@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STABLE = ["attack-roster.json", "surface-matrix.json", "candidate-scorecards.json", "threshold-outcomes.json", "rejection-evidence.json"]
+STABLE = ["attack-roster.json", "surface-matrix.json", "candidate-scorecards.json", "threshold-outcomes.json", "rejection-evidence.json", "timing.json"]
 
 
 def sha(path: Path) -> str:
@@ -25,12 +25,7 @@ def run_attack() -> None:
     subprocess.run(["python3", str(ROOT / "scripts/attack.py")], check=True, capture_output=True, text=True)
 
 
-def main() -> None:
-    first = {name: sha(ROOT / name) for name in STABLE}
-    run_attack()
-    second = {name: sha(ROOT / name) for name in STABLE}
-    assert first == second
-
+def result_document() -> dict:
     roster = load("attack-roster.json")
     matrix = load("surface-matrix.json")
     scorecards = load("candidate-scorecards.json")["candidates"]
@@ -50,8 +45,12 @@ def main() -> None:
     assert thresholds["surface_exercise"].startswith("FAIL_")
     assert thresholds["reader_visibility"].startswith("FAIL_")
     assert thresholds["width_overflow"].startswith("BLOCKED_")
+    timing = load("timing.json")
+    assert timing["measurement"] == "original_e07_run" and timing["immutable"] is True
+    volatile_timing = load(".replay/timing.json")
+    assert volatile_timing["tracked"] is False and volatile_timing["wall_seconds"] > 0
 
-    result = {
+    return {
         "schema_version": "legendary-e07-result/v1",
         "assignment_id": "E07",
         "round": 3,
@@ -75,16 +74,40 @@ def main() -> None:
         "rejected_candidates": rejections["rejected_candidates"],
         "capability_blocks": rejections["capability_blocks"],
         "proxy_evidence_rejected": rejections["proxy_evidence_rejected"],
-        "timing": load("timing.json"),
+        "timing": timing,
+        "volatile_timing_path": ".replay/timing.json",
         "validation": {"status": "PASS", "command": "bash run.sh", "expected_output": "E07 VERIFY PASS"},
         "hard_gate_outcome": "REJECTED_ALL_CANDIDATES",
         "verdict": {"quality": "BLOCKED", "action": "REWORK"},
         "reason": "All candidates lack candidate-specific evidence on four required real reader surfaces. E06 additionally lacks output or explicit rejection evidence for six adversarial fixtures. E03 source probes were intentionally not proxy-counted.",
         "stop_condition": "Triggered: authenticated Studio and real-client email capability are unavailable, so E07 returns BLOCKED rather than proxy-PASS.",
     }
-    (ROOT / "result.json").write_bytes(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+
+
+def result_bytes() -> bytes:
+    return json.dumps(result_document(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+
+def main() -> None:
+    first = {name: sha(ROOT / name) for name in STABLE}
+    run_attack()
+    second = {name: sha(ROOT / name) for name in STABLE}
+    assert first == second
+
+    first_result = result_bytes()
+    (ROOT / "result.json").write_bytes(first_result)
+    tracked_first = {name: sha(ROOT / name) for name in STABLE + ["result.json"]}
+
+    run_attack()
+    second_result = result_bytes()
+    (ROOT / "result.json").write_bytes(second_result)
+    tracked_second = {name: sha(ROOT / name) for name in STABLE + ["result.json"]}
+    assert first_result == second_result
+    assert tracked_first == tracked_second
+
     print("E07 VERIFY PASS")
     print("candidates=3 fixtures=36 surfaces=5 cells=540 pass=102 fail=6 blocked=432")
+    print("tracked_replay_bytes=STABLE clean_tree_contract=PASS")
     print("verdict=BLOCKED action=REWORK rejected=3")
     print(f"matrix_sha256={sha(ROOT / 'surface-matrix.json')}")
     print(f"result_sha256={sha(ROOT / 'result.json')}")
