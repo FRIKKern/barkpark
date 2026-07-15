@@ -416,10 +416,13 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     repair_version = 20_260_715_000_500
 
     assert %{rows: [[^original_version], [^repair_version]]} =
-             Repo.query!("SELECT version FROM schema_migrations WHERE version IN ($1, $2) ORDER BY version", [
-               original_version,
-               repair_version
-             ])
+             Repo.query!(
+               "SELECT version FROM schema_migrations WHERE version IN ($1, $2) ORDER BY version",
+               [
+                 original_version,
+                 repair_version
+               ]
+             )
 
     assert %{rows: [[definition]]} =
              Repo.query!("""

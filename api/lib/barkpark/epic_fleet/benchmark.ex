@@ -406,12 +406,17 @@ defmodule Barkpark.EpicFleet.Benchmark do
       )
 
     cond do
-      is_nil(previous_ordinal) -> {:error, :replacement_attempt_not_found}
-      ordinal <= previous_ordinal -> {:error, :replacement_ordinal_invalid}
+      is_nil(previous_ordinal) ->
+        {:error, :replacement_attempt_not_found}
+
+      ordinal <= previous_ordinal ->
+        {:error, :replacement_ordinal_invalid}
+
       replacement_already_exists?(experiment_id, replacement_id) ->
         {:error, :replacement_attempt_already_replaced}
 
-      true -> :ok
+      true ->
+        :ok
     end
   end
 
@@ -472,8 +477,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
               {:halt, :invalid}
 
             true ->
-              {:cont,
-               {Map.put(seen, attempt_id, ordinal), MapSet.put(replaced, replacement_id)}}
+              {:cont, {Map.put(seen, attempt_id, ordinal), MapSet.put(replaced, replacement_id)}}
           end
       end
     end)
