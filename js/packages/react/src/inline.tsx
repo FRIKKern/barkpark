@@ -21,10 +21,7 @@
 
 /* ── the type-keyed AST (Barkpark's own block grammar, NOT Sanity PortableText) ── */
 
-export type Inline =
-  | string
-  | number
-  | ({ type: string } & Record<string, unknown>)
+export type Inline = string | number | ({ type: string } & Record<string, unknown>)
 
 export type Block = { type: string } & Record<string, unknown>
 
@@ -112,11 +109,35 @@ export interface StatusRole {
 
 export const STATUS_ROLES: StatusRole[] = [
   { role: 'open', glyph: '○', spinner: false, label: 'open', meaning: 'backlog — not ready yet' },
-  { role: 'ready', glyph: '○', spinner: false, label: 'ready', meaning: 'unchecked — claim it now' },
-  { role: 'progress', glyph: '', spinner: true, label: 'in progress', meaning: 'being worked right now' },
-  { role: 'blocked', glyph: '!', spinner: false, label: 'blocked', meaning: 'something is required first' },
+  {
+    role: 'ready',
+    glyph: '○',
+    spinner: false,
+    label: 'ready',
+    meaning: 'unchecked — claim it now',
+  },
+  {
+    role: 'progress',
+    glyph: '',
+    spinner: true,
+    label: 'in progress',
+    meaning: 'being worked right now',
+  },
+  {
+    role: 'blocked',
+    glyph: '!',
+    spinner: false,
+    label: 'blocked',
+    meaning: 'something is required first',
+  },
   { role: 'done', glyph: '✓', spinner: false, label: 'done', meaning: 'complete' },
-  { role: 'cancel', glyph: '✕', spinner: false, label: 'cancelled', meaning: 'abandoned or superseded' },
+  {
+    role: 'cancel',
+    glyph: '✕',
+    spinner: false,
+    label: 'cancelled',
+    meaning: 'abandoned or superseded',
+  },
 ]
 
 const STATUS_TO_ROLE: Record<string, string> = {
@@ -337,7 +358,8 @@ export function renderInline(node: Inline): string {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
       const kids = renderInlines(node.children)
-      const label = alias !== '' ? escapeHtml(alias) : kids !== '' ? kids : escapeHtml(str(node.target))
+      const label =
+        alias !== '' ? escapeHtml(alias) : kids !== '' ? kids : escapeHtml(str(node.target))
       return `<span data-wikilink="${target}" class="bp-wikilink bp-wikilink--unresolved">${label}</span>`
     }
     case 'blockref': {
@@ -368,4 +390,28 @@ export function renderInlines(nodes: unknown): string {
   if (typeof nodes === 'number') return escapeHtml(String(nodes))
   if (!Array.isArray(nodes)) return ''
   return nodes.map((n) => renderInline(n as Inline)).join('')
+}
+
+/** Render a TABLE cell's inline content the way `walk.ex` does — one PdText per
+ * node, so a bare text node is wrapped in a `<span>` (mark styles fold ONTO that
+ * span). This differs from {@link renderInlines} (used by paragraph/list/callout,
+ * which leave unmarked text bare): table cells route through `render_children` →
+ * `walk`, which projects every inline node to a PdText element. */
+export function renderCell(cell: unknown): string {
+  const nodes = Array.isArray(cell) ? cell : cell == null ? [] : [cell]
+  return nodes
+    .map((n) => {
+      if (typeof n === 'string') return `<span>${escapeHtml(n)}</span>`
+      if (typeof n === 'number') return `<span>${escapeHtml(String(n))}</span>`
+      if (!isMap(n)) return ''
+      if (str(n.type) === 'text') {
+        const value = escapeHtml(str(n.value))
+        const inner = asList(n.marks).length ? applyMarks(value, asList(n.marks)) : value
+        // A mark that produced a wrapper element (bold/italic/code/link/…) is the
+        // PdText span itself; only genuinely-bare text needs the base `<span>`.
+        return inner.startsWith('<') ? inner : `<span>${inner}</span>`
+      }
+      return renderInline(n as Inline)
+    })
+    .join('')
 }

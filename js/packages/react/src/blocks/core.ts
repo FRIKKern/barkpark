@@ -19,7 +19,6 @@ import {
   roleOf,
   labelForRole,
   meaningForRole,
-  glyphChar,
   STATUS_ROLES,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
@@ -37,26 +36,24 @@ function paragraphInline(b: Block): unknown {
 
 const heading: Emit = (b) => {
   const raw = b.level
-  const level = raw === 1 || raw === 2 || raw === 3 || raw === '1' || raw === '2' || raw === '3' ? Number(raw) : 2
+  const level =
+    raw === 1 || raw === 2 || raw === 3 || raw === '1' || raw === '2' || raw === '3'
+      ? Number(raw)
+      : 2
   return `<h${level}>${escapeHtml(str(b.text))}</h${level}>`
 }
 
-const eyebrow: Emit = (b) =>
-  `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
 const byline: Emit = (b) => {
   const items = b.items
-  const text = Array.isArray(items)
-    ? items.map((i) => str(i)).join(' · ')
-    : str(b.text)
+  const text = Array.isArray(items) ? items.map((i) => str(i)).join(' · ') : str(b.text)
   return `<p class="bp-role-byline">${escapeHtml(text)}</p>`
 }
 
-const ingress: Emit = (b) =>
-  `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
+const ingress: Emit = (b) => `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
 
-const paragraph: Emit = (b) =>
-  `<p>${renderInlines(paragraphInline(b))}</p>`
+const paragraph: Emit = (b) => `<p>${renderInlines(paragraphInline(b))}</p>`
 
 // Pullquote is a PdParagraph with _role pullquote + italic:true → the role class
 // plus the inline italic author mark (walk.ex paragraph/3).
@@ -66,9 +63,7 @@ const pullquote: Emit = (b) =>
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
   const items = asList(b.items)
-  const inner = items
-    .map((item) => `<li><span>${renderInlines(item)}</span></li>`)
-    .join('')
+  const inner = items.map((item) => `<li><span>${renderInlines(item)}</span></li>`).join('')
   return `<${tag}>${inner}</${tag}>`
 }
 
@@ -175,6 +170,14 @@ function articleFigcaption(caption: string): string {
   return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
 }
 
+// asciicast_html/3 (:article) uses a PLAIN `#55635e` figcaption color — NOT the
+// `var(--paper-ink-soft, …)` the figure/diagram captions use (figures.ex line 124
+// vs 88). Mirror that divergence exactly, or the DOM-shape style attribute diverges.
+function asciicastFigcaption(caption: string): string {
+  if (caption === '') return ''
+  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
+}
+
 // Entity-encode ONLY & < > for the Mermaid source (Figures.encode_mermaid/1).
 function encodeMermaid(source: string): string {
   return source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -204,7 +207,7 @@ const asciicast: Emit = (b) => {
   return (
     `<figure style="margin:1.6rem 0">` +
     `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
-    articleFigcaption(caption) +
+    asciicastFigcaption(caption) +
     `</figure>`
   )
 }
@@ -456,7 +459,8 @@ const card: Emit = (b) => {
 function pnodeSource(node: Record<string, unknown>): [string, string] {
   const s = node.source
   if (s === true) return [' bp-pnode--src', '']
-  if (typeof s === 'string' && s !== '') return ['', `<div class="bp-pnode__src">${escapeHtml(s)}</div>`]
+  if (typeof s === 'string' && s !== '')
+    return ['', `<div class="bp-pnode__src">${escapeHtml(s)}</div>`]
   return ['', '']
 }
 
@@ -506,7 +510,9 @@ const stage: Emit = (b) => {
 /* task-detail (components.ex task_detail_html) */
 
 function priorityLabel(p: unknown): string | null {
-  const digits = str(p).trim().replace(/[^0-9]/g, '')
+  const digits = str(p)
+    .trim()
+    .replace(/[^0-9]/g, '')
   return digits === '' ? null : 'P' + digits
 }
 
@@ -535,7 +541,10 @@ function taskDetail(b: Block): string {
   {
     const c = str(t.created).trim()
     const u = str(t.updated).trim()
-    const line = [c !== '' ? `created ${escapeHtml(c)}` : '', u !== '' ? `updated ${escapeHtml(u)}` : '']
+    const line = [
+      c !== '' ? `created ${escapeHtml(c)}` : '',
+      u !== '' ? `updated ${escapeHtml(u)}` : '',
+    ]
       .filter(Boolean)
       .join(' · ')
     if (line !== '') sections.push(`<div class="bp-tdetail__stamp">${line}</div>`)
@@ -579,7 +588,9 @@ function taskDetail(b: Block): string {
           return `<div class="bp-crit${cls}">${g}<span class="bp-crit__t">${txt}</span></div>${evHtml}`
         })
         .join('')
-      sections.push(`<div class="bp-tdetail__lbl">Criteria · ${met}/${total}</div><div class="bp-tdetail__crit">${rows}</div>`)
+      sections.push(
+        `<div class="bp-tdetail__lbl">Criteria · ${met}/${total}</div><div class="bp-tdetail__crit">${rows}</div>`,
+      )
     }
   }
   // deps
@@ -593,7 +604,9 @@ function taskDetail(b: Block): string {
       .filter(Boolean)
       .join(' · ')
     if (words !== '')
-      sections.push(`<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">${words}</div>`)
+      sections.push(
+        `<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">${words}</div>`,
+      )
   }
   // children rail
   sections.push(detailRail(t, 'children', 'Children'))
@@ -603,14 +616,20 @@ function taskDetail(b: Block): string {
     if (rows.length) {
       const shown = rows.slice(0, 10)
       const extra = rows.length - shown.length
-      const body = shown.map((p) => `<div class="bp-rail__r bp-rail__paper">▸ ${escapeHtml(str(p))}</div>`).join('')
+      const body = shown
+        .map((p) => `<div class="bp-rail__r bp-rail__paper">▸ ${escapeHtml(str(p))}</div>`)
+        .join('')
       const more = extra <= 0 ? '' : `<div class="bp-rail__more">… and ${extra} more</div>`
-      sections.push(`<div class="bp-tdetail__lbl">Papers</div><div class="bp-tdetail__rail">${body}${more}</div>`)
+      sections.push(
+        `<div class="bp-tdetail__lbl">Papers</div><div class="bp-tdetail__rail">${body}${more}</div>`,
+      )
     }
   }
   // labels
   {
-    const labels = asList(t.labels).map((l) => str(l)).filter((l) => l !== '')
+    const labels = asList(t.labels)
+      .map((l) => str(l))
+      .filter((l) => l !== '')
     if (labels.length)
       sections.push(`<div class="bp-tdetail__labels">${labels.map(escapeHtml).join(' · ')}</div>`)
   }
@@ -653,7 +672,9 @@ const roadmap: Emit = (b) => {
   if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">No roadmap items.</div>`
   const todayVal = b.today
   const today =
-    typeof todayVal === 'number' ? `<span class="bp-rm__today" style="left:${clampf(todayVal)}%"></span>` : ''
+    typeof todayVal === 'number'
+      ? `<span class="bp-rm__today" style="left:${clampf(todayVal)}%"></span>`
+      : ''
   const scaleCells = asList(b.scale)
   const scale =
     scaleCells.length === 0

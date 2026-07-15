@@ -36,7 +36,9 @@ function displayString(v: unknown): string {
   return ''
 }
 function numberList(v: unknown): number[] {
-  return asArr(v).map(numeric).filter((n): n is number => n !== null)
+  return asArr(v)
+    .map(numeric)
+    .filter((n): n is number => n !== null)
 }
 function stringList(v: unknown): string[] {
   return asArr(v).map(displayString)
@@ -135,7 +137,10 @@ function dualLegend(): string {
 }
 
 function quantileBins(grid: number[][]): number[][] {
-  const nz = grid.flat().filter((v) => v > 0).sort((a, b) => a - b)
+  const nz = grid
+    .flat()
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b)
   const n = nz.length
   const q = (p: number): number => {
     if (n === 0) return 0.0
@@ -164,7 +169,12 @@ function normGrid(block: unknown): number[][] {
 
 function heatGridHtml(grid: number[][], block: unknown): string {
   const maxNum = numeric(get(block, 'max'))
-  const maxVal = maxNum !== null && maxNum > 0 ? maxNum : Math.max(...grid.flat(), 1.0, 1e-9)
+  // Mirror data_viz.ex heat_grid_html/2: with no explicit `max`, the divisor is
+  // the actual grid max (NOT floored at 1.0 — that would flatten all intensities),
+  // with 1.0 only as the empty-grid default and 1e-9 as the divide-by-zero floor.
+  const flat = grid.flat()
+  const maxVal =
+    maxNum !== null && maxNum > 0 ? maxNum : Math.max(flat.length ? Math.max(...flat) : 1.0, 1e-9)
   const rowLabels = stringList(get(block, 'rowLabels'))
   const colLabels = stringList(get(block, 'colLabels'))
   const cols = Math.max(...grid.map((r) => r.length), 0)
@@ -173,13 +183,17 @@ function heatGridHtml(grid: number[][], block: unknown): string {
   if (colLabels.length > 0) {
     const corner = rowLabels.length === 0 ? '' : '<span class="bp-heat__rl"></span>'
     let cells = ''
-    for (let j = 0; j < cols; j++) cells += `<span class="bp-heat__cl">${escapeHtml(colLabels[j] ?? '')}</span>`
+    for (let j = 0; j < cols; j++)
+      cells += `<span class="bp-heat__cl">${escapeHtml(colLabels[j] ?? '')}</span>`
     head = corner + cells
   }
 
   let body = ''
   grid.forEach((row, i) => {
-    const label = rowLabels.length === 0 ? '' : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
+    const label =
+      rowLabels.length === 0
+        ? ''
+        : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
     let cells = ''
     for (let j = 0; j < cols; j++) {
       const v = row[j] ?? 0.0
@@ -191,7 +205,8 @@ function heatGridHtml(grid: number[][], block: unknown): string {
 
   const track = rowLabels.length === 0 ? '' : 'auto '
   let legend = '<div class="bp-heat__legend">less '
-  for (const i of [0.15, 0.35, 0.55, 0.75, 1.0]) legend += `<i class="bp-heat__c" style="--i:${fmt3(i)}"></i>`
+  for (const i of [0.15, 0.35, 0.55, 0.75, 1.0])
+    legend += `<i class="bp-heat__c" style="--i:${fmt3(i)}"></i>`
   legend += ' more</div>'
   return `<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},minmax(10px,28px))">${head}${body}</div>${legend}</div>`
 }
@@ -206,13 +221,17 @@ function heatCalendarHtml(grid: number[][], block: unknown): string {
   if (colLabels.length > 0) {
     const corner = rowLabels.length === 0 ? '' : '<span class="bp-heat__rl"></span>'
     let cells = ''
-    for (let w = 0; w < weeks; w++) cells += `<span class="bp-heat__ml">${escapeHtml(colLabels[w] ?? '')}</span>`
+    for (let w = 0; w < weeks; w++)
+      cells += `<span class="bp-heat__ml">${escapeHtml(colLabels[w] ?? '')}</span>`
     head = corner + cells
   }
 
   let body = ''
   grid.forEach((row, i) => {
-    const label = rowLabels.length === 0 ? '' : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
+    const label =
+      rowLabels.length === 0
+        ? ''
+        : `<span class="bp-heat__rl">${escapeHtml(rowLabels[i] ?? '')}</span>`
     const binRow = bins[i] ?? []
     let cells = ''
     for (let w = 0; w < weeks; w++) {
@@ -228,7 +247,8 @@ function heatCalendarHtml(grid: number[][], block: unknown): string {
 }
 
 function matrixCell(bin: number, v: number, showVals: boolean): string {
-  if (showVals) return `<i class="bp-heat__c ${binClass(bin)} bp-heat__c--v" title="${fmt(v)}">${fmt(v)}</i>`
+  if (showVals)
+    return `<i class="bp-heat__c ${binClass(bin)} bp-heat__c--v" title="${fmt(v)}">${fmt(v)}</i>`
   return `<i class="bp-heat__c ${binClass(bin)}" title="${fmt(v)}"></i>`
 }
 
@@ -249,7 +269,8 @@ function heatMatrixExtrasHtml(grid: number[][], block: unknown): string {
   if (!(colLabels.length === 0 && !showMarg)) {
     const corner = gutter ? '<span class="bp-heat__rl"></span>' : ''
     let labels = ''
-    for (let j = 0; j < cols; j++) labels += `<span class="bp-heat__cl">${escapeHtml(colLabels[j] ?? '')}</span>`
+    for (let j = 0; j < cols; j++)
+      labels += `<span class="bp-heat__cl">${escapeHtml(colLabels[j] ?? '')}</span>`
     const sumHead = showMarg ? '<span class="bp-heat__cl bp-heat__cl--sum">Σ</span>' : ''
     head = corner + labels + sumHead
   }
@@ -341,7 +362,10 @@ function gridSvg(minV: number, maxV: number): string {
     out += `<line class="bp-chart__grid" x1="${PAD_L}" y1="${fmt(y)}" x2="${VW - PAD_R}" y2="${fmt(y)}"/>`
     out += `<text class="bp-chart__tick" x="${PAD_L - 6}" y="${fmt(y + 4)}" text-anchor="end">${tickCompact(v)}</text>`
   }
-  return out + `<line class="bp-chart__axis" x1="${PAD_L}" y1="${VH - PAD_B}" x2="${VW - PAD_R}" y2="${VH - PAD_B}"/>`
+  return (
+    out +
+    `<line class="bp-chart__axis" x1="${PAD_L}" y1="${VH - PAD_B}" x2="${VW - PAD_R}" y2="${VH - PAD_B}"/>`
+  )
 }
 
 function plotLine(series: Series[], minV: number, maxV: number, n: number): string {

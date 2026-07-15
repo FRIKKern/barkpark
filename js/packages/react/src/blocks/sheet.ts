@@ -9,7 +9,7 @@
 // colspan/rowspan merges, per-cell b/i/bg/al styles, engine-error red/bold, the
 // default-alignment class, URL-cell anchors, and the truncation note.
 
-import { type Block, escapeHtml, safeUrl, str, isMap } from '../inline'
+import { type Block, escapeHtml, safeUrl, isMap } from '../inline'
 
 type Emit = (block: Block) => string
 
