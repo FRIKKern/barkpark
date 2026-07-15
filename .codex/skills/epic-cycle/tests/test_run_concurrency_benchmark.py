@@ -18,7 +18,7 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def assignment(assignment_id, *, exit_code=0, complete=True, contradiction=False, delay=0.03):
+def assignment(assignment_id, *, exit_code=0, complete=True, contradiction=False, delay=0.08):
     payload = json.dumps(
         {"complete": complete, "contradiction_unsupported": contradiction},
         separators=(",", ":"),
@@ -197,6 +197,26 @@ class IdentityAndAdmissionTest(unittest.TestCase):
         self.assertFalse(decision.admitted)
         self.assertGreaterEqual(len(decision.reasons), 3)
 
+    def test_capacity_lease_enforces_exclusive_one_and_at_most_two(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with MODULE.HeavyCapacityLease(1, root):
+                with self.assertRaises(MODULE.SafetyError):
+                    with MODULE.HeavyCapacityLease(2, root):
+                        pass
+            with MODULE.HeavyCapacityLease(2, root) as first:
+                with MODULE.HeavyCapacityLease(2, root) as second:
+                    self.assertEqual({0, 1}, {first.slot_index, second.slot_index})
+                    with self.assertRaises(MODULE.SafetyError):
+                        with MODULE.HeavyCapacityLease(2, root):
+                            pass
+
+    def test_primary_fence_must_match_admitted_pid_start_identity(self):
+        expected = identity(10, "old")
+        MODULE.assert_primary_fence(MODULE.PaneSnapshot({"%1": expected}), "%1", expected)
+        with self.assertRaisesRegex(MODULE.SafetyError, "fence changed"):
+            MODULE.assert_primary_fence(MODULE.PaneSnapshot({"%1": identity(10, "new")}), "%1", expected)
+
 
 class MetricsAndSamplerTest(unittest.TestCase):
     def test_typed_unknown_metrics_are_not_zero(self):
@@ -244,9 +264,9 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         self.assertTrue(all("source" in metric for metric in result["metrics"].values()))
 
     def test_timeout_is_retained_in_itt_denominator(self):
-        assignments = [assignment(f"a{index}", delay=0.02) for index in range(1, 7)]
-        assignments[0] = assignment("a1", delay=0.3)
-        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 3, timeout_seconds=0.08, environment={})
+        assignments = [assignment(f"a{index}", delay=0.08) for index in range(1, 7)]
+        assignments[0] = assignment("a1", delay=0.5)
+        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 3, timeout_seconds=0.2, environment={})
         self.assertEqual(6, len(result["assignment_results"]))
         self.assertEqual("timeout", result["assignment_results"][0]["status"])
         rates = MODULE._trial_rates(result)

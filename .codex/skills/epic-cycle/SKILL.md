@@ -7,7 +7,7 @@ description: Run one evidence-gated Barkpark epic wave in Codex, from strategy t
 
 Run a durable epic wave with Barkpark tasks and one wave Paper as the source of truth. Preserve the full user wish verbatim. Optimize the reasoning budget by phase: high for choices, medium for gathering and proving facts.
 
-Read `references/phase-contract.md`, `references/fleet-contract.md`, `references/task-contract.md`, and `references/charter.md` before starting. Also read `.claude/workflows/bp-loop-ledger.md` for the current repository merge-ledger rules.
+Read `references/phase-contract.md`, `references/fleet-contract.md`, `references/task-contract.md`, and `references/charter.md` before starting. Read `references/benchmark-protocol.md` before proposing or running a concurrency trial. Also read `.claude/workflows/bp-loop-ledger.md` for the current repository merge-ledger rules.
 
 ## Inputs
 
@@ -149,6 +149,12 @@ Create and edit PR bodies from a file, never an interpolated shell string. Befor
 - On a failed gate, keep the task truthful and in progress; fix or record the blocker. Never convert a failure into prose-only success.
 - On interrupted runs, resume from the Paper, epic heartbeat, task claims, and git branches. Do not restart discovery already captured with evidence.
 - On user cancellation, use the active cancellation workflow, leave ledger state honest, and stop.
+
+## Concurrency proof
+
+Concurrency evidence for an Epic Cycle must use `scripts/run_concurrency_benchmark.py` and the frozen contract in `references/benchmark-protocol.md`. The only supported comparison is six equal assignments at widths 1/2/3/6, seed 20260715, in complete Williams cycles with per-treatment cold reset, warm prime, and four fixed balanced looks. Do not replace it with ad hoc timing, baseline-only comparison, generic process interception, or an optionally stopped trial.
+
+Generate and inspect a plan before any measured work. A run or replay requires explicit heavy execution, live tmux/process-start identity, owned process groups, and conservative host admission. Heavy capacity defaults to one; capacity two is allowed only when explicitly requested and all health signals pass. Missing identity or safety signals deny. Keep every ITT failure, typed unknown metric, contaminated original, and separately labeled sensitivity rerun in the result artifact.
 
 ## Completion report
 

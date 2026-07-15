@@ -11,6 +11,7 @@ without launching a real benchmark.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
@@ -519,6 +520,22 @@ def contamination_reasons(before: PaneSnapshot, after: PaneSnapshot, primary_pan
     return reasons
 
 
+def assert_primary_fence(snapshot: PaneSnapshot, pane: str, expected: ProcessIdentity) -> None:
+    current = snapshot.identities.get(pane)
+    if current != expected:
+        raise SafetyError("primary tmux pane pid/start fence changed after host admission")
+
+
+def execution_contamination_reasons(payload: Mapping[str, Any]) -> list[str]:
+    sampler = payload.get("sampler")
+    if not isinstance(sampler, dict):
+        return []
+    errors = sampler.get("errors")
+    if not isinstance(errors, list):
+        return ["sampler error record is malformed"]
+    return [f"owned process-group sampler error: {error}" for error in errors]
+
+
 def parse_linux_group_sample(lines: Iterable[str], pgid: int, clock_ticks: int, page_size: int) -> GroupSample:
     pids: list[int] = []
     user_ticks = 0
@@ -711,14 +728,18 @@ def launch_owned_process(
         if "process" in locals():
             stdout_handle.close()
             stderr_handle.close()
-    identity = read_process_identity(process.pid)
-    pgid = os.getpgid(process.pid)
-    if pgid != process.pid:
-        terminate_owned_group(pgid)
-        raise SafetyError("child did not become leader of its owned process group")
-    if not identity_is_live(identity):
-        terminate_owned_group(pgid)
-        raise SafetyError("child process identity could not be fenced after launch")
+    try:
+        identity = read_process_identity(process.pid)
+        pgid = os.getpgid(process.pid)
+        if pgid != process.pid:
+            raise SafetyError("child did not become leader of its owned process group")
+        if not identity_is_live(identity):
+            raise SafetyError("child process identity could not be fenced after launch")
+    except BaseException:
+        if process.poll() is None:
+            terminate_owned_group(process.pid)
+        process.wait(timeout=2.0)
+        raise
     return process, identity, pgid
 
 
@@ -758,22 +779,83 @@ def terminate_owned_group(pgid: int, grace_seconds: float = 1.0) -> None:
 
 def run_control_command(argv: Sequence[str], env: Mapping[str, str], timeout_seconds: float, label: str) -> dict[str, Any]:
     started = time.monotonic()
-    try:
-        result = subprocess.run(
-            list(argv),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            env=dict(env),
-            timeout=timeout_seconds,
-            check=False,
-            start_new_session=True,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise SafetyError(f"{label} timed out after {timeout_seconds}s") from error
-    if result.returncode != 0:
-        raise SafetyError(f"{label} failed with exit {result.returncode}: {result.stderr[-500:]}")
-    return {"status": "passed", "wall_seconds": time.monotonic() - started}
+    with tempfile.TemporaryDirectory(prefix="epic-cycle-control-") as temporary:
+        root = Path(temporary)
+        stdout_path = root / "stdout"
+        stderr_path = root / "stderr"
+        process: Optional[subprocess.Popen[str]] = None
+        pgid: Optional[int] = None
+        try:
+            process, process_identity, pgid = launch_owned_process(
+                argv,
+                env=env,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+            )
+            try:
+                returncode = process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as error:
+                terminate_owned_group(pgid)
+                process.wait(timeout=2.0)
+                raise SafetyError(f"{label} timed out after {timeout_seconds}s") from error
+            if returncode != 0:
+                stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
+                raise SafetyError(f"{label} failed with exit {returncode}: {stderr[-500:]}")
+            return {
+                "status": "passed",
+                "wall_seconds": time.monotonic() - started,
+                "process_identity": asdict(process_identity),
+                "pgid": pgid,
+            }
+        finally:
+            if process is not None and process.poll() is None and pgid is not None:
+                terminate_owned_group(pgid)
+                process.wait(timeout=2.0)
+
+
+class HeavyCapacityLease:
+    """Cross-process lease: capacity one is exclusive; capacity two shares two slots."""
+
+    def __init__(self, capacity: int, root: Optional[Path] = None) -> None:
+        if capacity not in {1, 2}:
+            raise ProtocolError("heavy capacity lease supports only one or two")
+        self.capacity = capacity
+        self.root = root or Path(tempfile.gettempdir()) / "barkpark-epic-cycle-concurrency"
+        self._gate: Optional[Any] = None
+        self._slot: Optional[Any] = None
+        self.slot_index: Optional[int] = None
+
+    def __enter__(self) -> "HeavyCapacityLease":
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._gate = (self.root / "capacity.gate").open("a+")
+        gate_mode = fcntl.LOCK_EX if self.capacity == 1 else fcntl.LOCK_SH
+        try:
+            fcntl.flock(self._gate.fileno(), gate_mode | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            self._gate.close()
+            self._gate = None
+            raise SafetyError("heavy capacity is already occupied by an incompatible run") from error
+        for index in range(self.capacity):
+            handle = (self.root / f"slot-{index}.lock").open("a+")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close()
+                continue
+            self._slot = handle
+            self.slot_index = index
+            return self
+        self.__exit__(None, None, None)
+        raise SafetyError(f"all {self.capacity} admitted heavy-capacity slots are occupied")
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        for handle in (self._slot, self._gate):
+            if handle is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                handle.close()
+        self._slot = None
+        self._gate = None
+        self.slot_index = None
 
 
 def run_assignment_set(
@@ -1056,13 +1138,19 @@ def execute_protocol(
     normalized = validate_manifest(manifest)
     if not admission.admitted:
         raise SafetyError("host admission denied: " + "; ".join(admission.reasons))
+    if admission.signals.pane != normalized["primary_pane"] or admission.signals.pane_identity is None:
+        raise SafetyError("admission identity does not belong to the manifest primary pane")
+    expected_primary = admission.signals.pane_identity
     plan = plan_artifact(normalized)
     originals: list[dict[str, Any]] = []
     for spec in plan["schedule"]:
         before = snapshotter(normalized["tmux_panes"])
+        assert_primary_fence(before, normalized["primary_pane"], expected_primary)
         payload = treatment_runner(normalized, spec, None)
         after = snapshotter(normalized["tmux_panes"])
+        assert_primary_fence(after, normalized["primary_pane"], expected_primary)
         reasons = contamination_reasons(before, after, normalized["primary_pane"])
+        reasons.extend(execution_contamination_reasons(payload))
         originals.append(
             {
                 **spec,
@@ -1080,9 +1168,12 @@ def execute_protocol(
             continue
         spec = {key: original[key] for key in ("trial_id", "look", "williams_row", "position", "width", "assignment_order", "cold_reset", "warm_prime")}
         before = snapshotter(normalized["tmux_panes"])
+        assert_primary_fence(before, normalized["primary_pane"], expected_primary)
         payload = treatment_runner(normalized, spec, original["trial_id"])
         after = snapshotter(normalized["tmux_panes"])
+        assert_primary_fence(after, normalized["primary_pane"], expected_primary)
         reasons = contamination_reasons(before, after, normalized["primary_pane"])
+        reasons.extend(execution_contamination_reasons(payload))
         reruns.append(
             {
                 **spec,
@@ -1190,7 +1281,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not admission.admitted:
             write_json(args.output, {"schema_version": SCHEMA_VERSION, "admission": admission_json(admission)})
             raise SafetyError("host admission denied: " + "; ".join(admission.reasons))
-        result = execute_protocol(manifest, admission)
+        with HeavyCapacityLease(admission.heavy_capacity) as lease:
+            result = execute_protocol(manifest, admission)
+            result["admission"]["heavy_slot"] = lease.slot_index
         write_json(args.output, result)
         print(f"wrote benchmark result: {args.output}")
         return 0
