@@ -40,9 +40,9 @@ const (
 	// ctxTextTokenDivisor: the text-baseline estimate, chars/4.
 	ctxTextTokenDivisor = 4
 	ctxGlyphAdvance     = 7  // basicfont.Face7x13 horizontal advance
-	ctxGlyphHeight     = 13 // basicfont.Face7x13 line height
-	ctxGlyphAscent     = 11 // basicfont.Face7x13 baseline offset
-	ctxPagePad         = 8  // white margin around each page, pre-scale
+	ctxGlyphHeight      = 13 // basicfont.Face7x13 line height
+	ctxGlyphAscent      = 11 // basicfont.Face7x13 baseline offset
+	ctxPagePad          = 8  // white margin around each page, pre-scale
 	// ctxDefaultScale is the validated operating point: 0.4 of the 13px face
 	// ≈ the research harness's 0.35 of a 13px Menlo (2.8px vs 2.73px advance).
 	ctxDefaultScale = 0.4
