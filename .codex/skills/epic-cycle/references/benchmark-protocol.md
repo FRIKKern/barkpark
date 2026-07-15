@@ -8,6 +8,7 @@
 - Schema: `epic-cycle-concurrency-v1`.
 - Seed: `20260715`; any other seed is rejected.
 - Work: exactly six unique assignment ids and argv lists. Every treatment receives all six assignments once per look.
+- Retrieval v2 corpus: `references/codex-epic-cycle-wave-3-real-corpus-v1.jsonl`, frozen at repository commit `55519257db1377e4e747683204fe902fe8d562a9`. Its identity is SHA-256 `a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26` over exact file bytes, including its single final LF; newline-stripped digests are not corpus identities. The six ordered records each own three claim ids, yielding claim-domain digest `ad364452e4288061ecb1b972bb301b9d8cfdbe91e8f142a62ef3ded02f13176a`.
 - Treatments: exactly `1/2/3/6`; no other width is accepted.
 - Design: one complete four-row Williams cycle:
 

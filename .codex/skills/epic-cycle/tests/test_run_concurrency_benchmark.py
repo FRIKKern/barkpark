@@ -16,6 +16,11 @@ from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "run_concurrency_benchmark.py"
 FIXTURES = Path(__file__).parent / "fixtures"
+REAL_CORPUS = (
+    Path(__file__).parents[1]
+    / "references"
+    / "codex-epic-cycle-wave-3-real-corpus-v1.jsonl"
+)
 SPEC = importlib.util.spec_from_file_location("run_concurrency_benchmark", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -298,6 +303,32 @@ class ManifestTest(unittest.TestCase):
                 path.write_bytes(path.read_bytes() + b" ")
                 with self.assertRaisesRegex(MODULE.ProtocolError, "bytes"):
                     MODULE.validate_manifest(source)
+
+    def test_v2_admits_the_versioned_real_corpus_without_digest_mocking(self):
+        raw = REAL_CORPUS.read_bytes()
+        records = [json.loads(line) for line in raw.splitlines()]
+
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertFalse(raw.endswith(b"\n\n"))
+        self.assertEqual(
+            MODULE.RETRIEVAL_CORPUS_SHA256, hashlib.sha256(raw).hexdigest()
+        )
+        self.assertEqual(6, len(records))
+        self.assertEqual(list(MODULE.RETRIEVAL_UNIT_IDS), [record["id"] for record in records])
+
+        normalized = MODULE.validate_manifest(
+            retrieval_manifest(REAL_CORPUS, MODULE.RETRIEVAL_CORPUS_SHA256)
+        )
+        expected_domain = {
+            assignment_id: ["C1", "C2", "C3"]
+            for assignment_id in MODULE.RETRIEVAL_UNIT_IDS
+        }
+        self.assertEqual("exact_file_bytes", normalized["corpus"]["sha256_scope"])
+        self.assertEqual(expected_domain, normalized["corpus"]["claim_domain"])
+        self.assertEqual(
+            "ad364452e4288061ecb1b972bb301b9d8cfdbe91e8f142a62ef3ded02f13176a",
+            normalized["corpus"]["claim_domain_digest"],
+        )
 
     def test_v2_rejects_attribution_scope_task_and_fence_mismatches(self):
         record = retrieval_record(1)
