@@ -21,7 +21,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
   )
   @sensitive_suffixes ~w(
     _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
-    _webhook_secret _secret_key _password _private_key _signing_key _credential _credentials
+    _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
+    _dsn _database_url _database_uri _connection_string
   )
 
   @spec create_experiment(map()) ::

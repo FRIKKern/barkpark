@@ -218,6 +218,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       manifest = %{
         "api-key" => "api-secret",
         "runner_credentials" => "credential-secret",
+        "runner_secret" => "generic-secret",
         "nested" => %{"webhook_secret" => "hook-secret"}
       }
 
@@ -227,12 +228,14 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert experiment.manifest == %{
                "api-key" => "[REDACTED]",
                "runner_credentials" => "[REDACTED]",
+               "runner_secret" => "[REDACTED]",
                "nested" => %{"webhook_secret" => "[REDACTED]"}
              }
 
       {:ok, json} = EpicFleet.export_benchmark_json(experiment)
       refute json =~ "api-secret"
       refute json =~ "credential-secret"
+      refute json =~ "generic-secret"
       refute json =~ "hook-secret"
     end
 
