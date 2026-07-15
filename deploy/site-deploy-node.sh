@@ -84,7 +84,12 @@
 #   CONTENT_REV        dataset revision read at build (baked as bp-content-rev).
 #   BARKPARK_CADDYFILE Caddyfile to arm/flip. Default /etc/caddy/Caddyfile
 #   BARKPARK_NODE_LINK stable node symlink. Default /usr/local/bin/barkpark-node
-#   BARKPARK_SITE_HEALTH_PATH  path the SSR process serves. Default /sites/<slug>/
+#   BARKPARK_SITE_HEALTH_PATH  path to probe on the RAW node port (the probe hits
+#                      127.0.0.1:<port> directly, bypassing Caddy). Caddy arms the
+#                      route with `handle_path /sites/<slug>/*`, which STRIPS the
+#                      prefix, and the next-starter sets no basePath — so the node
+#                      process serves the marker page at ROOT. Default "/". Only a
+#                      framework configured with a basePath needs to override this.
 #   BARKPARK_HEALTH_HOST  live FQDN (for logging). Default guerrilla.barkpark.cloud
 set -uo pipefail
 
@@ -281,7 +286,12 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
   port="$(slot_port "$slot")"; inst="$(slot_inst "$slot")"
-  path="${BARKPARK_SITE_HEALTH_PATH:-/sites/$SITE_SLUG/}"
+  # The probe hits the raw node port directly (below), bypassing Caddy. Caddy's
+  # `handle_path /sites/<slug>/*` strips the prefix and the next-starter has no
+  # basePath, so the node process serves the marker page at ROOT — probe "/", not
+  # the public sub-path (that path only exists once Caddy has stripped it). A
+  # framework built with a basePath overrides BARKPARK_SITE_HEALTH_PATH.
+  path="${BARKPARK_SITE_HEALTH_PATH:-/}"
   [ "${path#/}" = "$path" ] && path="/$path"
 
   if [ ! -f "$RELEASES/$bid/server.js" ]; then
@@ -516,10 +526,12 @@ FAKENPM
       BARKPARK_CADDYFILE="$CF" \
       BARKPARK_SITE_DEPLOY_LOCK="$TD/deploy.lock" \
       BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
-      BARKPARK_SITE_HEALTH_PATH=/ \
       BARKPARK_NODE_LINK="$TD/barkpark-node" \
       BARKPARK_SITE_NO_CAP=1 \
       bash "$SELF" "${@:2}" > "$TD/out.log" 2> "$TD/err.log"
+    # NB: BARKPARK_SITE_HEALTH_PATH is deliberately NOT set here — the main deploy
+    # path exercises the DEFAULT ("/"), which is what a real box uses (Caddy
+    # handle_path strips the /sites/<slug>/ prefix; the node process serves root).
     echo $?
   }
   e2e_rollback() {
