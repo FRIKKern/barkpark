@@ -54,6 +54,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Sites.BoxRelay
+  alias BarkparkCloud.Sites.NodePortAllocator
 
   # The six visible stages, in order — the same list the CLI renders
   # (cloudclient.SpawnSiteStages). This is the canonical ordering `stages/1`
@@ -294,6 +295,11 @@ defmodule BarkparkCloud.Sites.Deploy do
       build_id: deployment.build_id,
       content_rev: deployment.content_rev,
       framework: site.framework,
+      # site-spawner W7 (charter D63): WHICH runtime target the box drives this
+      # build to. "static" = symlink-swap of a built dist/; "node" = boot the
+      # per-site Node SSR process on the idle slot and flip the Caddy upstream to
+      # it. Mapped straight from `kind` so the box never re-derives it.
+      runtime_target: runtime_target(site),
       env: %{
         BARKPARK_API_URL: scoped_api_url(site, bp),
         BARKPARK_TOKEN: read_token,
@@ -306,7 +312,25 @@ defmodule BarkparkCloud.Sites.Deploy do
         BARKPARK_DOC_TYPE: site.doc_type
       }
     }
+    |> maybe_put_target_port(site)
   end
+
+  # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
+  # from `kind` — node sites boot a process, everything else swaps a symlink.
+  defp runtime_target(%Site{kind: "node"}), do: "node"
+  defp runtime_target(_site), do: "static"
+
+  # For a node deploy, carry down the IDLE slot's PORT — the port the box builds+
+  # boots the new Node process on, health-gates, THEN flips the Caddy upstream to
+  # (blue/green, zero-downtime). Non-node deploys carry no port (symlink swap).
+  defp maybe_put_target_port(payload, %Site{kind: "node"} = site) do
+    case NodePortAllocator.target_slot_port(site) do
+      nil -> payload
+      port -> Map.put(payload, :target_port, port)
+    end
+  end
+
+  defp maybe_put_target_port(payload, _site), do: payload
 
   # The build fetches over the SCOPED route (charter D6): tenant-membership
   # isolation is what pins the token to ONE workspace — the flat route would let a
