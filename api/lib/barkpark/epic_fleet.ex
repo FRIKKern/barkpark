@@ -9,7 +9,7 @@ defmodule Barkpark.EpicFleet do
 
   import Ecto.Query, warn: false
 
-  alias Barkpark.EpicFleet.{Assignment, Result}
+  alias Barkpark.EpicFleet.{Assignment, Benchmark, CanonicalJSON, Experiment, Result}
   alias Barkpark.Repo
 
   @default_plan %{
@@ -145,6 +145,34 @@ defmodule Barkpark.EpicFleet do
   @doc "The baseline phase plan from the Epic Cycle fleet contract."
   @spec default_plan() :: map()
   def default_plan, do: @default_plan
+
+  @doc "Create or replay an append-only Epic/Legendary benchmark experiment."
+  @spec create_benchmark_experiment(map()) ::
+          {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def create_benchmark_experiment(attrs), do: Benchmark.create_experiment(attrs)
+
+  @doc "Record or replay one immutable benchmark execution attempt."
+  def record_benchmark_attempt(experiment, attrs), do: Benchmark.record_attempt(experiment, attrs)
+
+  @doc "List benchmark attempts in deterministic ordinal/id order."
+  def list_benchmark_attempts(experiment), do: Benchmark.list_attempts(experiment)
+
+  @doc "Build the deterministic benchmark export document."
+  def export_benchmark(experiment), do: Benchmark.export(experiment)
+
+  @doc "Encode the deterministic benchmark export as canonical JSON bytes."
+  def export_benchmark_json(experiment), do: Benchmark.export_json(experiment)
+
+  @doc "Verify and persist a canonical benchmark JSON artifact atomically."
+  def import_benchmark_json(json), do: Benchmark.import_json(json)
+
+  @doc "Return a stable lowercase SHA-256 digest over canonical JSON bytes."
+  @spec canonical_digest(term()) :: String.t()
+  def canonical_digest(term), do: CanonicalJSON.digest(term)
+
+  @doc "Encode a JSON-compatible term with recursively sorted object keys."
+  @spec canonical_json(term()) :: binary()
+  def canonical_json(term), do: CanonicalJSON.encode!(term)
 
   @doc "Return a stable lowercase SHA-256 digest for JSON-compatible terms."
   @spec digest(term()) :: String.t()
