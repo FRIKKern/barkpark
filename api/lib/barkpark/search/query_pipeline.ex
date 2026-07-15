@@ -36,7 +36,9 @@ defmodule Barkpark.Search.QueryPipeline do
     config = SurfaceConfigs.get(surface, scope, Keyword.get(opts, :workspace_id))
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
-    {parsed, corrected_to} = expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
+
+    {parsed, corrected_to} =
+      expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
 
     {hits, total, recovery, engine_meta} =
       case surface do
