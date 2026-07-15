@@ -153,12 +153,24 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def update_search_settings(conn, %{"dataset" => dataset} = params) do
-    case SurfaceConfigs.upsert("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
+    # D58/D71 fail-closed — mirrors the documents surface. `workspace_id(conn)`
+    # reads `:current_workspace`, which `AssignDefaultScope` has ALREADY masked
+    # from nil to Default, so a genuinely nil-workspace admin token would
+    # silently write the Default/global media config. Read the RAW pre-mask token
+    # workspace_id (assigned by `RequireToken`) and refuse when nil, BEFORE the
+    # upsert. A workspace-bound admin token still writes its own row.
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+      _ws_id ->
+        case SurfaceConfigs.upsert("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
@@ -509,5 +521,28 @@ defmodule BarkparkWeb.V1.MediaController do
       %{id: id} -> id
       _ -> nil
     end
+  end
+
+  # The RAW pre-mask workspace of the calling admin token (assigned by
+  # `RequireToken`, BEFORE `AssignDefaultScope` masks nil → Default). The D58/D71
+  # fail-closed guard reads THIS, not `workspace_id/1`, so a legacy-null token is
+  # refused instead of silently attributing its write to Default.
+  defp token_workspace_id(conn) do
+    case conn.assigns[:api_token] do
+      %{workspace_id: ws_id} -> ws_id
+      _ -> nil
+    end
+  end
+
+  # 422 for a nil-workspace admin settings WRITE (D58/D71). `unprocessable` is a
+  # registered §9 code; the message tells the operator to use a workspace-bound
+  # token rather than have the write land on the global/Default config.
+  defp nil_workspace_write_error(conn) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      422,
+      "unprocessable",
+      "search-settings write requires a workspace-scoped token; this token has no workspace"
+    )
   end
 end
