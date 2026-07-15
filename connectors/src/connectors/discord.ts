@@ -355,6 +355,13 @@ export function createDiscordConnector(
      *
      * Must run AFTER `chat.initialize()` — the adapter answers 500 "Chat instance
      * not initialized" otherwise. `startBridge` already orders it that way.
+     *
+     * SINGLE-OWNER ACROSS REPLICAS (charter D93/D94). A Gateway socket opened on
+     * two replicas double-POSTs every reply, so `startBridge` does NOT call this at
+     * boot — the install-lease coordinator does, only on the replica that holds the
+     * install's lease. A standby stands by; on the owner's lapse it steals the lease
+     * and calls this. `stopListening()` clears the session, so a lease regained
+     * re-arms a FRESH socket (takeover), which the connector tests pin.
      */
     async listen(adapter: Adapter): Promise<void> {
       if (sessions.has(adapter)) return; // idempotent: never two sockets per bot

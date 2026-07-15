@@ -134,6 +134,50 @@ ALTER TABLE ${CHAT_BRIDGE_SCHEMA}.connector_installs
   ADD COLUMN IF NOT EXISTS chat_token_ref text`;
 
 /**
+ * connector_install_leases — the single-owner lease for SOCKET/POLL channels
+ * (charter D93). One row per install of a poll/socket connector (Discord's
+ * Gateway websocket, Telegram's getUpdates loop), claimed by exactly ONE bridge
+ * replica at a time so a horizontally-scaled bridge does not open a SECOND socket
+ * / a SECOND long-poll against the same bot (Discord double-POST, Telegram 409
+ * Conflict). Webhook channels do NOT need this — an inbound HTTP request is
+ * stateless and any replica can serve it (W8 mount-reconcile already makes the
+ * webhook mount index replica-safe); the lease covers exactly the complement.
+ *
+ * The claim/renew/steal is ONE atomic statement (`tenant/install-lease.ts`):
+ *
+ *   INSERT … ON CONFLICT (provider, install_key) DO UPDATE
+ *     SET owner_id = EXCLUDED.owner_id, expires_at = EXCLUDED.expires_at
+ *     WHERE connector_install_leases.owner_id = EXCLUDED.owner_id
+ *        OR connector_install_leases.expires_at < now()
+ *     RETURNING owner_id
+ *
+ * 0 rows returned ⇒ another replica holds a LIVE lease ⇒ stand by. A live lease
+ * whose `expires_at < now()` (the holder crashed without releasing) is stolen on
+ * the next tick — takeover on lapse falls out of the same statement.
+ *
+ * `owner_id` is a per-PROCESS `crypto.randomUUID()` (container-safe — a hostname
+ * collides across templated pods; a fresh UUID never does).
+ *
+ * ⚠️ UNLIKE `connector_installs`, this table is NEVER read by Elixir (D93 LAW,
+ * mirroring the D54 discipline): the Studio Connectors catalog lists installs,
+ * not their runtime lease-holder, so there is NO `@schema_prefix` schema, NO
+ * `test_helper.exs` transcription, and the DDL drift gate deliberately ignores
+ * it (it scans `connector_installs` by hardcoded name). A future Elixir read
+ * would reintroduce the two-source-of-truth transcription cost this LAW exists to
+ * prevent — do not add one.
+ */
+export const CREATE_CONNECTOR_INSTALL_LEASES_SQL = `
+CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_install_leases (
+  provider     text        NOT NULL,
+  install_key  text        NOT NULL,
+  owner_id     text        NOT NULL,
+  expires_at   timestamptz NOT NULL,
+  taken_at     timestamptz NOT NULL DEFAULT now(),
+  renewed_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, install_key)
+)`;
+
+/**
  * All bridge-owned DDL, in dependency order, to run once the schema exists.
  *
  * Note these are schema-QUALIFIED while state-pg's five are not. That asymmetry is
@@ -148,4 +192,7 @@ export const BRIDGE_TABLE_DDL: readonly string[] = [
   // a no-op; on a P2 database it is the only thing that adds it.
   ADD_CHAT_TOKEN_REF_SQL,
   CREATE_PENDING_CONNECT_SQL,
+  // Socket/poll single-owner lease (D93). Bridge-internal, never Elixir-read, so
+  // it does NOT touch the connector_installs column set the drift gate guards.
+  CREATE_CONNECTOR_INSTALL_LEASES_SQL,
 ];
