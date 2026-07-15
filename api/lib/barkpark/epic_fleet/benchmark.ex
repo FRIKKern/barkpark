@@ -392,10 +392,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
        }),
        do: {:error, :attempt_cannot_replace_itself}
 
-  defp validate_attempt_replacement(experiment_id, %{
-         "ordinal" => ordinal,
-         "replaces_attempt_id" => replacement_id
-       })
+  defp validate_attempt_replacement(
+         experiment_id,
+         %{
+           "ordinal" => ordinal,
+           "replaces_attempt_id" => replacement_id
+         } = attrs
+       )
        when is_binary(replacement_id) do
     previous_ordinal =
       Repo.one(
@@ -412,7 +415,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
       ordinal <= previous_ordinal ->
         {:error, :replacement_ordinal_invalid}
 
-      replacement_already_exists?(experiment_id, replacement_id) ->
+      replacement_already_exists?(experiment_id, replacement_id, attrs["attempt_id"]) ->
         {:error, :replacement_attempt_already_replaced}
 
       true ->
@@ -492,12 +495,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
     length(attempt_ids) == MapSet.size(MapSet.new(attempt_ids))
   end
 
-  defp replacement_already_exists?(experiment_id, replacement_id) do
+  defp replacement_already_exists?(experiment_id, replacement_id, attempt_id) do
     Repo.exists?(
       from attempt in Attempt,
         where:
           attempt.experiment_id == ^experiment_id and
-            attempt.replaces_attempt_id == ^replacement_id
+            attempt.replaces_attempt_id == ^replacement_id and
+            attempt.attempt_id != ^attempt_id
     )
   end
 
