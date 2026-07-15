@@ -162,6 +162,37 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
              ]
     end
 
+    test "partial unique index rejects replacement forks outside the context API", %{attrs: attrs} do
+      {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
+      {:ok, _original} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+
+      {:ok, _replacement} =
+        EpicFleet.record_benchmark_attempt(experiment, %{
+          attempt_attrs()
+          | attempt_id: "attempt-retry-a",
+            replaces_attempt_id: "attempt-a",
+            ordinal: 2
+        })
+
+      fork_attrs = %{
+        attempt_attrs()
+        | attempt_id: "attempt-retry-b",
+          replaces_attempt_id: "attempt-a",
+          ordinal: 3
+      }
+
+      changeset =
+        fork_attrs
+        |> Map.merge(%{
+          experiment_id: experiment.id,
+          attempt_digest: EpicFleet.canonical_digest(fork_attrs)
+        })
+        |> Attempt.insert_changeset()
+
+      assert {:error, changeset} = Repo.insert(changeset)
+      assert "has already been taken" in errors_on(changeset).replaces_attempt_id
+    end
+
     test "database rejects direct attempt UPDATE and DELETE", %{attrs: attrs} do
       {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
       {:ok, attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
@@ -413,7 +444,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
   test "forward migration repairs replacement boundaries after the original ledger migration" do
     original_version = 20_260_715_000_400
-    repair_version = 20_260_715_000_500
+    repair_version = 20_260_715_000_510
 
     assert %{rows: [[^original_version], [^repair_version]]} =
              Repo.query!(
