@@ -62,6 +62,9 @@ defmodule Barkpark.EpicFleet.Attempt do
     |> unique_constraint([:experiment_id, :attempt_id],
       name: :epic_benchmark_attempts_experiment_id_index
     )
+    |> unique_constraint(:replaces_attempt_id,
+      name: :epic_benchmark_attempts_replaces_once_index
+    )
     |> check_constraint(:ordinal, name: :epic_benchmark_attempts_ordinal)
     |> check_constraint(:status, name: :epic_benchmark_attempts_status)
     |> check_constraint(:costs, name: :epic_benchmark_attempts_costs)
