@@ -254,7 +254,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             MODULE.validate(self.args(ledger=ledger)),
         )
 
-    def test_legendary_exporter_to_validator_requires_high_build_effort(self):
+    def test_legendary_exporter_to_validator_requires_high_build_and_review_effort(self):
         ledger = self.ledger()
         build = next(
             attempt
@@ -262,9 +262,54 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             if attempt["payload"]["fleet_assignment"]["phase"] == "build"
         )
         build["payload"]["fleet_assignment"]["model_reasoning_effort"] = "medium"
+        review = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["phase"] == "review"
+        )
+        review["payload"]["fleet_assignment"]["model_reasoning_effort"] = "medium"
         self.resign_ledger(ledger)
-        self.assertTrue(
-            any("Build effort is not exactly high" in error for error in MODULE.validate(self.args(ledger=ledger)))
+        errors = MODULE.validate(self.args(ledger=ledger))
+        self.assertTrue(any("Build effort is not exactly high" in error for error in errors))
+        self.assertTrue(any("Review effort is not exactly high" in error for error in errors))
+
+    def test_legendary_ledger_rejects_duplicate_and_non_contiguous_ordinals(self):
+        duplicate = self.ledger()
+        duplicate["attempts"][-1]["ordinal"] = duplicate["attempts"][-2]["ordinal"]
+        self.resign_ledger(duplicate)
+        self.assertIn(
+            "fleet ledger attempt ordinals are not unique",
+            MODULE.validate(self.args(ledger=duplicate)),
+        )
+
+        non_contiguous = self.ledger()
+        non_contiguous["attempts"][-1]["ordinal"] += 1
+        self.resign_ledger(non_contiguous)
+        self.assertIn(
+            "fleet ledger attempt ordinals are not contiguous from 1",
+            MODULE.validate(self.args(ledger=non_contiguous)),
+        )
+
+    def test_legendary_ledger_rejects_independent_attempts_for_one_assignment(self):
+        paper = copy.deepcopy(self.paper)
+        self.fleet(paper)["experiment"]["failed"] = 1
+        ledger = self.ledger(paper=paper)
+        original = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["assignment_id"] == "experiment-1"
+        )
+        independent = copy.deepcopy(original)
+        independent["attempt_id"] = "attempt-experiment-1-independent"
+        independent["ordinal"] = len(ledger["attempts"]) + 1
+        independent["status"] = "failed"
+        ledger["attempts"].append(independent)
+        self.resign_ledger(ledger)
+
+        self.assertIn(
+            "fleet ledger logical assignment 'experiment/experiment-1' attempts do not form one "
+            "linear replacement chain with exactly one terminal leaf",
+            MODULE.validate(self.args(paper=paper, ledger=ledger)),
         )
 
     def test_legendary_exporter_to_validator_reconciles_replacement_failure_costs(self):
