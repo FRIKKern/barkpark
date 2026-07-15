@@ -201,9 +201,11 @@ describe('PortableDoc × Elixir golden parity (42 non-plugin types)', () => {
     const suffix = isChat ? ' — shape+style (colors: default-theme only, D6)' : ''
 
     it(`${golden.type} — DOM shape equals Elixir golden${suffix}`, () => {
-      const actualHtml = renderToStaticMarkup(createElement(Renderer, { value: golden.input }))
-      // Unwrap `.bp-paper-surface` on both sides so a per-block Elixir golden compares
-      // cleanly against a renderer that wraps the whole document in the surface.
+      // The golden `input` is ONE authored block; PortableDoc takes the block
+      // ARRAY (`value: Block[]`), so wrap it. It renders the single block inside
+      // the `.bp-paper-surface` wrapper, which unwrapClass then descends past to
+      // compare against the per-block Elixir golden.
+      const actualHtml = renderToStaticMarkup(createElement(Renderer, { value: [golden.input] }))
       assertShapeEqual(actualHtml, golden.expectedHtml, { unwrapClass: SURFACE })
     })
   }
