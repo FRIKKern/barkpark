@@ -238,8 +238,18 @@ arm_caddy_node_route() { # <port>
     log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — cannot arm /sites/$SITE_SLUG"
     return 1
   fi
+  # A UNIQUE, alphanumeric matcher name for the bare-path redirect. Caddy matcher
+  # names share the FQDN block, so derive one per slug; strip non-alnum so the
+  # name is always valid (a slug hyphen is legal in a name but we normalise).
+  local mname
+  mname="bare_$(printf '%s' "$SITE_SLUG" | tr -cd 'A-Za-z0-9')"
   local block; block="$(cat <<SITEROUTE
 	# $marker — node SSR site '$SITE_SLUG', reverse-proxied to its active slot.
+	# The bare path (no trailing slash) does NOT match handle_path, so redirect it
+	# to the canonical slashed form via an EXACT 'path' matcher (never a prefix, so
+	# it can never swallow the asset requests handle_path serves).
+	@$mname path /sites/$SITE_SLUG
+	redir @$mname /sites/$SITE_SLUG/ 308
 	handle_path /sites/$SITE_SLUG/* {
 		reverse_proxy localhost:$port
 	}
