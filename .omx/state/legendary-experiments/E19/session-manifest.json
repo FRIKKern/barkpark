@@ -1,0 +1,9 @@
+{
+  "api_bearer_substitutions_accepted": 0,
+  "authenticated_browser_session_established": false,
+  "block_reason": "NO_ISOLATED_DEPLOYMENT_OR_AUTHENTICATED_BROWSER_SESSION; LOGIN_OR_API_AUTH_IS_NOT_ACCEPTED",
+  "deployment_id": null,
+  "login_surfaces_accepted": 0,
+  "schema_version": "legendary-e19-session-manifest/v1",
+  "secrets_persisted": false
+}

@@ -1,0 +1,95 @@
+{
+  "$id": "urn:barkpark:legendary:e12:migration-manifest:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignment_id": {
+      "const": "E12"
+    },
+    "candidate_provenance": {
+      "type": "object"
+    },
+    "frozen_fixture_count": {
+      "const": 36
+    },
+    "routes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "authority": {
+            "const": "source_only"
+          },
+          "before_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "candidate_id": {
+            "const": "candidate-preservation-envelope"
+          },
+          "evidence_truth_boundary": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "fixture_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotence_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "quarantine_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rollback_preimage_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "route": {
+            "enum": [
+              "preservation_envelope_dry_run",
+              "quarantine"
+            ]
+          },
+          "route_status": {
+            "enum": [
+              "DRY_RUN_ONLY",
+              "BLOCKED_FROM_PRODUCTION"
+            ]
+          }
+        },
+        "required": [
+          "authority",
+          "before_sha256",
+          "candidate_id",
+          "evidence_truth_boundary",
+          "fixture_id",
+          "idempotence_sha256",
+          "quarantine_reason",
+          "rollback_preimage_sha256",
+          "route",
+          "route_status"
+        ],
+        "type": "object"
+      },
+      "maxItems": 36,
+      "minItems": 36,
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "legendary-e12-migration-manifest/v1"
+    }
+  },
+  "required": [
+    "assignment_id",
+    "candidate_provenance",
+    "frozen_fixture_count",
+    "routes",
+    "schema_version"
+  ],
+  "title": "E12 dry-run migration manifest",
+  "type": "object"
+}

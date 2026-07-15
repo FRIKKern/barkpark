@@ -1,0 +1,172 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": "epic-builder-studio-access-panel-live-expiry-countdow",
+    "claim": {
+      "epoch": 2,
+      "expired_at": "2026-07-10T08:37:00.714118Z",
+      "previous_worker": "epic-builder-studio-access-panel-live-expiry-countdow",
+      "ts_iso": "2026-07-10T08:37:00.714118Z",
+      "work_digest": "0d5e922617c4d1ff",
+      "work_field_digests": {
+        "acceptance_criteria": "38a682c284d761f6",
+        "description": "9010721c869e6aa6",
+        "title": "ff1b2c4e8611fb55"
+      },
+      "worker": null
+    },
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "access_panel/1 exists as a function component (NOT a LiveComponent) in studio_components/modals.ex beside airdrop_sheet, on the bp kit, with the two sections (Your access / Active grants in this workspace)",
+          "evidence": "modals.ex: def access_panel(assigns) is a plain function component (no use Phoenix.LiveComponent), added directly after airdrop_sheet; defdelegate access_panel(assigns), to: Modals in studio_components.ex facade; renders two <section> blocks data-test-id=access-your and data-test-id=access-workspace on the .image-picker bp-kit chrome. Branch loop-epic/studio-access-panel-live-expiry-countdow-3, commit 12f13a38.",
+          "met": true
+        },
+        {
+          "criterion": "Workspace section is fed ONLY by Access.list_grants_for_workspace/1 and membership-gated like AccessController.index; grantee section is fed ONLY by the existing :access_grants assign; grep proves no new Access query function was added",
+          "evidence": "handlers/access_panel.ex workspace_grants/1 calls Access.list_grants_for_workspace/1 ONLY when Auth.authorize(principal, ws_id, :read)==:ok - the identical gate AccessController.index applies; grantee Your access section renders @access_grants (existing StudioLive assign). Proof no new query: git diff --stat api/lib/barkpark/access.ex api/lib/barkpark_web/controllers/access_controller.ex is EMPTY (enforcement layer untouched).",
+          "met": true
+        },
+        {
+          "criterion": "One-click revoke: access-revoke event calls Access.revoke/2, the row disappears on re-list; access-revoke classifies :write in Caps, access-open/access-close are in @safe_events and the Caps comprehensiveness test passes",
+          "evidence": "access_revoke/2 calls Access.revoke(id, principal) then re-lists via workspace_grants/1 (revoked row drops through active_where). Test 'an admin revokes a grant - Access.revoke stamps revoked_at and the row DROPS' asserts Repo.get revoked_at != nil, list_grants_for_workspace == [], row absent. caps.ex: access-open/access-close added to @safe_events, access-revoke added to @write_events; full studio gate incl. StudioLiveCapsGateTest comprehensiveness = 1202 tests, 0 failures.",
+          "met": true
+        },
+        {
+          "criterion": "Live expiry countdown chip driven by a client-side JS hook on data-expires-at in api/assets/ - no server timer, no LiveComponent",
+          "evidence": "Hooks.ExpiryCountdown added to root.html.heex Hooks map (where ALL Studio LV hooks register - SheetGrid/ThemeToggle/EditorFocus house pattern): reads data-expires-at, rewrites its own textContent every 1000ms client-side, flips data-expired at zero. expiry_chip/1 renders span phx-hook=ExpiryCountdown phx-update=ignore data-expires-at={ISO8601}; no server timer added (existing :access_expiry_tick untouched); function component, not a LiveComponent.",
+          "met": true
+        },
+        {
+          "criterion": "LiveView tests: a member sees workspace grants and revoking one updates the list (deny-side: a non-authorized revoke is refused); a grant-admitted grantee sees their own access with countdown data and NOT other grantors private detail beyond the workspace-view semantics",
+          "evidence": "test/barkpark_web/live/studio/studio_live_access_panel_test.exs - 6 tests, 0 failures: admin sees access-workspace + access-revoke + access-countdown; admin revoke drops the row (revoked_at set, list empty); DENY write-member refused by Access.revoke server-authz -> inline access-error, grant ACTIVE; DENY read-only member halted at the Caps :write gate, grant ACTIVE; grantee sees access-your-row + data-expires-at + View/Edit chips, workspace section ABSENT; honest empty-state.",
+          "met": true
+        },
+        {
+          "criterion": "PR merged with the Elixir Test gate green (LEAD closes this criterion)",
+          "evidence": "merged in PR #2145 (602eb4a3) integrate/airdrop-endgame squashed to main",
+          "met": true
+        }
+      ],
+      "assignee": "epic-builder-studio-access-panel-live-expiry-countdow",
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Deferred UI slice from ag-studio-capability-hide — the visual layer only; enforcement + access-drop-at-expiry already hold in the parent (@caps map, default-deny event gate, :access_expiry_tick, :access_grants assign). ENDGAME-WAVE SHAPE (charter decision 6, .claude/workflows/bp-cloud-epic-charter.md): build access_panel/1 as a sibling FUNCTION component (NOT a LiveComponent — parent-process assigns, same law as airdrop_sheet) in api/lib/barkpark_web/components/studio_components/modals.ex, on the bp kit (Controls). Two honest sections: (1) YOUR ACCESS — the caller's own inbound grants from the existing :access_grants assign, each with scope + capabilities + a live expiry countdown chip; (2) "
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "6 of 6 acceptance criteria are recorded as met."
+              }
+            ],
+            "id": "state-callout",
+            "title": "done",
+            "tone": "success",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              "access_panel/1 exists as a function component (NOT a LiveComponent) in studio_components/modals.ex beside airdrop_sheet, on the bp kit, with the two sections (Your access / Active grants in this workspace)",
+              "Workspace section is fed ONLY by Access.list_grants_for_workspace/1 and membership-gated like AccessController.index; grantee section is fed ONLY by the existing :access_grants assign; grep proves no new Access query function was added",
+              "One-click revoke: access-revoke event calls Access.revoke/2, the row disappears on re-list; access-revoke classifies :write in Caps, access-open/access-close are in @safe_events and the Caps comprehensiveness test passes",
+              "Live expiry countdown chip driven by a client-side JS hook on data-expires-at in api/assets/ - no server timer, no LiveComponent",
+              "LiveView tests: a member sees workspace grants and revoking one updates the list (deny-side: a non-authorized revoke is refused); a grant-admitted grantee sees their own access with countdown data and NOT other grantors private detail beyond the workspace-view semantics",
+              "PR merged with the Elixir Test gate green (LEAD closes this criterion)"
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "claim": {
+        "epoch": 2,
+        "expired_at": "2026-07-10T08:37:00.714118Z",
+        "previous_worker": "epic-builder-studio-access-panel-live-expiry-countdow",
+        "ts_iso": "2026-07-10T08:37:00.714118Z",
+        "work_digest": "0d5e922617c4d1ff",
+        "work_field_digests": {
+          "acceptance_criteria": "38a682c284d761f6",
+          "description": "9010721c869e6aa6",
+          "title": "ff1b2c4e8611fb55"
+        },
+        "worker": null
+      },
+      "close_reason": "merged in PR #2145 (602eb4a3) integrate/airdrop-endgame squashed to main",
+      "description": "Deferred UI slice from ag-studio-capability-hide — the visual layer only; enforcement + access-drop-at-expiry already hold in the parent (@caps map, default-deny event gate, :access_expiry_tick, :access_grants assign). ENDGAME-WAVE SHAPE (charter decision 6, .claude/workflows/bp-cloud-epic-charter.md): build access_panel/1 as a sibling FUNCTION component (NOT a LiveComponent — parent-process assigns, same law as airdrop_sheet) in api/lib/barkpark_web/components/studio_components/modals.ex, on the bp kit (Controls). Two honest sections: (1) YOUR ACCESS — the caller's own inbound grants from the existing :access_grants assign, each with scope + capabilities + a live expiry countdown chip; (2) ACTIVE GRANTS IN THIS WORKSPACE — Access.list_grants_for_workspace/1 (workspace view, membership-gated exactly like AccessController.index gates on Auth.authorize :read), each row with grantee, scope, expiry chip, and a one-click Revoke via Access.revoke/2 (idempotent, server-authorized grantor-or-admin). ZERO new query paths — only list_grants_for_workspace, :access_grants, Access.revoke. Events: access-open/access-close MUST join Caps.@safe_events (:none) or the comprehensiveness test trips them as :deny; access-revoke classifies :write (goes through the Caps gate; Access.revoke re-authorizes server-side regardless). Countdown = client-side JS hook on data-expires-at in api/assets/ (per-second visual only; no server timer — the server tick already drops access). A row whose clock hits zero VANISHES on next re-list because active_where excludes it: the panel is a live-active view, not a history log (accepted). DO NOT touch shares_modal (P6 network shares) or item_share_popover (/s/ links) — different features. Wire an entry affordance near the airdrop button (components.ex) gated so grantees see the panel too (their Your-access section). Files: modals.ex, new handlers/access_panel.ex (sibling to handlers/airdrop.ex), components.ex render+trigger, studio_live.ex handler wiring ONLY (do NOT touch the load_access_grants/:access_expiry_tick region at studio_live.ex:97-184 — the ag-liveview-read-liveness slice owns it), caps.ex @safe_events, assets JS. Hard laws: .ex/.heex waits for the Elixir Test CI gate; worktree from origin/main after git fetch; claim first; PR body carries Task: ag-studio-access-panel-countdown. Local gate: cd api && CC=/usr/bin/clang mix test test/barkpark_web/live/studio/ (run where _build/test is warm — build-borrow into fresh worktrees is broken).",
+      "github": {
+        "issue": 1503,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 8720381,
+        "synced_rev": "690095c0828b92643f485bee679f9114"
+      },
+      "kind": "task",
+      "labels": [
+        "proj:airdrop-grants",
+        "enforcement-follow-on",
+        "ux"
+      ],
+      "lifecycle_status": "done",
+      "parent_id": "airdrop-grants",
+      "priority": 2
+    },
+    "criteria_progress": {
+      "met": 6,
+      "total": 6
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "ag-studio-access-panel-countdown",
+    "execution_policy": null,
+    "id": "7a49ac96-0bb1-482d-87cb-b603e8c40a48",
+    "inserted_at": "2026-07-08T11:17:47.945371Z",
+    "kind": "task",
+    "labels": [
+      "proj:airdrop-grants",
+      "enforcement-follow-on",
+      "ux"
+    ],
+    "lifecycle_status": "done",
+    "papers": [],
+    "parent_id": "airdrop-grants",
+    "priority": 2,
+    "rev": "df404313e62a6aaf72f3fc2491a49e93",
+    "status": "published",
+    "title": "Studio Access panel + live expiry countdown chips (ag-studio-capability-hide slice 3 UI)",
+    "type": "task",
+    "updated_at": "2026-07-12T11:00:32.536705Z"
+  },
+  "ok": true
+}

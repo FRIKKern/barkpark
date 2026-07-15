@@ -35,6 +35,7 @@ const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 type siteCP struct {
 	t          *testing.T
 	createBody []byte
+	deployBody []byte
 	lastAuth   string
 	deployHits int
 	pollHits   int
@@ -67,6 +68,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.createResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/deploy":
 			cp.deployHits++
+			cp.deployBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.deployResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
@@ -182,6 +184,172 @@ func TestRunCloudSiteCreateJSON(t *testing.T) {
 	}
 	if env.Site.Kind != "static" || env.Site.Dataset != "production" {
 		t.Fatalf("json site payload wrong: %+v", env.Site)
+	}
+}
+
+// TestRunCloudSiteCreateDocType is the D35 plumbing proof: --doc-type reaches the
+// wire as doc_type so a dataset that serves a non-default type (guerrilla is
+// `paper`, not `post`) actually builds. Passing it via an env prefix is inert —
+// the box's allowlist drops it — so create is the ONLY channel that gets it there.
+func TestRunCloudSiteCreateDocType(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--doc-type", "paper")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	var got struct {
+		DocType string `json:"doc_type"`
+	}
+	if err := json.Unmarshal(cp.createBody, &got); err != nil {
+		t.Fatalf("decode create body: %v (raw %s)", err, cp.createBody)
+	}
+	if got.DocType != "paper" {
+		t.Fatalf("create body doc_type=%q want %q (raw %s)", got.DocType, "paper", cp.createBody)
+	}
+	if !strings.Contains(stdout, "paper") {
+		t.Fatalf("create should echo the doc type it bound:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteCreateDocTypeOmitted proves the field is omitempty: with no
+// --doc-type the wire carries NO doc_type key at all, so the control plane applies
+// its own canonical default ("post") rather than the CLI forcing an empty string.
+func TestRunCloudSiteCreateDocTypeOmitted(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"}}`}
+	cp.serve()
+	if _, _, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID); code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if bytes.Contains(cp.createBody, []byte("doc_type")) {
+		t.Fatalf("omitted --doc-type must not send a doc_type key (omitempty): %s", cp.createBody)
+	}
+}
+
+// TestRunCloudSiteCreateNode is the D62 node-slot surface proof: `--kind node
+// --framework nextjs` threads kind=node + framework=nextjs to the wire, and the
+// created-site verdict narrates the node-slot SSR runtime (a long-running process
+// on a slot port) rather than the static astro-flagship note.
+func TestRunCloudSiteCreateNode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "app", "--dataset", "acme/app/production", "--instance", testInstanceID, "--kind", "node", "--framework", "nextjs")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The wire carried the node discriminators, Bearer-authed.
+	var got struct {
+		Kind, Framework string
+	}
+	if err := json.Unmarshal(cp.createBody, &got); err != nil {
+		t.Fatalf("decode create body: %v (raw %s)", err, cp.createBody)
+	}
+	if got.Kind != "node" || got.Framework != "nextjs" {
+		t.Fatalf("create body kind/framework wrong: %+v (raw %s)", got, cp.createBody)
+	}
+	// The verdict narrates the node-slot runtime, not the astro flagship note.
+	if !strings.Contains(stdout, "node") || !strings.Contains(stdout, "SSR process") {
+		t.Fatalf("node create should narrate the node-slot SSR runtime:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "astro is the flagship") {
+		t.Fatalf("a node site must not print the static astro-flagship note:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteStatusNodeFields is the json.Unmarshal-drops-unknown-keys proof:
+// the server returns runtime_target / port / port_base on a node site, and both the
+// human status header and `-o json` must SURFACE them (they were invisible until
+// SpawnSite + spawnSiteMap threaded the fields).
+func TestRunCloudSiteStatusNodeFields(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","runtime_target":"node-slot","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The human header surfaces the node runtime + the live slot port.
+	if !strings.Contains(stdout, "node-slot") || !strings.Contains(stdout, "4301") {
+		t.Fatalf("node status header must show runtime + port:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Site struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+			PortBase      int    `json:"port_base"`
+		} `json:"site"`
+		Deployment struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Site.RuntimeTarget != "node-slot" || env.Site.Port != 4301 || env.Site.PortBase != 4300 {
+		t.Fatalf("status -o json dropped the node site fields: %+v\n%s", env.Site, jstdout)
+	}
+	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
+		t.Fatalf("status -o json dropped the node deployment fields: %+v\n%s", env.Deployment, jstdout)
+	}
+}
+
+// TestRunCloudSiteRollbackNode is the mechanism-branch proof (D62): a node
+// rollback envelope carries runtime_target="node-slot", so the narration must name
+// the Caddy upstream port-flip to the warm previous slot — NOT the atomic symlink
+// swap, which is false for a node site.
+func TestRunCloudSiteRollbackNode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, `{"ok":true,"status":"rolled_back","deployment_id":"dep-prev","previous_deployment_id":"dep-1","runtime_target":"node-slot","port":4300,"url":"https://acme.barkpark.cloud/sites/app/"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Caddy upstream") || !strings.Contains(stdout, "warm") {
+		t.Fatalf("node rollback must narrate the Caddy upstream port-flip:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "atomic symlink") {
+		t.Fatalf("a node rollback must NOT claim an atomic symlink swap:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployNodeJSON proves the deploy stream's `-o json` surfaces the
+// node runtime_target/port the server stamped on the deployment — they would be
+// silently dropped without SiteDeployment carrying the fields.
+func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","runtime_target":"node-slot","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
+		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
+		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	var env struct {
+		Deployment struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, stdout)
+	}
+	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
+		t.Fatalf("deploy -o json dropped the node fields: %+v\n%s", env.Deployment, stdout)
 	}
 }
 
@@ -338,6 +506,170 @@ func TestRunCloudSiteDeployNoFollow(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "in progress") {
 		t.Fatalf("--no-follow should print the in-progress verdict:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployForce is the D36 proof: --force POSTs {"force":true} to
+// the deploy route so the box folds a nonce and mints a genuinely new release even
+// when content+config are unchanged. Without it a re-deploy would return the
+// cached (possibly failed) deployment and could never re-run.
+func TestRunCloudSiteDeployForce(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-2","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	if _, stderr, code := runSite(t, "table", "deploy", testSiteID, "--force"); code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	var got struct {
+		Force bool `json:"force"`
+	}
+	if err := json.Unmarshal(cp.deployBody, &got); err != nil {
+		t.Fatalf("decode deploy body: %v (raw %s)", err, cp.deployBody)
+	}
+	if !got.Force {
+		t.Fatalf("--force must POST {\"force\":true}, got %s", cp.deployBody)
+	}
+}
+
+// TestRunCloudSiteDeployNoForce is the tripwire on the idempotent default: with no
+// --force the deploy body must NOT carry force:true, so an unchanged re-deploy
+// stays the byte-identical no-op the box relies on.
+func TestRunCloudSiteDeployNoForce(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	if _, _, code := runSite(t, "table", "deploy", testSiteID); code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if bytes.Contains(cp.deployBody, []byte("true")) {
+		t.Fatalf("a plain deploy must not send force:true, got %s", cp.deployBody)
+	}
+}
+
+// TestRunCloudSiteDeployContentAutoTrigger is the D49 provenance proof for a
+// content-fired rebuild: when the control plane stamps trigger="content-auto"
+// (a publish on the bound dataset kicked the debounced auto-deploy), the stream
+// narrates the auto label on the queued and live lines, and `-o json` surfaces
+// the trigger so a script can tell an auto-rebuild from a hand-run deploy.
+func TestRunCloudSiteDeployContentAutoTrigger(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"b-1","trigger":"content-auto","stages":[{"name":"PLAN","status":"running"}]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","trigger":"content-auto","url":"https://acme.barkpark.cloud/sites/blog/","stages":[` +
+		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
+		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "auto: content publish") {
+		t.Fatalf("content-auto deploy must narrate the auto provenance:\n%s", stdout)
+	}
+
+	// -o json must carry the trigger — Go's Unmarshal drops unknown keys, so this
+	// fails until SiteDeployment.Trigger + siteDeploymentMap thread it through.
+	jstdout, _, jcode := runSite(t, "json", "deploy", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Deployment struct {
+			Trigger string `json:"trigger"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Deployment.Trigger != "content-auto" {
+		t.Fatalf("json deployment.trigger = %q, want content-auto\n%s", env.Deployment.Trigger, jstdout)
+	}
+}
+
+// TestRunCloudSiteDeployManualTriggerNoAutoLabel is the complement: a hand-run
+// deploy (trigger="manual") says "manual", never the content-auto label — the
+// provenance must not lie in the other direction either.
+func TestRunCloudSiteDeployManualTriggerNoAutoLabel(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"b-1","trigger":"manual","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "auto: content publish") {
+		t.Fatalf("a manual deploy must NOT claim content-auto provenance:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "manual") {
+		t.Fatalf("a manual deploy should narrate its manual provenance:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteStatusShowsTrigger proves the human status table surfaces the
+// deploy provenance (D49) — a user checking `bp cloud site status` sees whether
+// the live build came from a publish or a manual run, and `-o json` carries it.
+func TestRunCloudSiteStatusShowsTrigger(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","trigger":"content-auto","stages":[{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"}]}}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "trigger") || !strings.Contains(stdout, "content publish (auto)") {
+		t.Fatalf("status table must surface the deploy trigger:\n%s", stdout)
+	}
+
+	jstdout, _, _ := runSite(t, "json", "status", testSiteID)
+	var env struct {
+		Deployment struct {
+			Trigger string `json:"trigger"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Deployment.Trigger != "content-auto" {
+		t.Fatalf("status -o json deployment.trigger = %q, want content-auto\n%s", env.Deployment.Trigger, jstdout)
+	}
+}
+
+// TestRunCloudSiteDeployNarratesRunningThenDone is the D39 proof: a stage that
+// walks running → done prints TWO distinct lines (the "started" narration then the
+// terminal line), and the terminal done-line is NEVER swallowed. The bug D39 kills
+// is a name-only printed map: once "… BUILD" is printed, "✓ BUILD" would be
+// skipped and the bar would never resolve. Keyed by (name+status), BUILD appears
+// exactly twice — once running, once done — never once, never thrice.
+func TestRunCloudSiteDeployNarratesRunningThenDone(t *testing.T) {
+	cp := newSiteCP(t)
+	// The queued deploy response already carries BUILD as running (the box streams
+	// `started` as status running) — render() prints it on the first pass.
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"building","stage":"BUILD","build_id":"b-1","stages":[{"name":"BUILD","status":"running"}]}}`}
+	// The poll lands live with BUILD done among all six.
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// BUILD gets exactly two stream lines: no swallow (done survives), no double
+	// (running is not reprinted on every poll).
+	if n := strings.Count(stdout, "BUILD"); n != 2 {
+		t.Fatalf("BUILD should appear exactly twice (running + done), got %d:\n%s", n, stdout)
+	}
+	// One line carries the running glyph, one the done glyph — the two transitions.
+	if !strings.Contains(stdout, siteStageMark("running")+" "+hzCell("BUILD")) {
+		t.Fatalf("missing the running BUILD line:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, siteStageMark("done")+" "+hzCell("BUILD")) {
+		t.Fatalf("missing the terminal (done) BUILD line — it was swallowed:\n%s", stdout)
 	}
 }
 

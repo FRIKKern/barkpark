@@ -18,8 +18,10 @@ package cli
 // the doc path already uses, so the two never drift on the task contract.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -293,6 +295,17 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["description"] = v
 			i = ni
+		case key == "--execution-policy":
+			v, ni, err := takeValue(i, "--execution-policy", inline, hasInline)
+			if err != nil {
+				return nil, false, err
+			}
+			policy, err := parseTaskExecutionPolicyJSON([]byte(v))
+			if err != nil {
+				return nil, false, fmt.Errorf("--execution-policy: %w", err)
+			}
+			body["execution_policy"] = policy
+			i = ni
 		case key == "--set":
 			v, ni, err := takeValue(i, "--set", inline, hasInline)
 			if err != nil {
@@ -312,10 +325,90 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["title"] = a
 		default:
-			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --set k=v, --publish)", a)
+			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --set k=v, --publish)", a)
 		}
 	}
 	return body, publish, nil
+}
+
+// parseTaskExecutionPolicyJSON is the CLI/MCP-side mirror of the server's
+// strict v1 advisory allowlist. It rejects unsafe/unknown fields before a
+// request is sent and returns a canonical object safe to embed in JSON.
+func parseTaskExecutionPolicyJSON(raw []byte) (map[string]any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var policy map[string]any
+	if err := dec.Decode(&policy); err != nil {
+		return nil, fmt.Errorf("must be a JSON object: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("must contain exactly one JSON object")
+		}
+		return nil, fmt.Errorf("invalid trailing JSON: %w", err)
+	}
+	if policy == nil {
+		return nil, fmt.Errorf("must be a JSON object")
+	}
+
+	allowed := map[string]bool{
+		"version": true, "agent_type": true, "model": true,
+		"reasoning_effort": true, "resource_class": true,
+	}
+	for key := range policy {
+		if !allowed[key] {
+			return nil, fmt.Errorf("field %q is not allowed in execution_policy version 1", key)
+		}
+	}
+
+	version, ok := policy["version"].(json.Number)
+	if !ok || version.String() != "1" {
+		return nil, fmt.Errorf("version is required and must be integer 1")
+	}
+	policy["version"] = json.Number("1")
+
+	for _, field := range []struct {
+		name string
+		max  int
+	}{{"agent_type", 64}, {"model", 128}} {
+		if value, exists := policy[field.name]; exists {
+			s, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s must be a string when set", field.name)
+			}
+			s = strings.TrimSpace(s)
+			if s == "" || len(s) > field.max {
+				return nil, fmt.Errorf("%s must be non-blank and at most %d bytes", field.name, field.max)
+			}
+			policy[field.name] = s
+		}
+	}
+
+	if err := validateTaskPolicyEnum(policy, "reasoning_effort", []string{"minimal", "low", "medium", "high", "xhigh"}); err != nil {
+		return nil, err
+	}
+	if err := validateTaskPolicyEnum(policy, "resource_class", []string{"light", "standard", "heavy"}); err != nil {
+		return nil, err
+	}
+
+	return policy, nil
+}
+
+func validateTaskPolicyEnum(policy map[string]any, field string, allowed []string) error {
+	value, exists := policy[field]
+	if !exists {
+		return nil
+	}
+	s, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string when set", field)
+	}
+	for _, candidate := range allowed {
+		if s == candidate {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s must be one of %s", field, strings.Join(allowed, ", "))
 }
 
 // applyTaskSet merges one --set token into body, using the doc-create typing
@@ -379,8 +472,11 @@ arguments:
 
 flags:
   --title <t>      Task title.
-  --description <d> Task description.
-  --set <k=v>      Extra field (repeatable; k:=json for typed values, e.g.
+	  --description <d> Task description.
+	  --execution-policy <json>
+	                   Strict advisory v1 policy object (agent_type, model,
+	                   reasoning_effort, resource_class).
+	  --set <k=v>      Extra field (repeatable; k:=json for typed values, e.g.
                    --set priority:=3, --set 'labels:=["infra"]',
                    --set parent_id=my-goal). Overrides the injected defaults.
   --publish        Publish the new task immediately (draft → published).

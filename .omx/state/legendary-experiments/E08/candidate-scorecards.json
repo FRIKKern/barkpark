@@ -1,0 +1,39 @@
+{
+  "assignment_id": "E08",
+  "candidates": [
+    {
+      "candidate_id": "candidate-canonical-native",
+      "counts": {
+        "BLOCKED": 3,
+        "FAIL": 2,
+        "PASS": 5
+      },
+      "hard_gate_failures": 5,
+      "source_assignment": "E04",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate_id": "candidate-preservation-envelope",
+      "counts": {
+        "BLOCKED": 2,
+        "FAIL": 2,
+        "PARTIAL": 1,
+        "PASS": 5
+      },
+      "hard_gate_failures": 5,
+      "source_assignment": "E05",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate_id": "candidate-cohort-rails",
+      "counts": {
+        "BLOCKED": 8,
+        "FAIL": 1
+      },
+      "hard_gate_failures": 9,
+      "source_assignment": "E06",
+      "verdict": "REJECT"
+    }
+  ],
+  "schema_version": "legendary-e08-scorecards/v1"
+}

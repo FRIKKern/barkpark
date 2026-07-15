@@ -1,0 +1,34 @@
+{
+  "assignment_id": "E12",
+  "inputs": {
+    "E03/fixture-manifest.json": {
+      "path": ".omx/state/legendary-experiments/E03/fixture-manifest.json",
+      "sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df"
+    },
+    "E03/thresholds.json": {
+      "path": ".omx/state/legendary-experiments/E03/thresholds.json",
+      "sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b"
+    },
+    "E05/outputs/envelopes.jsonl": {
+      "path": ".omx/state/legendary-experiments/E05/outputs/envelopes.jsonl",
+      "sha256": "7a97214f78f53a8c4c16d5d753990fa861e0475aac89e01573fe37b17a96ef5c"
+    },
+    "E05/outputs/quarantine.json": {
+      "path": ".omx/state/legendary-experiments/E05/outputs/quarantine.json",
+      "sha256": "a8d8b2fc3a044063dee83c1dedb91838720086eb292866cfcfd44ab75b0e03a2"
+    },
+    "E05/outputs/rollback-manifest.json": {
+      "path": ".omx/state/legendary-experiments/E05/outputs/rollback-manifest.json",
+      "sha256": "1a1198d509c7b899ce7e4087a46853f8f0be7207b638ad3bedbb394e275ac334"
+    },
+    "E09/outputs/attack-matrix.json": {
+      "path": ".omx/state/legendary-experiments/E09/outputs/attack-matrix.json",
+      "sha256": "d34491e8556551d2d33011f7915d641b511371fd74c9862ffc1056761c129050"
+    },
+    "E09/result.json": {
+      "path": ".omx/state/legendary-experiments/E09/result.json",
+      "sha256": "66355b6dde567391e1ed63b4f2ba5784b19803638c3c9930b36b0232d5baf1ec"
+    }
+  },
+  "schema_version": "legendary-e12-input-hashes/v1"
+}

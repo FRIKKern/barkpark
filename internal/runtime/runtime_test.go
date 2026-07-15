@@ -721,6 +721,118 @@ func TestMergeSite_PreservesStaticKindAndRoot(t *testing.T) {
 	}
 }
 
+func TestTLSModeForServing(t *testing.T) {
+	// cf_proxied → internal (526-safe self-signed); every other value —
+	// direct, empty, or an unrecognized string — fails safe to on_demand so an
+	// unknown mode never silently produces a self-signed origin.
+	cases := []struct {
+		serving string
+		want    string
+	}{
+		{ServingModeCFProxied, caddyfile.TLSModeInternal},
+		{ServingModeDirect, caddyfile.TLSModeOnDemand},
+		{"", caddyfile.TLSModeOnDemand},
+		{"nonsense", caddyfile.TLSModeOnDemand},
+	}
+	for _, c := range cases {
+		if got := tlsModeForServing(c.serving); got != c.want {
+			t.Errorf("tlsModeForServing(%q) = %q, want %q", c.serving, got, c.want)
+		}
+	}
+}
+
+// deployAndReadCaddyfile walks a single claim→live cycle for site through the
+// real Executor (fake runner/fs/ports) and returns the rendered Caddyfile — the
+// end-to-end path that proves serving_mode threads into the rendered TLS block.
+func deployAndReadCaddyfile(t *testing.T, site InlineSite) string {
+	t.Helper()
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-12345678abcdef",
+			SiteID:   "s-aabbccdd",
+			Status:   "pushing",
+			ImageTag: "site-shop-d-12345678",
+			Site:     site,
+		},
+		epoch: 1,
+	}}
+
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+	containerPort := mustPort(t, containerSrv.URL)
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	fs := newMapFS()
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CacheDir:      "/var/lib/barkpark-builder/images",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		AskGateURL:    "https://cloud.barkpark.cloud/v1/tls/ask",
+		HTTPClient:    srv.Client(),
+		Runner:        &fakeRunner{},
+		FS:            fs,
+		Ports:         &fixedPorts{next: containerPort},
+		HealthTimeout: 2 * time.Second,
+	}
+	if _, err := e.RunOnce(context.Background(), State{}); err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	caddy, ok := fs.files["/etc/caddy/Caddyfile"]
+	if !ok {
+		t.Fatal("Caddyfile was not written")
+	}
+	return string(caddy)
+}
+
+func TestRunOnce_CFProxiedServingMode_RendersInternalTLS(t *testing.T) {
+	// serving_mode=cf_proxied on the claim must thread through mergeSite into the
+	// rendered TLS block: `tls internal`, never the on_demand cert block (which
+	// behind the CF proxy is a 526 outage).
+	caddy := deployAndReadCaddyfile(t, InlineSite{
+		Slug:        "shop",
+		Domains:     []string{"shop.example.com"},
+		ServingMode: ServingModeCFProxied,
+	})
+	if !strings.Contains(caddy, "  tls internal\n") {
+		t.Errorf("cf_proxied site must render `tls internal`:\n%s", caddy)
+	}
+	if strings.Contains(caddy, "  tls {\n    on_demand\n  }") {
+		t.Errorf("cf_proxied site must NOT emit an on_demand cert block (526 outage):\n%s", caddy)
+	}
+	// A CF-fronted site also trusts the CF edge ranges for client-IP.
+	if !strings.Contains(caddy, "trusted_proxies") {
+		t.Errorf("cf_proxied (CF-fronted) box must emit trusted_proxies:\n%s", caddy)
+	}
+}
+
+func TestRunOnce_DirectServingMode_StaysOnDemand(t *testing.T) {
+	// Empty serving_mode (today's default) and an explicit "direct" both keep the
+	// on_demand block — the pre-CF behaviour untouched. (Byte-identity of the
+	// on_demand block across an explicit and zero-value TLSMode is proven at the
+	// caddyfile layer; here the two deploys allocate different container ports, so
+	// this asserts the mode behaviour, not the exact bytes.)
+	empty := deployAndReadCaddyfile(t, InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}})
+	direct := deployAndReadCaddyfile(t, InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}, ServingMode: ServingModeDirect})
+	for name, caddy := range map[string]string{"empty": empty, "direct": direct} {
+		if !strings.Contains(caddy, "  tls {\n    on_demand\n  }\n") {
+			t.Errorf("%s serving_mode must keep the on_demand site block:\n%s", name, caddy)
+		}
+		if strings.Contains(caddy, "tls internal") {
+			t.Errorf("%s serving_mode must NOT render tls internal:\n%s", name, caddy)
+		}
+		if strings.Contains(caddy, "trusted_proxies") {
+			t.Errorf("%s serving_mode is not CF-fronted, must not emit trusted_proxies:\n%s", name, caddy)
+		}
+	}
+}
+
 func TestDefaultPortAllocator_PicksLowestFree(t *testing.T) {
 	a := DefaultPortAllocator{}
 	p, err := a.Allocate(map[int]bool{7001: true, 7002: true, 7004: true})

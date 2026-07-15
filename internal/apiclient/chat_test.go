@@ -87,6 +87,38 @@ func TestCreateChatSessionOmitsEmptyOptions(t *testing.T) {
 	}
 }
 
+func TestCreateChatSessionWithProviderExecutionOptions(t *testing.T) {
+	var gotBody map[string]interface{}
+	const hostID = "0f9d8c7b-6a5e-4d3c-2b1a-0f9e8d7c6b5a"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"sess-codex","provider":"codex","execution_target":"registered_host","execution_host_id":"`+hostID+`","provider_session_id":"thread-7"}`)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).CreateChatSessionWithOptions(ChatSessionCreateOptions{
+		Provider:        "codex",
+		ExecutionTarget: "registered_host",
+		ExecutionHostID: hostID,
+		Mode:            "read-only",
+		Model:           "gpt-5.6",
+		Effort:          "high",
+	})
+	if err != nil {
+		t.Fatalf("CreateChatSessionWithOptions: %v", err)
+	}
+
+	if gotBody["provider"] != "codex" || gotBody["execution_target"] != "registered_host" || gotBody["execution_host_id"] != hostID {
+		t.Errorf("provider execution body = %v", gotBody)
+	}
+	if s.Provider != "codex" || s.ExecutionTarget != "registered_host" || s.ExecutionHostID != hostID || s.ProviderSessionID != "thread-7" {
+		t.Errorf("provider identity decode = %+v", s)
+	}
+}
+
 func TestListChatSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wantBearer(t, r)

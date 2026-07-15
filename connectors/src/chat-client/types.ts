@@ -10,7 +10,7 @@
  *   api/lib/barkpark_web/controllers/chat_controller.ex   (the sse_*_frame serializers)
  *   api/lib/barkpark_web/plugs/require_chat_access.ex     (the workspace-less-token 403)
  *
- *   POST /v1/chat/sessions              {mode?,model?,effort?} -> 201 full session
+ *   POST /v1/chat/sessions              {provider?,execution_target?,execution_host_id?,mode?,model?,effort?} -> 201 full session
  *   GET  /v1/chat/sessions/:id          [?since=<seq>]         -> 200 full session
  *   POST /v1/chat/sessions/:id/messages {content}              -> 202 {accepted:true}
  *   GET  /v1/chat/sessions/:id/events                          -> SSE
@@ -31,6 +31,12 @@
  */
 export interface ChatSession {
   id: string;
+  /** Present on provider-aware servers; absent on legacy fixtures/responses. */
+  provider?: "claude" | "codex";
+  /** Present on provider-aware servers; absent on legacy fixtures/responses. */
+  execution_target?: "managed" | "registered_host";
+  execution_host_id?: string | null;
+  provider_session_id?: string | null;
   title: string | null;
   title_source?: string | null;
   status: string;
@@ -53,10 +59,14 @@ export interface ChatSessionMessage {
 }
 
 /**
- * Body of `POST /v1/chat/sessions`. All optional — the server defaults `mode`.
+ * Body of `POST /v1/chat/sessions`. All optional — the server preserves legacy
+ * `claude` + `managed` + `plan` defaults when the identity axes are omitted.
  * `id`, `cwd` and `workspace` are NOT accepted; workspace rides the token.
  */
 export interface CreateSessionInput {
+  provider?: "claude" | "codex";
+  execution_target?: "managed" | "registered_host";
+  execution_host_id?: string;
   mode?: string;
   model?: string;
   effort?: string;

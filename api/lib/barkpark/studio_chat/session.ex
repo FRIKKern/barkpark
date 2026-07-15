@@ -1,11 +1,12 @@
 defmodule Barkpark.StudioChat.Session do
   @moduledoc """
-  A Studio Claude chat SESSION — the index record for one resumable conversation
-  (epic studio-claude-chat, charter D6/D8).
+  A provider-neutral Studio chat SESSION — the index record for one resumable
+  conversation (epic studio-claude-chat, charter D6/D8).
 
-  The primary key is the minted claude session UUID (`autogenerate: false`): we
-  generate it before the first byte via `--session-id`, and the SAME value is the
-  `--resume` key. One identity, no cursor column.
+  The primary key is Barkpark's public UUID (`autogenerate: false`). Provider,
+  execution location, and opaque provider-native resume identity are durable,
+  independent fields. Legacy managed-Claude sessions intentionally reuse the
+  public UUID as their provider identity.
 
   Denormalised fields (`summary`, `message_count`, `input_tokens`,
   `output_tokens`, `total_cost_usd`, `last_active_at`) let the sidebar render
@@ -22,6 +23,8 @@ defmodule Barkpark.StudioChat.Session do
   # exited   — the process died (crash or clean exit); next send lazy-resumes
   @statuses ~w(active working exited)
   @title_sources ~w(default ai human)
+  @providers ~w(claude codex)
+  @execution_targets ~w(managed registered_host)
   # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
   # kept here so the context layer validates a mode without reaching into web).
   # The two constants move TOGETHER (charter D48). `bypassPermissions` is a legal
@@ -46,6 +49,14 @@ defmodule Barkpark.StudioChat.Session do
     # Stamped by `StudioChat.create_session/2` from the caller's scope; the
     # `:global` superuser path stamps NULL. See `Barkpark.StudioChat` store seal.
     field :owner_workspace_id, Ecto.UUID
+
+    # Provider identity and execution location are independent, durable axes.
+    # They are create-only: no update changeset casts them. `provider_session_id`
+    # is the opaque native resume/thread id and is set once by the runtime seam.
+    field :provider, :string, default: "claude"
+    field :execution_target, :string, default: "managed"
+    field :execution_host_id, Ecto.UUID
+    field :provider_session_id, :string
 
     field :cwd, :string
     field :mode, :string
@@ -85,6 +96,21 @@ defmodule Barkpark.StudioChat.Session do
     field :output_tokens, :integer, default: 0
     field :total_cost_usd, :float, default: 0.0
 
+    # Provider-observed runtime facts. Unlike the legacy Claude counters above,
+    # these stay nullable: no event means unknown, never a fabricated zero.
+    # Codex token usage is a cumulative snapshot and is SET idempotently by
+    # RuntimeTelemetry rather than incremented by record_result_metrics/2.
+    field :observed_model, :string
+    field :observed_effort, :string
+    field :observed_input_tokens, :integer
+    field :observed_cached_input_tokens, :integer
+    field :observed_output_tokens, :integer
+    field :observed_reasoning_output_tokens, :integer
+    field :observed_total_tokens, :integer
+    field :observed_context_window, :integer
+    field :runtime_identity, :map
+    field :runtime_telemetry_limitations, {:array, :string}
+
     # Per-turn context snapshot (charter D19) — the LATEST result frame's window
     # occupancy, SET (never inc). Nullable: unknown until the first result, and
     # the header ring renders hollow rather than a fake arc when they are nil.
@@ -111,6 +137,12 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Legal title sources."
   def title_sources, do: @title_sources
 
+  @doc "Supported provider identities."
+  def providers, do: @providers
+
+  @doc "Supported execution locations."
+  def execution_targets, do: @execution_targets
+
   @doc "Legal permission modes OFFERED in the picker (mirrors ClaudeChat.modes/0)."
   def modes, do: @modes
 
@@ -123,21 +155,76 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Modes `set_mode/2` may persist — the offered six plus the legacy `default`."
   def persistable_modes, do: @persistable_modes
 
-  @create_fields ~w(id owner_workspace_id title title_source cwd mode model status last_active_at summary)a
+  @create_fields ~w(
+    id owner_workspace_id provider execution_target execution_host_id provider_session_id
+    title title_source cwd mode model status last_active_at summary
+  )a
 
   @doc """
-  Changeset for creating a session. `id` is REQUIRED — the caller mints the UUID
-  (it doubles as the --resume key). Defaults supply title/title_source/status.
+  Changeset for creating a session. `id` is REQUIRED — the caller mints the
+  public UUID. Defaults supply the legacy managed-Claude identity plus
+  title/title_source/status.
   """
   def create_changeset(session, attrs) do
     session
     |> cast(attrs, @create_fields)
+    |> put_legacy_identity_defaults()
     |> maybe_default_last_active()
     |> maybe_default_last_visited()
     |> validate_required([:id])
     |> validate_uuid(:id)
+    |> validate_uuid(:execution_host_id)
+    |> validate_inclusion(:provider, @providers)
+    |> validate_inclusion(:execution_target, @execution_targets)
+    |> validate_execution_host()
+    |> validate_length(:provider_session_id, min: 1)
+    |> check_constraint(:provider, name: :chat_sessions_provider_check)
+    |> check_constraint(:execution_target, name: :chat_sessions_execution_target_check)
+    |> check_constraint(:execution_host_id, name: :chat_sessions_execution_host_check)
+    |> check_constraint(:provider_session_id, name: :chat_sessions_provider_session_id_check)
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:title_source, @title_sources)
+  end
+
+  defp put_legacy_identity_defaults(changeset) do
+    changeset =
+      changeset
+      |> put_default(:provider, "claude")
+      |> put_default(:execution_target, "managed")
+
+    case {get_field(changeset, :provider), get_field(changeset, :execution_target),
+          get_field(changeset, :provider_session_id), get_field(changeset, :id)} do
+      {"claude", "managed", nil, id} when is_binary(id) ->
+        put_change(changeset, :provider_session_id, id)
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp put_default(changeset, field, value) do
+    if is_nil(get_field(changeset, field)),
+      do: put_change(changeset, field, value),
+      else: changeset
+  end
+
+  defp validate_execution_host(changeset) do
+    case {get_field(changeset, :execution_target), get_field(changeset, :execution_host_id)} do
+      {"managed", nil} ->
+        changeset
+
+      {"managed", _host_id} ->
+        add_error(changeset, :execution_host_id, "must be empty for managed execution")
+
+      {"registered_host", nil} ->
+        add_error(changeset, :execution_host_id, "is required for registered-host execution")
+
+      {"registered_host", _host_id} ->
+        changeset
+
+      _ ->
+        changeset
+    end
   end
 
   defp maybe_default_last_active(changeset) do

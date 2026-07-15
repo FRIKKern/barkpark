@@ -173,6 +173,25 @@ export interface InstallsLookup {
   ): Promise<WorkspaceId | null>;
   /** Every install of a connector — the boot path mounts one Chat per install. */
   listInstalls(provider: string): Promise<ConnectorInstall[]>;
+  /**
+   * `(provider, workspaceId)` -> the full OPENED install, or `null` when that
+   * workspace has no install of that provider (charter D69, tool connectors).
+   *
+   * This is the tool-connector seam's read: the runtime `tool-headers` route
+   * proves the caller's WORKSPACE by verifying a signed session ticket, then opens
+   * exactly THAT workspace's sealed PAT for the named provider — never a caller
+   * -supplied install key. Because the seal's AAD binds `workspace_id`, a row that
+   * belongs to another tenant cannot be opened here even if its `(provider,
+   * install_key)` were guessed: this lookup keys on the workspace itself.
+   *
+   * Fail-closed: a blank provider/workspace, an unknown pair, or a blob that does
+   * not open for the row's own identity all yield `null` — the tool-headers route
+   * turns that into the same opaque 404 as any unknown route.
+   */
+  lookupByWorkspace(
+    provider: string,
+    workspaceId: string | null | undefined,
+  ): Promise<ConnectorInstall | null>;
 }
 
 /**
@@ -203,6 +222,35 @@ export type MutableInstallsLookup = InstallsLookup & InstallsWriter;
 export type ConnectValidation =
   | { ok: true; installKey: string; displayName: string }
   | { ok: false; reason: string };
+
+/**
+ * A TOOL connector's MCP transport descriptor (charter D69/D71) — the OTHER
+ * direction of the epic. A channel connector is inbound (a human talks to the
+ * agent); a tool connector is OUTBOUND (the agent ACTS on a service), and it does
+ * so by being an additional MCP server the runner's `claude` subprocess connects
+ * to, exactly the way it already connects to the loopback `bp mcp serve` server.
+ *
+ * This is the STATIC, NON-SECRET half a connector declares: which MCP transport,
+ * and where. The credential never appears here — the runner fetches
+ * `{"Authorization":"Bearer <pat>"}` at MCP-connect time via the bridge's
+ * loopback `tool-headers` route (D38: no Elixir ever holds the plaintext PAT).
+ * The `headersHelper` command that does that fetch is minted by the bridge's
+ * `tool-descriptors` route (it bakes in the loopback URL + the session ticket),
+ * NOT by the connector — so this descriptor stays credential-free and reusable.
+ *
+ * `type: "http"` is the only transport a tool connector uses today: GitHub's MCP
+ * server (`https://api.githubcopilot.com/mcp/`) speaks Streamable HTTP, and claude
+ * 2.1.209's `--mcp-config` accepts `{type:"http", url, headersHelper}` for exactly
+ * this. A second tool connector (Linear) is a second registry entry with its own
+ * `toolDescriptor` — ZERO core-loop change, the same acceptance bar the channel
+ * connectors meet.
+ */
+export interface ToolDescriptor {
+  /** The MCP transport. `"http"` (Streamable HTTP) is the only one v1 uses. */
+  type: "http";
+  /** The MCP server endpoint the agent's subprocess connects to. Non-secret. */
+  url: string;
+}
 
 /**
  * PASTE-MODE CONNECT (charter D51) — the optional member that makes a connector
@@ -236,6 +284,20 @@ export interface ConnectorConnect {
 /** Per-dispatch context handed to a connector's `resolveTenant`. */
 export interface TenantContext {
   installs: InstallsLookup;
+}
+
+/**
+ * Per-refresh context handed to a connector's optional {@link Connector.refreshCredential}
+ * (charter D90/D92).
+ *
+ * `now` is injected (not read as `Date.now()` inside the hook) so the skew-window
+ * decision — "refresh when `expires_at − now < SKEW`" — is deterministic under
+ * test: a fixed `now` proves both the "still fresh, no refresh" and the "inside the
+ * window, refresh" branches without racing the wall clock.
+ */
+export interface RefreshContext {
+  /** Current time as epoch-ms. Injectable so the skew window is testable. */
+  now: number;
 }
 
 /**
@@ -340,6 +402,53 @@ export interface Connector<TPayload = unknown> {
    * connect routes answer the same opaque 404 they answer for an unknown provider.
    */
   connect?: ConnectorConnect;
+  /**
+   * TOOL connector's MCP transport (charter D69/D71). Present ONLY on a `tool`
+   * (or `both`) connector: it declares the MCP server the agent's `claude`
+   * subprocess connects to when this workspace has an install. Absent on every
+   * channel connector — a channel is inbound, it has no tool transport.
+   *
+   * A connector with a `toolDescriptor` seals ONLY its provider credential on
+   * `/connect` (a PAT), never a chat token, and is NEVER mounted as a channel
+   * (`registry.channels()` excludes it) — the connect loop branches on
+   * `direction`, never on the provider id.
+   */
+  toolDescriptor?: ToolDescriptor;
+  /**
+   * Refresh this install's credential at header-build time (charter D90/D92) —
+   * the OPTIONAL, CONNECTOR-OWNED half of the dual-shape credential seam.
+   *
+   * `tool-headers` (`http/connect.ts`) calls this generically —
+   * `connector.refreshCredential?.(install, ctx)` — for whatever tool connector a
+   * runner is (re)connecting. The connector, not the shared route, owns the whole
+   * decision: it parses its own credential shape, decides whether the token is
+   * inside its skew window, and — if so — exchanges a fresh one. The shared route
+   * stays provider-agnostic; only the connector knows Linear's bundle shape and its
+   * `grant_type=refresh_token` exchange.
+   *
+   * Contract:
+   *   - return `null` when NO refresh is needed or POSSIBLE — a bare-string paste
+   *     credential (GitHub's PAT, which cannot refresh), a bundle still comfortably
+   *     inside its lifetime, or a bundle with no `refresh_token`. `null` is the
+   *     common case and must be cheap;
+   *   - return a FRESH PLAINTEXT credential (Linear: the re-serialised
+   *     `{access_token, refresh_token?, expires_at?}` JSON bundle) when a refresh
+   *     succeeded. The route write-backs it via `upsertInstall` (which performs the
+   *     single seal — the hook returns PLAINTEXT, never a pre-sealed blob) and
+   *     builds the Bearer from it;
+   *   - THROW on a refresh FAILURE (network, non-2xx, `invalid_grant`). The route
+   *     catches it, logs LOUDLY, and serves the STORED credential (serve-stale-loud,
+   *     D90): a failed refresh must never turn a maybe-stale header into a hard
+   *     connect failure. There is NO on-401 leg — the bridge only PRINTS headers and
+   *     never sees the provider's 401.
+   *
+   * Absent on every connector that has no refreshable credential (every channel;
+   * GitHub, whose PAT never rotates) — its credential is served byte-for-byte.
+   */
+  refreshCredential?(
+    install: ConnectorInstall,
+    ctx: RefreshContext,
+  ): Promise<string | null>;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.

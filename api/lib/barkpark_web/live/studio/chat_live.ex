@@ -1,11 +1,12 @@
 defmodule BarkparkWeb.Studio.ChatLive do
   @moduledoc """
-  Studio **Claude chat** at `/studio/chat` — admin-only agent chat backed by
-  the host's Claude Code CLI. Sessions are a PLACE: every conversation is
+  Studio agent chat at `/studio/chat` (or its workspace-scoped route) — an
+  admin-only control plane backed by the selected Claude Code or Codex runtime.
+  Sessions are a PLACE: every conversation is
   persisted (`Barkpark.StudioChat`), listed in the sidebar, addressable at
   `/studio/chat/:session_id`, and resumable via the CLI's `--resume`.
 
-  The chat subprocess is owned by `BarkparkWeb.Studio.ClaudeChat.Session`,
+  The chat subprocess is owned by the selected provider Runtime adapter,
   started lazily on the first send — never on mount, never on reopen
   (reopen replays OUR persisted history instantly). Every decoded
   stream-json event arrives here as `{:claude_chat_event, map}`:
@@ -17,8 +18,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
                         blocks render as dim activity lines
     * `result`        → the turn is over — back to ready, usage in the footer
 
-  Gating lives in `BarkparkWeb.Studio.ClaudeChat` — this mount redirects out
-  unless `ClaudeChat.enabled?/0` (which hard-refuses public-demo hosts and
+  Gating lives behind `Barkpark.StudioChat.Runtime` — this mount redirects out
+  unless the selected provider is enabled (which hard-refuses public-demo hosts and
   honors the per-host opt-out), and the `:admin_studio` live_session carrying
   the route applies the admin `on_mount` gate.
 
@@ -31,15 +32,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   require Logger
 
+  alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.StudioChat.Runtime
   alias BarkparkWeb.Studio.ChatToolRenderer
-  alias BarkparkWeb.Studio.ClaudeChat
   alias BarkparkWeb.Studio.ReturnTo
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
   # helpers shared by the live render and the store-replay path.
@@ -136,7 +139,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI's memory on the next send via `--resume`.
   @impl true
   def mount(params, _session, socket) do
-    if ClaudeChat.enabled?() do
+    enabled_provider = Enum.find(StudioChat.Session.providers(), &Runtime.enabled?/1)
+
+    if enabled_provider do
       {:ok,
        socket
        |> assign(
@@ -152,6 +157,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # affordance can land the admin back in the SAME scope instead of the
          # `/studio` session funnel. nil when arrived at flat/directly.
          return_to: ReturnTo.sanitize(params["return_to"]),
+         chat_base_path: chat_base_path(params),
          session: nil,
          store_session_id: nil,
          session_id: nil,
@@ -184,7 +190,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          rail: %{},
          rail_sig: [],
          rail_expanded: %{},
-         mode: "plan",
+         mode: List.first(Runtime.capabilities(enabled_provider).modes) || "default",
+         provider: enabled_provider,
+         execution_target: "managed",
+         execution_host_id: nil,
+         execution_hosts: execution_hosts(socket),
          model_choice: "default",
          # Reasoning-effort intent (charter D48), the exact mirror of model_choice.
          effort_choice: "default",
@@ -252,7 +262,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # every Recorder's activity broadcasts. Renders over the stored row.
          activity: %{},
          # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
-         # session's worker (ClaudeChat.worker_id/1) currently holds, keyed by
+         # session's provider-scoped worker id currently holds, keyed by
          # published doc id — fed live off the dataset's task-document
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
@@ -290,7 +300,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the truthful scope over the session-resolving redirect.
       {:ok,
        socket
-       |> put_flash(:error, "Claude chat is not enabled on this instance.")
+       |> put_flash(:error, "No Studio Chat provider is enabled on this instance.")
        |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
@@ -353,6 +363,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
       nil -> socket
       rt -> assign(socket, return_to: rt)
     end
+  end
+
+  defp execution_hosts(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: workspace_id} -> ChatHosts.list_hosts(workspace_id)
+      _ -> []
+    end
+  end
+
+  defp chat_base_path(params) do
+    params["workspace_slug"]
+    |> Paths.scope_prefix(params["project_slug"])
+    |> Paths.chat_root()
   end
 
   # Persist the leaving session's composer draft (charter D36c). No-op on the
@@ -517,11 +540,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # probe (~1–2s on a real host) runs off the LiveView process.
   def handle_event("readiness-recheck", _params, socket) do
     session = socket.assigns[:session]
+    provider = socket.assigns.provider
 
     {:noreply,
      socket
      |> assign(readiness: :checking)
-     |> start_async(:readiness_probe, fn -> compute_readiness(session) end)}
+     |> start_async(:readiness_probe, fn -> compute_readiness(provider, session) end)}
   end
 
   # Stop a running turn. The interrupt is a control-request frame on stdin
@@ -549,7 +573,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       true ->
-        ClaudeChat.interrupt(socket.assigns.session)
+        Runtime.interrupt(socket.assigns.provider, socket.assigns.session)
 
         Process.send_after(
           self(),
@@ -582,6 +606,42 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)}
   end
 
+  def handle_event("set-provider", %{"provider" => provider}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and provider in StudioChat.Session.providers() do
+      capabilities = Runtime.capabilities(provider)
+
+      {:noreply,
+       socket
+       |> assign(
+         provider: provider,
+         mode: List.first(capabilities.modes) || "default",
+         model_choice: "default",
+         effort_choice: "default",
+         readiness: :checking
+       )
+       |> start_async(:readiness_probe, fn -> compute_readiness(provider, nil) end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("set-execution-target", %{"execution_target" => target}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and
+         target in StudioChat.Session.execution_targets() do
+      {:noreply, assign(socket, execution_target: target, execution_host_id: nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("set-execution-host", %{"execution_host_id" => host_id}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and Ecto.UUID.cast(host_id) != :error do
+      {:noreply, assign(socket, execution_host_id: host_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     # Steering to any non-bypass mode drops the live arming token (charter D55):
     # the next resume of what was a bypass session can never fail open.
@@ -593,7 +653,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
        bypass_disarmed: false,
        bypass_live_armed: false
      )
-     |> change_mode(ClaudeChat.normalize_mode(mode))}
+     |> change_mode(Runtime.normalize_mode(socket.assigns.provider, mode))}
   end
 
   # Track the confirm word as it's typed so the Arm button only enables on an
@@ -652,7 +712,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # trap), so we do not pend/revert on it: the next init/result frame reports
   # the answering model as fact, rendered beside the picker.
   def handle_event("set-model", %{"model" => raw}, socket) do
-    {:noreply, change_model(socket, ClaudeChat.normalize_model(raw))}
+    {:noreply, change_model(socket, Runtime.normalize_model(socket.assigns.provider, raw))}
   end
 
   # Pick the reasoning-effort tier (charter D48). Intent-only: it persists on the
@@ -660,7 +720,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (the four control subtypes are closed), so a mid-session change never steers
   # the running turn — we post an honest "applies from the next resume" line.
   def handle_event("set-effort", %{"effort" => raw}, socket) do
-    {:noreply, change_effort(socket, ClaudeChat.normalize_effort(raw))}
+    {:noreply, change_effort(socket, Runtime.normalize_effort(socket.assigns.provider, raw))}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -893,7 +953,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # the request_id (latest-outstanding correlation) and the revert target:
         # the last known-good mode, which a chain of unconfirmed rapid switches
         # must preserve rather than fold into an intermediate optimistic value.
-        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
+        {:ok, request_id} = Runtime.steer(socket.assigns.provider, session, %{mode: mode})
         revert_to = revert_target(socket)
 
         socket
@@ -912,7 +972,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     label = if choice, do: model_label(choice), else: "the CLI default"
 
     if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
-    if session = socket.assigns[:session], do: ClaudeChat.set_model(session, choice || "default")
+
+    if session = socket.assigns[:session],
+      do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
 
     socket
     |> assign(model_choice: choice || "default")
@@ -979,7 +1041,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # would silently reset a sticky choice to the CLI default on any typo
         # ("/model opsu"). An unrecognized alias shows usage instead; only an
         # explicit "/model default" resets.
-        case ClaudeChat.normalize_model(arg) do
+        case Runtime.normalize_model("claude", arg) do
           nil -> :model_usage
           choice -> {:set_model, choice}
         end
@@ -1041,7 +1103,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
              |> assign(status: :ready)}
 
           blocks ->
-            case ClaudeChat.send_message(session, blocks) do
+            case Runtime.send_turn(socket.assigns.provider, session, blocks) do
               :ok ->
                 # With images, upgrade the phase-1 text echo to the full bubble
                 # (text + thumbnails) now that the stored data-URIs exist.
@@ -1119,6 +1181,57 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign_messages(clear_queued_badges(socket.assigns.messages))
      |> observe_permission_mode(observed)}
   end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: :text_delta} = event},
+        socket
+      ) do
+    text = get_in(event.native, ["params", "delta"]) || ""
+    {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
+  end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: :turn_completed} = event},
+        socket
+      ) do
+    socket =
+      case socket.assigns.streaming do
+        text when is_binary(text) and text != "" -> append_message(socket, :assistant, text)
+        _ -> socket
+      end
+
+    line =
+      case event.terminal_state do
+        :interrupted -> "⊘ Interrupted — the session is still live."
+        :failed -> "The turn ended with an error."
+        _ -> nil
+      end
+
+    socket = if line, do: append_message(socket, :system, line), else: socket
+
+    {:noreply,
+     socket
+     |> assign(status: :ready, streaming: nil, interrupt_requested: false)
+     |> refresh_sessions()}
+  end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, native: native}},
+        socket
+      )
+      when kind in [:item_started, :item_completed] do
+    lifecycle = if kind == :item_started, do: :started, else: :completed
+    item = get_in(native, ["params", "item"]) || %{}
+
+    {:noreply,
+     fold_rail(
+       socket,
+       StudioChat.rail_apply_codex_item(socket.assigns.rail, item, lifecycle)
+     )}
+  end
+
+  def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
+    do: {:noreply, socket}
 
   def handle_info(
         {:claude_chat_event,
@@ -1206,7 +1319,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # CLI's assistant frame carries `error:"authentication_failed"` — flip the
     # onboarding card to :not_logged_in the moment it shows. The frame's text
     # blocks still render below (transcript stays honest).
-    socket = if ClaudeChat.auth_failure?(ev), do: flag_auth_failure(socket), else: socket
+    socket =
+      if Runtime.auth_failure?(socket.assigns.provider, ev),
+        do: flag_auth_failure(socket),
+        else: socket
 
     # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
     # every row this frame produces inherits it so children indent under the
@@ -1283,10 +1399,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # `terminal_reason:"api_error"` (captured wire truth —
         # fixtures/claude_chat/unauthed_stream.ndjson). This clause runs FIRST:
         # subtype alone is never trusted.
-        ClaudeChat.auth_failure?(ev) ->
+        Runtime.auth_failure?(socket.assigns.provider, ev) ->
           flag_auth_failure(socket)
 
-        ClaudeChat.result_success?(ev) ->
+        Runtime.result_success?(socket.assigns.provider, ev) ->
           maybe_kick_title(socket)
 
         interrupted? ->
@@ -1582,14 +1698,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, teardown_session(socket, message)}
   end
 
-  # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
+  # The interrupt timed out (charter D18). CRITICAL: runtime `close/1` does
   # NOT emit {:claude_chat_exit} (only a real port exit_status does), so this
   # path must force-close AND run teardown itself. Guarded: a `result` arriving
   # first left `:interrupting`, and a session switch changed `store_session_id`
   # — both make a stale timer a no-op.
   def handle_info({:interrupt_timeout, sid}, socket) do
     if socket.assigns.status == :interrupting and socket.assigns[:store_session_id] == sid do
-      if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+      if pid = socket.assigns[:session],
+        do: Runtime.close(socket.assigns.provider, pid)
 
       {:noreply,
        teardown_session(
@@ -1676,7 +1793,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     if String.starts_with?(id, "drafts.") do
       {:noreply, socket}
     else
-      worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+      worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
       content = (msg.doc && msg.doc.content) || %{}
       claim = content["claim"] || %{}
 
@@ -2292,7 +2409,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <.icon name="message-circle" size={15} /> chats
           </span>
           <.link
-            patch={ReturnTo.with_return_to("/studio/chat", @return_to)}
+            patch={ReturnTo.with_return_to(@chat_base_path, @return_to)}
             class="btn btn-primary text-xs"
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
@@ -2328,7 +2445,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
           <.link
             :for={e <- strip}
-            patch={ReturnTo.with_return_to("/studio/chat/#{e.session.id}", @return_to)}
+            patch={ReturnTo.with_return_to("#{@chat_base_path}/#{e.session.id}", @return_to)}
             class="bp-chat-strip-row"
             data-test-id={"chat-strip-#{e.session.id}"}
           >
@@ -2376,9 +2493,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
               No chats yet
             </div>
             <p style="margin: 0 0 8px;">
-              This is your remembered agent workspace. Every conversation with
-              <code>claude</code> on this host is saved here — reopen one to pick up
-              exactly where you left off. Admins only.
+              This is your remembered agent workspace. Provider and execution location
+              are stored with every conversation — reopen one to pick up exactly where
+              you left off. Admins only.
             </p>
             <p style="margin: 0;">
               Try: <em>“Walk the studio LiveViews and sketch how a request flows.”</em>
@@ -2415,7 +2532,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={ReturnTo.with_return_to("/studio/chat/#{s.id}", @return_to)} class="bp-chat-session-link">
+                <.link patch={ReturnTo.with_return_to("#{@chat_base_path}/#{s.id}", @return_to)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -2566,8 +2683,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       >
         <div style="display: flex; flex-direction: column; gap: 10px; max-width: 860px; width: 100%; margin: 0 auto;">
           <p :if={@messages == [] and @streaming == nil} class="text-sm text-dim">
-            An agent chat backed by this host's <code>claude</code> login. Plan mode: it can
-            read this host's files, but cannot edit or execute anything.
+            An agent chat backed by <code><%= @provider %></code> on the selected execution
+            location. Plan mode can read approved files, but cannot edit or execute anything.
           </p>
 
           <div
@@ -2745,7 +2862,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
               re-probes and unlocks the composer in place. The bp-lane states
               render as a banner BELOW the live composer instead (the chat
               itself still works; only its task hands are offline). --%>
-        <.chat_readiness_card :if={composer_locked?(@readiness)} readiness={@readiness} />
+        <.chat_readiness_card
+          :if={composer_locked?(@readiness)}
+          readiness={@readiness}
+          provider={@provider}
+        />
         <div :if={not composer_locked?(@readiness)} style="display: contents;">
         <form
           id="chat-composer-form"
@@ -2861,6 +2982,51 @@ defmodule BarkparkWeb.Studio.ChatLive do
               the attach <label>'s `for` reaches the hidden input by id. --%>
         <div style="display: flex; align-items: center; gap: 10px; padding: 4px 12px 10px;">
             <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <form
+              :if={is_nil(@store_session_id)}
+                phx-change="set-provider"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select bp-select-strong">
+                  <select name="provider" aria-label="Provider">
+                    <option :for={p <- StudioChat.Session.providers()} value={p} selected={p == @provider}>
+                      <%= String.capitalize(p) %>
+                    </option>
+                  </select>
+                </span>
+              </form>
+              <form
+                :if={is_nil(@store_session_id) and @execution_target == "registered_host"}
+                phx-change="set-execution-host"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select">
+                  <select name="execution_host_id" aria-label="Registered host">
+                    <option value="">Choose local hardware…</option>
+                    <option
+                      :for={host <- @execution_hosts}
+                      value={host.id}
+                      selected={host.id == @execution_host_id}
+                    >
+                      <%= host.name %><%= if host.online, do: " · online", else: " · offline" %>
+                    </option>
+                  </select>
+                </span>
+              </form>
+              <form
+                :if={is_nil(@store_session_id)}
+                phx-change="set-execution-target"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select">
+                  <select name="execution_target" aria-label="Execution target">
+                    <option value="managed" selected={@execution_target == "managed"}>Managed</option>
+                    <option value="registered_host" selected={@execution_target == "registered_host"}>
+                      Registered host
+                    </option>
+                  </select>
+                </span>
+              </form>
               <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
                 <span class="bp-select bp-select-chip">
                 <select
@@ -2873,7 +3039,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <option :if={@mode == "default"} value="default" selected>
                     <%= mode_label("default") %>
                   </option>
-                  <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
+                  <option :for={m <- Runtime.capabilities(@provider).modes} value={m} selected={m == @mode}>
                     <%= mode_label(m) %>
                   </option>
                 </select>
@@ -2892,7 +3058,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <option value="default" selected={@model_choice == "default"}>
                     Model
                   </option>
-                  <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
+                  <option :for={m <- Runtime.capabilities(@provider).models} value={m} selected={m == @model_choice}>
                     <%= model_label(m) %>
                   </option>
                 </select>
@@ -2920,7 +3086,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <option value="default" selected={@effort_choice == "default"}>
                     Effort
                   </option>
-                  <option :for={e <- ClaudeChat.efforts()} value={e} selected={e == @effort_choice}>
+                  <option :for={e <- Runtime.capabilities(@provider).efforts} value={e} selected={e == @effort_choice}>
                     <%= effort_label(e) %>
                   </option>
                 </select>
@@ -3001,13 +3167,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           style="display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; font-family: var(--font-mono); opacity: 0.75;"
         >
           <span class="bp-chat-spinner" aria-hidden="true"></span>
-          <span>checking Claude readiness…</span>
+          <span>checking <%= String.capitalize(@provider) %> readiness…</span>
         </div>
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
         <.chat_readiness_card
           :if={@readiness in [:no_task_hands, :task_token_expired]}
           readiness={@readiness}
+          provider={@provider}
         />
         </div>
         </div>
@@ -3109,6 +3276,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Every state carries its exact next step and a Re-check button that
   # re-probes and unlocks the composer in place — the chat never dead-ends.
   attr :readiness, :atom, required: true
+  attr :provider, :string, required: true
 
   defp chat_readiness_card(assigns) do
     ~H"""
@@ -3120,17 +3288,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     >
       <span class="text-sm" style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
         <.icon name="alert-triangle" size={15} />
-        <%= readiness_title(@readiness) %>
+        <%= readiness_title(@readiness, @provider) %>
       </span>
       <p class="text-sm text-dim" style="margin: 0; max-width: 60ch;">
-        <%= readiness_body(@readiness) %>
+        <%= readiness_body(@readiness, @provider) %>
       </p>
       <code
-        :if={readiness_step(@readiness)}
+        :if={readiness_step(@readiness, @provider)}
         class="text-xs"
         style="font-family: var(--font-mono); background: var(--bg); border: 1px solid var(--border-muted); border-radius: 6px; padding: 4px 8px; align-self: flex-start;"
       >
-        <%= readiness_step(@readiness) %>
+        <%= readiness_step(@readiness, @provider) %>
       </code>
       <div>
         <button
@@ -3147,36 +3315,59 @@ defmodule BarkparkWeb.Studio.ChatLive do
     """
   end
 
-  defp readiness_title(:no_binary), do: "Claude Code isn't installed on this host"
-  defp readiness_title(:not_logged_in), do: "Claude Code isn't logged in on this host"
-  defp readiness_title(:no_task_hands), do: "Task hands are offline"
-  defp readiness_title(:task_token_expired), do: "The chat's task credential expired"
-  defp readiness_title(_), do: "Checking readiness"
+  defp readiness_title(:no_binary, "claude"), do: "Claude Code isn't installed on this host"
+  defp readiness_title(:no_binary, provider), do: "#{provider_name(provider)} isn't installed"
+
+  defp readiness_title(:not_logged_in, "claude"),
+    do: "Claude Code isn't logged in on this host"
+
+  defp readiness_title(:not_logged_in, provider),
+    do: "#{provider_name(provider)} isn't logged in on this execution host"
+
+  defp readiness_title(:no_task_hands, _provider), do: "Task hands are offline"
+
+  defp readiness_title(:task_token_expired, _provider),
+    do: "The chat's task credential expired"
+
+  defp readiness_title(_, _provider), do: "Checking readiness"
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
   # first live surface — it was dead code until this slice).
-  defp readiness_body(:no_binary), do: spawn_error_text(:binary_not_found)
+  defp readiness_body(:no_binary, "claude"), do: spawn_error_text(:binary_not_found)
 
-  defp readiness_body(:not_logged_in),
+  defp readiness_body(:no_binary, provider),
+    do: "The #{provider_name(provider)} runtime is not available on the selected execution host."
+
+  defp readiness_body(:not_logged_in, "claude"),
     do:
       "The `claude` binary is installed, but it has no credentials. " <>
         "Log in on this host, then Re-check — the composer unlocks in place, no reload."
 
-  defp readiness_body(:no_task_hands),
+  defp readiness_body(:not_logged_in, provider),
+    do:
+      "#{provider_name(provider)} is installed but has no usable local credentials. " <>
+        "Authenticate on the execution host, then Re-check."
+
+  defp readiness_body(:no_task_hands, _provider),
     do:
       "Barkpark refused to mint this session's task credential — the agent can chat, " <>
         "but its bp task tools are offline. Check that your admin token has write " <>
         "access to this workspace, then Re-check."
 
-  defp readiness_body(:task_token_expired),
+  defp readiness_body(:task_token_expired, _provider),
     do:
       "This session's minted Barkpark task token has expired, so task tools stopped " <>
         "working. Re-check, then your next send mints a fresh credential."
 
-  defp readiness_body(_), do: "Checking Claude readiness…"
+  defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
 
-  defp readiness_step(:not_logged_in), do: "claude auth login"
-  defp readiness_step(_), do: nil
+  defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
+  defp readiness_step(:not_logged_in, "codex"), do: "codex login"
+  defp readiness_step(_, _provider), do: nil
+
+  defp provider_name("claude"), do: "Claude Code"
+  defp provider_name("codex"), do: "Codex"
+  defp provider_name(provider), do: String.capitalize(provider)
 
   # The agents rail (charter D47) — mission control below the composer. Distinct
   # from the D45/D46 transcript spawn rows BY DESIGN (this is live state, that is
@@ -3444,12 +3635,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # a store row already exists (store_session_id set by replay) — spawn with
   # `--resume` to rehydrate the CLI's memory. Never eager-respawn; never scrape
   # ids off hook_* frames (D8).
-  defp ensure_session(%{assigns: %{session: session}} = socket) when is_pid(session), do: socket
+  defp ensure_session(%{assigns: %{session: session}} = socket) when not is_nil(session),
+    do: socket
 
   defp ensure_session(socket) do
     case socket.assigns.store_session_id do
       nil ->
         id = Ecto.UUID.generate()
+
+        scope =
+          if socket.assigns.execution_target == "registered_host" do
+            socket.assigns.current_workspace.id
+          else
+            :global
+          end
 
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
@@ -3457,15 +3656,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
         case StudioChat.create_session(
                %{
                  id: id,
-                 cwd: ClaudeChat.cwd(),
+                 provider: socket.assigns.provider,
+                 execution_target: socket.assigns.execution_target,
+                 execution_host_id: socket.assigns.execution_host_id,
+                 cwd: Runtime.cwd(socket.assigns.provider),
                  mode: socket.assigns.mode
                },
-               :global
+               scope
              ) do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
-            |> push_patch(to: chat_patch_to("/studio/chat/#{id}", socket))
+            |> push_patch(to: chat_patch_to("#{socket.assigns.chat_base_path}/#{id}", socket))
             |> spawn_session(id, false)
 
           {:error, reason} ->
@@ -3495,10 +3697,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
     with {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: store_id,
+             provider: socket.assigns.provider,
+             provider_session_id: socket.assigns[:provider_session_id],
+             execution_target: socket.assigns.execution_target,
+             execution_host_id: socket.assigns.execution_host_id,
+             workspace_id:
+               socket.assigns[:current_workspace] && socket.assigns.current_workspace.id,
+             cwd: Runtime.cwd(socket.assigns.provider),
              mode: socket.assigns.mode,
              resume: resume?,
-             model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
-             effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
+             model:
+               Runtime.normalize_choice(
+                 socket.assigns.provider,
+                 :models,
+                 socket.assigns[:model_choice]
+               ),
+             effort:
+               Runtime.normalize_choice(
+                 socket.assigns.provider,
+                 :efforts,
+                 socket.assigns[:effort_choice]
+               ),
              # The chat admin's principal (charter D63): the Session mints its
              # loopback bp-mcp credential from this — never exceeding the
              # human's own rights; absent ⇒ no hands, chat unchanged.
@@ -3613,9 +3832,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp kick_readiness_probe(socket) do
     socket = assign(socket, readiness: :checking)
+    provider = socket.assigns.provider
 
     if connected?(socket) do
-      start_async(socket, :readiness_probe, fn -> compute_readiness(nil) end)
+      start_async(socket, :readiness_probe, fn -> compute_readiness(provider, nil) end)
     else
       socket
     end
@@ -3626,20 +3846,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `{:static, state}` or a 0-arity fun; absent ⇒ the real provider-neutral
   # probe. Runs INSIDE the start_async task, never on the LiveView process
   # (the claude auth shell-out costs ~1–2s, charter Verified ground).
-  defp compute_readiness(session) do
+  defp compute_readiness(provider, session) do
     case Application.get_env(:barkpark, :studio_chat_readiness_probe) do
       {:static, state} when is_atom(state) -> state
       fun when is_function(fun, 0) -> fun.()
-      _ -> with(:ready <- claude_readiness(), do: hands_readiness(session))
+      _ -> with(:ready <- provider_readiness(provider), do: hands_readiness(provider, session))
     end
   end
 
-  defp claude_readiness do
-    probe = Barkpark.StudioChat.Probe.probe(:claude)
+  defp provider_readiness(provider) do
+    probe = Runtime.readiness(provider)
+    probe = if match?({:ok, _}, probe), do: elem(probe, 1), else: probe
 
     cond do
-      probe.binary != true -> :no_binary
-      probe.authed? != true -> :not_logged_in
+      not is_map(probe) -> :no_binary
+      Map.get(probe, :binary) != true -> :no_binary
+      Map.get(probe, :authed?) != true -> :not_logged_in
       true -> :ready
     end
   end
@@ -3648,25 +3870,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # there is nothing to ask — the mint happens AT spawn (charter decision 2) —
   # so a nil session reads :ready and observe_hands_state/2 covers the spawn
   # moment. The default reads the spawn-env slice's queryable mint state
-  # (`ClaudeChat.task_hands/1`: :minted | :mint_refused | :not_attempted |
+  # (provider `task_hands/1`: :minted | :mint_refused | :not_attempted |
   # :unknown); the config seam injects a verdict for deterministic tests.
   # `:task_token_expired` is reachable only through the seam today —
   # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
   # the card state is ready for it.
-  defp hands_readiness(session) do
-    case hands_state(session) do
+  defp hands_readiness(provider, session) do
+    case hands_state(provider, session) do
       state when state in [:refused, :mint_refused] -> :no_task_hands
       :expired -> :task_token_expired
       _ -> :ready
     end
   end
 
-  defp hands_state(nil), do: :ok
+  defp hands_state(_provider, nil), do: :ok
 
-  defp hands_state(session) do
+  defp hands_state(provider, session) do
     case Application.get_env(:barkpark, :studio_chat_hands_state) do
       fun when is_function(fun, 1) -> fun.(session)
-      _ -> ClaudeChat.task_hands(session)
+      _ -> Runtime.task_hands(provider, session)
     end
   catch
     # A session that died between spawn and query is not a hands verdict.
@@ -3674,7 +3896,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp observe_hands_state(socket, session) do
-    case hands_readiness(session) do
+    case hands_readiness(socket.assigns.provider, session) do
       :ready -> socket
       state -> assign(socket, readiness: state)
     end
@@ -3730,7 +3952,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     StudioChat.mark_visited(session.id)
 
     {session_pid, status, live?} =
-      case live_runtime(session.id) do
+      case live_runtime(session) do
         nil ->
           # No live runtime: a still-"pending" approval can never be answered,
           # so persist its cancellation BEFORE replay — the store then agrees
@@ -3754,6 +3976,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session: session_pid,
       store_session_id: session.id,
       session_id: session.id,
+      provider: session.provider || "claude",
+      execution_target: session.execution_target || "managed",
+      execution_host_id: session.execution_host_id,
+      provider_session_id: session.provider_session_id,
       mode: session.mode || "plan",
       model_choice: session.model_choice || "default",
       effort_choice: session.effort_choice || "default",
@@ -3859,11 +4085,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # whose runtime is still running keeps its pending approvals answerable
   # instead of cancelling them. A recorder that dies between lookup and the
   # session_pid call is treated as no runtime.
-  defp live_runtime(session_id) do
-    with recorder when is_pid(recorder) <- Recorder.whereis(session_id),
-         {:ok, session_pid} <- Recorder.session_pid(recorder),
-         true <- Process.alive?(session_pid) do
-      session_pid
+  defp live_runtime(session) do
+    with recorder when is_pid(recorder) <- Recorder.whereis(session.id),
+         {:ok, runtime_ref} <- Recorder.session_pid(recorder),
+         true <- Runtime.alive?(runtime_ref) do
+      runtime_ref
     else
       _ -> nil
     end
@@ -3893,6 +4119,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       hand_tasks: %{},
       task_picker: nil,
       mode: "plan",
+      provider: "claude",
+      execution_target: "managed",
+      execution_host_id: nil,
+      provider_session_id: nil,
       # Sticky model default (charter D36d): a new chat inherits the last
       # non-default model you picked, via a DEDICATED query (list_sessions omits
       # model_choice — seeding off it reads nil forever). nil → "default".
@@ -3963,7 +4193,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
 
     if socket.assigns.store_session_id == id do
-      push_patch(socket, to: chat_patch_to("/studio/chat", socket))
+      push_patch(socket, to: chat_patch_to(socket.assigns.chat_base_path, socket))
     else
       socket
     end
@@ -4062,7 +4292,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Stay quiet and — critically — do NOT adopt/persist it: the stored
       # bypassPermissions row is what keeps the re-arm affordance alive on the
       # next reopen (D55's honest disarmed panel).
-      mode == ClaudeChat.normalize_mode(socket.assigns.mode) ->
+      mode == Runtime.normalize_mode(socket.assigns.provider, socket.assigns.mode) ->
         socket
 
       true ->
@@ -4543,7 +4773,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     do: assign(socket, hand_tasks: %{})
 
   defp hydrate_hand_tasks(socket) do
-    worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+    worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
 
     rows =
       Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
@@ -4680,7 +4910,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       )
 
     if pending? and socket.assigns.session do
-      ClaudeChat.respond_permission(socket.assigns.session, request_id, decision)
+      Runtime.answer_approval(
+        socket.assigns.provider,
+        socket.assigns.session,
+        request_id,
+        decision
+      )
 
       status =
         case decision do

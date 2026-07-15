@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329  # arm_caddy_site_route runs via with_caddy_lock "$@"; saw/nosaw only in --self-test — shellcheck 0.11 can't trace that
 # Deploy a content-bound STATIC site (Astro adapter × static symlink-swap target)
 # next to Phoenix on a Barkpark content box (e.g. guerrilla). Site-Spawner W1.
 #
@@ -93,40 +94,23 @@ set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
 
+# Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
+# meta_value, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy-node.sh
+# sources the SAME file so neither engine drifts on the wire protocol or the lock.
+# shellcheck source=deploy/lib/site-deploy-common.sh
+. "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh"
+
 # ---- Config ----------------------------------------------------------------
 SITES_DIR="${BARKPARK_SITES_DIR:-/opt/barkpark/sites}"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 RETAIN="${BARKPARK_SITE_RETAIN:-5}"
-# The ONLY env vars BUILD may see (Vite process.env-precedence scrub, D7).
-BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
-             BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE)
+# BUILD_ALLOW (the Vite process.env-precedence scrub, D7) lives in the common lib.
 # Dropped INSIDE a release dir whose bytes failed HEALTH but which we must not
 # delete (it is the live or the rollback target).  PLAN refuses to re-gate a
 # release carrying it — it rebuilds instead.  See purge_failed_release.
 HEALTH_FAIL_MARK=".bp-health-failed"
-
-log() { echo "[site-deploy $(date -u +%H:%M:%S)] $*"; }
-
-# ---------------------------------------------------------------------------
-# emit — the machine stage protocol (D25; contract in the header).  ONE line per
-# stage boundary on STDOUT, next to (never instead of) the human prose, so an
-# orchestrator can render six honest stages by regexing `^BPSTAGE `.  The old
-# engine announced some stages before the work, logged others after it, and said
-# NOTHING at all on three normal paths (PLAN no-op, SKIP_BUILD redeploy, a RETIRE
-# with nothing to remove) — a stage-watching caller hung forever on those.
-# Precedent for a KEY=VALUE machine line on stdout: --rollback-preflight's
-# TARGET_BUILD=.  detail= is free text (quotes normalised, one line, clipped).
-emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|failed> [detail…]
-  local name="$1" status="$2"; shift 2
-  local detail="$*"
-  if [ -n "$detail" ]; then
-    detail="$(printf '%s' "$detail" | tr '\n\r\t"' '   '"'" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//' | cut -c1-240)"
-    printf 'BPSTAGE name=%s status=%s build_id=%s detail="%s"\n' "$name" "$status" "${BUILD_ID:-}" "$detail"
-  else
-    printf 'BPSTAGE name=%s status=%s build_id=%s\n' "$name" "$status" "${BUILD_ID:-}"
-  fi
-}
+# log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
 MODE=deploy
@@ -230,26 +214,7 @@ do_rollback() {
 # Basename of the live release, or "" if none.
 live_build() { [ -L "$CURRENT" ] && basename "$(readlink "$CURRENT")" || true; }
 
-# Read the VALUE of a <meta name="…" content="…"> marker out of an HTML document.
-# Prints "" when the tag is absent OR its content is empty — the caller asserts on
-# the VALUE and never on presence, which is the whole point (D26): the old gate
-# grepped the marker NAME, so a build whose bp-build-id said TOTALLY-WRONG and
-# whose bp-content-rev was the EMPTY STRING sailed through it and went LIVE.
-# Tolerates attribute order, single/double/unquoted values and minified HTML.
-meta_value() { # <html-file> <marker-name>
-  local f="$1" n="$2"
-  [ -f "$f" ] || return 0
-  # ONE tag per line first (awk RS='>', never `tr` — tr maps characters 1:1 and
-  # cannot insert a newline, so a minified <meta a><meta b> stayed one line and
-  # the greedy content= match below read the LAST tag's value for EVERY marker).
-  awk 'BEGIN { RS = ">" } { print $0 ">" }' "$f" 2>/dev/null \
-    | grep -Ei "<meta[^>]*name=[\"']?${n}[\"'[:space:]/>]" \
-    | head -1 \
-    | sed -E -e 's/.*content="([^"]*)".*/\1/' -e t \
-             -e "s/.*content='([^']*)'.*/\1/" -e t \
-             -e "s/.*content=([^\"'[:space:]/>]+).*/\1/" -e t \
-             -e 's/.*//'
-}
+# meta_value() — the content-truth marker reader — lives in the common lib.
 
 # HEALTH (D11 + D26).  Serve the release exactly as a visitor would receive it —
 # throwaway static server on a loopback ephemeral port — then assert on the BYTES
@@ -399,6 +364,7 @@ if [ "$MODE" = selftest ]; then
   check "retire kept b2 (previous)"     [ -d "$RELEASES/b2" ]
   check "retire kept b3"                [ -d "$RELEASES/b3" ]
   check "retire kept b7 (current)"      [ -d "$RELEASES/b7" ]
+  # shellcheck disable=SC2012  # counting fixture release dirs (known-clean names) in the self-test
   remaining="$(ls -1d "$RELEASES"/*/ 2>/dev/null | wc -l | tr -d ' ')"
   check "6 dirs remain (5 newest + protected previous)" [ "$remaining" = 6 ]
 
@@ -614,7 +580,7 @@ fi
 SITE_SLUG="${SITE_SLUG:-}"
 if [ -z "$SITE_SLUG" ]; then log "SITE_SLUG is required"; exit 11; fi
 # Slug hygiene: it names a filesystem dir AND a Caddy path matcher.
-if ! printf '%s' "$SITE_SLUG" | grep -Eq '^[a-z0-9][a-z0-9-]{0,62}$'; then
+if ! valid_slug "$SITE_SLUG"; then
   log "invalid SITE_SLUG '$SITE_SLUG' (want ^[a-z0-9][a-z0-9-]{0,62}\$)"; exit 11
 fi
 
@@ -669,7 +635,7 @@ fi
 # ===========================================================================
 BUILD_ID="${BUILD_ID:-}"
 if [ -z "$BUILD_ID" ]; then log "BUILD_ID is required for a deploy"; exit 11; fi
-if ! printf '%s' "$BUILD_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'; then
+if ! valid_build_id "$BUILD_ID"; then
   log "invalid BUILD_ID '$BUILD_ID'"; exit 11
 fi
 
@@ -819,45 +785,15 @@ fi
 emit HEALTH ok "$HEALTH_DETAIL"
 
 # ---- ONE shared Caddyfile lock (D27) ---------------------------------------
-# /etc/caddy/Caddyfile has TWO writers: this engine's route arming and
-# instance-deploy.sh's blue/green port flip (+ its maintenance / mcp / connectors
-# arming).  Both do read -> backup -> rewrite -> mv.  An interleave silently
-# DISCARDS one of them, and a lost update is syntactically VALID — so the
-# backup + `caddy validate` + revert discipline both scripts already have is
-# structurally blind to it.  Reproduced: this script's stale write dropped
-# instance-deploy's port flip and then reloaded Caddy onto the slot
-# instance-deploy was about to `systemctl disable --now` — a hard 502 on the
-# content API that does not self-heal until the next deploy.
-#
-# Both scripts now take THIS leaf lock (fd 8) around every Caddyfile
-# read-modify-write, in the same order (own lock fd 9 -> caddy lock fd 8), so
-# neither can deadlock the other.  It is deliberately NOT instance-deploy's own
-# lock: that one is held for its whole multi-minute run and would stall a site
-# deploy for ten minutes.  The lock is a LEAF — taken, used, released, never
-# held across a build.
-CADDY_LOCK="${BARKPARK_CADDYFILE_LOCK:-/var/lock/barkpark-caddyfile.lock}"
-if ! ( : > "$CADDY_LOCK" ) 2>/dev/null; then
-  # Unwritable /var/lock (dev box, unprivileged CI) — same fallback idiom as the
-  # per-slug deploy lock above, so we still serialize with anyone else on the box.
-  CADDY_LOCK="${TMPDIR:-/tmp}/barkpark-caddyfile.lock"
-  # LOUD, because the failure mode is silent: the two writers only exclude each
-  # other if they resolve the SAME path.  On the real box both run as root and
-  # both get /var/lock; if one falls back and the other does not, they serialize
-  # against nothing.  Pin BARKPARK_CADDYFILE_LOCK identically on both.
-  log "WARN: /var/lock is not writable — Caddyfile lock falls back to $CADDY_LOCK; instance-deploy.sh MUST resolve the same path (set BARKPARK_CADDYFILE_LOCK) or the two Caddyfile writers do not serialize"
-fi
-with_caddy_lock() { # <fn> [args…] — run a Caddyfile read-modify-write serialized
-  exec 8>"$CADDY_LOCK" || { log "cannot open the Caddyfile lock $CADDY_LOCK — leaving Caddy untouched"; return 1; }
-  if ! flock -w 120 8; then
-    log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — leaving Caddy untouched"
-    exec 8>&-
-    return 1
-  fi
-  "$@"
-  local rc=$?
-  exec 8>&-
-  return "$rc"
-}
+# setup_caddy_lock (common lib) resolves CADDY_LOCK — the single leaf lock (fd 8)
+# every Caddyfile writer shares: this engine's route arming, instance-deploy.sh's
+# blue/green port flip, and site-deploy-node.sh's per-site reverse_proxy port
+# flip. An interleave silently DISCARDS one writer, and a lost update is
+# syntactically VALID — so backup + `caddy validate` + revert is blind to it
+# (reproduced: a stale write dropped instance-deploy's port flip and reloaded
+# Caddy onto the slot it was about to disable — a hard 502). with_caddy_lock runs
+# each read-modify-write serialized; it is a LEAF, never held across a build.
+setup_caddy_lock
 
 # ---- Arm the Caddy path handle ONCE (D4) -----------------------------------
 # Marker-guarded `handle_path /sites/<slug>/*` into the live FQDN block, mirrors

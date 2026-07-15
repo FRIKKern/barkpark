@@ -56,6 +56,31 @@ describe("createSession", () => {
     expect(recorded.createBodies[0]).toEqual({});
   });
 
+  it("serializes provider and execution identity without launcher controls", async () => {
+    server.use(
+      http.post(`${TEST_BASE}/v1/chat/sessions`, async ({ request }) => {
+        recorded.createBodies.push(await request.json());
+        return HttpResponse.json({ id: SESSION_ID }, { status: 201 });
+      }),
+    );
+
+    await client.createSession({
+      provider: "codex",
+      execution_target: "registered_host",
+      execution_host_id: "0f9d8c7b-6a5e-4d3c-2b1a-0f9e8d7c6b5a",
+      mode: "read-only",
+    });
+
+    expect(recorded.createBodies[0]).toEqual({
+      provider: "codex",
+      execution_target: "registered_host",
+      execution_host_id: "0f9d8c7b-6a5e-4d3c-2b1a-0f9e8d7c6b5a",
+      mode: "read-only",
+    });
+    expect(recorded.createBodies[0]).not.toHaveProperty("cwd");
+    expect(recorded.createBodies[0]).not.toHaveProperty("provider_session_id");
+  });
+
   it("carries the Bearer token", async () => {
     await client.createSession();
     expect(recorded.headers[0]?.get("authorization")).toBe(

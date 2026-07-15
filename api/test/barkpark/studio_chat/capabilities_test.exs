@@ -56,14 +56,14 @@ defmodule Barkpark.StudioChat.Runtime.CapabilitiesTest do
     end
   end
 
-  describe "codex/0 (designed-not-built stub — charter D5, provider-horizon CLOSED)" do
+  describe "codex/0 (schema-backed managed app-server)" do
     test "is a codex-tagged matrix distinct from claude" do
       c = Capabilities.codex()
       assert %Capabilities{provider: :codex} = c
       refute c.provider == Capabilities.claude().provider
     end
 
-    test "every capability flag is the safe not-supported value — degrades honestly, never pretends Claude" do
+    test "advertises only schema-backed surfaces and never pretends Claude-only controls" do
       c = Capabilities.codex()
 
       # Empty vocab lists (no modes/models/efforts offered).
@@ -74,16 +74,16 @@ defmodule Barkpark.StudioChat.Runtime.CapabilitiesTest do
       assert c.agent_spawn_names == []
 
       # Enum fields at their absent tier.
-      assert c.thinking == :none
-      assert c.plan == :none
-      assert c.agent_rail == :none
+      assert c.thinking == :text
+      assert c.plan == :simulated
+      assert c.agent_rail == :rows
 
       # Boolean feature flags all false.
       assert c.slash_commands == false
       assert c.mode_switch == false
       assert c.rewind == false
-      assert c.images == false
-      assert c.mcp_tools == false
+      assert c.images == true
+      assert c.mcp_tools == true
       assert c.todo_write == false
       assert c.user_input == false
     end

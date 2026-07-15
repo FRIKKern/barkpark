@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "437ee17ac18f8f222f7b94414c9bae49bf0e95e4002fbd4f227a739ecb0ec17a",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "634fe8164741d6b26b13f12e42a213a19c490861a6b78cb3a1b05eb486ce11d9",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "b2ab42d6d8f34d20524f0d9682448493b75f13e0444ba147745b884a7f04e086",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; LOCAL_CAPSULE_OR_PRODUCTION_API_IS_NOT_ACCEPTED",
+  "fixture_id": "pd-everything-editable-wave-2026-07-11",
+  "fixture_kind": "paper",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "cli_api"
+}

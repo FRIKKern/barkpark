@@ -84,6 +84,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.Fence
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
+  alias Barkpark.Tasks.ClaimFence
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Pulse
@@ -387,6 +388,9 @@ defmodule Barkpark.Tasks do
           {:ok, Document.t()}
           | {:error, :not_found | :not_ready | :blocked_by_unsatisfied_deps | :stale_claim}
   defdelegate claim_by_id(doc_id, worker_id, opts \\ []), to: Claim
+
+  @doc "Validate an exact live claim for assignment-bound evidence without renewing it."
+  defdelegate verify_claim_fence(task_id, expected), to: ClaimFence, as: :verify
 
   # claim/2, claim_by_id/3 + their helpers (fetch/check/resource-overlap/do_claim)
   # → Tasks.Claim (defdelegated). ready/1 + ready_query/1 → Tasks.Queue.

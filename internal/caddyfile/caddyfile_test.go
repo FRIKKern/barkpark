@@ -474,6 +474,132 @@ func TestRender_OriginCA_StaticSite(t *testing.T) {
 	}
 }
 
+func TestRender_InternalGolden(t *testing.T) {
+	// A CF-Full-proxied site renders `tls internal` (self-signed, no cert files,
+	// no ACME) and emits NO on_demand block — behind the Cloudflare proxy an ACME
+	// challenge cannot complete, so on_demand there means error 526. The box also
+	// gains the once-only trusted_proxies global option (it IS behind CF).
+	got := Render(Box{
+		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
+		Sites: []Site{{
+			Slug:    "shop",
+			Domains: []string{"www.shop.com", "shop.com"},
+			Port:    7001,
+			TLSMode: TLSModeInternal,
+		}},
+	})
+	want := "{\n" +
+		"  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n" +
+		"  servers {\n" +
+		"    trusted_proxies static " + strings.Join(cloudflareIPRanges, " ") + "\n" +
+		"    client_ip_headers CF-Connecting-IP\n" +
+		"  }\n" +
+		"}\n\n" +
+		"# site shop (port 7001)\n" +
+		"shop.com, www.shop.com {\n" +
+		"  tls internal\n" +
+		"  reverse_proxy 127.0.0.1:7001\n" +
+		MaintenanceHandler("  ") +
+		"}\n\n"
+	if got != want {
+		t.Errorf("internal-TLS render drifted from golden:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	// The site block must carry `tls internal` and NOT the on_demand cert block.
+	if !strings.Contains(got, "  tls internal\n") {
+		t.Errorf("internal-TLS site must emit `tls internal`:\n%s", got)
+	}
+	if strings.Contains(got, "    on_demand\n") {
+		t.Errorf("internal-TLS site must NOT emit an on_demand cert directive (526 outage):\n%s", got)
+	}
+}
+
+func TestRender_Internal_NeedsNoCertFiles(t *testing.T) {
+	// Unlike Origin CA, internal TLS provisions no PEM pair — a site with empty
+	// CertPath/KeyPath must still render (never be skipped by tlsReady), because
+	// Caddy mints the self-signed cert itself.
+	got := Render(Box{
+		Sites: []Site{{
+			Slug:    "blog",
+			Domains: []string{"blog.com"},
+			Port:    7002,
+			TLSMode: TLSModeInternal,
+			// CertPath / KeyPath deliberately empty.
+		}},
+	})
+	if !strings.Contains(got, "blog.com {\n  tls internal\n  reverse_proxy 127.0.0.1:7002\n") {
+		t.Errorf("internal-TLS site with no cert files must still render:\n%s", got)
+	}
+}
+
+func TestRender_Internal_StaticSite(t *testing.T) {
+	// TLSMode is orthogonal to Kind: a static site can be CF-Full-proxied too.
+	got := Render(Box{
+		Sites: []Site{{
+			Slug:    "docs",
+			Domains: []string{"docs.com"},
+			Kind:    KindStatic,
+			Root:    "/srv/sites/docs/current",
+			TLSMode: TLSModeInternal,
+		}},
+	})
+	if !strings.Contains(got, "docs.com {\n  tls internal\n  root * /srv/sites/docs/current\n  file_server\n}") {
+		t.Errorf("internal-TLS static block malformed:\n%s", got)
+	}
+	if strings.Contains(got, "on_demand") {
+		t.Errorf("internal-TLS static site must not emit on_demand:\n%s", got)
+	}
+}
+
+func TestRender_Internal_GetsTrustedProxies(t *testing.T) {
+	// An internal-TLS site IS behind Cloudflare (CF Full), so the box must trust
+	// the CF edge ranges exactly as an Origin-CA box does — otherwise every
+	// request logs a Cloudflare IP instead of the visitor's.
+	got := Render(Box{
+		Sites: []Site{{
+			Slug:    "s",
+			Domains: []string{"s.com"},
+			Port:    7001,
+			TLSMode: TLSModeInternal,
+		}},
+	})
+	if n := strings.Count(got, "trusted_proxies"); n != 1 {
+		t.Errorf("internal-TLS (CF-fronted) box must emit exactly one trusted_proxies stanza, got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "client_ip_headers CF-Connecting-IP") {
+		t.Errorf("internal-TLS box must honour CF-Connecting-IP:\n%s", got)
+	}
+}
+
+func TestRender_Internal_MixedWithOriginCAAndOnDemand(t *testing.T) {
+	// All three TLS modes coexist in one box: origin_ca loads cert files, internal
+	// mints self-signed, on_demand keeps its block. The two CF-fronted modes share
+	// the single global trusted_proxies option.
+	got := Render(Box{
+		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
+		Sites: []Site{
+			{Slug: "a-ocsp", Domains: []string{"a.com"}, Port: 7001, TLSMode: TLSModeOriginCA, CertPath: "/c/a.pem", KeyPath: "/c/a.key"},
+			{Slug: "b-internal", Domains: []string{"b.com"}, Port: 7002, TLSMode: TLSModeInternal},
+			{Slug: "c-ondemand", Domains: []string{"c.com"}, Port: 7003},
+		},
+	})
+	if !strings.Contains(got, "a.com {\n  tls /c/a.pem /c/a.key\n") {
+		t.Errorf("origin-CA site must load cert files:\n%s", got)
+	}
+	if !strings.Contains(got, "b.com {\n  tls internal\n") {
+		t.Errorf("internal site must emit `tls internal`:\n%s", got)
+	}
+	if !strings.Contains(got, "c.com {\n  tls {\n    on_demand\n  }\n") {
+		t.Errorf("on-demand site must keep its on_demand block:\n%s", got)
+	}
+	// Exactly one on_demand cert block (site c), one trusted_proxies (global).
+	if n := strings.Count(got, "    on_demand\n"); n != 1 {
+		t.Errorf("only the on-demand neighbour keeps an on_demand block, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "trusted_proxies"); n != 1 {
+		t.Errorf("two CF-fronted sites must still share one trusted_proxies stanza, got %d:\n%s", n, got)
+	}
+}
+
 func TestRender_ZeroValueAndUnknownTLSMode_StayOnDemand(t *testing.T) {
 	// The zero value is on-demand (that is what keeps every existing caller
 	// byte-identical), an explicit TLSModeOnDemand means the same thing, and an

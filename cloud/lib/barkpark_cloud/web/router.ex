@@ -88,6 +88,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
+      GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
@@ -124,6 +125,7 @@ defmodule BarkparkCloud.Web.Router do
     ArchiveStore,
     Azure,
     Billing,
+    Cloudflare,
     DeviceAuth,
     DomainStatus,
     Events,
@@ -216,7 +218,10 @@ defmodule BarkparkCloud.Web.Router do
   plug(:dispatch)
 
   @raw_body_paths ["/v1/billing/webhook"]
-  @raw_body_path_prefixes ["/v1/webhooks/github/"]
+  # site-spawner W5 (charter D46): the content-publish receiver verifies an HMAC
+  # over the EXACT bytes the box signed, so its raw body must be cached too
+  # (the parsed JSON map is not stable enough to re-derive the signature).
+  @raw_body_path_prefixes ["/v1/webhooks/github/", "/v1/sites/webhooks/content-publish/"]
 
   # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
   # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
@@ -2579,6 +2584,33 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # DELETE /v1/providers/:kind → 200 {ok: true} — disconnect the team's connected
+  # provider of `kind` (drops the row + its encrypted credential). The plugin law:
+  # disconnecting a provider degrades gracefully back to standalone. 404 not_found
+  # when the team has no connection of that kind (no existence leak). RBAC: team
+  # admin only (parity with the connect side). Mirrors DELETE
+  # /v1/github/installation.
+  delete "/v1/providers/:kind" do
+    conn = Auth.require_team_admin(conn, [])
+    kind = conn.params["kind"]
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        # The label (if any) for the audit metadata — read before the delete. No
+        # row of this kind → 404 (no existence leak). This is the ONLY place the
+        # label is available; the delete drops the row.
+        disconnect_provider_request(conn, team, kind)
+    end
+  end
+
   # GET /v1/providers/:kind/catalog → 200 {regions, server_types} — the
   # PROVIDER-NEUTRAL provisioning menu (what this team can provision into its
   # connected account), normalized to one shape across providers so the
@@ -4622,6 +4654,12 @@ defmodule BarkparkCloud.Web.Router do
              # A static site IS its content binding — refuse an unbound one AT THE
              # DOOR rather than writing a row the deploy path can never build.
              :ok <- require_content_binding(kind, attrs),
+             # site-spawner W7 (charter D68): a node site owns a per-site blue/green
+             # port pair — allocate the lowest-free EVEN base ONCE, here at create.
+             # A container/static site allocates nothing (attrs pass through). A box
+             # whose node-slot window is full fails closed with an honest 503 rather
+             # than minting a portless (un-servable) node row.
+             {:ok, attrs} <- allocate_node_port(kind, attrs),
              # site-spawner D29: MINT the public-read content token on the box
              # BEFORE the row exists, so a 201 can never be a ghost (a site with a
              # binding but no token can't build, and nothing downstream would say
@@ -4680,6 +4718,13 @@ defmodule BarkparkCloud.Web.Router do
               detail:
                 "a static site builds FROM your content — bind it with " <>
                   "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+            })
+
+          {:error, :ports_exhausted} ->
+            json(conn, 503, %{
+              error: "node_ports_exhausted",
+              detail:
+                "this instance has no free node-slot port left — retire a node site or move to a larger box"
             })
 
           {:error, {:mint_failed, detail}} ->
@@ -4741,90 +4786,108 @@ defmodule BarkparkCloud.Web.Router do
   # box through the six stages. The container path below is untouched.
   post "/v1/sites/:id/deploy" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
-      cond do
-        site.kind == "static" ->
-          deploy_static_site(conn, site)
+      # cf-in-front (D57): when a deploy asks to go THROUGH Cloudflare
+      # (via=cloudflare + a domain), resolve the team's CF credential, point the
+      # domain at the box origin, flip the record proxied, and persist the
+      # binding — all BEFORE the normal build. With no `via` this is a pure
+      # no-op: the standalone deploy path below is byte-identical to today. A
+      # missing/unreadable CF provider fails closed here and NEVER half-binds.
+      with {:cont, site} <- maybe_bind_cloudflare(conn, site) do
+        cond do
+          # site-spawner W7 (charter D62): a NODE site is content-bound just like a
+          # static one — it builds FROM a Barkpark dataset and is driven through the
+          # SAME six-stage deploy machine (`deploy_static_site/2` mints the build and
+          # drives PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE). The only difference is the
+          # runtime target the box switches to (a running node process vs a symlink),
+          # which the deploy_payload carries down — not this route's concern. The
+          # container artifact/repo path below is NOT taken.
+          site.kind in ["static", "node"] ->
+            deploy_static_site(conn, site)
 
-        # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
-        # connected repo can never build regardless of fleet — the row would sit
-        # "queued" forever as an eternal dashboard spinner. Refuse it up front so
-        # no un-buildable row is ever minted.
-        is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) ->
-          json(conn, 422, %{
-            error: "no_build_source",
-            detail: "upload an artifact (bp deploy) or connect a GitHub repo"
-          })
+          # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
+          # connected repo can never build regardless of fleet — the row would sit
+          # "queued" forever as an eternal dashboard spinner. Refuse it up front so
+          # no un-buildable row is ever minted.
+          is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) ->
+            json(conn, 422, %{
+              error: "no_build_source",
+              detail: "upload an artifact (bp deploy) or connect a GitHub repo"
+            })
 
-        true ->
-          attrs = %{
-            git_ref: conn.body_params["git_ref"],
-            artifact_url: conn.body_params["artifact_url"]
-          }
+          true ->
+            attrs = %{
+              git_ref: conn.body_params["git_ref"],
+              artifact_url: conn.body_params["artifact_url"]
+            }
 
-          # manual-deploy-no-dedup: a double-click or client retry must not mint a
-          # duplicate queued build. When a git_ref is present, coalesce onto any
-          # already-active (queued|building|pushing) PRODUCTION deploy of this
-          # exact ref and 200 the existing row — the same "active" definition the
-          # GitHub webhook path (handle_production_push) uses via
-          # find_active_deployment/2. An artifact-only deploy (no ref) can't be
-          # coalesced and always mints a fresh row.
-          existing =
-            case attrs.git_ref do
-              ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
-              _ -> nil
-            end
-
-          case existing do
-            %{} = deployment ->
-              json(conn, 200, %{deployment: deployment_json(deployment)})
-
-            nil ->
-              case Registry.create_deployment(site, attrs) do
-                {:ok, deployment} ->
-                  # activity-audit-log: a deploy request ENQUEUES a queued row the
-                  # off-box builder later walks — a relay, so the audit is a
-                  # post-commit best-effort record_audit/1 (never rolls the queued
-                  # row back). Only a FRESHLY minted row is audited; a coalesced /
-                  # lost-race 200 re-uses an existing row and stamps nothing (no
-                  # double-audit on a double-click). Detail carries git_ref + whether
-                  # an artifact was supplied, never the artifact bytes.
-                  _ =
-                    Accounts.record_audit(%{
-                      team_id: site.team_id,
-                      actor_user_id: conn.assigns.current_user.id,
-                      action: "site.deploy_requested",
-                      target_type: "deployment",
-                      target_id: deployment.id,
-                      metadata: %{
-                        site_id: site.id,
-                        git_ref: attrs.git_ref,
-                        has_artifact: not is_nil(attrs.artifact_url)
-                      }
-                    })
-
-                  push_event(site.team_id, "deployments")
-                  push_event(site.team_id, "audit")
-                  json(conn, 201, %{deployment: deployment_json(deployment)})
-
-                {:error, %Ecto.Changeset{errors: errs} = cs} ->
-                  # A lost race: a concurrent double-click won the active
-                  # site+ref partial-unique index between our lookup and this
-                  # INSERT. Recover its row as a 200 duplicate rather than
-                  # surfacing the constraint error (mirrors the webhook path).
-                  winner =
-                    if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
-                      Registry.find_active_deployment(site.id, attrs.git_ref)
-                    end
-
-                  case winner do
-                    %{} = deployment ->
-                      json(conn, 200, %{deployment: deployment_json(deployment)})
-
-                    _ ->
-                      json(conn, 422, %{error: "invalid", details: errors(cs)})
-                  end
+            # manual-deploy-no-dedup: a double-click or client retry must not mint a
+            # duplicate queued build. When a git_ref is present, coalesce onto any
+            # already-active (queued|building|pushing) PRODUCTION deploy of this
+            # exact ref and 200 the existing row — the same "active" definition the
+            # GitHub webhook path (handle_production_push) uses via
+            # find_active_deployment/2. An artifact-only deploy (no ref) can't be
+            # coalesced and always mints a fresh row.
+            existing =
+              case attrs.git_ref do
+                ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
+                _ -> nil
               end
-          end
+
+            case existing do
+              %{} = deployment ->
+                json(conn, 200, %{deployment: deployment_json(deployment)})
+
+              nil ->
+                case Registry.create_deployment(site, attrs) do
+                  {:ok, deployment} ->
+                    # activity-audit-log: a deploy request ENQUEUES a queued row the
+                    # off-box builder later walks — a relay, so the audit is a
+                    # post-commit best-effort record_audit/1 (never rolls the queued
+                    # row back). Only a FRESHLY minted row is audited; a coalesced /
+                    # lost-race 200 re-uses an existing row and stamps nothing (no
+                    # double-audit on a double-click). Detail carries git_ref + whether
+                    # an artifact was supplied, never the artifact bytes.
+                    _ =
+                      Accounts.record_audit(%{
+                        team_id: site.team_id,
+                        actor_user_id: conn.assigns.current_user.id,
+                        action: "site.deploy_requested",
+                        target_type: "deployment",
+                        target_id: deployment.id,
+                        metadata: %{
+                          site_id: site.id,
+                          git_ref: attrs.git_ref,
+                          has_artifact: not is_nil(attrs.artifact_url)
+                        }
+                      })
+
+                    push_event(site.team_id, "deployments")
+                    push_event(site.team_id, "audit")
+                    json(conn, 201, %{deployment: deployment_json(deployment)})
+
+                  {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                    # A lost race: a concurrent double-click won the active
+                    # site+ref partial-unique index between our lookup and this
+                    # INSERT. Recover its row as a 200 duplicate rather than
+                    # surfacing the constraint error (mirrors the webhook path).
+                    winner =
+                      if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
+                        Registry.find_active_deployment(site.id, attrs.git_ref)
+                      end
+
+                    case winner do
+                      %{} = deployment ->
+                        json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                      _ ->
+                        json(conn, 422, %{error: "invalid", details: errors(cs)})
+                    end
+                end
+            end
+        end
+      else
+        # maybe_bind_cloudflare already sent the fail-closed response (409/422/502).
+        {:halt, conn} -> conn
       end
     end)
   end
@@ -4891,7 +4954,11 @@ defmodule BarkparkCloud.Web.Router do
   post "/v1/sites/:id/rollback" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       cond do
-        site.kind != "static" ->
+        # site-spawner W7 (charter D67): a NODE site rolls back the SAME way a
+        # static one does — instantly, by flipping the Caddy upstream back to the
+        # previous slot's still-running node process (no rebuild). Container sites
+        # keep the promote verb; static AND node both get the sub-second flip.
+        site.kind not in ["static", "node"] ->
           json(conn, 422, %{
             error: "not_rollbackable",
             detail:
@@ -5325,6 +5392,61 @@ defmodule BarkparkCloud.Web.Router do
               handle_verified_github_push(conn, site)
             else
               json(conn, 401, %{error: "bad_signature"})
+            end
+        end
+    end
+  end
+
+  # POST /v1/sites/webhooks/content-publish/:site_id — NO bearer auth (HMAC IS the
+  # auth). site-spawner W5 (charter D45/D46): the publish-to-live receiver.
+  #
+  # The box fires this off a content publish/unpublish/delete on the site's bound
+  # dataset (the box's existing Webhooks.Dispatcher delivers one signed POST per
+  # registered webhook row, each to its own :site_id endpoint — the fan-out is
+  # free, the routing is exact). The route:
+  #   1. Loads the Site by id (404 silently when missing or unconfigured).
+  #   2. Verifies x-barkpark-signature (`t=<unix>,v1=<hex>` = HMAC-SHA256 over
+  #      "<t>.<raw-body>", ±300s) against the site's own stored secret — a
+  #      StripeGateway-clone scheme, NOT the GitHub sha256= scheme. 401 on a bad
+  #      OR expired signature (no detail — don't help an attacker tune guesses).
+  #   3. On a valid delivery, enqueues the DEBOUNCED AutoDeployWorker for THIS
+  #      site (a burst coalesces to one rebuild; a publish mid-build mints one
+  #      trailing rebuild) and answers 202.
+  #
+  # Per-site (not per-dataset) on purpose (charter D45): (workspace,project,dataset)
+  # is NOT unique across the sites table, so a dataset→sites resolver would
+  # cross-trigger two boxes sharing default slugs; :site_id is the PK, unambiguous.
+  post "/v1/sites/webhooks/content-publish/:site_id" do
+    site_id = conn.path_params["site_id"]
+    site = Registry.get_site(site_id)
+
+    cond do
+      is_nil(site) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.reveal_site_content_secret(site) do
+          {:ok, nil} ->
+            # No content webhook configured — same shape as "not found" so a probe
+            # cannot distinguish unconfigured from nonexistent.
+            json(conn, 404, %{error: "not_found"})
+
+          :error ->
+            json(conn, 500, %{error: "secret_unreadable"})
+
+          {:ok, secret} when is_binary(secret) ->
+            raw = raw_request_body(conn)
+            sig = get_first_header(conn, "x-barkpark-signature")
+
+            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+              :ok ->
+                # Debounced (charter D44): N publishes in the window = ONE rebuild.
+                _ = Sites.AutoDeployWorker.enqueue(site.id)
+                json(conn, 202, %{ok: true, trigger: "content-auto"})
+
+              {:error, _reason} ->
+                # A bad OR expired signature is the same 401 — never leak which.
+                json(conn, 401, %{error: "bad_signature"})
             end
         end
     end
@@ -5990,6 +6112,41 @@ defmodule BarkparkCloud.Web.Router do
         case resolve_team_barkpark(conn.assigns.current_team, conn.path_params["id"]) do
           nil -> json(conn, 404, %{error: "not_found"})
           %Barkpark{} = bp -> json(conn, 200, DomainStatus.check(bp))
+        end
+    end
+  end
+
+  # GET /v1/sites/:id/domain-status → 200 {ok, checked_at, instance, domains} —
+  # the Site sibling of the barkparks checklist above (charter D56, CF-in-front
+  # wave). Probes each of the site's custom `domains` dns_found → points_here →
+  # tls → serving against the box it runs on (`site.barkpark.host`).
+  #
+  # MODE-AWARE: a :cf_proxied site (behind Cloudflare's orange cloud) resolves to
+  # CF edge anycast IPs, not the origin, so `points_here` is classified :proxied
+  # (informational) instead of compared — the mode is read from the Site record,
+  # NEVER inferred from the resolved IP. A :direct site (the default, and every
+  # standalone box) is the exact addr == box intersection, unchanged.
+  #
+  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # barkparks route (wrong-team / absent / malformed id are indistinguishable).
+  # Reads only public DNS + the box's own TLS/HTTP — no admin token, no zone read.
+  get "/v1/sites/:id/domain-status" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site ->
+            json(conn, 200, DomainStatus.check(Repo.preload(site, :barkpark)))
+
+          nil ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -6917,7 +7074,19 @@ defmodule BarkparkCloud.Web.Router do
   ## raw-catalog fetch) split per provider; the persisted row and the JSON are
   ## one shape.
 
+  # Kinds that own a normalized provisioning CATALOG (GET /v1/providers/:kind/…):
+  # a connected account can be listed as a provisioning menu. Cloudflare is NOT
+  # here — it is a free-superpower EDGE provider (DNS/TLS/CDN), not a box source,
+  # so it has no `build_provider_catalog` clause and must NOT expose a backing-less
+  # `GET /v1/providers/cloudflare/catalog`.
   @neutral_kinds ~w(hetzner azure)
+
+  # Kinds a team may CONNECT via POST /v1/providers. A SUPERSET of
+  # @neutral_kinds — cloudflare is connectable (it stores a verified credential)
+  # WITHOUT being catalog-backed, so the connect gate reads THIS list while the
+  # catalog route keeps reading @neutral_kinds. Keeping the two lists distinct is
+  # what lets cloudflare connect without leaking a menu route it can't serve.
+  @connectable_kinds ~w(hetzner azure cloudflare)
 
   # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
   # pure catalog and never in any response. Defined above the first use (module
@@ -6931,7 +7100,7 @@ defmodule BarkparkCloud.Web.Router do
     kind = conn.body_params["kind"]
     label = conn.body_params["label"]
 
-    with true <- kind in @neutral_kinds,
+    with true <- kind in @connectable_kinds,
          {:ok, credential} <- provider_credential(kind, conn.body_params),
          :ok <- preflight_provider(kind, credential) do
       # activity-audit-log: the credential row insert + a `provider.connected`
@@ -6978,6 +7147,53 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # DELETE /v1/providers/:kind body → 404-if-none → audited row delete. The label
+  # (for the audit metadata) is read BEFORE the delete; the delete + a
+  # `provider.disconnected` audit event commit atomically. The detail map carries
+  # ONLY the provider KIND and LABEL — NEVER the credential material.
+  defp disconnect_provider_request(conn, team, kind) do
+    label =
+      team
+      |> Registry.list_providers()
+      |> Enum.find(&(&1.kind == kind))
+      |> case do
+        nil -> :none
+        provider -> provider.label
+      end
+
+    case label do
+      :none ->
+        json(conn, 404, %{error: "not_found"})
+
+      label ->
+        audited =
+          Accounts.audit(
+            %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "provider.disconnected",
+              target_type: "provider",
+              metadata: %{kind: kind, label: label}
+            },
+            fn ->
+              case Registry.disconnect_provider(team, kind) do
+                :ok -> {:ok, :disconnected}
+                {:error, _} = err -> err
+              end
+            end
+          )
+
+        case audited do
+          {:ok, :disconnected} ->
+            push_event(team.id, "audit")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # The plaintext credential to validate + encrypt, per kind. hetzner: the token
   # string. azure: the four-field service-principal blob as JSON — the single
   # encrypted_token home holds it (Decision 4), so stray input is dropped here.
@@ -6992,6 +7208,17 @@ defmodule BarkparkCloud.Web.Router do
     case params["credentials"] do
       creds when is_map(creds) -> {:ok, Jason.encode!(azure_credential_blob(creds))}
       _ -> {:error, :bad_credentials}
+    end
+  end
+
+  # cloudflare: EITHER a bare API-token string (`token`, the common paste) OR a
+  # `{api_token, account_id?, zone_id?}` JSON blob (`credentials`). Both ride the
+  # single encrypted_token column (the Provider changeset validates each shape).
+  # A blob keeps only the three known fields — never stray request input.
+  defp provider_credential("cloudflare", params) do
+    case params["credentials"] do
+      creds when is_map(creds) -> {:ok, Jason.encode!(cloudflare_credential_blob(creds))}
+      _ -> {:ok, credential_string(params["token"])}
     end
   end
 
@@ -7010,6 +7237,25 @@ defmodule BarkparkCloud.Web.Router do
   defp credential_string(value) when is_binary(value), do: value
   defp credential_string(_), do: ""
 
+  # Keep ONLY the three known cloudflare blob fields (string keys) — never persist
+  # stray request input alongside the credential, and coerce any non-string value
+  # to "" so a malformed body fails the changeset shape gate cleanly (never a
+  # to_string/1 crash). account_id/zone_id are optional (dropped when blank/absent
+  # so the stored blob stays minimal), but a JSON blob MUST carry a non-blank
+  # api_token — the Provider changeset enforces that.
+  defp cloudflare_credential_blob(creds) do
+    %{"api_token" => credential_string(Map.get(creds, "api_token"))}
+    |> maybe_put_field(creds, "account_id")
+    |> maybe_put_field(creds, "zone_id")
+  end
+
+  defp maybe_put_field(blob, creds, field) do
+    case credential_string(Map.get(creds, field)) do
+      "" -> blob
+      value -> Map.put(blob, field, value)
+    end
+  end
+
   # Verify-before-save: a cheap authenticated call proving the credential works.
   # :ok to proceed; {:error, :unverified} to refuse the save with remediation.
   defp preflight_provider("hetzner", token) do
@@ -7024,6 +7270,32 @@ defmodule BarkparkCloud.Web.Router do
       _ -> {:error, :unverified}
     end
   end
+
+  # cloudflare: verify the API token is LIVE + active before saving. The token to
+  # verify is the bare credential, or a JSON blob's `api_token` — extracted here,
+  # then handed to the SSRF-guarded Cloudflare.Client (Fake in dev/test). Only
+  # {:ok, %{status: "active"}} proceeds; anything else refuses the save with the
+  # per-kind remediation. Never routes any private/loopback/metadata host (the
+  # Real client's shared Billing.HttpClient enforces verify_peer + no-redirect).
+  defp preflight_provider("cloudflare", credential) do
+    case Cloudflare.verify_token(cloudflare_api_token(credential)) do
+      {:ok, %{status: "active"}} -> :ok
+      _ -> {:error, :unverified}
+    end
+  end
+
+  # The API token to verify — a bare token IS the token; a JSON blob's `api_token`
+  # is. Falls back to the raw credential (a non-blob string) so a pasted token
+  # verifies directly; "" when there is nothing to verify (verify then fails
+  # closed and the changeset backstops the blank).
+  defp cloudflare_api_token(credential) when is_binary(credential) do
+    case Jason.decode(credential) do
+      {:ok, %{"api_token" => token}} when is_binary(token) -> token
+      _ -> credential
+    end
+  end
+
+  defp cloudflare_api_token(_), do: ""
 
   # A one-row authenticated server list — the cheapest proof the token is live.
   # Success is a 2xx from api.hetzner.cloud; anything else (401/403/transport)
@@ -8026,6 +8298,9 @@ defmodule BarkparkCloud.Web.Router do
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
+      # site-spawner W7: the node-slot port base (blue=base, green=base+1). Null on
+      # static/container sites. `port` above is the currently-live serving port.
+      port_base: s.port_base,
       current_deployment_id: s.current_deployment_id,
       # site-spawner W1: the content binding (which Barkpark dataset a static
       # build reads). read_token_encrypted is NEVER serialized — the plaintext
@@ -8082,6 +8357,11 @@ defmodule BarkparkCloud.Web.Router do
       branch: d.branch,
       preview_host: d.preview_host,
       preview_url: preview_url(d),
+      # site-spawner W5 (charter D49): deploy provenance — "manual" | "content-auto".
+      # The wish's "observable — content-triggered, not manual" bar reads off this;
+      # emitted from the SOLE base serializer so list/get/deploy-response/agent-claim
+      # all carry it.
+      trigger: d.trigger,
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
       console: d.console || [],
@@ -8304,6 +8584,122 @@ defmodule BarkparkCloud.Web.Router do
   #
   # `no_build_source` — the container refusal about artifacts and GitHub repos —
   # is exactly what a static site must NEVER hear: it is not what it builds from.
+  # cf-in-front deploy binding (D57). Returns `{:cont, site}` to let the normal
+  # deploy proceed (the standalone path — the overwhelming common case, since a
+  # deploy WITHOUT `via` is byte-identical to today), or `{:halt, conn}` after
+  # sending a fail-closed response when a Cloudflare cutover was asked for but
+  # can't be completed. The binding is persisted LAST (after the DNS write + the
+  # proxy flip both succeed) so a deploy NEVER half-binds: if any CF step fails
+  # the site's serving_mode is left untouched and the box keeps serving directly.
+  defp maybe_bind_cloudflare(conn, site) do
+    via = conn.body_params["via"]
+    domain = conn.body_params["domain"]
+
+    cond do
+      # No `via` (or any value other than "cloudflare") → standalone, untouched.
+      via != "cloudflare" ->
+        {:cont, site}
+
+      not is_binary(domain) or String.trim(domain) == "" ->
+        {:halt,
+         json(conn, 422, %{
+           error: "cloudflare_domain_required",
+           detail:
+             "`--via cloudflare` needs a `--domain` (the custom hostname to point at this box)"
+         })}
+
+      true ->
+        bind_cloudflare(conn, site, String.trim(domain))
+    end
+  end
+
+  defp bind_cloudflare(conn, site, domain) do
+    case Registry.resolve_cloudflare_credential(site.team_id) do
+      {:ok, %{token: token, zone_id: zone_id}} when is_binary(zone_id) and zone_id != "" ->
+        do_bind_cloudflare(conn, site, domain, token, zone_id)
+
+      {:ok, %{}} ->
+        {:halt,
+         json(conn, 422, %{
+           error: "cloudflare_zone_missing",
+           detail:
+             "the connected Cloudflare provider carries no zone_id — reconnect it with `bp provider add cloudflare` including the zone for #{domain}"
+         })}
+
+      {:error, :no_cloudflare_provider} ->
+        {:halt,
+         json(conn, 409, %{
+           error: "no_cloudflare_provider",
+           detail:
+             "connect Cloudflare first: `bp provider add cloudflare` (the box keeps serving standalone until you do)"
+         })}
+
+      {:error, _reason} ->
+        {:halt,
+         json(conn, 409, %{
+           error: "cloudflare_credential_unreadable",
+           detail:
+             "the stored Cloudflare credential could not be read — reconnect it with `bp provider add cloudflare`"
+         })}
+    end
+  end
+
+  defp do_bind_cloudflare(conn, site, domain, token, zone_id) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    origin = bp && bp.host
+
+    cond do
+      not is_binary(origin) or origin == "" ->
+        {:halt,
+         json(conn, 422, %{
+           error: "instance_no_origin",
+           detail:
+             "the instance hosting this site has no address yet — wait for it to finish provisioning before pointing a domain at it"
+         })}
+
+      true ->
+        # Point the domain at the box origin (A record), flip it PROXIED (orange
+        # cloud), and only THEN persist the binding — the token + zone_id are
+        # THREADED as arguments (D52), never global config.
+        with {:ok, %{record_id: record_id}} <-
+               Cloudflare.upsert_dns_record(token, zone_id, %{
+                 type: "A",
+                 name: domain,
+                 content: origin,
+                 proxied: true
+               }),
+             {:ok, %{proxied: true}} <- Cloudflare.ensure_zone_proxied(token, zone_id, record_id),
+             {:ok, bound_site} <-
+               Registry.set_cf_binding(site, %{
+                 serving_mode: "cf_proxied",
+                 tls_mode: "cf_internal",
+                 cf_domain: domain,
+                 cf_zone_id: zone_id,
+                 cf_record_id: record_id
+               }) do
+          _ =
+            Accounts.record_audit(%{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "site.cloudflare_bound",
+              target_type: "site",
+              target_id: site.id,
+              metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
+            })
+
+          {:cont, bound_site}
+        else
+          {:error, reason} ->
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_bind_failed",
+               detail:
+                 "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
+             })}
+        end
+    end
+  end
+
   defp deploy_static_site(conn, site) do
     bp = Registry.get_barkpark(site.barkpark_id)
 
@@ -8323,7 +8719,13 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       true ->
-        case Sites.Deploy.enqueue(site, bp) do
+        # site-spawner W4 (charter D36): `{force: true}` mints a genuinely new
+        # build on unchanged content (a nonce varies the build_id), so a re-deploy
+        # can actually re-run instead of returning the cached duplicate. Anything
+        # but a literal `true` keeps the idempotent default.
+        force = conn.body_params["force"] == true
+
+        case Sites.Deploy.enqueue(site, bp, force) do
           {:ok, deployment} ->
             _ =
               Accounts.record_audit(%{
@@ -8334,7 +8736,7 @@ defmodule BarkparkCloud.Web.Router do
                 target_id: deployment.id,
                 metadata: %{
                   site_id: site.id,
-                  kind: "static",
+                  kind: site.kind,
                   build_id: deployment.build_id
                 }
               })
@@ -8399,7 +8801,9 @@ defmodule BarkparkCloud.Web.Router do
       # symlink repoint — POST /v1/sites/:id/rollback, sub-second, no rebuild.
       # Without this branch the guard below would 422 no_build_source on every
       # static row (no artifact, no repo) — the SAME lie the deploy route told.
-      site.kind == "static" ->
+      # site-spawner W7: a NODE site is likewise never promoted (it rolls back by
+      # flipping the Caddy upstream to the previous slot), so it takes this arm too.
+      site.kind in ["static", "node"] ->
         json(conn, 422, %{
           error: "not_promotable",
           detail:
@@ -8546,6 +8950,11 @@ defmodule BarkparkCloud.Web.Router do
       {:bootstrap_workspace, ["bootstrap_workspace", "workspace"]},
       {:bootstrap_project, ["bootstrap_project", "project"]},
       {:bootstrap_dataset, ["bootstrap_dataset", "dataset"]},
+      # site-spawner W4 (charter D35): the content type the build reads. OPTIONAL
+      # — a create with no `doc_type` keeps the schema default "post"; it is NOT
+      # part of require_content_binding (the content binding is workspace/project/
+      # dataset, doc_type just selects which type within it).
+      {:doc_type, ["doc_type"]},
       {:read_token, ["read_token"]}
     ]
     |> Enum.reduce(attrs, fn {key, params}, acc ->
@@ -8578,7 +8987,30 @@ defmodule BarkparkCloud.Web.Router do
   # fetches from workspace/project/dataset and has literally nothing to render
   # without all three, so the honest answer is a 422 at the door naming the flag.
   # The reaper's static pass stays as the safety net for rows that predate this.
-  defp require_content_binding("static", attrs) do
+  defp require_content_binding("static", attrs), do: require_content_triple(attrs)
+
+  # site-spawner W7 (charter D62): a NODE site is content-bound EXACTLY like a
+  # static one — its SSR build fetches from workspace/project/dataset and has
+  # literally nothing to render without all three. It must NOT fall through to the
+  # `_kind -> :ok` catch-all (which is for container BYO-repo sites): an unbound
+  # node site is the same ghost the static clause exists to kill.
+  defp require_content_binding("node", attrs), do: require_content_triple(attrs)
+
+  defp require_content_binding(_kind, _attrs), do: :ok
+
+  # site-spawner W7 (charter D68): fold the allocated node-slot port base into the
+  # create attrs for a node site. Non-node sites pass through untouched (no
+  # port_base). An exhausted window fails closed — no portless node row is minted.
+  defp allocate_node_port("node", attrs) do
+    case Sites.NodePortAllocator.allocate() do
+      {:ok, base} -> {:ok, Map.put(attrs, :port_base, base)}
+      {:error, :exhausted} -> {:error, :ports_exhausted}
+    end
+  end
+
+  defp allocate_node_port(_kind, attrs), do: {:ok, attrs}
+
+  defp require_content_triple(attrs) do
     missing =
       [
         {:bootstrap_workspace, "workspace"},
@@ -8591,9 +9023,9 @@ defmodule BarkparkCloud.Web.Router do
     if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
   end
 
-  defp require_content_binding(_kind, _attrs), do: :ok
-
-  defp mint_site_read_token(bp, %{kind: "static"} = attrs, slug) do
+  # site-spawner W7 (charter D62): a node site is content-bound like a static one,
+  # so it mints the SAME public-read token over the SAME scoped route.
+  defp mint_site_read_token(bp, %{kind: kind} = attrs, slug) when kind in ["static", "node"] do
     ws = attrs[:bootstrap_workspace]
     proj = attrs[:bootstrap_project]
     ds = attrs[:bootstrap_dataset]

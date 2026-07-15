@@ -1,0 +1,22 @@
+{
+  "accepted_paper_and_adversarial_count": 16,
+  "class_count": 6,
+  "failures": [],
+  "first_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+  "first_transformations_sha256": "3ea294a03e2b972a6eabaca8de9d526af0da9ff5e66e7fef9d7760da48f8d47b",
+  "idempotent": true,
+  "measured_at": "2026-07-15T02:47:23Z",
+  "measurement_context": "task 7 replay-cleanliness rework; frozen representative local wall-clock sample",
+  "quarantine_count": 2,
+  "schema_version": "legendary-e04-verification/v2",
+  "second_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+  "second_transformations_sha256": "3ea294a03e2b972a6eabaca8de9d526af0da9ff5e66e7fef9d7760da48f8d47b",
+  "status": "PASS",
+  "task_count": 18,
+  "timing_policy": "volatile replay timing is stdout-only; committed measured timing is frozen in verification.json and excluded from regenerated deterministic bytes",
+  "timings_seconds": [
+    0.201478,
+    0.215131
+  ],
+  "total_fixture_count": 36
+}

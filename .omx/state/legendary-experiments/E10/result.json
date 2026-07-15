@@ -1,0 +1,70 @@
+{
+  "artifact_hashes": {
+    "candidate-provenance.json": "128f5a55502feb6ad88171dbcac21a6881590978bf41ebff86194e8a9af41f21",
+    "frozen/candidate-rubric.json": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4",
+    "frozen/thresholds.json": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+    "next-complete-three.json": "43faac8a46c08277443fdad9beb138295628338266db3af84e5f9f6f7dcb8387",
+    "rejected-candidate-decision-record.json": "52961cd28b14ce6295197530a5a30ea7df5d86b9db2afddac08c80cc63cc9424",
+    "threshold-outcomes.json": "27933f690470dce3579a8f345f5973e720f79fd589ac848d9437db256f868629",
+    "timing.json": "fffde6b0809d841bfdc6c6065229d93c275d7316d6a027630dd7afbec6cef047"
+  },
+  "assignment_id": "E10",
+  "builder_gate": {
+    "command": "python3 .omx/state/legendary-experiments/E10/scripts/builder_gate.py",
+    "expected_exit": 42,
+    "expected_output": "E10 BUILDER GATE BLOCKED",
+    "status": "BLOCKED"
+  },
+  "candidate": {
+    "candidate_id": "candidate-preservation-envelope",
+    "candidate_version": "E05/legendary-e05-result/v1",
+    "content_sha256": "076a273805c39b98cfad66575fd1a1d9f1c974aef91aace1ddfb9faf9739a739",
+    "definition_sha256": "9cd9a837f38d2c0e836007b1a78722a2ff69848e5bdab3af63949c6df1377480",
+    "runnable_output_sha256": "7a97214f78f53a8c4c16d5d753990fa861e0475aac89e01573fe37b17a96ef5c",
+    "source_assignment": "E05",
+    "status": "PROVISIONAL_BLOCKED_REWORK"
+  },
+  "capability_blocks": [
+    "authenticated Studio content proof unavailable",
+    "no frozen unsupported-alias fixture exists in E03",
+    "paired blind records are not sealed before scoring",
+    "real TUI/narrow-width assistive-technology proof unavailable",
+    "real-client email proof unavailable",
+    "typed native-subagent spawn unavailable on this worker tool surface; untyped substitutes forbidden"
+  ],
+  "counts": {
+    "adversarial": 6,
+    "candidates_blocked_rework": 1,
+    "candidates_considered": 3,
+    "candidates_rejected": 2,
+    "frozen_fixtures": 36,
+    "frozen_thresholds": 13,
+    "next_round_assignments": 3,
+    "papers": 12,
+    "tasks": 18,
+    "thresholds_blocked_or_failed": 10,
+    "thresholds_passed": 3,
+    "winners": 0
+  },
+  "probes": [
+    "Reconciled E03 frozen rubric and thresholds by physical SHA-256.",
+    "Reconciled E07-E09 candidate decisions and capability blocks.",
+    "Pinned E05 semantic, definition, and runnable-output hashes.",
+    "Executed deterministic E10 rebuild and fail-closed builder gate in scripts/verify.py."
+  ],
+  "schema_version": "legendary-e10-result/v1",
+  "stop_condition": "Triggered: every Round-2 candidate failed or remained blocked on at least one frozen hard gate. Start the exact complete-three rework round in next-complete-three.json; do not begin pilot or builder fan-out.",
+  "threshold_outcomes_path": "threshold-outcomes.json",
+  "timing_path": "timing.json",
+  "validation": {
+    "command": "python3 .omx/state/legendary-experiments/E10/scripts/verify.py",
+    "expected_output": "E10 VERIFY PASS",
+    "status": "PASS"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "quality": "BLOCKED",
+    "reason": "E05 is the strongest provisional candidate but does not clear the frozen hard gates; E04 and E06 are rejected.",
+    "winner_selected": false
+  }
+}

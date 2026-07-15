@@ -63,6 +63,10 @@ import {
 import type { ConnectorRegistry } from "../connector/registry.js";
 import type { ConnectorInstall, InstallsLookup } from "../connector/types.js";
 import {
+  handleLinearOAuthCallback,
+  type LinearOAuthCallbackDeps,
+} from "../oauth/linear-oauth.js";
+import {
   handleSlackOAuthCallback,
   type SlackOAuthCallbackDeps,
 } from "../oauth/slack-oauth.js";
@@ -144,6 +148,18 @@ export interface WebhookServerOptions {
    * `state`, not by network topology.
    */
   slackOAuth?: SlackOAuthCallbackDeps;
+  /**
+   * The Connect-to-Linear OAuth callback deps (D77/D78) — the OUTBOUND (tool)
+   * OAuth, the mirror of `slackOAuth` for a TOOL connector. ABSENT ⇒ the callback
+   * route is NOT MOUNTED and answers the same opaque 404 as any unknown path — the
+   * honest state on an instance with no Linear OAuth app configured. Present only
+   * when the bridge has Linear app credentials AND a connect secret (see `index.ts`).
+   *
+   * Like `slackOAuth` this is PUBLIC (Linear redirects a browser to it) and is
+   * NEVER loopback-gated: it authenticates by the signed connect ticket in `state`,
+   * not by network topology.
+   */
+  linearOAuth?: LinearOAuthCallbackDeps;
   /** Node's `server.headersTimeout`, ms. Default 20 s. */
   headersTimeoutMs?: number;
   /** Node's `server.requestTimeout`, ms. Default 30 s. MUST be >= headersTimeout. */
@@ -278,20 +294,46 @@ function isHealthRoute(rawTarget: string, pathPrefix: string): boolean {
  * mounted elsewhere would have to duplicate all of it, and the copy is where the
  * traversal bug would live.
  */
+interface ConnectRoute {
+  action: ConnectAction;
+  /** The provider segment, present only on `tool-headers/:provider` (D69). */
+  pathProvider?: string;
+}
+
 function parseConnectRoute(
   rawTarget: string,
   pathPrefix: string,
-): ConnectAction | null {
+): ConnectRoute | null {
   const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
   if (rest === null) return null;
 
-  if (rest.length === 1 && rest[0] === "connect") return "connect";
-  if (rest.length === 1 && rest[0] === "disconnect") return "disconnect";
+  if (rest.length === 1 && rest[0] === "connect") return { action: "connect" };
+  if (rest.length === 1 && rest[0] === "disconnect") {
+    return { action: "disconnect" };
+  }
   if (rest.length === 2 && rest[0] === "connect" && rest[1] === "validate") {
-    return "validate";
+    return { action: "validate" };
   }
   if (rest.length === 2 && rest[0] === "connect" && rest[1] === "pending") {
-    return "pending";
+    return { action: "pending" };
+  }
+  // The OUTBOUND (tool) direction (D69/D71): list a workspace's tool connectors,
+  // and open ONE provider's sealed PAT at MCP-connect. Same loopback gate below.
+  if (
+    rest.length === 2 &&
+    rest[0] === "connect" &&
+    rest[1] === "tool-descriptors"
+  ) {
+    return { action: "tool-descriptors" };
+  }
+  if (
+    rest.length === 3 &&
+    rest[0] === "connect" &&
+    rest[1] === "tool-headers" &&
+    rest[2] !== undefined &&
+    rest[2] !== ""
+  ) {
+    return { action: "tool-headers", pathProvider: rest[2] };
   }
   return null;
 }
@@ -312,6 +354,30 @@ function isSlackOAuthCallbackRoute(rawTarget: string, pathPrefix: string): boole
     rest.length === 3 &&
     rest[0] === "oauth" &&
     rest[1] === "slack" &&
+    rest[2] === "callback"
+  );
+}
+
+/**
+ * `GET {prefix}/oauth/linear/callback` — the Connect-to-Linear OAuth callback
+ * (D77/D78), the OUTBOUND (tool) sibling of the Slack callback above.
+ *
+ * A FIFTH route class, identical in shape to the Slack one: PUBLIC and `GET`,
+ * authenticated by a signed connect ticket in `state` (crypto, not network
+ * topology), never loopback-gated. It reuses the SAME hardened path parsing
+ * (`segmentsUnderPrefix` — dot segments rejected after percent-decoding) so the
+ * traversal defence is not duplicated.
+ */
+function isLinearOAuthCallbackRoute(
+  rawTarget: string,
+  pathPrefix: string,
+): boolean {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  return (
+    rest !== null &&
+    rest.length === 3 &&
+    rest[0] === "oauth" &&
+    rest[1] === "linear" &&
     rest[2] === "callback"
   );
 }
@@ -397,11 +463,14 @@ function sendOAuthPage(
   status: number,
   installed: boolean,
   error: string | undefined,
+  providerLabel: string,
 ): void {
   if (res.writableEnded) return;
-  const heading = installed ? "Connected to Slack" : "Could not connect Slack";
+  const heading = installed
+    ? `Connected to ${providerLabel}`
+    : `Could not connect ${providerLabel}`;
   const detail = installed
-    ? "Your Slack workspace is now connected to Barkpark. You can close this tab and return to Studio."
+    ? `Your ${providerLabel} account is now connected to Barkpark. You can close this tab and return to Studio.`
     : escapeHtml(
         error ??
           "The connect could not be completed. Return to Studio and try again.",
@@ -575,6 +644,7 @@ export function createWebhookRequestHandler(
     mounts,
     connect,
     slackOAuth,
+    linearOAuth,
     publicBaseUrl,
     onError,
     waitUntil = defaultWaitUntil,
@@ -638,11 +708,13 @@ export function createWebhookRequestHandler(
       // The connect loop (D50/D51). Every refusal below is the SAME opaque 404 the
       // webhook demux gives, and it is reached BEFORE any body is read whenever
       // that is possible at all.
-      const connectAction = parseConnectRoute(req.url ?? "/", pathPrefix);
-      if (connectAction !== null) {
+      const connectRoute = parseConnectRoute(req.url ?? "/", pathPrefix);
+      if (connectRoute !== null) {
         // Not mounted (no CONNECTORS_CONNECT_SECRET), came through the proxy, or
         // arrived as a GET: indistinguishable from "there is no such route". A
-        // stranger cannot even learn that a connect seam exists here.
+        // stranger cannot even learn that a connect seam exists here. The tool
+        // routes (D69) ride this SAME loopback gate — a `tool-headers` fetch is
+        // never reachable from the public path.
         if (connect === undefined || isProxied(req) || method !== "POST") {
           drain(req);
           notFound(res);
@@ -661,9 +733,10 @@ export function createWebhookRequestHandler(
         }
 
         const reply = await handleConnectRequest(
-          connectAction,
+          connectRoute.action,
           read.body.toString("utf8"),
           connect,
+          connectRoute.pathProvider,
         );
         // `null` => the handler declined (unknown/unconnectable provider, or a
         // cross-tenant disconnect). It never spells the 404 itself, so it cannot
@@ -694,7 +767,28 @@ export function createWebhookRequestHandler(
 
         const request = buildRequest(req, undefined, publicBaseUrl);
         const result = await handleSlackOAuthCallback(request, slackOAuth);
-        sendOAuthPage(res, result.status, result.installed, result.error);
+        sendOAuthPage(res, result.status, result.installed, result.error, "Slack");
+        return;
+      }
+
+      // THE CONNECT-TO-LINEAR OAUTH CALLBACK (D77/D78) — the OUTBOUND (tool)
+      // sibling of the Slack callback above, and identical in shape: PUBLIC and
+      // GET (Linear redirects a browser here through Caddy, so x-forwarded-* is
+      // ALWAYS present — an isProxied gate would 404 it permanently), authenticated
+      // by the signed connect ticket in `state`, never by loopback. No body is read.
+      if (isLinearOAuthCallbackRoute(req.url ?? "/", pathPrefix)) {
+        drain(req);
+        // Not configured (no Linear app / no connect secret) ⇒ indistinguishable
+        // from "there is no such route". A non-GET is the same: a browser redirect
+        // is a GET, and anything else is a probe.
+        if (linearOAuth === undefined || method !== "GET") {
+          notFound(res);
+          return;
+        }
+
+        const request = buildRequest(req, undefined, publicBaseUrl);
+        const result = await handleLinearOAuthCallback(request, linearOAuth);
+        sendOAuthPage(res, result.status, result.installed, result.error, "Linear");
         return;
       }
 

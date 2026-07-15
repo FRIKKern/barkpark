@@ -63,10 +63,19 @@ defmodule Barkpark.Sites.DeployRunner do
 
   use GenServer
 
+  require Logger
+
   alias Barkpark.Sites.DeployRequest
+  alias Barkpark.Sites.Provisioner
 
   @default_command {"bash", ["deploy/site-deploy.sh"]}
   @default_rollback_command {"bash", ["deploy/site-deploy.sh", "--rollback"]}
+  # The node-slot SSR runtime target (charter D63): the SAME 6-stage state
+  # machine, but the artifact is a long-running node process, so it drives a
+  # SEPARATE engine script (`deploy/site-deploy-node.sh`) that boots + health-
+  # probes + Caddy-upstream-flips a node port instead of swapping a symlink.
+  @default_node_command {"bash", ["deploy/site-deploy-node.sh"]}
+  @default_node_rollback_command {"bash", ["deploy/site-deploy-node.sh", "--rollback"]}
   @default_max_log_lines 500
   # 30 min — an `npm ci` + build on a small box, with headroom. A run that
   # outlives it is force-closed so a wedged port can't hold the slug's slot
@@ -255,6 +264,27 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   defp start_run(state, %DeployRequest{} = req) do
+    # PROVISION FIRST (charter D33/D34): a content-bound static site has no repo
+    # to check out, so its source must be materialized from the shipped template
+    # BEFORE the deploy port opens — otherwise site-deploy.sh walks PLAN and dies
+    # at BUILD with `no site source dir …/src` (exit 10). Deploy only; a rollback
+    # is a symlink repoint whose source is already there (Provisioner no-ops it).
+    # Fail-closed: a provision failure short-circuits EXACTLY like an open_port
+    # failure — no Port, no run recorded, `{:error, :start_failed}`.
+    case Provisioner.provision(req) do
+      :ok ->
+        open_port_and_record(state, req)
+
+      {:error, {:provision_failed, reason}} ->
+        Logger.warning(
+          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{inspect(reason)}"
+        )
+
+        {:reply, {:error, :start_failed}, state}
+    end
+  end
+
+  defp open_port_and_record(state, %DeployRequest{} = req) do
     case open_port(req) do
       {:ok, port} ->
         schedule_run_deadline(port)
@@ -264,6 +294,7 @@ defmodule Barkpark.Sites.DeployRunner do
           build_id: req.build_id,
           content_rev: req.content_rev,
           mode: req.mode,
+          runtime_target: req.runtime_target,
           state: :running,
           port: port,
           stages: [],
@@ -288,7 +319,7 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   defp open_port(%DeployRequest{} = req) do
-    {exe, args} = command_for(req.mode)
+    {exe, args} = command_for(req.mode, req.runtime_target)
 
     case System.find_executable(exe) do
       nil ->
@@ -317,14 +348,23 @@ defmodule Barkpark.Sites.DeployRunner do
     error -> {:error, error}
   end
 
-  # Each mode resolves its own injectable command (tests stub these). The
-  # engine takes slug/build_id/content_rev from the ENVIRONMENT (see
-  # deploy/site-deploy.sh: SITE_SLUG / BUILD_ID / CONTENT_REV), so the MODE is
-  # what argv carries — `--rollback` or nothing.
-  defp command_for(:rollback),
+  # Each {mode, runtime_target} cell resolves its own injectable command (tests
+  # stub these). The engine takes slug/build_id/content_rev from the ENVIRONMENT
+  # (see deploy/site-deploy.sh: SITE_SLUG / BUILD_ID / CONTENT_REV), so argv
+  # carries only the MODE (`--rollback` or nothing); the RUNTIME TARGET (charter
+  # D63) picks which engine script runs — the static symlink-swap machine or the
+  # node-slot SSR machine. runtime_target is a CLOSED enum validated upstream
+  # (DeployRequest.validate_runtime_target/1), so these four clauses are total.
+  defp command_for(:rollback, :node),
+    do: Keyword.get(config(), :node_rollback_command, @default_node_rollback_command)
+
+  defp command_for(:rollback, _static),
     do: Keyword.get(config(), :rollback_command, @default_rollback_command)
 
-  defp command_for(_deploy),
+  defp command_for(_deploy, :node),
+    do: Keyword.get(config(), :node_command, @default_node_command)
+
+  defp command_for(_deploy, _static),
     do: Keyword.get(config(), :command, @default_command)
 
   # Configured working dir, or the repo root: the BEAM's cwd is api/ under both
@@ -533,6 +573,7 @@ defmodule Barkpark.Sites.DeployRunner do
       build_id: nil,
       content_rev: nil,
       mode: nil,
+      runtime_target: nil,
       stages: [],
       exit_code: nil,
       failure_reason: nil,
@@ -550,6 +591,7 @@ defmodule Barkpark.Sites.DeployRunner do
       build_id: run.build_id,
       content_rev: run.content_rev,
       mode: run.mode,
+      runtime_target: run.runtime_target,
       stages: run.stages,
       exit_code: run.exit_code,
       failure_reason: run.failure_reason,

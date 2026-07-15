@@ -1,0 +1,118 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "Any new live-mounted surface that can serve reads under an UNCLAIMED grant also broadcasts revoke on a topic that surface subscribes to (or the surface is restricted to claimed-only grants)",
+          "evidence": "no such surface exists as of 2026-07-10; nothing to point at",
+          "met": false
+        },
+        {
+          "criterion": "broadcast_revoked/1 gains a second branch (or companion) covering the unbound-grant case, exercised by a test that mounts a hypothetical unclaimed-grant session and asserts revoke propagates",
+          "evidence": "not built, not scheduled",
+          "met": false
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "DEFENSE-IN-DEPTH RESIDUAL of the airdrop-grants epic (charter D12/D19) — explicitly NOT a confirmed leak, NOT part of the deny-matrix findings, NOT blocking epic closure. Filed standalone so the closed epic keeps zero open children. Barkpark.Access.broadcast_revoked/1 (api/lib/barkpark/access.ex:559-565) publishes {:airdrop_revoked} on user:#{grantee_user_id} only when the revoked grant has a bound grantee_user_id (when is_binary(uid) guard)"
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "0 of 2 acceptance criteria are recorded as met."
+              }
+            ],
+            "id": "state-callout",
+            "title": "open",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              "Any new live-mounted surface that can serve reads under an UNCLAIMED grant also broadcasts revoke on a topic that surface subscribes to (or the surface is restricted to claimed-only grants)",
+              "broadcast_revoked/1 gains a second branch (or companion) covering the unbound-grant case, exercised by a test that mounts a hypothetical unclaimed-grant session and asserts revoke propagates"
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "DEFENSE-IN-DEPTH RESIDUAL of the airdrop-grants epic (charter D12/D19) — explicitly NOT a confirmed leak, NOT part of the deny-matrix findings, NOT blocking epic closure. Filed standalone so the closed epic keeps zero open children.\n\nBarkpark.Access.broadcast_revoked/1 (api/lib/barkpark/access.ex:559-565) publishes {:airdrop_revoked} on user:#{grantee_user_id} only when the revoked grant has a bound grantee_user_id (when is_binary(uid) guard). An UNCLAIMED grant (no bound user) revokes silently — broadcast_revoked(_grant), do: :ok.\n\nVerified inert on merged main (post #2177/#2145), stronger than the original charter phrasing:\n- Only a CLAIMED grant has a bound grantee_user_id (claiming requires an authenticated User — access.ex:204 claim/2 sets grantee_user_id + claimed_at atomically). There is no token-grantee or anonymous-grantee concept in the Grant schema — grants bind exclusively to a User id.\n- StudioLive.mount/3 (live/studio/studio_live.ex:71-79) subscribes to user:#{uid} ONLY for socket.assigns[:current_user] matching %{id: uid} when is_binary(uid) — token-only and anonymous Studio sockets never subscribe, so they can never miss a revoke signal they were never eligible to receive.\n- Token and anonymous CallerContexts NEVER CARRY GRANTS AT ALL (caller_context.ex from_token/1 line 49 and anonymous/0 line 42 never invoke resolve_grants; only from_user/2 does) — structurally nothing to go stale for those principals.\n- Authenticated-User HTTP reads rebuild CallerContext fresh every request (require_user_session.ex:57 -> CallerContext.from_user -> Access.list_active_grants_for_grantee, active/not-revoked/not-expired/not-spent filtered in-query) — a revoke is visible on the very next HTTP request regardless of this function.\n\nThe only theoretical exposure is a FUTURE surface that mounts a live (LiveView/socket) session keyed to an UNCLAIMED grant (e.g. a pre-claim preview desk). No such surface exists today. Parked deliberately; do not build without one.",
+      "github": {
+        "issue": 2270,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 95174383,
+        "synced_rev": "05f736000dae1e254f900b62106e29b2"
+      },
+      "kind": "task",
+      "labels": [
+        "proj:airdrop-grants",
+        "defense-in-depth"
+      ],
+      "lifecycle_status": "open",
+      "priority": 3
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 2
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "ag-broadcast-revoked-residual",
+    "execution_policy": null,
+    "id": "3e5e0900-65bf-40af-83ff-eea7a51335fd",
+    "inserted_at": "2026-07-10T17:26:32.919402Z",
+    "kind": "task",
+    "labels": [
+      "proj:airdrop-grants",
+      "defense-in-depth"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 3,
+    "rev": "8a84154f37b72c3bb0ed7b05696a95aa",
+    "status": "published",
+    "title": "broadcast_revoked/1 has zero LiveView blast radius for unbound-grant sockets — defense-in-depth residual, NOT a confirmed leak",
+    "type": "task",
+    "updated_at": "2026-07-12T11:00:30.059937Z"
+  },
+  "ok": true
+}

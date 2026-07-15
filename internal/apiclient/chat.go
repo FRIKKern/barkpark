@@ -54,12 +54,16 @@ import (
 // them to nil forever while missing the real ones. Timestamps are `inserted_at`,
 // not created_at.
 type ChatSession struct {
-	ID     string `json:"id"`
-	Title  string `json:"title,omitempty"`
-	Status string `json:"status,omitempty"`
-	Cwd    string `json:"cwd,omitempty"`
-	Mode   string `json:"mode,omitempty"`
-	Model  string `json:"model,omitempty"`
+	ID                string `json:"id"`
+	Provider          string `json:"provider,omitempty"`
+	ExecutionTarget   string `json:"execution_target,omitempty"`
+	ExecutionHostID   string `json:"execution_host_id,omitempty"`
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	Title             string `json:"title,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Cwd               string `json:"cwd,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	Model             string `json:"model,omitempty"`
 
 	// D14 continuity round-trip set (present on GET :id, absent on list).
 	// RailSnapshot stays raw JSON so an unknown future rail key never breaks the
@@ -151,6 +155,9 @@ func (m ChatMessage) Resolved() bool {
 // and last_active_at are what the picker renders per row.
 type ChatSessionSummary struct {
 	ID               string `json:"id"`
+	Provider         string `json:"provider,omitempty"`
+	ExecutionTarget  string `json:"execution_target,omitempty"`
+	ExecutionHostID  string `json:"execution_host_id,omitempty"`
 	Title            string `json:"title,omitempty"`
 	Status           string `json:"status,omitempty"`
 	Summary          string `json:"summary,omitempty"`
@@ -259,15 +266,37 @@ func (c *Client) chatSend(method, endpoint string, payload interface{}, okStatus
 // here even though the returned session may report a read-only Cwd. Returns the
 // full session JSON the server mints (201).
 func (c *Client) CreateChatSession(mode, model, effort string) (ChatSession, error) {
+	return c.CreateChatSessionWithOptions(ChatSessionCreateOptions{Mode: mode, Model: model, Effort: effort})
+}
+
+type ChatSessionCreateOptions struct {
+	Provider        string `json:"provider,omitempty"`
+	ExecutionTarget string `json:"execution_target,omitempty"`
+	ExecutionHostID string `json:"execution_host_id,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+}
+
+func (c *Client) CreateChatSessionWithOptions(opts ChatSessionCreateOptions) (ChatSession, error) {
 	payload := map[string]string{}
-	if mode != "" {
-		payload["mode"] = mode
+	if opts.Provider != "" {
+		payload["provider"] = opts.Provider
 	}
-	if model != "" {
-		payload["model"] = model
+	if opts.ExecutionTarget != "" {
+		payload["execution_target"] = opts.ExecutionTarget
 	}
-	if effort != "" {
-		payload["effort"] = effort
+	if opts.ExecutionHostID != "" {
+		payload["execution_host_id"] = opts.ExecutionHostID
+	}
+	if opts.Mode != "" {
+		payload["mode"] = opts.Mode
+	}
+	if opts.Model != "" {
+		payload["model"] = opts.Model
+	}
+	if opts.Effort != "" {
+		payload["effort"] = opts.Effort
 	}
 	body, err := c.chatSend(http.MethodPost, c.chatURL("/sessions"), payload, http.StatusCreated, http.StatusOK)
 	if err != nil {

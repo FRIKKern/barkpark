@@ -39,10 +39,14 @@ defmodule BarkparkCloud.Cloudflare.Fake do
   end
 
   @impl true
-  def upsert_dns_record(zone_id, record) when is_binary(zone_id) and is_map(record) do
+  def upsert_dns_record(token, zone_id, record)
+      when is_binary(token) and is_binary(zone_id) and is_map(record) do
     name = record[:name] || record["name"]
 
     cond do
+      fail?(token) ->
+        {:error, :invalid_token}
+
       fail?(zone_id) ->
         {:error, :upsert_failed}
 
@@ -66,9 +70,12 @@ defmodule BarkparkCloud.Cloudflare.Fake do
   end
 
   @impl true
-  def ensure_zone_proxied(zone_id, record_id)
-      when is_binary(zone_id) and is_binary(record_id) do
+  def ensure_zone_proxied(token, zone_id, record_id)
+      when is_binary(token) and is_binary(zone_id) and is_binary(record_id) do
     cond do
+      fail?(token) ->
+        {:error, :invalid_token}
+
       fail?(zone_id) ->
         {:error, :proxy_failed}
 

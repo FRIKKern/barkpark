@@ -45,8 +45,13 @@ defmodule BarkparkCloud.Registry.SiteTest do
       assert Ecto.Changeset.get_field(cs, :kind) == "container"
     end
 
-    test "the two legal kinds are container and static" do
-      assert Site.kinds() == ~w(container static)
+    test "the legal kinds are container, static, and node" do
+      assert Site.kinds() == ~w(container static node)
+    end
+
+    test "node is a valid kind (site-spawner W7 — the node-slot SSR runtime target)" do
+      cs = changeset(kind: "node", framework: "nextjs")
+      assert cs.valid?, inspect(errors_on(cs))
     end
 
     test "container is a valid kind" do
@@ -81,6 +86,19 @@ defmodule BarkparkCloud.Registry.SiteTest do
       end
     end
 
+    test "node allows nextjs, nuxt, and sveltekit (site-spawner W7 — the container frameworks)" do
+      for fw <- ~w(nextjs nuxt sveltekit) do
+        cs = changeset(kind: "node", framework: fw)
+        assert cs.valid?, "node+#{fw} should be legal: #{inspect(errors_on(cs))}"
+      end
+    end
+
+    test "astro (a static framework) on a node site is rejected" do
+      cs = changeset(kind: "node", framework: "astro")
+      refute cs.valid?
+      assert %{framework: [_ | _]} = errors_on(cs)
+    end
+
     test "astro on a container site is rejected" do
       cs = changeset(kind: "container", framework: "astro")
       refute cs.valid?
@@ -105,6 +123,8 @@ defmodule BarkparkCloud.Registry.SiteTest do
     test "frameworks_for_kind maps each kind to its sublist" do
       assert Site.frameworks_for_kind("static") == ~w(astro hugo static)
       assert Site.frameworks_for_kind("container") == ~w(nextjs nuxt sveltekit)
+      # site-spawner W7: node reuses the container frameworks (SSR from content).
+      assert Site.frameworks_for_kind("node") == ~w(nextjs nuxt sveltekit)
       # Unknown kind → the full union (so the kind-inclusion check, not an empty
       # allow-list, is what fails).
       assert Site.frameworks_for_kind("bogus") == Site.frameworks()
@@ -135,6 +155,20 @@ defmodule BarkparkCloud.Registry.SiteTest do
     end
   end
 
+  describe "doc_type (charter D35)" do
+    test "defaults to the canonical 'post' when unspecified" do
+      cs = changeset(kind: "static", framework: "astro")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :doc_type) == "post"
+    end
+
+    test "an explicit doc_type is cast onto the site" do
+      cs = changeset(kind: "static", framework: "astro", doc_type: "paper")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :doc_type) == "paper"
+    end
+  end
+
   describe "read_token_encrypted (encrypted-at-rest field)" do
     test "the changeset accepts ciphertext as the read_token_encrypted binary" do
       cipher = <<1, 2, 3, 4>>
@@ -158,6 +192,127 @@ defmodule BarkparkCloud.Registry.SiteTest do
       assert cs.valid?
       refute Map.has_key?(cs.changes, :read_token)
       assert Ecto.Changeset.get_field(cs, :read_token_encrypted) == nil
+    end
+  end
+
+  describe "CF edge binding — schema defaults (charter D51/D58 standalone-degrade)" do
+    test "serving_mode defaults to direct (the standalone path)" do
+      cs = changeset(kind: "static", framework: "astro")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :serving_mode) == "direct"
+    end
+
+    test "tls_mode defaults to on_demand (today's box Caddy ACME)" do
+      cs = changeset(kind: "static", framework: "astro")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :tls_mode) == "on_demand"
+    end
+
+    test "a default site carries no CF handles (all nil)" do
+      cs = changeset(kind: "container", framework: "nextjs")
+      assert cs.valid?
+      assert Ecto.Changeset.get_field(cs, :cf_domain) == nil
+      assert Ecto.Changeset.get_field(cs, :cf_zone_id) == nil
+      assert Ecto.Changeset.get_field(cs, :cf_record_id) == nil
+    end
+
+    test "the mode enums expose their legal values" do
+      assert Site.serving_modes() == ~w(direct cf_proxied)
+      assert Site.tls_modes() == ~w(on_demand cf_internal cf_origin_ca)
+    end
+
+    test "the main changeset does NOT cast CF columns (containment — narrow changeset owns them)" do
+      # The edge binding is written ONLY through cf_binding_changeset/2, never the
+      # broad create/update path — so a create call can't back-door a CF binding.
+      cs =
+        changeset(
+          kind: "static",
+          framework: "astro",
+          cf_domain: "blog.example.com",
+          serving_mode: "cf_proxied"
+        )
+
+      assert cs.valid?
+      refute Map.has_key?(cs.changes, :cf_domain)
+      refute Map.has_key?(cs.changes, :serving_mode)
+      # …and the resolved values stay at the standalone defaults.
+      assert Ecto.Changeset.get_field(cs, :cf_domain) == nil
+      assert Ecto.Changeset.get_field(cs, :serving_mode) == "direct"
+    end
+  end
+
+  describe "cf_binding_changeset (the narrow CF-binding write path, charter D51)" do
+    defp cf_cs(attrs), do: Site.cf_binding_changeset(%Site{}, Map.new(attrs))
+
+    test "casts the CF handles + modes onto the site" do
+      cs =
+        cf_cs(
+          cf_domain: "blog.example.com",
+          cf_zone_id: "zone_abc",
+          cf_record_id: "rec_123",
+          serving_mode: "cf_proxied",
+          tls_mode: "cf_internal"
+        )
+
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :cf_domain) == "blog.example.com"
+      assert Ecto.Changeset.get_field(cs, :cf_zone_id) == "zone_abc"
+      assert Ecto.Changeset.get_field(cs, :cf_record_id) == "rec_123"
+      assert Ecto.Changeset.get_field(cs, :serving_mode) == "cf_proxied"
+      assert Ecto.Changeset.get_field(cs, :tls_mode) == "cf_internal"
+    end
+
+    test "normalizes cf_domain (case-folds, trims, strips trailing dot)" do
+      cs = cf_cs(cf_domain: " Blog.Example.COM. ")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :cf_domain) == "blog.example.com"
+    end
+
+    test "an unknown serving_mode is rejected" do
+      cs = cf_cs(serving_mode: "sideways")
+      refute cs.valid?
+      assert %{serving_mode: [_ | _]} = errors_on(cs)
+    end
+
+    test "an unknown tls_mode is rejected" do
+      cs = cf_cs(tls_mode: "letsencrypt")
+      refute cs.valid?
+      assert %{tls_mode: [_ | _]} = errors_on(cs)
+    end
+
+    test "cf_origin_ca tls_mode + cert/key paths are accepted (deferred hardening shape)" do
+      cs =
+        cf_cs(
+          serving_mode: "cf_proxied",
+          tls_mode: "cf_origin_ca",
+          cf_cert_path: "/etc/caddy/cf/blog.crt",
+          cf_key_path: "/etc/caddy/cf/blog.key"
+        )
+
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :cf_cert_path) == "/etc/caddy/cf/blog.crt"
+      assert Ecto.Changeset.get_field(cs, :cf_key_path) == "/etc/caddy/cf/blog.key"
+    end
+
+    test "a malformed cf_domain is rejected" do
+      cs = cf_cs(cf_domain: "not a domain")
+      refute cs.valid?
+      assert %{cf_domain: [_ | _]} = errors_on(cs)
+    end
+
+    test "the narrow changeset can NOT rename or re-team the site (containment)" do
+      cs =
+        Site.cf_binding_changeset(%Site{}, %{
+          name: "hijacked",
+          slug: "hijacked",
+          team_id: "99999999-9999-9999-9999-999999999999",
+          serving_mode: "cf_proxied"
+        })
+
+      refute Map.has_key?(cs.changes, :name)
+      refute Map.has_key?(cs.changes, :slug)
+      refute Map.has_key?(cs.changes, :team_id)
+      assert Ecto.Changeset.get_field(cs, :serving_mode) == "cf_proxied"
     end
   end
 end
@@ -227,5 +382,75 @@ defmodule BarkparkCloud.Registry.SitePersistenceTest do
     assert reloaded.bootstrap_dataset == nil
     assert reloaded.read_token_encrypted == nil
     assert {:ok, nil} = Registry.reveal_site_read_token(reloaded)
+  end
+
+  describe "CF edge binding round-trip (charter D51)" do
+    test "a freshly created site defaults to the standalone binding (direct / on_demand, no handles)" do
+      bp = barkpark_fixture(team_fixture())
+      {:ok, site} = Registry.create_site(bp, %{name: "App", slug: "app", framework: "nextjs"})
+
+      reloaded = Repo.get!(Site, site.id)
+      assert reloaded.serving_mode == "direct"
+      assert reloaded.tls_mode == "on_demand"
+
+      assert Registry.cf_binding(reloaded) == %{
+               cf_domain: nil,
+               cf_zone_id: nil,
+               cf_record_id: nil,
+               serving_mode: "direct",
+               tls_mode: "on_demand",
+               cf_cert_path: nil,
+               cf_key_path: nil
+             }
+    end
+
+    test "set_cf_binding persists the edge binding atomically and cf_binding reads it back" do
+      bp = barkpark_fixture(team_fixture())
+
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "Marketing",
+          slug: "marketing",
+          kind: "static",
+          framework: "astro",
+          bootstrap_dataset: "production"
+        })
+
+      {:ok, bound} =
+        Registry.set_cf_binding(site, %{
+          cf_domain: "blog.example.com",
+          cf_zone_id: "zone_abc",
+          cf_record_id: "rec_123",
+          serving_mode: "cf_proxied",
+          tls_mode: "cf_internal"
+        })
+
+      assert bound.serving_mode == "cf_proxied"
+
+      reloaded = Repo.get!(Site, site.id)
+
+      assert Registry.cf_binding(reloaded) == %{
+               cf_domain: "blog.example.com",
+               cf_zone_id: "zone_abc",
+               cf_record_id: "rec_123",
+               serving_mode: "cf_proxied",
+               tls_mode: "cf_internal",
+               cf_cert_path: nil,
+               cf_key_path: nil
+             }
+    end
+
+    test "set_cf_binding rejects a bad mode without persisting (transactional, row unchanged)" do
+      bp = barkpark_fixture(team_fixture())
+      {:ok, site} = Registry.create_site(bp, %{name: "App", slug: "app", framework: "nextjs"})
+
+      assert {:error, %Ecto.Changeset{}} =
+               Registry.set_cf_binding(site, %{serving_mode: "sideways"})
+
+      # The row keeps its standalone defaults — nothing half-persisted.
+      reloaded = Repo.get!(Site, site.id)
+      assert reloaded.serving_mode == "direct"
+      assert reloaded.tls_mode == "on_demand"
+    end
   end
 end

@@ -1,0 +1,20 @@
+{
+  "outcomes": {
+    "delivered_real_client_email": "NOT_STARTED_DEPENDENCY_BLOCK",
+    "e19_immutable": "PASS_HASH_PINNED",
+    "e19_pass_and_live_deployment": "BLOCKED_E19_BLOCKED_DEPLOYMENT_NULL",
+    "exact_72_real_captures": "FAIL_0_OF_72",
+    "immutable_assignment": "PASS",
+    "no_production_mutation": "PASS",
+    "real_interactive_bp_tui": "NOT_STARTED_DEPENDENCY_BLOCK",
+    "rollback_or_untouched": "PASS_36_OF_36",
+    "zero_fake_receipts_or_client_opens": "PASS",
+    "zero_proxy_evidence": "PASS",
+    "zero_silent_blanks": "PASS_EXPLICIT_BLOCKS_72_OF_72"
+  },
+  "schema_version": "legendary-e20-hard-gates/v1",
+  "verdict": {
+    "action": "REWORK",
+    "quality": "BLOCKED"
+  }
+}

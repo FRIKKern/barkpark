@@ -1,0 +1,1 @@
+{"assignment_id":"E06","measurement_policy":"Every replay writes a positive measured wall_seconds to ignored .replay/timing.json; volatile timing is excluded from tracked deterministic hashes.","representative_round_2_wall_seconds":0.035565,"schema_version":"legendary-e06-timing-policy/v1","unit_count":33,"volatile_path":".replay/timing.json"}

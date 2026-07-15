@@ -1,0 +1,91 @@
+{
+  "artifact_hashes": {
+    "README.md": "b23f61265178c75bc80031308fbf4a7436e5832d9d5c71c7fe4b5bf54da215e4",
+    "accessibility-fixtures.json": "a01090466770facac19be0692eef93b1e9c2cd727b658c5aff00e4f9cc71062b",
+    "explicit-degradation.json": "0edee13f12a6001ba3092b3c8a3b84654052997e878a93102f2e82dff3fb74ca",
+    "five-surface-goldens.json": "98e8ad9d6ae604c651c20407df35a951cbcc94448c2beb126c1b96bd27c943c7",
+    "next-three-assignments.json": "49c2da3be207263c112726a24185bd940a01041f3340dc71bbdcfc07f8b1e949",
+    "run.sh": "fbf9c8e96f6b62d449cb8404a7dd5effd9126885345a867b769e051223e2600e",
+    "scripts/verify.py": "14193f6a4ff4fc9dc0f760edb00badcb95d4518899ab4c5e175fea694de81282",
+    "timing.json": "1036ad85422de45282f8cb5755f16f58763cfec8b0b789a06ebb8196a77dc77e"
+  },
+  "assignment_id": "E11",
+  "candidate_provenance": {
+    "candidate_id": "candidate-preservation-envelope",
+    "source_assignment": "E05",
+    "source_hashes": {
+      "E03/thresholds.json": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+      "E05/candidate.json": "9cd9a837f38d2c0e836007b1a78722a2ff69848e5bdab3af63949c6df1377480",
+      "E07/result.json": "0c17eec9a1931249b94c238a7f85d0134f84bdb880e39b9c50f3a20d366ec872",
+      "E08/result.json": "ba7ca0ab2cd8f8622620e23d1c4e5e1d699ff9f4b768d37e03fd8674d04f6e1c",
+      "E09/result.json": "66355b6dde567391e1ed63b4f2ba5784b19803638c3c9930b36b0232d5baf1ec"
+    },
+    "status": "STRONGEST_NON_REJECTED_IN_E09_ONLY_NOT_A_WINNER"
+  },
+  "capability_blocks": [
+    "no Round-3 winner exists to refine or freeze",
+    "authenticated Studio candidate-specific captures unavailable",
+    "public reader candidate-specific captures unavailable",
+    "real TUI narrow-width candidate-specific captures unavailable",
+    "real-client email candidate-specific captures unavailable",
+    "paired blind classification records were not sealed before scoring"
+  ],
+  "commands_or_probes": [
+    "bash .omx/state/legendary-experiments/E07/run.sh",
+    "sh .omx/state/legendary-experiments/E08/scripts/run.sh",
+    "bash .omx/state/legendary-experiments/E09/run.sh",
+    "bash .omx/state/legendary-experiments/E11/run.sh"
+  ],
+  "counts": {
+    "accepted_goldens": 0,
+    "blocked_real_surfaces": 4,
+    "candidate_specific_source_cells": 180,
+    "fixtures": 36,
+    "next_assignments": 3,
+    "required_golden_cells": 180,
+    "surfaces": 5
+  },
+  "exact_assignment": {
+    "id": "E11",
+    "objective": "Refine and independently verify the winner's reading order, semantic cues, width behavior, fallback behavior, and five-surface golden renders.",
+    "stop_condition": "Reject convergence on any critical/high defect, silent fallback, missing real surface, or non-reproducible golden.",
+    "title": "Freeze accessibility and cross-reader behavior"
+  },
+  "observed_facts": [
+    "E07 reconciles 540 candidate-fixture-surface cells: 102 PASS, 6 FAIL, and 432 BLOCKED.",
+    "For E05, all 36 CLI/API cells pass while all 144 authenticated Studio, public reader, TUI, and real-client email cells are blocked.",
+    "E08 rejects all three Round-2 candidates; E05 has two FAIL, one PARTIAL, two BLOCKED, and five PASS attack outcomes.",
+    "E09 names E05 only as strongest non-rejected under its migration/evidence-truth lens and explicitly selects no winner.",
+    "Zero five-surface golden cells can be accepted without inventing a Round-3 winner or proxy-passing inaccessible readers."
+  ],
+  "probes": {
+    "frozen_fixture_hashes": 36,
+    "round_3_candidate_surface_cells": 540,
+    "round_3_e05_blocked_real_surface_cells": 144,
+    "round_3_e05_cli_api_pass_cells": 36,
+    "round_3_e05_surface_cells": 180,
+    "round_3_rejected_candidates": 3,
+    "round_3_winners": 0
+  },
+  "round": 4,
+  "schema_version": "legendary-e11-result/v1",
+  "stop_condition": {
+    "reason": "No Round-3 candidate clears the frozen accessibility, structural completeness, surface exercise, reader visibility, and width/overflow hard gates.",
+    "status": "TRIGGERED"
+  },
+  "threshold_outcomes": {
+    "accessibility": "FAIL_BLOCKED_NO_ELIGIBLE_WINNER",
+    "explicit_degradation": "BLOCKED_REAL_TUI_AND_EMAIL",
+    "reader_visibility": "BLOCKED_144_OF_180_E05_REAL_SURFACE_CELLS",
+    "reproducible_goldens": "FAIL_ZERO_OF_180_ACCEPTED",
+    "semantic_reading_order": "BLOCKED_REAL_SURFACES",
+    "structural_completeness": "FAIL_E08_NESTED_HIERARCHY_AND_LONG_CONTENT",
+    "surface_exercise": "FAIL_FOUR_OF_FIVE_SURFACES_BLOCKED",
+    "width_overflow": "BLOCKED_REAL_TUI_AND_EMAIL"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "quality": "NO_WINNER"
+  },
+  "winner_selected": false
+}

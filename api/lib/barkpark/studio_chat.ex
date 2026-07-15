@@ -1,7 +1,7 @@
 defmodule Barkpark.StudioChat do
   @moduledoc """
-  The **Studio Claude chat** context — the session index + display history behind
-  the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
+  The provider-neutral Studio chat context — the session index + display history
+  behind the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
 
   Two tables, `chat_sessions` + `chat_messages`, with **no HTTP route ever**: the
   admin LiveView reads `Repo` directly, so transcripts (cwd, tool inputs, host
@@ -10,10 +10,10 @@ defmodule Barkpark.StudioChat do
 
   ## Identity + resume (D8)
 
-  A session's primary key is the minted claude session UUID. We generate it
-  before the first byte (`--session-id`), and the SAME value is the `--resume`
-  key — one identity, no cursor column. `create_session/1` is called on the
-  FIRST user send, never on mount (no empty rows).
+  A session's primary key is Barkpark's public UUID. The independent,
+  provider-owned resume cursor lives in `provider_session_id`; legacy Claude
+  rows intentionally use the public UUID for both. `create_session/1` is called
+  on the FIRST user send, never on mount (no empty rows).
 
   ## Display history (D7)
 
@@ -102,8 +102,8 @@ defmodule Barkpark.StudioChat do
   defp owner_ws_from_scope(_), do: nil
 
   @doc """
-  Create a session from `attrs`. `id` (the minted claude session UUID) is
-  REQUIRED — the caller mints it so it doubles as the `--resume` key.
+  Create a session from `attrs`. `id` is Barkpark's REQUIRED public UUID;
+  provider-native resume identity is persisted separately and set at most once.
 
   `scope` (charter D17) stamps `owner_workspace_id`: `{:workspace, ws}` (or a
   bare `ws` binary) stamps that workspace; `:global` (the default) stamps NULL —
@@ -186,6 +186,10 @@ defmodule Barkpark.StudioChat do
     |> limit(^@sidebar_cap)
     |> select([s], %Session{
       id: s.id,
+      provider: s.provider,
+      execution_target: s.execution_target,
+      execution_host_id: s.execution_host_id,
+      provider_session_id: s.provider_session_id,
       title: s.title,
       title_source: s.title_source,
       status: s.status,
@@ -509,6 +513,29 @@ defmodule Barkpark.StudioChat do
       |> Ecto.Changeset.change(status: status, last_active_at: DateTime.utc_now())
       |> Ecto.Changeset.validate_inclusion(:status, Session.statuses())
       |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc "Persist the opaque provider-native session id once; later changes are rejected."
+  @spec set_provider_session_id(String.t(), String.t()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :immutable}
+  def set_provider_session_id(session_id, provider_session_id)
+      when is_binary(provider_session_id) and provider_session_id != "" do
+    with %Session{} = session <- get_session(session_id) do
+      case session.provider_session_id do
+        nil ->
+          session
+          |> Ecto.Changeset.change(provider_session_id: provider_session_id)
+          |> Repo.update()
+
+        ^provider_session_id ->
+          {:ok, session}
+
+        _other ->
+          {:error, :immutable}
+      end
     else
       nil -> {:error, :not_found}
     end
@@ -893,6 +920,70 @@ defmodule Barkpark.StudioChat do
   end
 
   def rail_apply_background(rail, _ev), do: rail
+
+  @doc "Fold a Codex app-server collaboration item into the shared agent rail."
+  def rail_apply_codex_item(rail, item, lifecycle)
+      when is_map(rail) and is_map(item) and lifecycle in [:started, :completed] do
+    case item["type"] do
+      type when type in ["collabAgentToolCall", "collab_agent_tool_call"] ->
+        ids =
+          case item["receiverThreadIds"] || item["receiver_thread_ids"] do
+            ids when is_list(ids) -> Enum.filter(ids, &is_binary/1)
+            _ -> []
+          end
+
+        Enum.reduce(ids, rail, fn thread_id, acc ->
+          entry =
+            acc
+            |> rail_entry(thread_id)
+            |> Map.put("row", %{
+              "task_type" => item["tool"] || "codex_subagent",
+              "description" => item["prompt"] || "Codex subagent"
+            })
+            |> Map.put("origin", "codex")
+            |> Map.put("model", item["model"])
+            |> Map.put("status", codex_agent_status(item["status"], lifecycle))
+
+          Map.put(acc, thread_id, entry)
+        end)
+        |> cap_rail()
+
+      type when type in ["subAgentActivity", "sub_agent_activity"] ->
+        case item["agentThreadId"] || item["agent_thread_id"] do
+          thread_id when is_binary(thread_id) ->
+            entry =
+              rail
+              |> rail_entry(thread_id)
+              |> Map.put("row", %{
+                "task_type" => "codex_subagent",
+                "description" => item["agentPath"] || item["agent_path"] || "Codex subagent"
+              })
+              |> Map.put("origin", "codex")
+              |> Map.put("status", codex_activity_status(item["kind"], lifecycle))
+
+            rail |> Map.put(thread_id, entry) |> cap_rail()
+
+          _ ->
+            rail
+        end
+
+      _ ->
+        rail
+    end
+  end
+
+  def rail_apply_codex_item(rail, _item, _lifecycle), do: rail
+
+  defp codex_agent_status(status, :completed)
+       when status in ["completed", "failed", "cancelled", "interrupted"],
+       do: if(status == "completed", do: "completed", else: "interrupted")
+
+  defp codex_agent_status(_, :completed), do: "completed"
+  defp codex_agent_status(_, :started), do: "running"
+
+  defp codex_activity_status("subagentStop", _), do: "completed"
+  defp codex_activity_status(_, :completed), do: "completed"
+  defp codex_activity_status(_, _), do: "running"
 
   # A rail entry only earns the vanish→completed flip when a
   # `background_tasks_changed` snapshot is its provenance — workflow and

@@ -54,6 +54,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Sites.BoxRelay
+  alias BarkparkCloud.Sites.NodePortAllocator
 
   # The six visible stages, in order — the same list the CLI renders
   # (cloudclient.SpawnSiteStages). This is the canonical ordering `stages/1`
@@ -83,13 +84,30 @@ defmodule BarkparkCloud.Sites.Deploy do
   code+content+config is already built (the `(site_id, build_id)` unique index —
   the PLAN no-op's DB backstop), or `{:error, changeset}`.
   """
-  @spec enqueue(Site.t(), Barkpark.t()) ::
+  #
+  # `force` (charter D36) mints a genuinely NEW build on UNCHANGED content: it
+  # folds a nonce into `build_id`, so the `(site_id, build_id)` index no longer
+  # collapses the re-deploy into a no-op and a fresh `releases/<build_id>/` is
+  # cut. The default (`force = false`) path is byte-identical to before — the
+  # idempotent no-op is the norm; force is the escape hatch for "re-run this
+  # exact content" (a stuck/failed build, or two distinct builds for a rollback
+  # proof).
+  #
+  # `trigger` (charter D49) is the deploy's PROVENANCE — "manual" (the default,
+  # every `bp cloud site deploy`) or "content-auto" (the publish-to-live receiver
+  # via AutoDeployWorker). It rides straight onto the Deployment row so the
+  # deployment stream can show WHY the build ran (the wish's "observable" bar).
+  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t()) ::
           {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
-  def enqueue(%Site{} = site, %Barkpark{} = bp) do
+  def enqueue(%Site{} = site, %Barkpark{} = bp, force \\ false, trigger \\ "manual") do
     content_rev = content_rev(site, bp)
-    build_id = build_id(site, bp, content_rev)
+    build_id = build_id(site, bp, content_rev, force)
 
-    case Registry.create_deployment(site, %{build_id: build_id, content_rev: content_rev}) do
+    case Registry.create_deployment(site, %{
+           build_id: build_id,
+           content_rev: content_rev,
+           trigger: trigger
+         }) do
       {:ok, deployment} ->
         {:ok, deployment}
 
@@ -114,24 +132,42 @@ defmodule BarkparkCloud.Sites.Deploy do
   instance, so the instance's commit IS the build's code identity); `config` is
   everything else that changes the output: framework, kind, the base path the site
   is served at, and the content binding.
+
+  When `force` is true (charter D36) a `System.system_time()` nonce is folded
+  into `config`, so an otherwise-identical build hashes to a DIFFERENT `build_id`
+  — the `(site_id, build_id)` index then mints a new row instead of returning the
+  cached duplicate, and a real `releases/<build_id>/` is cut on the box. With
+  `force` false the config map is EXACTLY the pre-D36 shape, so the default
+  build_id is unchanged and the idempotent no-op still fires.
   """
-  @spec build_id(Site.t(), Barkpark.t(), String.t()) :: String.t()
-  def build_id(%Site{} = site, %Barkpark{} = bp, content_rev) when is_binary(content_rev) do
+  @spec build_id(Site.t(), Barkpark.t(), String.t(), boolean()) :: String.t()
+  def build_id(%Site{} = site, %Barkpark{} = bp, content_rev, force \\ false)
+      when is_binary(content_rev) do
     config =
-      Jason.encode!(%{
+      %{
         framework: site.framework,
         kind: site.kind,
         base: base_path(site),
         workspace: site.bootstrap_workspace,
         project: site.bootstrap_project,
         dataset: site.bootstrap_dataset
-      })
+      }
+      |> maybe_force_nonce(force)
+      |> Jason.encode!()
 
     :sha256
     |> :crypto.hash(Enum.join([code_rev(bp), content_rev, config], "|"))
     |> Base.encode16(case: :lower)
     |> binary_part(0, 16)
   end
+
+  # The force nonce (charter D36). `System.system_time()` is monotonic-enough for
+  # a per-request nonce (two forced deploys of the same content in the same
+  # nanosecond is not a case we owe distinctness). When force is false the map is
+  # returned untouched, so the encoded config — and therefore the build_id — is
+  # byte-identical to the pre-D36 default path.
+  defp maybe_force_nonce(config, true), do: Map.put(config, :force_nonce, System.system_time())
+  defp maybe_force_nonce(config, false), do: config
 
   # The box's code revision. `git_commit` is the truth when the instance reports
   # it; `version` is the fallback; "unknown" only when the box has reported
@@ -219,7 +255,23 @@ defmodule BarkparkCloud.Sites.Deploy do
       bp: bp
     }
 
-    case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp)) do
+    # FAIL CLOSED on a missing/undecryptable read token (charter D37). The build
+    # fetches content over the SCOPED route with this token; a nil token would
+    # build UNAUTHENTICATED — empty content, an empty `bp-doc-id` marker, a
+    # false-green "live" page with nothing on it. So the token is revealed HERE,
+    # before the box is ever touched: anything but `{:ok, binary}` settles the
+    # deployment `failed` with an honest reason and never starts a build.
+    case Registry.reveal_site_read_token(site) do
+      {:ok, read_token} when is_binary(read_token) ->
+        start_on_box(ctx, deployment, site, bp, read_token)
+
+      _ ->
+        fail(ctx, "site read token missing or unreadable")
+    end
+  end
+
+  defp start_on_box(ctx, %Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
+    case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp, read_token)) do
       {:ok, status, _body} when status in 200..299 ->
         poll(ctx, deployment.build_id, poll_max())
 
@@ -234,30 +286,51 @@ defmodule BarkparkCloud.Sites.Deploy do
   # The box's argv: WHAT to build, and the scrubbed BARKPARK_* env it is allowed
   # to see (charter D7 — the box passes ONLY these into the build, so an ambient
   # BARKPARK_TOKEN on the instance can never shadow the site's own read token).
-  # The read token is revealed here and never logged.
-  defp deploy_payload(%Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp) do
-    read_token =
-      case Registry.reveal_site_read_token(site) do
-        {:ok, t} when is_binary(t) -> t
-        _ -> nil
-      end
-
+  # `read_token` is already proven to be a binary by `drive/3` (D37); it is never
+  # logged.
+  defp deploy_payload(%Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
     %{
       mode: "deploy",
       slug: site.slug,
       build_id: deployment.build_id,
       content_rev: deployment.content_rev,
       framework: site.framework,
+      # site-spawner W7 (charter D63): WHICH runtime target the box drives this
+      # build to. "static" = symlink-swap of a built dist/; "node" = boot the
+      # per-site Node SSR process on the idle slot and flip the Caddy upstream to
+      # it. Mapped straight from `kind` so the box never re-derives it.
+      runtime_target: runtime_target(site),
       env: %{
         BARKPARK_API_URL: scoped_api_url(site, bp),
         BARKPARK_TOKEN: read_token,
         BARKPARK_DATASET: site.bootstrap_dataset,
         BARKPARK_WORKSPACE: site.bootstrap_workspace,
         BARKPARK_PROJECT: site.bootstrap_project,
-        BARKPARK_SITE_BASE: base_path(site)
+        BARKPARK_SITE_BASE: base_path(site),
+        # site-spawner W4 (charter D35): the content type the build's flagship
+        # fetch reads. NOT NULL by column default, so this is always a binary.
+        BARKPARK_DOC_TYPE: site.doc_type
       }
     }
+    |> maybe_put_target_port(site)
   end
+
+  # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
+  # from `kind` — node sites boot a process, everything else swaps a symlink.
+  defp runtime_target(%Site{kind: "node"}), do: "node"
+  defp runtime_target(_site), do: "static"
+
+  # For a node deploy, carry down the IDLE slot's PORT — the port the box builds+
+  # boots the new Node process on, health-gates, THEN flips the Caddy upstream to
+  # (blue/green, zero-downtime). Non-node deploys carry no port (symlink swap).
+  defp maybe_put_target_port(payload, %Site{kind: "node"} = site) do
+    case NodePortAllocator.target_slot_port(site) do
+      nil -> payload
+      port -> Map.put(payload, :target_port, port)
+    end
+  end
+
+  defp maybe_put_target_port(payload, _site), do: payload
 
   # The build fetches over the SCOPED route (charter D6): tenant-membership
   # isolation is what pins the token to ONE workspace — the flat route would let a
@@ -486,7 +559,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   def rollback(%Site{} = site, %Barkpark{} = bp) do
     was = site.current_deployment_id
 
-    case BoxRelay.rollback(bp, %{mode: "rollback", slug: site.slug}) do
+    # Carry the runtime_target so the box dispatches to the RIGHT rollback engine
+    # (charter D63/D71): a node site rolls back by flipping the Caddy port to its
+    # warm previous slot (site-deploy-node.sh --rollback), NOT the static engine's
+    # symlink swap — which has no `current` symlink for a node site and exits 22
+    # "not_supported". The deploy payload already carries this; rollback must too.
+    case BoxRelay.rollback(bp, %{
+           mode: "rollback",
+           slug: site.slug,
+           runtime_target: runtime_target(site)
+         }) do
       {:ok, status, body} when status in 200..299 ->
         target = body["build_id"] || body["target_build"] || body["current_build"]
         finish_rollback(site, bp, was, target)

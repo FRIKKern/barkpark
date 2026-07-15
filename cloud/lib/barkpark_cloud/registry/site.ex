@@ -34,16 +34,36 @@ defmodule BarkparkCloud.Registry.Site do
   #     long-lived container next to Phoenix (the pre-W1 shape, the default).
   #   * "static"    — content-bound static build: Astro/Hugo/plain HTML built once
   #     from a Barkpark dataset and served as files. The flagship spawn path.
-  @kinds ~w(container static)
+  #   * "node"      — site-spawner W7 (charter D62): content-bound SSR build served
+  #     by a per-site long-running Node process (the node-slot runtime target).
+  #     Next.js/Nuxt/SvelteKit built FROM a Barkpark dataset (like static) but
+  #     served as a running process behind a blue/green Caddy upstream flip — NOT
+  #     the pre-W1 "container" BYO-repo path (which routes to the dead off-box
+  #     builder, has no content binding, and has no instant rollback).
+  @kinds ~w(container static node)
 
-  # Framework legality is kind-GATED (charter D2): a static site can't be a
+  # Framework legality is kind-GATED (charter D2/D62): a static site can't be a
   # Next.js container app and vice-versa. `@frameworks` stays the union (the
   # public `frameworks/0` surface + the migration/history), but the changeset
-  # only accepts the sublist that matches the row's `kind`.
+  # only accepts the sublist that matches the row's `kind`. The container
+  # frameworks are ALSO legal under `node` — a node site fetches content like a
+  # static one but serves it via SSR.
   @container_frameworks ~w(nextjs nuxt sveltekit)
   @static_frameworks ~w(astro hugo static)
   @frameworks @container_frameworks ++ @static_frameworks
   @scale_modes ~w(always_on zero)
+
+  # site-spawner W6 (charter D51): the CF-in-front edge-binding enums.
+  #
+  #   * @serving_modes — how the box is fronted. "direct" is the standalone
+  #     default (the box answers on its own origin, TODAY's behavior); "cf_proxied"
+  #     means an orange-cloud CF record fronts the box.
+  #   * @tls_modes — how TLS terminates at the box origin. "on_demand" is the
+  #     standalone default (box Caddy on-demand ACME); "cf_internal" is Caddy
+  #     `tls internal` under CF Full (526-avoidance, charter D55); "cf_origin_ca"
+  #     is a CF Origin-CA cert on disk under CF Full Strict (deferred hardening).
+  @serving_modes ~w(direct cf_proxied)
+  @tls_modes ~w(on_demand cf_internal cf_origin_ca)
 
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
   # Two segments separated by one slash; each segment is letters/digits/_/-/.
@@ -58,6 +78,13 @@ defmodule BarkparkCloud.Registry.Site do
     field :env_encrypted, :binary
     field :scale_mode, :string, default: "always_on"
     field :port, :integer
+
+    # site-spawner W7 (charter D68): the per-site node-slot port BASE, allocated
+    # ONCE at create for a kind=node site (the lowest-free EVEN base in
+    # [7002,7998]). Blue slot = port_base, green slot = port_base + 1; `port`
+    # above stays the currently-LIVE serving port (whichever slot the Caddy
+    # upstream points at). Null on static/container sites (no per-site process).
+    field :port_base, :integer
     field :current_deployment_id, :binary_id
 
     # site-spawner W1 (charter D3): the content binding — WHICH Barkpark dataset a
@@ -66,6 +93,13 @@ defmodule BarkparkCloud.Registry.Site do
     field :bootstrap_workspace, :string
     field :bootstrap_project, :string
     field :bootstrap_dataset, :string
+
+    # site-spawner W4 (charter D35): the content TYPE the static build's flagship
+    # fetch reads (baked into BARKPARK_DOC_TYPE at build time). "post" is the
+    # canonical default; a site created with `--doc-type paper` reads papers
+    # instead — the guerrilla live proof needs `paper` because `production/post`
+    # has zero docs there and a real Astro build hard-fails on the empty type.
+    field :doc_type, :string, default: "post"
 
     # A public-read-scoped token the static build uses to read that dataset.
     # `Vault.encrypt/1`'d exactly like `env_encrypted`; the plaintext is never
@@ -80,11 +114,48 @@ defmodule BarkparkCloud.Registry.Site do
     field :github_branch, :string, default: "main"
     field :github_webhook_secret_encrypted, :string
 
+    # site-spawner W5 (charter D47): the per-site HMAC secret the CP mints at
+    # create, registers on the box's dataset webhook, and verifies inbound
+    # content-publish deliveries against (POST /v1/sites/webhooks/content-publish/
+    # :site_id). `Vault.encrypt/1`'d at rest exactly like
+    # github_webhook_secret_encrypted; the plaintext is never persisted and never
+    # serialized. Null on container sites (no content webhook).
+    field :content_webhook_secret_encrypted, :binary
+
     # gh-6: per-site kill switch for branch previews. Default ON — a connected
     # repo previews non-production branches unless the team opts out. When false,
     # the inbound webhook ignores non-`github_branch` pushes (the pre-gh-6
     # branch_mismatch no-op).
     field :previews_enabled, :boolean, default: true
+
+    # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
+    # OWN domain (blog.example.com), bound to THIS deployed site through the user's
+    # CF account — the OPPOSITE of `Barkpark.custom_host` (platform own-zone, box
+    # instance, `*.barkpark.cloud`-locked). One CF-bound domain per site (v1 =
+    # singular `--domain`). Every field is nullable/defaulted so a pure-standalone
+    # site (no CF account connected) is byte-identical to today (charter D58
+    # standalone-degrade).
+    #
+    #   * cf_domain    — the user's hostname fronting this site.
+    #   * cf_zone_id   — the CF zone the DNS writer targets.
+    #   * cf_record_id — the CF DNS record the writer created (idempotent re-write
+    #     + teardown handle).
+    #   * serving_mode — "direct" (box answers on its own origin — TODAY's default,
+    #     the standalone path) | "cf_proxied" (orange-cloud CF record fronts the
+    #     box). Drives the box's TLS render (mergeSite) and the domain-status rung.
+    #   * tls_mode     — "on_demand" (box Caddy on-demand ACME — TODAY's default) |
+    #     "cf_internal" (Caddy `tls internal` under CF Full — 526-avoidance,
+    #     charter D55) | "cf_origin_ca" (CF Origin-CA cert on disk under CF Full
+    #     Strict — DEFERRED hardening).
+    #   * cf_cert_path / cf_key_path — on-disk CF Origin-CA cert+key paths
+    #     (populated only by the deferred origin-CA provisioning path).
+    field :cf_domain, :string
+    field :cf_zone_id, :string
+    field :cf_record_id, :string
+    field :serving_mode, :string, default: "direct"
+    field :tls_mode, :string, default: "on_demand"
+    field :cf_cert_path, :string
+    field :cf_key_path, :string
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
     belongs_to :team, BarkparkCloud.Accounts.Team
@@ -99,6 +170,8 @@ defmodule BarkparkCloud.Registry.Site do
   def frameworks, do: @frameworks
   def kinds, do: @kinds
   def scale_modes, do: @scale_modes
+  def serving_modes, do: @serving_modes
+  def tls_modes, do: @tls_modes
   def domain_format, do: @domain_format
 
   @doc """
@@ -108,6 +181,7 @@ defmodule BarkparkCloud.Registry.Site do
   """
   def frameworks_for_kind("static"), do: @static_frameworks
   def frameworks_for_kind("container"), do: @container_frameworks
+  def frameworks_for_kind("node"), do: @container_frameworks
   def frameworks_for_kind(_), do: @frameworks
 
   @doc """
@@ -127,14 +201,17 @@ defmodule BarkparkCloud.Registry.Site do
       :env_encrypted,
       :scale_mode,
       :port,
+      :port_base,
       :current_deployment_id,
       :bootstrap_workspace,
       :bootstrap_project,
       :bootstrap_dataset,
+      :doc_type,
       :read_token_encrypted,
       :github_repo,
       :github_branch,
       :github_webhook_secret_encrypted,
+      :content_webhook_secret_encrypted,
       :previews_enabled,
       :barkpark_id,
       :team_id
@@ -213,6 +290,52 @@ defmodule BarkparkCloud.Registry.Site do
   def runtime_changeset(site, attrs) do
     site
     |> cast(attrs, [:port, :current_deployment_id])
+  end
+
+  @doc """
+  site-spawner W6 (charter D51): NARROW changeset for the Cloudflare-in-front
+  edge binding. Casts ONLY the CF columns — it can never rename, re-team, or
+  re-point the site's runtime (containment, mirroring `custom_host_changeset`).
+  The two mode enums are inclusion-validated so a bad `serving_mode` /
+  `tls_mode` is a validation error, never a silent bad row that the box render
+  (mergeSite) or the domain-status rung would then misinterpret.
+
+  `cf_domain` is normalized (lower-cased, trimmed, trailing-dot stripped) exactly
+  like `domains`, and validated against the generic `@domain_format` — a user's
+  own arbitrary hostname (blog.example.com), NOT zone-locked to the platform.
+  """
+  def cf_binding_changeset(site, attrs) do
+    site
+    |> cast(attrs, [
+      :cf_domain,
+      :cf_zone_id,
+      :cf_record_id,
+      :serving_mode,
+      :tls_mode,
+      :cf_cert_path,
+      :cf_key_path
+    ])
+    |> update_change(:cf_domain, &normalize_domain/1)
+    |> validate_inclusion(:serving_mode, @serving_modes)
+    |> validate_inclusion(:tls_mode, @tls_modes)
+    |> validate_cf_domain()
+  end
+
+  # A CF-bound domain, when present, must be a well-formed generic hostname (the
+  # user's own domain — not zone-locked). A nil cf_domain (pure-standalone, or a
+  # binding that only flips serving_mode) is left alone.
+  defp validate_cf_domain(changeset) do
+    case get_field(changeset, :cf_domain) do
+      nil ->
+        changeset
+
+      d when is_binary(d) ->
+        if String.length(d) <= 253 and Regex.match?(@domain_format, d) do
+          changeset
+        else
+          add_error(changeset, :cf_domain, "invalid domain: #{inspect(d)}")
+        end
+    end
   end
 
   defp normalize_domains(changeset) do

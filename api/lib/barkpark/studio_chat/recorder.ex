@@ -1,7 +1,7 @@
 defmodule Barkpark.StudioChat.Recorder do
   @moduledoc """
   Server-owned chat runtime (wave 4, charter D28). One Recorder per live
-  session is the `ClaudeChat.Session`'s PERMANENT sink: it persists every
+  session is the provider runtime's PERMANENT sink: it persists every
   durable outcome to the store the moment it happens and rebroadcasts every
   sink message verbatim on PubSub `"studio_chat:<session_id>"`.
 
@@ -22,8 +22,10 @@ defmodule Barkpark.StudioChat.Recorder do
 
   require Logger
 
-  alias Barkpark.StudioChat
-  alias BarkparkWeb.Studio.ClaudeChat
+  alias Barkpark.{CycleFleet, StudioChat}
+  alias Barkpark.StudioChat.Runtime
+  alias Barkpark.StudioChat.Runtime.Event
+  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
 
   @registry Barkpark.StudioChat.RecorderRegistry
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
@@ -58,8 +60,8 @@ defmodule Barkpark.StudioChat.Recorder do
 
   def whereis(_), do: nil
 
-  @doc "The underlying ClaudeChat.Session pid (sends/controls go there)."
-  @spec session_pid(pid()) :: {:ok, pid()} | {:error, term()}
+  @doc "The underlying provider runtime reference (sends/controls go there)."
+  @spec session_pid(pid()) :: {:ok, term()} | {:error, term()}
   def session_pid(recorder) when is_pid(recorder) do
     GenServer.call(recorder, :session_pid)
   catch
@@ -107,52 +109,118 @@ defmodule Barkpark.StudioChat.Recorder do
 
   @impl true
   def init(%{session_id: id} = opts) do
-    session_opts = %{
-      session_id: id,
-      resume: Map.get(opts, :resume, false),
-      model: Map.get(opts, :model),
-      effort: Map.get(opts, :effort),
-      bypass_armed: Map.get(opts, :bypass_armed, false),
-      # The chat admin's principal (charter D63): the Session mints its
-      # loopback `bp mcp serve` credential from this — never exceeding the
-      # human's rights. Absent ⇒ the spawn simply has no hands (fail-closed;
-      # the chat itself is unchanged).
-      minter: Map.get(opts, :minter)
-    }
+    provider = Map.get(opts, :provider, "claude")
+    runtime_attempt = CycleFleet.get_runtime_attempt_by_session(id)
+    runtime_ingress_token = make_ref()
 
-    case ClaudeChat.start_session(%{
-           sink: self(),
-           mode: Map.get(opts, :mode, "plan"),
-           session_opts: session_opts
-         }) do
-      {:ok, session} ->
-        Process.monitor(session)
-        # Ask the CLI for its slash-command list right after spawn (charter D36a)
-        # — the ack lands as {:claude_chat_control, :initialize, …}, which we hold
-        # so a LATE-joining tab still gets the vocabulary (a one-shot broadcast
-        # alone would miss it).
-        ClaudeChat.initialize(session)
-        {:ok, new_state(id, session)}
+    # A Task holder authorized this managed attempt but is not the Studio
+    # process's principal. Never mint or forward Task hands for that process.
+    minter = if runtime_attempt, do: nil, else: Map.get(opts, :minter)
 
-      {:error, {:already_started, session}} ->
-        # A Session survived its Recorder (recorder crash). Re-adopt it as our
-        # sink so its frames flow again instead of casting into a dead pid.
-        ClaudeChat.adopt_sink(session, self())
-        Process.monitor(session)
-        ClaudeChat.initialize(session)
-        {:ok, new_state(id, session)}
+    session_opts =
+      %{
+        session_id: id,
+        resume: Map.get(opts, :resume, false),
+        model: Map.get(opts, :model),
+        effort: Map.get(opts, :effort),
+        bypass_armed: Map.get(opts, :bypass_armed, false),
+        provider_session_id: Map.get(opts, :provider_session_id)
+      }
+      |> maybe_put_minter(minter)
+
+    runtime_opts =
+      %{
+        session_id: id,
+        sink: self(),
+        mode: Map.get(opts, :mode, "plan"),
+        resume: Map.get(opts, :resume, false),
+        execution_target: Map.get(opts, :execution_target, "managed"),
+        execution_host_id: Map.get(opts, :execution_host_id),
+        workspace_id: Map.get(opts, :workspace_id),
+        cwd: Map.get(opts, :cwd),
+        provider_session_id: Map.get(opts, :provider_session_id),
+        runtime_ingress_token: runtime_ingress_token,
+        developer_instructions: codex_developer_instructions(provider, id),
+        session_opts: session_opts
+      }
+      |> maybe_put_minter(minter)
+
+    case RuntimeAdmission.acquire(id, Map.merge(opts, runtime_opts)) do
+      {:ok, admission} ->
+        case Runtime.open(provider, runtime_opts) do
+          {:ok, session} ->
+            initialize_runtime(id, session, provider)
+            RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
+
+            {:ok,
+             new_state(
+               id,
+               session,
+               provider,
+               admission,
+               runtime_attempt,
+               runtime_ingress_token
+             )}
+
+          {:error, {:already_started, session}} ->
+            # A Session survived its Recorder (recorder crash). Re-adopt it as
+            # our sink so its frames flow again instead of casting into a dead
+            # pid. The old Recorder-owned admission lease died with its owner.
+            Runtime.adopt_sink(provider, session, self())
+            initialize_runtime(id, session, provider)
+            RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
+
+            {:ok,
+             new_state(
+               id,
+               session,
+               provider,
+               admission,
+               runtime_attempt,
+               runtime_ingress_token
+             )}
+
+          {:error, reason} ->
+            RuntimeAdmission.release(admission)
+            {:stop, {:shutdown, reason}}
+        end
 
       {:error, reason} ->
         {:stop, {:shutdown, reason}}
     end
   end
 
-  defp new_state(id, session) do
+  defp initialize_runtime(id, session, provider) do
+    monitor_runtime(session)
+    capture_provider_session_id(id, session)
+    # Ask the CLI for its slash-command list right after spawn (charter D36a)
+    # — the ack lands as {:claude_chat_control, :initialize, …}, which we hold
+    # so a LATE-joining tab still gets the vocabulary.
+    Runtime.initialize(provider, session)
+    send(self(), :replay_registered_host_events)
+  end
+
+  defp codex_developer_instructions("codex", session_id) do
+    """
+    You are Barkpark Studio Chat worker codex-chat-#{session_id}. Be Task obsessed: for non-trivial repository work, use the repository's AGENTS.md and bp task workflow as the operating contract. Claim the relevant task before implementation, pulse at phase boundaries, stamp acceptance criteria with concrete evidence, and close only after fresh verification. Use Codex native subagents for independent bounded work when that materially improves quality or throughput, and preserve their lifecycle evidence.
+    """
+  end
+
+  defp codex_developer_instructions(_, _), do: nil
+
+  defp maybe_put_minter(opts, nil), do: opts
+  defp maybe_put_minter(opts, minter), do: Map.put(opts, :minter, minter)
+
+  defp new_state(id, session, provider, admission, runtime_attempt, runtime_ingress_token) do
     %{
       session_id: id,
+      provider: provider,
       session: session,
+      admission: admission,
+      monitor_pid: Runtime.runtime_pid(session),
       timer: arm_idle(nil),
       activity: nil,
+      runtime_text: "",
       # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
       # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
       # one in the same turn UPDATES this persisted row's input in place rather
@@ -165,6 +233,16 @@ defmodule Barkpark.StudioChat.Recorder do
       # best available via `advertised_commands/1`.
       commands: nil,
       slash_commands: nil,
+      # Assignment usage authority is loaded from the immutable server row, never
+      # accepted from Recorder opts. Generic Studio chats remain unbound and do
+      # not mint CycleFleet receipts.
+      runtime_attempt: runtime_attempt,
+      runtime_ingress_token: runtime_ingress_token,
+      # Codex reports cumulative thread snapshots separately from terminal events.
+      # Hold the preceding snapshot as the next turn's baseline and only a usage
+      # event observed during the active turn as its terminal candidate.
+      runtime_usage_snapshot: nil,
+      runtime_usage_turn: nil,
       # The current thinking bout's token count (charter D41). Accumulated off
       # `system/thinking_tokens` (`estimated_tokens` is monotonic cumulative — we
       # take the max seen since the last flush, NEVER sum thinking_delta counts),
@@ -206,12 +284,55 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
+  def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
+    state = capture_runtime_event(state, event, false)
+    broadcast(state, {:studio_chat_runtime_event, event})
+    {:reply, :ok, touch(state)}
+  end
+
   # Late-join query (charter D36a): a tab that opens AFTER the initialize ack
   # already fired still gets the held vocabulary. Returns the best available
   # list of `%{"name", "description", "argumentHint"}` maps (rich, then the
   # name-only init fallback, then []).
   def handle_call(:advertised_commands, _from, state),
     do: {:reply, advertised(state), state}
+
+  # Only the private capability echoed by the managed Session may feed
+  # assignment usage. The public/generic event shape remains projection-only.
+  def handle_info(
+        {:studio_chat_managed_runtime_event, token, %Event{} = event},
+        %{runtime_ingress_token: token} = state
+      ) do
+    state = capture_runtime_event(state, event, true)
+    broadcast(state, {:studio_chat_runtime_event, event})
+    {:noreply, touch(state)}
+  end
+
+  # Provider-neutral untrusted ingress for registered-host replay and generic
+  # projection callers. It can update chat UI state but cannot mint usage.
+  def handle_info({:studio_chat_runtime_event, %Event{} = event} = msg, state) do
+    state = capture_runtime_event(state, event, false)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  def handle_info(:replay_registered_host_events, state) do
+    state =
+      state.session_id
+      |> Barkpark.ChatHosts.replay_unprojected()
+      |> Enum.reduce(state, fn
+        {event_id, %Event{} = event}, acc ->
+          acc = capture_runtime_event(acc, event, false)
+          broadcast(acc, {:studio_chat_runtime_event, event})
+          Barkpark.ChatHosts.mark_projected(event_id)
+          acc
+
+        _, acc ->
+          acc
+      end)
+
+    {:noreply, touch(state)}
+  end
 
   # ── sink messages: persist, then rebroadcast verbatim ──────────────────────
 
@@ -361,8 +482,8 @@ defmodule Barkpark.StudioChat.Recorder do
   # generic catch-all below (which would merely rebroadcast the frame, exactly
   # why the user saw no agents). Broadcasts every frame so live tabs animate.
   def handle_info(
-        {:claude_chat_event,
-         %{"type" => "system", "subtype" => "background_tasks_changed"} = ev} = msg,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "background_tasks_changed"} = ev} =
+          msg,
         state
       ) do
     state = background_tasks_changed(state, ev)
@@ -376,7 +497,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   def handle_info({:claude_chat_permission, ask} = msg, state) do
-    if ClaudeChat.mcp_auto_approved?(ask.tool_name) do
+    if Runtime.auto_approve?(state.provider, ask) do
       # D65: a READ-ONLY loopback tool auto-approves at this single D31
       # ask-routing seam — in EVERY mode, plan included. Answered wire-side
       # (the Session echoes its tracked original input as `updatedInput`,
@@ -384,7 +505,9 @@ defmodule Barkpark.StudioChat.Recorder do
       # needs-you flip, no card — live and replay agree the question was
       # never the human's. Mutating loopback tools (task_next claims,
       # doc_create writes, …) fall through to the honest card below.
-      if pid = state.session, do: ClaudeChat.respond_permission(pid, ask.request_id, :allow)
+      if pid = state.session,
+        do: Runtime.answer_approval(state.provider, pid, ask.request_id, :allow)
+
       {:noreply, touch(state)}
     else
       persist_approval_ask(state.session_id, ask)
@@ -404,6 +527,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   def handle_info({:claude_chat_exit, _status, _stderr_tail} = msg, state) do
     session_exited(state.session_id)
+    release_admission(state)
     # Rebroadcast verbatim so the stderr tail (charter D54) rides through to
     # every viewer's ChatLive; the tail is what lets it refuse a doomed resume.
     broadcast(state, msg)
@@ -413,11 +537,12 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # The Session process died without a port exit (crash). Tell the store and
   # the viewers the same honest story an exit tells.
-  def handle_info({:DOWN, _ref, :process, session, _reason}, %{session: session} = state) do
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{monitor_pid: pid} = state) do
     session_exited(state.session_id)
+    release_admission(state)
     broadcast(state, {:claude_chat_exit, :crashed, nil})
     publish_activity(state, %{state: :offline, line: nil})
-    {:stop, :normal, %{state | session: nil}}
+    {:stop, :normal, %{state | session: nil, monitor_pid: nil}}
   end
 
   # Frame-silence reaper: nothing arrived for @idle_after_ms. Close the
@@ -425,14 +550,21 @@ defmodule Barkpark.StudioChat.Recorder do
   # any idle viewers honestly. `:close` produces NO exit message (charter D18),
   # so we broadcast the teardown ourselves and stop.
   def handle_info(:idle_reap, state) do
-    if pid = state.session, do: ClaudeChat.close(pid)
+    if pid = state.session, do: Runtime.close(state.provider, pid)
     session_exited(state.session_id)
+    release_admission(state)
     broadcast(state, {:claude_chat_exit, :idle_reaped, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    release_admission(state)
+    :ok
+  end
 
   # ── persistence (mirrors the store shapes replay reads back) ───────────────
 
@@ -484,7 +616,7 @@ defmodule Barkpark.StudioChat.Recorder do
                   "input" => input,
                   "tool_use_id" => block["id"]
                 }
-                |> Map.merge(mcp_meta(name))
+                |> Map.merge(mcp_meta(st.provider, name))
                 |> Map.merge(frame)
             },
             "tool"
@@ -504,8 +636,8 @@ defmodule Barkpark.StudioChat.Recorder do
   # (scc-w12-native-chips) can classify persisted rows without re-parsing
   # names: `"mcp" => true` + the bare tool (`task_ready`, `bp_search_query`).
   # `%{}` for every other tool, so a non-loopback row's metadata is unchanged.
-  defp mcp_meta(name) do
-    case ClaudeChat.mcp_tool_name(name) do
+  defp mcp_meta(provider, name) do
+    case Runtime.tool_name(provider, name) do
       nil -> %{}
       tool -> %{"mcp" => true, "mcp_tool" => tool}
     end
@@ -661,6 +793,214 @@ defmodule Barkpark.StudioChat.Recorder do
     StudioChat.update_status(session_id, "active")
   end
 
+  defp capture_runtime_event(state, %Event{} = event, trusted_managed_ingress?) do
+    RuntimeTelemetry.observe(state.session_id, event)
+    trusted_source? = trusted_managed_ingress? and trusted_runtime_source?(state, event)
+
+    state =
+      if trusted_source? or (not trusted_managed_ingress? and is_nil(state.runtime_attempt)) do
+        maybe_capture_event_provider_session_id(state.session_id, event.provider_session_id)
+
+        %{
+          state
+          | session: Runtime.with_provider_session_id(state.session, event.provider_session_id)
+        }
+      else
+        state
+      end
+
+    state =
+      if trusted_source? and trusted_runtime_usage_identity?(state, event) do
+        capture_runtime_usage(state, event)
+      else
+        state
+      end
+
+    case event.kind do
+      :session_started ->
+        state
+
+      :turn_started ->
+        StudioChat.update_status(state.session_id, "working")
+        %{state | runtime_text: ""} |> publish_activity(%{state: :working, line: "thinking…"})
+
+      :text_delta ->
+        %{state | runtime_text: state.runtime_text <> runtime_delta(event)}
+        |> publish_activity(%{state: :working, line: "writing…"})
+
+      :approval_requested ->
+        ask = runtime_approval(event)
+        persist_approval_ask(state.session_id, ask)
+        broadcast(state, {:claude_chat_permission, ask})
+        publish_activity(state, %{state: :needs_you, line: needs_you_line(ask.tool_name)})
+
+      :turn_completed ->
+        persist_runtime_text(state)
+        StudioChat.update_status(state.session_id, "active")
+        %{state | runtime_text: ""} |> publish_activity(%{state: :idle, line: nil})
+
+      :control_completed ->
+        state
+
+      kind when kind in [:item_started, :item_completed] ->
+        lifecycle = if kind == :item_started, do: :started, else: :completed
+        item = get_in(event.native, ["params", "item"]) || %{}
+        commit_rail(state, StudioChat.rail_apply_codex_item(state.rail_snapshot, item, lifecycle))
+
+      kind when kind in [:error, :process_failed, :protocol_error] ->
+        persist_runtime_text(state)
+        StudioChat.update_status(state.session_id, "exited")
+        publish_activity(state, %{state: :offline, line: nil})
+
+      _ ->
+        state
+    end
+  end
+
+  defp capture_runtime_usage(%{runtime_attempt: nil} = state, _event), do: state
+
+  defp capture_runtime_usage(state, %Event{kind: :usage} = event) do
+    usage_turn =
+      case state.runtime_usage_turn do
+        %{turn_id: turn_id} = turn when turn_id == event.turn_id ->
+          %{turn | terminal_snapshot: event}
+
+        turn ->
+          turn
+      end
+
+    %{state | runtime_usage_snapshot: event, runtime_usage_turn: usage_turn}
+  end
+
+  defp capture_runtime_usage(state, %Event{kind: :turn_started, turn_id: turn_id} = event)
+       when is_binary(turn_id) and turn_id != "" do
+    observe_runtime_boundary(state, :baseline, state.runtime_usage_snapshot, event)
+    %{state | runtime_usage_turn: %{turn_id: turn_id, terminal_snapshot: nil}}
+  end
+
+  defp capture_runtime_usage(
+         state,
+         %Event{kind: kind, turn_id: turn_id} = event
+       )
+       when kind in [:turn_completed, :error, :process_failed, :protocol_error] and
+              is_binary(turn_id) and turn_id != "" do
+    case state.runtime_usage_turn do
+      %{turn_id: ^turn_id, terminal_snapshot: snapshot} ->
+        observe_runtime_boundary(state, :terminal, snapshot, event)
+
+      _ ->
+        :ok
+    end
+
+    %{state | runtime_usage_turn: nil}
+  end
+
+  defp capture_runtime_usage(state, _event), do: state
+
+  defp trusted_runtime_source?(state, event),
+    do: event.provider == state.provider and event.session_id == state.session_id
+
+  defp trusted_runtime_usage_identity?(state, event) do
+    expected_provider_session_id = Runtime.provider_session_id(state.session)
+
+    is_binary(expected_provider_session_id) and
+      event.provider_session_id == expected_provider_session_id
+  end
+
+  defp observe_runtime_boundary(_state, _boundary, nil, _identity), do: :ok
+
+  defp observe_runtime_boundary(state, boundary, %Event{} = snapshot, %Event{} = identity) do
+    event = %{
+      snapshot
+      | provider: identity.provider,
+        session_id: identity.session_id,
+        provider_session_id: identity.provider_session_id,
+        turn_id: identity.turn_id,
+        idempotency_key: nil,
+        native: %{}
+    }
+
+    attribution =
+      case CycleFleet.current_runtime_attempt_attribution(state.runtime_attempt) do
+        {:ok, attribution} -> attribution
+        {:error, _reason} -> Barkpark.CycleFleet.RuntimeAttempt.attribution(state.runtime_attempt)
+      end
+
+    case RuntimeUsage.observe(attribution, boundary, event) do
+      {:ok, result} when result in [:recorded, :duplicate] ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: runtime usage #{boundary} was rejected: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp capture_provider_session_id(session_id, runtime_ref) do
+    maybe_capture_event_provider_session_id(session_id, Runtime.provider_session_id(runtime_ref))
+  end
+
+  defp maybe_capture_event_provider_session_id(session_id, provider_session_id)
+       when is_binary(provider_session_id) and provider_session_id != "" do
+    case StudioChat.set_provider_session_id(session_id, provider_session_id) do
+      {:ok, _session} ->
+        :ok
+
+      {:error, :immutable} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: failed to persist provider session id: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp maybe_capture_event_provider_session_id(_session_id, _provider_session_id), do: :ok
+
+  defp monitor_runtime(runtime_ref) do
+    case Runtime.runtime_pid(runtime_ref) do
+      pid when is_pid(pid) -> Process.monitor(pid)
+      _ -> nil
+    end
+  end
+
+  defp runtime_delta(%Event{native: native}) do
+    case get_in(native, ["params", "delta"]) || get_in(native, [:params, :delta]) do
+      text when is_binary(text) -> text
+      _ -> ""
+    end
+  end
+
+  defp runtime_approval(%Event{} = event) do
+    params = event.native["params"] || event.native[:params] || %{}
+
+    %{
+      request_id: event.approval_id,
+      tool_name: runtime_approval_name(event.native),
+      input: params,
+      title: nil
+    }
+  end
+
+  defp runtime_approval_name(native) do
+    case native["method"] || native[:method] do
+      "item/fileChange/requestApproval" -> "FileChange"
+      "item/permissions/requestApproval" -> "Permissions"
+      "item/commandExecution/requestApproval" -> "CommandExecution"
+      method when is_binary(method) -> method
+      _ -> "Approval"
+    end
+  end
+
+  defp persist_runtime_text(%{runtime_text: text, session_id: session_id})
+       when is_binary(text) and text != "" do
+    persist(session_id, %{role: "assistant", source_markdown: text, metadata: %{}}, "assistant")
+  end
+
+  defp persist_runtime_text(_state), do: :ok
+
   defp session_exited(session_id) do
     StudioChat.cancel_pending_approvals(session_id)
     # Any sub-agent still "running" at teardown can never report — flip it to
@@ -668,6 +1008,9 @@ defmodule Barkpark.StudioChat.Recorder do
     StudioChat.interrupt_running_tasks(session_id)
     StudioChat.mark_exited(session_id)
   end
+
+  defp release_admission(%{admission: admission}), do: RuntimeAdmission.release(admission)
+  defp release_admission(_state), do: :ok
 
   # ── agent lifecycle (charter D45) ──────────────────────────────────────────
 
@@ -750,9 +1093,7 @@ defmodule Barkpark.StudioChat.Recorder do
   defp stamp_task(session_id, tool_use_id, patch) do
     case StudioChat.merge_tool_metadata(session_id, tool_use_id, patch) do
       {:error, reason} ->
-        Logger.warning(
-          "studio chat recorder: failed to stamp task metadata: #{inspect(reason)}"
-        )
+        Logger.warning("studio chat recorder: failed to stamp task metadata: #{inspect(reason)}")
 
       _ ->
         :ok

@@ -108,6 +108,43 @@ type InlineSite struct {
 	ScaleMode   string   `json:"scale_mode,omitempty"`
 	PreviewSlug string   `json:"preview_slug,omitempty"`
 	PreviewHost string   `json:"preview_host,omitempty"`
+
+	// ServingMode is the control plane's per-site instruction for how the box
+	// terminates TLS: ServingModeDirect (default) issues a cert on demand;
+	// ServingModeCFProxied renders `tls internal` so a Cloudflare-proxied origin
+	// never runs on-demand ACME (whose challenge cannot complete through the
+	// proxy → error 526). The empty string is the zero value and means direct,
+	// so a claim from a control plane that does not yet send serving_mode keeps
+	// rendering today's on-demand block byte-for-byte. The CP→box channel that
+	// populates this is a separate concern (cf-agent-sites-tls-channel backlog);
+	// the field is threaded here so the derivation is ready the moment it lands.
+	ServingMode string `json:"serving_mode,omitempty"`
+}
+
+// Serving modes carried on InlineSite.ServingMode — the control plane's per-site
+// TLS-termination instruction. Direct sites resolve straight to the box and
+// issue their own cert on demand; CF-proxied sites sit behind Cloudflare's
+// orange cloud and must present a self-signed cert instead of running ACME.
+const (
+	// ServingModeDirect — the domain resolves straight to the box (grey cloud /
+	// no proxy). On-demand ACME is correct. This is the zero-value default.
+	ServingModeDirect = "direct"
+	// ServingModeCFProxied — the domain is proxied through Cloudflare (orange
+	// cloud). On-demand ACME cannot complete through the proxy, so the box must
+	// render `tls internal` (self-signed) to avoid Cloudflare error 526.
+	ServingModeCFProxied = "cf_proxied"
+)
+
+// tlsModeForServing maps a site's serving_mode to the caddyfile TLS mode the
+// renderer needs: cf_proxied → internal (self-signed, no ACME — 526-safe behind
+// the Cloudflare proxy); everything else (direct, empty, or any unknown value)
+// → on_demand, the direct-to-box default. On-demand is the fail-safe default so
+// an unrecognized mode never silently produces a `tls internal` origin.
+func tlsModeForServing(mode string) string {
+	if mode == ServingModeCFProxied {
+		return caddyfile.TLSModeInternal
+	}
+	return caddyfile.TLSModeOnDemand
 }
 
 // CommandRunner runs a subprocess, streaming combined stdout+stderr to w.
@@ -195,10 +232,16 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	// We have a healthy new container on `port`. Render Caddyfile with the
 	// updated site list (replace this site's existing entry), reload Caddy,
 	// then drain the old (blue) container if any.
+	// Derive the TLS mode from the site's serving_mode so a Cloudflare-proxied
+	// site renders `tls internal` (526-safe) and a direct site keeps on-demand.
+	// serving_mode is zero-valued until the CP→box channel populates it
+	// (cf-agent-sites-tls-channel backlog), so today every site resolves to
+	// on_demand and the rendered block is byte-identical to before.
 	updated := mergeSite(state.LiveSites, caddyfile.Site{
 		Slug:    slug,
 		Domains: domains,
 		Port:    port,
+		TLSMode: tlsModeForServing(d.Site.ServingMode),
 	})
 
 	if err := e.writeCaddyfile(updated); err != nil {

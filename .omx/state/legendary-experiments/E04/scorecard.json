@@ -1,0 +1,51 @@
+{
+  "action": "REWORK",
+  "assignment_id": "E04",
+  "candidate_id": "candidate-canonical-native",
+  "capability_blocks": [
+    "authenticated Studio content proof unavailable",
+    "real-client email client proof unavailable",
+    "target-reader width/accessibility proof unavailable without those capabilities"
+  ],
+  "counts": {
+    "accepted_paper_and_adversarial": 16,
+    "frozen_fixtures": 36,
+    "quarantined": 2,
+    "task_classes": 6,
+    "tasks": 18
+  },
+  "frozen_candidate_rubric": {
+    "path": "../E03/candidate-rubric.json",
+    "sha256": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4"
+  },
+  "frozen_failure_taxonomy": {
+    "path": "../E03/failure-taxonomy.json",
+    "sha256": "29fbb60a099ff6607efd87716887f592e2443498c5b65f2b87317ba3e1807ce9"
+  },
+  "frozen_replay_contract": {
+    "path": "../E03/requests.json",
+    "sha256": "ab26ec626a168e2bbdf522441650cf06808264080365224572197a53e22f3059"
+  },
+  "frozen_thresholds": {
+    "path": "../E03/thresholds.json",
+    "sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b"
+  },
+  "local_candidate_gate": "PASS",
+  "overall_quality": "PARTIAL",
+  "schema_version": "legendary-e04-scorecard/v1",
+  "threshold_results": {
+    "accessibility": "BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL_UNAVAILABLE",
+    "authored_content_preservation": "PASS_36_OF_36_PREIMAGES_AND_ACCEPTED_SEMANTIC_HASHES",
+    "build_formula": "NOT_APPLICABLE_ROUND_2",
+    "capacity_rule": "NOT_APPLICABLE_BEFORE_PILOT",
+    "idempotence": "PASS_TWO_IDENTICAL_RUNS",
+    "pilot_failure_rate": "NOT_APPLICABLE_ROUND_2",
+    "reader_visibility": "PARTIAL_LOCAL_HTML_NONBLANK; TARGET_STUDIO_EMAIL_BLOCKED",
+    "render_test_gate": "PASS_LOCAL_RUNNER_AND_VERIFIER",
+    "rollback": "PASS_36_OF_36_PREIMAGES; TWO_QUARANTINE_PATHS",
+    "schema_validity": "PASS_ACCEPTED_OUTPUTS_USE_SUPPORTED_TERMINAL_TYPES",
+    "structural_completeness": "PASS_SEMANTIC_HASH_AND_SIX_DISTINCT_TASK_CONTRACTS",
+    "surface_exercise": "FAIL_BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL",
+    "width_overflow": "BLOCKED_REAL_TUI_AND_EMAIL_CLIENT; LONG_TOKEN_FIXTURE_PRESERVED_LOCALLY"
+  }
+}

@@ -347,6 +347,85 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The decrypted Cloudflare credential for a `team` — `{:ok, %{token:,
+  account_id:, zone_id:}}` from the newest connected `cloudflare` Provider, or
+  `{:error, :no_cloudflare_provider}` when the team has connected none.
+
+  This is the D52 per-team credential seam: the CF DNS writers thread `token`
+  and `zone_id` in as ARGUMENTS, so a concurrent deploy for a DIFFERENT team can
+  never race over a shared `Application.put_env`. The stored `encrypted_token`
+  is `Vault.decrypt`'d then parsed — Cloudflare accepts EITHER a bare API-token
+  string OR a JSON blob `{api_token, account_id?, zone_id?}` (Provider validates
+  this at connect time), so both shapes decode here to the same map (`account_id`
+  / `zone_id` are `nil` for a bare token). A present-but-undecryptable /
+  unparseable ciphertext fails closed as `{:error, :cloudflare_credential_unreadable}`
+  (never a crash, never a silent standalone-bypass).
+
+  `team` is a `Team`, a team id binary, or anything `team_id/1` resolves.
+  """
+  @spec resolve_cloudflare_credential(Team.t() | binary()) ::
+          {:ok, %{token: String.t(), account_id: String.t() | nil, zone_id: String.t() | nil}}
+          | {:error, :no_cloudflare_provider | :cloudflare_credential_unreadable}
+  def resolve_cloudflare_credential(team) do
+    tid = team_id(team)
+
+    Provider
+    |> where([p], p.team_id == ^tid and p.kind == "cloudflare")
+    |> order_by([p], desc: p.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      %Provider{encrypted_token: ciphertext} ->
+        with {:ok, plaintext} <- Vault.decrypt(ciphertext),
+             {:ok, creds} <- parse_cloudflare_credential(plaintext) do
+          {:ok, creds}
+        else
+          _ -> {:error, :cloudflare_credential_unreadable}
+        end
+
+      _ ->
+        {:error, :no_cloudflare_provider}
+    end
+  end
+
+  # Cloudflare's stored credential is EITHER a JSON blob {api_token, account_id?,
+  # zone_id?} or a bare token string (Provider.validate_credential_shape gates
+  # both). A JSON object without a non-blank api_token is rejected (it can't
+  # authenticate); a non-object / non-JSON string is a bare token.
+  defp parse_cloudflare_credential(plaintext) when is_binary(plaintext) do
+    case Jason.decode(plaintext) do
+      {:ok, %{"api_token" => api_token} = blob} when is_binary(api_token) and api_token != "" ->
+        {:ok,
+         %{
+           token: api_token,
+           account_id: blank_to_nil(blob["account_id"]),
+           zone_id: blank_to_nil(blob["zone_id"])
+         }}
+
+      {:ok, %{}} ->
+        # A JSON object that carries no usable api_token can't authenticate.
+        :error
+
+      _ ->
+        case String.trim(plaintext) do
+          "" -> :error
+          token -> {:ok, %{token: token, account_id: nil, zone_id: nil}}
+        end
+    end
+  end
+
+  defp parse_cloudflare_credential(_), do: :error
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(_), do: nil
+
   @doc "List a Team's Barkparks, newest first. Scoped — never crosses teams."
   @spec list_barkparks(Team.t() | binary()) :: [Barkpark.t()]
   def list_barkparks(team) do
@@ -2204,6 +2283,25 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Disconnect a team's connected provider(s) of `kind` — drops the row(s), and the
+  encrypted credential goes with them (the plugin law: disconnecting a provider
+  degrades gracefully back to standalone). Returns `:ok` when at least one row was
+  removed, `{:error, :not_found}` when the team had none of that kind (no
+  existence leak on the caller side). Team-scoped — never crosses teams.
+  """
+  @spec disconnect_provider(Team.t() | binary(), String.t()) :: :ok | {:error, :not_found}
+  def disconnect_provider(team, kind) when is_binary(kind) do
+    tid = team_id(team)
+
+    {count, _} =
+      Provider
+      |> where([p], p.team_id == ^tid and p.kind == ^kind)
+      |> Repo.delete_all()
+
+    if count > 0, do: :ok, else: {:error, :not_found}
+  end
+
+  @doc """
   Decrypt a stored provider token back to plaintext. Returns `{:ok, token}` or
   `:error` (tampered ciphertext fails closed). Call-site sugar over
   `Vault.decrypt/1` so consumers don't reach into the schema field directly.
@@ -3336,14 +3434,100 @@ defmodule BarkparkCloud.Registry do
   @spec create_site(Barkpark.t(), map()) ::
           {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
   def create_site(%Barkpark{} = barkpark, attrs) do
-    %Site{}
-    |> Site.changeset(
+    # site-spawner W5 (charter D47): mint the per-site content-publish webhook
+    # secret BEFORE the insert so its ciphertext lands on the row; the plaintext is
+    # carried out here to register on the box AFTER the row exists (the receiver URL
+    # needs the site id). A container / unbound site mints nothing.
+    {content_secret, attrs} = maybe_mint_content_secret(attrs)
+
+    prepared =
       attrs
       |> put_site_read_token()
       |> Map.put_new(:barkpark_id, barkpark.id)
       |> Map.put_new(:team_id, barkpark.team_id)
-    )
-    |> Repo.insert()
+
+    case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
+      {:ok, site} ->
+        # Best-effort: register the dataset-scoped webhook on the box so a publish
+        # fires the CP receiver. NEVER fails the create — the site row is the truth;
+        # a box that is not yet live (or refuses) just means auto-rebuild is wired
+        # on the next successful registration path. Fires only for a live static
+        # site with a bootstrap_dataset (charter D42/D47).
+        _ = maybe_register_content_webhook(barkpark, site, content_secret)
+        {:ok, site}
+
+      {:error, _cs} = error ->
+        error
+    end
+  end
+
+  # Mint + Vault-encrypt the content-publish secret when this is a content-bound
+  # static site. Returns `{plaintext | nil, attrs}` — the plaintext travels to the
+  # box registration; only the ciphertext is folded into the insert attrs. Accepts
+  # atom or string keys (the router sends atoms, the HTTP-mutate path strings).
+  defp maybe_mint_content_secret(attrs) do
+    kind = Map.get(attrs, :kind) || Map.get(attrs, "kind")
+    dataset = Map.get(attrs, :bootstrap_dataset) || Map.get(attrs, "bootstrap_dataset")
+
+    if kind == "static" and is_binary(dataset) and dataset != "" do
+      secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      {secret, Map.put(attrs, :content_webhook_secret_encrypted, Vault.encrypt(secret))}
+    else
+      {nil, attrs}
+    end
+  end
+
+  # Register ONE dataset-scoped webhook on the box (via the admin-token relay — the
+  # `wire_site_url` prior art) pointed at THIS site's content-publish receiver, so
+  # a publish on the bound dataset fires the CP auto-deploy. events =
+  # {publish,unpublish,delete} (charter D43 — the three lifecycle actions that
+  # touch the PUBLISHED row). Best-effort by contract; the caller ignores the
+  # result. Skips a nil secret (non-static/unbound) and a non-live box.
+  defp maybe_register_content_webhook(_barkpark, _site, nil), do: :noop
+
+  defp maybe_register_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret)
+       when is_binary(secret) do
+    with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
+         dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
+         url when is_binary(url) <- content_receiver_url(site) do
+      # The box's webhook changeset validate_required([:name, :url]) — omitting
+      # `name` 422s ("name can't be blank") and the registration silently fails,
+      # so the site never auto-rebuilds on publish. Name it after the site.
+      body = %{
+        name: "site-autodeploy-#{site.id}",
+        events: ["publish", "unpublish", "delete"],
+        url: url,
+        secret: secret
+      }
+
+      case relay_admin(barkpark, :post, "/v1/webhooks/#{URI.encode(dataset)}", body) do
+        {:ok, status, _resp} when status in 200..299 ->
+          :ok
+
+        other ->
+          Logger.warning(
+            "content-publish webhook registration for site #{site.id} did not take: #{inspect(other)}"
+          )
+
+          :error
+      end
+    else
+      _ -> :noop
+    end
+  end
+
+  # The public URL the box POSTs a content-publish delivery to. Per-site receiver
+  # (charter D45): `<control-plane public origin>/v1/sites/webhooks/content-publish/
+  # <site_id>`. The origin is config-driven (`:public_url`, PUBLIC_URL /
+  # CONTROL_PLANE_URL in prod) so it is a genuine cross-host public call
+  # (guerrilla → barkpark.cloud), never loopback.
+  defp content_receiver_url(%Site{id: id}) do
+    base =
+      Application.get_env(:barkpark_cloud, :public_url, "https://api.barkpark.cloud")
+      |> to_string()
+      |> String.trim_trailing("/")
+
+    base <> "/v1/sites/webhooks/content-publish/#{id}"
   end
 
   # site-spawner W1: fold a plaintext read token into the changeset as its
@@ -3375,6 +3559,62 @@ defmodule BarkparkCloud.Registry do
 
   def reveal_site_read_token(%Site{read_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
+
+  @doc """
+  site-spawner W6 (charter D51): persist the Cloudflare-in-front edge binding on
+  `site` — the seam the DNS writer (S4) and the domain-status rung (S5) bind to.
+
+  Writes through the NARROW `Site.cf_binding_changeset/2` (containment: only the
+  CF columns move; it can never rename or re-team the site), inside a transaction
+  so the multi-column edge binding (domain + zone + record + serving_mode +
+  tls_mode) lands atomically or not at all — a half-persisted binding (e.g. a
+  serving_mode flipped to `cf_proxied` without its `cf_record_id`) would leave
+  the box's TLS render and the status rung reading an inconsistent row.
+
+  `attrs` carries any subset of the CF fields; the two mode enums are
+  inclusion-validated, so a bad value is `{:error, changeset}`, never a bad row.
+  With no CF account connected NOTHING calls this, so the standalone path is
+  untouched and the row keeps its `direct`/`on_demand` defaults (charter D58).
+
+  Returns `{:ok, %Site{}}` or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec set_cf_binding(Site.t(), map()) ::
+          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def set_cf_binding(%Site{} = site, attrs) when is_map(attrs) do
+    Repo.transaction(fn ->
+      case site |> Site.cf_binding_changeset(attrs) |> Repo.update() do
+        {:ok, updated} -> updated
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  site-spawner W6 (charter D51): read `site`'s Cloudflare edge binding as a plain
+  map — the reader the DNS writer and the domain-status rung resolve mode from
+  (never the resolved IP, charter D56). A pure-standalone site returns its
+  `direct`/`on_demand` defaults with nil CF handles.
+  """
+  @spec cf_binding(Site.t()) :: %{
+          cf_domain: String.t() | nil,
+          cf_zone_id: String.t() | nil,
+          cf_record_id: String.t() | nil,
+          serving_mode: String.t(),
+          tls_mode: String.t(),
+          cf_cert_path: String.t() | nil,
+          cf_key_path: String.t() | nil
+        }
+  def cf_binding(%Site{} = site) do
+    %{
+      cf_domain: site.cf_domain,
+      cf_zone_id: site.cf_zone_id,
+      cf_record_id: site.cf_record_id,
+      serving_mode: site.serving_mode,
+      tls_mode: site.tls_mode,
+      cf_cert_path: site.cf_cert_path,
+      cf_key_path: site.cf_key_path
+    }
+  end
 
   @doc "List a Team's sites across all of its barkparks, newest first."
   @spec list_sites_for_team(Team.t() | binary()) :: [Site.t()]
@@ -3784,6 +4024,26 @@ defmodule BarkparkCloud.Registry do
   def reveal_site_github_secret(%Site{github_webhook_secret_encrypted: nil}), do: {:ok, nil}
 
   def reveal_site_github_secret(%Site{github_webhook_secret_encrypted: ciphertext}) do
+    case Vault.decrypt(ciphertext) do
+      {:ok, plain} -> {:ok, plain}
+      :error -> :error
+    end
+  end
+
+  @doc """
+  site-spawner W5 (charter D46/D47): decrypt a Site's content-publish webhook
+  secret back to plaintext — the secret the CP verifies inbound
+  `POST /v1/sites/webhooks/content-publish/:site_id` deliveries against.
+
+  Returns `{:ok, plaintext}` when set, `{:ok, nil}` when never configured (every
+  container site + any static site that predates W5 / had no live box at create),
+  or `:error` when the stored ciphertext is tampered (fail closed). Mirrors
+  `reveal_site_github_secret/1` exactly.
+  """
+  @spec reveal_site_content_secret(Site.t()) :: {:ok, binary() | nil} | :error
+  def reveal_site_content_secret(%Site{content_webhook_secret_encrypted: nil}), do: {:ok, nil}
+
+  def reveal_site_content_secret(%Site{content_webhook_secret_encrypted: ciphertext}) do
     case Vault.decrypt(ciphertext) do
       {:ok, plain} -> {:ok, plain}
       :error -> :error
@@ -4453,6 +4713,13 @@ defmodule BarkparkCloud.Registry do
     |> Site.runtime_changeset(%{current_deployment_id: deployment_id})
     |> Repo.update()
   end
+
+  # NOTE: `set_cf_binding/2` (the D57 CF-in-front persist) is defined ONCE, above,
+  # by the cf-edge-binding-schema slice — the charter D51 owner of the cf_* columns
+  # and their narrow, inclusion-validated `Site.cf_binding_changeset/2`. The DNS
+  # writer's earlier schema-tolerant stopgap was removed at review to avoid a
+  # duplicate clause (`--warnings-as-errors` merge-gate failure); the canonical
+  # validating+transactional version is call-compatible with the deploy handler.
 
   @doc """
   Transition a claimed Deployment, CASing on the worker's observed epoch. Returns

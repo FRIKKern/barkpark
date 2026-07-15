@@ -61,6 +61,38 @@ export interface BridgeConfig {
   userName: string;
   /** The inbound HTTP transport for webhook channels (Slack/Teams/WhatsApp). */
   webhook: WebhookConfig;
+  /**
+   * How often the webhook mount index re-reads `connector_installs` and converges
+   * against it (`CONNECTORS_MOUNT_RECONCILE_INTERVAL_MS`, charter D83). This is
+   * what makes a horizontally-scaled bridge survive: replica A handles an OAuth
+   * callback and mounts the new install in ITS OWN in-memory index; replica B,
+   * which never saw the request, is stale until it rediscovers the row on a tick.
+   *
+   * `0` DISABLES the reconcile entirely — a single-replica deploy needs nothing
+   * more than the boot mount + the connect-time `addInstall`, and the loop would
+   * only burn a query. Optional in the TYPE so a hand-built test config can omit
+   * it; `loadConfig` always sets it, and `startBridge` falls back to the default.
+   */
+  mountReconcileIntervalMs?: number;
+  /**
+   * How often the SOCKET/POLL ownership lease is renewed and lapsed leases are
+   * taken over (`CONNECTORS_INSTALL_LEASE_INTERVAL_MS`, charter D93/D94). This is
+   * what stops a horizontally-scaled bridge from opening a SECOND Discord socket /
+   * a SECOND Telegram poll against one bot: exactly one replica holds each
+   * install's lease and drives its transport; the others stand by and take over on
+   * lapse. Distinct from `mountReconcileIntervalMs` (webhook mounts, replica-safe
+   * a different way). `0` disables the loop — a single-replica deploy just holds
+   * the lease from boot. Optional in the TYPE; `loadConfig` always sets it.
+   */
+  installLeaseIntervalMs?: number;
+  /**
+   * The lease TTL (`CONNECTORS_INSTALL_LEASE_TTL_MS`) — how long a claim stays
+   * valid before a standby may steal it. MUST exceed `installLeaseIntervalMs` (the
+   * holder renews every interval; a TTL below the interval would let a healthy
+   * holder's lease lapse mid-cycle and flap). `loadConfig` enforces `ttl >
+   * interval` by defaulting the TTL to 3× the interval.
+   */
+  installLeaseTtlMs?: number;
 }
 
 /**
@@ -105,6 +137,22 @@ const DEFAULT_WEBHOOK_HOST = "127.0.0.1";
 const DEFAULT_WEBHOOK_PORT = 4020;
 const DEFAULT_WEBHOOK_PATH_PREFIX = "/connectors";
 const DEFAULT_WEBHOOK_MAX_BODY_BYTES = 1_048_576;
+/**
+ * 30s: fast enough that a second replica picks up a new install within one poll
+ * of the OAuth callback that wrote it, slow enough that the reconcile query is
+ * noise against real traffic. `0` in the env disables it.
+ */
+export const DEFAULT_MOUNT_RECONCILE_INTERVAL_MS = 30_000;
+/**
+ * 15s renew: comfortably under the 45s default TTL (3×), so two consecutive
+ * renew-misses still leave headroom before a standby steals a lease from a holder
+ * that is merely slow. Fast enough that a dead owner's socket/poll install is
+ * taken over within ~one TTL; slow enough that the claim query is noise. `0`
+ * disables the loop for a single-replica deploy.
+ */
+export const DEFAULT_INSTALL_LEASE_INTERVAL_MS = 15_000;
+/** 3× the renew interval — a holder must miss three renews before a lapse is stealable. */
+export const DEFAULT_INSTALL_LEASE_TTL_MS = DEFAULT_INSTALL_LEASE_INTERVAL_MS * 3;
 
 export class MissingConfigError extends Error {
   constructor(key: string) {
@@ -173,6 +221,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     ...(connectSecret ? { connectSecret } : {}),
     userName: env["BRIDGE_USER_NAME"]?.trim() || "barkpark",
     webhook: loadWebhookConfig(env),
+    mountReconcileIntervalMs: intFromEnv(
+      env,
+      "CONNECTORS_MOUNT_RECONCILE_INTERVAL_MS",
+      DEFAULT_MOUNT_RECONCILE_INTERVAL_MS,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    installLeaseIntervalMs: intFromEnv(
+      env,
+      "CONNECTORS_INSTALL_LEASE_INTERVAL_MS",
+      DEFAULT_INSTALL_LEASE_INTERVAL_MS,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    installLeaseTtlMs: intFromEnv(
+      env,
+      "CONNECTORS_INSTALL_LEASE_TTL_MS",
+      // Default the TTL to the LARGER of the healthy default and 3× the (possibly
+      // overridden) interval, so `ttl > interval` holds when the interval is raised
+      // AND a `0` interval (loop disabled) still yields a full-length TTL — never a
+      // 1ms lease that a second replica could steal on its own boot pass.
+      Math.max(
+        DEFAULT_INSTALL_LEASE_TTL_MS,
+        intFromEnv(
+          env,
+          "CONNECTORS_INSTALL_LEASE_INTERVAL_MS",
+          DEFAULT_INSTALL_LEASE_INTERVAL_MS,
+          0,
+          Number.MAX_SAFE_INTEGER,
+        ) * 3,
+      ),
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
   };
 }
 

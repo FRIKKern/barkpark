@@ -40,6 +40,22 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
+  # Flat CycleFleet commands must identify the same workspace as their token.
+  # Unlike the legacy :api alias, token derivation happens before the Default
+  # fallback so a local `bp cycle` invocation cannot silently operate on a
+  # different cloud/default workspace.
+  pipeline :cycle_api do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants
   # ag-enforcement — flat-routes arm). Layered AFTER `:api` on the flat read
   # scope ONLY — NEVER on write/admin/auth/plugin routes. `ResolveTokenOwner`
@@ -649,6 +665,19 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireChatAccess)
   end
 
+  pipeline :require_chat_host_admin do
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
+  end
+
+  pipeline :registered_chat_host do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireChatHost)
+  end
+
   # Scoped admin gate (barkpark-23yi / barkpark-fsko P0 fix). For the
   # /w/:ws/p/:project admin routes: require a token AND a membership ROLE of
   # owner/admin in the resolved `current_workspace`. RequireToken sets
@@ -790,8 +819,8 @@ defmodule BarkparkWeb.Router do
       # on TmuxConsole.enabled? (dev-only PTY dep + config flag). Hidden in
       # prod/test where the flag is off and the backend isn't compiled.
       live("/tmux", TmuxLive)
-      # Claude chat — admin-gated here; ChatLive.mount also hard-gates on
-      # ClaudeChat.enabled? (host `claude` binary + config flag; refused on
+      # Provider-neutral agent chat — admin-gated here; ChatLive.mount also
+      # requires at least one enabled Claude Code or Codex runtime (refused on
       # public-demo hosts). Both routes share this live_session + module, so a
       # session switch is a `push_patch` with NO remount (charter D14):
       # `/chat` is the new-chat empty state; `/chat/:session_id` replays a
@@ -1146,6 +1175,9 @@ defmodule BarkparkWeb.Router do
       ],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
+      live("/chat-hosts", ChatHostsLive)
+      live("/chat", ChatLive)
+      live("/chat/:session_id", ChatLive)
 
       # Connectors catalog + the connect loop (connectors D49). It MUST be in
       # THIS session, not the flat `/studio/*` one: the flat live_session carries
@@ -1476,6 +1508,12 @@ defmodule BarkparkWeb.Router do
   # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24:
   # {"req_per_s": float, "p95_ms": int|null, "window_s": int}.
   scope "/v1", BarkparkWeb do
+    pipe_through(:cycle_api)
+
+    get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
+  end
+
+  scope "/v1", BarkparkWeb do
     pipe_through([:api, :require_token])
 
     get("/instance/request-stats", RequestStatsController, :show)
@@ -1485,6 +1523,20 @@ defmodule BarkparkWeb.Router do
     # convention, because request-rate/latency/memory is instance-operational
     # data. Served by TelemetryMetricsPrometheus.Core (BarkparkWeb.Telemetry).
     get("/instance/metrics", MetricsController, :scrape)
+  end
+
+  scope "/v1", BarkparkWeb do
+    pipe_through([:cycle_api, :require_write])
+
+    post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
+    post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
+    post("/cycles/:epic_id/:wave_id/assignments", CycleFleetController, :create_assignment)
+
+    post(
+      "/cycles/:epic_id/:wave_id/assignments/:assignment_id/results",
+      CycleFleetController,
+      :create_result
+    )
   end
 
   # ── Federated discovery ─────────────────────────────────────────────────
@@ -1571,6 +1623,27 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
     get("/sessions/:id/events", ChatController, :events)
+  end
+
+  scope "/w/:workspace_slug/v1/chat-hosts", BarkparkWeb do
+    pipe_through([:api, :require_chat_host_admin])
+
+    get("/", ChatHostController, :index)
+    post("/enrollments", ChatHostController, :create_enrollment)
+    delete("/:id", ChatHostController, :revoke)
+  end
+
+  scope "/v1/chat-host", BarkparkWeb do
+    pipe_through(:api)
+    post("/enroll", ChatHostController, :enroll)
+  end
+
+  scope "/v1/chat-host", BarkparkWeb do
+    pipe_through(:registered_chat_host)
+    post("/heartbeat", ChatHostController, :heartbeat)
+    post("/rotate", ChatHostController, :rotate)
+    get("/commands", ChatHostController, :commands)
+    post("/events", ChatHostController, :event)
   end
 
   # ── Revision restore — a WRITE (Revisions.restore_revision →
@@ -1943,6 +2016,26 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token])
+
+    get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token, :require_write])
+
+    post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
+    post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
+    post("/cycles/:epic_id/:wave_id/assignments", CycleFleetController, :create_assignment)
+
+    post(
+      "/cycles/:epic_id/:wave_id/assignments/:assignment_id/results",
+      CycleFleetController,
+      :create_result
+    )
   end
 
   # Scoped READ document routes — share-aware via the :docs surface (P2). These

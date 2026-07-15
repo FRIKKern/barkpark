@@ -9,6 +9,63 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
   alias BarkparkWeb.Studio.ClaudeChat
 
+  # A stub bridge for the TOOL-connector seam (connectors D69/D73). It plays the
+  # `fetch_tool_descriptors/1` role WITHOUT a running Node process, and — the
+  # non-vacuous part — it DECODES the ticket and only answers a descriptor when
+  # the runner signed a real TOOL-SESSION ticket (provider `tool-session`) for
+  # the expected workspace. So a config file that ends up with the `github`
+  # server PROVES `setup_mcp` minted the right ticket for the right workspace,
+  # not that a canned value was stuffed in.
+  defmodule ToolBridgeStub do
+    @behaviour Barkpark.Connectors.Bridge
+
+    @impl true
+    def validate(_ticket, _credential), do: {:error, :unreachable}
+    @impl true
+    def connect(_ticket, _credential, _chat_token), do: {:error, :unreachable}
+    @impl true
+    def disconnect(_ticket, _install_key), do: {:error, :unreachable}
+    @impl true
+    def stage_pending(_ticket, _chat_token), do: {:error, :unreachable}
+
+    @impl true
+    def fetch_tool_descriptors(ticket) do
+      with [body, _sig] <- String.split(ticket, ".", parts: 2),
+           {:ok, json} <- Base.url_decode64(body, padding: false),
+           {:ok, %{"p" => "tool-session", "w" => ws}} <- Jason.decode(json),
+           ^ws <- Application.get_env(:barkpark, :tool_stub_ws) do
+        {:ok,
+         [
+           %{
+             "provider" => "github",
+             "type" => "http",
+             "url" => "https://api.githubcopilot.com/mcp/",
+             "headersHelper" =>
+               "curl -sS -X POST -d '{\"ticket\":\"#{ticket}\"}' " <>
+                 "http://127.0.0.1:4020/connectors/connect/tool-headers/github"
+           }
+         ]}
+      else
+        _ -> {:ok, []}
+      end
+    end
+  end
+
+  # Set `config :barkpark, Barkpark.Connectors, …`, restoring on exit. The tool
+  # seam reads `connect_secret` (to sign the ticket) and `bridge` (to dispatch)
+  # from here — the default is `connect_secret: nil`, i.e. no tool servers.
+  defp put_connectors_config(overrides) do
+    prev = Application.get_env(:barkpark, Barkpark.Connectors)
+    merged = Keyword.merge(prev || [], overrides)
+    Application.put_env(:barkpark, Barkpark.Connectors, merged)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.Connectors, prev),
+        else: Application.delete_env(:barkpark, Barkpark.Connectors)
+    end)
+  end
+
   defp put_chat_config(config) do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -285,6 +342,87 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                server["env"]
 
       assert is_binary(url) and url != ""
+    end
+
+    test "mcp_config/2 with no descriptors == mcp_config/1 (back-compat, connectors D69)" do
+      assert ClaudeChat.mcp_config("bpcs_x", []) == ClaudeChat.mcp_config("bpcs_x")
+    end
+
+    test "mcp_config/2 FOLDS a tool descriptor as a SECOND mcpServers key (D69/D71)" do
+      helper =
+        "curl -sS -X POST -d '{\"ticket\":\"t\"}' " <>
+          "http://127.0.0.1:4020/connectors/connect/tool-headers/github"
+
+      descriptor = %{
+        "provider" => "github",
+        "type" => "http",
+        "url" => "https://api.githubcopilot.com/mcp/",
+        "headersHelper" => helper
+      }
+
+      servers = ClaudeChat.mcp_config("bpcs_secret", [descriptor])["mcpServers"]
+
+      # The loopback server survives UNSHADOWED, still carrying the minted token —
+      # a tool connector is ADDITIVE, never a replacement.
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] == "bpcs_secret"
+
+      # …and github lands as a SECOND key, DERIVED from the descriptor (provider,
+      # transport, url, and the non-secret headersHelper that fetches the PAT).
+      assert servers["github"] == %{
+               "type" => "http",
+               "url" => "https://api.githubcopilot.com/mcp/",
+               "headersHelper" => helper
+             }
+
+      assert map_size(servers) == 2
+    end
+
+    test "a SECOND tool connector is a SECOND mcpServers key — the acceptance bar (D69)" do
+      descriptors = [
+        %{
+          "provider" => "github",
+          "type" => "http",
+          "url" => "https://api.githubcopilot.com/mcp/",
+          "headersHelper" => "curl github"
+        },
+        %{
+          "provider" => "linear",
+          "type" => "http",
+          "url" => "https://mcp.linear.app/sse",
+          "headersHelper" => "curl linear"
+        }
+      ]
+
+      servers = ClaudeChat.mcp_config("bpcs", descriptors)["mcpServers"]
+      # ZERO core-loop change: two tool connectors, two entries, no special-case.
+      assert Enum.sort(Map.keys(servers)) == ["barkpark", "github", "linear"]
+    end
+
+    test "mcp_config/2 FAILS CLOSED on malformed / reserved-name descriptors (never shadows barkpark)" do
+      bad = [
+        # no url/type
+        %{"provider" => "github"},
+        # reserved name — must NEVER override the loopback server's minted token
+        %{"provider" => "barkpark", "type" => "http", "url" => "https://evil.example/"},
+        # no provider
+        %{"type" => "http", "url" => "https://x.example/"},
+        # non-http transport (only http is a tool transport today, D71)
+        %{"provider" => "linear", "type" => "stdio", "url" => "x"},
+        # blank url
+        %{"provider" => "zed", "type" => "http", "url" => ""}
+      ]
+
+      servers = ClaudeChat.mcp_config("bpcs_secret", bad)["mcpServers"]
+      # ONLY the loopback server, and its token intact — no rogue shadow.
+      assert map_size(servers) == 1
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] == "bpcs_secret"
+    end
+
+    test "a tool descriptor with no headersHelper folds a URL-only server (fail-soft)" do
+      descriptor = %{"provider" => "github", "type" => "http", "url" => "https://x.example/mcp/"}
+      servers = ClaudeChat.mcp_config("bpcs", [descriptor])["mcpServers"]
+      assert servers["github"] == %{"type" => "http", "url" => "https://x.example/mcp/"}
+      refute Map.has_key?(servers["github"], "headersHelper")
     end
 
     test "plan mode road-blocks Workflow (D65/D68 fail-closed until S3's verdict)" do
@@ -884,6 +1022,68 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert get_in(config, ["mcpServers", "barkpark", "env", "BARKPARK_API_TOKEN"]) == token
 
       assert ClaudeChat.task_hands(session) == :minted
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "a connected TOOL connector folds a SECOND mcpServers key into the ON-DISK config (D69)",
+         %{minter: minter, ws: ws} do
+      # A configured connect seam + a stub bridge that answers ONLY a real
+      # tool-session ticket for THIS workspace (see ToolBridgeStub). No Node.
+      put_connectors_config(connect_secret: "tool-seam-test-secret", bridge: ToolBridgeStub)
+      Application.put_env(:barkpark, :tool_stub_ws, ws.id)
+      on_exit(fn -> Application.delete_env(:barkpark, :tool_stub_ws) end)
+
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      # Wait for the child to boot (the env dump lands), then read the config file.
+      _env = read_child_env(file)
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      servers = config_path |> File.read!() |> Jason.decode!() |> Map.fetch!("mcpServers")
+
+      # The loopback server still carries the minted token …
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] |> String.starts_with?("bpcs_")
+
+      # … AND github landed as a SECOND server, DERIVED from the bridge descriptor.
+      # This only happens if setup_mcp signed a REAL tool-session ticket bound to
+      # THIS workspace — the stub returns [] otherwise (non-vacuous, D69/D38).
+      assert servers["github"]["type"] == "http"
+      assert servers["github"]["url"] == "https://api.githubcopilot.com/mcp/"
+      assert servers["github"]["headersHelper"] =~ "/connect/tool-headers/github"
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "no connect seam ⇒ NO tool servers, config unchanged (fail-soft, D69)", %{minter: minter} do
+      # The default instance: connect_secret nil. sign_tool short-circuits BEFORE
+      # any bridge call, so the config is byte-identical to the pre-wave shape.
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      _env = read_child_env(file)
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      servers = config_path |> File.read!() |> Jason.decode!() |> Map.fetch!("mcpServers")
+
+      assert Map.keys(servers) == ["barkpark"]
 
       ref = Process.monitor(session)
       ClaudeChat.close(session)

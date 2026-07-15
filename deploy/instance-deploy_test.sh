@@ -274,8 +274,9 @@ check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' 
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
 check "per-slot sha stamp written (W6)"   "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'newsha' ]"
 check "idle slot has no stamp yet"        "[ ! -e '$APP/.slots/blue.sha' ]"
-check "prod channel: ff-only pull of origin main" "grep -q 'pull --ff-only origin main' '$GITLOG'"
-check "prod channel: no staging fetch/reset"       "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
+check "prod channel: fetch origin main"           "grep -q 'fetch origin main' '$GITLOG'"
+check "prod channel: hard reset to FETCH_HEAD (divergence-proof)" "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "prod channel: NO ff-only pull (jams on divergence)" "! grep -q 'pull --ff-only' '$GITLOG'"
 
 echo "== Case 2: green active (:4001) -> healthy deploy flips back to blue =="
 : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
@@ -326,13 +327,13 @@ check "non-origin remote: exit 11"        "[ '$rc' = '11' ]"
 check "non-origin remote: no git mutation" "! grep -qE 'fetch|reset --hard FETCH_HEAD|pull --ff-only' '$GITLOG'"
 rm -rf "$TMP"
 
-echo "== Case 5: production box, default ref -> unchanged guerrilla ff-only path =="
+echo "== Case 5: production box, default ref -> fetch origin main + hard reset (divergence-proof) =="
 setup_case
 rc="$(run_deploy 200 defaultsha)"   # DEPLOY_REF unset -> main
 check "exit 0"                            "[ '$rc' = '0' ]"
-check "ff-only pull of origin main"       "grep -q 'pull --ff-only origin main' '$GITLOG'"
-check "artifact-discard checkout ran"     "grep -q 'checkout -- .' '$GITLOG'"
-check "no staging fetch/reset on prod"    "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
+check "fetch origin main"                 "grep -q 'fetch origin main' '$GITLOG'"
+check "hard reset to FETCH_HEAD"          "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "NO ff-only pull (would jam on a divergent box HEAD)" "! grep -q 'pull --ff-only' '$GITLOG'"
 check "healthy full flip to :4001"        "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
 rm -rf "$TMP"
 
@@ -604,6 +605,30 @@ EOF
     "grep -q 'armed caddy /sites/racesite route' '$TMP/site.log' || grep -q 'caddy reload failed (config valid)' '$TMP/site.log'"
   rm -rf "$TMP"
 fi
+
+echo "== Case 14: slot-env regen PRESERVES an operator-set BARKPARK_SITE_DEPLOY_APPLY (D38) =="
+# The seam-enable flag lives in .slots/%i.env (read at BEAM boot via the unit's
+# EnvironmentFile). The generator truncate-regenerates both env files EVERY
+# deploy — before this fix the flag was silently dropped, reverting the
+# site-deploy admin route to 503. Seed the flag BEFORE a deploy, prove it
+# survives the regen, and prove the untouched slot does NOT get it hardcoded on.
+setup_case
+mkdir -p "$APP/.slots"
+printf 'BARKPARK_SITE_DEPLOY_APPLY=1\n' > "$APP/.slots/green.env"   # operator opt-in, pre-deploy
+rc="$(run_deploy 200 seedsha1)"                                    # blue active -> deploys green
+check "exit 0"                                    "[ '$rc' = '0' ]"
+check "seeded flag survives regen (green.env)"    "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
+check "slot env files still written (regression anchor)" "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
+check "flag NOT hardcoded onto the unseeded slot (fail-closed)" "! grep -q 'BARKPARK_SITE_DEPLOY_APPLY' '$APP/.slots/blue.env'"
+# Survives a SECOND deploy too — the one that TARGETS blue still rewrites
+# green.env, the exact truncation that dropped the flag before.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 seedsha2)"                                    # green active -> deploys blue, rewrites green.env
+check "second deploy exit 0"                      "[ '$rc' = '0' ]"
+check "flag still present after a full regen cycle" "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
+check "unseeded blue slot still has no flag"      "! grep -q 'BARKPARK_SITE_DEPLOY_APPLY' '$APP/.slots/blue.env'"
+rm -rf "$TMP"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "c7237114b05259ea8a477baeac8333f1df21de1de0148c86120fa1830775eb7f",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "6d6861b5f4fc1918030318771707e90d5d62fc8bfdd271851bfdfbf50794c065",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "af024ff6ace089e7a6746c4c70234afa92438eea7e86dfdd9d85d58ddc164243",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYMENT_OR_AUTHENTICATED_BROWSER_SESSION; LOGIN_OR_API_AUTH_IS_NOT_ACCEPTED",
+  "fixture_id": "wave-deck",
+  "fixture_kind": "paper",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "authenticated_studio"
+}

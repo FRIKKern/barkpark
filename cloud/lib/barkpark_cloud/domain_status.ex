@@ -41,6 +41,32 @@ defmodule BarkparkCloud.DomainStatus do
   A stage DOWNSTREAM of a non-ok stage is `pending` (skipped, not probed) — the
   chain stops at the first blocker so the operator reads top-down to the cause.
 
+  ## Two subjects: a Barkpark box, or a co-located Site
+
+  `check/2` accepts either a `%Barkpark{}` (its platform FQDN + optional custom
+  host) or a `%Site{}` (its `domains` array, each checked against the box it
+  runs on — `site.barkpark.host`, read from the preloaded association). Both walk
+  the identical four-stage chain; the only difference is the estate and the
+  serving MODE.
+
+  ## Serving mode (CF-in-front, charter D56)
+
+  A Site carries a `serving_mode`, read STRAIGHT FROM THE RECORD, never inferred
+  from a resolved IP:
+
+    * `:direct` (the default, and every Barkpark) — the box is the origin, so
+      `points_here` is the exact `addr == box` intersection.
+    * `:cf_proxied` — the box sits behind Cloudflare's orange-cloud proxy, so the
+      domain resolves to CF's anycast EDGE IPs, not the origin. An `addr == box`
+      comparison would ALWAYS red (a false failure), so we never run it:
+      `points_here` is classified `:proxied` — informational, not a failure — and
+      TLS/serving (which probe THROUGH the CF edge) continue. The stronger
+      CF→my-origin health probe is deferred (`cf-origin-health-rung-backlog`).
+
+  Mode is read via `Map.get/2` with a `:direct` fallback, so an instance whose
+  schema predates the `serving_mode` column degrades to today's exact
+  standalone behaviour (fail-closed to `:direct`).
+
   ## Total over failure, bounded
 
   `check/2` NEVER raises. Every seam is bounded (the default transports carry
@@ -52,7 +78,7 @@ defmodule BarkparkCloud.DomainStatus do
   """
 
   alias BarkparkCloud.FailureCopy
-  alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.Registry.{Barkpark, Site}
 
   @dns_label "DNS resolves"
   @points_label "Points to this instance"
@@ -63,7 +89,9 @@ defmodule BarkparkCloud.DomainStatus do
   # so a pathological host string can never bloat the envelope.
   @max_evidence_bytes 240
 
-  @type status :: :ok | :pending | :failed
+  @type status :: :ok | :pending | :failed | :proxied
+
+  @type serving_mode :: :direct | :cf_proxied
 
   @type stage :: %{
           stage: String.t(),
@@ -93,21 +121,47 @@ defmodule BarkparkCloud.DomainStatus do
   `:http`) per call; otherwise they resolve from config at call time, defaulting
   to the real transports. Never raises.
   """
-  @spec check(Barkpark.t(), keyword()) :: result()
-  def check(barkpark, opts \\ [])
+  @spec check(Barkpark.t() | Site.t(), keyword()) :: result()
+  def check(instance, opts \\ [])
 
   def check(%Barkpark{} = bp, opts) do
     seams = resolve_seams(opts)
+    # The box IS the origin (mode is always :direct) — resolve its address once,
+    # then compare every domain against it.
+    expected = expected_addrs(bp.host, seams)
 
     domains =
       bp
       |> domain_estate()
-      |> Enum.map(fn {host, kind} -> probe_domain(bp, host, kind, seams) end)
+      |> Enum.map(fn {host, kind} -> probe_domain(host, kind, :direct, expected, seams) end)
 
+    envelope(bp.id, bp.host, domains)
+  end
+
+  # A co-located Site: check each of its `domains` against the box it runs on
+  # (`site.barkpark.host`, from the preloaded association), in the site's own
+  # serving mode. A :cf_proxied site never compares addr == box (see @moduledoc).
+  def check(%Site{} = site, opts) do
+    seams = resolve_seams(opts)
+    mode = serving_mode(site)
+    box = site_box_host(site)
+    expected = expected_addrs(box, seams)
+
+    domains =
+      site
+      |> site_estate()
+      |> Enum.map(fn {host, kind} -> probe_domain(host, kind, mode, expected, seams) end)
+
+    envelope(site.id, box, domains)
+  end
+
+  # The shared S13b response envelope. `ok` is true only when EVERY domain is
+  # overall ok (an informational :proxied rung does not count against it).
+  defp envelope(id, host, domains) do
     %{
       ok: Enum.all?(domains, &(&1.overall == "ok")),
       checked_at: DateTime.to_iso8601(DateTime.utc_now()),
-      instance: %{id: bp.id, host: bp.host},
+      instance: %{id: id, host: host},
       domains: domains
     }
   end
@@ -125,17 +179,46 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
+  # A Site's estate is its custom domains array (the apex, www, and any attached
+  # hostnames). Each is a "custom" domain for remediation-copy purposes. A site
+  # with no domains yet has an empty estate (nothing to check → ok).
+  defp site_estate(%Site{domains: domains}) when is_list(domains) do
+    Enum.map(domains, fn host -> {host, "custom"} end)
+  end
+
+  defp site_estate(_), do: []
+
+  # The box a Site runs on, from the preloaded `:barkpark` association. Absent /
+  # not-loaded → nil, which makes points_here honestly pending ("no address
+  # reported yet") rather than raising.
+  defp site_box_host(%Site{barkpark: %Barkpark{host: host}}), do: host
+  defp site_box_host(_), do: nil
+
+  # The serving mode, read STRAIGHT FROM THE RECORD (never inferred from a
+  # resolved IP). `Map.get/2` — not struct access — so a row whose schema
+  # predates the `serving_mode` column degrades to :direct (fail-closed to pure
+  # standalone). Accepts the Ecto.Enum atom or a raw string; anything else is
+  # :direct.
+  @spec serving_mode(Site.t()) :: serving_mode()
+  defp serving_mode(site) do
+    case Map.get(site, :serving_mode) do
+      :cf_proxied -> :cf_proxied
+      "cf_proxied" -> :cf_proxied
+      _ -> :direct
+    end
+  end
+
   # ── per-domain stage chain ──
 
   # Walk the four stages in order; a stage downstream of a non-ok stage is
   # skipped into `pending` rather than probed, so we never render a red on a
   # check that couldn't meaningfully run yet.
-  defp probe_domain(bp, host, kind, seams) do
+  defp probe_domain(host, kind, mode, expected, seams) do
     {dns_status, dns_stage, addrs} = probe_dns(host, kind, seams)
 
     {points_status, points_stage} =
       run_or_skip(dns_status, :points_here, @points_label, kind, fn ->
-        probe_points_here(host, bp, kind, seams, addrs)
+        probe_points_here(host, kind, mode, expected, addrs)
       end)
 
     {tls_status, tls_stage} =
@@ -195,10 +278,29 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
-  # points_here: do the resolved addresses include the instance's host? An empty
-  # host (still provisioning) is pending; resolving elsewhere is failed.
-  defp probe_points_here(host, bp, kind, seams, addrs) do
-    case expected_addrs(bp, seams) do
+  # points_here (:cf_proxied): the domain is served THROUGH Cloudflare's
+  # orange-cloud proxy, so it resolves to CF's anycast edge IPs, NOT the box
+  # origin. An addr == box comparison would always red (a false failure), so we
+  # never run it — the mode is read from the Site record, never inferred from the
+  # resolved IP. Classify it :proxied (informational, no remediation) and return
+  # a control-flow :ok so TLS/serving still probe through the CF edge. The
+  # stronger CF→origin health probe is deferred (cf-origin-health-rung-backlog).
+  defp probe_points_here(host, kind, :cf_proxied, _expected, addrs) do
+    {:ok,
+     build_stage(
+       :points_here,
+       @points_label,
+       :proxied,
+       proxied_evidence(host, addrs),
+       kind
+     )}
+  end
+
+  # points_here (:direct): do the resolved addresses include the box's own
+  # address? An empty box address (still provisioning) is pending; resolving
+  # elsewhere is failed.
+  defp probe_points_here(host, kind, :direct, expected, addrs) do
+    case expected do
       [] ->
         {:pending,
          build_stage(
@@ -234,14 +336,23 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
-  # The instance's address set: a literal IP host is itself the target
-  # (round-tripped through parse+ntoa so a non-canonical stored IPv6 like
-  # "2001:0db8::1" still matches the resolver's canonical form); a hostname host
-  # is resolved (so a CNAME-style box still compares honestly).
-  defp expected_addrs(%Barkpark{host: host}, _seams) when not is_binary(host) or host == "",
-    do: []
+  # Informational evidence for a CF-proxied domain — states plainly that origin
+  # pointing is Cloudflare's to manage and is deliberately NOT compared here.
+  defp proxied_evidence(host, []) do
+    "#{host} is proxied through Cloudflare — its DNS points at Cloudflare's edge, not this box, so origin pointing is managed by Cloudflare (not compared here)."
+  end
 
-  defp expected_addrs(%Barkpark{host: host}, seams) do
+  defp proxied_evidence(host, addrs) do
+    "#{host} resolves to Cloudflare's edge (#{Enum.join(addrs, ", ")}); it is proxied, so origin pointing is managed by Cloudflare, not compared to the box."
+  end
+
+  # The box's address set: a literal IP host is itself the target (round-tripped
+  # through parse+ntoa so a non-canonical stored IPv6 like "2001:0db8::1" still
+  # matches the resolver's canonical form); a hostname host is resolved (so a
+  # CNAME-style box still compares honestly). An empty/nil host is [] (pending).
+  defp expected_addrs(host, _seams) when not is_binary(host) or host == "", do: []
+
+  defp expected_addrs(host, seams) do
     case :inet.parse_address(to_charlist(host)) do
       {:ok, addr} -> [ip_to_string(addr)]
       {:error, _} -> resolve_all(host, seams.dns)
@@ -354,9 +465,10 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
-  # Build one stage map. An ok stage carries no remediation; every non-ok stage
+  # Build one stage map. A healthy stage (:ok, or the informational :proxied)
+  # carries no remediation; every actionable non-ok stage (:pending / :failed)
   # gets server-owned copy from FailureCopy (which has a terminal default clause,
-  # so no non-ok stage is ever reason-less).
+  # so no such stage is ever reason-less).
   defp build_stage(stage, label, status, evidence, kind) do
     stage_name = to_string(stage)
 
@@ -366,7 +478,7 @@ defmodule BarkparkCloud.DomainStatus do
       status: to_string(status),
       evidence: truncate(evidence),
       remediation:
-        if status == :ok do
+        if status in [:ok, :proxied] do
           nil
         else
           FailureCopy.domain_stage_remediation(kind, stage_name)

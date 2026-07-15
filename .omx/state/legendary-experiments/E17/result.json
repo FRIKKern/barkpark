@@ -1,0 +1,48 @@
+{
+  "assignment_id": "E17",
+  "assignment_source": "E11/next-three-assignments.json",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "capability_blocks": [
+    "Authenticated Studio redirected to login; the API bearer token did not establish a browser session and E16 was not deployed.",
+    "Public reader responses lacked a deployed E16 provenance marker, so URL-reflected pages were not accepted as captures.",
+    "The real TUI failed during schema loading before candidate selection.",
+    "Mail.app was present, but candidate email endpoints returned 404; no message was imported and no proxy was substituted.",
+    "bp paper view reported the candidate-shaped slugs absent."
+  ],
+  "counts": {
+    "accepted_candidate_specific_captures": 0,
+    "blocked_cells": 180,
+    "cells": 180,
+    "fixtures": 36,
+    "hashed_attempt_artifacts": 180,
+    "silent_proxy_promotions": 0,
+    "surfaces": 5
+  },
+  "evidence": {
+    "attempt_index": "attempt-index.json",
+    "cells": "output/cells.jsonl",
+    "expected_output": "E17 REPLAY PASS verdict=FAIL/REWORK captures=0 attempts=180",
+    "hashes": "output/hashes.json",
+    "reconciliation": "output/reconciliation.json",
+    "validation_command": ".omx/state/legendary-experiments/E17/scripts/replay.sh"
+  },
+  "schema_version": "legendary-e17-result/v1",
+  "threshold_outcomes": {
+    "authenticated_studio": "FAIL_AUTH_SESSION_AND_DEPLOYMENT_BLOCK",
+    "cli_api": "FAIL_CANDIDATE_ABSENT",
+    "exact_180_candidate_specific_captures": "FAIL_0_OF_180",
+    "explicit_narrow_width_degradation": "FAIL_UNPROVEN_REAL_TUI_AND_EMAIL",
+    "proxy_source_synthetic_substitutions": "PASS_ZERO_PROMOTED",
+    "public_reader": "FAIL_NO_DEPLOYED_E16_PROVENANCE",
+    "real_client_email": "FAIL_ENDPOINT_404_NO_MESSAGE_IMPORTED",
+    "tui": "FAIL_SCHEMA_LOAD_BEFORE_SELECTION",
+    "zero_silent_blanks": "PARTIAL_EXPLICIT_BLOCKS_180_OF_180_BUT_NO_CAPTURE_PROOF"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "pilot_authorized": false,
+    "quality": "FAIL",
+    "real_surface_gate_passed": false,
+    "winner_selected": false
+  }
+}

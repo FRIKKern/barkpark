@@ -1,0 +1,12 @@
+{
+  "accepted_responses": 0,
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "deployed_fixture_records": 0,
+  "deployment_id": null,
+  "fixture_manifest_digest": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+  "provenance_mismatches": 0,
+  "proxy_promotions": 0,
+  "schema_version": "legendary-e19-provenance-manifest/v1",
+  "status": "BLOCKED_BEFORE_DEPLOYMENT"
+}

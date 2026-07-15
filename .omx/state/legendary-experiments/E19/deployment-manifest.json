@@ -1,0 +1,15 @@
+{
+  "base_url": null,
+  "block_reason": "ISOLATION_EXPIRY_TEARDOWN_OR_AUTH_BROWSER_CONTROL_UNAVAILABLE",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "created_at": null,
+  "deployment_created": false,
+  "deployment_id": null,
+  "environment": "non-production-required-not-created",
+  "expires_at": null,
+  "fixture_manifest_digest": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+  "production_mutations": 0,
+  "schema_version": "legendary-e19-deployment-manifest/v1",
+  "teardown_command": null
+}

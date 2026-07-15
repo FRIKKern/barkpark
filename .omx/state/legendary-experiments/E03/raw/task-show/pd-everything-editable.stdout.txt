@@ -1,0 +1,320 @@
+{
+  "child_count": 18,
+  "children": [
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-action",
+      "inserted_at": "2026-07-07T01:36:36.973381Z",
+      "lifecycle_status": "done",
+      "title": "action block → in-canvas control atom (label + href + priority)"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-figure",
+      "inserted_at": "2026-07-07T01:36:37.388917Z",
+      "lifecycle_status": "done",
+      "title": "figure block → editable single-child container + caption"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-terminal",
+      "inserted_at": "2026-07-07T01:36:37.808667Z",
+      "lifecycle_status": "done",
+      "title": "terminal block → editable recursive container (bp-term chrome + child body)"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-section-integrate",
+      "inserted_at": "2026-07-07T01:37:09.984131Z",
+      "lifecycle_status": "done",
+      "title": "Integrate section: recursive container + the title-persistence fix"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-integrate-wave2",
+      "inserted_at": "2026-07-07T01:37:10.388430Z",
+      "lifecycle_status": "done",
+      "title": "Integration wave: land figure/action/terminal sequentially off fresh main"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 1
+      },
+      "doc_id": "pd-ee-live-verify",
+      "inserted_at": "2026-07-07T01:37:38.882881Z",
+      "lifecycle_status": "open",
+      "title": "Live Studio pass (infra-blocked agent task): nested-editing UX for table/columns/section/figure/terminal + card slots"
+    },
+    {
+      "criteria_progress": {
+        "met": 1,
+        "total": 1
+      },
+      "doc_id": "pd-ee-fleet-config-decision",
+      "inserted_at": "2026-07-07T01:37:39.300219Z",
+      "lifecycle_status": "done",
+      "title": "HUMAN DECISION · Fleet blocks (Task/brand mirrors): config editor or stay read-only?"
+    },
+    {
+      "criteria_progress": {
+        "met": 2,
+        "total": 2
+      },
+      "doc_id": "pd-ee-final-audit",
+      "inserted_at": "2026-07-07T01:37:39.682868Z",
+      "lifecycle_status": "done",
+      "title": "Final audit: zero dead blocks across real papers + refresh the parity matrix"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "pd-ee-insertability",
+      "inserted_at": "2026-07-07T02:51:14.182825Z",
+      "lifecycle_status": "done",
+      "title": "Make the newly-editable blocks INSERTABLE from the canvas slash menu"
+    },
+    {
+      "criteria_progress": {
+        "met": 4,
+        "total": 4
+      },
+      "doc_id": "pd-ee-fleet-editors",
+      "inserted_at": "2026-07-07T08:29:19.364938Z",
+      "lifecycle_status": "done",
+      "title": "Fleet blocks get edit islands: authored items (cards/notes/pipeline) + query config (task-*)"
+    },
+    {
+      "criteria_progress": {
+        "met": 5,
+        "total": 5
+      },
+      "doc_id": "pd-ee-bundle-regen",
+      "inserted_at": "2026-07-10T23:47:07.702682Z",
+      "lifecycle_status": "done",
+      "title": "paper-editor.yml green again: catch-up bundle regen (committed artifact = fresh build)"
+    },
+    {
+      "criteria_progress": {
+        "met": 6,
+        "total": 6
+      },
+      "doc_id": "pd-ee-dataviz-editors",
+      "inserted_at": "2026-07-10T23:47:49.100085Z",
+      "lifecycle_status": "done",
+      "title": "DataViz blocks become canvas-editable: stat/stats/stat-grid/heatmap/chart server-paint + edit islands (closes the last C1 gap)"
+    },
+    {
+      "criteria_progress": {
+        "met": 2,
+        "total": 2
+      },
+      "doc_id": "pd-ee-chrome-mcp-userdatadir",
+      "inserted_at": "2026-07-10T23:49:50.075112Z",
+      "lifecycle_status": "done",
+      "title": "Host infra: give every chrome-devtools-mcp session its own userDataDir (unblocks all agent browser passes, incl. C3)"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 4
+      },
+      "doc_id": "pd-ee-dataviz-structured-editors",
+      "inserted_at": "2026-07-10T23:49:52.435219Z",
+      "lifecycle_status": "open",
+      "title": "DataViz v2: structured editors replace the JSON islands (heatmap 2D grid, chart series/axes forms)"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 2
+      },
+      "doc_id": "pd-ee-sheet-embed-audit",
+      "inserted_at": "2026-07-10T23:50:15.655515Z",
+      "lifecycle_status": "open",
+      "title": "Audit sheet/embed editability against the anchor criteria (the two types no surveyor reached)"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 3
+      },
+      "doc_id": "pd-ee-reader-stale-cache",
+      "inserted_at": "2026-07-10T23:50:17.839209Z",
+      "lifecycle_status": "open",
+      "title": "Reader route serves a deleted paper: find and fix the stale cache layer"
+    },
+    {
+      "criteria_progress": {
+        "met": 1,
+        "total": 1
+      },
+      "doc_id": "pd-ee-root-heex-card-comment",
+      "inserted_at": "2026-07-11T00:14:33.573036Z",
+      "lifecycle_status": "open",
+      "title": "root.html.heex card canvas-copy comment still describes model-A slot chrome (stale after S10)"
+    },
+    {
+      "doc_id": "task-d08e3f8bb7321009",
+      "inserted_at": "2026-07-12T12:42:23.576965Z",
+      "lifecycle_status": "open",
+      "title": "Live nested-edit verification blocked: local fixture unavailable and API has pending migration"
+    }
+  ],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "No authorable block type reaches the not-editable-yet catch-all (paper_editor.ex:1339, mainline canvas-on surface; classic mode is a legacy opt-out per charter D2) — was ':1312', line moved",
+          "evidence": "C1 true at 1ac1122b (zero types reach the catch-all — DataViz editable via #2446); C2 gates green MODULO none (card chrome fixed same PR)",
+          "met": true
+        },
+        {
+          "criterion": "Every editable block byte-aligns with the reader (parity gate green)",
+          "evidence": "C1 true at 1ac1122b (zero types reach the catch-all — DataViz editable via #2446); C2 gates green MODULO none (card chrome fixed same PR)",
+          "met": true
+        },
+        {
+          "criterion": "Live browser pass confirms nested-editing UX for table/columns/section/figure/terminal",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Umbrella for the last mile of the editability push. DONE: prose(7)+divider+callout+code+diagram in-canvas; 9 field- controls; image picker; 4 schema composites; table 1227; columns 1228 (incl. parity-gate graduation of bp-cols). Parity matrix (36 block types, ground truth compose.ex × papercanvas.ex): https://claude.ai/code/artifact/3c437631-90f7-48e4-8d6b-a3d4b6296c99. REMAINING: section (recursive container + KNOWN title-persistence defect), figure/action/terminal (wave-2 workflow building), the shared-machinery integration wave, live-browser human verify, fleet-config human decision, final zero-dead-blocks audit. Flow order = child priority order (0 first). Tasks labeled sketchy carry a known defect, unproven UX, or a human decision."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Ready for execution. 2 of 3 recorded acceptance criteria are marked met."
+              }
+            ],
+            "id": "state-copy",
+            "title": "open",
+            "tone": "note",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "No authorable block type reaches the not-editable-yet catch-all (papereditor.ex:1339, mainline canvas-on surface; classic mode is a legacy opt-out per charter D2) — was ':1312', line moved"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Every editable block byte-aligns with the reader (parity gate green)"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Live browser pass confirms nested-editing UX for table/columns/section/figure/terminal"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "Umbrella for the last mile of the editability push. DONE: prose(7)+divider+callout+code+diagram in-canvas; 9 field-* controls; image picker; 4 schema composites; table #1227; columns #1228 (incl. parity-gate graduation of bp-cols__). Parity matrix (36 block types, ground truth compose.ex × paper_canvas.ex): https://claude.ai/code/artifact/3c437631-90f7-48e4-8d6b-a3d4b6296c99. REMAINING: section (recursive container + KNOWN title-persistence defect), figure/action/terminal (wave-2 workflow building), the shared-machinery integration wave, live-browser human verify, fleet-config human decision, final zero-dead-blocks audit. Flow order = child priority order (0 first). Tasks labeled sketchy carry a known defect, unproven UX, or a human decision.",
+      "github": {
+        "issue": 1562,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 100772190,
+        "synced_rev": "6caf95118f960de94f28747d3cf566b6"
+      },
+      "kind": "task",
+      "labels": [
+        "paper-editor",
+        "editability",
+        "epic"
+      ],
+      "lifecycle_status": "open",
+      "priority": 1,
+      "wave_paper": "pd-everything-editable-wave-2026-07-11",
+      "wave_status": "wave: complete — grade A-, paper pd-everything-editable-wave-2026-07-11. Three slices reviewed + gate-green, stacked for merge: S1 loop-epic/paper-editor-yml-green-again-catch-up-bu-0 → S2 loop-epic/s10-card-slot-chrome-parity-editor-node--1-r (review branch, + root.html.heex comment fix) → S3 loop-epic/dataviz-blocks-become-canvas-editable-st-2-r (review branch, collisions pre-resolved, portable_doc 884/0). S2/S3 wait for Elixir Test CI. Lead closes merge-gated criteria + pd-ee-root-heex-card-comment on merge; C1 evidence stamps when S3 lands. Close ceremony then gated ONLY on C3 (pd-ee-live-verify, infra-blocked)."
+    },
+    "criteria_progress": {
+      "met": 2,
+      "total": 3
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "pd-everything-editable",
+    "execution_policy": null,
+    "id": "0de4095d-6f45-4a0b-b24c-56d55a0b9e72",
+    "inserted_at": "2026-07-07T01:36:13.236325Z",
+    "kind": "task",
+    "labels": [
+      "paper-editor",
+      "editability",
+      "epic"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 1,
+    "rev": "ead95bbc81f42633dfac68c249b36b6d",
+    "status": "published",
+    "title": "EPIC · PortableDoc Beta: everything editable, 1:1 with the reader (finish line)",
+    "type": "task",
+    "updated_at": "2026-07-12T11:22:22.686764Z"
+  },
+  "ok": true
+}

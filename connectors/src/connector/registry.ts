@@ -31,6 +31,13 @@ export interface ConnectorRegistry {
    * inbound channel to listen on.
    */
   channels(): Connector[];
+  /**
+   * Only the OUTBOUND (tool) connectors — the mirror of {@link channels}. A
+   * `tool` or `both` connector declares a `toolDescriptor`; the connect seam's
+   * `tool-descriptors` route walks THIS list to tell the runner which MCP servers
+   * the agent may connect to. A channel-only connector never appears here.
+   */
+  tools(): Connector[];
   /** Drop a single connector. Returns true when one was removed. */
   unregister(id: string): boolean;
   /** Drop every connector. Test-isolation helper — not used in production paths. */
@@ -79,6 +86,13 @@ export function createConnectorRegistry(): ConnectorRegistry {
       return [...connectors.values()].filter(
         (connector) =>
           connector.direction === "channel" || connector.direction === "both",
+      );
+    },
+
+    tools() {
+      return [...connectors.values()].filter(
+        (connector) =>
+          connector.direction === "tool" || connector.direction === "both",
       );
     },
 

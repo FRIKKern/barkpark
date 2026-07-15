@@ -17,10 +17,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 26 workspace_id tables incl roles + data_keys + search_surface_config + the two zero-FK audit tables + the 5 sync_* tables" do
+    test "E1 = the 32 workspace_id tables including registered chat-host execution state" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 26
+      assert length(e1) == 32
       assert "roles" in e1
+      assert "registered_chat_hosts" in e1
+      assert "chat_execution_leases" in e1
+      assert "chat_execution_events" in e1
+      # The 20260715 epic-cycle / cycle-fleet ledgers carry workspace_id and ride
+      # the generic E1 path (exported + torn down via WHERE workspace_id=$ws).
+      assert "cycle_waves" in e1
+      assert "epic_assignments" in e1
+      assert "epic_benchmark_experiments" in e1
       # search_surface_config gained a workspace_id column in Wave 5 Slice A
       # (charter D45/D49) to close a LIVE cross-tenant config bleed — re-pinned
       # out of the scope-column allowlist into E1.
@@ -40,9 +48,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
-    test "E2 = the 6 FK-transitive children without a workspace_id column" do
+    test "E2 = the 12 FK-transitive children without a workspace_id column" do
+      # The six 20260715 cycle-fleet children joined the original six; each reaches
+      # the tenant grain through a single many-to-one FK to a workspace_id parent.
       assert Catalog.live_e2(Repo) ==
-               ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
+               ~w(chat_runtime_usage_receipts content_edges cycle_build_plans datasets
+                  epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
+                  epic_benchmark_attempts plugin_doc_state role_permissions task_edges
+                  webhook_deliveries)
     end
 
     test "E3 = the 4 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config and the 5 sync_* tables all rode into E1" do

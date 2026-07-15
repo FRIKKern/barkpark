@@ -117,6 +117,7 @@
                   "halted",
                   "idempotency_key_in_use",
                   "internal_error",
+                  "invalid_enrollment",
                   "invalid_filter",
                   "invalid_grant",
                   "invalid_op",
@@ -416,6 +417,99 @@
           "bulldocs"
         ],
         "x-barkpark-scope": "ingest"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/seal": {
+      "post": {
+        "operationId": "cycle.seal.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: proven_batch_capacity, chosen_format, pilot_evidence, pilot_evidence_revision, failure_rate, failure_threshold, golden_fixtures_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Seal post-pilot capacity evidence and the resulting immutable build plan.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search": {
@@ -1165,7 +1259,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Start a new Claude chat session (id server-minted; cwd is always ClaudeChat.cwd/0).",
+        "summary": "Start a provider-backed chat session with server-minted public and provider identities.",
         "tags": [
           "chat"
         ],
@@ -3419,6 +3513,79 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}": {
+      "get": {
+        "operationId": "cycle.show.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the canonical CycleFleet reconciliation and projected fleet.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/tasks/{doc_id}/pulse": {
       "post": {
         "operationId": "task.pulse",
@@ -3939,6 +4106,107 @@
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/assignments/{assignment_id}/results": {
+      "post": {
+        "operationId": "cycle.result.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, status, summary, evidence, evidence_revision, payload_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append or idempotently replay one typed terminal assignment result.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/checkout": {
@@ -6057,6 +6325,99 @@
           "schema"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/open": {
+      "post": {
+        "operationId": "cycle.open.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: profile, inventory_json, scale_contract_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Freeze a cycle profile, inventory, and experiment contract before fan-out.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/tasks": {
@@ -9146,6 +9507,99 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/assignments": {
+      "post": {
+        "operationId": "cycle.assign.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: assignment_id, phase, agent_type, effort, snapshot_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append one immutable typed assignment snapshot to a cycle wave.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/analytics/{dataset}": {
       "get": {
         "operationId": "dataset.stats.scoped",
@@ -9632,6 +10086,10 @@
     {
       "description": "Airdrop grants — time-boxed, account-bound scoped access links.",
       "name": "access"
+    },
+    {
+      "description": "Epic and Legendary cycle ledgers — one project-scoped authority for local and cloud agents.",
+      "name": "cycle"
     },
     {
       "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",

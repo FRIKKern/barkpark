@@ -1,0 +1,252 @@
+{
+  "schema_version": "legendary-round-06-plan/v1",
+  "round": 6,
+  "immutable": true,
+  "candidate": {
+    "id": "candidate-lossless-semantic-tree",
+    "source_assignment": "E16",
+    "winner_selected": false,
+    "pilot_authorized": false
+  },
+  "reason": "E16 passed lossless local preservation, E17 accepted 0 of 180 candidate-specific real-reader captures because deployment, authenticated Studio, TUI, email, public-reader provenance, and CLI candidate access were blocked, and E18 therefore failed closed.",
+  "assignment_ids": [
+    "E19",
+    "E20",
+    "E21"
+  ],
+  "source_hashes": {
+    ".codex/skills/legendary-cycle/references/experiment-contract.md": "17795fa96b2443fe84d439dce0840a368afd6e5111d40b1eb920dd573f80ac24",
+    ".omx/state/legendary-experiments/E03/result.json": "429ff1bd117299175ec44d8ad28d7ce0b5e7934a4e80d4d25aea01fff0a3aab5",
+    ".omx/state/legendary-experiments/E03/thresholds.json": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+    ".omx/state/legendary-experiments/E03/fixture-manifest.json": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+    ".omx/state/legendary-experiments/E11/result.json": "bfe5bccccdc0a9168c8de6caacc9a7764ef51f503579f032fd6aa65dee5e2121",
+    ".omx/state/legendary-experiments/E11/next-three-assignments.json": "49c2da3be207263c112726a24185bd940a01041f3340dc71bbdcfc07f8b1e949",
+    ".omx/state/legendary-experiments/E16/result.json": "b02c3a5e4ef7abe3bdef7eb2a97c536fe8b0fafb0b54ab013beb1136964e62c6",
+    ".omx/state/legendary-experiments/E17/result.json": "40b363b10679d94d2a5b35ae95046c571117d5ef21cc3c551631e90a84c9b458",
+    ".omx/state/legendary-experiments/E17/output/reconciliation.json": "127bd3b1711f5a6b598768b2a41aebf9e756d7592d2cae54a0da58d3d4fc03d7",
+    ".omx/state/legendary-experiments/E17/output/hard-gates.json": "9647ce4f672d8dd7690bec2fdd50c2357954acdd757234fdab0d8eb83823ec74",
+    ".omx/state/legendary-experiments/E18/result.json": "a4919ca6f3718c7a98e070c0decf21eca2e744bde3ab48539faccd0ee42e65cd",
+    ".omx/state/legendary-experiments/E18/output/blind-seal.json": "e7cb887b4b9581f1fa47861bfb50a65ca44f70ae2e355a73a10a937a80df07c8",
+    ".omx/state/legendary-experiments/E18/output/gate-matrix.json": "48d8114068db8fd67a1d2bf2c3a0746461396b9b93271f6dcd12fa0e0283b521",
+    ".omx/state/legendary-experiments/E18/output/replay-hashes.json": "4db51dbae28ea86a35e303823c2161e28dff78aaa31e023c4e510e87e5ee4278",
+    ".omx/state/legendary-experiments/E18/output/rollback-quarantine.json": "ca5015d2c972f0d0b98195880a9d0917be9fb1aeef3998acb5d1847c02300cd8"
+  },
+  "global_no_proxy_rules": [
+    "No source-only render, URL-reflected page, synthetic screenshot, fixture JSON, or API response may substitute for authenticated Studio, public-reader, TUI, or delivered-email evidence.",
+    "No email endpoint HTML, browser preview, headless HTML renderer, or server-side proxy render may count as a real-client email capture.",
+    "No pdrender snapshot, plain stdout dump, or fabricated terminal frame may count as a real bp TUI capture.",
+    "A capture without candidate id, candidate digest, isolated deployment id, fixture id, surface id, capture timestamp, invocation/session metadata, and artifact SHA-256 is rejected.",
+    "Missing credentials, unavailable readers, schema-load failure, delivery failure, or provenance mismatch is BLOCKED or FAIL, never N/A or PASS."
+  ],
+  "assignments": [
+    {
+      "id": "E19",
+      "title": "Isolated candidate deployment and authenticated/provenance reader access",
+      "immutable": true,
+      "depends_on": [],
+      "owner_boundary": {
+        "owns": [
+          ".omx/state/legendary-experiments/E19/**",
+          "one isolated non-production candidate deployment",
+          "authenticated Studio browser-session captures",
+          "candidate-provenance public-reader captures",
+          "candidate-provenance CLI/API captures"
+        ],
+        "must_not_touch": [
+          "production data or production deployment",
+          ".omx/state/legendary-experiments/E03/**",
+          ".omx/state/legendary-experiments/E11/**",
+          ".omx/state/legendary-experiments/E16/**",
+          ".omx/state/legendary-experiments/E17/**",
+          ".omx/state/legendary-experiments/E18/**",
+          ".omx/state/legendary-experiments/round-06-plan/**",
+          "TUI capture, delivered-email capture, scoring, winner selection, or pilot authorization"
+        ]
+      },
+      "inputs": [
+        "E03 fixture-manifest.json: exactly 36 frozen fixtures",
+        "E03 thresholds.json and failure-taxonomy.json unchanged",
+        "E16 candidate capsules, hashes, rollback manifest, and result.json",
+        "E17 failure evidence for Studio auth, public provenance, and CLI candidate absence",
+        "ephemeral deployment credentials supplied at runtime and never persisted"
+      ],
+      "outputs": [
+        "deployment-manifest.json binding deployment id, non-production base URL, candidate id, candidate digest, fixture manifest digest, creation time, expiry time, and teardown command",
+        "session-manifest.json proving an authenticated Studio browser session without storing secrets",
+        "provenance-manifest.json binding every deployed fixture record and every accepted response to the E16 candidate digest",
+        "captures/authenticated_studio/<fixture-id>/* for 36 accepted Studio captures",
+        "captures/public_reader/<fixture-id>/* for 36 accepted public-reader captures",
+        "captures/cli_api/<fixture-id>/* for 36 accepted CLI/API captures",
+        "capture-index.json with exactly 108 unique accepted candidate-specific cells and zero duplicates",
+        "rollback.json proving all 36 isolated records removed or restored and the deployment torn down",
+        "result.json with PASS, FAIL, or BLOCKED and winner_selected=false, pilot_authorized=false"
+      ],
+      "commands": [
+        "python3 .omx/state/legendary-experiments/E19/scripts/preflight.py --plan .omx/state/legendary-experiments/round-06-plan/assignments.json --fixtures .omx/state/legendary-experiments/E03/fixture-manifest.json --candidate .omx/state/legendary-experiments/E16/result.json",
+        "python3 .omx/state/legendary-experiments/E19/scripts/deploy.py --isolated --ttl-minutes 120 --candidate-id candidate-lossless-semantic-tree --candidate-dir .omx/state/legendary-experiments/E16 --out .omx/state/legendary-experiments/E19/deployment-manifest.json",
+        "python3 .omx/state/legendary-experiments/E19/scripts/capture.py --deployment .omx/state/legendary-experiments/E19/deployment-manifest.json --surfaces authenticated_studio,public_reader,cli_api --fixtures .omx/state/legendary-experiments/E03/fixture-manifest.json",
+        "python3 .omx/state/legendary-experiments/E19/scripts/verify.py --require-cells 108 --require-surfaces authenticated_studio,public_reader,cli_api --require-candidate-provenance",
+        "python3 .omx/state/legendary-experiments/E19/scripts/teardown.py --deployment .omx/state/legendary-experiments/E19/deployment-manifest.json --verify-rollback"
+      ],
+      "acceptance_thresholds": [
+        "Exactly 36 of 36 frozen fixtures are materialized in one isolated deployment; no production record is created or changed.",
+        "Exactly 108 of 108 unique cells are accepted: 36 authenticated Studio, 36 public reader, and 36 CLI/API.",
+        "Every accepted capture proves the same E16 candidate digest and deployment id; zero provenance mismatches or missing markers.",
+        "Authenticated Studio evidence comes from a real authenticated browser session and includes rendered content plus semantic/accessibility capture; login redirects fail.",
+        "Public reader evidence comes from the deployed candidate record, not URL reflection; CLI/API evidence retrieves that same candidate-provenance record.",
+        "Zero silent blanks; unsupported content yields an explicit supported error without losing the authored preimage.",
+        "All applicable E03 preservation, schema, structural, accessibility, reader-visibility, and render gates pass for these three surfaces.",
+        "Teardown and rollback cover 36 of 36 fixtures and the isolated deployment; coverage is 100 percent."
+      ],
+      "no_proxy_rules": [
+        "Anonymous Studio, API bearer responses without an authenticated browser session, login-shell HTML, and screenshots of the login surface are rejected.",
+        "A public URL that merely reflects the requested slug without an E16 provenance marker is rejected.",
+        "Source captures and local E16 capsule renders cannot replace deployed public or CLI/API records."
+      ],
+      "stop_conditions": [
+        "Stop before deployment if isolation, expiry, teardown, or runtime credential handling cannot be proven.",
+        "Stop and tear down immediately on any production target, provenance mismatch, secret persistence, cross-tenant exposure, or authored-content mutation outside the isolated deployment.",
+        "Return FAIL or BLOCKED and keep winner_selected=false and pilot_authorized=false if any of 108 cells is missing, duplicated, proxy-derived, blank, or hard-gate failing."
+      ]
+    },
+    {
+      "id": "E20",
+      "title": "Real bp TUI and delivered real-client email capture",
+      "immutable": true,
+      "depends_on": [
+        "E19"
+      ],
+      "owner_boundary": {
+        "owns": [
+          ".omx/state/legendary-experiments/E20/**",
+          "real bp TUI sessions against E19's immutable deployment",
+          "delivered messages opened in a named real email client",
+          "narrow-width and long-token evidence for TUI and email"
+        ],
+        "must_not_touch": [
+          "E19 deployment contents or provenance bindings",
+          "production data or deployment",
+          "frozen E03/E11/E16/E17/E18 evidence",
+          ".omx/state/legendary-experiments/round-06-plan/**",
+          "authenticated Studio, public-reader, CLI/API scoring, winner selection, or pilot authorization"
+        ]
+      },
+      "inputs": [
+        "E19 PASS result, deployment-manifest.json, provenance-manifest.json, and 108-cell capture index",
+        "the same 36-fixture E03 manifest and same E16 candidate digest used by E19",
+        "a real bp binary capable of schema load and interactive document selection",
+        "a real delivery transport and named installed email client supplied at runtime; secrets are not persisted"
+      ],
+      "outputs": [
+        "tui-session-manifest.json binding bp binary digest, terminal dimensions, deployment id, candidate digest, and fixture selections",
+        "captures/tui/<fixture-id>/* for 36 accepted real interactive TUI captures plus required narrow-width evidence",
+        "delivery-manifest.json with one delivered message id per fixture, transport receipt, candidate digest header, and client-open timestamp",
+        "captures/real_client_email/<fixture-id>/* for 36 accepted captures from the delivered message in the named real client plus required narrow-width evidence",
+        "capture-index.json with exactly 72 unique accepted candidate-specific cells and zero duplicates",
+        "rollback.json proving message/test-account cleanup and no mutation of E19 fixture records",
+        "result.json with PASS, FAIL, or BLOCKED and winner_selected=false, pilot_authorized=false"
+      ],
+      "commands": [
+        "python3 .omx/state/legendary-experiments/E20/scripts/preflight.py --e19 .omx/state/legendary-experiments/E19/result.json --deployment .omx/state/legendary-experiments/E19/deployment-manifest.json --require-e19-pass",
+        "python3 .omx/state/legendary-experiments/E20/scripts/capture_tui.py --real-bp --deployment .omx/state/legendary-experiments/E19/deployment-manifest.json --fixtures .omx/state/legendary-experiments/E03/fixture-manifest.json --columns 40 --rows 24",
+        "python3 .omx/state/legendary-experiments/E20/scripts/deliver_email.py --deployment .omx/state/legendary-experiments/E19/deployment-manifest.json --fixtures .omx/state/legendary-experiments/E03/fixture-manifest.json --require-delivery-receipt --candidate-provenance-header",
+        "python3 .omx/state/legendary-experiments/E20/scripts/capture_email_client.py --require-real-client --viewport-width 320 --delivery-manifest .omx/state/legendary-experiments/E20/delivery-manifest.json",
+        "python3 .omx/state/legendary-experiments/E20/scripts/verify.py --require-cells 72 --require-surfaces tui,real_client_email --tui-columns 40 --email-viewport-width 320 --require-candidate-provenance",
+        "python3 .omx/state/legendary-experiments/E20/scripts/cleanup.py --verify-rollback"
+      ],
+      "acceptance_thresholds": [
+        "E19 is PASS and the E19 deployment id, fixture digest, and E16 candidate digest remain byte-identical throughout E20.",
+        "Exactly 72 of 72 unique cells are accepted: 36 real TUI and 36 delivered real-client email.",
+        "The real bp TUI loads schemas, selects each deployed candidate record interactively, and records its binary digest and terminal session; zero pdrender or stdout substitutes.",
+        "Each email is actually delivered, has a transport receipt and candidate-provenance header, and is opened in the named real client; endpoint HTML and browser previews do not count.",
+        "At 40 columns by 24 rows in TUI and a 320 CSS-pixel email content viewport, there is zero content loss or horizontal clipping; long unbroken tokens degrade explicitly.",
+        "All 36 fixtures retain semantic reading order and non-visual headings, lists, links, tables, and status cues; zero critical/high accessibility defects.",
+        "All applicable frozen E03 gates pass, including the six adversarial fixtures, zero silent blanks, and explicit supported errors.",
+        "Cleanup and rollback cover 36 of 36 fixture sessions/messages and preserve the E19 deployment unchanged; coverage is 100 percent."
+      ],
+      "no_proxy_rules": [
+        "pdrender, server-rendered strings, static snapshots, redirected schema-error screens, and non-interactive bp output are rejected as TUI evidence.",
+        "Email endpoint HTML, browser rendering, raw MIME inspection alone, synthetic client screenshots, and proxy-rendered images are rejected as real-client evidence.",
+        "A message without delivery receipt, opened-client evidence, fixture id, candidate digest, and deployment id is rejected."
+      ],
+      "stop_conditions": [
+        "Do not start unless E19 is PASS and its isolated deployment remains live and immutable.",
+        "Stop on TUI schema-load failure, inability to select the candidate, email delivery failure, unavailable real client, provenance mismatch, or any attempt to substitute a proxy.",
+        "Return FAIL or BLOCKED and keep winner_selected=false and pilot_authorized=false if any of 72 cells or any narrow-width/adversarial proof is missing or hard-gate failing."
+      ]
+    },
+    {
+      "id": "E21",
+      "title": "Sealed blind scoring, double replay, and fail-closed decision",
+      "immutable": true,
+      "depends_on": [
+        "E19",
+        "E20"
+      ],
+      "owner_boundary": {
+        "owns": [
+          ".omx/state/legendary-experiments/E21/**",
+          "pre-score blind seal",
+          "180-cell reconciliation and frozen-threshold scoring",
+          "double replay",
+          "adversarial, rollback, and quarantine reconciliation",
+          "the only Round 6 winner/pilot authorization record"
+        ],
+        "must_not_touch": [
+          "E19 or E20 captures, deployment, sessions, delivery records, or result files",
+          "production data or deployment",
+          "frozen E03/E11/E16/E17/E18 evidence",
+          ".omx/state/legendary-experiments/round-06-plan/**",
+          "candidate implementation or reader behavior"
+        ]
+      },
+      "inputs": [
+        "E19 PASS result and exactly 108 accepted cells",
+        "E20 PASS result and exactly 72 accepted cells",
+        "E03 fixture manifest, thresholds, failure taxonomy, and six adversarial fixtures",
+        "E16 candidate digest and rollback/quarantine evidence",
+        "E18 blind-seal, double-replay, gate-matrix, and rollback/quarantine schemas as minimum precedent"
+      ],
+      "outputs": [
+        "input-manifest.json hashing every input byte before processing",
+        "blind-seal.json created before scoring and mapping opaque fixture/surface ids to all 180 capture digests without candidate ranking",
+        "blind-records.jsonl with exactly 180 sealed scored cells",
+        "gate-matrix.json evaluating every frozen E03 hard gate without threshold changes",
+        "adversarial-reconciliation.json proving all six E03 adversarial fixtures across all five surfaces",
+        "replay-hashes.json proving two clean replays produce identical canonical semantic and artifact hashes",
+        "rollback-quarantine.json proving 100 percent rollback for all 36 fixtures and 100 percent quarantine for every rejected fixture/cell",
+        "decision.json and result.json with explicit winner_selected and pilot_authorized booleans plus fail-closed reasons"
+      ],
+      "commands": [
+        "python3 .omx/state/legendary-experiments/E21/scripts/preflight.py --e19 .omx/state/legendary-experiments/E19/result.json --e20 .omx/state/legendary-experiments/E20/result.json --require-pass --require-cells 180",
+        "python3 .omx/state/legendary-experiments/E21/scripts/seal.py --before-scoring --e19-index .omx/state/legendary-experiments/E19/capture-index.json --e20-index .omx/state/legendary-experiments/E20/capture-index.json --out .omx/state/legendary-experiments/E21/blind-seal.json",
+        "python3 .omx/state/legendary-experiments/E21/scripts/score.py --blind-seal .omx/state/legendary-experiments/E21/blind-seal.json --thresholds .omx/state/legendary-experiments/E03/thresholds.json --failure-taxonomy .omx/state/legendary-experiments/E03/failure-taxonomy.json",
+        "python3 .omx/state/legendary-experiments/E21/scripts/replay.py --clean --run 1 --out .omx/state/legendary-experiments/E21/replay-1",
+        "python3 .omx/state/legendary-experiments/E21/scripts/replay.py --clean --run 2 --out .omx/state/legendary-experiments/E21/replay-2",
+        "python3 .omx/state/legendary-experiments/E21/scripts/verify.py --require-cells 180 --require-surfaces 5 --require-adversarial 6 --require-double-replay --require-rollback-percent 100 --require-quarantine-percent 100 --fail-closed",
+        "python3 .omx/state/legendary-experiments/E21/scripts/decide.py --authorize-only-if-all-hard-gates-pass"
+      ],
+      "acceptance_thresholds": [
+        "E19 and E20 are PASS; exactly 180 unique cells reconcile as 36 fixtures times five real surfaces with zero missing, duplicate, unknown, proxy-derived, or provenance-mismatched cells.",
+        "Fixture/surface identity records and all input hashes are sealed before the first score is computed; scoring cannot rewrite or append captures.",
+        "Two clean replays produce identical canonical semantic hashes, artifact hashes, gate outcomes, and decision bytes.",
+        "All six E03 adversarial fixtures are exercised on all five real surfaces; every required adversarial cell passes or explicitly fails the wave.",
+        "Rollback restores 36 of 36 fixture preimages and tears down the isolated deployment; every rejected unit/cell is quarantined with a reason and evidence. Both coverages are 100 percent.",
+        "Every frozen E03 hard gate passes: reader visibility, structural completeness, schema validity, accessibility, surface exercise, width/overflow, authored-content preservation, idempotence, render gate, rollback, and failure-rate ceiling.",
+        "Zero critical failures and no non-critical rate above the frozen one-percent ceiling.",
+        "winner_selected=true and pilot_authorized=true occur only when every preceding threshold passes; otherwise both are false and action is REWORK."
+      ],
+      "no_proxy_rules": [
+        "No missing cell may be backfilled after sealing, borrowed from E03/E17, or replaced by source, synthetic, proxy, or non-candidate evidence.",
+        "No scorer sees candidate ranking or an unsealed fixture identity before emitting its sealed record.",
+        "No aggregate score, majority vote, or average can override a single frozen hard-gate failure."
+      ],
+      "stop_conditions": [
+        "Do not seal or score unless E19 and E20 are PASS and their indexes reconcile to exactly 180 unique real-reader cells.",
+        "Stop and emit REWORK with winner_selected=false and pilot_authorized=false on any input drift, post-seal mutation, replay mismatch, missing adversarial cell, incomplete rollback/quarantine, provenance failure, proxy evidence, or hard-gate failure.",
+        "Authorize convergence/pilot only after the final verifier independently confirms every acceptance threshold and the decision bytes replay identically."
+      ]
+    }
+  ],
+  "wave_stop_condition": "Round 6 completes only when E19, E20, and E21 finish sequentially and E21 reconciles 180 of 180 candidate-specific real-reader cells, all six adversarial fixtures, byte-stable double replay, 100 percent rollback/quarantine, and every frozen E03 hard gate. Any failed or blocked condition returns REWORK with winner_selected=false and pilot_authorized=false."
+}

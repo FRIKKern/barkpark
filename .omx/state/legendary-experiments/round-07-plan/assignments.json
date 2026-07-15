@@ -1,0 +1,123 @@
+{
+  "contract": {
+    "schema_version": "legendary-round-07-plan/v1",
+    "round": 7,
+    "immutable": true,
+    "planning_only": true,
+    "candidate": {"id": "candidate-lossless-semantic-tree", "capsules_sha256": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830", "winner_selected": false, "pilot_authorized": false},
+    "assignment_ids": ["E22", "E23", "E24"],
+    "execution_order": ["E22", "E23", "E24"],
+    "plan_sha256": "54ba4d6b9d58dc8b8a43b01931ed5e759e45fe0b623735833f8849aa3eba8a3f",
+    "plan_sha256_method": "SHA256 of canonical compact JSON (sorted keys, UTF-8, separators comma/colon) after replacing contract.plan_sha256 with 64 ASCII zeroes.",
+    "stop_condition": "Complete only after E22 and E23 PASS, E24 reconciles 180/180 real-reader cells, all 30 adversarial cells, two byte-identical replays, 100% rollback and quarantine, and every frozen E03 hard gate; otherwise REWORK with winner_selected=false and pilot_authorized=false."
+  },
+  "repository_evidence": [
+    {"path": "deploy/instance-deploy.sh", "fact": "Production blue/green deployment, health gate, rollback, and slot teardown exist; Round 7 must implement a separate expiring non-production harness and must never call this against production."},
+    {"path": "docs/auth.md", "fact": "Bearer tokens back session[api_token]; POST /v1/auth/login-tickets mints a single-use 60-second ticket consumed by GET /login/ticket/:ticket for authenticated Studio."},
+    {"path": "api/lib/barkpark/plugins/bulldocs.ex", "fact": "The real public reader is /papers/:slug and the exact email byte stream is /papers/:slug/email."},
+    {"path": "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex", "fact": "Email HTML is renderable, but this controller neither delivers a message nor proves transport receipt or real-client open."},
+    {"path": "cmd/barkpark/main.go", "fact": "Bare bp loads schemas from the resolved API configuration and runs the real Bubble Tea TUI; positional arguments use the manifest-driven CLI."},
+    {"path": ".omx/state/legendary-experiments/E19/result.json", "sha256": "3c2228fe964aedbbc7ebd881d16f03144a6d9e6fee390b75b371189f62d60ad6", "fact": "BLOCKED with 0/108 accepted captures: no isolated expiring deployment, authenticated Studio session, or bound public/CLI provenance."},
+    {"path": ".omx/state/legendary-experiments/E20/result.json", "sha256": "cd138d2e73e94d0f1d1240045c9d64fe135421d42b51c479db76d18cf206f476", "fact": "BLOCKED with 0/72 because E19 did not PASS; no real TUI or delivered real-client email evidence."},
+    {"path": ".omx/state/legendary-experiments/E21/result.json", "sha256": "c78c743686be613caa0f570caab7c8d55a727dd692889f42be8d2d58a380fbb4", "fact": "Correctly stopped before sealing/scoring with 0/180 accepted real-reader cells and no winner or pilot."}
+  ],
+  "frozen_inputs": {
+    ".codex/skills/legendary-cycle/references/experiment-contract.md": "17795fa96b2443fe84d439dce0840a368afd6e5111d40b1eb920dd573f80ac24",
+    ".omx/state/legendary-experiments/E03/fixture-manifest.json": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+    ".omx/state/legendary-experiments/E03/candidate-rubric.json": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4",
+    ".omx/state/legendary-experiments/E03/thresholds.json": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+    ".omx/state/legendary-experiments/E03/failure-taxonomy.json": "29fbb60a099ff6607efd87716887f592e2443498c5b65f2b87317ba3e1807ce9",
+    ".omx/state/legendary-experiments/E16/result.json": "b02c3a5e4ef7abe3bdef7eb2a97c536fe8b0fafb0b54ab013beb1136964e62c6"
+  },
+  "prohibitions": [
+    "No proxy evidence, source-only render, URL reflection, pdrender, stdout dump, browser email preview, endpoint HTML, raw MIME alone, fabricated frame, or synthetic screenshot may count as a real-reader capture.",
+    "No synthetic backfill, borrowed prior-round capture, threshold or rubric weakening, missing-cell scoring, post-seal mutation, aggregate override, or N/A substitution is permitted.",
+    "No production deployment or content mutation is permitted; target, database, workspace, hostname, expiry, and teardown must prove isolation before any write.",
+    "No winner may be selected unless every hard gate passes; no pilot may be authorized without winner_selected=true."
+  ],
+  "assignments": [
+    {
+      "id": "E22",
+      "title": "Provision isolated candidate and prove authenticated Studio, public reader, and CLI",
+      "depends_on": [],
+      "dependency_behavior": "Run first. Any missing isolation, expiry, teardown, credentials, auth, or provenance returns BLOCKED/REWORK, tears down, and prevents E23 and E24.",
+      "inputs": [
+        {"path": ".omx/state/legendary-experiments/E03/fixture-manifest.json", "sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df"},
+        {"path": ".omx/state/legendary-experiments/E16/output/capsules.jsonl", "sha256": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830"},
+        {"path": ".omx/state/legendary-experiments/E19/result.json", "sha256": "3c2228fe964aedbbc7ebd881d16f03144a6d9e6fee390b75b371189f62d60ad6"},
+        {"runtime_secret_names": ["E22_ISOLATED_BASE_URL", "E22_DATABASE_URL", "E22_ADMIN_TOKEN"], "persist_values": false}
+      ],
+      "numeric_inventory": {"fixtures": 36, "surfaces": 3, "authenticated_studio_cells": 36, "public_reader_cells": 36, "cli_cells": 36, "required_unique_cells": 108, "deployment_ttl_minutes": 120, "production_mutations": 0},
+      "ownership_boundaries": {"owns": [".omx/state/legendary-experiments/E22/**", "one isolated expiring deployment", "108 three-surface captures"], "must_not_touch": ["production", ".omx/state/legendary-experiments/E03/**", ".omx/state/legendary-experiments/E16/**", "E23/E24 evidence", "scoring or decision"]},
+      "capability_classification": [
+        {"capability": "isolation guard, TTL/expiry, candidate loader, provenance binding, teardown verifier", "class": "implementable", "path": ".omx/state/legendary-experiments/E22/scripts/"},
+        {"capability": "Studio ticket/session, public /papers/:slug, manifest-driven CLI retrieval", "class": "implementable", "paths": ["docs/auth.md", "api/lib/barkpark/plugins/bulldocs.ex", "cmd/barkpark/main.go"]},
+        {"capability": "isolated host/database allocation and admin token authority", "class": "credential-gated", "blocker": "An authorized operator must supply a provably non-production target and short-lived credentials; values must not be persisted."}
+      ],
+      "runnable_implementation_path": [
+        "Implement E22/scripts/preflight.py to reject production host/database/workspace, require TTL<=120, hash all frozen inputs, and prove a teardown command before writes.",
+        "Implement E22/scripts/provision.py to materialize exactly 36 capsule-backed scratch records, stamp candidate/deployment/fixture digests, mint no production data, and emit deployment-manifest.json with expiry.",
+        "Use POST /v1/auth/login-tickets then GET /login/ticket/:ticket for the real authenticated Studio session; use /papers/:slug for public reader and the built bp CLI against the same deployment.",
+        "Implement E22/scripts/capture.py and verify.py to seal 108 unique browser/CLI cells with timestamps, session/invocation metadata, semantic capture, screenshot/transcript, and SHA256."
+      ],
+      "commands": ["python3 .omx/state/legendary-experiments/E22/scripts/preflight.py --ttl-minutes 120 --deny-production", "python3 .omx/state/legendary-experiments/E22/scripts/provision.py --fixtures .omx/state/legendary-experiments/E03/fixture-manifest.json --capsules .omx/state/legendary-experiments/E16/output/capsules.jsonl", "python3 .omx/state/legendary-experiments/E22/scripts/capture.py --surfaces authenticated_studio,public_reader,cli --require-real-readers", "python3 .omx/state/legendary-experiments/E22/scripts/verify.py --require-cells 108 --require-provenance --replays 2", "python3 .omx/state/legendary-experiments/E22/scripts/teardown.py --require-expired-or-explicit --verify-zero-records"],
+      "acceptance_gates": ["One non-production deployment has creation/expiry/teardown proof and 36/36 capsule-backed records with one candidate digest.", "Exactly 108/108 unique cells are real and provenance-bound; Studio is authenticated, public reader resolves deployed records, and CLI retrieves the same records.", "Every applicable frozen E03 hard gate passes, zero proxy/missing/duplicate/blank cells exist, and rollback plus teardown is 36/36 and 100%."],
+      "rejection_gates": ["Reject on production ambiguity, secret persistence, login redirect, anonymous Studio, URL reflection, API-only Studio substitute, provenance drift, missing cell, silent blank, cross-tenant exposure, or teardown failure."],
+      "rollback_and_teardown": {"required": true, "action": "Delete or restore all 36 scratch records, revoke runtime credentials/tickets, terminate deployment, verify endpoint unavailable and zero residual records; failure is FAIL."},
+      "artifacts": ["deployment-manifest.json", "session-manifest.json", "provenance-manifest.json", "capture-index.json", "captures/authenticated_studio/**", "captures/public_reader/**", "captures/cli/**", "rollback.json", "replay-hashes.json", "result.json"],
+      "hashes": {"known_inputs": "frozen_inputs plus E16 capsules_sha256", "required_outputs": "SHA256 for every capture and artifact, deployment id/digest, candidate digest, fixture digest, and aggregate index digest"},
+      "two_replay_requirements": "Two verifier replays over the sealed deployment/capture artifacts must produce identical canonical hashes and PASS bytes; they must not redeploy or mutate records."
+    },
+    {
+      "id": "E23",
+      "title": "Prove real TUI selection and delivered-message real-client email",
+      "depends_on": ["E22"],
+      "dependency_behavior": "Start only when E22 is PASS and its deployment, candidate digest, fixture digest, and 108-cell index are immutable; otherwise record NOT_STARTED/BLOCKED and do not launch TUI or send mail.",
+      "inputs": [
+        {"path": ".omx/state/legendary-experiments/E22/result.json", "required": "PASS"},
+        {"path": ".omx/state/legendary-experiments/E22/deployment-manifest.json", "required": "live, unexpired, immutable"},
+        {"path": ".omx/state/legendary-experiments/E03/fixture-manifest.json", "sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df"},
+        {"runtime_secret_names": ["E23_SMTP_CREDENTIALS", "E23_TEST_MAILBOX", "E23_CLIENT_CAPTURE_AUTHORITY"], "persist_values": false}
+      ],
+      "numeric_inventory": {"fixtures": 36, "surfaces": 2, "tui_cells": 36, "email_cells": 36, "required_unique_cells": 72, "delivery_receipts": 36, "client_open_proofs": 36, "tui_columns": 40, "tui_rows": 24, "email_viewport_css_px": 320, "production_mutations": 0},
+      "ownership_boundaries": {"owns": [".omx/state/legendary-experiments/E23/**", "real bp PTY sessions", "36 test deliveries and named-client opens"], "must_not_touch": ["E22 records or captures", "production", "frozen inputs", "E24 scoring or decision"]},
+      "capability_classification": [
+        {"capability": "real bp schema load, interactive selection, PTY capture, candidate binding", "class": "implementable", "path": "cmd/barkpark/main.go"},
+        {"capability": "exact email byte rendering", "class": "implementable", "path": "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex"},
+        {"capability": "SMTP delivery receipt, controlled mailbox, named real-client open and capture", "class": "credential-gated", "blocker": "Requires external transport/mailbox credentials and human or authorized GUI-client control; endpoint HTML is insufficient."}
+      ],
+      "runnable_implementation_path": ["Implement E23/scripts/capture_tui.py with a real PTY driving the built bp binary: load schemas, select every deployed candidate, capture 40x24 frames, and reject pdrender/stdout substitutes.", "Implement E23/scripts/deliver_email.py to fetch the exact /papers/:slug/email bytes, send them through an authorized real transport with candidate/deployment headers, and persist provider receipts without secrets.", "Implement E23/scripts/capture_real_client.py to bind named client, message id, receipt, open timestamp, 320px capture, semantic/accessibility evidence, and artifact SHA256."],
+      "commands": ["python3 .omx/state/legendary-experiments/E23/scripts/preflight.py --require-e22-pass", "python3 .omx/state/legendary-experiments/E23/scripts/capture_tui.py --real-bp --columns 40 --rows 24 --fixtures 36", "python3 .omx/state/legendary-experiments/E23/scripts/deliver_email.py --require-receipt --messages 36", "python3 .omx/state/legendary-experiments/E23/scripts/capture_real_client.py --require-named-client --viewport-width 320 --require-open-proof", "python3 .omx/state/legendary-experiments/E23/scripts/verify.py --require-cells 72 --replays 2", "python3 .omx/state/legendary-experiments/E23/scripts/cleanup.py --verify-no-e22-mutation"],
+      "acceptance_gates": ["E22 remains PASS and byte-bound; exactly 72/72 unique cells are accepted with zero proxies or provenance drift.", "The real bp TUI selects all 36 records at 40x24; each of 36 messages has a transport receipt and is opened/captured in a named real client at 320px.", "All applicable frozen E03, six-adversarial, semantic order, accessibility, width/overflow, explicit-error, and zero-silent-blank gates pass."],
+      "rejection_gates": ["Reject pdrender, stdout, non-interactive/schema-error TUI, endpoint HTML, browser preview, raw MIME alone, synthetic client capture, absent receipt/open proof, clipping, E22 drift, or any missing cell."],
+      "rollback_and_teardown": {"required": true, "action": "Delete 36 test messages and local client artifacts where authority permits, revoke transport/test-account credentials, close PTYs, prove E22 records unchanged, and defer final deployment teardown to E24."},
+      "artifacts": ["tui-session-manifest.json", "delivery-manifest.json", "client-open-manifest.json", "capture-index.json", "captures/tui/**", "captures/real_client_email/**", "cleanup.json", "replay-hashes.json", "result.json"],
+      "hashes": {"runtime_inputs": "E22 result/deployment/provenance/index digests plus bp binary digest", "required_outputs": "SHA256 for 72 captures, 36 delivered MIME byte streams, receipts, open proofs, manifests, cleanup, and aggregate index"},
+      "two_replay_requirements": "Two offline verifier replays over sealed PTY, delivery, and client-open artifacts must be byte-identical; no resend, recapture, or synthetic replacement is allowed."
+    },
+    {
+      "id": "E24",
+      "title": "Run sealed five-surface blind comparison and fail-closed decision",
+      "depends_on": ["E22", "E23"],
+      "dependency_behavior": "Do not seal or score unless E22 and E23 are PASS and indexes reconcile to 108+72=180 unique real cells; any block/failure emits REWORK without scoring, winner, or pilot.",
+      "inputs": [
+        {"path": ".omx/state/legendary-experiments/E22/capture-index.json", "cells": 108, "required_result": "PASS"},
+        {"path": ".omx/state/legendary-experiments/E23/capture-index.json", "cells": 72, "required_result": "PASS"},
+        {"path": ".omx/state/legendary-experiments/E03/candidate-rubric.json", "sha256": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4"},
+        {"path": ".omx/state/legendary-experiments/E03/thresholds.json", "sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b"},
+        {"path": ".omx/state/legendary-experiments/E03/failure-taxonomy.json", "sha256": "29fbb60a099ff6607efd87716887f592e2443498c5b65f2b87317ba3e1807ce9"}
+      ],
+      "numeric_inventory": {"fixtures": 36, "surfaces": 5, "required_unique_cells": 180, "adversarial_fixtures": 6, "required_adversarial_cells": 30, "clean_replays": 2, "rollback_fixtures": 36, "rollback_percent": 100, "quarantine_percent": 100, "critical_failures_allowed": 0, "noncritical_failure_rate_max_percent": 1, "production_mutations": 0},
+      "ownership_boundaries": {"owns": [".omx/state/legendary-experiments/E24/**", "pre-score blind seal", "180-cell scoring", "two-replay decision", "Round 7 winner/pilot record"], "must_not_touch": ["E22/E23 captures or results", "production", "frozen E03 inputs", "candidate implementation", "thresholds or rubric"]},
+      "capability_classification": [{"capability": "hash reconciliation, blind sealing, frozen scoring, adversarial gates, replay, rollback/quarantine decision", "class": "implementable", "path": ".omx/state/legendary-experiments/E24/scripts/"}, {"capability": "upstream real-reader evidence", "class": "credential-gated", "blocker": "No new authority is needed after E22/E23 PASS; missing upstream authority remains a hard dependency block, never a scoring exception."}],
+      "runnable_implementation_path": ["Implement E24/scripts/preflight.py to hash every input and require exact 180-cell uniqueness before sealing.", "Implement seal.py to create opaque fixture/surface identities before the first score; implement score.py against frozen rubric/threshold/failure taxonomy only.", "Implement replay.py and decide.py so two clean runs produce identical semantic, artifact, gate, and decision bytes and any hard-gate failure returns REWORK."],
+      "commands": ["python3 .omx/state/legendary-experiments/E24/scripts/preflight.py --require-pass E22,E23 --require-cells 180", "python3 .omx/state/legendary-experiments/E24/scripts/seal.py --before-scoring --opaque-identities", "python3 .omx/state/legendary-experiments/E24/scripts/score.py --frozen-e03 --require-adversarial-cells 30", "python3 .omx/state/legendary-experiments/E24/scripts/replay.py --clean --run 1", "python3 .omx/state/legendary-experiments/E24/scripts/replay.py --clean --run 2", "python3 .omx/state/legendary-experiments/E24/scripts/verify.py --cells 180 --surfaces 5 --rollback 100 --quarantine 100 --fail-closed", "python3 .omx/state/legendary-experiments/E24/scripts/decide.py --authorize-only-if-all-hard-gates-pass"],
+      "acceptance_gates": ["Exactly 180/180 unique provenance-bound real-reader cells and 30/30 adversarial cells are sealed before scoring with zero missing, duplicate, proxy, backfilled, or mutated cells.", "Two clean replays have identical canonical semantic hashes, artifact hashes, gate outcomes, and decision bytes; all frozen hard gates pass, rollback is 36/36, and quarantine is 100%.", "winner_selected=true only after independent verification of every hard gate; pilot_authorized=true only when winner_selected=true and the same decision replays identically."],
+      "rejection_gates": ["Reject and emit REWORK on dependency drift, missing capture, proxy/backfill, seal timing violation, scorer identity leak, threshold change, any hard-gate/adversarial failure, replay mismatch, incomplete rollback/quarantine, winner without all gates, or pilot without winner."],
+      "rollback_and_teardown": {"required": true, "action": "Verify restoration of 36/36 preimages, quarantine every rejected unit/cell with reason and evidence, invoke E22 deployment teardown, revoke residual credentials, and prove no production mutation."},
+      "artifacts": ["input-manifest.json", "blind-seal.json", "blind-records.jsonl", "gate-matrix.json", "adversarial-reconciliation.json", "replay-hashes.json", "rollback-quarantine.json", "decision.json", "result.json"],
+      "hashes": {"required_inputs": "SHA256 of every E22/E23 artifact plus frozen E03 inputs before sealing", "required_outputs": "SHA256 of seal, 180 records, gate matrix, adversarial reconciliation, each replay tree, rollback/quarantine, decision, and result"},
+      "two_replay_requirements": "Two clean isolated replays from the same sealed input manifest must yield byte-identical canonical outputs and decision; mismatch forces REWORK, winner_selected=false, pilot_authorized=false."
+    }
+  ]
+}

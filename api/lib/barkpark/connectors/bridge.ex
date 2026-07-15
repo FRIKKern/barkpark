@@ -51,4 +51,26 @@ defmodule Barkpark.Connectors.Bridge do
   """
   @callback stage_pending(ticket :: String.t(), chat_token :: String.t()) ::
               {:ok, map()} | {:error, reason()}
+
+  @doc """
+  FETCH the workspace's TOOL descriptors for the runner (connectors D69/D73) —
+  the OTHER direction. This is the outbound-tool mirror of the connect routes:
+  the runner (`claude_chat.ex` `setup_mcp`) mints a session-length tool ticket
+  and asks the bridge which MCP servers this workspace's agent may connect to.
+
+  The bridge answers a list of NON-SECRET descriptors (`%{"provider", "type",
+  "url", "headersHelper"}`) — one per tool connector the workspace has an install
+  of. The PAT is NEVER in this answer (D38): the subprocess fetches it at
+  MCP-connect via the `headersHelper` command, over the bridge's loopback
+  `tool-headers` route, and Elixir never holds plaintext.
+
+  `POST {bridge}/connect/tool-descriptors {ticket}` -> `{descriptors: [...]}`.
+
+  OPTIONAL: a stub bridge that does not implement it is treated as "no tool
+  servers" by the runner — a session simply gets the loopback server alone.
+  """
+  @callback fetch_tool_descriptors(ticket :: String.t()) ::
+              {:ok, [map()]} | {:error, reason()}
+
+  @optional_callbacks fetch_tool_descriptors: 1
 end

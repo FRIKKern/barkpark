@@ -1,0 +1,21 @@
+{
+  "accepted_capture": false,
+  "block_reason": "CLI_REPORTS_CANDIDATE_SLUG_ABSENT",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_materialized": false,
+  "candidate_source_sha256": "580560b4856ab1b52d57ba3d40ee6615037c80a96d5c454a68de30fc27d6991c",
+  "capture_sha256": null,
+  "evidence_boundary": "REAL_SURFACE_ATTEMPT_ONLY_NOT_A_CAPTURE",
+  "fixture_id": "ag-studio-access-panel-countdown",
+  "observation": {
+    "diagnostic": "bp: no paper matches \"candidate-lossless-semantic-tree--ag-studio-access-panel-countdown\" on https://guerrilla.barkpark.cloud\navailable papers:\n  2026-06-29-concepts-and-details-truth-fabric\n  2026-07-10-barkpark-greatest-weaknesses\n  aesthetic-unification-epic-wave-2026-07-11\n  agent-epistemics-portabledoc-2026-07\n  agent-onramps-epic-wave-2026-07-11\n  agent-onramps-epic-wave-2026-07-13\n  airdrop-grants-wave-2026-07-10-close\n  authoring-excellence\n  authoring-excellence-d10-reconcile-2026-07-14\n  authoring-excellence-wave-2026-07-10\n  … and 190 more (run `bp paper view <slug>` with one of these)\n",
+    "exit_code": 4,
+    "stderr_bytes": 606,
+    "stderr_sha256": "bed9d6d0ace40df2317ab9097795658f9b054776dd1c4868360a20cbbdb7460a",
+    "stdout_bytes": 0,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "schema_version": "legendary-e17-real-surface-attempt/v1",
+  "surface": "cli_api",
+  "target": "bp paper view candidate-lossless-semantic-tree--ag-studio-access-panel-countdown --width 40"
+}

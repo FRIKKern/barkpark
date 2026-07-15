@@ -1,0 +1,50 @@
+{
+  "assignment_id": "E08",
+  "capability_blocks": [
+    "authenticated Studio content proof unavailable",
+    "real-client email proof unavailable",
+    "real TUI/narrow-width assistive-technology proof unavailable",
+    "no frozen unsupported-alias fixture exists in E03"
+  ],
+  "hard_gate": "Reject any candidate with critical/high accessibility defects, semantic reordering, malformed-node propagation, or content loss.",
+  "rejected_candidates": [
+    {
+      "candidate_id": "candidate-canonical-native",
+      "reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E04"
+    },
+    {
+      "candidate_id": "candidate-preservation-envelope",
+      "reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:PARTIAL",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E05"
+    },
+    {
+      "candidate_id": "candidate-cohort-rails",
+      "reasons": [
+        "fixture coverage:all:FAIL",
+        "hostile-content execution:adv-narrow-width:BLOCKED",
+        "hostile-content execution:adv-long-content:BLOCKED",
+        "hostile-content execution:adv-missing-fields:BLOCKED",
+        "hostile-content execution:adv-malformed-legacy:BLOCKED",
+        "hostile-content execution:adv-nested-list-table:BLOCKED",
+        "hostile-content execution:adv-long-token:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E06"
+    }
+  ],
+  "schema_version": "legendary-e08-rejections/v1"
+}

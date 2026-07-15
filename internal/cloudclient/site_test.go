@@ -9,7 +9,68 @@ package cloudclient
 // (300 × 2s ≈ 10 min) and then tells the user the deploy is "in progress" — which is
 // exactly what `cancelled` used to do.
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"testing"
+)
+
+// TestDeploySpawnSiteBodyOnlyCarriesSetFlags pins the cf-in-front deploy body
+// contract (D57): `via`/`domain` ride the POST body ONLY when non-empty, exactly
+// like `force`. A plain deploy must be byte-identical to the pre-cf request (no
+// stray `via`/`domain` keys the server would have to ignore), and a cutover
+// deploy must carry both.
+func TestDeploySpawnSiteBodyOnlyCarriesSetFlags(t *testing.T) {
+	cases := []struct {
+		name           string
+		force          bool
+		via, domain    string
+		wantForce      bool
+		wantVia        any
+		wantDomain     any
+		wantViaPresent bool
+	}{
+		{name: "plain deploy carries nothing", wantForce: false},
+		{name: "force only", force: true, wantForce: true},
+		{
+			name: "cloudflare cutover carries via+domain",
+			via:  "cloudflare", domain: "blog.example.com",
+			wantVia: "cloudflare", wantDomain: "blog.example.com", wantViaPresent: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			c := newFake(t, "sess", func(w http.ResponseWriter, r *http.Request) {
+				got = readJSON(t, r)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"deployment":{"id":"dep_1","status":"queued"}}`))
+			})
+
+			if _, err := c.DeploySpawnSite(context.Background(), "site_1", tc.force, tc.via, tc.domain); err != nil {
+				t.Fatalf("DeploySpawnSite: %v", err)
+			}
+
+			if _, present := got["force"]; present != tc.wantForce {
+				t.Fatalf("force present=%v, want %v (body=%v)", present, tc.wantForce, got)
+			}
+			if _, present := got["via"]; present != tc.wantViaPresent {
+				t.Fatalf("via present=%v, want %v (body=%v)", present, tc.wantViaPresent, got)
+			}
+			if tc.wantViaPresent {
+				if got["via"] != tc.wantVia {
+					t.Fatalf("via=%v, want %v", got["via"], tc.wantVia)
+				}
+				if got["domain"] != tc.wantDomain {
+					t.Fatalf("domain=%v, want %v", got["domain"], tc.wantDomain)
+				}
+			} else if _, present := got["domain"]; present {
+				t.Fatalf("domain should be absent when unset (body=%v)", got)
+			}
+		})
+	}
+}
 
 func TestSiteDeploymentTerminal(t *testing.T) {
 	terminal := []string{

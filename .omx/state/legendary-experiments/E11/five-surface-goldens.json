@@ -1,0 +1,18 @@
+{
+  "accepted_golden_count": 0,
+  "assignment_id": "E11",
+  "candidate_id": "candidate-preservation-envelope",
+  "candidate_is_round_3_winner": false,
+  "expected_cells": 180,
+  "fixture_count": 36,
+  "reason": "No Round-3 winner exists; E08 rejected every candidate and E09 selected no winner. Candidate-specific source evidence is blocked on four real reader surfaces, so no cell is promoted to a frozen E11 golden.",
+  "schema_version": "legendary-e11-five-surface-goldens/v1",
+  "source_surface_matrix_sha256": "1d4ff93db64e5181df0b0e82b5260d9c0db8f3a4fb47a025cde5cc35852f8e68",
+  "surfaces": [
+    {"accepted_goldens": 0, "observed_round_3_cells": 36, "observed_status": "BLOCKED", "surface": "authenticated_studio"},
+    {"accepted_goldens": 0, "observed_round_3_cells": 36, "observed_status": "BLOCKED", "surface": "public_reader"},
+    {"accepted_goldens": 0, "observed_round_3_cells": 36, "observed_status": "BLOCKED", "surface": "tui"},
+    {"accepted_goldens": 0, "observed_round_3_cells": 36, "observed_status": "BLOCKED", "surface": "real_client_email"},
+    {"accepted_goldens": 0, "observed_round_3_cells": 36, "observed_status": "PASS", "surface": "cli_api"}
+  ]
+}

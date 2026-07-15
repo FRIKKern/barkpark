@@ -18,17 +18,21 @@
 #
 # TWO CHANNELS, ONE SCRIPT — the git step is channel-gated on a $APP/.staging
 # marker (fail-closed: absent => production channel):
-#   * production (no .staging): strict `pull --ff-only origin main`, exactly as
-#     before. A non-main DEPLOY_REF or non-origin DEPLOY_REMOTE is REFUSED
-#     (exit 11) — a prod content box only ever fast-forwards origin main; it
-#     can never be pushed to a branch, a PR, or a foreign remote.
+#   * production (no .staging): `fetch origin main` then `reset --hard
+#     FETCH_HEAD`, LOCKED to origin/main. A non-main DEPLOY_REF or non-origin
+#     DEPLOY_REMOTE is REFUSED (exit 11) BEFORE the git step — a prod content box
+#     can never be pushed to a branch, a PR, or a foreign remote. A content box
+#     is a MIRROR of origin/main, never a source of truth, so it hard-resets
+#     (converging even from a DIVERGENT HEAD — a stray commit made on the box, or
+#     main rewritten under it) rather than `pull --ff-only`, which ABORTS on
+#     divergence and silently jams the box off the deploy train. Divergence is
+#     logged, not swallowed. The hard reset also discards committed build
+#     artifacts (go.sum/bin churn), subsuming the old `git checkout -- .`.
 #   * staging (.staging present): deploy ANY ref — DEPLOY_REF (default main),
 #     DEPLOY_REMOTE (default origin) — via `fetch $DEPLOY_REMOTE $DEPLOY_REF`
 #     then `reset --hard FETCH_HEAD`. This is the pre-merge proving path: try a
 #     branch or a PR (DEPLOY_REF=pull/<n>/head) BEFORE it rides the auto-deploy
-#     merge train. The hard reset also discards committed build artifacts,
-#     subsuming the `git checkout -- .` the prod path still needs to clear the
-#     go.sum/bin churn that blocks --ff-only.
+#     merge train.
 # EVERY git path suppresses the repo's post-merge hook (core.hooksPath=.githooks
 # on the box): that hook nukes the live _build and restarts the legacy `barkpark`
 # unit — exactly the outage this script exists to prevent.
@@ -271,17 +275,27 @@ if [ -f "$APP/.staging" ]; then
   git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
 else
   if [ "$DEPLOY_REF" != "main" ]; then
-    log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only fast-forwards main"
+    log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only mirrors origin/main"
     exit 11
   fi
   if [ "$DEPLOY_REMOTE" != "origin" ]; then
     log "refusing DEPLOY_REMOTE '$DEPLOY_REMOTE' on a production box (no $APP/.staging marker) — prod only pulls origin; ignoring it silently would deploy the wrong remote"
     exit 11
   fi
-  # Built artifacts (committed bin/, go.sum churn) block --ff-only; discard them.
-  git checkout -- . 2>/dev/null || true
-  log "git pull (post-merge hook suppressed — this script IS the deploy)"
-  git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+  # A content box is a MIRROR of origin/main — never a source of truth. Fetch +
+  # hard-reset (the same idiom the staging path uses, origin/main-locked) instead
+  # of `pull --ff-only`: a divergent HEAD (a stray commit made directly on the box,
+  # or origin/main rewritten under it) makes --ff-only ABORT ("Not possible to
+  # fast-forward") → exit 11 → the box silently stops auto-deploying while every
+  # run reports "failure". Reset always converges to origin/main; any local commit
+  # is drift to discard, and this also subsumes the old `git checkout -- .` for
+  # committed build artifacts. Divergence is surfaced (logged), not swallowed.
+  log "git fetch origin main + reset --hard (post-merge hook suppressed — this script IS the deploy)"
+  git -c core.hooksPath=/dev/null fetch origin main || { log "fetch origin main failed"; exit 11; }
+  if ! git merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
+    log "WARNING: box HEAD $(git rev-parse --short HEAD) has DIVERGED from origin/main (a commit was made on the box, or main was rewritten) — discarding local divergence and converging to origin/main"
+  fi
+  git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
 fi
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
@@ -559,11 +573,33 @@ else
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 
-# ---- Install/refresh the slot units + per-slot env (idempotent).
+# ---- Install/refresh the slot units + per-slot env (idempotent). The env files
+# are truncate-regenerated every deploy, so any operator-set
+# BARKPARK_SITE_DEPLOY_APPLY=1 — the site-deploy seam-enable flag, read at BEAM
+# boot from .slots/%i.env via the unit's EnvironmentFile — must be CARRIED
+# FORWARD or a redeploy silently drops it and the site-deploy admin route
+# reverts to 503, re-breaking the finish line (D38). Mirror the backfill
+# discipline used for the $APP/.env durable flags above: preserve what the prior
+# file held, never hardcode the flag on (absent stays absent — fail-closed).
 install -m 0644 "$APP/deploy/systemd/barkpark-slot@.service" /etc/systemd/system/barkpark-slot@.service
+# The node-slot SSR template unit (site-spawner W7): site-deploy-node.sh drives
+# `systemctl start barkpark-site@<slug>__<slot>` for container-framework (kind=node)
+# sites, but that unit template must be INSTALLED on the box first — without it a
+# node deploy dies at HEALTH ("the node process would not boot"). Install it here
+# alongside barkpark-slot@ so every box that can deploy can serve a node site.
+[ -f "$APP/deploy/systemd/barkpark-site@.service" ] && \
+  install -m 0644 "$APP/deploy/systemd/barkpark-site@.service" /etc/systemd/system/barkpark-site@.service
 mkdir -p "$APP/.slots"
-printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$BLUE_PORT" "$APP/api/_build_blue" > "$APP/.slots/blue.env"
-printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$GREEN_PORT" "$APP/api/_build_green" > "$APP/.slots/green.env"
+write_slot_env() { # $1=slot  $2=port  $3=build_root
+  local f="$APP/.slots/$1.env" apply=""
+  [ -f "$f" ] && apply="$(grep -E '^BARKPARK_SITE_DEPLOY_APPLY=' "$f" 2>/dev/null | tail -1)"
+  {
+    printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$2" "$3"
+    [ -n "$apply" ] && printf '%s\n' "$apply"
+  } > "$f"
+}
+write_slot_env blue  "$BLUE_PORT"  "$APP/api/_build_blue"
+write_slot_env green "$GREEN_PORT" "$APP/api/_build_green"
 # Per-slot version stamp (W6 D12): record what THIS deploy puts into the target
 # slot, so --rollback knows what the idle slot holds after the next flip. STATE
 # is one global sha and the env files carry only port+build-root — without the

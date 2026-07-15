@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "28627234ccf0bcf21661f78ae7a6f5fdb7055b5ffca1068467c22548a982e91a",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "4c71a0e5f3c38b6d1d2f7211e0e9ada536ce13138e8a004d4a6c090a43b5e3dc",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "30996b56fb3772b226020cc19a93fdbbd6c94b220c87aed57156b04b9cf30fcc",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYMENT_OR_AUTHENTICATED_BROWSER_SESSION; LOGIN_OR_API_AUTH_IS_NOT_ACCEPTED",
+  "fixture_id": "choosing-your-site-framework",
+  "fixture_kind": "paper",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "authenticated_studio"
+}

@@ -35,10 +35,10 @@ defmodule Barkpark.StudioChat.Probe do
       (`no_task_hands` / `task_token_expired`, charter D2) are surfaced at spawn
       time by the mint, not here.
 
-    * **`:codex`** — a real binary check for a provider that is **designed, not
-      built** (charter D5: the provider-horizon trigger is CLOSED this wave).
-      On every real host `binary: false`; `authed?: false`. The honest
-      capability flags for codex live in `Barkpark.StudioChat.Runtime.Capabilities.codex/0`.
+    * **`:codex`** — resolves the pinned Codex CLI, verifies the app-server
+      version contract, and performs its account-read readiness handshake.
+      The honest capability flags live in
+      `Barkpark.StudioChat.Runtime.Capabilities.codex/0`.
 
   ## LATENCY — callers MUST run this ASYNC (this is not optional)
 
@@ -68,7 +68,9 @@ defmodule Barkpark.StudioChat.Probe do
             path: nil,
             version: nil,
             authed?: nil,
-            account: nil
+            account: nil,
+            ready?: false,
+            reason: nil
 
   @type provider :: :claude | :bp | :codex
 
@@ -78,7 +80,9 @@ defmodule Barkpark.StudioChat.Probe do
           path: String.t() | nil,
           version: String.t() | nil,
           authed?: boolean() | nil,
-          account: map() | nil
+          account: map() | nil,
+          ready?: boolean(),
+          reason: atom() | nil
         }
 
   @providers [:claude, :bp, :codex]
@@ -123,36 +127,50 @@ defmodule Barkpark.StudioChat.Probe do
       path: path,
       version: claude_version(path),
       authed?: authed?,
-      account: account
+      account: account,
+      ready?: authed?,
+      reason: if(authed?, do: nil, else: :not_authenticated)
     }
   end
 
   # bp: presence/path only. Auth is mint-driven (no login step to probe) — so
   # authed? stays nil (not-applicable), never a misleading false.
   defp present(:bp, path) do
-    %__MODULE__{provider: :bp, binary: true, path: path, version: nil, authed?: nil, account: nil}
-  end
-
-  # codex: designed-not-built. A real binary check (honest true if some codex is
-  # on PATH) but no version/auth probing — that lane is not wired this wave.
-  defp present(:codex, path) do
     %__MODULE__{
-      provider: :codex,
+      provider: :bp,
       binary: true,
       path: path,
       version: nil,
-      authed?: false,
-      account: nil
+      authed?: nil,
+      account: nil,
+      ready?: true
     }
+  end
+
+  defp present(:codex, path) do
+    case Barkpark.StudioChat.Runtime.Codex.Readiness.probe(path, %{timeout_ms: probe_timeout()}) do
+      {:ok, readiness} ->
+        struct!(__MODULE__, Map.merge(readiness, %{provider: :codex}))
+
+      {:error, reason} ->
+        %__MODULE__{
+          provider: :codex,
+          binary: true,
+          path: path,
+          authed?: false,
+          ready?: false,
+          reason: reason
+        }
+    end
   end
 
   # ── absent-binary structs ─────────────────────────────────────────────────
 
   # bp's authed? is not-applicable in BOTH states (mint-driven).
-  defp absent(:bp), do: %__MODULE__{provider: :bp, binary: false}
+  defp absent(:bp), do: %__MODULE__{provider: :bp, binary: false, reason: :binary_missing}
 
   defp absent(provider),
-    do: %__MODULE__{provider: provider, binary: false, authed?: false}
+    do: %__MODULE__{provider: provider, binary: false, authed?: false, reason: :binary_missing}
 
   # ── claude shell-outs (tolerant; degrade on any error) ────────────────────
 

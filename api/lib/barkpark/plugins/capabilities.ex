@@ -494,6 +494,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" => "Airdrop grants — time-boxed, account-bound scoped access links.",
         "plugin" => nil
       },
+      %{
+        "name" => "cycle",
+        "summary" =>
+          "Epic and Legendary cycle ledgers — one project-scoped authority for local and cloud agents.",
+        "plugin" => nil
+      },
       # Claude chat sessions (charter bp-chat-tui, D21). StudioChat is
       # CORE-embedded, NOT a Barkpark.Plugin — it never flows through
       # plugin_nouns/2, so the noun is hand-declared here so MCP/SDK codegen and
@@ -1781,7 +1787,136 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         default_output: "table"
       ),
-      # ── Claude chat transport (charter bp-chat-tui, D21-D24) ──────────────
+      # ── Profile-driven Epic / Legendary cycle ledger ───────────────────
+      # These commands name the canonical project-scoped route directly. Flat
+      # /v1/cycles routes remain a projectless compatibility API and are never
+      # selected by bp through the deferred ScopedMirror seam.
+      core_cmd(
+        "cycle.show",
+        "cycle",
+        "show",
+        "Read the canonical CycleFleet reconciliation and projected fleet.",
+        "GET",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id",
+        "read",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Wave id.")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.open",
+        "cycle",
+        "open",
+        "Freeze a cycle profile, inventory, and experiment contract before fan-out.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Wave id."),
+          arg("profile", true, "string", "epic | legendary"),
+          arg("inventory_json", true, "string", "JSON array of immutable inventory units."),
+          arg(
+            "scale_contract_json",
+            true,
+            "string",
+            "Complete Legendary scale contract JSON; use {} for profile=epic."
+          )
+        ],
+        flags: [
+          flag(
+            "experiment_contract_json",
+            "string",
+            "Optional JSON experiment contract; Legendary accepts the canonical five-round contract."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.seal",
+        "cycle",
+        "seal",
+        "Seal post-pilot capacity evidence and the resulting immutable build plan.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Wave id."),
+          arg("proven_batch_capacity", true, "int", "Units proven safe per builder."),
+          arg("chosen_format", true, "string", "Pilot-selected build format."),
+          arg("pilot_evidence", true, "string", "Evidence URI or durable reference."),
+          arg("pilot_evidence_revision", true, "string", "Evidence revision."),
+          arg("failure_rate", true, "string", "Observed pilot failure rate."),
+          arg("failure_threshold", true, "string", "Maximum accepted failure rate."),
+          arg(
+            "golden_fixtures_json",
+            true,
+            "string",
+            "JSON array of frozen golden fixture references."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.assign",
+        "cycle",
+        "assign",
+        "Append one immutable typed assignment snapshot to a cycle wave.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Wave id."),
+          arg("assignment_id", true, "string", "Logical idempotent assignment id."),
+          arg("phase", true, "string", "survey | verify | experiment | build | review"),
+          arg("agent_type", true, "string", "Contract agent type."),
+          arg("effort", true, "string", "Reasoning effort."),
+          arg("snapshot_json", true, "string", "JSON assignment snapshot and owned units.")
+        ],
+        flags: [
+          flag(
+            "task_id",
+            "string",
+            "Physical same-project Task row id frozen with this assignment."
+          ),
+          flag(
+            "replaces_assignment_id",
+            "string",
+            "Logical assignment id replaced by this retry."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.result",
+        "cycle",
+        "result",
+        "Append or idempotently replay one typed terminal assignment result.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Wave id."),
+          arg("assignment_id", true, "string", "Logical assignment id."),
+          arg("idempotency_key", true, "string", "Stable result replay key."),
+          arg("status", true, "string", "completed | failed"),
+          arg("summary", true, "string", "Terminal summary."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision."),
+          arg("payload_json", true, "string", "JSON typed result payload.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
       # The seven non-streaming verbs behind the `/v1/chat` scope, which is
       # `pipe_through [:api, :require_admin]` — every route needs a data-plane
       # bearer with the global `admin` permission (D21: instance-global scope,
@@ -1797,14 +1932,25 @@ defmodule Barkpark.Plugins.Capabilities do
         "chat.create_session",
         "chat",
         "create-session",
-        "Start a new Claude chat session (id server-minted; cwd is always ClaudeChat.cwd/0).",
+        "Start a provider-backed chat session with server-minted public and provider identities.",
         "POST",
         "/v1/chat/sessions",
         "admin",
         flags: [
-          flag("mode", "string", "Permission mode (must pass the Session/ClaudeChat allowlist)."),
-          flag("model", "string", "Model choice (allowlisted)."),
-          flag("effort", "string", "Effort choice (allowlisted).")
+          flag("provider", "string", "Runtime provider (claude or codex; defaults to claude)."),
+          flag(
+            "execution_target",
+            "string",
+            "Execution location (managed or registered_host; defaults to managed)."
+          ),
+          flag(
+            "execution_host_id",
+            "string",
+            "Registered host UUID; required only when execution_target is registered_host."
+          ),
+          flag("mode", "string", "Provider-scoped permission mode (allowlisted)."),
+          flag("model", "string", "Provider-scoped model choice (allowlisted)."),
+          flag("effort", "string", "Provider-scoped effort choice (allowlisted).")
         ],
         default_output: "json"
       ),

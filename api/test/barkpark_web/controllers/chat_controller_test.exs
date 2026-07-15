@@ -22,14 +22,31 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   @dataset "production"
 
+  defmodule FakeCodexAdapter do
+    @moduledoc false
+
+    def capabilities do
+      %{modes: ["default", "read-only"], models: ["gpt-5.6"], efforts: ["high"]}
+    end
+
+    def cwd, do: "/tmp/codex-managed"
+  end
+
   setup do
     # A valid `cat` echo-server fake CLI so send/interrupt/approval can bring up a
     # real Recorder + Session without a real `claude`. public_demo_studio is ON in
     # test config (which fail-closes enabled?/0), so both must flip.
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    prev_adapters = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
     Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
     Application.put_env(:barkpark, :public_demo_studio, false)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(prev_adapters || %{}, :codex, FakeCodexAdapter)
+    )
 
     on_exit(fn ->
       # Reap any spawned runtimes so a live subprocess never leaks into the next test.
@@ -48,6 +65,10 @@ defmodule BarkparkWeb.ChatControllerTest do
         else: Application.delete_env(:barkpark, :claude_chat)
 
       Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+
+      if prev_adapters,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev_adapters),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
     end)
 
     admin = "chat-admin-#{System.unique_integer([:positive])}"
@@ -299,6 +320,65 @@ defmodule BarkparkWeb.ChatControllerTest do
     test "an absent mode defaults to plan", %{admin: a1} do
       body = json_conn(a1) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
       assert body["mode"] == "plan"
+      assert body["provider"] == "claude"
+      assert body["execution_target"] == "managed"
+      assert body["execution_host_id"] == nil
+      assert body["provider_session_id"] == body["id"]
+    end
+
+    test "persists and projects explicit provider and registered-host identity", %{admin: a1} do
+      host_id = Ecto.UUID.generate()
+
+      body =
+        json_conn(a1)
+        |> post(
+          "/v1/chat/sessions",
+          Jason.encode!(%{
+            provider: "codex",
+            execution_target: "registered_host",
+            execution_host_id: host_id,
+            mode: "read-only",
+            model: "gpt-5.6",
+            effort: "high"
+          })
+        )
+        |> json_response(201)
+
+      assert body["provider"] == "codex"
+      assert body["execution_target"] == "registered_host"
+      assert body["execution_host_id"] == host_id
+      assert body["provider_session_id"] == nil
+      assert body["mode"] == "read-only"
+      assert body["model_choice"] == "gpt-5.6"
+      assert body["effort_choice"] == "high"
+
+      stored = StudioChat.get_session(body["id"])
+      assert stored.provider == "codex"
+      assert stored.execution_target == "registered_host"
+      assert stored.execution_host_id == host_id
+      assert stored.provider_session_id == nil
+    end
+
+    test "rejects invalid provider/target/host combinations before writing", %{admin: a1} do
+      before = length(StudioChat.list_sessions())
+      host_id = Ecto.UUID.generate()
+
+      for invalid <- [
+            %{provider: "other"},
+            %{execution_target: "other"},
+            %{execution_target: "managed", execution_host_id: host_id},
+            %{execution_target: "registered_host"},
+            %{execution_target: "registered_host", execution_host_id: "not-a-uuid"}
+          ] do
+        response =
+          json_conn(a1)
+          |> post("/v1/chat/sessions", Jason.encode!(invalid))
+          |> json_response(400)
+
+        assert response["error"]["code"] == "invalid_request", inspect(invalid)
+      end
+
+      assert length(StudioChat.list_sessions()) == before
     end
 
     test "every launcher control / unknown key is rejected 400 with ZERO store write",
@@ -458,10 +538,25 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "rejects bypassPermissions, unknown keys, and archived (list-only, not a write)",
          %{admin: a1, sid: sid} do
-      for body <- [%{mode: "bypassPermissions"}, %{archived: true}, %{foo: 1}, %{title: "  "}] do
+      for body <- [
+            %{mode: "bypassPermissions"},
+            %{archived: true},
+            %{foo: 1},
+            %{title: "  "},
+            %{provider: "codex"},
+            %{execution_target: "registered_host"},
+            %{execution_host_id: Ecto.UUID.generate()},
+            %{provider_session_id: "native-thread"}
+          ] do
         conn = json_conn(a1) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(body))
         assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
       end
+
+      stored = StudioChat.get_session(sid)
+      assert stored.provider == "claude"
+      assert stored.execution_target == "managed"
+      assert stored.execution_host_id == nil
+      assert stored.provider_session_id == sid
     end
 
     test "title and draft honor the exact 256-byte / 64-KiB boundaries", %{admin: a1, sid: sid} do

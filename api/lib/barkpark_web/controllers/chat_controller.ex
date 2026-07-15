@@ -2,18 +2,19 @@ defmodule BarkparkWeb.ChatController do
   @moduledoc """
   The `/v1/chat` HTTP + SSE transport (charter `bp-chat-tui`, D21-D24) — a strict
   ADAPTER that lets a non-Studio client (`bp chat`) drive the SAME engine the
-  LiveView drives: the `StudioChat` store, `Recorder`, and `ClaudeChat.Session`.
+  LiveView drives: the `StudioChat` store, `Recorder`, and provider Runtime adapter.
 
   ## Not a second engine, not a launcher API
 
   Reads subscribe to `Recorder.topic/1`; writes go `Recorder.ensure/1 →
-  Recorder.session_pid/1 → ClaudeChat.{send_message,interrupt,respond_permission}`.
+  Recorder.session_pid/1 → Runtime.Adapter lifecycle callbacks.
   The controller NEVER calls `adopt_sink` (D2/D24 — Recorder stays the single
   persisting sink + verbatim rebroadcaster) and NEVER closes Recorder/ClaudeChat
   when the HTTP client disconnects (D24 — viewers do not own runtimes).
 
   Every session id is minted server-side (`Ecto.UUID.generate/0`) and cwd is
-  ALWAYS `ClaudeChat.cwd/0` (D22). Executable, argv, environment, cwd, session
+  ALWAYS the selected provider adapter's managed cwd (D22). Executable, argv,
+  environment, cwd, session
   id, resume, minter/token, and bypass arming are never request-controlled — a
   body carrying any of them (or an unknown key, a wrong JSON type, an invalid
   enum, an out-of-bounds value) is rejected with the canonical 400 envelope
@@ -71,9 +72,8 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.Recorder
+  alias Barkpark.StudioChat.{Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
-  alias BarkparkWeb.Studio.ClaudeChat
 
   # Wire bounds (charter "Security, validation, and transport verification
   # obligations"). These are the CHAT limits — NOT the endpoint-wide 100 MB
@@ -93,8 +93,9 @@ defmodule BarkparkWeb.ChatController do
   # ── POST /v1/chat/sessions ─────────────────────────────────────────────────
 
   @doc """
-  Create a session. Body `{mode?, model?, effort?}`; the id is server-minted and
-  cwd is ALWAYS `ClaudeChat.cwd/0` (D22). No runtime is spawned here — the
+  Create a session. Body `{provider?, execution_target?, execution_host_id?,
+  mode?, model?, effort?}`; the public id is server-minted and cwd is ALWAYS the
+  selected provider adapter's managed cwd (D22). No runtime is spawned here — the
   subprocess comes up on the first send (`Recorder.ensure/1`).
   """
   def create(conn, params) do
@@ -108,7 +109,14 @@ defmodule BarkparkWeb.ChatController do
       # is passed as the second arg, NOT smuggled through `attrs` (the store
       # overrides any owner in `attrs`).
       case StudioChat.create_session(
-             %{id: id, cwd: ClaudeChat.cwd(), mode: attrs.mode},
+             %{
+               id: id,
+               provider: attrs.provider,
+               execution_target: attrs.execution_target,
+               execution_host_id: attrs.execution_host_id,
+               cwd: provider_cwd(attrs.provider),
+               mode: attrs.mode
+             },
              scope(conn)
            ) do
         {:ok, _session} ->
@@ -229,11 +237,11 @@ defmodule BarkparkWeb.ChatController do
   spawn one just to interrupt it.
   """
   def interrupt(conn, %{"id" => id}) do
-    with %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
+    with %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
       request_id =
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
              {:ok, session} <- Recorder.session_pid(recorder),
-             {:ok, rid} <- ClaudeChat.interrupt(session) do
+             {:ok, rid} <- Runtime.interrupt(stored.provider, session) do
           rid
         else
           _ -> nil
@@ -257,10 +265,10 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
-        :ok = ClaudeChat.respond_permission(session, request_id, decision)
+        :ok = Runtime.answer_approval(stored.provider, session, request_id, decision)
 
         status =
           case decision do
@@ -378,6 +386,9 @@ defmodule BarkparkWeb.ChatController do
       {:claude_chat_event, frame} ->
         chunk_or_stop(conn, sse_chat_frame(frame))
 
+      {:studio_chat_runtime_event, %Runtime.Event{} = event} ->
+        chunk_or_stop(conn, sse_runtime_frame(event))
+
       {:claude_chat_permission, ask} ->
         chunk_or_stop(conn, sse_permission_frame(ask))
 
@@ -437,6 +448,11 @@ defmodule BarkparkWeb.ChatController do
   # Live delta: the raw claude stream-json frame, re-encoded verbatim, NO id
   # (deltas are unreplayable by design, D5).
   def sse_chat_frame(frame), do: "event: chat\ndata: #{Jason.encode!(frame)}\n\n"
+
+  @doc false
+  def sse_runtime_frame(%Runtime.Event{} = event) do
+    "event: runtime\ndata: #{event |> Map.from_struct() |> Jason.encode!()}\n\n"
+  end
 
   @doc false
   def sse_permission_frame(ask), do: "event: permission\ndata: #{Jason.encode!(ask)}\n\n"
@@ -517,10 +533,16 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: id,
+             provider: session.provider,
+             provider_session_id: session.provider_session_id,
+             execution_target: session.execution_target,
+             execution_host_id: session.execution_host_id,
+             workspace_id: session.owner_workspace_id,
+             cwd: session.cwd,
              mode: session.mode || "plan",
              resume: resume?,
-             model: ClaudeChat.normalize_model(session.model_choice),
-             effort: ClaudeChat.normalize_effort(session.effort_choice),
+             model: Runtime.normalize_choice(session.provider, :models, session.model_choice),
+             effort: Runtime.normalize_choice(session.provider, :efforts, session.effort_choice),
              # The admin principal (charter D63): the Session mints its loopback
              # bp-mcp credential from this — never exceeding the caller's rights;
              # fail-soft if absent.
@@ -530,7 +552,7 @@ defmodule BarkparkWeb.ChatController do
              bypass_armed: false
            }),
          {:ok, session_pid} <- Recorder.session_pid(recorder) do
-      ClaudeChat.send_message(session_pid, content)
+      Runtime.send_turn(session.provider, session_pid, content)
     end
   end
 
@@ -544,18 +566,88 @@ defmodule BarkparkWeb.ChatController do
   # validation (fail BEFORE any store/runtime call — obligations D + E)
   # ─────────────────────────────────────────────────────────────────────────
 
-  @create_keys ~w(mode model effort)
+  @create_keys ~w(provider execution_target execution_host_id mode model effort)
   defp validate_create(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, @create_keys),
-         {:ok, mode} <- opt_mode(params, "mode"),
-         {:ok, model} <- opt_model(params, "model"),
-         {:ok, effort} <- opt_effort(params, "effort") do
+         {:ok, provider} <- opt_enum(params, "provider", StudioChat.Session.providers(), "claude"),
+         {:ok, target} <-
+           opt_enum(params, "execution_target", StudioChat.Session.execution_targets(), "managed"),
+         {:ok, host_id} <- opt_uuid(params, "execution_host_id"),
+         :ok <- validate_execution_identity(target, host_id),
+         capabilities = Runtime.capabilities(provider),
+         {:ok, mode} <-
+           opt_capability(params, "mode", capabilities.modes -- ["bypassPermissions"]),
+         {:ok, model} <- opt_capability(params, "model", capabilities.models),
+         {:ok, effort} <- opt_capability(params, "effort", capabilities.efforts) do
       # `plan` is the product default (charter — read-only, no approval UI),
       # pinned explicitly so an allowlist reordering never changes it silently.
-      {:ok, %{mode: mode || "plan", model: model, effort: effort}}
+      default_mode =
+        if provider == "claude", do: "plan", else: List.first(capabilities.modes) || "default"
+
+      {:ok,
+       %{
+         provider: provider,
+         execution_target: target,
+         execution_host_id: host_id,
+         mode: mode || default_mode,
+         model: model,
+         effort: effort
+       }}
     end
   end
+
+  defp opt_enum(params, key, allowed, default) do
+    case Map.get(params, key) do
+      nil ->
+        {:ok, default}
+
+      value when is_binary(value) ->
+        if value in allowed, do: {:ok, value}, else: {:error, "invalid #{key}"}
+
+      _ ->
+        {:error, "invalid #{key}"}
+    end
+  end
+
+  defp opt_uuid(params, key) do
+    case Map.get(params, key) do
+      nil ->
+        {:ok, nil}
+
+      value when is_binary(value) ->
+        if match?({:ok, _}, Ecto.UUID.cast(value)),
+          do: {:ok, value},
+          else: {:error, "invalid #{key}"}
+
+      _ ->
+        {:error, "#{key} must be a UUID"}
+    end
+  end
+
+  defp validate_execution_identity("managed", nil), do: :ok
+  defp validate_execution_identity("registered_host", host) when is_binary(host), do: :ok
+
+  defp validate_execution_identity("managed", _),
+    do: {:error, "execution_host_id must be empty for managed execution"}
+
+  defp validate_execution_identity("registered_host", nil),
+    do: {:error, "execution_host_id is required for registered_host execution"}
+
+  defp opt_capability(params, key, allowed) do
+    case Map.get(params, key) do
+      nil ->
+        {:ok, nil}
+
+      value when is_binary(value) ->
+        if value in allowed, do: {:ok, value}, else: {:error, "invalid #{key}"}
+
+      _ ->
+        {:error, "invalid #{key}"}
+    end
+  end
+
+  defp provider_cwd(provider), do: Runtime.cwd(provider)
 
   @patch_keys ~w(draft mode model_choice effort_choice title)
   defp validate_patch(params) do
@@ -681,18 +773,7 @@ defmodule BarkparkWeb.ChatController do
   end
 
   # mode allowlist EXCLUDES bypassPermissions (D22 — not accepted remotely).
-  defp valid_modes, do: ClaudeChat.modes() -- ["bypassPermissions"]
-
-  defp opt_mode(params, key), do: opt(params, key, &req_mode/1)
-  defp opt_model(params, key), do: opt(params, key, &req_model/1)
-  defp opt_effort(params, key), do: opt(params, key, &req_effort/1)
-
-  defp opt(params, key, fun) do
-    case Map.get(params, key) do
-      nil -> {:ok, nil}
-      value -> fun.(value)
-    end
-  end
+  defp valid_modes, do: StudioChat.Session.modes() -- ["bypassPermissions"]
 
   defp req_mode(value) do
     cond do
@@ -705,7 +786,7 @@ defmodule BarkparkWeb.ChatController do
   defp req_model(value) do
     cond do
       not is_binary(value) -> {:error, "model must be a string"}
-      value in ClaudeChat.models() -> {:ok, value}
+      value in Runtime.capabilities("claude").models -> {:ok, value}
       true -> {:error, "invalid model"}
     end
   end
@@ -713,7 +794,7 @@ defmodule BarkparkWeb.ChatController do
   defp req_effort(value) do
     cond do
       not is_binary(value) -> {:error, "effort must be a string"}
-      value in ClaudeChat.efforts() -> {:ok, value}
+      value in Runtime.capabilities("claude").efforts -> {:ok, value}
       true -> {:error, "invalid effort"}
     end
   end
@@ -750,6 +831,10 @@ defmodule BarkparkWeb.ChatController do
   defp full_session_json(%StudioChat.Session{} = s, messages) do
     %{
       id: s.id,
+      provider: s.provider,
+      execution_target: s.execution_target,
+      execution_host_id: s.execution_host_id,
+      provider_session_id: s.provider_session_id,
       title: s.title,
       title_source: s.title_source,
       status: s.status,
@@ -781,6 +866,9 @@ defmodule BarkparkWeb.ChatController do
   defp sidebar_json(%StudioChat.Session{} = s) do
     %{
       id: s.id,
+      provider: s.provider,
+      execution_target: s.execution_target,
+      execution_host_id: s.execution_host_id,
       title: s.title,
       title_source: s.title_source,
       status: s.status,

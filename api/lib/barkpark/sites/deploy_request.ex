@@ -10,15 +10,25 @@ defmodule Barkpark.Sites.DeployRequest do
   defense in depth, not redundancy: either layer alone is a single point of
   failure for a value that names a filesystem path.
 
-  Shape (charter D22):
+  Shape (charter D22, D63):
 
       %{
-        "slug"        => "my-blog",           # ^[a-z0-9][a-z0-9-]{0,62}$
-        "build_id"    => "a1b2c3d4",          # ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ (deploy only)
-        "content_rev" => "1f2e...",           # optional, baked as bp-content-rev
-        "mode"        => "deploy" | "rollback",
-        "env"         => %{"BARKPARK_API_URL" => _, "BARKPARK_TOKEN" => _, ...}
+        "slug"           => "my-blog",        # ^[a-z0-9][a-z0-9-]{0,62}$
+        "build_id"       => "a1b2c3d4",       # ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ (deploy only)
+        "content_rev"    => "1f2e...",        # optional, baked as bp-content-rev
+        "mode"           => "deploy" | "rollback",
+        "runtime_target" => "static" | "node",# where the artifact runs (default "static")
+        "env"            => %{"BARKPARK_API_URL" => _, "BARKPARK_TOKEN" => _, ...}
       }
+
+  `runtime_target` (charter D63) is the SECOND axis of the deploy engine — the
+  "ONE state machine, TWO runtime targets" split. `"static"` (the default,
+  backward-compatible) is the symlink-swap target the box has always run;
+  `"node"` is the node-slot SSR target (a long-running `next start` process the
+  box supervises). It is a CLOSED enum, validated exactly like `mode`: an
+  unrecognized value is a 400, NEVER `String.to_atom` on request data, because
+  this value chooses which engine script reaches argv (and, later, a systemd
+  slot unit NAME) — an open string there is a command/unit-injection seam.
 
   `env` is a CLOSED allow-list (`allowed_env_keys/0`) — an unknown key is a
   400, never a silent drop, because a caller that thinks it is passing a build
@@ -26,13 +36,19 @@ defmodule Barkpark.Sites.DeployRequest do
   """
 
   @enforce_keys [:slug, :mode]
-  defstruct slug: nil, build_id: nil, content_rev: nil, mode: :deploy, env: %{}
+  defstruct slug: nil,
+            build_id: nil,
+            content_rev: nil,
+            mode: :deploy,
+            runtime_target: :static,
+            env: %{}
 
   @type t :: %__MODULE__{
           slug: String.t(),
           build_id: String.t() | nil,
           content_rev: String.t() | nil,
           mode: :deploy | :rollback,
+          runtime_target: :static | :node,
           env: %{optional(String.t()) => String.t()}
         }
 
@@ -46,6 +62,7 @@ defmodule Barkpark.Sites.DeployRequest do
     BARKPARK_WORKSPACE
     BARKPARK_PROJECT
     BARKPARK_SITE_BASE
+    BARKPARK_DOC_TYPE
   )
 
   # Same regexes site-deploy.sh enforces (SITE_SLUG / BUILD_ID). Anchored with
@@ -68,12 +85,13 @@ defmodule Barkpark.Sites.DeployRequest do
 
   Returns `{:error, code, message}` with a machine-readable `code`
   (`invalid_slug` | `invalid_build_id` | `invalid_content_rev` |
-  `invalid_mode` | `invalid_env`) on any violation.
+  `invalid_mode` | `invalid_runtime_target` | `invalid_env`) on any violation.
   """
   @spec new(map()) :: {:ok, t()} | {:error, String.t(), String.t()}
   def new(params) when is_map(params) do
     with {:ok, slug} <- validate_slug(Map.get(params, "slug")),
          {:ok, mode} <- validate_mode(Map.get(params, "mode")),
+         {:ok, runtime_target} <- validate_runtime_target(Map.get(params, "runtime_target")),
          {:ok, build_id} <- validate_build_id(mode, Map.get(params, "build_id")),
          {:ok, content_rev} <- validate_content_rev(Map.get(params, "content_rev")),
          {:ok, env} <- validate_env(Map.get(params, "env")) do
@@ -83,6 +101,7 @@ defmodule Barkpark.Sites.DeployRequest do
          build_id: build_id,
          content_rev: content_rev,
          mode: mode,
+         runtime_target: runtime_target,
          env: env
        }}
     end
@@ -110,6 +129,17 @@ defmodule Barkpark.Sites.DeployRequest do
   defp validate_mode("deploy"), do: {:ok, :deploy}
   defp validate_mode("rollback"), do: {:ok, :rollback}
   defp validate_mode(_mode), do: {:error, "invalid_mode", ~s(mode must be "deploy" or "rollback")}
+
+  # Runtime target is a CLOSED enum, validated EXACTLY like mode (charter D63):
+  # it picks which engine script reaches argv — and later a systemd slot unit
+  # NAME — so an open string is a command/unit-injection seam. Default "static"
+  # keeps every existing (pre-node) caller on the symlink-swap target.
+  defp validate_runtime_target(nil), do: {:ok, :static}
+  defp validate_runtime_target("static"), do: {:ok, :static}
+  defp validate_runtime_target("node"), do: {:ok, :node}
+
+  defp validate_runtime_target(_target),
+    do: {:error, "invalid_runtime_target", ~s(runtime_target must be "static" or "node")}
 
   # A rollback is a pure symlink repoint — the engine reads .previous, not a
   # build_id — so we drop any build_id passed with one rather than feed the
