@@ -108,6 +108,19 @@ extract_bridge() {
         [ -f "$f" ] || continue
         base="$(basename "$f" .ts)"
         prov="${base%-oauth}"
+        # A TOOL connector (`direction: "tool"` — Linear, connectors D77, the epic's
+        # OTHER direction) ALSO connects over OAuth (a <p>-oauth.ts callback), yet it
+        # is NOT a channel: its registry file `connectors/<p>.ts` declares
+        # `direction: "tool"`, and catalog.ex (the CHANNEL catalog) omits it. So a
+        # <p>-oauth.ts whose sibling registry file is a tool is EXCLUDED here, exactly
+        # as the paste loop above excludes a tool `connect:` member (github). Without
+        # this a linear-oauth.ts would false-drift against a catalog that correctly
+        # omits it. The exclusion fires ONLY when the registry file exists AND declares
+        # the tool direction, so a channel oauth (slack) is never touched.
+        if [ -f "$cdir/$prov.ts" ] &&
+           grep -Eq '^[[:space:]]*direction:[[:space:]]*"tool"' "$cdir/$prov.ts"; then
+          continue
+        fi
         echo "$prov oauth"
       done
     fi
@@ -187,6 +200,20 @@ export const githubConnector = {
     },
 };
 EOF
+  # A TOOL connector that connects over OAUTH (connectors D77 — Linear). Its registry
+  # file declares `direction: "tool"` and has NO `connect:` member (it is OAuth-only),
+  # and it has a <p>-oauth.ts callback. It is NOT a channel, so the channel catalog
+  # omits it — a naive OAUTH-loop extractor would emit "linear oauth" and false-drift.
+  # This pair proves the OAUTH-loop tool exclusion, which the paste case (github)
+  # above does NOT exercise (the bundled selftest was BLIND to this branch before D82).
+  cat > "$tmp/agree/connectors/linear.ts" <<'EOF'
+export const linearConnector = {
+    direction: "tool",
+};
+EOF
+  cat > "$tmp/agree/oauth/linear-oauth.ts" <<'EOF'
+export function linearCallback() {}
+EOF
   cat > "$tmp/agree/oauth/slack-oauth.ts" <<'EOF'
 export function slackCallback() {}
 EOF
@@ -218,6 +245,13 @@ EOF
   if printf '%s\n' "$agree_set" | grep -q '^github '; then
     echo "SELFTEST FAIL: a tool-direction connector leaked into the channel connectable set"; return 1
   fi
+  # The OAUTH tool connector (linear, direction:"tool" + linear-oauth.ts) must NOT
+  # appear either — the OAUTH loop must exclude a tool the SAME way the paste loop
+  # excludes github (connectors D77/D82). Without the oauth-loop fix "linear oauth"
+  # leaks here and the agreeing catalog+bridge is misreported as drift below.
+  if printf '%s\n' "$agree_set" | grep -q '^linear '; then
+    echo "SELFTEST FAIL: a tool-direction OAUTH connector leaked into the channel connectable set"; return 1
+  fi
   if [ "$cat_set" != "$agree_set" ]; then
     echo "SELFTEST FAIL: an agreeing catalog+bridge was reported as drift"
     echo "  catalog: [$(flat "$cat_set")]"
@@ -227,7 +261,7 @@ EOF
   if [ "$cat_set" = "$drift_set" ]; then
     echo "SELFTEST FAIL: a dropped connect member went undetected"; return 1
   fi
-  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded"
+  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth)"
 }
 
 if [ "${1:-}" = "--selftest" ]; then
