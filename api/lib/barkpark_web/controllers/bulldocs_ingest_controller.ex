@@ -77,6 +77,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
 
+  # Learn-pointer advisory for the legacy body_html leg (authoring-excellence
+  # ae-ingest-learn-pointer). The errors-as-instructions pattern teaches what
+  # broke; this teaches WHERE THE STANDARDS LIVE at the point of use. A producer
+  # who reaches for opaque body_html gets a NON-BLOCKING nudge toward the native
+  # `blocks` grammar and the doctrine papers — advisory only, never a 4xx
+  # (charter D5). Rides the existing Warnings channel opened by the wall wiring
+  # (D36/D42): this is that pipe's FIRST content-shape consumer, not a duplicate.
+  @body_html_learn_code "legacy_body_html"
+  @body_html_learn_message "This paper was ingested as opaque body_html; the preferred path is a native `blocks` list (in-canvas editing, ~50 block types). Learn the block vocabulary and composition grammar in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan, then re-ingest with `blocks`."
+
   # Native portable-doc blocks path (preferred). Renders in article mode so
   # the doc shows native typography at /papers/:slug. `style` defaults to
   # "article" since this endpoint only ingests article-grammar docs;
@@ -209,6 +219,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     # Advisory channel — see the blocks head (authoring-excellence D36/D42).
     Warnings.reset()
+
+    # Learn-pointer: the body_html leg is the legacy fallback. Queue a
+    # NON-BLOCKING advisory (first, so it leads the drained list) naming the
+    # preferred blocks path + the doctrine papers. It rides the SUCCESS envelope
+    # via with_warnings/1; an error path drops the queue, so a rejected ingest
+    # never carries it. Advisory only — never promoted to a 4xx (charter D5).
+    Warnings.put(@body_html_learn_code, @body_html_learn_message)
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->

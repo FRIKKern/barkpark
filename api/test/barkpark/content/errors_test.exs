@@ -273,6 +273,10 @@ defmodule Barkpark.Content.ErrorsTest do
     assert is_binary(env.message) and env.message != ""
     # additive fix-suggesting hint, like every other registered code
     assert is_binary(env.hint) and env.hint != ""
+    # ae-ingest-learn-pointer: the hint teaches WHERE the standards live, not
+    # only what broke — it points at both doctrine papers.
+    assert env.hint =~ "portabledoc-doctrine"
+    assert env.hint =~ "composition-doctrine-plan"
   end
 
   # DELIBERATE membership test (charter D5, amended): known_codes/0 derives
