@@ -1243,11 +1243,47 @@ type SpawnSiteCreate struct {
 	DocType string `json:"doc_type,omitempty"`
 }
 
+// Runtime targets — the "where does the artifact RUN" half of the site engine
+// (charter D61/D62). The state machine (PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE) is
+// one; the runtime target is which of two ways its artifact serves:
+//
+//   - RuntimeTargetStatic — the flagship (Astro): the artifact is a `dist/` tree
+//     and SWITCH / rollback is an atomic symlink flip. No per-site process.
+//   - RuntimeTargetNode — the container-framework SSR target (Next.js first, then
+//     nuxt/sveltekit): the artifact is a long-running node process on a per-slot
+//     PORT (systemd slot unit), health-gated by an HTTP probe TO the process, and
+//     SWITCH / rollback is a Caddy reverse_proxy upstream flip to the warm slot.
+const (
+	RuntimeTargetStatic = "static-symlink-swap"
+	RuntimeTargetNode   = "node-slot"
+)
+
+// RuntimeTargetIsNode reports whether a runtime_target names the node-slot SSR
+// target — the container-framework path whose SWITCH / rollback is a Caddy
+// upstream port-flip, not a symlink swap. It matches the canonical "node-slot"
+// plus any value CONTAINING "node" (so a server that labels the field "node" or
+// "node_slot" still branches). An EMPTY target — a pre-node / static box that
+// never sends the field — is deliberately NOT node: the CLI fails closed to the
+// static symlink-swap narration it has always used, never claiming a node
+// mechanism it wasn't told about.
+func RuntimeTargetIsNode(target string) bool {
+	t := strings.ToLower(strings.TrimSpace(target))
+	return t == RuntimeTargetNode || strings.Contains(t, "node")
+}
+
 // SpawnSite is one spawned site as returned by the /v1/sites endpoints for a
 // `kind` row. URL is the live PATH url (https://<instance>.barkpark.cloud/sites/
 // <slug>/) the control plane computes; Instance is the instance slug/host the CLI
 // falls back to when URL is absent. CurrentDeployment is the live build, embedded
 // when the control plane includes it so `status` needs no second round trip.
+//
+// RuntimeTarget / Port / PortBase are the node-slot fields (charter D62): a
+// container-framework site runs as a long-running node process, so the control
+// plane returns its runtime_target ("node-slot"), the currently-serving slot Port,
+// and the PortBase the per-slot ports are allocated from. All three are omitempty
+// AND must be threaded here explicitly — Go's json.Unmarshal SILENTLY DROPS keys
+// with no matching field, so a static-only struct would make a node site's port
+// invisible to `bp cloud site status -o json`.
 type SpawnSite struct {
 	ID                  string          `json:"id"`
 	BarkparkID          string          `json:"barkpark_id"`
@@ -1261,6 +1297,9 @@ type SpawnSite struct {
 	Dataset             string          `json:"dataset"`
 	URL                 string          `json:"url"`
 	Instance            string          `json:"instance"`
+	RuntimeTarget       string          `json:"runtime_target,omitempty"`
+	Port                int             `json:"port,omitempty"`
+	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`
 	CurrentDeployment   *SiteDeployment `json:"current_deployment,omitempty"`
 	InsertedAt          string          `json:"inserted_at"`
@@ -1288,6 +1327,12 @@ type SiteStage struct {
 // content publish on the bound dataset fired the debounced auto-rebuild); it is
 // omitempty because the control plane only started emitting it in wave 5 and Go's
 // json.Unmarshal would otherwise silently drop the unknown key.
+//
+// RuntimeTarget / Port mirror the SpawnSite node-slot fields at the deployment
+// grain (charter D62): a node deployment carries the runtime_target it ran on and
+// the slot Port its process bound — omitempty and threaded explicitly for the same
+// json.Unmarshal-drops-unknown-keys reason as SpawnSite. A static deployment omits
+// both.
 type SiteDeployment struct {
 	ID            string      `json:"id"`
 	SiteID        string      `json:"site_id"`
@@ -1297,6 +1342,8 @@ type SiteDeployment struct {
 	BuildID       string      `json:"build_id"`
 	URL           string      `json:"url"`
 	Trigger       string      `json:"trigger,omitempty"`
+	RuntimeTarget string      `json:"runtime_target,omitempty"`
+	Port          int         `json:"port,omitempty"`
 	FailureReason string      `json:"failure_reason"`
 	BecameLiveAt  string      `json:"became_live_at"`
 	InsertedAt    string      `json:"inserted_at"`
@@ -1315,10 +1362,18 @@ func SiteDeploymentTerminal(status string) bool {
 	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled"
 }
 
-// SiteRollbackResult is a completed spawned-site rollback — the sub-second
-// symlink flip to the previous good build. Raw is the envelope bytes verbatim so
-// `-o json` re-emits the contract without reshaping (the instance-rollback
-// idiom). The scalar fields are the parsed view the human renderer consumes.
+// SiteRollbackResult is a completed spawned-site rollback. Raw is the envelope
+// bytes verbatim so `-o json` re-emits the contract without reshaping (the
+// instance-rollback idiom). The scalar fields are the parsed view the human
+// renderer consumes.
+//
+// RuntimeTarget is the mechanism the rollback used (charter D62) — the SIGNAL the
+// CLI branches its narration on: a static rollback is an atomic symlink swap, a
+// "node-slot" rollback is a Caddy reverse_proxy upstream flip back to the warm
+// previous node slot. The rollback path never fetches the site row, so the
+// envelope itself must carry the mechanism; when it is absent (a static / pre-node
+// box that never sends it) the CLI falls back to the symlink-swap copy it always
+// had. Port is the node slot the box flipped the upstream back to, when node.
 type SiteRollbackResult struct {
 	Raw                  []byte `json:"-"`
 	OK                   bool   `json:"ok"`
@@ -1326,6 +1381,8 @@ type SiteRollbackResult struct {
 	DeploymentID         string `json:"deployment_id"`
 	PreviousDeploymentID string `json:"previous_deployment_id"`
 	URL                  string `json:"url"`
+	RuntimeTarget        string `json:"runtime_target"`
+	Port                 int    `json:"port"`
 }
 
 // CreateSpawnSite POSTs /v1/sites (Bearer) with the spawner body and returns the
@@ -1427,8 +1484,11 @@ func (c *Client) SpawnSiteDeployment(ctx context.Context, id, deploymentID strin
 }
 
 // RollbackSpawnSite flips a spawned site back to its previous good build via
-// POST /v1/sites/:id/rollback (Bearer) — the sub-second symlink flip. Raw is the
-// envelope bytes verbatim so `-o json` re-emits the contract.
+// POST /v1/sites/:id/rollback (Bearer) — a sub-second flip whose mechanism depends
+// on the runtime target: an atomic symlink swap for a static site, a Caddy
+// upstream port-flip to the warm previous slot for a node site (the envelope's
+// runtime_target says which). Raw is the envelope bytes verbatim so `-o json`
+// re-emits the contract.
 func (c *Client) RollbackSpawnSite(ctx context.Context, id string) (SiteRollbackResult, error) {
 	status, raw, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/rollback", true, nil)
 	if err != nil {
