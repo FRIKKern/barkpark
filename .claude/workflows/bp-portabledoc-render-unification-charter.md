@@ -40,4 +40,18 @@ Backlog carried alongside (filed as epic children this wave): the field-*/compos
 
 ## Wave log
 
-_(empty — Wave 1 in flight; Review appends the debrief)_
+### Wave 2026-07-16 (Wave 1 — canonical JS renderer foundation)
+
+**Landed (all 5 slices green; grade A−).** The wave shipped the whole Wave-1 foundation and, critically, the END PROOF now fires: `@barkpark/react`'s new type-keyed `PortableDoc({value})` renders all 42 non-plugin block types to HTML that DOM-shape-equals the Elixir `:article` golden (42/42 parity assertions + 17 comparator self-tests, 0 skipped, in the reviewer's 5-branch integration).
+
+Per slice (final branch = the reviewer's `-r` branch; lead flips merge-gated criteria on merge):
+
+- **rpu-w1-chat-tokens** (`…tokens-to-pap-0-r`): 5 chat base tokens added to `paper-surface.css` light+dark. Review fix: D6's verbatim light `--border-muted: var(--border)` dangled off-Studio (the chat-tool-diff divider vanished on `/papers`); resolved to the concrete `hsl(240 5.9% 90%)` the default `--border` carries. Elixir gate 24/0 + mirror PASS.
+- **rpu-w1-golden-gen** (`…kitchen-sink-array-el-1-r`): sibling mix task + 42×2 golden mirrors + `#!/usr/bin/env bash` completeness guard. Review fix: the paragraph fixture used string marks (`["bold"]`) which `Inline.apply_mark` (map-keyed) ignores, so the sole marks fixture never exercised D4; corrected to a map mark and regenerated. Freshness 129/0, guard 42/42.
+- **rpu-w1-pd-renderer** (`…portabledoc-renderer-2-r`): the 42-type `PortableDoc` string emitter, `bp-*` classes, RSC-safe from both entries. Review fixes (caught by the integrated harness, missed by the self-proof gate): (1) table cells now wrap inline content in the `walk.ex` per-child `<span>`; (2) heatmap `--i` divides by the grid max, not a 1.0 floor; (3) asciicast figcaption uses plain `#55635e`, not `var(--paper-ink-soft,…)`; (4) removed 2 dead imports that redded CI lint. +3 regression assertions. Gate: build + typecheck + 124 test + lint clean.
+- **rpu-w1-css-asset** (`…consumable-b-3-r`): `paper-surface.css` shipped via tsup copy + `exports` subpath + byte-identity drift guard. Review fix: size budgets were sized for an imagined 3.1KB renderer; the real 42-type renderer is a ~16KB gzipped shared chunk both entries pull, so the merged bundle blew all 3 caps — rebased on the real measurement (index.mjs 18KB / server.mjs 17KB / PortableText-shim 16KB), dropped the double-counting total.
+- **rpu-w1-parity-proof** (`…dom-shape-comparat-4-r`): net-new Layer-2 DOM-shape comparator + self-arming harness. Review fix: the END-proof passed `value: golden.input` (one block) to `PortableDoc` whose contract is `Block[]` → empty render; wrapped as `[golden.input]`. Comparator is non-vacuous (8-case protective proof).
+
+**What stalled:** nothing hard-stalled. Two structural notes carried forward, NOT blockers: (a) the renderer is a ~16KB gzipped shared chunk, so a `PortableText`-only consumer now pays for it — a later wave can subpath-split the shim from the renderer if consumer bundle size matters; (b) the JS renderer is more lenient than Elixir on mark shape (accepts string marks as bold; Elixir requires maps) — harmless for real map-mark content, latent divergence otherwise.
+
+**Next wave (W2 — Astro SSR-to-HTML):** the foundation is proven, so W2 can drop `PortableDoc`/`renderPortableDocument` into an Astro surface (`set:html`, no hydration) and re-run the same DOM-shape parity from Astro's build output. The golden harness + comparator are reusable as-is. Do NOT re-author the block array — the golden mirror is canonical. Watch the shared-chunk bundle size if the Astro island budget is tight.
