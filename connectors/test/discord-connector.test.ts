@@ -398,6 +398,30 @@ describe("discord connector — the gateway listener (the three vendor traps)", 
 
     await connector.stopListening?.(adapter as unknown as Adapter);
   });
+
+  // STANDBY TAKEOVER (charter D93/D94): the install-lease coordinator stops the
+  // Gateway socket on a replica that loses the lease and starts it on the one that
+  // steals it. A replica that loses then RE-acquires must open a FRESH socket —
+  // stopListening() must clear the session so the connector is re-listenable. This
+  // is the connector-level property the lease relies on for takeover.
+  it("re-arms after stopListening — a lease regained opens a FRESH socket (takeover)", async () => {
+    const { adapter, calls } = fakeGateway();
+    const connector = createDiscordConnector();
+
+    await connector.listen?.(adapter as unknown as Adapter);
+    expect(calls).toHaveLength(1);
+
+    // Lost the lease → the coordinator stops the transport.
+    await connector.stopListening?.(adapter as unknown as Adapter);
+
+    // Re-acquired the lease → listen() again must open a NEW socket, not silently
+    // no-op on a stale session left behind by the previous listen().
+    await connector.listen?.(adapter as unknown as Adapter);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.signal?.aborted).toBe(false);
+
+    await connector.stopListening?.(adapter as unknown as Adapter);
+  });
 });
 
 describe("gateway supervisor — a persistent process outlives one window", () => {

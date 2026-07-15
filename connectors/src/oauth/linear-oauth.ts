@@ -131,10 +131,108 @@ export interface LinearTokenResponse {
   access_token?: string;
   token_type?: string;
   expires_in?: number;
+  /**
+   * The rotating refresh token (charter D80/D90). Present on both the
+   * authorization-code exchange and every refresh; Linear ROTATES it per call, so
+   * the fresh value must be stored and the old one discarded. Untyped ANYWHERE
+   * before this wave — the code exchange simply threw it away with the bare-token
+   * seal (D80). Optional because a token response can legitimately omit it.
+   */
+  refresh_token?: string;
   scope?: string;
   /** Present on a refusal (`invalid_grant`, …). */
   error?: string;
   error_description?: string;
+}
+
+/**
+ * The credential `credential_ref` holds for an OAUTH tool install (charter
+ * D90) — a small JSON bundle instead of the bare access token D80 shipped.
+ *
+ *   { "access_token": "…", "refresh_token": "…", "expires_at": <epoch-ms> }
+ *
+ * Only `access_token` is required. `refresh_token` and `expires_at` are absent on a
+ * legacy row (a pre-refresh install sealed the bare string) and on any credential
+ * that cannot refresh — which is why the read-path (`tool-headers`) accepts BOTH a
+ * bundle and a bare string, and this shape is ADDITIVE, never a migration (D89).
+ *
+ * `expires_at` is EPOCH-MS (`now + expires_in*1000`), the same absolute-instant
+ * shape the WhatsApp 24h-window policy uses — not a relative TTL, so the skew
+ * decision is one subtraction against the wall clock with no "issued at" to track.
+ */
+export interface LinearCredentialBundle {
+  access_token: string;
+  refresh_token?: string;
+  /** Epoch-ms the access token expires. Absent ⇒ unknown, treated as refreshable. */
+  expires_at?: number;
+}
+
+/**
+ * Parse a stored `credential_ref` into a Linear bundle, or `null` when it is NOT a
+ * bundle (charter D89).
+ *
+ * `null` covers every non-bundle input — a bare-string paste credential, malformed
+ * JSON, a JSON array, a JSON object with no usable `access_token`. A `null` here is
+ * NOT an error: the refresher reads it as "nothing to refresh, serve as-is", and
+ * the generic read-path serves the raw string byte-for-byte. NEVER throws.
+ */
+export function parseLinearBundle(raw: string): LinearCredentialBundle | null {
+  const trimmed = raw.trim();
+  // Cheap gate: a bundle is a JSON object, so it starts with `{`. A bare token
+  // (`lin_oauth_…`) never does, and skipping the parse keeps the common legacy
+  // path allocation-free.
+  if (!trimmed.startsWith("{")) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const record = parsed as {
+    access_token?: unknown;
+    refresh_token?: unknown;
+    expires_at?: unknown;
+  };
+  const accessToken = record.access_token;
+  if (typeof accessToken !== "string" || accessToken.trim() === "") return null;
+
+  const bundle: LinearCredentialBundle = { access_token: accessToken };
+  if (
+    typeof record.refresh_token === "string" &&
+    record.refresh_token.trim() !== ""
+  ) {
+    bundle.refresh_token = record.refresh_token;
+  }
+  if (typeof record.expires_at === "number" && Number.isFinite(record.expires_at)) {
+    bundle.expires_at = record.expires_at;
+  }
+  return bundle;
+}
+
+/**
+ * Build the credential bundle a token response seals into (charter D90).
+ *
+ * `expires_at` is derived HERE (`now + expires_in*1000`) so the stored value is an
+ * absolute instant; a response with no `expires_in` (Linear always sends one, but a
+ * stub or a future provider might not) simply omits it, and an omitted `expires_at`
+ * is treated as "unknown → refreshable" downstream.
+ */
+export function buildLinearBundle(
+  token: LinearTokenResponse,
+  now: number,
+): LinearCredentialBundle {
+  const accessToken = token.access_token ?? "";
+  const bundle: LinearCredentialBundle = { access_token: accessToken };
+  if (token.refresh_token) bundle.refresh_token = token.refresh_token;
+  if (typeof token.expires_in === "number" && Number.isFinite(token.expires_in)) {
+    bundle.expires_at = now + token.expires_in * 1000;
+  }
+  return bundle;
 }
 
 export interface LinearCodeExchangeOptions {
@@ -413,15 +511,20 @@ export async function handleLinearOAuthCallback(
   }
 
   const seal = deps.sealCredential ?? ((token: string) => token);
-  // A TOOL install carries ONLY the sealed access token as `credential_ref` — NO
-  // `chatToken` key, so `chat_token_ref` stays NULL (D78). The bare token, not a
-  // JSON bundle, so the RAW `Bearer ${credentialRef}` the generic tool-headers
-  // route prints is a working MCP bearer (D80).
+  // A TOOL install carries ONLY the sealed credential as `credential_ref` — NO
+  // `chatToken` key, so `chat_token_ref` stays NULL (D78). The credential is now a
+  // JSON BUNDLE `{access_token, refresh_token?, expires_at?}` (D90), not the bare
+  // token D80 shipped: `refresh_token` is what lets `tool-headers` re-token before
+  // expiry, and `expires_at` is what tells it when. The generic read-path extracts
+  // `.access_token` for the `Bearer` (D89), so the MCP bearer is unchanged — the
+  // bundle is additive, and a bare-string legacy install still opens byte-for-byte.
+  const now = deps.now?.() ?? Date.now();
+  const bundle = buildLinearBundle(exchange, now);
   const install: ConnectorInstall = {
     provider: LINEAR_PROVIDER,
     installKey,
     workspaceId,
-    credentialRef: await seal(exchange.access_token),
+    credentialRef: await seal(JSON.stringify(bundle)),
   };
 
   await deps.upsertInstall(install);

@@ -5,6 +5,10 @@ import type {
   ConnectorInstall,
   ToolDescriptor,
 } from "../connector/types.js";
+import {
+  createLinearTokenRefresher,
+  type LinearTokenRefreshDeps,
+} from "../oauth/linear-token-refresh.js";
 
 /**
  * Linear — the SECOND tool connector (charter D77), and the proof that the
@@ -60,15 +64,24 @@ import type {
  * route via claude's `headersHelper`; Elixir writes only that helper command + a
  * non-secret session ticket and never sees the plaintext.
  *
- * D80 — TOKEN STALENESS IS NAMED, NOT HIDDEN
- * ------------------------------------------
- * The callback seals the BARE access token (not a `{access,refresh,expires}` JSON
- * bundle), because `tool-headers` prints `Bearer ${credentialRef}` RAW — a JSON
- * blob would become the bearer and break MCP auth unless the SHARED generic route
- * learned to parse it, which is the very "second connector = zero core change"
- * this wave proves. Named consequence: Linear access tokens live ~24h, so an
- * expired install opens fine and 401s invisibly AT THE PROVIDER until re-connected.
- * Refresh is filed as its own backlog task (`connectors-linear-token-refresh`).
+ * D80→D90 — TOKEN STALENESS: NAMED IN W8, CLOSED IN W9
+ * ----------------------------------------------------
+ * W8 (D80) sealed the BARE access token, because `tool-headers` printed
+ * `Bearer ${credentialRef}` RAW — a JSON blob would have become the bearer and
+ * broken MCP auth unless the SHARED route learned to parse it. Named consequence:
+ * Linear access tokens live ~24h, so an expired install opened fine and 401'd
+ * invisibly AT THE PROVIDER until re-connected. W9 (D89–D92) closes it WITHOUT
+ * breaking the zero-core-change invariant: the read-path learned ONE generic,
+ * shape-blind parse (a `{`-prefixed JSON object with a non-empty `access_token` is a
+ * bundle; anything else — including GitHub's bare PAT — passes byte-for-byte), so
+ * `credential_ref` can now hold a `{access_token, refresh_token?, expires_at?}`
+ * bundle. This connector owns a `refreshCredential` hook (below) that `tool-headers`
+ * calls generically: inside a skew window it exchanges a fresh token against
+ * `api.linear.app/oauth/token` and the route write-backs the re-sealed bundle. A
+ * LIVE refresh rides the human gate `connectors-linear-live-oauth-gate` — never
+ * fabricated. The refresh hook is present ONLY when the bridge is configured with
+ * Linear OAuth client credentials (see `createLinearConnector`); without them the
+ * connector still serves any bare-string install byte-for-byte.
  *
  * THE ONE-INCH HUMAN GATE
  * -----------------------
@@ -86,6 +99,14 @@ export const LINEAR_MCP_URL = "https://mcp.linear.app/mcp";
 export interface LinearConnectorOptions {
   /** Override the MCP server URL (tests point it at a local stub). */
   mcpUrl?: string;
+  /**
+   * Linear OAuth client credentials (charter D92). Present ⇒ the connector carries
+   * a `refreshCredential` hook that re-tokens an expiring install at header-build
+   * time. Absent ⇒ NO hook — a bare-string or bundle install is served as-is (the
+   * common state on a box with no Linear app configured). Threaded from
+   * `registerBuiltinConnectors`' deps bag, exactly as Slack's credentials are.
+   */
+  refresh?: LinearTokenRefreshDeps;
 }
 
 export function createLinearConnector(
@@ -94,6 +115,14 @@ export function createLinearConnector(
   const mcpUrl = options.mcpUrl ?? LINEAR_MCP_URL;
 
   const toolDescriptor: ToolDescriptor = { type: "http", url: mcpUrl };
+
+  // The refresh hook is CONNECTOR-OWNED and OPTIONAL (D92): only present when the
+  // bridge has Linear OAuth client credentials to drive the exchange. The shared
+  // `tool-headers` route calls `connector.refreshCredential?.()` generically, so its
+  // absence simply means "serve the stored credential" — never a broken read-path.
+  const refreshCredential = options.refresh
+    ? createLinearTokenRefresher(options.refresh)
+    : undefined;
 
   return {
     id: LINEAR_PROVIDER,
@@ -109,6 +138,11 @@ export function createLinearConnector(
     tenantResolution: "credential-bound",
 
     toolDescriptor,
+
+    // The refresh hook (D92), present only when Linear OAuth creds were threaded in.
+    // Spread rather than assigned `undefined` to keep `exactOptionalPropertyTypes`
+    // happy: an absent hook is a MISSING member, not a member set to undefined.
+    ...(refreshCredential ? { refreshCredential } : {}),
 
     // NO `connect` member (D77): Linear is OAuth-only, so it is NOT paste-
     // connectable. The paste-mode `/connect` routes answer the same opaque 404
