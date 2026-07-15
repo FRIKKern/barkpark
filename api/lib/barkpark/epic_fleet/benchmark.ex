@@ -17,7 +17,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @spec create_experiment(map()) ::
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
   def create_experiment(attrs) when is_map(attrs) do
-    attrs = attrs |> select(@experiment_fields) |> sanitize_map()
+    attrs = attrs |> select_attrs(@experiment_fields) |> sanitize_map()
     manifest = Map.get(attrs, "manifest", %{})
 
     if is_map(manifest) do
@@ -38,7 +38,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
     do: record_attempt(experiment_id, attrs)
 
   def record_attempt(experiment_id, attrs) when is_binary(experiment_id) and is_map(attrs) do
-    attrs = attrs |> select(@attempt_fields) |> sanitize_map()
+    attrs = attrs |> select_attrs(@attempt_fields) |> sanitize_map()
 
     attrs =
       attrs
@@ -255,7 +255,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   defp attempt_map(attempt) when is_map(attempt) do
-    semantic = attempt |> select(@attempt_fields) |> sanitize_map()
+    semantic = attempt |> select_attrs(@attempt_fields) |> sanitize_map()
     Map.put(semantic, "attempt_digest", CanonicalJSON.digest(semantic))
   end
 
@@ -297,18 +297,19 @@ defmodule Barkpark.EpicFleet.Benchmark do
           {:error, changeset} -> Repo.rollback(changeset)
         end
 
-      %Attempt{attempt_digest: digest} = attempt when digest == attrs["attempt_digest"] ->
-        attempt
-
-      %Attempt{} ->
-        Repo.rollback(:attempt_conflict)
+      %Attempt{attempt_digest: digest} = attempt ->
+        if digest == attrs["attempt_digest"] do
+          attempt
+        else
+          Repo.rollback(:attempt_conflict)
+        end
     end
   end
 
   defp unwrap_attempt({:ok, %Attempt{} = attempt}), do: {:ok, attempt}
   defp unwrap_attempt({:error, reason}), do: {:error, reason}
 
-  defp select(attrs, fields) do
+  defp select_attrs(attrs, fields) do
     Map.new(fields, fn field ->
       {field, Map.get(attrs, field, Map.get(attrs, String.to_atom(field)))}
     end)
