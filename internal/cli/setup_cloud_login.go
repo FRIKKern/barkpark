@@ -195,7 +195,13 @@ func cloudResolveTarget(out *writer, reader *bufio.Reader, client cloudFleetClie
 	if target == "" {
 		return cloudStillProvisioning(out, picked), nil
 	}
-	return setup.CloudLoginResult{Server: target, Token: creds.AdminToken, Name: picked.Name}, nil
+	return setup.CloudLoginResult{
+		Server:     target,
+		Token:      creds.AdminToken,
+		Name:       picked.Name,
+		InstanceID: strings.TrimSpace(picked.ID),
+		Team:       fleetTeamLabel(picked),
+	}, nil
 }
 
 func fleetTeamID(b cloudclient.Barkpark) string {
@@ -210,6 +216,17 @@ func fleetTeamName(b cloudclient.Barkpark) string {
 		return "that team"
 	}
 	return b.Team.Name
+}
+
+// fleetTeamLabel is the IDENTITY form of the owning team's name — the raw name,
+// or "" when unknown. Distinct from fleetTeamName, which returns the prose "that
+// team" fallback for sentences. This is what lands on ServerEntry.Team, so a
+// missing team stays empty rather than storing the prose placeholder.
+func fleetTeamLabel(b cloudclient.Barkpark) string {
+	if b.Team == nil {
+		return ""
+	}
+	return strings.TrimSpace(b.Team.Name)
 }
 
 // cloudStillProvisioning is the not-a-dead-end outcome when a Barkpark has no URL

@@ -212,10 +212,16 @@ func runServers(out *writer, args []string) int {
 	case "json", "yaml":
 		rows := make([]map[string]any, 0, len(list))
 		for _, e := range list {
+			aliases := []string{}
+			if len(e.Aliases) > 0 {
+				aliases = append(aliases, e.Aliases...)
+			}
 			rows = append(rows, map[string]any{
 				"name":           cfg.DisplayName(e),
 				"server":         e.Server,
 				"kind":           cfg.KindOf(e),
+				"instance_id":    e.InstanceID,
+				"aliases":        aliases,
 				"active":         cfg.IsActiveServer(e.Server),
 				"last_connected": e.LastConnected,
 				"tier":           e.Tier,
@@ -282,6 +288,11 @@ func runServers(out *writer, args []string) int {
 			extra = "  (" + e.LastConnected + ")"
 		}
 		out.outf("%s%-*s %-*s %s%s", mark, maxName, name, maxKind, kind, e.Server, extra)
+		// An instance reached via more than one hostname lists its other hostnames
+		// indented beneath the primary row, so the fold into ONE entry is visible.
+		if len(e.Aliases) > 0 {
+			out.outf("  %-*s %-*s also: %s", maxName, "", maxKind, "", joinComma(e.Aliases))
+		}
 	}
 	return exitOK
 }
