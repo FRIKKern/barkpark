@@ -30,11 +30,13 @@ defmodule Barkpark.Repo.Migrations.RepairEpicFleetReplacementBoundaries do
 
     execute """
     DROP TRIGGER IF EXISTS epic_benchmark_attempts_replacement_ordinal
-      ON epic_benchmark_attempts;
+      ON epic_benchmark_attempts
+    """
 
+    execute """
     CREATE TRIGGER epic_benchmark_attempts_replacement_ordinal
     BEFORE INSERT ON epic_benchmark_attempts
-    FOR EACH ROW EXECUTE FUNCTION barkpark_epic_replacement_ordinal_valid();
+    FOR EACH ROW EXECUTE FUNCTION barkpark_epic_replacement_ordinal_valid()
     """
 
     create unique_index(:epic_benchmark_attempts, [:experiment_id, :replaces_attempt_id],
