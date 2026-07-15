@@ -18,17 +18,21 @@
 #
 # TWO CHANNELS, ONE SCRIPT — the git step is channel-gated on a $APP/.staging
 # marker (fail-closed: absent => production channel):
-#   * production (no .staging): strict `pull --ff-only origin main`, exactly as
-#     before. A non-main DEPLOY_REF or non-origin DEPLOY_REMOTE is REFUSED
-#     (exit 11) — a prod content box only ever fast-forwards origin main; it
-#     can never be pushed to a branch, a PR, or a foreign remote.
+#   * production (no .staging): `fetch origin main` then `reset --hard
+#     FETCH_HEAD`, LOCKED to origin/main. A non-main DEPLOY_REF or non-origin
+#     DEPLOY_REMOTE is REFUSED (exit 11) BEFORE the git step — a prod content box
+#     can never be pushed to a branch, a PR, or a foreign remote. A content box
+#     is a MIRROR of origin/main, never a source of truth, so it hard-resets
+#     (converging even from a DIVERGENT HEAD — a stray commit made on the box, or
+#     main rewritten under it) rather than `pull --ff-only`, which ABORTS on
+#     divergence and silently jams the box off the deploy train. Divergence is
+#     logged, not swallowed. The hard reset also discards committed build
+#     artifacts (go.sum/bin churn), subsuming the old `git checkout -- .`.
 #   * staging (.staging present): deploy ANY ref — DEPLOY_REF (default main),
 #     DEPLOY_REMOTE (default origin) — via `fetch $DEPLOY_REMOTE $DEPLOY_REF`
 #     then `reset --hard FETCH_HEAD`. This is the pre-merge proving path: try a
 #     branch or a PR (DEPLOY_REF=pull/<n>/head) BEFORE it rides the auto-deploy
-#     merge train. The hard reset also discards committed build artifacts,
-#     subsuming the `git checkout -- .` the prod path still needs to clear the
-#     go.sum/bin churn that blocks --ff-only.
+#     merge train.
 # EVERY git path suppresses the repo's post-merge hook (core.hooksPath=.githooks
 # on the box): that hook nukes the live _build and restarts the legacy `barkpark`
 # unit — exactly the outage this script exists to prevent.
@@ -271,17 +275,27 @@ if [ -f "$APP/.staging" ]; then
   git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
 else
   if [ "$DEPLOY_REF" != "main" ]; then
-    log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only fast-forwards main"
+    log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only mirrors origin/main"
     exit 11
   fi
   if [ "$DEPLOY_REMOTE" != "origin" ]; then
     log "refusing DEPLOY_REMOTE '$DEPLOY_REMOTE' on a production box (no $APP/.staging marker) — prod only pulls origin; ignoring it silently would deploy the wrong remote"
     exit 11
   fi
-  # Built artifacts (committed bin/, go.sum churn) block --ff-only; discard them.
-  git checkout -- . 2>/dev/null || true
-  log "git pull (post-merge hook suppressed — this script IS the deploy)"
-  git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+  # A content box is a MIRROR of origin/main — never a source of truth. Fetch +
+  # hard-reset (the same idiom the staging path uses, origin/main-locked) instead
+  # of `pull --ff-only`: a divergent HEAD (a stray commit made directly on the box,
+  # or origin/main rewritten under it) makes --ff-only ABORT ("Not possible to
+  # fast-forward") → exit 11 → the box silently stops auto-deploying while every
+  # run reports "failure". Reset always converges to origin/main; any local commit
+  # is drift to discard, and this also subsumes the old `git checkout -- .` for
+  # committed build artifacts. Divergence is surfaced (logged), not swallowed.
+  log "git fetch origin main + reset --hard (post-merge hook suppressed — this script IS the deploy)"
+  git -c core.hooksPath=/dev/null fetch origin main || { log "fetch origin main failed"; exit 11; }
+  if ! git merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
+    log "WARNING: box HEAD $(git rev-parse --short HEAD) has DIVERGED from origin/main (a commit was made on the box, or main was rewritten) — discarding local divergence and converging to origin/main"
+  fi
+  git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
 fi
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"

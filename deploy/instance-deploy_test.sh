@@ -274,8 +274,9 @@ check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' 
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
 check "per-slot sha stamp written (W6)"   "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'newsha' ]"
 check "idle slot has no stamp yet"        "[ ! -e '$APP/.slots/blue.sha' ]"
-check "prod channel: ff-only pull of origin main" "grep -q 'pull --ff-only origin main' '$GITLOG'"
-check "prod channel: no staging fetch/reset"       "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
+check "prod channel: fetch origin main"           "grep -q 'fetch origin main' '$GITLOG'"
+check "prod channel: hard reset to FETCH_HEAD (divergence-proof)" "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "prod channel: NO ff-only pull (jams on divergence)" "! grep -q 'pull --ff-only' '$GITLOG'"
 
 echo "== Case 2: green active (:4001) -> healthy deploy flips back to blue =="
 : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
@@ -326,13 +327,13 @@ check "non-origin remote: exit 11"        "[ '$rc' = '11' ]"
 check "non-origin remote: no git mutation" "! grep -qE 'fetch|reset --hard FETCH_HEAD|pull --ff-only' '$GITLOG'"
 rm -rf "$TMP"
 
-echo "== Case 5: production box, default ref -> unchanged guerrilla ff-only path =="
+echo "== Case 5: production box, default ref -> fetch origin main + hard reset (divergence-proof) =="
 setup_case
 rc="$(run_deploy 200 defaultsha)"   # DEPLOY_REF unset -> main
 check "exit 0"                            "[ '$rc' = '0' ]"
-check "ff-only pull of origin main"       "grep -q 'pull --ff-only origin main' '$GITLOG'"
-check "artifact-discard checkout ran"     "grep -q 'checkout -- .' '$GITLOG'"
-check "no staging fetch/reset on prod"    "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
+check "fetch origin main"                 "grep -q 'fetch origin main' '$GITLOG'"
+check "hard reset to FETCH_HEAD"          "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "NO ff-only pull (would jam on a divergent box HEAD)" "! grep -q 'pull --ff-only' '$GITLOG'"
 check "healthy full flip to :4001"        "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
 rm -rf "$TMP"
 
