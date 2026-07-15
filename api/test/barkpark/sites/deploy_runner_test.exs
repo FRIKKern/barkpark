@@ -579,18 +579,35 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
 
     test "the default node engine script is deploy/site-deploy-node.sh (argv, not env)" do
-      # No config override: prove the SHIPPED default command names the node
+      # No command override: prove the SHIPPED default command names the node
       # script — the box's real dispatch when the CP sends runtime_target=node.
       # A node rollback (no build_id, no provision) exercises the argv without
       # needing the script to exist: bash reports "No such file" and exits
-      # non-zero, but the log carries the exact path we dispatched to.
-      put_cfg(enabled: true)
+      # non-zero, but the log carries the exact relative path we dispatched to.
+      #
+      # `cd:` is LOAD-BEARING, do not drop it: run_cd honors config[:cd] first
+      # (deploy_runner.ex:374), so bash runs from a scriptless tmp dir where
+      # `deploy/site-deploy-node.sh` cannot resolve — it prints the path in a
+      # "No such file or directory" error on EVERY host and the real script
+      # never runs. Without it, run_cd falls back to the repo root where the
+      # real script EXISTS, so on a flock-present host (Linux CI) it executes,
+      # logs "not_supported", and never echoes its own path → non-hermetic red.
+      scriptless_tmp =
+        Path.join(System.tmp_dir!(), "bp-scriptless-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(scriptless_tmp)
+      on_exit(fn -> File.rm_rf(scriptless_tmp) end)
+
+      put_cfg(enabled: true, cd: scriptless_tmp)
 
       assert DeployRunner.trigger(req("rt-default", mode: "rollback", runtime_target: "node")) ==
                {:ok, :started}
 
       assert %{state: :done} = status = await_done("rt-default")
       assert Enum.any?(status.log, &String.contains?(&1, "deploy/site-deploy-node.sh"))
+      # The real script must NOT have executed — its bespoke log lines prove it did.
+      refute Enum.any?(status.log, &String.contains?(&1, "not_supported"))
+      refute Enum.any?(status.log, &String.contains?(&1, "no live route"))
     end
   end
 
