@@ -122,6 +122,72 @@ otherwise walk a build already proven broken back in front of visitors. Typed
 deploy exits: 11 missing input, 12 BUILD, 13 STAGE, 14 HEALTH, 15 lock wait, 16
 SWITCH. Node/npm are already on guerrilla (asdf).
 
+**Spawned node (SSR) sites (`deploy/site-deploy-node.sh`).** The SECOND runtime
+target the founding architecture named — *"ONE deploy state machine, TWO runtime
+targets: static-symlink-swap OR node-slot SSR"* — for container frameworks
+(`site.framework ∈ nextjs|nuxt|sveltekit`; Next.js is the flagship). It is the
+**sibling** of `site-deploy.sh`, not a fork: both source the same
+`deploy/lib/site-deploy-common.sh` (the `BPSTAGE` `emit()`, the `meta_value`
+marker reader, the slug/build-id validators, the `BUILD_ALLOW` scrub, and the ONE
+shared Caddyfile leaf lock), so the two engines can never drift on the wire
+protocol or the lock. The **artifact is a running PROCESS** with a port +
+lifecycle, not a directory of files. Same six stages, node-shaped: **PLAN**
+(`live` = the process on the *active Caddy-upstream slot* already serves this
+`build_id`) → **BUILD** (`npm ci && npm run build` under the same scrubbed, capped
+sandbox; Next's `output:'standalone'` emits `.next/standalone`, a traced
+`node_modules` + `server.js`, NOT a static `dist/`) → **STAGE** (three-piece copy
+into an immutable `releases/<build_id>/`: the standalone dir IS the release root,
+then `.next/static` → `<release>/.next/static`, then `public/` → `<release>/public`)
+→ **HEALTH** (boot the REAL idle slot — `systemctl start
+barkpark-site@<slug>__<slot>` — and poll ITS port to a ≥10 s deadline, because a
+process needs ~1.5 s to first-200 and Next's "Ready" log lies; assert `200` AND
+`bp-build-id == BUILD_ID` + `bp-content-rev`/`bp-doc-id` non-empty **by value**;
+on failure stop the just-booted slot, **never touch the live slot or Caddy**, exit
+14) → **SWITCH** (marker-anchored per-site `reverse_proxy localhost:<port>`
+**re-flip in place** inside this site's `BARKPARK_SITE_ROUTE:<slug>` block, under
+the shared lock → backup → `caddy validate` → reload → revert — deliberately NOT
+`instance-deploy.sh`'s whole-file global `sed`, which was RUN-proven to corrupt a
+second site sharing a port literal) → **RETIRE** (keep the current slot + **1
+warm previous** slot running for `<1 s` rollback, stop the rest, keep the newest
+`N` release dirs on disk). Two slots per site (`a`/`b`), blue/green: build+boot
+the idle slot, health-gate it, THEN flip — a slot that won't boot or fails its
+probe NEVER takes the Caddy upstream. `--rollback`: a warm previous slot = a pure
+Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots the
+idle slot onto it + gates + flips. The slot unit is
+`deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
+`systemctl`/`caddy`/`npm`, no real systemd/network): `bash
+deploy/site-deploy-node.sh --self-test` — 50 checks: the six-stage protocol,
+boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
+retire protecting both live slots, and the warm-rollback flip.
+
+**The slot unit (`deploy/systemd/barkpark-site@.service`).** ONE generic template
+for every node site's every slot — `%i = <slug>__<slot>`. `EnvironmentFile=/opt/
+barkpark/.slots/%i.env` (regenerated each deploy, 0600 — it holds the read token)
+carries `PORT`, `HOSTNAME=127.0.0.1` (loopback bind), `RELEASE_DIR`, and the
+per-site `BARKPARK_*` runtime vars SSR fetches content with.
+`ExecStart=/usr/local/bin/barkpark-node ${RELEASE_DIR}/server.js` — `barkpark-node`
+is the stable symlink the deploy aims at the resolved asdf node (`asdf where
+nodejs`), NEVER the shim (an unpinned shim exits 126 and crash-loops the unit) and
+NEVER a version-pinned path. Hardened: `MemoryMax=512M`, `CPUQuota=100%`,
+`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`.
+
+**Static vs node density (charter D67).** The two targets trade differently:
+
+| | static (`site-deploy.sh`) | node SSR (`site-deploy-node.sh`) |
+|---|---|---|
+| Resident cost | **0** — Caddy `file_server`, no process | **1 process/site, 65-85 MB RSS, always resident** |
+| Request CPU | disk-bound (~0) | request-time SSR on the box's ~2 cores |
+| On disk | ~16 KB (`dist/`) per release | ~18 MB (traced standalone) per release |
+| During a deploy | one extra release dir | **warm standby doubles RSS** (current + previous slot both up for `<1 s` rollback) |
+| Density | thousands per box | low tens idle; single digits under real SSR load |
+
+So a box that hosts hundreds of static sites hosts only tens of node sites: each
+node site is a permanent process (RAM) that burns the shared 2 cores per request
+(CPU), and the warm-standby that buys sub-second rollback keeps a *second* process
+resident until the next deploy retires it. `MemoryMax`/`CPUQuota` on the slot unit
+bound the blast radius of one busy or leaking site; the operator trades density
+for the SSR/container capability, not for free.
+
 **Machine stage protocol.** A deploy prints, next to the human prose, one line
 per stage boundary on **stdout**:
 
@@ -139,9 +205,12 @@ to be silent — a PLAN no-op, a SKIP_BUILD redeploy, a RETIRE that removes noth
 — all speak, so a stage-watching caller cannot hang. `--rollback` keeps its own
 contract (`TARGET_BUILD=` + typed exits), not `BPSTAGE`.
 
-**One Caddyfile, one lock.** `site-deploy.sh` and `instance-deploy.sh` both
-read-modify-write `/etc/caddy/Caddyfile` (route arming; blue/green port flip). An
-interleave silently discards one writer — and a lost update is *syntactically
+**One Caddyfile, one lock.** `site-deploy.sh`, `site-deploy-node.sh` and
+`instance-deploy.sh` all read-modify-write `/etc/caddy/Caddyfile` (static route
+arming; node per-site port flip; blue/green slot flip) — the third writer
+(`site-deploy-node.sh`) JOINS this lock via the shared `with_caddy_lock` in
+`lib/site-deploy-common.sh`, it does not copy it. An interleave silently discards
+one writer — and a lost update is *syntactically
 valid*, so `caddy validate` cannot see it (reproduced: a losing write dropped the
 port flip, then reloaded Caddy onto the slot the deploy was about to disable — a
 hard 502). Every read-modify-write in **both** scripts therefore runs under one
