@@ -840,6 +840,23 @@ func (c *Client) ConnectProvider(ctx context.Context, kind, token, label string)
 	return out.Provider, nil
 }
 
+// DisconnectProvider drops the team's connected provider of `kind` via DELETE
+// /v1/providers/:kind (Bearer). The control plane deletes the row + its encrypted
+// credential and returns {ok:true}. A 404 (no such connection — no existence
+// leak) surfaces verbatim via cloudError, as does any other non-2xx. This is the
+// plugin law's "disconnect degrades to standalone" path — the box keeps serving
+// its own content directly once the edge provider is gone.
+func (c *Client) DisconnectProvider(ctx context.Context, kind string) error {
+	status, body, err := c.do(ctx, "DELETE", "/v1/providers/"+esc(kind), true, nil)
+	if err != nil {
+		return err
+	}
+	if !ok(status) {
+		return cloudError(status, body)
+	}
+	return nil
+}
+
 // Launch provisions a Barkpark into a connected provider via POST /v1/launch
 // (Bearer). provider is the provider id/kind to launch into (sent only when
 // non-empty so the control plane can pick the Team's default); name is the new

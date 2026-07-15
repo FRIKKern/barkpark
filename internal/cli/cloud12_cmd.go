@@ -678,12 +678,15 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTea
 	renderHzTable(out, headers, rows)
 }
 
-// runProvider is the `bp provider <verb>` built-in. Today the only verb is `add`:
+// runProvider is the `bp provider <verb>` built-in. Verbs:
 //
-//	bp provider add hetzner --token <t> [--label <l>]
+//	bp provider add hetzner --token <t> [--label <l>]   connect a cloud account
+//	bp provider remove <kind>                           disconnect it (→ standalone)
 //
-// It connects a cloud account to the control plane (POST /v1/providers) so a
-// later `bp launch` can provision into it. Requires a Cloud token.
+// `add` connects a cloud account to the control plane (POST /v1/providers) so a
+// later `bp launch` can provision into it; `remove` drops it (DELETE
+// /v1/providers/:kind) — the plugin law: disconnecting degrades to standalone.
+// Requires a Cloud token.
 func runProvider(out *writer, args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printProviderHelp(out)
@@ -694,13 +697,23 @@ func runProvider(out *writer, args []string) int {
 	}
 
 	verb := args[0]
-	if verb != "add" {
+	switch verb {
+	case "add":
+		return runProviderAdd(out, args[1:])
+	case "remove":
+		return runProviderRemove(out, args[1:])
+	default:
 		out.userErr("unknown provider command %q", verb)
-		out.errf("usage: bp provider add hetzner --token <token> [--label <label>]")
+		out.errf("usage: bp provider <add|remove> <kind> …")
 		return exitUsage
 	}
+}
 
-	kind, token, label, perr := parseProviderAddArgs(args[1:])
+// runProviderAdd connects a cloud account: bp provider add <kind> --token <t>
+// [--label <l>] (POST /v1/providers). The token is verified server-side before
+// it is encrypted at rest, and never echoed back.
+func runProviderAdd(out *writer, args []string) int {
+	kind, token, label, perr := parseProviderAddArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
@@ -739,6 +752,47 @@ func runProvider(out *writer, args []string) int {
 	}
 	out.outf("✓ connected %s provider %q (id %s)", prov.Kind, label, prov.ID)
 	out.outf("  launch into it with 'bp launch %s --name <name>'", prov.Kind)
+	return exitOK
+}
+
+// runProviderRemove disconnects a cloud account: bp provider remove <kind>
+// (DELETE /v1/providers/:kind). Drops the team's connection of that kind — the
+// plugin law: with the provider gone, the box degrades gracefully to standalone.
+// A 404 (nothing connected of that kind — no existence leak) surfaces verbatim.
+func runProviderRemove(out *writer, args []string) int {
+	var kind string
+	for _, a := range args {
+		switch {
+		case a == "-h" || a == "--help":
+			printProviderHelp(out)
+			return exitOK
+		case strings.HasPrefix(a, "-"):
+			return useError(out, "usage", fmt.Sprintf("unknown flag %q (usage: bp provider remove <kind>)", a), exitUsage)
+		default:
+			if kind != "" {
+				return useError(out, "usage", fmt.Sprintf("unexpected extra argument %q", a), exitUsage)
+			}
+			kind = a
+		}
+	}
+	if kind == "" {
+		return useError(out, "usage", "missing provider kind — e.g. bp provider remove cloudflare", exitUsage)
+	}
+
+	cfg, ok := requireCloud(out)
+	if !ok {
+		return exitAuth
+	}
+
+	if err := cfg.CloudClient().DisconnectProvider(cloudCtx(), kind); err != nil {
+		return cloudFail(out, "disconnect provider", err)
+	}
+
+	if out.emitStructured(map[string]any{"ok": true, "kind": kind}) {
+		return exitOK
+	}
+
+	out.outf("✓ disconnected %s provider", kind)
 	return exitOK
 }
 
@@ -1281,16 +1335,19 @@ func printProviderHelp(out *writer) {
 	const help = `bp provider — connect a cloud account to provision Barkparks into.
 
 USAGE
-  bp provider add hetzner --token <token> [--label <label>]
+  bp provider add <kind> --token <token> [--label <label>]
+  bp provider remove <kind>
 
 WHAT IT DOES
-  links a cloud provider (today: hetzner) to your team on the control plane so
-  'bp launch <kind>' can provision a Barkpark into it. The token is encrypted at
-  rest by the control plane and never echoed back. Requires 'bp login' first.
+  links a cloud provider (hetzner / azure to provision into; cloudflare for free
+  edge DNS/TLS/CDN) to your team on the control plane. The token is verified, then
+  encrypted at rest by the control plane and never echoed back. 'remove'
+  disconnects it — the box degrades gracefully back to standalone. Requires
+  'bp login' first.
 
 FLAGS
-  --token <token>   the provider API token
-  --label <label>   a human label for the connection (optional)
+  --token <token>   the provider API token (add only)
+  --label <label>   a human label for the connection (optional, add only)
   -o json           emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }

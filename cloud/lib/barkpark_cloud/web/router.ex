@@ -124,6 +124,7 @@ defmodule BarkparkCloud.Web.Router do
     ArchiveStore,
     Azure,
     Billing,
+    Cloudflare,
     DeviceAuth,
     DomainStatus,
     Events,
@@ -2579,6 +2580,33 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         connect_provider_request(conn)
+    end
+  end
+
+  # DELETE /v1/providers/:kind → 200 {ok: true} — disconnect the team's connected
+  # provider of `kind` (drops the row + its encrypted credential). The plugin law:
+  # disconnecting a provider degrades gracefully back to standalone. 404 not_found
+  # when the team has no connection of that kind (no existence leak). RBAC: team
+  # admin only (parity with the connect side). Mirrors DELETE
+  # /v1/github/installation.
+  delete "/v1/providers/:kind" do
+    conn = Auth.require_team_admin(conn, [])
+    kind = conn.params["kind"]
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        # The label (if any) for the audit metadata — read before the delete. No
+        # row of this kind → 404 (no existence leak). This is the ONLY place the
+        # label is available; the delete drops the row.
+        disconnect_provider_request(conn, team, kind)
     end
   end
 
@@ -6975,7 +7003,19 @@ defmodule BarkparkCloud.Web.Router do
   ## raw-catalog fetch) split per provider; the persisted row and the JSON are
   ## one shape.
 
+  # Kinds that own a normalized provisioning CATALOG (GET /v1/providers/:kind/…):
+  # a connected account can be listed as a provisioning menu. Cloudflare is NOT
+  # here — it is a free-superpower EDGE provider (DNS/TLS/CDN), not a box source,
+  # so it has no `build_provider_catalog` clause and must NOT expose a backing-less
+  # `GET /v1/providers/cloudflare/catalog`.
   @neutral_kinds ~w(hetzner azure)
+
+  # Kinds a team may CONNECT via POST /v1/providers. A SUPERSET of
+  # @neutral_kinds — cloudflare is connectable (it stores a verified credential)
+  # WITHOUT being catalog-backed, so the connect gate reads THIS list while the
+  # catalog route keeps reading @neutral_kinds. Keeping the two lists distinct is
+  # what lets cloudflare connect without leaking a menu route it can't serve.
+  @connectable_kinds ~w(hetzner azure cloudflare)
 
   # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
   # pure catalog and never in any response. Defined above the first use (module
@@ -6989,7 +7029,7 @@ defmodule BarkparkCloud.Web.Router do
     kind = conn.body_params["kind"]
     label = conn.body_params["label"]
 
-    with true <- kind in @neutral_kinds,
+    with true <- kind in @connectable_kinds,
          {:ok, credential} <- provider_credential(kind, conn.body_params),
          :ok <- preflight_provider(kind, credential) do
       # activity-audit-log: the credential row insert + a `provider.connected`
@@ -7036,6 +7076,53 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # DELETE /v1/providers/:kind body → 404-if-none → audited row delete. The label
+  # (for the audit metadata) is read BEFORE the delete; the delete + a
+  # `provider.disconnected` audit event commit atomically. The detail map carries
+  # ONLY the provider KIND and LABEL — NEVER the credential material.
+  defp disconnect_provider_request(conn, team, kind) do
+    label =
+      team
+      |> Registry.list_providers()
+      |> Enum.find(&(&1.kind == kind))
+      |> case do
+        nil -> :none
+        provider -> provider.label
+      end
+
+    case label do
+      :none ->
+        json(conn, 404, %{error: "not_found"})
+
+      label ->
+        audited =
+          Accounts.audit(
+            %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "provider.disconnected",
+              target_type: "provider",
+              metadata: %{kind: kind, label: label}
+            },
+            fn ->
+              case Registry.disconnect_provider(team, kind) do
+                :ok -> {:ok, :disconnected}
+                {:error, _} = err -> err
+              end
+            end
+          )
+
+        case audited do
+          {:ok, :disconnected} ->
+            push_event(team.id, "audit")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # The plaintext credential to validate + encrypt, per kind. hetzner: the token
   # string. azure: the four-field service-principal blob as JSON — the single
   # encrypted_token home holds it (Decision 4), so stray input is dropped here.
@@ -7050,6 +7137,17 @@ defmodule BarkparkCloud.Web.Router do
     case params["credentials"] do
       creds when is_map(creds) -> {:ok, Jason.encode!(azure_credential_blob(creds))}
       _ -> {:error, :bad_credentials}
+    end
+  end
+
+  # cloudflare: EITHER a bare API-token string (`token`, the common paste) OR a
+  # `{api_token, account_id?, zone_id?}` JSON blob (`credentials`). Both ride the
+  # single encrypted_token column (the Provider changeset validates each shape).
+  # A blob keeps only the three known fields — never stray request input.
+  defp provider_credential("cloudflare", params) do
+    case params["credentials"] do
+      creds when is_map(creds) -> {:ok, Jason.encode!(cloudflare_credential_blob(creds))}
+      _ -> {:ok, credential_string(params["token"])}
     end
   end
 
@@ -7068,6 +7166,25 @@ defmodule BarkparkCloud.Web.Router do
   defp credential_string(value) when is_binary(value), do: value
   defp credential_string(_), do: ""
 
+  # Keep ONLY the three known cloudflare blob fields (string keys) — never persist
+  # stray request input alongside the credential, and coerce any non-string value
+  # to "" so a malformed body fails the changeset shape gate cleanly (never a
+  # to_string/1 crash). account_id/zone_id are optional (dropped when blank/absent
+  # so the stored blob stays minimal), but a JSON blob MUST carry a non-blank
+  # api_token — the Provider changeset enforces that.
+  defp cloudflare_credential_blob(creds) do
+    %{"api_token" => credential_string(Map.get(creds, "api_token"))}
+    |> maybe_put_field(creds, "account_id")
+    |> maybe_put_field(creds, "zone_id")
+  end
+
+  defp maybe_put_field(blob, creds, field) do
+    case credential_string(Map.get(creds, field)) do
+      "" -> blob
+      value -> Map.put(blob, field, value)
+    end
+  end
+
   # Verify-before-save: a cheap authenticated call proving the credential works.
   # :ok to proceed; {:error, :unverified} to refuse the save with remediation.
   defp preflight_provider("hetzner", token) do
@@ -7082,6 +7199,32 @@ defmodule BarkparkCloud.Web.Router do
       _ -> {:error, :unverified}
     end
   end
+
+  # cloudflare: verify the API token is LIVE + active before saving. The token to
+  # verify is the bare credential, or a JSON blob's `api_token` — extracted here,
+  # then handed to the SSRF-guarded Cloudflare.Client (Fake in dev/test). Only
+  # {:ok, %{status: "active"}} proceeds; anything else refuses the save with the
+  # per-kind remediation. Never routes any private/loopback/metadata host (the
+  # Real client's shared Billing.HttpClient enforces verify_peer + no-redirect).
+  defp preflight_provider("cloudflare", credential) do
+    case Cloudflare.verify_token(cloudflare_api_token(credential)) do
+      {:ok, %{status: "active"}} -> :ok
+      _ -> {:error, :unverified}
+    end
+  end
+
+  # The API token to verify — a bare token IS the token; a JSON blob's `api_token`
+  # is. Falls back to the raw credential (a non-blob string) so a pasted token
+  # verifies directly; "" when there is nothing to verify (verify then fails
+  # closed and the changeset backstops the blank).
+  defp cloudflare_api_token(credential) when is_binary(credential) do
+    case Jason.decode(credential) do
+      {:ok, %{"api_token" => token}} when is_binary(token) -> token
+      _ -> credential
+    end
+  end
+
+  defp cloudflare_api_token(_), do: ""
 
   # A one-row authenticated server list — the cheapest proof the token is live.
   # Success is a 2xx from api.hetzner.cloud; anything else (401/403/transport)
