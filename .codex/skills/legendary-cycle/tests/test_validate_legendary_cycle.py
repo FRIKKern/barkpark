@@ -6,6 +6,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,12 +59,22 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             ]
             fleet[phase] = {
                 "agent_type": agent_type,
+                "effort": MODULE.FLEET_EFFORTS[phase],
                 "planned": planned,
                 "started": planned,
                 "completed": planned,
                 "failed": 0,
                 "missing": 0,
                 "assignments": assignments,
+                "evidence_proofs": [],
+                "terminal_counts": {
+                    "completed": planned,
+                    "failed": 0,
+                    "cancelled": 0,
+                    "missing": 0,
+                    "invalid": 0,
+                },
+                "invalid_assignments": 0,
             }
         self.paper = {
             "_id": "legendary-paper-1",
@@ -88,6 +99,88 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                             "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
                             "proven_batch_capacity": 20,
                             "planned_build_assignments": 15,
+                            "excluded_inventory": [],
+                            "quality_rubric": {
+                                "reader_visibility": "all target readers pass",
+                                "preservation": "authored content is preserved",
+                            },
+                            "failure_threshold": 0.05,
+                        },
+                    },
+                    {
+                        "type": "callout",
+                        "title": "CycleFleet ledger",
+                        "content": [
+                            {
+                                "type": "text",
+                                "value": "Legendary CycleFleet wave wave-rev-1: 300 inventoried, 300 assigned, 300 shipped, 0 stalled, 0 excluded; exact reconciliation true.",
+                            }
+                        ],
+                        "cycle_ledger": {
+                            "profile": "legendary",
+                            "scope": {
+                                "workspace_id": "workspace-1",
+                                "epic_id": "legendary-1",
+                                "wave_id": "wave-1",
+                            },
+                            "wave_revision": "wave-rev-1",
+                            "inventory_digest": "a" * 64,
+                            "plan_digest": "b" * 64,
+                            "reconciliation_digest": "c" * 64,
+                            "scale_contract": {
+                                "unit_definition": "Paper",
+                                "unit_count": 300,
+                                "inventory_evidence": "bp doc list paper --all -o json",
+                                "target_surfaces": ["Studio", "TUI", "email"],
+                                "minimum_multiplier": 5,
+                                "concurrency_width": 3,
+                                "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+                                "excluded_inventory": [],
+                                "quality_rubric": {
+                                    "reader_visibility": "all target readers pass",
+                                    "preservation": "authored content is preserved",
+                                },
+                                "failure_threshold": 0.05,
+                            },
+                            "inventory_count": 300,
+                            "assigned_count": 300,
+                            "assigned_occurrences": 300,
+                            "shipped_count": 300,
+                            "stalled_count": 0,
+                            "excluded_count": 0,
+                            "planned_builders": 15,
+                            "duplicate_assignment_unit_ids": [],
+                            "unknown_assignment_unit_ids": [],
+                            "unknown_outcome_unit_ids": [],
+                            "outcome_overlap_unit_ids": [],
+                            "outcome_ownership_violation_unit_ids": [],
+                            "unassigned_unit_ids": [],
+                            "unaccounted_unit_ids": [],
+                            "fleet_complete": True,
+                            "exact": True,
+                            "capacity": {
+                                "sealed": True,
+                                "proven_batch_capacity": 20,
+                                "failure_rate": 0.0,
+                                "failure_threshold": 0.05,
+                                "golden_fixtures": ["paper://fixtures/good", "paper://fixtures/bad"],
+                                "quality_rubric": {
+                                    "reader_visibility": "all target readers pass",
+                                    "preservation": "authored content is preserved",
+                                },
+                            },
+                            "experiment": {
+                                "required?": True,
+                                "complete?": True,
+                                "missing_rounds": [],
+                                "round_counts": {
+                                    "baseline": 3,
+                                    "diverge": 3,
+                                    "attack": 3,
+                                    "converge": 3,
+                                    "pilot": 3,
+                                }
+                            },
                         },
                     },
                     {"type": "heading", "text": "Agent fleet"},
@@ -196,22 +289,32 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
     ):
         task = task or self.task
         paper = paper or self.paper
-        ledger = ledger or self.ledger(task, paper)
+        benchmark_ledger = ledger or self.ledger(task, paper)
+        cycle_ledger = next(
+            (block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block),
+            {},
+        )
         return argparse.Namespace(
             task=None,
             task_json=self.write("task.json", task),
             paper=None,
             paper_json=self.write("paper.json", paper),
+            cycle_json=self.write(
+                "cycle.json",
+                {"cycle_ledger": cycle_ledger, "fleet": self.fleet(paper)},
+            ),
             worker="legendary-lead",
             phase=phase,
             require_debrief=require_debrief,
             fleet_ledger_json=(
-                self.write("fleet-ledger.json", MODULE.EPIC.canonical_json(ledger))
+                self.write("fleet-ledger.json", MODULE.EPIC.canonical_json(benchmark_ledger))
                 if include_ledger
                 else None
             ),
             wish_file=self.write("wish.txt", "repair every unreadable Paper\n"),
             pr_body=self.write("pr.md", "Summary\n\nTask: legendary-slice-1\n"),
+            workspace="default",
+            project="default",
         )
 
     def fleet(self, paper):
@@ -347,11 +450,161 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         paper = copy.deepcopy(self.paper)
         paper["body"]["blocks"].append({"type": "paragraph", "text": "Unrelated context"})
         self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
+    def test_live_cyclefleet_lookup_passes_explicit_workspace_and_project(self):
+        args = self.args()
+        args.cycle_json = None
+        ledger = next(
+            block["cycle_ledger"] for block in self.paper["body"]["blocks"]
+            if "cycle_ledger" in block
+        )
+        fleet = self.fleet(self.paper)
+
+        with mock.patch.object(
+            MODULE.EPIC,
+            "command_json",
+            return_value={"cycle_ledger": ledger, "fleet": fleet},
+        ) as command:
+            self.assertEqual((ledger, fleet), MODULE._live_cycle_projection(args, ledger))
+
+        command.assert_called_once_with(
+            "bp", "--workspace", "default", "--project", "default",
+            "cycle", "show", "legendary-1", "wave-1", "-o", "json"
+        )
+
+    def test_parser_inherits_cycle_json_exactly_once(self):
+        args = MODULE.parser().parse_args(
+            [
+                "--task-json",
+                "task.json",
+                "--paper-json",
+                "paper.json",
+                "--worker",
+                "legendary-lead",
+                "--cycle-json",
+                "cycle.json",
+            ]
+        )
+        self.assertEqual(Path("cycle.json"), args.cycle_json)
 
     def test_missing_scale_profile_fails(self):
         paper = copy.deepcopy(self.paper)
         paper["body"]["blocks"] = [block for block in paper["body"]["blocks"] if "scale_profile" not in block]
         self.assertIn("paper has no structured Scale profile record", MODULE.validate(self.args(paper=paper)))
+
+    def test_missing_cycle_ledger_projection_fails(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"] = [block for block in paper["body"]["blocks"] if "cycle_ledger" not in block]
+        self.assertIn(
+            "paper has no structured CycleFleet ledger projection",
+            MODULE.validate(self.args(paper=paper)),
+        )
+
+    def test_projection_must_match_live_cyclefleet_authority(self):
+        args = self.args()
+        live = json.loads(args.cycle_json.read_text(encoding="utf-8"))
+        live["cycle_ledger"]["inventory_digest"] = "f" * 64
+        args.cycle_json = self.write("drifted-cycle.json", live)
+        self.assertIn(
+            "paper CycleFleet projection does not exactly match the live ledger authority",
+            MODULE.validate(args),
+        )
+
+    def test_fleet_projection_must_match_live_cyclefleet_authority(self):
+        args = self.args()
+        live = json.loads(args.cycle_json.read_text(encoding="utf-8"))
+        live["fleet"]["review"]["completed"] = 14
+        args.cycle_json = self.write("drifted-fleet-cycle.json", live)
+        self.assertIn(
+            "paper Agent fleet does not exactly match the live CycleFleet fleet",
+            MODULE.validate(args),
+        )
+
+    def test_complete_scale_profile_must_match_live_contract_and_capacity(self):
+        drift_cases = {
+            "target_surfaces": ["Studio"],
+            "concurrency_width": 4,
+            "excluded_inventory": [{"unit_id": "paper-1", "reason": "wrong"}],
+            "quality_rubric": {"reader_visibility": "drifted"},
+            "failure_threshold": 0.1,
+            "proven_batch_capacity": 19,
+        }
+
+        for field, value in drift_cases.items():
+            with self.subTest(field=field):
+                paper = copy.deepcopy(self.paper)
+                profile = next(
+                    block["scale_profile"]
+                    for block in paper["body"]["blocks"]
+                    if "scale_profile" in block
+                )
+                profile[field] = value
+                self.assertIn(
+                    "paper Scale profile does not exactly match the live CycleFleet scale contract and capacity",
+                    MODULE.validate(self.args(paper=paper)),
+                )
+
+    def test_live_capacity_must_retain_frozen_contract_fields(self):
+        args = self.args()
+        live = json.loads(args.cycle_json.read_text(encoding="utf-8"))
+        live["cycle_ledger"]["capacity"]["quality_rubric"] = {"drifted": True}
+        args.cycle_json = self.write("drifted-capacity.json", live)
+        self.assertIn(
+            "live CycleFleet capacity quality_rubric drifted from Scale contract",
+            MODULE.validate(args),
+        )
+
+    def test_cycle_ledger_must_be_reader_visible(self):
+        paper = copy.deepcopy(self.paper)
+        block = next(block for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        block["content"] = []
+        self.assertIn(
+            "cycle ledger callout has no complete reader-visible reconciliation summary",
+            MODULE.validate(self.args(paper=paper)),
+        )
+
+    def test_cycle_ledger_visible_summary_requires_terminal_counts(self):
+        paper = copy.deepcopy(self.paper)
+        block = next(block for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        block["content"][0]["value"] = (
+            "Legendary CycleFleet wave wave-rev-1: 300 inventoried, 300 assigned; "
+            "exact reconciliation true."
+        )
+        self.assertIn(
+            "cycle ledger callout has no complete reader-visible reconciliation summary",
+            MODULE.validate(self.args(paper=paper)),
+        )
+
+    def test_build_rejects_duplicate_unit_ownership(self):
+        paper = copy.deepcopy(self.paper)
+        ledger = next(block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger["duplicate_assignment_unit_ids"] = ["paper-42"]
+        self.assertIn("cycle ledger has multiply assigned units", MODULE.validate(self.args(paper=paper)))
+
+    def test_review_requires_exact_terminal_reconciliation(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
+        ledger = next(block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger.update({"shipped_count": 299, "unaccounted_unit_ids": ["paper-300"], "exact": False})
+        errors = MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True))
+        self.assertIn("cycle ledger has unaccounted units", errors)
+        self.assertIn("cycle ledger exact flag is not true", errors)
+
+    def test_review_debrief_requires_complete_planned_fleet(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
+        ledger = next(block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger["fleet_complete"] = False
+        errors = MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True))
+        self.assertIn("cycle ledger fleet_complete flag is not true", errors)
+
+    def test_malformed_experiment_count_is_a_validation_error(self):
+        paper = copy.deepcopy(self.paper)
+        ledger = next(block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger["experiment"]["round_counts"]["baseline"] = "3"
+        self.assertIn(
+            "cycle ledger experiment round baseline count is invalid",
+            MODULE.validate(self.args(paper=paper)),
+        )
 
     def test_wrong_multiplier_fails(self):
         paper = copy.deepcopy(self.paper)
@@ -363,6 +616,14 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         paper = copy.deepcopy(self.paper)
         profile = next(block["scale_profile"] for block in paper["body"]["blocks"] if "scale_profile" in block)
         profile.update({"unit_count": 400, "proven_batch_capacity": 20, "planned_build_assignments": 20})
+        ledger = next(block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger.update({"inventory_count": 400, "assigned_count": 400, "shipped_count": 400, "planned_builders": 20})
+        ledger["scale_contract"]["unit_count"] = 400
+        ledger_block = next(block for block in paper["body"]["blocks"] if "cycle_ledger" in block)
+        ledger_block["content"][0]["value"] = (
+            "Legendary CycleFleet wave wave-rev-1: 400 inventoried, 400 assigned, "
+            "400 shipped, 0 stalled, 0 excluded; exact reconciliation true."
+        )
         build = self.fleet(paper)["build"]
         build["planned"] = 20
         for index in range(15, 20):
@@ -396,7 +657,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             MODULE.validate(self.args(paper=paper, phase="decide")),
         )
 
-    def test_additional_experiments_require_complete_wave(self):
+    def test_additional_experiments_are_forbidden_in_the_same_wave(self):
         paper = copy.deepcopy(self.paper)
         experiment = self.fleet(paper)["experiment"]
         experiment["assignments"].append(
@@ -409,11 +670,11 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         )
         experiment.update({"started": 16, "completed": 16, "missing": 0})
         self.assertIn(
-            "fleet experiment contains an incomplete additional wave",
+            "fleet experiment exceeds its exact 15-assignment contract",
             MODULE.validate(self.args(paper=paper)),
         )
 
-    def test_review_requires_complete_fifteen_assignment_repeat(self):
+    def test_additional_review_is_forbidden_in_the_same_wave(self):
         paper = copy.deepcopy(self.paper)
         paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
         review = self.fleet(paper)["review"]
@@ -427,13 +688,19 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         )
         review.update({"started": 16, "completed": 16, "missing": 0})
         self.assertIn(
-            "fleet review contains an incomplete repeated review fleet",
+            "fleet review exceeds its exact 15-assignment contract",
             MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)),
         )
+
+    def test_wrong_phase_effort_is_forbidden(self):
+        paper = copy.deepcopy(self.paper)
+        self.fleet(paper)["build"]["effort"] = "high"
+        self.assertIn("fleet build effort is not medium", MODULE.validate(self.args(paper=paper)))
 
     def test_contract_pins_numeric_and_builder_heavy_rules(self):
         skill = (SCRIPT.parents[1] / "SKILL.md").read_text(encoding="utf-8")
         fleet = (SCRIPT.parents[1] / "references" / "fleet-contract.md").read_text(encoding="utf-8")
+        scale = (SCRIPT.parents[1] / "references" / "scale-contract.md").read_text(encoding="utf-8")
         builder = (SCRIPT.parents[3] / "agents" / "legendary-builder.toml").read_text(encoding="utf-8")
         experimenter = (SCRIPT.parents[3] / "agents" / "legendary-experimenter.toml").read_text(encoding="utf-8")
         self.assertIn("exactly five times", skill)
@@ -449,6 +716,8 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         self.assertIn("Every attempt stays in cost and outcome denominators", fleet)
         self.assertIn('model_reasoning_effort = "medium"', builder)
         self.assertIn('name = "legendary-experimenter"', experimenter)
+        self.assertIn("open a new immutable wave", skill)
+        self.assertIn("Never recompute or reopen Experiment inside the sealed wave", scale)
 
 
 if __name__ == "__main__":

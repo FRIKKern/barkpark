@@ -50,3 +50,33 @@ func TestBuildURLScopePlaceholderFallsBackToCtx(t *testing.T) {
 		t.Errorf("scope placeholder should fall back to ctx when no arg supplied:\n got %q\nwant %q", got, want)
 	}
 }
+
+// CycleFleet deliberately publishes its canonical scoped route as the path
+// template itself (not as the normally inert scoped_prefix hint). Both ambient
+// scope segments and logical cycle ids must therefore resolve and escape in one
+// pass without duplicating the scope prefix.
+func TestBuildURLCanonicalCycleFleetScopedTemplate(t *testing.T) {
+	m := &Manifest{}
+	cmd := Command{
+		ID: "cycle.show",
+		HTTP: HTTP{
+			Method:       "GET",
+			PathTemplate: "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id",
+		},
+	}
+	ctx := Context{
+		Server:    "https://api.example.com/",
+		Workspace: "Acme North",
+		Project:   "Paper/Readers",
+	}
+	args := map[string]string{"epic_id": "epic#42", "wave_id": "wave 1"}
+
+	got, err := m.BuildURL(cmd, ctx, args)
+	if err != nil {
+		t.Fatalf("BuildURL returned error: %v", err)
+	}
+	want := "https://api.example.com/w/Acme%20North/p/Paper%2FReaders/v1/cycles/epic%2342/wave%201"
+	if got != want {
+		t.Errorf("canonical CycleFleet URL mismatch:\n got %q\nwant %q", got, want)
+	}
+}

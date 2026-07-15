@@ -7,6 +7,17 @@ description: Run a five-scale, experiment-gated Barkpark epic for enormous numer
 
 Run a durable Barkpark cycle whose minimum Epic-equivalent fleet is exactly five times the Epic Cycle, then add a format-experiment fleet before production building. Use numbers from the inventory and the winning pilot to size builder batches; never use “large” or “many” as a substitute for counts.
 
+`Barkpark.CycleFleet` is the canonical executable ledger. Open the wave with
+profile `legendary` to freeze inventory and experiment intent before Survey.
+After Pilot, seal capacity and the computed Build plan as a second immutable
+record. The seal is server-refused until all 15 experiment results are complete
+and includes golden fixtures plus the opening quality rubric. Dispatch through
+typed assignments and terminal results. `bp cycle
+show <epic_id> <wave_id> -o json` is the shared local/cloud authority; copy its
+exact `cycle_ledger` object into a reader-visible Paper callout. The validator
+rejects drift between both Paper `cycle_ledger`/`fleet` projections and the live
+authority.
+
 Read `references/scale-contract.md`, `references/experiment-contract.md`, `references/fleet-contract.md`, and `references/phase-contract.md` before starting. Also read `../epic-cycle/references/task-contract.md`, `../epic-cycle/references/charter.md`, and `.claude/workflows/bp-loop-ledger.md`. The Epic task, Paper, claim, worktree, PR, merge, and recovery contracts remain binding unless this skill explicitly strengthens them.
 
 ## Inputs
@@ -22,7 +33,9 @@ Infer missing ids and the unit definition from Barkpark and the repository. Ask 
 
 ## Fleet policy
 
-Record a **Scale profile** and structured **Agent fleet** in the wave Paper before fan-out. The minimum completed typed fleet is:
+Record a **Scale profile**, structured **Agent fleet**, and the reader-visible
+CycleFleet ledger summary in the wave Paper before fan-out. Refresh the exact
+structured projection after every ledger transition. The minimum completed typed fleet is:
 
 | Phase | Typed role | Assignments | Effort |
 | --- | --- | ---: | --- |
@@ -44,7 +57,7 @@ If the current surface cannot explicitly select `agent_type`, do not spawn untyp
 
 Follow Epic Prime. Locate or publish the root and wave tasks, claim the active task, read back its epoch and links, inspect git state and live claims, and create or locate the wave Paper. Preserve unrelated work and never build from a dirty or diverged shared main checkout.
 
-Define the outcome, stop condition, target surfaces, unit definition, exact initial unit count, evidence source for that count, concurrency width, and any external or human-only gates. Run `scripts/validate_legendary_cycle.py` at every available phase boundary.
+Define the outcome, stop condition, target surfaces, unit definition, exact initial unit count, evidence source for that count, concurrency width, and any external or human-only gates. Open the immutable `Barkpark.CycleFleet` wave before dispatch and run `scripts/validate_legendary_cycle.py` at every available phase boundary.
 
 ### 2. Strategize
 
@@ -75,9 +88,9 @@ Gate: every load-bearing format, reader, migration, or compatibility claim is pr
 
 Run five sequential rounds of three `legendary-experimenter` assignments using `references/experiment-contract.md`: baseline, divergent prototypes, hostile-reader trials, convergence, then pilot. Keep candidates isolated from production branches. Score real representative fixtures across every target surface; do not accept prose-only aesthetic judgments.
 
-After each round, append candidates, metrics, failures, and the next-round decision to the Paper. After the pilot, record one chosen format, frozen golden fixtures, proven batch capacity, rollback rule, and observed failure rate. Recompute the Build planned count from the proven capacity.
+After each round, append candidates, metrics, failures, and the next-round decision to the Paper. After the pilot, record one chosen format, frozen golden fixtures, proven batch capacity, rollback rule, and observed failure rate. Seal that evidence with `bp cycle seal`, then read back `bp cycle show` and use its computed Build count. Build assignments are rejected before this seal exists.
 
-Gate: all 15 experiment assignments are complete, one format has a reproducible cross-surface proof, and the pilot meets the predeclared thresholds. Otherwise iterate another complete three-assignment experiment round and keep the phase open.
+Gate: all 15 experiment assignments are complete, one format has a reproducible cross-surface proof, and the pilot meets the predeclared thresholds. The immutable wave admits no additional Experiment assignments and the seal closes Experiment permanently. If the evidence is insufficient, open a new immutable wave instead of iterating inside this one.
 
 ### 6. Decide and shard
 
@@ -89,15 +102,15 @@ No unit may be silently dropped or owned by two builders. Publish a shard manife
 
 Run successive waves of up to three `legendary-builder` agents in isolated worktrees until every planned Build assignment completes. Builders claim before editing, pulse at boundaries, use the frozen format and fixtures, stamp evidence immediately, run the exact gate, self-review, and commit. They do not redesign the format, mutate the wave Paper, close merge-gated criteria, or share write ownership.
 
-The leader integrates in dependency order and audits the shard manifest after every wave. If observed failures exceed the experiment threshold, stop fan-out, quarantine affected batches, return to Experiment, and do not normalize the failure as gruntwork noise.
+The leader integrates in dependency order and audits the shard manifest after every wave. If observed failures exceed the experiment threshold, stop fan-out and quarantine affected batches. Open a new immutable wave with a freshly frozen inventory and renew the full Experiment/Pilot evidence before sealing a replacement Build plan; never return to the sealed Experiment phase in the current wave or normalize the failure as gruntwork noise.
 
 Gate: every inventoried unit is either shipped, explicitly excluded with a published reason, or stalled on a named blocker; accepted branches are green, committed, collision-free, and truthfully stamped.
 
 ### 8. Review and debrief
 
-Run five waves of three independent `code-reviewer` assignments over the integration candidate. Assign distinct lenses across correctness/contracts, cross-surface rendering, test/failure modes, inventory completeness, and Task/Paper/merge-ledger coherence. If fixes materially change behavior or format, repeat a complete 15-assignment Review fleet.
+Run five waves of three independent `code-reviewer` assignments over the integration candidate. Assign distinct lenses across correctness/contracts, cross-surface rendering, test/failure modes, inventory completeness, and Task/Paper/merge-ledger coherence. Review is fixed at 15 assignments in one immutable wave. If fixes materially change behavior or format, open a new wave for the next review fleet.
 
-Append the final inventory reconciliation, experiment verdict, shipped/stalled batches, commits/PRs, proofs, review findings, grade, shortcomings, and next direction to the Paper and charter. Run Review preflight before review, then rerun with `--require-debrief` after publication.
+Append the final inventory reconciliation, experiment verdict, shipped/stalled batches, commits/PRs, proofs, review findings, grade, shortcomings, and next direction to the Paper and charter. The CycleFleet callout must contain visible prose naming the profile, wave revision, inventoried/assigned/outcome counts, and exact state, plus the unmodified structured `cycle_ledger` returned by `bp cycle show`. Run Review preflight before review, then rerun with `--require-debrief` after publication.
 
 Do not close the root merely because one wave ended. The stop condition is the full numeric inventory reconciled, the chosen format proven across declared readers, all accepted work merged and evidenced, and the durable ledger truthful.
 

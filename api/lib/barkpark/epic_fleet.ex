@@ -13,10 +13,26 @@ defmodule Barkpark.EpicFleet do
   alias Barkpark.Repo
 
   @default_plan %{
-    survey: %{agent_type: "epic-surveyor", planned: 12},
-    verify: %{agent_type: "epic-verifier", planned: 6},
-    build: %{agent_type: "epic-builder", planned: 3},
-    review: %{agent_type: "code-reviewer", planned: 3}
+    survey: %{agent_type: "epic-surveyor", effort: "medium", planned: 12},
+    verify: %{agent_type: "epic-verifier", effort: "medium", planned: 6},
+    build: %{agent_type: "epic-builder", effort: "high", planned: 3},
+    review: %{agent_type: "code-reviewer", effort: "high", planned: 3}
+  }
+
+  @phase_agent_types %{
+    survey: "epic-surveyor",
+    verify: "epic-verifier",
+    experiment: "legendary-experimenter",
+    build: "epic-builder",
+    review: "code-reviewer"
+  }
+
+  @phase_efforts %{
+    survey: "medium",
+    verify: "medium",
+    experiment: "medium",
+    build: "high",
+    review: "high"
   }
 
   @assignment_fields [
@@ -28,6 +44,7 @@ defmodule Barkpark.EpicFleet do
     :agent_type,
     :effort,
     :snapshot,
+    :cycle_wave_id,
     :replaces_assignment_id
   ]
 
@@ -68,6 +85,14 @@ defmodule Barkpark.EpicFleet do
       {:ok, normalized} -> Repo.all(assignments_query(normalized))
       {:error, :invalid_scope} -> []
     end
+  end
+
+  @doc "List assignments attached to one immutable CycleFleet wave."
+  @spec list_cycle_assignments(Ecto.UUID.t()) :: [Assignment.t()]
+  def list_cycle_assignments(cycle_wave_id) when is_binary(cycle_wave_id) do
+    Repo.all(
+      from a in Assignment, where: a.cycle_wave_id == ^cycle_wave_id, order_by: a.inserted_at
+    )
   end
 
   @doc "Record or idempotently replay the terminal result for an assignment."
@@ -138,6 +163,30 @@ defmodule Barkpark.EpicFleet do
     end
   end
 
+  @doc "Reduce only assignments attached to one CycleFleet wave."
+  @spec reduce_cycle(Ecto.UUID.t(), map()) :: {:ok, map()} | {:error, :invalid_plan}
+  def reduce_cycle(cycle_wave_id, plan) when is_binary(cycle_wave_id) and is_map(plan) do
+    with {:ok, normalized_plan} <- normalize_plan(plan) do
+      rows =
+        Assignment
+        |> where([a], a.cycle_wave_id == ^cycle_wave_id)
+        |> join(:left, [a], r in Result, on: r.assignment_id == a.id)
+        |> select([a, r], {a, r})
+        |> Repo.all()
+
+      fleet = reduce_rows(rows, normalized_plan)
+
+      {:ok,
+       %{
+         source: :cycle_ledger,
+         ledger_present?: rows != [],
+         scope: %{cycle_wave_id: cycle_wave_id},
+         fleet: fleet,
+         ledger_digest: digest(%{cycle_wave_id: cycle_wave_id, fleet: fleet})
+       }}
+    end
+  end
+
   @doc "Alias for `reduce_fleet/2` used by projection callers."
   @spec reduce(map(), map()) :: {:ok, map()} | {:error, :invalid_scope | :invalid_plan}
   def reduce(scope, plan \\ @default_plan), do: reduce_fleet(scope, plan)
@@ -188,13 +237,7 @@ defmodule Barkpark.EpicFleet do
   defp reconcile_assignment({:ok, assignment}, _attrs), do: {:ok, assignment}
 
   defp reconcile_assignment({:error, changeset}, attrs) do
-    existing =
-      Repo.get_by(Assignment,
-        workspace_id: attrs[:workspace_id],
-        epic_id: attrs[:epic_id],
-        wave_id: attrs[:wave_id],
-        assignment_id: attrs[:assignment_id]
-      )
+    existing = existing_assignment(attrs)
 
     cond do
       is_nil(existing) -> {:error, changeset}
@@ -203,11 +246,27 @@ defmodule Barkpark.EpicFleet do
     end
   end
 
+  defp existing_assignment(%{cycle_wave_id: cycle_wave_id, assignment_id: assignment_id})
+       when is_binary(cycle_wave_id) do
+    Repo.get_by(Assignment, cycle_wave_id: cycle_wave_id, assignment_id: assignment_id)
+  end
+
+  defp existing_assignment(attrs) do
+    Repo.get_by(Assignment,
+      workspace_id: attrs[:workspace_id],
+      epic_id: attrs[:epic_id],
+      wave_id: attrs[:wave_id],
+      assignment_id: attrs[:assignment_id]
+    )
+  end
+
   defp assignment_replay?(existing, attrs) do
-    existing.snapshot_digest == attrs.snapshot_digest and
+    existing.assignment_id == attrs.assignment_id and
+      existing.snapshot_digest == attrs.snapshot_digest and
       existing.phase == attrs.phase and
       existing.agent_type == attrs.agent_type and
       existing.effort == attrs.effort and
+      existing.cycle_wave_id == Map.get(attrs, :cycle_wave_id) and
       existing.replaces_assignment_id == Map.get(attrs, :replaces_assignment_id)
   end
 
@@ -215,7 +274,38 @@ defmodule Barkpark.EpicFleet do
        when is_binary(replacement_id) do
     case Repo.get(Assignment, replacement_id) do
       %Assignment{} = previous ->
-        validate_replacement_contract(attrs, previous)
+        existing_replacement =
+          Repo.one(from a in Assignment, where: a.replaces_assignment_id == ^previous.id)
+
+        predecessor_result = get_result(previous)
+
+        cond do
+          not Enum.all?(@scope_fields, &(Map.get(attrs, &1) == Map.get(previous, &1))) ->
+            {:error, :replacement_scope_mismatch}
+
+          Map.get(attrs, :phase) != previous.phase ->
+            {:error, :replacement_phase_mismatch}
+
+          Map.get(attrs, :agent_type) != previous.agent_type ->
+            {:error, :replacement_agent_type_mismatch}
+
+          Map.get(attrs, :cycle_wave_id) != previous.cycle_wave_id ->
+            {:error, :replacement_contract_mismatch}
+
+          is_nil(predecessor_result) ->
+            {:error, :replacement_predecessor_pending}
+
+          predecessor_result.status not in ["failed", "cancelled"] ->
+            {:error, :replacement_predecessor_not_replaceable}
+
+          not is_nil(existing_replacement) ->
+            if assignment_replay?(existing_replacement, attrs),
+              do: :ok,
+              else: {:error, :assignment_already_replaced}
+
+          true ->
+            :ok
+        end
 
       nil ->
         {:error, :replacement_not_found}
@@ -223,22 +313,6 @@ defmodule Barkpark.EpicFleet do
   end
 
   defp validate_replacement(_attrs), do: :ok
-
-  defp validate_replacement_contract(attrs, previous) do
-    cond do
-      not Enum.all?(@scope_fields, &(Map.get(attrs, &1) == Map.get(previous, &1))) ->
-        {:error, :replacement_scope_mismatch}
-
-      Map.get(attrs, :phase) != previous.phase ->
-        {:error, :replacement_phase_mismatch}
-
-      Map.get(attrs, :agent_type) != previous.agent_type ->
-        {:error, :replacement_agent_type_mismatch}
-
-      true ->
-        :ok
-    end
-  end
 
   defp result_attrs(assignment_id, idempotency_key, attrs) do
     selected = select_attrs(attrs, @result_fields)
@@ -319,7 +393,7 @@ defmodule Barkpark.EpicFleet do
     from a in Assignment,
       where:
         a.workspace_id == ^scope.workspace_id and a.epic_id == ^scope.epic_id and
-          a.wave_id == ^scope.wave_id,
+          a.wave_id == ^scope.wave_id and is_nil(a.cycle_wave_id),
       order_by: [asc: a.inserted_at, asc: a.assignment_id]
   end
 
@@ -335,15 +409,18 @@ defmodule Barkpark.EpicFleet do
   end
 
   defp normalize_plan_config(phase, planned) when is_integer(planned) and planned >= 0 do
-    {:ok, %{agent_type: @default_plan[phase].agent_type, planned: planned}}
+    {:ok,
+     %{agent_type: @phase_agent_types[phase], effort: @phase_efforts[phase], planned: planned}}
   end
 
   defp normalize_plan_config(phase, config) when is_map(config) do
     planned = value(config, :planned)
-    agent_type = value(config, :agent_type) || @default_plan[phase].agent_type
+    agent_type = value(config, :agent_type) || @phase_agent_types[phase]
+    effort = value(config, :effort) || @phase_efforts[phase]
 
-    if is_integer(planned) and planned >= 0 and is_binary(agent_type) and agent_type != "" do
-      {:ok, %{agent_type: agent_type, planned: planned}}
+    if is_integer(planned) and planned >= 0 and is_binary(agent_type) and agent_type != "" and
+         effort in ["medium", "high"] do
+      {:ok, %{agent_type: agent_type, effort: effort, planned: planned}}
     else
       {:error, :invalid_plan}
     end
@@ -353,6 +430,7 @@ defmodule Barkpark.EpicFleet do
 
   defp phase_key(key) when key in [:survey, "survey"], do: {:ok, :survey}
   defp phase_key(key) when key in [:verify, "verify"], do: {:ok, :verify}
+  defp phase_key(key) when key in [:experiment, "experiment"], do: {:ok, :experiment}
   defp phase_key(key) when key in [:build, "build"], do: {:ok, :build}
   defp phase_key(key) when key in [:review, "review"], do: {:ok, :review}
   defp phase_key(_key), do: {:error, :invalid_plan}
@@ -369,7 +447,7 @@ defmodule Barkpark.EpicFleet do
   defp reduce_phase(rows, config) do
     typed_rows =
       Enum.filter(rows, fn {assignment, _result} ->
-        assignment.agent_type == config.agent_type
+        assignment.agent_type == config.agent_type and assignment.effort == config.effort
       end)
 
     replaced_ids =
@@ -387,6 +465,27 @@ defmodule Barkpark.EpicFleet do
       Enum.filter(verified_rows, fn {assignment, result, verified?} ->
         verified? and result.status == "completed" and
           not MapSet.member?(replaced_ids, assignment.id)
+      end)
+
+    live_rows =
+      Enum.reject(verified_rows, fn {assignment, _result, _verified?} ->
+        MapSet.member?(replaced_ids, assignment.id)
+      end)
+
+    unresolved_failures =
+      Enum.count(live_rows, fn
+        {_assignment, %Result{status: status}, true} when status in ["failed", "cancelled"] ->
+          true
+
+        _ ->
+          false
+      end)
+
+    unresolved_missing =
+      Enum.count(live_rows, fn
+        {_assignment, nil, _verified?} -> true
+        {_assignment, _result, false} -> true
+        _ -> false
       end)
 
     state_counts =
@@ -440,6 +539,7 @@ defmodule Barkpark.EpicFleet do
 
     %{
       agent_type: config.agent_type,
+      effort: config.effort,
       planned: config.planned,
       started: length(typed_rows),
       completed: completed,
@@ -448,6 +548,8 @@ defmodule Barkpark.EpicFleet do
       assignments: assignments,
       evidence_proofs: evidence_proofs,
       terminal_counts: state_counts,
+      unresolved_failures: unresolved_failures,
+      unresolved_missing: unresolved_missing,
       invalid_assignments: length(rows) - length(typed_rows)
     }
   end

@@ -3,13 +3,13 @@
 
 ## 1. Overview
 
-Frozen contract for all `/v1` endpoints: breaking changes bump the prefix to `/v2`; additive changes stay in v1.
+Frozen `/v1` contract: breaking changes require `/v2`; additive changes stay in v1.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
-A **Workspace** is the tenancy boundary — every token binds to exactly one, every content read/write is workspace-scoped. Workspaces contain **Projects**, Projects contain **Datasets**, a Dataset holds **Documents** (§3). Content endpoints live under the scoped prefix `/w/:workspace_slug/p/:project_slug/v1/data/...`.
+A **Workspace** is the token-bound tenant containing **Projects**, **Datasets**, and **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*` and other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`; the scoped prefix is canonical.
+**Flat alias.** Legacy unprefixed `/v1/*` content routes resolve to `Default`/`Default`; scoped paths are canonical.
 
 ## 2. Base URL & Authentication
 
@@ -17,9 +17,9 @@ A **Workspace** is the tenancy boundary — every token binds to exactly one, ev
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all perms, `Default` ws). CORS reflects only origins in a per-dataset allow-list (`cors_origins` per schema, unioned with `DEFAULT_CORS_ORIGINS` + Barkpark Cloud origins).
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all permissions, `Default`). CORS uses the schema `cors_origins` plus configured defaults and Barkpark Cloud origins.
 
-**Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match — unknown `:workspace_slug` → `404`, non-member → `403`. Binding, membership, write gate: `docs/auth.md`.
+**Tenancy.** Path workspace/project are authoritative and must match the token: unknown workspace → `404`, non-member → `403`. Binding and write gates: `docs/auth.md`.
 
 Markers: **[public]** = no token (restricted by schema visibility) · **[token]** = any valid token · **[admin]** = admin.
 
@@ -157,6 +157,11 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_T
 **`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), recompute refreshes values, undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
 
 **Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression, not a gap.
+
+## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
+
+Immutable Epic/Legendary ledger; scoped routes are canonical and flat routes are
+projectless legacy aliases. Full contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
 ## 9. Error Codes
 

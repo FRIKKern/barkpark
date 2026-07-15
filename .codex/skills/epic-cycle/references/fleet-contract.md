@@ -16,7 +16,14 @@ The leader never counts. A retry replaces a failed assignment and does not incre
 
 ## Fleet gate
 
-The Paper's **Agent fleet** section records, per phase: planned, started, completed, failed, missing, exact `agent_type`, task or assignment id, and evidence location. Completion requires all 24 typed assignments and all three Build assignments at high effort.
+The Paper's **Agent fleet** section records, per phase: planned, started, completed, failed, missing, exact `agent_type`, exact effort, task or assignment id, and evidence location. Completion requires all 24 typed assignments with Survey/Verify at medium effort and Build/Review at high effort.
+
+New waves also embed the complete `cycle_ledger` returned by `bp cycle show`.
+When that projection is present, the validator compares both it and this fleet
+record byte-for-structure with the live CycleFleet authority. A Paper with no
+`cycle_ledger` fails by default. Compatibility requires both the explicit
+`--allow-pre-cyclefleet-paper-without-ledger` flag and immutable Paper
+`_createdAt` provenance before the `2026-07-15T00:05:00Z` CycleFleet cutoff.
 
 Store the machine-readable record on the reader-visible Agent fleet callout as a top-level `fleet` object. This is the canonical PortableDoc shape (JSON shown without unrelated display fields):
 
@@ -27,6 +34,7 @@ Store the machine-readable record on the reader-visible Agent fleet callout as a
   "fleet": {
     "survey": {
       "agent_type": "epic-surveyor",
+      "effort": "medium",
       "planned": 12,
       "started": 0,
       "completed": 0,
@@ -36,6 +44,7 @@ Store the machine-readable record on the reader-visible Agent fleet callout as a
     },
     "verify": {
       "agent_type": "epic-verifier",
+      "effort": "medium",
       "planned": 6,
       "started": 0,
       "completed": 0,
@@ -45,6 +54,7 @@ Store the machine-readable record on the reader-visible Agent fleet callout as a
     },
     "build": {
       "agent_type": "epic-builder",
+      "effort": "high",
       "planned": 3,
       "started": 0,
       "completed": 0,
@@ -54,6 +64,7 @@ Store the machine-readable record on the reader-visible Agent fleet callout as a
     },
     "review": {
       "agent_type": "code-reviewer",
+      "effort": "high",
       "planned": 3,
       "started": 0,
       "completed": 0,
@@ -76,7 +87,7 @@ Every completed assignment is appended in this exact form:
 }
 ```
 
-`completed` equals the number of unique, valid assignment records; `started` is at least `completed`; and `missing` is `max(0, planned - completed)`. If fixes materially change behavior, append a complete new Review wave of three unique assignments. The baseline `planned` value remains 3, `completed` may therefore be 6, 9, and so on, and `missing` remains 0. Never overwrite earlier review evidence.
+`completed` equals the number of unique, valid assignment records; `started` is at least `completed`; and `missing` is `max(0, planned - completed)`. Every phase count is exact. Review has exactly three assignments in this immutable wave. If fixes materially change behavior, preserve its evidence and open a new immutable CycleFleet wave with a new three-assignment Review fleet.
 
 ## Ledger-backed Build and Review gate
 

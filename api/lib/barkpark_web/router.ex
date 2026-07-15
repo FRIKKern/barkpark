@@ -40,6 +40,22 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
+  # Flat CycleFleet commands must identify the same workspace as their token.
+  # Unlike the legacy :api alias, token derivation happens before the Default
+  # fallback so a local `bp cycle` invocation cannot silently operate on a
+  # different cloud/default workspace.
+  pipeline :cycle_api do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants
   # ag-enforcement — flat-routes arm). Layered AFTER `:api` on the flat read
   # scope ONLY — NEVER on write/admin/auth/plugin routes. `ResolveTokenOwner`
@@ -1492,6 +1508,12 @@ defmodule BarkparkWeb.Router do
   # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24:
   # {"req_per_s": float, "p95_ms": int|null, "window_s": int}.
   scope "/v1", BarkparkWeb do
+    pipe_through(:cycle_api)
+
+    get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
+  end
+
+  scope "/v1", BarkparkWeb do
     pipe_through([:api, :require_token])
 
     get("/instance/request-stats", RequestStatsController, :show)
@@ -1501,6 +1523,20 @@ defmodule BarkparkWeb.Router do
     # convention, because request-rate/latency/memory is instance-operational
     # data. Served by TelemetryMetricsPrometheus.Core (BarkparkWeb.Telemetry).
     get("/instance/metrics", MetricsController, :scrape)
+  end
+
+  scope "/v1", BarkparkWeb do
+    pipe_through([:cycle_api, :require_write])
+
+    post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
+    post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
+    post("/cycles/:epic_id/:wave_id/assignments", CycleFleetController, :create_assignment)
+
+    post(
+      "/cycles/:epic_id/:wave_id/assignments/:assignment_id/results",
+      CycleFleetController,
+      :create_result
+    )
   end
 
   # ── Federated discovery ─────────────────────────────────────────────────
@@ -1980,6 +2016,26 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token])
+
+    get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token, :require_write])
+
+    post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
+    post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
+    post("/cycles/:epic_id/:wave_id/assignments", CycleFleetController, :create_assignment)
+
+    post(
+      "/cycles/:epic_id/:wave_id/assignments/:assignment_id/results",
+      CycleFleetController,
+      :create_result
+    )
   end
 
   # Scoped READ document routes — share-aware via the :docs surface (P2). These

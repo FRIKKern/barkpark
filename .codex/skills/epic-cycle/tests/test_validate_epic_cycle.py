@@ -6,6 +6,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -54,6 +55,7 @@ class EpicCyclePreflightTest(unittest.TestCase):
             ]
             fleet[phase] = {
                 "agent_type": agent_type,
+                "effort": MODULE.FLEET_EFFORTS[phase],
                 "planned": planned,
                 "started": planned,
                 "completed": planned,
@@ -61,9 +63,16 @@ class EpicCyclePreflightTest(unittest.TestCase):
                 "missing": 0,
                 "assignments": assignments,
             }
+        ledger = {
+            "profile": "epic",
+            "scope": {"workspace_id": "workspace-1", "epic_id": "epic-1", "wave_id": "wave-1"},
+            "wave_revision": "wave-rev-1",
+            "exact": True,
+        }
         self.paper = {
             "_id": "paper-1",
             "_draft": False,
+            "_createdAt": "2026-07-15T00:05:00Z",
             "body": {
                 "version": 1,
                 "blocks": [
@@ -72,6 +81,11 @@ class EpicCyclePreflightTest(unittest.TestCase):
                     {"type": "heading", "text": "Strategic direction"},
                     {"type": "heading", "text": "Agent fleet"},
                     {"type": "callout", "title": "COMPLETE", "fleet": fleet},
+                    {
+                        "type": "callout",
+                        "title": "CycleFleet ledger",
+                        "cycle_ledger": ledger,
+                    },
                     {"type": "heading", "text": "Survey digest and coverage gaps"},
                     {"type": "heading", "text": "Verification plan"},
                     {"type": "heading", "text": "Decisions and rationale"},
@@ -179,10 +193,17 @@ class EpicCyclePreflightTest(unittest.TestCase):
         include_wish=True,
         ledger=None,
         include_ledger=True,
+        allow_legacy=False,
     ):
         task = task or self.task
         paper = paper or self.paper
-        ledger = ledger or self.ledger(task, paper)
+        blocks = MODULE.paper_blocks(paper.get("result", paper))
+        cycle_ledger = next(
+            (block["cycle_ledger"] for block in blocks if "cycle_ledger" in block),
+            None,
+        )
+        fleet = next((block["fleet"] for block in blocks if "fleet" in block), None)
+        benchmark_ledger = ledger or self.ledger(task, paper)
         return argparse.Namespace(
             task=None,
             task_json=self.write("task.json", task),
@@ -192,12 +213,20 @@ class EpicCyclePreflightTest(unittest.TestCase):
             phase=phase,
             require_debrief=require_debrief,
             fleet_ledger_json=(
-                self.write("fleet-ledger.json", MODULE.canonical_json(ledger))
+                self.write("fleet-ledger.json", MODULE.canonical_json(benchmark_ledger))
                 if include_ledger
                 else None
             ),
             wish_file=self.write("wish.txt", "make Codex task obsessed") if include_wish else None,
             pr_body=self.write("pr.md", pr_body),
+            cycle_json=(
+                self.write("cycle.json", {"cycle_ledger": cycle_ledger, "fleet": fleet})
+                if cycle_ledger is not None
+                else None
+            ),
+            allow_pre_cyclefleet_paper_without_ledger=allow_legacy,
+            workspace="default",
+            project="default",
         )
 
     def test_valid_fixture_passes(self):
@@ -442,6 +471,112 @@ class EpicCyclePreflightTest(unittest.TestCase):
         paper = copy.deepcopy(self.paper)
         paper["body"]["blocks"].append({"type": "paragraph", "text": "Unrelated reader context"})
         self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
+    def test_canonical_epic_projection_matches_live_cyclefleet(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        ledger = next(
+            block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block
+        )
+        args = self.args(paper=paper)
+        args.cycle_json = self.write("cycle.json", {"cycle_ledger": ledger, "fleet": fleet})
+        self.assertEqual([], MODULE.validate(args))
+
+    def test_live_cyclefleet_lookup_passes_explicit_workspace_and_project(self):
+        args = self.args()
+        args.cycle_json = None
+        blocks = MODULE.paper_blocks(self.paper)
+        ledger = next(block["cycle_ledger"] for block in blocks if "cycle_ledger" in block)
+        fleet = next(block["fleet"] for block in blocks if "fleet" in block)
+
+        with mock.patch.object(
+            MODULE, "command_json", return_value={"cycle_ledger": ledger, "fleet": fleet}
+        ) as command:
+            self.assertEqual([], MODULE.validate_canonical_cycle_projection(self.paper, args))
+
+        command.assert_called_once_with(
+            "bp", "--workspace", "default", "--project", "default",
+            "cycle", "show", "epic-1", "wave-1", "-o", "json"
+        )
+
+    def test_canonical_epic_ledger_and_fleet_drift_fail(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        ledger = next(
+            block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block
+        )
+        live_ledger = copy.deepcopy(ledger)
+        live_ledger["exact"] = False
+        live_fleet = copy.deepcopy(fleet)
+        live_fleet["review"]["completed"] = 2
+        args = self.args(paper=paper)
+        args.cycle_json = self.write(
+            "cycle-drift.json", {"cycle_ledger": live_ledger, "fleet": live_fleet}
+        )
+        errors = MODULE.validate(args)
+        self.assertIn(
+            "Epic Paper cycle_ledger does not exactly match the live CycleFleet authority",
+            errors,
+        )
+        self.assertIn("Epic Paper fleet does not exactly match the live CycleFleet authority", errors)
+
+    def test_missing_cycle_ledger_requires_explicit_pre_cyclefleet_opt_in(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"] = [
+            block for block in paper["body"]["blocks"] if "cycle_ledger" not in block
+        ]
+        errors = MODULE.validate(self.args(paper=paper))
+        self.assertTrue(any("--allow-pre-cyclefleet-paper-without-ledger" in error for error in errors))
+
+    def test_live_pre_cyclefleet_paper_can_opt_in_to_legacy_compatibility(self):
+        paper = copy.deepcopy(self.paper)
+        paper["_createdAt"] = "2026-07-14T23:59:59Z"
+        paper["body"]["blocks"] = [
+            block for block in paper["body"]["blocks"] if "cycle_ledger" not in block
+        ]
+        args = self.args(paper=paper, allow_legacy=True)
+        args.paper_json = None
+        args.paper = "paper-1"
+        with mock.patch.object(MODULE, "command_json", return_value=paper) as command:
+            self.assertEqual([], MODULE.validate(args))
+        command.assert_called_once_with("bp", "doc", "get", "paper", "paper-1", "-o", "json")
+
+    def test_offline_json_cannot_spoof_pre_cyclefleet_created_at(self):
+        paper = copy.deepcopy(self.paper)
+        paper["_createdAt"] = "2020-01-01T00:00:00Z"
+        paper["body"]["blocks"] = [
+            block for block in paper["body"]["blocks"] if "cycle_ledger" not in block
+        ]
+        errors = MODULE.validate(self.args(paper=paper, allow_legacy=True))
+        self.assertIn(
+            "legacy ledger omission requires live --paper retrieval; --paper-json "
+            "cannot prove immutable _createdAt metadata",
+            errors,
+        )
+
+    def test_post_cutoff_ledgerless_paper_is_not_made_legacy_by_flag(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"] = [
+            block for block in paper["body"]["blocks"] if "cycle_ledger" not in block
+        ]
+        args = self.args(paper=paper, allow_legacy=True)
+        args.paper_json = None
+        args.paper = "paper-1"
+        with mock.patch.object(MODULE, "command_json", return_value=paper):
+            errors = MODULE.validate(args)
+        self.assertTrue(any("not proven pre-CycleFleet" in error for error in errors))
+
+    def test_legacy_flag_requires_machine_readable_created_at(self):
+        paper = copy.deepcopy(self.paper)
+        paper.pop("_createdAt")
+        paper["body"]["blocks"] = [
+            block for block in paper["body"]["blocks"] if "cycle_ledger" not in block
+        ]
+        args = self.args(paper=paper, allow_legacy=True)
+        args.paper_json = None
+        args.paper = "paper-1"
+        with mock.patch.object(MODULE, "command_json", return_value=paper):
+            errors = MODULE.validate(args)
+        self.assertTrue(any("_createdAt" in error for error in errors))
 
     def test_missing_claim_fails(self):
         task = copy.deepcopy(self.task)
@@ -575,6 +710,7 @@ class EpicCyclePreflightTest(unittest.TestCase):
             {"type": "heading", "text": "Strategic direction"},
             {"type": "heading", "text": "Agent fleet"},
             fleet_block,
+            next(block for block in self.paper["body"]["blocks"] if "cycle_ledger" in block),
             {"type": "heading", "text": "Survey"},
         ]
         self.assertEqual([], MODULE.validate(self.args(task=task, paper=paper, phase="strategize")))
@@ -627,7 +763,7 @@ class EpicCyclePreflightTest(unittest.TestCase):
         paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
         self.assertEqual([], MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)))
 
-    def test_post_review_gate_accepts_complete_repeated_review_wave(self):
+    def test_post_review_gate_rejects_second_review_wave(self):
         paper = copy.deepcopy(self.paper)
         paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
         fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
@@ -642,25 +778,16 @@ class EpicCyclePreflightTest(unittest.TestCase):
         ]
         fleet["review"]["assignments"].extend(repeated)
         fleet["review"].update({"started": 6, "completed": 6, "missing": 0})
-        self.assertEqual([], MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)))
-
-    def test_post_review_gate_rejects_incomplete_repeated_review_wave(self):
-        paper = copy.deepcopy(self.paper)
-        paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
-        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
-        fleet["review"]["assignments"].append(
-            {
-                "id": "review-2-1",
-                "agent_type": "code-reviewer",
-                "status": "completed",
-                "evidence": "paper://review/round-2/reviewer-1",
-            }
-        )
-        fleet["review"].update({"started": 4, "completed": 4, "missing": 0})
         self.assertIn(
-            "fleet review contains an incomplete repeated review wave",
+            "fleet review exceeds its exact 3-assignment contract",
             MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)),
         )
+
+    def test_wrong_phase_effort_fails(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        fleet["survey"]["effort"] = "high"
+        self.assertIn("fleet survey effort is not medium", MODULE.validate(self.args(paper=paper)))
 
     def test_literal_escaped_newline_fails(self):
         errors = MODULE.validate(self.args(pr_body="Summary\\n\\nTask: slice-1"))
@@ -686,10 +813,11 @@ class EpicCyclePreflightTest(unittest.TestCase):
         self.assertIn("model_reasoning_effort = \"high\"", builder)
         self.assertIn("Fleet gate", fleet)
         self.assertIn('"fleet": {', fleet)
-        self.assertIn("Never overwrite earlier review evidence", fleet)
+        self.assertIn("preserve its evidence", fleet)
         self.assertIn("--fleet-ledger-json", fleet)
         self.assertIn("Every attempt, including failed", fleet)
         self.assertIn("model_reasoning_effort: high", fleet)
+        self.assertIn("new immutable CycleFleet wave", fleet)
 
 
 if __name__ == "__main__":

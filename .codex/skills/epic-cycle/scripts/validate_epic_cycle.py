@@ -30,6 +30,13 @@ FLEET_SPECS = {
     "review": ("code-reviewer", 3),
 }
 
+FLEET_EFFORTS = {
+    "survey": "medium",
+    "verify": "medium",
+    "build": "high",
+    "review": "high",
+}
+
 REQUIRED_COMPLETIONS = {
     "strategize": (),
     "digest": ("survey",),
@@ -129,6 +136,7 @@ SENSITIVE_SUFFIXES = (
     "_database_uri",
     "_connection_string",
 )
+CYCLEFLEET_PAPER_CUTOFF = datetime(2026, 7, 15, 0, 5, tzinfo=timezone.utc)
 
 
 def command_json(*args: str) -> dict[str, Any]:
@@ -635,6 +643,10 @@ def validate_fleet(paper: dict[str, Any], phase: str, require_debrief: bool) -> 
             errors.append(f"fleet {fleet_phase} planned count is not {planned}")
         if record.get("agent_type") != agent_type:
             errors.append(f"fleet {fleet_phase} agent_type is not {agent_type}")
+        if record.get("effort") != FLEET_EFFORTS[fleet_phase]:
+            errors.append(
+                f"fleet {fleet_phase} effort is not {FLEET_EFFORTS[fleet_phase]}"
+            )
         started = record.get("started")
         failed = record.get("failed")
         if not isinstance(started, int) or started < 0:
@@ -663,9 +675,7 @@ def validate_fleet(paper: dict[str, Any], phase: str, require_debrief: bool) -> 
         missing = max(0, planned - len(valid_assignments))
         if record.get("missing") != missing:
             errors.append(f"fleet {fleet_phase} missing count is inconsistent")
-        if fleet_phase == "review" and len(valid_assignments) > planned and len(valid_assignments) % planned:
-            errors.append("fleet review contains an incomplete repeated review wave")
-        if fleet_phase != "review" and len(valid_assignments) > planned:
+        if len(valid_assignments) > planned:
             errors.append(f"fleet {fleet_phase} exceeds its exact {planned}-assignment contract")
         if fleet_phase in required and len(valid_assignments) < planned:
             errors.append(f"fleet {fleet_phase} requires {planned} completed typed assignments before {phase}")
@@ -679,6 +689,81 @@ def paper_blocks(paper: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(blocks, list) and blocks:
             return blocks
     return []
+
+
+def validate_canonical_cycle_projection(paper: dict[str, Any], args: argparse.Namespace) -> list[str]:
+    """Pin canonical CycleFleet Papers to live authority unless legacy is explicit."""
+    blocks = paper_blocks(paper)
+    paper_ledger = next(
+        (
+            block.get("cycle_ledger")
+            for block in blocks
+            if isinstance(block, dict) and isinstance(block.get("cycle_ledger"), dict)
+        ),
+        None,
+    )
+    if paper_ledger is None:
+        if getattr(args, "allow_pre_cyclefleet_paper_without_ledger", False):
+            if getattr(args, "paper_json", None) is not None:
+                return [
+                    "legacy ledger omission requires live --paper retrieval; --paper-json "
+                    "cannot prove immutable _createdAt metadata"
+                ]
+            created_at = parsed_timestamp(paper.get("_createdAt"))
+            if created_at is not None and created_at.astimezone(timezone.utc) < CYCLEFLEET_PAPER_CUTOFF:
+                return []
+            return [
+                "ledger-less Paper is not proven pre-CycleFleet: _createdAt must be an immutable "
+                f"timestamp before {CYCLEFLEET_PAPER_CUTOFF.isoformat()}"
+            ]
+        return [
+            "paper has no cycle_ledger; only a verified pre-CycleFleet Paper may use "
+            "--allow-pre-cyclefleet-paper-without-ledger"
+        ]
+
+    paper_fleet = next(
+        (
+            block.get("fleet")
+            for block in blocks
+            if isinstance(block, dict) and isinstance(block.get("fleet"), dict)
+        ),
+        None,
+    )
+    errors: list[str] = []
+    expected_profile = "legendary" if "experiment" in FLEET_SPECS else "epic"
+    if paper_ledger.get("profile") != expected_profile:
+        errors.append(f"canonical cycle ledger profile is not {expected_profile}")
+
+    if getattr(args, "cycle_json", None):
+        payload = load_json(args.cycle_json)
+    else:
+        scope = paper_ledger.get("scope")
+        epic_id = scope.get("epic_id") if isinstance(scope, dict) else None
+        wave_id = scope.get("wave_id") if isinstance(scope, dict) else None
+        if not nonempty_string(epic_id) or not nonempty_string(wave_id):
+            return errors + ["could not resolve the live CycleFleet authority for this Epic Paper"]
+        workspace = getattr(args, "workspace", None)
+        project = getattr(args, "project", None)
+        if not nonempty_string(workspace) or not nonempty_string(project):
+            return errors + [
+                "live CycleFleet lookup requires explicit --workspace and --project scope"
+            ]
+        payload = command_json(
+            "bp", "--workspace", workspace, "--project", project,
+            "cycle", "show", epic_id, wave_id, "-o", "json"
+        )
+
+    live_ledger = payload.get("cycle_ledger") if isinstance(payload, dict) else None
+    live_fleet = payload.get("fleet") if isinstance(payload, dict) else None
+    if not isinstance(live_ledger, dict):
+        errors.append("could not resolve the live CycleFleet authority for this Epic Paper")
+    elif paper_ledger != live_ledger:
+        errors.append("Epic Paper cycle_ledger does not exactly match the live CycleFleet authority")
+    if not isinstance(live_fleet, dict):
+        errors.append("could not resolve the live CycleFleet fleet for this Epic Paper")
+    elif paper_fleet != live_fleet:
+        errors.append("Epic Paper fleet does not exactly match the live CycleFleet authority")
+    return errors
 
 
 def validate(args: argparse.Namespace) -> list[str]:
@@ -781,6 +866,7 @@ def validate(args: argparse.Namespace) -> list[str]:
                 errors.append(f"fleet ledger export is invalid: {error}")
             else:
                 errors.extend(validate_ledger(ledger, paper, fields.get("parent_id"), paper_id))
+    errors.extend(validate_canonical_cycle_projection(paper, args))
     if args.require_debrief and not any("debrief" in heading for heading in headings):
         errors.append("paper is missing required post-review heading: debrief")
     if args.phase == "strategize" and not args.wish_file:
@@ -814,6 +900,19 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--fleet-ledger-json", type=Path)
     result.add_argument("--wish-file", type=Path)
     result.add_argument("--pr-body", type=Path)
+    result.add_argument("--cycle-json", type=Path)
+    result.add_argument("--workspace")
+    result.add_argument("--project")
+    result.add_argument(
+        "--allow-pre-cyclefleet-paper-without-ledger",
+        action="store_true",
+        help=(
+            "Explicit compatibility opt-in only with live --paper retrieval for a Paper whose "
+            "immutable _createdAt is "
+            f"before the CycleFleet cutoff {CYCLEFLEET_PAPER_CUTOFF.isoformat()}; canonical "
+            "Papers must embed and verify cycle_ledger, and --paper-json cannot use this exception."
+        ),
+    )
     return result
 
 

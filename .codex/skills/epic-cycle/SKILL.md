@@ -7,6 +7,24 @@ description: Run one evidence-gated Barkpark epic wave in Codex, from strategy t
 
 Run a durable epic wave with Barkpark tasks and one wave Paper as the source of truth. Preserve the full user wish verbatim. Optimize the reasoning budget by phase: high for choices, medium for gathering and proving facts.
 
+For new runs, open the canonical project-scoped `Barkpark.CycleFleet` with
+`profile=epic`, dispatch assignments/results through `bp cycle`, and project
+its exact fleet into the Paper. Epic needs no Legendary post-Pilot seal and can
+reach exact when its full 24-assignment planned fleet completes. The legacy
+`Barkpark.EpicFleet` APIs and older Paper fleet shapes remain compatible; flat
+HTTP cycle routes are token-bound, projectless compatibility surfaces, not the
+canonical path for new runs.
+
+Canonical preflight requires a `cycle_ledger` projection and reads the live
+explicitly workspace/project-scoped `bp cycle show` authority (or its captured
+`--cycle-json` response) to require both the Paper ledger and fleet to match it
+exactly. Only a Paper whose immutable `_createdAt` predates the documented
+`2026-07-15T00:05:00Z` CycleFleet cutoff may omit the ledger, and then the
+operator must use live `--paper` retrieval and explicitly pass
+`--allow-pre-cyclefleet-paper-without-ledger`. Offline `--paper-json` may still
+validate a ledger-bearing Paper, but can never use the legacy omission because
+its caller-controlled `_createdAt` is not authoritative.
+
 Read `references/phase-contract.md`, `references/fleet-contract.md`, `references/task-contract.md`, and `references/charter.md` before starting. Read `references/benchmark-protocol.md` before proposing or running a concurrency trial. Also read `.claude/workflows/bp-loop-ledger.md` for the current repository merge-ledger rules.
 
 ## Inputs
@@ -133,7 +151,7 @@ Gate: each accepted branch has a clean diff, fresh passing evidence, a truthful 
 
 ### 8. Review and debrief — high
 
-Spawn one wave of three independent `code-reviewer` agents over the green integration candidate. Assign correctness/contracts, tests/failure modes, and task/Paper/merge-ledger coherence as distinct lenses. The leader reconciles all three reports. Fix actionable issues on review branches, rerun gates, and repeat the three-reviewer wave when the fixes materially change behavior.
+Spawn exactly one wave of three independent `code-reviewer` agents over the green integration candidate. Assign correctness/contracts, tests/failure modes, and task/Paper/merge-ledger coherence as distinct lenses. The leader reconciles all three reports. If actionable fixes materially change behavior, rerun their implementation gates and open a new immutable CycleFleet wave for renewed Review; never add Review assignments to the sealed wave.
 
 Append a dated wave log to the charter and a final debrief to the Paper. Include shipped/stalled slices, final branches or commits, proof, ledger repairs, honest grade, shortcomings, and next-wave direction. Patch the epic `wave_status` to complete only when the wave's own stop condition is satisfied.
 

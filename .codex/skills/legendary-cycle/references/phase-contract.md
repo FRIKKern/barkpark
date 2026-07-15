@@ -15,12 +15,14 @@
 ## Invariants
 
 - Preserve the user's wish verbatim.
-- Use Barkpark tasks as the execution ledger and the Paper as the phase narrative.
+- Use Barkpark tasks for work lifecycle, CycleFleet for immutable fleet truth,
+  and the Paper as a human-readable projection and phase narrative.
 - Record literal counts, formulas, samples, and missing ranges.
 - Keep the leader responsible for mutations, selection, integration, and completion claims.
 - Keep Survey and Verify read-only; keep Experiment candidates and Build slices isolated.
 - Freeze the winning format and golden fixtures before Build.
 - Stop builder fan-out when production evidence violates the pilot threshold.
+- A sealed wave never returns to Experiment; renewed Experiment/Pilot work opens a new immutable wave.
 - Keep claim epochs, merge gates, PR trailers, and code provenance truthful under the Epic task contract.
 - Use typed roles only; inability to select `agent_type` is a capability block.
 

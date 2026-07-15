@@ -11,7 +11,7 @@ defmodule Barkpark.EpicFleet.Assignment do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @phases ~w(survey verify build review)
+  @phases ~w(survey verify experiment build review)
   @efforts ~w(medium high)
   @digest_format ~r/^[0-9a-f]{64}$/
 
@@ -25,6 +25,7 @@ defmodule Barkpark.EpicFleet.Assignment do
     field :effort, :string
     field :snapshot, :map, default: %{}
     field :snapshot_digest, :string
+    belongs_to :cycle_wave, Barkpark.CycleFleet.Wave
     belongs_to :replaces_assignment, __MODULE__
     has_one :result, Barkpark.EpicFleet.Result
     timestamps(type: :utc_datetime_usec, updated_at: false)
@@ -46,6 +47,7 @@ defmodule Barkpark.EpicFleet.Assignment do
       :effort,
       :snapshot,
       :snapshot_digest,
+      :cycle_wave_id,
       :replaces_assignment_id
     ])
     |> validate_required([
@@ -64,9 +66,13 @@ defmodule Barkpark.EpicFleet.Assignment do
     |> validate_format(:snapshot_digest, @digest_format)
     |> validate_not_self_replacement()
     |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:cycle_wave_id)
     |> foreign_key_constraint(:replaces_assignment_id)
     |> unique_constraint([:workspace_id, :epic_id, :wave_id, :assignment_id],
       name: :epic_assignments_scope_assignment_index
+    )
+    |> unique_constraint([:cycle_wave_id, :assignment_id],
+      name: :epic_assignments_cycle_assignment_index
     )
     |> unique_constraint(:replaces_assignment_id,
       name: :epic_assignments_replaces_assignment_index
@@ -77,6 +83,7 @@ defmodule Barkpark.EpicFleet.Assignment do
     |> check_constraint(:replaces_assignment_id,
       name: :epic_assignments_not_self_replacement
     )
+    |> check_constraint(:cycle_wave_id, name: :epic_assignments_legendary_wave)
   end
 
   @doc "Compatibility name for callers that construct an insertion changeset."

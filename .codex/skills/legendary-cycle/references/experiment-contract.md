@@ -12,7 +12,7 @@ Experiment before mass repair so hundreds of agents do not reproduce a weak form
 | 4. Converge | independently refine the strongest candidate, accessibility behavior, and migration/idempotence behavior | one candidate plus frozen rubric |
 | 5. Pilot | run three disjoint representative batches through the full proposed builder gate | chosen format, golden fixtures, capacity, time, and failure rate |
 
-All 15 baseline assignments are required. Further iteration happens in complete waves of three and does not erase earlier evidence.
+All 15 assignments are required and exact for one immutable wave. Further iteration requires a new wave and does not erase earlier evidence. Experiment assignments are rejected after the build-plan seal.
 
 ## Rubric
 
@@ -33,4 +33,7 @@ Use real fixtures sampled from the numeric inventory. Include at least one known
 
 Experimenters may edit only their isolated candidate worktree or scratch artifact. They do not mutate production data, the wave Paper, or authoritative build tasks. The leader records results, selects the winner, and freezes golden fixtures.
 
-If no candidate clears every hard threshold, keep the phase open. Do not average away a hard reader failure with higher scores elsewhere.
+If no candidate clears every hard threshold after the exact 15 assignments,
+close the wave as unsuccessful and open a new immutable wave for renewed
+Experiment and Pilot. Do not add a sixth round to the current wave or average
+away a hard reader failure with higher scores elsewhere.

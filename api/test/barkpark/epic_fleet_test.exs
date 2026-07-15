@@ -85,6 +85,7 @@ defmodule Barkpark.EpicFleetTest do
     test "concurrent direct successors admit exactly one replacement", %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
       {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+      {:ok, _failed} = EpicFleet.record_result(original, "failed", result_attrs("failed"))
 
       outcomes =
         1..12
@@ -309,19 +310,19 @@ defmodule Barkpark.EpicFleetTest do
     test "replacement results count once and expose digest-pinned evidence", %{scope: scope} do
       {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
 
-      replacement_attrs =
-        scope
-        |> assignment_attrs("build-1-retry")
-        |> Map.put(:replaces_assignment_id, original.id)
-
-      {:ok, replacement} = EpicFleet.create_assignment(replacement_attrs)
-
       assert {:ok, _failed} =
                EpicFleet.record_result(
                  original,
                  "terminal-original",
                  result_attrs("failed", "paper://build/1/failed")
                )
+
+      replacement_attrs =
+        scope
+        |> assignment_attrs("build-1-retry")
+        |> Map.put(:replaces_assignment_id, original.id)
+
+      {:ok, replacement} = EpicFleet.create_assignment(replacement_attrs)
 
       assert {:ok, completed} =
                EpicFleet.record_result(
@@ -356,6 +357,98 @@ defmodule Barkpark.EpicFleetTest do
       assert proof.revision == "paper-rev-1"
       assert String.length(proof.digest) == 64
       assert String.length(proof.payload_digest) == 64
+      assert summary.fleet.build.unresolved_failures == 0
+      assert summary.fleet.build.unresolved_missing == 0
+    end
+
+    test "one logical assignment cannot fork into sibling replacements", %{scope: scope} do
+      {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+      {:ok, _failed} = EpicFleet.record_result(original, "failed", result_attrs("failed"))
+
+      attrs =
+        scope
+        |> assignment_attrs("build-1-retry")
+        |> Map.put(:replaces_assignment_id, original.id)
+
+      assert {:ok, _replacement} = EpicFleet.create_assignment(attrs)
+      assert {:ok, replay} = EpicFleet.create_assignment(attrs)
+      assert replay.assignment_id == "build-1-retry"
+
+      assert {:error, :assignment_already_replaced} =
+               attrs
+               |> Map.put(:assignment_id, "build-1-sibling")
+               |> EpicFleet.create_assignment()
+    end
+
+    test "replacement must preserve phase and typed agent contract", %{scope: scope} do
+      {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+      {:ok, _failed} = EpicFleet.record_result(original, "failed", result_attrs("failed"))
+
+      assert {:error, :replacement_phase_mismatch} =
+               scope
+               |> assignment_attrs("verify-retry")
+               |> Map.merge(%{
+                 phase: "verify",
+                 agent_type: "epic-verifier",
+                 replaces_assignment_id: original.id
+               })
+               |> EpicFleet.create_assignment()
+    end
+
+    test "replacement requires a failed or cancelled predecessor", %{scope: scope} do
+      {:ok, pending} = EpicFleet.create_assignment(assignment_attrs(scope, "build-pending"))
+
+      pending_retry =
+        scope
+        |> assignment_attrs("build-pending-retry")
+        |> Map.put(:replaces_assignment_id, pending.id)
+
+      assert {:error, :replacement_predecessor_pending} =
+               EpicFleet.create_assignment(pending_retry)
+
+      {:ok, completed} = EpicFleet.create_assignment(assignment_attrs(scope, "build-completed"))
+      {:ok, _result} = EpicFleet.record_result(completed, "completed", result_attrs())
+
+      assert {:error, :replacement_predecessor_not_replaceable} =
+               scope
+               |> assignment_attrs("build-completed-retry")
+               |> Map.put(:replaces_assignment_id, completed.id)
+               |> EpicFleet.create_assignment()
+
+      {:ok, cancelled} = EpicFleet.create_assignment(assignment_attrs(scope, "build-cancelled"))
+
+      {:ok, _result} =
+        EpicFleet.record_result(cancelled, "cancelled", result_attrs("cancelled"))
+
+      assert {:ok, _replacement} =
+               scope
+               |> assignment_attrs("build-cancelled-retry")
+               |> Map.put(:replaces_assignment_id, cancelled.id)
+               |> EpicFleet.create_assignment()
+    end
+
+    test "an unreplaced failed leaf remains unresolved", %{scope: scope} do
+      {:ok, failed} = EpicFleet.create_assignment(assignment_attrs(scope, "build-failed"))
+      {:ok, _result} = EpicFleet.record_result(failed, "failed", result_attrs("failed"))
+
+      assert {:ok, summary} = EpicFleet.reduce_fleet(scope, %{build: 1})
+      assert summary.fleet.build.unresolved_failures == 1
+      assert summary.fleet.build.completed == 0
+    end
+
+    test "wrong effort is invalid evidence and cannot complete the planned fleet", %{scope: scope} do
+      {:ok, assignment} =
+        scope
+        |> assignment_attrs("build-wrong-effort")
+        |> Map.put(:effort, "medium")
+        |> EpicFleet.create_assignment()
+
+      {:ok, _result} = EpicFleet.record_result(assignment, "completed", result_attrs())
+
+      assert {:ok, summary} = EpicFleet.reduce_fleet(scope, %{build: 1})
+      assert summary.fleet.build.completed == 0
+      assert summary.fleet.build.missing == 1
+      assert summary.fleet.build.invalid_assignments == 1
     end
 
     test "legacy absence is explicit and never fabricates completion evidence", %{scope: scope} do

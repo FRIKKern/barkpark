@@ -1,0 +1,22 @@
+<!-- doc-tier: agent | canonical-for: cycle-fleet-http-contract | budget: 1200tok -->
+# CycleFleet HTTP contract
+
+CycleFleet is the immutable, profile-driven execution ledger shared by Epic and Legendary Codex cycles. The canonical root is `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id`; resolved path scope is authoritative. Flat `/v1/cycles/*` routes are token-workspace-bound, projectless legacy routes and never alias a project row.
+
+## Authorization and routes
+
+- `GET …` requires a normal `read` token and returns `{cycle_ledger, fleet, authority}`. Public-read-only tokens receive `403` on both route shapes. `authority.connection` identifies local/remote execution from the configured canonical server origin (never request `Host`) and returns that origin plus persisted workspace/project scope and the connected cloud URL.
+- `POST …/open` requires `write` and freezes profile, inventory, and experiment intent. Legendary also freezes the complete scale contract. Exact replay returns the original wave; changed input returns `409`.
+- `POST …/seal` requires `write` and freezes capacity, format, evidence revision, failure contract, golden fixtures, opening rubric, and Build plan. Legendary requires the exact completed Experiment fleet with no dangling failed/cancelled leaf before sealing; Build requires the seal.
+- `POST …/assignments` requires `write` and appends a typed snapshot. Planned phase counts are hard capacities: Epic has exactly three Review assignments; Legendary Experiment and Review each have exactly 15 live assignments; Experiment closes at seal. Effort is exact: Epic Survey/Verify are `medium`, Build/Review are `high`; Legendary Survey/Verify/Experiment/Build are `medium`, Review is `high`. Legendary inventory has at least 15 real units (never padding). Every Build snapshot, including a replacement, owns a non-empty unique list of non-empty string inventory unit ids and must not exceed sealed `proven_batch_capacity`.
+- `POST …/assignments/:assignment_id/results` requires `write` and appends or exactly replays one terminal result. Conflicting assignment/result replays return `409`.
+
+## Replacement and reconciliation
+
+`replaces_assignment_id` is the logical assignment id in the exact cycle scope. Immutable phase and agent-type mismatches are reported as `409` before generic profile validation. A project-scoped lookup never searches another project: a same-named cross-project predecessor remains `replacement_not_found` (`422`) to hide its existence. On projectless compatibility routes, a same-workspace legacy EpicFleet predecessor can be identified safely and returns `replacement_contract_mismatch` (`409`) because it is not bound to the immutable CycleFleet wave. Only a failed or cancelled matching predecessor may be replaced; pending and completed predecessors remain `422`. One predecessor has at most one successor, producing a linear chain. Replaced attempts remain historical, while the live leaf determines reconciliation.
+
+Reconciliation is exact only when every planned phase has its exact completed live fleet at the profile's exact effort, no live failed/cancelled or result-missing leaves remain, assignments/results are valid, and each completed Build result supplies all three typed outcome lists that exactly partition its owned units without overlap. Epic may reach exact without a post-Pilot seal. Epic and Legendary Paper preflight compare embedded `cycle_ledger` and fleet projections with explicitly workspace/project-scoped live CycleFleet. An Epic Paper may omit its ledger only when the explicit legacy validator flag is supplied, live `--paper` retrieval provides immutable `_createdAt`, and that timestamp proves creation before the documented `2026-07-15T00:05:00Z` CycleFleet cutoff. Caller-controlled `--paper-json` remains valid for ledger-bearing validation but can never establish this legacy exception.
+
+The manifest deliberately publishes canonical scoped CycleFleet path templates directly. This is the exception to the otherwise deferred `scoped_prefix` mirror hint: clients resolve `:workspace_slug` and `:project_slug` from explicit context, while flat routes remain projectless compatibility only.
+
+Workspace/project teardown removes tenant-owned cycle ledger rows through guarded parent deletion. Direct updates/deletes remain forbidden.

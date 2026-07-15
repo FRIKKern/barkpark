@@ -21,7 +21,7 @@ Every phase also updates the Paper's **Agent fleet** counts. The fleet gate is 2
 - Barkpark tasks are the execution ledger; do not substitute markdown TODOs.
 - The wave Paper is the phase narrative; fan-out workers never write it.
 - The charter is long-lived decision memory; the Paper is one wave's story.
-- Strategy and decisions use high effort. Survey, proof, and bounded implementation use medium effort.
+- Strategy and decisions use high effort. Survey and Verify use medium effort; Build and Review use high effort.
 - The leader owns mutations, synthesis, integration, and completion claims.
 - Negative findings and failed commands are evidence, not embarrassment.
 - A passing test proves only the behavior it actually exercises.
@@ -48,4 +48,4 @@ Every phase also updates the Paper's **Agent fleet** counts. The fleet gate is 2
 
 A slice is ready only when its published task has one parent epic, an outcome-shaped title, sufficient cold-start context, exact file ownership, checkable criteria, a runnable gate, real blockers, and a link to the wave Paper. Read it back from the server before dispatch.
 
-Use `../scripts/validate_epic_cycle.py` to enforce the machine-checkable subset before dispatch and before PR creation. A root epic is valid for the Strategize preflight even when it has no parent or criteria, but Strategize always requires `--wish-file` to prove verbatim preservation. Review has two gates: `--phase review` checks its prerequisites, while `--phase review --require-debrief` proves its output after the debrief is published.
+Use `../scripts/validate_epic_cycle.py` to enforce the machine-checkable subset before dispatch and before PR creation. A root epic is valid for the Strategize preflight even when it has no parent or criteria, but Strategize always requires `--wish-file` to prove verbatim preservation. Canonical Papers require live CycleFleet comparison with explicit `--workspace` and `--project` scope. The narrowly named `--allow-pre-cyclefleet-paper-without-ledger` flag is accepted only when the Paper's immutable `_createdAt` is before the documented CycleFleet cutoff `2026-07-15T00:05:00Z`; the flag alone is never provenance. Review has two gates: `--phase review` checks its prerequisites, while `--phase review --require-debrief` proves its output after the debrief is published.
