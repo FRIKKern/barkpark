@@ -127,6 +127,79 @@ extract_bridge() {
   } | sort -u
 }
 
+# ── TOOL SET (variant B — the OUTBOUND direction, D99/D100) ──────────────────
+#
+# The catalog now carries a SEPARATE `@tool_providers [ … ]` block for the tool
+# connectors (github/linear — the OTHER direction). These two extractors are the
+# MIRROR IMAGE of the channel ones: the tool catalog block, and the bridge's
+# tool-direction connectors (exactly the ones the CHANNEL extractor EXCLUDES).
+# They are PURELY ADDITIVE — the channel extractors above are byte-unchanged.
+
+# Extract the sorted "<provider> <mode>" set from the catalog's `@tool_providers`
+# block. Identical shape to extract_catalog, scanning the tool block instead — a
+# `@tool_providers [` opens it, a lone `]` closes it. `@providers` never matches
+# `@tool_providers` (and vice-versa) because the literal `@providers` is not a
+# substring of `@tool_providers` — the two blocks are extracted independently.
+extract_catalog_tools() {
+  awk '
+    /@tool_providers[ \t]*\[/ { inblock=1; next }
+    inblock && /^[ \t]*\][ \t]*$/ { inblock=0; next }
+    inblock {
+      if (match($0, /id:[ \t]*"[a-z0-9_]+"/)) {
+        s = substr($0, RSTART, RLENGTH)
+        gsub(/^id:[ \t]*"|"$/, "", s)
+        curid = s
+      }
+      if (match($0, /connect_mode:[ \t]*:[a-z]+/)) {
+        m = substr($0, RSTART, RLENGTH)
+        sub(/^connect_mode:[ \t]*:/, "", m)
+        if ((m == "paste" || m == "oauth") && curid != "") print curid " " m
+      }
+    }
+  ' "$1" | sort -u
+}
+
+# Extract the sorted "<provider> <mode>" set the BRIDGE implements as TOOL
+# connectors — the exact complement of extract_bridge's exclusions:
+#   paste = a connectors/<p>.ts declaring BOTH a `connect: {` member AND
+#           `direction: "tool"` (github);
+#   oauth = a <p>-oauth.ts callback whose sibling connectors/<p>.ts declares
+#           `direction: "tool"` (linear).
+# $1 = connectors dir, $2 = oauth dir (parameterized for --selftest temp trees).
+extract_bridge_tools() {
+  local cdir="$1" odir="$2" f base prov
+  {
+    if [ -d "$cdir" ]; then
+      for f in "$cdir"/*.ts; do
+        [ -f "$f" ] || continue
+        # A TOOL paste connector: a `connect: {` member AND `direction: "tool"`
+        # (github pastes a PAT). This is precisely the case the channel paste loop
+        # EXCLUDES, collected here instead.
+        if grep -Eq '^[[:space:]]*connect:[[:space:]]*\{' "$f" &&
+           grep -Eq '^[[:space:]]*direction:[[:space:]]*"tool"' "$f"; then
+          base="$(basename "$f" .ts)"
+          echo "$base paste"
+        fi
+      done
+    fi
+    if [ -d "$odir" ]; then
+      for f in "$odir"/*-oauth.ts; do
+        [ -f "$f" ] || continue
+        base="$(basename "$f" .ts)"
+        prov="${base%-oauth}"
+        # A TOOL oauth connector: a <p>-oauth.ts whose registry file declares
+        # `direction: "tool"` (linear). This is precisely the case the channel
+        # oauth loop EXCLUDES, collected here instead. A channel oauth (slack,
+        # whose registry is not a tool) is skipped.
+        if [ -f "$cdir/$prov.ts" ] &&
+           grep -Eq '^[[:space:]]*direction:[[:space:]]*"tool"' "$cdir/$prov.ts"; then
+          echo "$prov oauth"
+        fi
+      done
+    fi
+  } | sort -u
+}
+
 flat() { printf '%s\n' "$1" | tr '\n' ' ' | sed 's/ *$//'; }
 
 selftest() {
@@ -166,6 +239,26 @@ selftest() {
       connectable?: false,
       connect_mode: nil,
       gate: "azure admin consent"
+    }
+  ]
+
+  # A SEPARATE tool block, EXACTLY as the real catalog carries it. Its presence
+  # must NOT perturb the channel extractor above (proven below: cat_set must not
+  # contain github/linear), and it is the catalog side of the tool-set check.
+  @tool_providers [
+    %{
+      id: "github",
+      connectable?: true,
+      connect_mode: :paste,
+      direction: :tool,
+      gate: nil
+    },
+    %{
+      id: "linear",
+      connectable?: false,
+      connect_mode: :oauth,
+      direction: :tool,
+      gate: nil
     }
   ]
 EOF
@@ -261,7 +354,55 @@ EOF
   if [ "$cat_set" = "$drift_set" ]; then
     echo "SELFTEST FAIL: a dropped connect member went undetected"; return 1
   fi
-  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth)"
+
+  # ── TOOL-SET cases (variant B, D100) ──────────────────────────────────────
+  #
+  # (a) The channel set is BYTE-UNCHANGED by the presence of a @tool_providers
+  #     block: the tool entries (github/linear) must NEVER leak into the CHANNEL
+  #     set. This is the exact regression the separate-block design prevents.
+  if printf '%s\n' "$cat_set" | grep -Eq '^(github|linear) '; then
+    echo "SELFTEST FAIL: a @tool_providers entry leaked into the CHANNEL set"; return 1
+  fi
+  if [ "$cat_set" != "$(printf 'discord paste\nslack oauth\ntelegram paste')" ]; then
+    echo "SELFTEST FAIL: the @tool_providers block perturbed the channel set"
+    echo "  channel set: [$(flat "$cat_set")]"
+    return 1
+  fi
+
+  local cat_tool_set agree_tool_set drop_tool_set
+  cat_tool_set="$(extract_catalog_tools "$tmp/catalog.ex")"
+  agree_tool_set="$(extract_bridge_tools "$tmp/agree/connectors" "$tmp/agree/oauth")"
+
+  if [ -z "$cat_tool_set" ] || [ -z "$agree_tool_set" ]; then
+    echo "SELFTEST FAIL: tool extraction produced an empty set"; return 1
+  fi
+  # (b) Agreeing tool sets are GREEN. github (paste tool) + linear (oauth tool)
+  #     must match on BOTH sides.
+  if [ "$cat_tool_set" != "$agree_tool_set" ]; then
+    echo "SELFTEST FAIL: an agreeing catalog+bridge TOOL set was reported as drift"
+    echo "  catalog tools: [$(flat "$cat_tool_set")]"
+    echo "  bridge tools:  [$(flat "$agree_tool_set")]"
+    return 1
+  fi
+
+  # (c) A DROPPED tool entry REDS: a catalog that removes linear from
+  #     @tool_providers while linear-oauth.ts still exists on the bridge must be
+  #     caught (the tool dual of the dropped-channel-member case above).
+  cat > "$tmp/catalog_drop_tool.ex" <<'EOF'
+  @tool_providers [
+    %{
+      id: "github",
+      connect_mode: :paste,
+      direction: :tool
+    }
+  ]
+EOF
+  drop_tool_set="$(extract_catalog_tools "$tmp/catalog_drop_tool.ex")"
+  if [ "$drop_tool_set" = "$agree_tool_set" ]; then
+    echo "SELFTEST FAIL: a dropped TOOL entry went undetected"; return 1
+  fi
+
+  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth); tool set: agree→green, @tool_providers channel-neutral, dropped tool entry→red"
 }
 
 if [ "${1:-}" = "--selftest" ]; then
@@ -298,4 +439,30 @@ if [ "$CATALOG_SET" != "$BRIDGE_SET" ]; then
   exit 1
 fi
 
-echo "connectors-catalog-drift-check: PASS — connectable providers agree [$(flat "$CATALOG_SET")]"
+# ── TOOL SET (variant B) — the OUTBOUND direction, checked INDEPENDENTLY ──────
+CATALOG_TOOL_SET="$(extract_catalog_tools "$CATALOG_EX")"
+BRIDGE_TOOL_SET="$(extract_bridge_tools "$CONNECTORS_DIR" "$OAUTH_DIR")"
+
+# Empty = the extractor found nothing (block moved / all tool files renamed), NOT
+# agreement — fail closed. The catalog ships EXACTLY two tool providers today, so
+# an empty tool set is always a broken anchor.
+if [ -z "$CATALOG_TOOL_SET" ]; then
+  echo "FAIL: no tool providers parsed from $CATALOG_EX (@tool_providers block moved or renamed?)"; exit 1
+fi
+if [ -z "$BRIDGE_TOOL_SET" ]; then
+  echo "FAIL: no tool providers parsed from $CONNECTORS_DIR / $OAUTH_DIR (a direction:\"tool\" connect: member or tool *-oauth.ts moved or renamed?)"; exit 1
+fi
+
+if [ "$CATALOG_TOOL_SET" != "$BRIDGE_TOOL_SET" ]; then
+  only_catalog="$(comm -23 <(printf '%s\n' "$CATALOG_TOOL_SET") <(printf '%s\n' "$BRIDGE_TOOL_SET") | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+  only_bridge="$(comm -13 <(printf '%s\n' "$CATALOG_TOOL_SET") <(printf '%s\n' "$BRIDGE_TOOL_SET") | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+  echo "FAIL: TOOL-connector DRIFT — the Elixir catalog and the bridge registry disagree (connectors D99/D100)"
+  echo "  $CATALOG_EX @tool_providers declares [$(flat "$CATALOG_TOOL_SET")]"
+  echo "  but the bridge implements [$(flat "$BRIDGE_TOOL_SET")]"
+  [ -n "$only_catalog" ] && echo "  catalog claims, bridge lacks:  $only_catalog"
+  [ -n "$only_bridge" ]  && echo "  bridge implements, catalog omits: $only_bridge"
+  echo "  → reconcile catalog.ex @tool_providers connect_mode with the bridge's direction:\"tool\" connect: member / tool *-oauth.ts callback"
+  exit 1
+fi
+
+echo "connectors-catalog-drift-check: PASS — channel providers agree [$(flat "$CATALOG_SET")]; tool providers agree [$(flat "$CATALOG_TOOL_SET")]"
