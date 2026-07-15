@@ -24,6 +24,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
     _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
     _dsn _database_url _database_uri _connection_string
   )
+  @sensitive_exact_compact Enum.map(@sensitive_exact, &String.replace(&1, "_", ""))
+  @sensitive_suffixes_compact Enum.map(@sensitive_suffixes, &String.replace(&1, "_", ""))
 
   @spec create_experiment(map()) ::
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
@@ -235,6 +237,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
       not Enum.all?(attempts, &valid_attempt_map?/1) ->
         {:error, :invalid_attempt}
 
+      not unique_attempt_ids?(attempts) ->
+        {:error, :duplicate_attempt_id}
+
       attempts != Enum.sort_by(attempts, &{&1["ordinal"], &1["attempt_id"]}) ->
         {:error, :attempts_not_canonical}
 
@@ -403,6 +408,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
     cond do
       is_nil(previous_ordinal) -> {:error, :replacement_attempt_not_found}
       ordinal <= previous_ordinal -> {:error, :replacement_ordinal_invalid}
+      replacement_already_exists?(experiment_id, replacement_id) ->
+        {:error, :replacement_attempt_already_replaced}
+
       true -> :ok
     end
   end
@@ -436,32 +444,57 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp sanitize(value), do: value
 
   defp sensitive_key?(key) do
-    key = key |> String.downcase() |> String.replace("-", "_")
+    normalized = key |> String.downcase() |> String.replace(~r/[^a-z0-9]+/u, "_")
+    compact = String.replace(normalized, "_", "")
 
-    key in @sensitive_exact or
-      Enum.any?(@sensitive_suffixes, &String.ends_with?(key, &1))
+    normalized in @sensitive_exact or
+      Enum.any?(@sensitive_suffixes, &String.ends_with?(normalized, &1)) or
+      compact in @sensitive_exact_compact or
+      Enum.any?(@sensitive_suffixes_compact, &String.ends_with?(compact, &1))
   end
 
   defp valid_replacement_ancestry?(attempts) do
     attempts
-    |> Enum.reduce_while(%{}, fn attempt, seen ->
+    |> Enum.reduce_while({%{}, MapSet.new()}, fn attempt, {seen, replaced} ->
       ordinal = attempt["ordinal"]
+      attempt_id = attempt["attempt_id"]
 
       case attempt["replaces_attempt_id"] do
         nil ->
-          {:cont, Map.put(seen, attempt["attempt_id"], ordinal)}
+          {:cont, {Map.put(seen, attempt_id, ordinal), replaced}}
 
         replacement_id ->
-          case Map.fetch(seen, replacement_id) do
-            {:ok, previous_ordinal} when previous_ordinal < ordinal ->
-              {:cont, Map.put(seen, attempt["attempt_id"], ordinal)}
-
-            _ ->
+          cond do
+            MapSet.member?(replaced, replacement_id) ->
               {:halt, :invalid}
+
+            Map.get(seen, replacement_id, ordinal) >= ordinal ->
+              {:halt, :invalid}
+
+            true ->
+              {:cont,
+               {Map.put(seen, attempt_id, ordinal), MapSet.put(replaced, replacement_id)}}
           end
       end
     end)
-    |> is_map()
+    |> case do
+      {_seen, _replaced} -> true
+      :invalid -> false
+    end
+  end
+
+  defp unique_attempt_ids?(attempts) do
+    attempt_ids = Enum.map(attempts, & &1["attempt_id"])
+    length(attempt_ids) == MapSet.size(MapSet.new(attempt_ids))
+  end
+
+  defp replacement_already_exists?(experiment_id, replacement_id) do
+    Repo.exists?(
+      from attempt in Attempt,
+        where:
+          attempt.experiment_id == ^experiment_id and
+            attempt.replaces_attempt_id == ^replacement_id
+    )
   end
 
   defp exact_keys?(map, expected) when is_map(map),
