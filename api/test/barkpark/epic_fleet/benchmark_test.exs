@@ -136,6 +136,32 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
              ]
     end
 
+    test "rejects a second replacement fork before persistence", %{attrs: attrs} do
+      {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
+      {:ok, _original} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+
+      {:ok, _replacement} =
+        EpicFleet.record_benchmark_attempt(experiment, %{
+          attempt_attrs()
+          | attempt_id: "attempt-retry-a",
+            replaces_attempt_id: "attempt-a",
+            ordinal: 2
+        })
+
+      assert {:error, :replacement_attempt_already_replaced} =
+               EpicFleet.record_benchmark_attempt(experiment, %{
+                 attempt_attrs()
+                 | attempt_id: "attempt-retry-b",
+                   replaces_attempt_id: "attempt-a",
+                   ordinal: 3
+               })
+
+      assert Enum.map(EpicFleet.list_benchmark_attempts(experiment), & &1.attempt_id) == [
+               "attempt-a",
+               "attempt-retry-a"
+             ]
+    end
+
     test "database rejects direct attempt UPDATE and DELETE", %{attrs: attrs} do
       {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
       {:ok, attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
@@ -210,6 +236,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:ok, json} = EpicFleet.export_benchmark_json(experiment)
       assert {:ok, %{experiment: replay, attempts: 2}} = EpicFleet.import_benchmark_json(json)
       assert replay.id == experiment.id
+      assert {:ok, ^json} = EpicFleet.export_benchmark_json(replay)
       assert Repo.aggregate(Experiment, :count) == 1
       assert Repo.aggregate(Attempt, :count) == 2
     end
@@ -219,6 +246,9 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
         "api-key" => "api-secret",
         "runner_credentials" => "credential-secret",
         "runner_secret" => "generic-secret",
+        "accessToken" => "camel-secret",
+        "runnerAccess-Token" => "mixed-secret",
+        "userPassWord" => "password-secret",
         "nested" => %{"webhook_secret" => "hook-secret"}
       }
 
@@ -229,6 +259,9 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
                "api-key" => "[REDACTED]",
                "runner_credentials" => "[REDACTED]",
                "runner_secret" => "[REDACTED]",
+               "accessToken" => "[REDACTED]",
+               "runnerAccess-Token" => "[REDACTED]",
+               "userPassWord" => "[REDACTED]",
                "nested" => %{"webhook_secret" => "[REDACTED]"}
              }
 
@@ -236,7 +269,49 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       refute json =~ "api-secret"
       refute json =~ "credential-secret"
       refute json =~ "generic-secret"
+      refute json =~ "camel-secret"
+      refute json =~ "mixed-secret"
+      refute json =~ "password-secret"
       refute json =~ "hook-secret"
+    end
+
+    test "rejects duplicate attempt ids before persistence", %{attrs: attrs} do
+      experiment = struct!(Experiment, Map.merge(attrs, %{id: Ecto.UUID.generate()}))
+      duplicate = attempt_attrs()
+      document = Benchmark.document(experiment, [duplicate, duplicate])
+      json = EpicFleet.canonical_json(document)
+
+      assert json == document |> Jason.encode!() |> Jason.decode!() |> EpicFleet.canonical_json()
+      assert {:error, :duplicate_attempt_id} = EpicFleet.import_benchmark_json(json)
+      assert Repo.aggregate(Experiment, :count) == 0
+      assert Repo.aggregate(Attempt, :count) == 0
+    end
+
+    test "rejects signed replacement forks before persistence", %{attrs: attrs} do
+      experiment = struct!(Experiment, Map.merge(attrs, %{id: Ecto.UUID.generate()}))
+
+      document =
+        Benchmark.document(experiment, [
+          attempt_attrs(),
+          %{
+            attempt_attrs()
+            | attempt_id: "attempt-retry-a",
+              replaces_attempt_id: "attempt-a",
+              ordinal: 2
+          },
+          %{
+            attempt_attrs()
+            | attempt_id: "attempt-retry-b",
+              replaces_attempt_id: "attempt-a",
+              ordinal: 3
+          }
+        ])
+
+      assert {:error, :invalid_replacement_ancestry} =
+               document |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+
+      assert Repo.aggregate(Experiment, :count) == 0
+      assert Repo.aggregate(Attempt, :count) == 0
     end
 
     test "rejects non-canonical bytes and shape-changing fields before any write", %{attrs: attrs} do
@@ -336,11 +411,15 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     end
   end
 
-  test "forward migration installs typed-cost and append-only constraints" do
-    version = 20_260_715_000_400
+  test "forward migration repairs replacement boundaries after the original ledger migration" do
+    original_version = 20_260_715_000_400
+    repair_version = 20_260_715_000_500
 
-    assert %{rows: [[^version]]} =
-             Repo.query!("SELECT version FROM schema_migrations WHERE version=$1", [version])
+    assert %{rows: [[^original_version], [^repair_version]]} =
+             Repo.query!("SELECT version FROM schema_migrations WHERE version IN ($1, $2) ORDER BY version", [
+               original_version,
+               repair_version
+             ])
 
     assert %{rows: [[definition]]} =
              Repo.query!("""
@@ -360,6 +439,16 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
                  AND NOT tgisinternal
              )
              """)
+
+    assert %{rows: [[true, predicate]]} =
+             Repo.query!("""
+             SELECT index.indisunique, pg_get_expr(index.indpred, index.indrelid)
+             FROM pg_index AS index
+             JOIN pg_class AS relation ON relation.oid = index.indexrelid
+             WHERE relation.relname = 'epic_benchmark_attempts_replaces_once_index'
+             """)
+
+    assert predicate =~ "replaces_attempt_id IS NOT NULL"
   end
 
   defp manifest do
