@@ -55,20 +55,17 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
       document = Benchmark.document(experiment, attempts)
 
-      IO.inspect(
-        Map.take(document, [
-          "manifest_digest",
-          "attempts_digest",
-          "summary_digest",
-          "ledger_digest"
-        ]),
-        label: "FIXED_GOLDEN_DIGESTS"
-      )
+      assert document["manifest_digest"] ==
+               "615f47d9bde44b357f54b888dd7a0e9bba5d7a0f6b1baa68c18662839b959f6e"
 
-      assert document["manifest_digest"] == "REPLACE_FIXED_MANIFEST_DIGEST"
-      assert document["attempts_digest"] == "REPLACE_FIXED_ATTEMPTS_DIGEST"
-      assert document["summary_digest"] == "REPLACE_FIXED_SUMMARY_DIGEST"
-      assert document["ledger_digest"] == "REPLACE_FIXED_LEDGER_DIGEST"
+      assert document["attempts_digest"] ==
+               "7265dfbb9bedf5765f750738aebec81fa2766a7287a572e19f4d7593fede196f"
+
+      assert document["summary_digest"] ==
+               "5bd7d2914bc4ae184608cb1c6994de16c8c9502ac76ea3803521781f787bc5ec"
+
+      assert document["ledger_digest"] ==
+               "11386eec47be11331c18795df6d10484121bc85425fdf4e61dad4b4884b13365"
     end
   end
 
