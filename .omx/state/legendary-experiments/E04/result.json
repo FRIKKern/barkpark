@@ -17,7 +17,7 @@
     "scripts/run.sh": "14bfaa25bf1ff7cb87c5ae83bac80120c0f6cbdd337868967c5b970f2a4f4a62",
     "scripts/verify.py": "d4b736d033bf80bab15a6f0a9e3f16d83cbfd5dab0d7adf6b63aa3a5397e4f35",
     "transformation-manifest.json": "3ea294a03e2b972a6eabaca8de9d526af0da9ff5e66e7fef9d7760da48f8d47b",
-    "verification.json": "c665b6812e3faa4846d1813e2debc3da36e2367c02623c3385fe6d20b7e7ffe5"
+    "verification.json": "e13876bf7beec90f75e7804f2f23fca53565db7fbc4c2d4a6eb1f962ff490e30"
   },
   "assignment_id": "E04",
   "candidate_id": "candidate-canonical-native",
@@ -40,7 +40,7 @@
     "task_classes": 6,
     "tasks": 18
   },
-  "generated_at": "2026-07-15T02:41:35.224907+00:00",
+  "generated_at": "2026-07-15T02:46:17.569663+00:00",
   "hard_threshold_outcomes": {
     "accessibility": "BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL_UNAVAILABLE",
     "authored_content_preservation": "PASS_36_OF_36_PREIMAGES_AND_ACCEPTED_SEMANTIC_HASHES",
@@ -81,10 +81,10 @@
   "schema_version": "legendary-e04-result/v1",
   "timing": {
     "candidate_reruns_seconds": [
-      0.179179,
-      0.171201
+      0.245389,
+      0.201099
     ],
-    "max_seconds": 0.179179
+    "max_seconds": 0.245389
   },
   "validation": {
     "command": "./scripts/run.sh",
