@@ -91,6 +91,7 @@ REQUIRED_COMPLETIONS = {
 EPIC.PHASE_HEADINGS = PHASE_HEADINGS
 EPIC.FLEET_SPECS = FLEET_SPECS
 EPIC.REQUIRED_COMPLETIONS = REQUIRED_COMPLETIONS
+EPIC.CYCLE_PHASE = "legendary"
 
 CLAIM_TTL_SECONDS = EPIC.CLAIM_TTL_SECONDS
 
@@ -242,7 +243,9 @@ def main() -> int:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    print("PASS: Legendary Cycle scale, fleet, Task, Paper, and PR evidence satisfy the preflight contract")
+    print(
+        "PASS: Legendary Cycle scale, fleet ledger, Task, Paper, and PR evidence satisfy the preflight contract"
+    )
     return 0
 
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -38,6 +39,96 @@ REQUIRED_COMPLETIONS = {
 }
 
 CLAIM_TTL_SECONDS = 2700
+CYCLE_PHASE = "epic"
+
+LEDGER_FORMAT = "barkpark-epic-benchmark-v1"
+LEDGER_KEYS = {
+    "format",
+    "experiment",
+    "manifest",
+    "manifest_digest",
+    "attempts",
+    "attempts_digest",
+    "summary",
+    "summary_digest",
+    "ledger_digest",
+}
+EXPERIMENT_KEYS = {
+    "workspace_id",
+    "epic_id",
+    "wave_id",
+    "experiment_id",
+    "phase",
+    "protocol_version",
+}
+ATTEMPT_KEYS = {
+    "attempt_id",
+    "replaces_attempt_id",
+    "ordinal",
+    "treatment",
+    "status",
+    "costs",
+    "provenance",
+    "payload",
+    "attempt_digest",
+}
+FLEET_ASSIGNMENT_KEYS = {
+    "phase",
+    "assignment_id",
+    "agent_type",
+    "evidence",
+    "model_reasoning_effort",
+}
+ATTEMPT_STATUSES = ("completed", "failed", "timeout", "contaminated", "cancelled")
+COST_STATES = ("observed", "unsupported", "missing", "invalid")
+SENSITIVE_EXACT = {
+    "token",
+    "access_token",
+    "refresh_token",
+    "auth_token",
+    "id_token",
+    "session_token",
+    "api_key",
+    "apikey",
+    "secret",
+    "client_secret",
+    "webhook_secret",
+    "secret_key",
+    "password",
+    "authorization",
+    "cookie",
+    "set_cookie",
+    "private_key",
+    "signing_key",
+    "bearer",
+    "credential",
+    "credentials",
+    "dsn",
+    "database_url",
+    "database_uri",
+    "connection_string",
+}
+SENSITIVE_SUFFIXES = (
+    "_access_token",
+    "_refresh_token",
+    "_auth_token",
+    "_id_token",
+    "_session_token",
+    "_api_key",
+    "_client_secret",
+    "_webhook_secret",
+    "_secret_key",
+    "_secret",
+    "_password",
+    "_private_key",
+    "_signing_key",
+    "_credential",
+    "_credentials",
+    "_dsn",
+    "_database_url",
+    "_database_uri",
+    "_connection_string",
+)
 
 
 def command_json(*args: str) -> dict[str, Any]:
@@ -48,6 +139,35 @@ def command_json(*args: str) -> dict[str, Any]:
 def load_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def canonical_json(value: Any) -> str:
+    """Mirror Barkpark.EpicFleet.CanonicalJSON for cross-runtime digests."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def canonical_digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def load_canonical_ledger(path: Path) -> dict[str, Any]:
+    raw = path.read_text(encoding="utf-8")
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-JSON numeric constant {value}")
+
+    payload = json.loads(raw, parse_constant=reject_constant)
+    if not isinstance(payload, dict):
+        raise ValueError("top level is not an object")
+    if raw != canonical_json(payload):
+        raise ValueError("bytes are not the canonical B1 exporter encoding")
+    return payload
 
 
 def task_doc(payload: dict[str, Any]) -> dict[str, Any]:
@@ -92,6 +212,313 @@ def has_label_value(labels: list[Any], prefix: str) -> bool:
 
 def nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def integer(value: Any, minimum: int = 0) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def sensitive_key(key: str) -> bool:
+    normalized = key.casefold().replace("-", "_")
+    return normalized in SENSITIVE_EXACT or any(
+        normalized.endswith(suffix) for suffix in SENSITIVE_SUFFIXES
+    )
+
+
+def sanitized(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if sensitive_key(key) else sanitized(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitized(child) for child in value]
+    return value
+
+
+def valid_costs(costs: Any) -> bool:
+    if not isinstance(costs, dict) or not costs:
+        return False
+    for metric, envelope in costs.items():
+        if not nonempty_string(metric) or not isinstance(envelope, dict):
+            return False
+        state = envelope.get("state")
+        if state == "observed":
+            value = envelope.get("value")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                return False
+        elif state in {"unsupported", "missing", "invalid"}:
+            if not nonempty_string(envelope.get("reason")):
+                return False
+        else:
+            return False
+    return True
+
+
+def benchmark_summary(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    outcomes = {status: 0 for status in ATTEMPT_STATUSES}
+    cost_states = {state: 0 for state in COST_STATES}
+    treatments: dict[str, int] = {}
+    for attempt in attempts:
+        outcomes[attempt["status"]] += 1
+        treatments[attempt["treatment"]] = treatments.get(attempt["treatment"], 0) + 1
+        for metric in attempt["costs"].values():
+            cost_states[metric["state"]] += 1
+    return {
+        "attempt_count": len(attempts),
+        "outcomes": outcomes,
+        "cost_states": cost_states,
+        "treatments": treatments,
+    }
+
+
+def paper_fleet(paper: dict[str, Any]) -> dict[str, Any] | None:
+    return next(
+        (
+            block.get("fleet")
+            for block in paper_blocks(paper)
+            if isinstance(block, dict) and isinstance(block.get("fleet"), dict)
+        ),
+        None,
+    )
+
+
+def validate_ledger(
+    ledger: dict[str, Any],
+    paper: dict[str, Any],
+    epic_id: Any,
+    paper_id: str,
+) -> list[str]:
+    """Validate B1 canonical truth and reconcile its terminal leaves to the Paper projection."""
+    errors: list[str] = []
+    if set(ledger) != LEDGER_KEYS:
+        return ["fleet ledger has an invalid canonical document shape"]
+    if ledger.get("format") != LEDGER_FORMAT:
+        errors.append(f"fleet ledger format is not {LEDGER_FORMAT}")
+
+    experiment = ledger.get("experiment")
+    if not isinstance(experiment, dict) or set(experiment) != EXPERIMENT_KEYS:
+        errors.append("fleet ledger experiment has an invalid shape")
+        experiment = {}
+    else:
+        for field in ("workspace_id", "epic_id", "wave_id", "experiment_id"):
+            if not nonempty_string(experiment.get(field)):
+                errors.append(f"fleet ledger experiment {field} is empty or invalid")
+        if experiment.get("epic_id") != epic_id:
+            errors.append(
+                f"fleet ledger epic scope is {experiment.get('epic_id')!r}, expected {epic_id!r}"
+            )
+        if experiment.get("wave_id") != paper_id:
+            errors.append(
+                f"fleet ledger wave scope is {experiment.get('wave_id')!r}, expected {paper_id!r}"
+            )
+        if experiment.get("phase") != CYCLE_PHASE:
+            errors.append(
+                f"fleet ledger cycle phase is {experiment.get('phase')!r}, expected {CYCLE_PHASE!r}"
+            )
+        if experiment.get("protocol_version") != 1:
+            errors.append("fleet ledger protocol_version is not 1")
+
+    manifest = ledger.get("manifest")
+    if not isinstance(manifest, dict):
+        errors.append("fleet ledger manifest is not an object")
+        manifest = {}
+    contract = manifest.get("fleet_contract")
+    expected_contract_keys = {"version", "paper_fleet_digest"}
+    if not isinstance(contract, dict) or set(contract) != expected_contract_keys:
+        errors.append("fleet ledger manifest has no exact fleet_contract v1 scope")
+    else:
+        if contract.get("version") != 1:
+            errors.append("fleet ledger fleet_contract version is not 1")
+        projection = paper_fleet(paper)
+        if projection is None:
+            errors.append("fleet ledger cannot reconcile a missing Paper fleet")
+        elif contract.get("paper_fleet_digest") != canonical_digest(projection):
+            errors.append("fleet ledger Paper fleet digest is stale")
+
+    attempts = ledger.get("attempts")
+    if not isinstance(attempts, list):
+        errors.append("fleet ledger attempts is not a list")
+        attempts = []
+
+    attempts_valid = True
+    attempt_ids: set[str] = set()
+    projections: dict[str, dict[str, Any]] = {}
+    for index, attempt in enumerate(attempts):
+        prefix = f"fleet ledger attempt {index + 1}"
+        if not isinstance(attempt, dict) or set(attempt) != ATTEMPT_KEYS:
+            errors.append(f"{prefix} has an invalid shape")
+            attempts_valid = False
+            continue
+        attempt_id = attempt.get("attempt_id")
+        replacement_id = attempt.get("replaces_attempt_id")
+        if not nonempty_string(attempt_id):
+            errors.append(f"{prefix} has an invalid attempt_id")
+            attempts_valid = False
+        elif attempt_id in attempt_ids:
+            errors.append(f"fleet ledger contains duplicate attempt id {attempt_id!r}")
+            attempts_valid = False
+        else:
+            attempt_ids.add(attempt_id)
+        if replacement_id is not None and not nonempty_string(replacement_id):
+            errors.append(f"{prefix} has an invalid replaces_attempt_id")
+            attempts_valid = False
+        if not integer(attempt.get("ordinal"), 1):
+            errors.append(f"{prefix} has an invalid ordinal")
+            attempts_valid = False
+        if not nonempty_string(attempt.get("treatment")):
+            errors.append(f"{prefix} has an invalid treatment")
+            attempts_valid = False
+        if attempt.get("status") not in ATTEMPT_STATUSES:
+            errors.append(f"{prefix} has an invalid status")
+            attempts_valid = False
+        if not valid_costs(attempt.get("costs")):
+            errors.append(f"{prefix} costs do not use exhaustive typed states")
+            attempts_valid = False
+        if not isinstance(attempt.get("provenance"), dict):
+            errors.append(f"{prefix} provenance is not an object")
+            attempts_valid = False
+        payload = attempt.get("payload")
+        if not isinstance(payload, dict):
+            errors.append(f"{prefix} payload is not an object")
+            attempts_valid = False
+            continue
+        assignment = payload.get("fleet_assignment")
+        if not isinstance(assignment, dict) or set(assignment) != FLEET_ASSIGNMENT_KEYS:
+            errors.append(f"{prefix} has no exact fleet_assignment projection")
+            attempts_valid = False
+            continue
+        if assignment.get("phase") not in FLEET_SPECS:
+            errors.append(f"{prefix} fleet_assignment phase is invalid")
+            attempts_valid = False
+        if not nonempty_string(assignment.get("assignment_id")):
+            errors.append(f"{prefix} fleet_assignment assignment_id is invalid")
+            attempts_valid = False
+        phase_spec = FLEET_SPECS.get(assignment.get("phase"))
+        if phase_spec and assignment.get("agent_type") != phase_spec[0]:
+            errors.append(f"{prefix} fleet_assignment agent_type is invalid")
+            attempts_valid = False
+        if not nonempty_string(assignment.get("evidence")):
+            errors.append(f"{prefix} fleet_assignment evidence is invalid")
+            attempts_valid = False
+        effort = assignment.get("model_reasoning_effort")
+        if not nonempty_string(effort):
+            errors.append(f"{prefix} fleet_assignment effort is invalid")
+            attempts_valid = False
+        if assignment.get("phase") == "build" and effort != "high":
+            errors.append(f"{prefix} Build effort is not exactly high")
+            attempts_valid = False
+        if nonempty_string(attempt_id):
+            projections[attempt_id] = assignment
+
+        semantic = {key: value for key, value in attempt.items() if key != "attempt_digest"}
+        if attempt.get("attempt_digest") != canonical_digest(semantic):
+            errors.append(f"{prefix} digest does not match canonical attempt content")
+            attempts_valid = False
+
+    if attempts_valid and attempts != sorted(
+        attempts, key=lambda attempt: (attempt["ordinal"], attempt["attempt_id"])
+    ):
+        errors.append("fleet ledger attempts are not in canonical order")
+        attempts_valid = False
+
+    if manifest != sanitized(manifest) or attempts != sanitized(attempts):
+        errors.append("fleet ledger contains unredacted secret fields")
+
+    if ledger.get("manifest_digest") != canonical_digest(manifest):
+        errors.append("fleet ledger manifest digest mismatch")
+    if ledger.get("attempts_digest") != canonical_digest(attempts):
+        errors.append("fleet ledger attempts digest mismatch")
+    if attempts_valid:
+        expected_summary = benchmark_summary(attempts)
+        if ledger.get("summary") != expected_summary:
+            errors.append("fleet ledger summary does not account for every attempt and cost state")
+        if ledger.get("summary_digest") != canonical_digest(ledger.get("summary")):
+            errors.append("fleet ledger summary digest mismatch")
+    elif not isinstance(ledger.get("summary"), dict):
+        errors.append("fleet ledger summary is not an object")
+    base = {key: value for key, value in ledger.items() if key != "ledger_digest"}
+    if ledger.get("ledger_digest") != canonical_digest(base):
+        errors.append("fleet ledger digest mismatch")
+
+    if not attempts_valid:
+        return errors
+
+    attempts_by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+    replaced_by: dict[str, str] = {}
+    for attempt in attempts:
+        replacement_id = attempt["replaces_attempt_id"]
+        if replacement_id is None:
+            continue
+        predecessor = attempts_by_id.get(replacement_id)
+        if predecessor is None or predecessor["ordinal"] >= attempt["ordinal"]:
+            errors.append(f"fleet ledger replacement ancestry is invalid for {attempt['attempt_id']!r}")
+            continue
+        if replacement_id in replaced_by:
+            errors.append(f"fleet ledger replacement ancestry forks at {replacement_id!r}")
+        else:
+            replaced_by[replacement_id] = attempt["attempt_id"]
+        predecessor_assignment = projections[replacement_id]
+        assignment = projections[attempt["attempt_id"]]
+        stable_keys = ("phase", "assignment_id", "agent_type", "model_reasoning_effort")
+        if any(predecessor_assignment[key] != assignment[key] for key in stable_keys):
+            errors.append(f"fleet ledger replacement changes assignment identity for {attempt['attempt_id']!r}")
+
+    projection = paper_fleet(paper) or {}
+    leaves = [attempt for attempt in attempts if attempt["attempt_id"] not in replaced_by]
+    for fleet_phase in FLEET_SPECS:
+        record = projection.get(fleet_phase)
+        if not isinstance(record, dict):
+            continue
+        phase_attempts = [
+            attempt
+            for attempt in attempts
+            if projections[attempt["attempt_id"]]["phase"] == fleet_phase
+        ]
+        terminal = [
+            attempt
+            for attempt in leaves
+            if projections[attempt["attempt_id"]]["phase"] == fleet_phase
+            and attempt["status"] == "completed"
+        ]
+        terminal_rows = [
+            (
+                projections[attempt["attempt_id"]]["assignment_id"],
+                projections[attempt["attempt_id"]]["agent_type"],
+                projections[attempt["attempt_id"]]["evidence"],
+            )
+            for attempt in terminal
+        ]
+        paper_rows = [
+            (assignment.get("id"), assignment.get("agent_type"), assignment.get("evidence"))
+            for assignment in record.get("assignments", [])
+            if isinstance(assignment, dict)
+            and assignment.get("status") == "completed"
+            and nonempty_string(assignment.get("id"))
+            and nonempty_string(assignment.get("agent_type"))
+            and nonempty_string(assignment.get("evidence"))
+        ]
+        terminal_ids = [row[0] for row in terminal_rows]
+        if len(set(terminal_ids)) != len(terminal_ids):
+            errors.append(f"fleet ledger {fleet_phase} has duplicate terminal assignment ids")
+        if sorted(terminal_rows) != sorted(paper_rows):
+            errors.append(
+                f"fleet ledger {fleet_phase} terminal completions do not match the Paper projection"
+            )
+        if record.get("completed") != len(terminal_rows):
+            errors.append(f"fleet ledger {fleet_phase} completed count does not reconcile")
+        started = len(
+            {
+                projections[attempt["attempt_id"]]["assignment_id"]
+                for attempt in phase_attempts
+            }
+        )
+        if record.get("started") != started:
+            errors.append(f"fleet ledger {fleet_phase} started count does not reconcile")
+        failed = sum(attempt["status"] != "completed" for attempt in phase_attempts)
+        if record.get("failed") != failed:
+            errors.append(f"fleet ledger {fleet_phase} failed attempt count does not reconcile")
+    return errors
 
 
 def iso_timestamp(value: Any) -> bool:
@@ -312,6 +739,17 @@ def validate(args: argparse.Namespace) -> list[str]:
         if not any(required in heading for heading in headings):
             errors.append(f"paper is missing required {args.phase} heading: {required}")
     errors.extend(validate_fleet(paper, args.phase, args.require_debrief))
+    if args.phase in {"build", "review"}:
+        ledger_path = getattr(args, "fleet_ledger_json", None)
+        if ledger_path is None:
+            errors.append("build/review preflight requires --fleet-ledger-json")
+        else:
+            try:
+                ledger = load_canonical_ledger(ledger_path)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+                errors.append(f"fleet ledger export is invalid: {error}")
+            else:
+                errors.extend(validate_ledger(ledger, paper, fields.get("parent_id"), paper_id))
     if args.require_debrief and not any("debrief" in heading for heading in headings):
         errors.append("paper is missing required post-review heading: debrief")
     if args.phase == "strategize" and not args.wish_file:
@@ -342,6 +780,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--worker", required=True)
     result.add_argument("--phase", choices=PHASE_HEADINGS, default="build")
     result.add_argument("--require-debrief", action="store_true")
+    result.add_argument("--fleet-ledger-json", type=Path)
     result.add_argument("--wish-file", type=Path)
     result.add_argument("--pr-body", type=Path)
     return result
@@ -358,7 +797,7 @@ def main() -> int:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    print("PASS: Epic Cycle Task, Paper, and PR evidence satisfy the preflight contract")
+    print("PASS: Epic Cycle Task, Paper, fleet ledger, and PR evidence satisfy the preflight contract")
     return 0
 
 
