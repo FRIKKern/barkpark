@@ -1326,6 +1326,14 @@ select.form-input {
 .site-inst { color: var(--text); font-weight: 500; }
 .site-row[data-id] { cursor: pointer; }
 .site-row[data-id]:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 2px var(--ring-soft); }
+/* "Visit ↗" live-site link — sits among the row/detail badges. In a list row it
+   is a quiet text link (it must not shout over the drill-in affordance); in the
+   detail head it also appears as a ghost button. Both stopPropagation so a click
+   opens the live site instead of drilling into the detail view. */
+.site-open { font-size: 12px; color: var(--muted-text); text-decoration: none; white-space: nowrap; padding: 2px 6px; border-radius: var(--radius-sm); }
+.site-open:hover { color: var(--text); text-decoration: underline; }
+.site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
+a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* ===================================================== DEPLOYMENTS */
 .deploys { display: flex; flex-direction: column; gap: 8px; }
