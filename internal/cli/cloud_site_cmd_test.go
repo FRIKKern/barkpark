@@ -229,6 +229,130 @@ func TestRunCloudSiteCreateDocTypeOmitted(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteCreateNode is the D62 node-slot surface proof: `--kind node
+// --framework nextjs` threads kind=node + framework=nextjs to the wire, and the
+// created-site verdict narrates the node-slot SSR runtime (a long-running process
+// on a slot port) rather than the static astro-flagship note.
+func TestRunCloudSiteCreateNode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "app", "--dataset", "acme/app/production", "--instance", testInstanceID, "--kind", "node", "--framework", "nextjs")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The wire carried the node discriminators, Bearer-authed.
+	var got struct {
+		Kind, Framework string
+	}
+	if err := json.Unmarshal(cp.createBody, &got); err != nil {
+		t.Fatalf("decode create body: %v (raw %s)", err, cp.createBody)
+	}
+	if got.Kind != "node" || got.Framework != "nextjs" {
+		t.Fatalf("create body kind/framework wrong: %+v (raw %s)", got, cp.createBody)
+	}
+	// The verdict narrates the node-slot runtime, not the astro flagship note.
+	if !strings.Contains(stdout, "node") || !strings.Contains(stdout, "SSR process") {
+		t.Fatalf("node create should narrate the node-slot SSR runtime:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "astro is the flagship") {
+		t.Fatalf("a node site must not print the static astro-flagship note:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteStatusNodeFields is the json.Unmarshal-drops-unknown-keys proof:
+// the server returns runtime_target / port / port_base on a node site, and both the
+// human status header and `-o json` must SURFACE them (they were invisible until
+// SpawnSite + spawnSiteMap threaded the fields).
+func TestRunCloudSiteStatusNodeFields(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","runtime_target":"node-slot","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The human header surfaces the node runtime + the live slot port.
+	if !strings.Contains(stdout, "node-slot") || !strings.Contains(stdout, "4301") {
+		t.Fatalf("node status header must show runtime + port:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Site struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+			PortBase      int    `json:"port_base"`
+		} `json:"site"`
+		Deployment struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Site.RuntimeTarget != "node-slot" || env.Site.Port != 4301 || env.Site.PortBase != 4300 {
+		t.Fatalf("status -o json dropped the node site fields: %+v\n%s", env.Site, jstdout)
+	}
+	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
+		t.Fatalf("status -o json dropped the node deployment fields: %+v\n%s", env.Deployment, jstdout)
+	}
+}
+
+// TestRunCloudSiteRollbackNode is the mechanism-branch proof (D62): a node
+// rollback envelope carries runtime_target="node-slot", so the narration must name
+// the Caddy upstream port-flip to the warm previous slot — NOT the atomic symlink
+// swap, which is false for a node site.
+func TestRunCloudSiteRollbackNode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, `{"ok":true,"status":"rolled_back","deployment_id":"dep-prev","previous_deployment_id":"dep-1","runtime_target":"node-slot","port":4300,"url":"https://acme.barkpark.cloud/sites/app/"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Caddy upstream") || !strings.Contains(stdout, "warm") {
+		t.Fatalf("node rollback must narrate the Caddy upstream port-flip:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "atomic symlink") {
+		t.Fatalf("a node rollback must NOT claim an atomic symlink swap:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployNodeJSON proves the deploy stream's `-o json` surfaces the
+// node runtime_target/port the server stamped on the deployment — they would be
+// silently dropped without SiteDeployment carrying the fields.
+func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","runtime_target":"node-slot","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
+		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
+		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	var env struct {
+		Deployment struct {
+			RuntimeTarget string `json:"runtime_target"`
+			Port          int    `json:"port"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, stdout)
+	}
+	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
+		t.Fatalf("deploy -o json dropped the node fields: %+v\n%s", env.Deployment, stdout)
+	}
+}
+
 func TestRunCloudSiteCreateUsage(t *testing.T) {
 	withTempConfigHome(t)
 	// missing --name / --dataset are usage errors BEFORE any network call.

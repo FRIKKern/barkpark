@@ -7,7 +7,7 @@ package cli
 // (spawnable first); Next.js, TanStack Start, Hugo and others ride the same engine
 // on the roadmap.
 //
-//	bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]
+//	bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node]
 //	bp cloud site deploy    <site> [--no-follow]   (alias: build)
 //	bp cloud site rollback  <site>
 //	bp cloud site status    <site>
@@ -22,10 +22,13 @@ package cli
 //     blue/green CODE-slot flip of a whole Barkpark box);
 //   - the top-level `bp sites` / `bp deploy` operate on the CONTAINER model (a
 //     long-running app image);
-//   - `bp cloud site …` operates on a SPAWNED static site — its deploy walks the
-//     six visible stages PLAN → BUILD → STAGE → HEALTH → SWITCH → RETIRE,
-//     health-gated so a broken build never reaches visitors, and its rollback is
-//     the sub-second symlink flip to the previous good build.
+//   - `bp cloud site …` operates on a SPAWNED site — its deploy walks the six
+//     visible stages PLAN → BUILD → STAGE → HEALTH → SWITCH → RETIRE, health-gated
+//     so a broken build never reaches visitors. One state machine drives TWO
+//     runtime targets (charter D62): a static site (Astro) whose rollback is a
+//     sub-second symlink flip, and a node site (`--kind node`, Next.js first) that
+//     runs a long-running SSR process on a per-slot port and whose SWITCH/rollback
+//     is a Caddy reverse_proxy upstream flip to the warm previous node slot.
 //
 // Like every control-plane verb it NEVER writes bp config: it resolves the site
 // by name/id via the fleet list and the Cloud session token, exactly like
@@ -132,7 +135,7 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // Astro/static are the defaults; --instance has no default because there is no
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static] [--doc-type <type>]"
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>]"
 	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -206,8 +209,20 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if u := spawnSiteURL(site); u != "" {
 		out.outf("  url:     %s (live after the first deploy)", u)
 	}
-	if framework != "astro" {
-		out.outf("  note:    astro is the flagship framework; %q rides the same engine on the roadmap and may not build yet", framework)
+	// Runtime-target note: a node site runs a long-running SSR process on its own
+	// slot port (health-gated, Caddy-fronted); the flagship container framework is
+	// Next.js, the rest ride the same node-slot engine on the roadmap. A static site
+	// keeps the Astro-is-flagship note. Both are measured — neither over-promises a
+	// build that may not land yet.
+	effFramework := siteOr(site.Framework, framework)
+	switch {
+	case siteIsNode(siteOr(site.Kind, kind), site.RuntimeTarget):
+		out.outf("  runtime: %s — a long-running node SSR process on its own slot port, health-gated behind Caddy", hzCell(siteOr(site.RuntimeTarget, cloudclient.RuntimeTargetNode)))
+		if effFramework != "nextjs" {
+			out.outf("  note:    nextjs is the flagship container framework; %q rides the same node-slot engine on the roadmap and may not build yet", effFramework)
+		}
+	case effFramework != "astro":
+		out.outf("  note:    astro is the flagship static framework; %q rides the same engine on the roadmap and may not build yet", effFramework)
 	}
 	out.outf("  deploy it with `bp cloud site deploy %s`", ref)
 	return exitOK
@@ -445,11 +460,45 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	if prev := strings.TrimSpace(res.PreviousDeploymentID); prev != "" {
 		out.outf("  was: %s", sanitizeCell(prev))
 	}
-	out.outf("  the flip is an atomic symlink swap (sub-second) — a broken build never reached visitors, and this reverses it instantly.")
+	out.outf("  %s", siteRollbackMechanismLine(res.RuntimeTarget))
 	if u := strings.TrimSpace(res.URL); u != "" {
 		out.outf("  url: %s", sanitizeCell(u))
 	}
 	return exitOK
+}
+
+// siteRollbackMechanismLine is the one-line explanation of HOW the rollback flipped,
+// branched by runtime target (charter D62). The two runtime targets undo a bad
+// build by DIFFERENT mechanisms, and the copy must not lie about which:
+//
+//   - static: an atomic symlink swap — the previous `dist/` symlink is re-pointed,
+//     a broken build never reached a visitor and this reverses it instantly.
+//   - node:   a Caddy reverse_proxy upstream flip back to the warm previous node
+//     slot — a node process that failed its health probe never took the upstream,
+//     so the flip back is sub-second and nothing cold-starts.
+//
+// The signal is the envelope's runtime_target (the rollback path never fetches the
+// site row); an empty / static target falls back to the symlink copy the CLI has
+// always printed — it never claims a node mechanism it wasn't told about.
+func siteRollbackMechanismLine(runtimeTarget string) string {
+	if cloudclient.RuntimeTargetIsNode(runtimeTarget) {
+		return "the flip re-points the Caddy upstream to the previous warm node slot (<1s) — a node process that failed its health probe never took the upstream, and this reverses it instantly."
+	}
+	return "the flip is an atomic symlink swap (sub-second) — a broken build never reached visitors, and this reverses it instantly."
+}
+
+// siteIsNode reports whether a spawned site runs on the node-slot SSR runtime
+// target (charter D62) — the container-framework path (Next.js/Nuxt/SvelteKit).
+// The truth is the server's runtime_target when present; absent that, the `kind`
+// discriminator ("node" is the user-facing verb, "container" the server enum) is
+// the fallback so a node site still renders as node before its first deploy has
+// stamped a runtime_target.
+func siteIsNode(kind, runtimeTarget string) bool {
+	if cloudclient.RuntimeTargetIsNode(runtimeTarget) {
+		return true
+	}
+	k := strings.ToLower(strings.TrimSpace(kind))
+	return k == "node" || k == "container"
 }
 
 // runCloudSiteStatus is `bp cloud site status <site>` — the current deployment +
@@ -689,6 +738,18 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 	if s.Instance != "" {
 		m["instance"] = s.Instance
 	}
+	// Node-slot fields (charter D62): surfaced ONLY when the server sent them, so a
+	// static site's JSON is byte-identical to before. These are the fields Go's
+	// json.Unmarshal would silently drop if SpawnSite didn't declare them.
+	if s.RuntimeTarget != "" {
+		m["runtime_target"] = s.RuntimeTarget
+	}
+	if s.Port != 0 {
+		m["port"] = s.Port
+	}
+	if s.PortBase != 0 {
+		m["port_base"] = s.PortBase
+	}
 	if s.CurrentDeploymentID != "" {
 		m["current_deployment_id"] = s.CurrentDeploymentID
 	}
@@ -703,6 +764,16 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment
 		"kind":      hzCell(s.Kind),
 		"framework": hzCell(s.Framework),
 		"dataset":   siteDatasetLabel(s, "", "", ""),
+	}
+	// Runtime target + slot port (charter D62): a node site advertises the node-slot
+	// SSR runtime and the port its live process is bound to, so a user reading
+	// `status` sees it runs a process, not files. Shown for node sites only — a
+	// static site's status header is unchanged.
+	if siteIsNode(s.Kind, s.RuntimeTarget) {
+		m["runtime"] = hzCell(siteOr(s.RuntimeTarget, cloudclient.RuntimeTargetNode))
+		if s.Port != 0 {
+			m["port"] = fmt.Sprintf("%d", s.Port)
+		}
 	}
 	if u := spawnSiteURL(s); u != "" {
 		m["url"] = u
@@ -761,6 +832,15 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.Trigger != "" {
 		m["trigger"] = d.Trigger
 	}
+	// Node-slot deployment fields (charter D62): the runtime target it ran on and
+	// the slot port its process bound — omitted for a static deployment so the JSON
+	// stays byte-identical there.
+	if d.RuntimeTarget != "" {
+		m["runtime_target"] = d.RuntimeTarget
+	}
+	if d.Port != 0 {
+		m["port"] = d.Port
+	}
 	if d.FailureReason != "" {
 		m["failure_reason"] = d.FailureReason
 	}
@@ -772,7 +852,7 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
-  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static] [--doc-type <type>]
+  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>]
   bp cloud site deploy    <site> [--no-follow] [--force]      (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
@@ -781,21 +861,26 @@ USAGE
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
 
+  --kind static (default) builds a dist/ tree served as files (Astro). --kind node
+  runs a container framework (Next.js first, then nuxt/sveltekit) as a long-running
+  SSR process on its own slot port, health-gated behind Caddy.
   --doc-type binds the content type the build reads (default 'post'); pass it
   when your dataset serves another type (e.g. 'paper').
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
 
 WHAT IT DOES
-  Spawns a static site (Astro is the flagship; Next.js, TanStack Start, Hugo and
-  others ride the same engine on the roadmap) that reads your Barkpark content
-  over the internal link and serves from the co-located instance's own Caddy +
-  blue/green + webhook machinery. Publish-to-live keeps it fresh as content
-  changes.
+  Spawns a site that reads your Barkpark content over the internal link and serves
+  from the co-located instance's own Caddy + blue/green + webhook machinery.
+  Publish-to-live keeps it fresh as content changes. ONE deploy state machine
+  drives TWO runtime targets: static (Astro — the flagship; Hugo and other static
+  frameworks on the roadmap) and node-slot SSR (Next.js — the flagship container
+  framework; nuxt/sveltekit on the roadmap).
 
   deploy streams the SIX visible stages — PLAN → BUILD → STAGE → HEALTH →
   SWITCH → RETIRE — health-gated so a broken build never reaches visitors.
-  rollback is the sub-second symlink flip to the previous good build.
+  rollback is a sub-second flip to the previous good build: an atomic symlink swap
+  for a static site, a Caddy upstream port-flip to the warm previous slot for node.
 
   <site> is a site name or id; needs 'bp login'.
 
