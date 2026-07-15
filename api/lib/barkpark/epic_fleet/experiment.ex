@@ -1,5 +1,5 @@
 defmodule Barkpark.EpicFleet.Experiment do
-  @moduledoc """Append-only manifest for one Epic or Legendary benchmark experiment."""
+  @moduledoc "Append-only manifest for one Epic or Legendary benchmark experiment."
 
   use Ecto.Schema
   import Ecto.Changeset

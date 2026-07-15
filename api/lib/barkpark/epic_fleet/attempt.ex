@@ -1,5 +1,5 @@
 defmodule Barkpark.EpicFleet.Attempt do
-  @moduledoc """Append-only execution attempt with typed benchmark cost observations."""
+  @moduledoc "Append-only execution attempt with typed benchmark cost observations."
 
   use Ecto.Schema
   import Ecto.Changeset
