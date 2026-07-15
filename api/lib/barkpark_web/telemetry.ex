@@ -94,6 +94,22 @@ defmodule BarkparkWeb.Telemetry do
         description:
           "Batch-mutate (apply_mutations) latency — p95 via histogram_quantile; tag :workspace_id."
       ),
+      # Q: "what is p95 of a search?" — the READ path (QueryPipeline.search/4, the
+      # single choke point every documents+media search funnels through) had ZERO
+      # timing: it computed `ms` locally for the response body but fired no
+      # telemetry (the only search event, [:barkpark, :search, :intel, :record],
+      # is a WRITE with no workspace_id). `:telemetry.span` emits
+      # [:barkpark, :search, :query, :stop] with :duration; this histogram makes
+      # p95 derivable. `:workspace_id` tags per-workspace search volume/latency
+      # (perfect-plan-build W7); unscoped/anonymous reads carry the "global"
+      # sentinel, mirroring the content.mutate distribution above (D12).
+      distribution("barkpark.search.query.stop.duration",
+        tags: [:workspace_id],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "Search read-path (QueryPipeline.search) latency — p95 via histogram_quantile; tag :workspace_id."
+      ),
       # Q: "what is p95 of a publish?" — the publish/lifecycle hot path had ZERO
       # timing. One span [:barkpark, :content, :lifecycle, :stop] covers all four
       # ops; the :op tag selects publish (or unpublish/discard_draft/delete);
