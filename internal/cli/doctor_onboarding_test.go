@@ -13,6 +13,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -437,6 +438,54 @@ func TestWhoamiInstanceReadsServerEntryIdentity(t *testing.T) {
 	}
 	if inst.URL != custom {
 		t.Fatalf("instance URL = %q, want %q", inst.URL, custom)
+	}
+}
+
+// TestOnboardingInstancePrefersLocalOffline is the D15 offline win: when the
+// active target's saved ServerEntry carries the stamped InstanceID (wave-2
+// slice-1), onboardingInstance resolves the identity from local config ALONE
+// (Source "local") and NEVER reaches the cross-team fleet — so the doctor receipt
+// names the instance offline, round-trip-free. A Cloud token is deliberately
+// present so the fleet branch WOULD fire if local-first were broken; the
+// fail-if-called fake is the tripwire proving it does not.
+func TestOnboardingInstancePrefersLocalOffline(t *testing.T) {
+	const server = "https://gyldendal.barkpark.cloud"
+	const alias = "https://cms.gyldendal.no"
+
+	cfg := &Config{
+		Server:     server,
+		CloudToken: onbCloudSecret, // HasCloudToken() → true: the fleet branch is armed
+		CloudTeam:  "active-team",
+		KnownServers: []ServerEntry{
+			{Server: server, InstanceID: "inst-gyld", Aliases: []string{alias}, Team: "Gyldendal"},
+		},
+	}
+
+	fleetCalls := 0
+	t.Cleanup(swapVar(&onboardingListFleet, func(c *Config) ([]cloudclient.Barkpark, error) {
+		fleetCalls++
+		t.Errorf("onboardingListFleet was called — local-first must skip the fleet when a stamped InstanceID exists")
+		return nil, errors.New("fleet must not be reached on the offline path")
+	}))
+
+	inst := onboardingInstance(cfg, manifest.Context{Server: server})
+	if inst == nil {
+		t.Fatal("onboardingInstance returned nil for an active target carrying a stamped identity")
+	}
+	if inst.Source != "local" {
+		t.Fatalf("instance source = %q, want \"local\" (resolved without a fleet round-trip)", inst.Source)
+	}
+	if inst.ID != "inst-gyld" {
+		t.Fatalf("instance ID = %q, want the ServerEntry.InstanceID inst-gyld", inst.ID)
+	}
+	if len(inst.Aliases) != 1 || inst.Aliases[0] != alias {
+		t.Fatalf("instance aliases = %v, want the ServerEntry.Aliases [%s]", inst.Aliases, alias)
+	}
+	if inst.Team != "Gyldendal" {
+		t.Fatalf("instance team = %q, want the entry's owning team Gyldendal", inst.Team)
+	}
+	if fleetCalls != 0 {
+		t.Fatalf("fleet seam invoked %d time(s), want 0 — the offline path must not touch the network", fleetCalls)
 	}
 }
 
