@@ -267,7 +267,10 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       bp = barkpark_fixture(team)
       {:ok, deployed} = Registry.create_site(bp, %{name: "Deployed", slug: "deployed"})
       {:ok, _fresh} = Registry.create_site(bp, %{name: "Fresh", slug: "fresh"})
-      {:ok, _d} = Registry.create_deployment(deployed, %{git_ref: "main", trigger: "content-auto"})
+
+      {:ok, _d} =
+        Registry.create_deployment(deployed, %{git_ref: "main", trigger: "content-auto"})
+
       token = login_token(user)
 
       conn = call(:get, "/v1/sites", nil, token)
