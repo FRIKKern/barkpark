@@ -4744,17 +4744,21 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  site-spawner D22: the STATIC deployments the reaper requeued — rows that were
-  claimed at least once (`claim_epoch > 0`) and are back at `queued` because their
-  driver died with the control plane.
+  site-spawner D22 (+ search-template W6): the BOX-RELAY-DRIVEN deployments the
+  reaper requeued — rows that were claimed at least once (`claim_epoch > 0`) and
+  are back at `queued` because their driver died with the control plane (or the
+  box restarted mid-build under it).
 
-  Nothing else in the fleet claims a static row (`claim_next_deployment/1` is
-  kind-scoped to container), so without this the reaper's requeue would hand the
-  row to nobody and it would sit `queued` forever — an eternal spinner wearing the
-  reaper's own uniform. `Sites.Deploy.resume_orphaned/0` re-drives each.
+  Nothing else in the fleet claims these rows (`claim_next_deployment/1` is
+  kind-scoped to container — the off-box builder), so without this the reaper's
+  requeue would hand the row to nobody and it would sit `queued` forever — an
+  eternal spinner wearing the reaper's own uniform. Originally static-only;
+  live-caught twice in one evening that a NODE row strands identically (W7 made
+  node ride the same box relay), so the sweep now covers both box-driven kinds.
+  `Sites.Deploy.resume_orphaned/0` re-drives each.
 
-  Content-bound only: an UNBOUND static row is not an orphan, it is un-buildable,
-  and the sweep's static no-source pass terminates it with an honest reason.
+  Content-bound only: an UNBOUND row is not an orphan, it is un-buildable, and
+  the sweep's no-source pass terminates it with an honest reason.
   """
   @spec list_orphaned_static_deployments() :: [Deployment.t()]
   def list_orphaned_static_deployments do
@@ -4762,7 +4766,7 @@ defmodule BarkparkCloud.Registry do
       join: s in Site,
       on: s.id == d.site_id,
       where:
-        d.status == "queued" and d.claim_epoch > 0 and s.kind == "static" and
+        d.status == "queued" and d.claim_epoch > 0 and s.kind in ["static", "node"] and
           not is_nil(s.bootstrap_dataset),
       order_by: [asc: d.inserted_at]
     )
