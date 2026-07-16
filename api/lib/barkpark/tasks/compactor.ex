@@ -463,6 +463,25 @@ defmodule Barkpark.Tasks.Compactor do
           | {:error, :not_found | :revision_not_found | :not_a_compaction_snapshot | :stale_claim}
   def restore(doc_id, snapshot_revision_id)
       when is_binary(doc_id) and is_binary(snapshot_revision_id) do
+    # Guard the :binary_id casts — a raw non-UUID id (e.g. from a future
+    # restore endpoint's path/body params) would otherwise raise
+    # Ecto.Query.CastError -> 500 inside Repo.get/2. A malformed id can't
+    # identify any row, so fold it into the existing not_found branches
+    # (mirrors Barkpark.Sharing.Links.revoke/1).
+    with {:ok, uuid} <- cast_uuid(doc_id, :not_found),
+         {:ok, rev_uuid} <- cast_uuid(snapshot_revision_id, :revision_not_found) do
+      do_restore(uuid, rev_uuid)
+    end
+  end
+
+  defp cast_uuid(id, error_reason) do
+    case Repo.uuid_or_nil(id) do
+      nil -> {:error, error_reason}
+      uuid -> {:ok, uuid}
+    end
+  end
+
+  defp do_restore(doc_id, snapshot_revision_id) do
     result =
       Repo.transaction(fn ->
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])

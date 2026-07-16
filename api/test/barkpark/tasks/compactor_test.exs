@@ -490,6 +490,23 @@ defmodule Barkpark.Tasks.CompactorTest do
       assert {:error, :not_found} =
                Compactor.restore("00000000-0000-0000-0000-000000000000", snap.id)
     end
+
+    test "restore guards raw non-UUID ids instead of raising Ecto.Query.CastError",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_done_with_history!(uniq("rev-guard"), scope, 60)
+      _ = Compactor.compact()
+      [snap] = snapshot_revisions(task.doc_id)
+
+      # A non-UUID doc_id would raise Ecto.Query.CastError inside
+      # Repo.get(Document, ...) without the Repo.uuid_or_nil guard.
+      assert {:error, :not_found} = Compactor.restore("not-a-uuid", snap.id)
+
+      # A non-UUID snapshot_revision_id would raise the same way inside
+      # Repo.get(Revision, ...).
+      assert {:error, :revision_not_found} = Compactor.restore(task.id, "not-a-uuid")
+    end
   end
 
   # ─── (5) Advisory-lock concurrency ───────────────────────────────────────
