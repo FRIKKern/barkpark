@@ -48,12 +48,14 @@ type Agent struct {
 	ReportProbes ReportConfig
 }
 
-// httpClient returns the injected client or http.DefaultClient.
+// httpClient returns the injected client, or a Timeout-bearing fallback (30s)
+// so a hung control-plane connection can't freeze the report+poll loop with
+// no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (a *Agent) httpClient() *http.Client {
 	if a.HTTPClient != nil {
 		return a.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // runner returns the injected runner or the real ExecRunner.

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // --- A scripted control plane for the builder tests --------------------------
@@ -799,5 +800,51 @@ func TestBuildLogPathShape(t *testing.T) {
 	want := "/tmp/p2-logs/d-1234.log"
 	if have != want {
 		t.Errorf("filepath.Join gave %q, want %q", have, want)
+	}
+}
+
+// TestHTTPNilFallbackHasTimeout proves the nil-HTTPClient fallback is
+// Timeout-bearing (not http.DefaultClient, whose Timeout is 0 == no
+// deadline) — a hung control-plane connection must not freeze the
+// claim/transition loop forever with no crash and no log.
+func TestHTTPNilFallbackHasTimeout(t *testing.T) {
+	b := &Builder{}
+	c := b.http()
+	if c.Timeout == 0 {
+		t.Fatal("http() with nil HTTPClient has Timeout == 0, want a non-zero deadline")
+	}
+}
+
+// TestRunOnceTimesOutAgainstHangingServer proves a hung control-plane
+// connection surfaces as a timeout error from a single RunOnce iteration
+// rather than blocking forever. It injects a client with a short timeout
+// (rather than waiting out the real 30s fallback) against a server that
+// never writes a response, so the test itself stays fast.
+func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
+	const clientTimeout = 50 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/builder/claim", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * clientTimeout) // outlast the client's timeout, then respond
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		HTTPClient: &http.Client{Timeout: clientTimeout},
+	}
+
+	start := time.Now()
+	_, err := b.RunOnce(context.Background())
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("RunOnce returned nil against a hanging server, want a timeout error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("RunOnce took %s to return an error, want it to return promptly on client timeout", elapsed)
 	}
 }

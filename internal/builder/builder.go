@@ -380,11 +380,14 @@ func (b *Builder) resolveArtifact(url string) (string, error) {
 	}
 }
 
+// http returns the injected client, or a Timeout-bearing fallback (30s) so a
+// hung control-plane connection can't freeze the claim/transition loop with
+// no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (b *Builder) http() *http.Client {
 	if b.HTTPClient != nil {
 		return b.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (b *Builder) runner() CommandRunner {
