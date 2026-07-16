@@ -84,12 +84,23 @@
 #   CONTENT_REV        dataset revision read at build (baked as bp-content-rev).
 #   BARKPARK_CADDYFILE Caddyfile to arm/flip. Default /etc/caddy/Caddyfile
 #   BARKPARK_NODE_LINK stable node symlink. Default /usr/local/bin/barkpark-node
+#   BARKPARK_SITE_BASEPATH  set to 1 for a site whose framework BAKES a basePath
+#                      of `/sites/<slug>` at build (multi-route Next apps — the
+#                      search-starter — whose links/RSC fetches are root-absolute
+#                      and would 404 if the prefix were stripped; charter D6).
+#                      Two effects: Caddy arms a NON-stripping `handle` (keeps the
+#                      prefix the app expects) instead of the default stripping
+#                      `handle_path`, AND the HEALTH probe defaults to
+#                      `/sites/<slug>/` (the app serves there even on the raw port).
+#                      Default 0: a single-page next-starter sets no basePath and
+#                      keeps the stripping handle_path + root probe.
 #   BARKPARK_SITE_HEALTH_PATH  path to probe on the RAW node port (the probe hits
-#                      127.0.0.1:<port> directly, bypassing Caddy). Caddy arms the
-#                      route with `handle_path /sites/<slug>/*`, which STRIPS the
-#                      prefix, and the next-starter sets no basePath — so the node
-#                      process serves the marker page at ROOT. Default "/". Only a
-#                      framework configured with a basePath needs to override this.
+#                      127.0.0.1:<port> directly, bypassing Caddy). For a default
+#                      (non-basePath) site Caddy's `handle_path /sites/<slug>/*`
+#                      STRIPS the prefix and the app serves the marker page at
+#                      ROOT, so the default is "/"; a basePath site
+#                      (BARKPARK_SITE_BASEPATH=1) defaults to `/sites/<slug>/`.
+#                      Set explicitly to override either default.
 #   BARKPARK_HEALTH_HOST  live FQDN (for logging). Default guerrilla.barkpark.cloud
 set -uo pipefail
 
@@ -111,6 +122,11 @@ HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 HEALTH_FAIL_MARK=".bp-health-failed"
+# basePath mode (charter D6): a framework that bakes basePath=/sites/<slug> serves
+# EVERY route under that prefix, including on the raw node port — so Caddy must
+# NOT strip the prefix (arm a `handle`, not `handle_path`) and the health probe
+# hits the sub-path. Default OFF (the single-page next-starter sets no basePath).
+SITE_BASEPATH="${BARKPARK_SITE_BASEPATH:-0}"
 # The runtime env the SSR slot process needs (it fetches content per request).
 # The per-site read token rides here, so slot env files are written 0600.
 RUNTIME_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
@@ -243,14 +259,20 @@ arm_caddy_node_route() { # <port>
   # name is always valid (a slug hyphen is legal in a name but we normalise).
   local mname
   mname="bare_$(printf '%s' "$SITE_SLUG" | tr -cd 'A-Za-z0-9')"
+  # basePath sites need a NON-stripping `handle` — Caddy keeps the /sites/<slug>
+  # prefix the app's baked basePath expects on every route (charter D6). The
+  # default single-page site uses the stripping `handle_path` (the app serves at
+  # root). Set ONCE at arm time; a later port flip only rewrites reverse_proxy.
+  local route_handle="handle_path"
+  [ "$SITE_BASEPATH" = 1 ] && route_handle="handle"
   local block; block="$(cat <<SITEROUTE
 	# $marker — node SSR site '$SITE_SLUG', reverse-proxied to its active slot.
-	# The bare path (no trailing slash) does NOT match handle_path, so redirect it
+	# The bare path (no trailing slash) does NOT match the handle, so redirect it
 	# to the canonical slashed form via an EXACT 'path' matcher (never a prefix, so
-	# it can never swallow the asset requests handle_path serves).
+	# it can never swallow the asset requests the handle serves).
 	@$mname path /sites/$SITE_SLUG
 	redir @$mname /sites/$SITE_SLUG/ 308
-	handle_path /sites/$SITE_SLUG/* {
+	$route_handle /sites/$SITE_SLUG/* {
 		reverse_proxy localhost:$port
 	}
 SITEROUTE
@@ -296,12 +318,19 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
   port="$(slot_port "$slot")"; inst="$(slot_inst "$slot")"
-  # The probe hits the raw node port directly (below), bypassing Caddy. Caddy's
-  # `handle_path /sites/<slug>/*` strips the prefix and the next-starter has no
-  # basePath, so the node process serves the marker page at ROOT — probe "/", not
-  # the public sub-path (that path only exists once Caddy has stripped it). A
-  # framework built with a basePath overrides BARKPARK_SITE_HEALTH_PATH.
-  path="${BARKPARK_SITE_HEALTH_PATH:-/}"
+  # The probe hits the raw node port directly (below), bypassing Caddy. For a
+  # default (non-basePath) site Caddy's `handle_path /sites/<slug>/*` strips the
+  # prefix and the app serves the marker page at ROOT — probe "/". A basePath
+  # site (SITE_BASEPATH=1) bakes basePath=/sites/<slug>, so the app serves there
+  # even on the raw port — probe the sub-path. BARKPARK_SITE_HEALTH_PATH overrides
+  # either default explicitly.
+  if [ -n "${BARKPARK_SITE_HEALTH_PATH:-}" ]; then
+    path="$BARKPARK_SITE_HEALTH_PATH"
+  elif [ "$SITE_BASEPATH" = 1 ]; then
+    path="/sites/$SITE_SLUG/"
+  else
+    path="/"
+  fi
   [ "${path#/}" = "$path" ] && path="/$path"
 
   if [ ! -f "$RELEASES/$bid/server.js" ]; then
@@ -469,6 +498,7 @@ if [ "$MODE" = selftest ]; then
   # Two free loopback ports for the two slots.
   free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
   T_PORT_A="$(free_port)"; T_PORT_B="$(free_port)"; T_PORT_C="$(free_port)"; T_PORT_D="$(free_port)"
+  T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -537,6 +567,14 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
 } > .next/standalone/index.html
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
+# basePath mode: an app built with basePath=/sites/<slug> serves its marker page
+# UNDER that prefix even on the raw node port — so also emit the index there, so
+# the real health_gate_node probing /sites/<slug>/ gets 200 + markers.
+if [ -f ./.basepath ] && [ -n "${BARKPARK_SITE_BASE:-}" ]; then
+  sub=".next/standalone${BARKPARK_SITE_BASE}"
+  mkdir -p "$sub"
+  cp .next/standalone/index.html "${sub}index.html"
+fi
 exit 0
 FAKENPM
   chmod +x "$FAKEBIN"/*
@@ -686,6 +724,31 @@ FAKENPM
   check "warm slot a env now RELEASE_DIR=w3"   grep -q "RELEASE_DIR=$TD/sites/warm/releases/w3" "$SENV/warm__a.env"
   check "the OTHER site's Caddy block was NOT touched by the warm deploys (D66 per-site isolation)" \
     [ "$(cf_port)" = "$sel_port_before" ]
+
+  echo "[selftest] e2e: a basePath site arms a NON-stripping 'handle' + health-probes the sub-path (D6)"
+  # BARKPARK_SITE_BASEPATH=1 + a .basepath sentinel (so the fake npm also emits the
+  # marker page under /sites/basepath/) — the health probe must default to the
+  # sub-path and Caddy must arm `handle` (keeps the prefix), not `handle_path`.
+  : > "$SRC/.basepath"
+  bp_deploy() { # <build_id>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG=basepath BUILD_ID="$1" CONTENT_REV=bp-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_E" SITE_PORT_B="$T_PORT_F" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/basepath.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_BASEPATH=1 BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+    # NB: BARKPARK_SITE_HEALTH_PATH is deliberately NOT set — the basePath DEFAULT
+    # (/sites/basepath/) is what a real basePath site relies on.
+  }
+  rc="$(bp_deploy bp1)"
+  rm -f "$SRC/.basepath"
+  check "basePath deploy exit 0"               [ "$rc" = 0 ]
+  check "basePath HEALTH ok (probed the sub-path)" saw HEALTH ok bp1
+  check "SWITCH ok"                            saw SWITCH ok bp1
+  check "armed a NON-stripping 'handle /sites/basepath/*'" \
+    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "did NOT arm a stripping handle_path for basepath" \
+    sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
   echo "[selftest] rollback preflight is read-only + typed"
   # Fresh site with no previous -> not_supported / no_previous.

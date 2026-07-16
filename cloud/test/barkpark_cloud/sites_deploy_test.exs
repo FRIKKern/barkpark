@@ -192,6 +192,9 @@ defmodule BarkparkCloud.SitesDeployTest do
       # charter D35: the content type the build's flagship fetch reads — the
       # canonical default "post" when the site was created without --doc-type.
       assert env[:BARKPARK_DOC_TYPE] == "post"
+      # search-template D7: the template-slug axis rides the payload, derived
+      # from framework (this site is astro → astro-starter).
+      assert payload.template == "astro-starter"
     end
 
     # charter D35 — DOC_TYPE end-to-end. A site created with `doc_type: "paper"`

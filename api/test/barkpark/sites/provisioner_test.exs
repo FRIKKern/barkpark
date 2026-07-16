@@ -43,10 +43,28 @@ defmodule Barkpark.Sites.ProvisionerTest do
     File.write!(Path.join(node_template, "package.json"), ~s({"name":"next-stub"}))
     File.write!(Path.join(node_template, "next.config.mjs"), "export default {}\n")
 
-    put_cfg(sites_dir: sites, template_dir: template, node_template_dir: node_template)
+    # A stand-in for templates/search-starter (search-template charter D7) — a
+    # THIRD distinct package.json name so a template=search-starter deploy provably
+    # lands THIS tree, never astro or next.
+    search_template = Path.join(base, "search-template")
+    File.mkdir_p!(Path.join(search_template, "app"))
+    File.write!(Path.join(search_template, "package.json"), ~s({"name":"search-stub"}))
+    File.write!(Path.join(search_template, "next.config.mjs"), "export default {basePath:'/x'}\n")
+
+    put_cfg(
+      sites_dir: sites,
+      template_dir: template,
+      node_template_dir: node_template,
+      search_template_dir: search_template
+    )
+
     on_exit(fn -> File.rm_rf(base) end)
 
-    {:ok, sites: sites, template: template, node_template: node_template}
+    {:ok,
+     sites: sites,
+     template: template,
+     node_template: node_template,
+     search_template: search_template}
   end
 
   defp put_cfg(overrides) do
@@ -68,6 +86,7 @@ defmodule Barkpark.Sites.ProvisionerTest do
         "mode" => Keyword.get(opts, :mode, "deploy")
       }
       |> maybe_put("runtime_target", Keyword.get(opts, :runtime_target))
+      |> maybe_put("template", Keyword.get(opts, :template))
 
     {:ok, req} = DeployRequest.new(params)
     req
@@ -232,6 +251,53 @@ defmodule Barkpark.Sites.ProvisionerTest do
                :ok
 
       assert File.read!(Path.join(src, "package.json")) == ~s({"name":"locally-edited-next"})
+    end
+  end
+
+  # ── template selection (search-template charter D7) ──────────────────────
+
+  describe "template selection" do
+    test "template=search-starter materializes the search-starter tree" do
+      assert Provisioner.provision(deploy("search-blog", template: "search-starter")) == :ok
+
+      src = Provisioner.src_dir("search-blog")
+      # The distinct package.json name proves the SEARCH tree landed — never astro
+      # or next.
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"search-stub"})
+      assert File.exists?(Path.join(src, "next.config.mjs"))
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+      refute File.exists?(src <> ".partial")
+    end
+
+    test "an explicit template OVERRIDES the runtime_target default" do
+      # runtime_target=node alone would pick next-starter; the explicit template
+      # wins and picks search-starter.
+      assert Provisioner.provision(
+               deploy("override", runtime_target: "node", template: "search-starter")
+             ) == :ok
+
+      src = Provisioner.src_dir("override")
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"search-stub"})
+    end
+
+    test "template=astro-starter selects astro; template=next-starter selects next" do
+      assert Provisioner.provision(deploy("t-astro", template: "astro-starter")) == :ok
+      assert File.read!(Path.join(Provisioner.src_dir("t-astro"), "package.json")) ==
+               ~s({"name":"astro-stub"})
+
+      assert Provisioner.provision(deploy("t-next", template: "next-starter")) == :ok
+      assert File.read!(Path.join(Provisioner.src_dir("t-next"), "package.json")) ==
+               ~s({"name":"next-stub"})
+    end
+
+    test "no template falls back to the runtime_target default — unchanged behavior" do
+      assert Provisioner.provision(deploy("fb-node", runtime_target: "node")) == :ok
+      assert File.read!(Path.join(Provisioner.src_dir("fb-node"), "package.json")) ==
+               ~s({"name":"next-stub"})
+
+      assert Provisioner.provision(deploy("fb-static")) == :ok
+      assert File.read!(Path.join(Provisioner.src_dir("fb-static"), "package.json")) ==
+               ~s({"name":"astro-stub"})
     end
   end
 
