@@ -245,7 +245,10 @@ check "connectors route proxies :4020, exactly one line" "[ \"\$(grep -c 'localh
 check "connectors matcher covers /connectors and its subtree" "grep -q '@barkpark_connectors path /connectors /connectors/\*' '$CADDY'"
 check "connectors handle sits before the bare slot proxy" "[ \"\$(grep -n 'handle @barkpark_connectors' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nE 'reverse_proxy localhost:400[01]' '$CADDY' | head -1 | cut -d: -f1)\" ]"
 check "flip sed left :4020 untouched"     "grep -q 'reverse_proxy localhost:4020' '$CADDY'"
-check "node resolved via asdf, symlinked" "[ \"\$(readlink '$TMP/barkpark-node')\" = '$TMP/home/.asdf/installs/nodejs/26.5.0/bin/node' ]"
+# COPY, not symlink (ProtectHome slots 203/EXEC on a /root symlink — the bug
+# this test used to ENSHRINE): assert a regular file, byte-equal to the
+# resolved node, and executable.
+check "node resolved via asdf, COPIED (not a symlink)" "[ ! -L '$TMP/barkpark-node' ] && [ -f '$TMP/barkpark-node' ] && cmp -s '$TMP/barkpark-node' '$TMP/home/.asdf/installs/nodejs/26.5.0/bin/node' && [ -x '$TMP/barkpark-node' ]"
 check "npm ci ran in the connectors dir"  "grep -q '^npm ci' '$SYSCTLLOG' && [ -f '$APP/connectors/node_modules/tsx/dist/cli.mjs' ]"
 check "connectors unit installed"         "grep -q 'barkpark-connectors.service /etc/systemd/system/barkpark-connectors.service' '$SYSCTLLOG'"
 check "connectors unit enabled + restarted" "grep -q 'systemctl enable barkpark-connectors' '$SYSCTLLOG' && grep -q 'systemctl restart barkpark-connectors' '$SYSCTLLOG'"
