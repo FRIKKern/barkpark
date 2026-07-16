@@ -55,7 +55,13 @@ export default defineConfig({
   // renderer chunk (what `server.mjs` re-exports the renderers from) stays
   // hook-free, and the client surface lands in its own `'use client'`-bannered
   // chunk. Guarded by `tests/rsc-chunk-hook-free.test.ts`.
-  entry: { index: 'src/index.ts', server: 'src/server.ts', image: 'src/Image.tsx' },
+  // `client` is the framework-free media-hydration entry (`hydratePortableDoc`).
+  // It shares NO code with the renderer (imports only the two `external`,
+  // dynamic-imported media libs), so it lands in a standalone `dist/client.*`
+  // and never perturbs the hook-free renderer chunk `server.mjs` re-exports —
+  // guarded by `tests/rsc-chunk-hook-free.test.ts` (chunk stays hook-free) and
+  // by the media-parity package's byte-identity md5 check on `server.mjs`.
+  entry: { index: 'src/index.ts', server: 'src/server.ts', image: 'src/Image.tsx', client: 'src/client.ts' },
   format: ['cjs', 'esm'],
   dts: true,
   sourcemap: true,
@@ -64,7 +70,17 @@ export default defineConfig({
   treeshake: true,
   target: 'es2022',
   outDir: 'dist',
-  external: ['react', 'react-dom', '@barkpark/core'],
+  // `mermaid` + `asciinema-player` (and its CSS asset) are dynamic-imported by
+  // `client.ts` and MUST stay external — they are the consuming app's peers, not
+  // bundled into `dist/client.mjs` (which would blow the size budget and force a
+  // version on the consumer). Guarded by `.size-limit.json`'s `ignore` list.
+  external: [
+    'react',
+    'react-dom',
+    '@barkpark/core',
+    'mermaid',
+    /^asciinema-player($|\/)/,
+  ],
   outExtension({ format }) {
     return {
       js: format === 'cjs' ? '.cjs' : '.mjs',
