@@ -482,7 +482,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   # this is an offline migration, not a live edit.
   defp persist(%Document{content: content} = doc, new_blocks) do
     style = get_in(content, ["style"])
-    render_opts = Labels.paper_render_opts(doc.dataset, style)
+    scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+    render_opts = Labels.paper_render_opts(doc.dataset, style, scope)
     body_html = Render.render_blocks(new_blocks, render_opts)
 
     new_content =
@@ -491,7 +492,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       |> Map.put("body_html", body_html)
       |> Map.put("body_html_sv", Render.body_html_render_version())
       |> Map.put("rev", next_content_rev(content))
-      |> Projection.project(new_blocks, Labels.render_opts(doc.dataset))
+      |> Projection.project(new_blocks, Labels.render_opts(doc.dataset, scope))
 
     title = title_block_text(new_blocks) || doc.title
 

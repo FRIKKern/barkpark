@@ -119,9 +119,17 @@ defmodule Barkpark.Content.Labels do
   # `field-reference` row shows the referenced doc's TITLE instead of the raw
   # id, and the `codelist` row shows the selected code's LABEL instead of the
   # raw code; everything else in `Render` stays pure.
-  def render_opts(dataset) do
+  def render_opts(dataset), do: render_opts(dataset, [])
+
+  @doc false
+  # Scope-aware twin used by every persisted block render. The legacy arity
+  # above intentionally remains explicit-global for callers whose data model is
+  # global; scoped Paper/document writers bind reference resolution to the row
+  # they are rendering so a same-id document in another tenant cannot leak into
+  # a cached HTML projection.
+  def render_opts(dataset, scope) when is_list(scope) do
     %{
-      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end,
+      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset, scope) end,
       codelist_resolver: fn plugin, codelist_id, code ->
         codelist_label(plugin, codelist_id, code)
       end
@@ -134,8 +142,13 @@ defmodule Barkpark.Content.Labels do
   # so an article paper's body_html cache (and delta fragments) come out in the
   # article palette. A nil / non-"article" style adds nothing → email default,
   # byte-unchanged from `render_opts/1`.
-  def paper_render_opts(dataset, "article"), do: Map.put(render_opts(dataset), :style, :article)
-  def paper_render_opts(dataset, _style), do: render_opts(dataset)
+  def paper_render_opts(dataset, style), do: paper_render_opts(dataset, style, [])
+
+  @doc false
+  def paper_render_opts(dataset, "article", scope),
+    do: Map.put(render_opts(dataset, scope), :style, :article)
+
+  def paper_render_opts(dataset, _style, scope), do: render_opts(dataset, scope)
 
   @doc false
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs

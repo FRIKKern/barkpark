@@ -143,13 +143,15 @@ defmodule Barkpark.Content.Papers.Proposals do
          {:ok, new_blocks} <- encrypt_blocks(normalized, dataset, draft.workspace_id) do
       rev = current_rev(draft) + 1
       style = get_in(draft.content || %{}, ["style"])
-      render_opts = Labels.paper_render_opts(dataset, style)
+      scope = [workspace_id: draft.workspace_id, project_id: draft.project_id]
+      render_opts = Labels.paper_render_opts(dataset, style, scope)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       content =
         (draft.content || %{})
         |> Map.put("blocks", new_blocks)
         |> Map.put("body_html", body_html)
+        |> Map.put("body_html_sv", Render.body_html_render_version())
         |> Map.put("rev", rev)
         |> Projection.project(blocks, new_blocks, render_opts)
         |> record_provenance(applied_ids, source)

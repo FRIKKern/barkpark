@@ -72,6 +72,51 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert body =~ "Hello Shared Paper"
       assert body =~ "scoped body"
     end
+
+    test "block-backed scoped reader ignores a stale current-version body_html cache", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      blocks = [
+        %{
+          "id" => "scoped-authority",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Scoped blocks are authoritative."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "shared-paper",
+            "dataset" => @dataset,
+            "blocks" => blocks,
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      stale_content =
+        paper.content
+        |> Map.put("body_html", "<p>STALE SCOPED CACHE</p>")
+        |> Map.put(
+          "body_html_sv",
+          Barkpark.PortableDoc.Render.body_html_render_version()
+        )
+
+      paper
+      |> Ecto.Changeset.change(content: stale_content)
+      |> Barkpark.Repo.update!()
+
+      conn = get(conn, paper_path(ws, project, "shared-paper"))
+      body = html_response(conn, 200)
+
+      assert body =~ "Scoped blocks are authoritative."
+      refute body =~ "STALE SCOPED CACHE"
+    end
   end
 
   describe "GET /w/:ws/p/:project/papers/:slug — (b) NO shares configured" do

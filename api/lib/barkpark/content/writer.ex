@@ -30,7 +30,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.Content.Papers.BlockOps
 
-  alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Synthesis}
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Preview
 
   # W7a step 1 — task documents carry a tight `content` field contract
@@ -166,6 +166,8 @@ defmodule Barkpark.Content.Writer do
               # BEFORE the changeset, so plaintext never reaches storage. A field
               # that cannot be sealed REJECTS the write (HIGH-3, fail closed).
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+
                 existing
                 |> Document.changeset(enc_attrs)
                 |> fenced_or_plain_update(existing, opts)
@@ -193,6 +195,8 @@ defmodule Barkpark.Content.Writer do
               # Encrypt AFTER scaffold/projection so the final projected field
               # values (the ciphertext-at-rest source of truth) are encrypted.
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+
                 %Document{}
                 |> Document.changeset(enc_attrs)
                 |> Repo.insert()
@@ -491,12 +495,47 @@ defmodule Barkpark.Content.Writer do
   # path is caller-supplied, not re-rendered — so it is never trusted). Every
   # non-paper type and any paper without a string body_html passes through
   # byte-identical.
-  defp maybe_sanitize_paper_body_html(%{"content" => %{"body_html" => html} = content} = attrs, "paper")
+  defp maybe_sanitize_paper_body_html(
+         %{"content" => %{"body_html" => html} = content} = attrs,
+         "paper"
+       )
        when is_binary(html) do
     Map.put(attrs, "content", Map.put(content, "body_html", HtmlSanitizer.sanitize(html)))
   end
 
   defp maybe_sanitize_paper_body_html(attrs, _type), do: attrs
+
+  # A block-backed Paper's PortableDoc blocks are the source of truth. The
+  # generic document writer used to sanitize but otherwise preserve a caller's
+  # body_html, so a patch could change blocks while retaining stale HTML and a
+  # still-current renderer stamp. Re-render AFTER field encryption/template
+  # normalization and immediately before the changeset, making blocks + cache +
+  # stamp one atomic row write. HTML-only legacy papers keep the sanitizer path.
+  defp maybe_render_paper_body_html(%{"content" => content} = attrs, "paper", dataset)
+       when is_map(content) do
+    case Projection.read_blocks(content) do
+      blocks when is_list(blocks) ->
+        scope = [
+          workspace_id: Map.get(attrs, "workspace_id"),
+          project_id: Map.get(attrs, "project_id")
+        ]
+
+        render_opts =
+          Labels.paper_render_opts(dataset, Map.get(content, "style"), scope)
+
+        content =
+          content
+          |> Map.put("body_html", Render.render_blocks(blocks, render_opts))
+          |> Map.put("body_html_sv", Render.body_html_render_version())
+
+        Map.put(attrs, "content", content)
+
+      nil ->
+        attrs
+    end
+  end
+
+  defp maybe_render_paper_body_html(attrs, _type, _dataset), do: attrs
 
   defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
@@ -531,6 +570,8 @@ defmodule Barkpark.Content.Writer do
               # Field-encryption chokepoint (mirror of create_document). Fail
               # closed: a marked field that cannot be sealed rejects the write.
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+
                 existing
                 |> Document.changeset(enc_attrs)
                 |> fenced_or_plain_update(existing, opts)
@@ -546,6 +587,8 @@ defmodule Barkpark.Content.Writer do
 
             _ ->
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+
                 %Document{}
                 |> Document.changeset(enc_attrs)
                 |> Repo.insert()
@@ -633,7 +676,7 @@ defmodule Barkpark.Content.Writer do
       %{media_resolver: Preview.media_resolver(scope), doc_type: type}
       |> maybe_put_preview_url(type, attrs)
 
-    Map.put(Labels.render_opts(dataset), :preview, preview)
+    Map.put(Labels.render_opts(dataset, scope), :preview, preview)
   end
 
   defp maybe_put_preview_url(preview, "paper", %{"doc_id" => doc_id}) when is_binary(doc_id) do
