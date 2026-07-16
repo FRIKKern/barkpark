@@ -190,10 +190,19 @@ defmodule BarkparkCloud.Web.Router do
   # falls through to the matchers below. A missing asset (e.g. no favicon.ico)
   # just falls through too. priv/ ships in the OTP release by default, so
   # `from: :barkpark_cloud` resolves the same in dev and prod.
+  # `no-cache` ≠ "don't cache": it means REVALIDATE every time — the browser
+  # keeps the bytes but must ask (If-None-Match), and Plug.Static answers 304
+  # off the etag when unchanged. Without this the SPA's unversioned app.js/
+  # app.css shipped bare `cache-control: public`, so browsers heuristically
+  # served STALE console UI after every deploy (live-caught: a whole deploy-UX
+  # wave was invisible to a returning operator until a hard refresh). Fonts are
+  # content-stable; they keep a long immutable lifetime instead.
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html fonts)
+    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html fonts),
+    headers: %{"cache-control" => "no-cache"},
+    cache_control_for_etags: "no-cache"
   )
 
   plug(:match)
