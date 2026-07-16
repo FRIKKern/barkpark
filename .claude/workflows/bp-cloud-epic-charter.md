@@ -162,3 +162,48 @@ Backlog (filed, published, NOT this wave):
   D62 provenance; both shapes are synthetic-only today).
 
 ## Wave log
+
+### Wave 1 — 2026-07-16 — grade A- (review complete)
+
+All five slices built AND review-hardened; every builder claimed within the same second, so the
+D16 spine ("after s1") was impossible and THREE independent `workflow_summary/1` implementations
+were born — the review's main work was collapsing them back to ONE truth table (D1). Lead merges
+the -r branches in this order (stacked, integration-proven conflict-free onto origin/main;
+Elixir PRs wait for the Elixir Test gate; `git branch` local — the -r branches are unpushed):
+
+1. **wsc-s1** → `loop-epic/wsc-s1-workflow-summary-1-pure-d3-shape--0` (8b13b51d0, UNCHANGED by
+   review — the canonical D3 fold + shared parity fixtures were right the first time; 150/0).
+2. **wsc-s2** → `loop-epic/wsc-s2-recorder-chat-workflow-change-onl-1-r` (fda0d1b93; contains
+   s1). Review dropped s2's bridge `workflow_summary/1` twin. {:chat_workflow} distinct-tuple
+   broadcast + end_time stamp ride unchanged; 215/0.
+3. **wsc-s3** → `loop-epic/wsc-s3-studio-sidebar-two-lines-phase-ti-2-r` (7280968a0; contains
+   s1+s2-r). Review fixed TWO integration-fatal defects: s3's summary twin had DIVERGED from
+   the pinned D3 shape (%{state,…} — no ticks/running/terminal?/outcome, read "endTime" where
+   s2 stamps "end_time"), and the {:chat_workflow} overlay read `ws.state` → guaranteed
+   KeyError on the first live ping. Now one canonical shape everywhere; the tick strip renders
+   straight off `summary.ticks` (a skipped Perfect phase reads honestly un-filled); the compact
+   wire pins the full canonical key set (`terminal?` serialises verbatim). Sidebar golden
+   UNCHANGED (regen byte-identical). 500/0. PR body must say "amends D14".
+4. **wsc-s4** → `loop-epic/wsc-s4-bp-chat-session-list-mirrors-the--3-r` (8e4e45e7c). Review
+   fixed the decode to the REAL wire: `terminal?` json tag, epoch-ms *int64 timestamps (the
+   string typing would have ERRORED the whole session-list decode on the first workflow row),
+   sibling `epic` key (the nested epic_goal could never decode), six-state tick vocabulary
+   (✕ for interrupted). Invented fixtures replaced by s1's shared workflow_summary.json —
+   mechanism-A parity now real.
+5. **wsc-s5** → `loop-epic/wsc-s5-below-composer-workflow-panel-str-4-r` (ed80a45be; contains
+   s4-r). Builder work was excellent (1:1 journey port, honest clocks, conditional geometry);
+   review only merged s4-r (import-list unions).
+
+Integration proof: s3-r + s5-r merged onto origin/main = zero conflicts; Go gate green; 563
+Elixir tests 0 failures across all five gate files. Known follow-ups: the epic-goal fold runs
+3 small queries per workflow row per refresh_sessions (memoize if fleets multiply); mid-turn
+TUI panel freshness stays turn-boundary (wsc-bl-workflow-sse); real interrupted/attempt>1
+captures (wsc-bl-real-fixtures). Ledger: honest — two evidence rows corrected with dated
+reviewer notes (s3 C1 wire shape, s4 C1 fixture parity), `review_note` stamped on all five.
+
+**Next wave takes:** (1) lead merge train + close the five merge-gate criteria + push this
+charter branch (PR #3826); (2) LIVE proof against a real running epic cycle — the epic-level
+exit gate no slice could run (disposable session, Studio card + bp chat panel side by side);
+(3) wsc-bl-workflow-sse for mid-turn liveness — the wish's "just like Claude Code" feel wants
+sub-turn updates; (4) then wsc-bl-real-fixtures / wsc-bl-busiest-child / wsc-bl-prs-open as
+data sources appear.
