@@ -44,6 +44,13 @@ bp cloud site create --template search-starter --barkpark <id> --kind node
 bp cloud site deploy <slug>
 ```
 
+> **Template selection is landing across this epic.** The deploy engine already
+> materializes `search-starter` (the `template` axis ships in Wave 1); the
+> `--template` flag on `bp cloud site create` and the dashboard picker are the
+> epic's next surface (Wave 2). Until then, bind the site with `--instance <id>`
+> (`bp cloud site create --name <name> --dataset <ws/proj/ds> --instance <id>
+> --kind node --framework nextjs`) and select the template on deploy.
+
 `create` registers the site (node runtime target) against your instance;
 `deploy` enqueues the build and **streams the six visible stages live**:
 
