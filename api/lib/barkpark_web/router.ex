@@ -1103,6 +1103,20 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :public_root)
   end
 
+  # ── Public finder (LiveView) — the flagship search, Phoenix-native ──────
+  # search-template W3: the same premium experience the Next/Astro starters
+  # ship, as pure LiveView — per-keystroke search round-trips into the same
+  # engine the search channel serves, the corpus graph inlines server-derived
+  # topology into the shared Canvas2D renderer. Same public pipeline + reader
+  # layout as the flat /papers reader it links into.
+  scope "/", BarkparkWeb do
+    pipe_through([:browser, :paper_reader_csp])
+
+    live_session :finder, root_layout: {BarkparkWeb.Layouts, :bulldocs} do
+      live("/finder", FinderLive, :index)
+    end
+  end
+
   # ── Plugin-contributed routes — ingest-token (`auth: :ingest`) ────────
   # For plugin CONTROLLER routes authenticated by the shared-secret ingest
   # token (`RequireIngestToken`) rather than an `api_tokens` bearer — e.g. the
