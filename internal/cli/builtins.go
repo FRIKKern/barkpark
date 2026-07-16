@@ -82,18 +82,8 @@ type metaResponse struct {
 	SchemaHashes  map[string]string `json:"currentDatasetSchemaHash"`
 }
 
-// whoamiSource classifies where ctx.Server was chosen from, for whoami's
-// "saved/default/env/flag" annotation. It mirrors resolveContext's precedence
-// (flags > env > saved config > baked default) WITHOUT touching that function —
-// it re-derives the winning layer by comparing the resolved server against each
-// candidate. active reports whether the resolved server is the saved config's
-// active server (only meaningful for "saved").
-func whoamiSource(g globals, ctx manifest.Context) (source string, active bool) {
-	s, a, _ := whoamiSourceName(g, ctx)
-	return s, a
-}
-
-// whoamiSourceName extends whoamiSource with the resolved server NAME: the
+// whoamiSourceName classifies where ctx.Server was chosen from, for whoami's
+// "saved/default/env/flag" annotation, plus the resolved server NAME: the
 // DisplayName of whichever known entry matches ctx.Server (by name or URL),
 // empty when no known entry matches (a raw -s URL or env var pointing somewhere
 // unsaved). The name is purely cosmetic — it never changes the source/active

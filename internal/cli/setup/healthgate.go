@@ -111,7 +111,9 @@ func (r HealthReport) Failures() []string {
 }
 
 // String renders the report as a human-scannable block: one line per check
-// with a PASS/FAIL marker and the detail, then a final roll-up line.
+// with a PASS/FAIL marker and the detail, then a final roll-up line. It is
+// used implicitly via fmt's Stringer interface by test %s/%v format verbs
+// (healthgate_test.go) — a live caller, so it stays.
 func (r HealthReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "health gate — %s\n", r.BaseURL)

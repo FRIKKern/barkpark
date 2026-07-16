@@ -180,13 +180,6 @@ type HetznerDNS struct {
 	Token string
 }
 
-// NewHetznerDNS returns a HetznerDNS for the given zone id, wired to the live
-// Hetzner root and http.DefaultClient. Auth is read from HETZNER_DNS_TOKEN at
-// request time.
-func NewHetznerDNS(zoneID string) *HetznerDNS {
-	return &HetznerDNS{ZoneID: zoneID}
-}
-
 func (h *HetznerDNS) base() string {
 	if h.BaseURL != "" {
 		return strings.TrimRight(h.BaseURL, "/")
