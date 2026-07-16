@@ -581,8 +581,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # one chat surface per host, like the tmux console.
   # The Workspace Settings tab (ssp-w3, charter D15). Admin-only — mirrors the
   # Style/tmux/chat gating (the route itself is admin-gated). Scope-prefixed:
-  # on a scoped surface it addresses the SAME workspace/project/dataset the page
-  # is on (the canonical `/w/:ws/p/:proj/d/:dataset/studio/settings` route); on a
+  # on a scoped surface it addresses the SAME workspace/project the page
+  # is on (the canonical dataset-less `/w/:ws/p/:proj/studio/settings` route); on a
   # flat surface (scope_prefix "") it points at the flat `/studio/settings`
   # compat entry, which resolves the Default scope and redirects to the scoped URL.
   defp settings_entry(_base, scope_prefix, true) do
