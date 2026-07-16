@@ -117,6 +117,25 @@ function pollConnector(id: string): Connector {
   };
 }
 
+// A TOOL connector (charter D69) — the OUTBOUND direction. It is DOUBLE-excluded
+// from the reconcile: `registry.channels()` drops it on `direction: "tool"`, and it
+// declares no `webhook`. Either exclusion alone would keep its rows untouched; the
+// boundary test below proves the whole (register a tool, plant a tool row, reconcile,
+// and it is left entirely alone — never listed, never mounted).
+function toolConnector(id: string): Connector {
+  return {
+    id,
+    direction: "tool",
+    auth: "token",
+    tenantResolution: "credential-bound",
+    toolDescriptor: { type: "http", url: "http://mcp.invalid/" },
+    adapterFactory: () => ({}) as Adapter,
+    async resolveTenant() {
+      return null;
+    },
+  };
+}
+
 // The seam only ever touches `.webhooks[provider]`; a fake Chat is that map.
 function fakeChat(provider: string): WebhookCapableChat {
   const handler: WebhookHandler = async () =>
@@ -156,6 +175,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
   "webhook mount reconcile — a replica rediscovers installs written by another process (D83, real Postgres)",
   () => {
     const SLACK = "slack";
+    const GITHUB = "github";
     const KEY = "T_TEAM_A";
 
     let admin: pg.Client;
@@ -188,6 +208,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       registry = createConnectorRegistry();
       registry.register(webhookConnector(SLACK));
       registry.register(pollConnector("telegram"));
+      registry.register(toolConnector(GITHUB));
     }, 30_000);
 
     afterAll(async () => {
@@ -343,6 +364,32 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       // …and the reconcile leaves it entirely alone: mounting it here would start a
       // SECOND getUpdates loop against the same bot (a 409-Conflict). That safety
       // belongs to connectors-replica-socket-poll-safety, not this loop.
+      expect(summary).toEqual({ added: 0, removed: 0, failures: 0 });
+      expect(replica.mounts.size()).toBe(0);
+    });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // THE BOUNDARY, OTHER DIRECTION: TOOL connectors are NEVER reconciled (D69).
+    // ───────────────────────────────────────────────────────────────────────
+    it("never touches a TOOL-direction connector's rows — it has no channel mount at all", async () => {
+      // A tool (GitHub) install exists in the shared table — a sealed PAT, no chat
+      // token, exactly what the tool connect loop writes.
+      await upsertInstall(writerPool, cipher, {
+        provider: GITHUB,
+        installKey: "gh-install-1",
+        workspaceId: WS_A,
+        credentialRef: "ghp_a_personal_access_token",
+        chatToken: null,
+      });
+
+      const replica = makeReplica(registry);
+      const reconcile = reconcileFor(replica);
+      const summary = await reconcile.reconcileOnce();
+
+      // The reconcile enumerates ONLY webhook CHANNELS — `registry.channels()` drops
+      // the tool on direction, and it has no `webhook` either. So the row is never
+      // listed and never mounted: mounting a tool as a Chat is a category error (it
+      // has no inbound transport; the agent reaches it over MCP, not this bridge).
       expect(summary).toEqual({ added: 0, removed: 0, failures: 0 });
       expect(replica.mounts.size()).toBe(0);
     });
