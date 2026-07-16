@@ -37,12 +37,16 @@ export default function RootLayout({
             dep). `data-theme` (mode): localStorage.theme, else OS preference —
             the emitted [data-theme="dark"] block flips every --color-* var, and
             the graph reads this exact attribute (born correct, charter D11).
-            `data-bp-theme` (identity): localStorage.bp_theme, default evergreen —
-            swaps the palette independently. */}
+            `data-bp-theme` (identity): localStorage.bp_theme, default the
+            DEPLOY-pinned palette (BARKPARK_THEME baked at build via
+            next.config env — the per-deploy theme dimension, W2) falling back
+            to evergreen. A visitor's own picker choice still wins. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||'evergreen';}catch(e){}})();",
+              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||" +
+              JSON.stringify(process.env.NEXT_PUBLIC_BARKPARK_THEME || "evergreen") +
+              ";}catch(e){}})();",
           }}
         />
       </head>

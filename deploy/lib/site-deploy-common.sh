@@ -91,7 +91,7 @@ meta_value() { # <html-file> <marker-name>
 # shellcheck disable=SC2034  # consumed by the sourcing engines (site-deploy*.sh), not here
 BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
              BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE \
-             BARKPARK_DOC_TYPE)
+             BARKPARK_DOC_TYPE BARKPARK_THEME)
 
 # ---------------------------------------------------------------------------
 # The ONE shared Caddyfile leaf lock (D27). /etc/caddy/Caddyfile has THREE
