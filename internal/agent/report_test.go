@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
@@ -362,6 +363,54 @@ func TestReportJSONFieldNames(t *testing.T) {
 			t.Errorf("Report JSON missing %s — the CP reads this key verbatim; payload=%s", key, s)
 		}
 	}
+}
+
+// TestExecRunnerDeadline proves ExecRunner.Run applies a bounded internal
+// deadline: a command that sleeps past a lowered timeout returns PROMPTLY with
+// a "timed out" error (never blocking for the command's real duration), while
+// a fast command's happy-path output is unchanged. Fails before the fix — a
+// bare exec.Command(...).CombinedOutput() would block for the full sleep.
+func TestExecRunnerDeadline(t *testing.T) {
+	orig := execRunnerTimeout
+	defer func() { execRunnerTimeout = orig }()
+
+	t.Run("stuck command times out promptly", func(t *testing.T) {
+		execRunnerTimeout = 50 * time.Millisecond
+
+		done := make(chan struct{})
+		var out string
+		var err error
+		go func() {
+			out, err = ExecRunner{}.Run("sleep", "5")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("ExecRunner.Run did not return promptly after the deadline elapsed")
+		}
+
+		if err == nil {
+			t.Fatal("err = nil, want a timeout error")
+		}
+		if !strings.Contains(err.Error(), "timed out after") {
+			t.Errorf("err = %q, want it to contain %q", err.Error(), "timed out after")
+		}
+		_ = out
+	})
+
+	t.Run("fast command happy path unchanged", func(t *testing.T) {
+		execRunnerTimeout = 5 * time.Second
+
+		out, err := ExecRunner{}.Run("echo", "hello")
+		if err != nil {
+			t.Fatalf("err = %v, want nil for a fast command", err)
+		}
+		if strings.TrimSpace(out) != "hello" {
+			t.Errorf("out = %q, want %q", strings.TrimSpace(out), "hello")
+		}
+	})
 }
 
 // TestGatherReportBackupProbeError surfaces a backup probe error honestly.
