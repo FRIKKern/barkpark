@@ -83,7 +83,8 @@ defmodule Barkpark.Sites.Provisioner do
   @templates %{
     astro_starter: {:template_dir, "templates/astro-starter"},
     next_starter: {:node_template_dir, "templates/next-starter"},
-    search_starter: {:search_template_dir, "templates/search-starter"}
+    search_starter: {:search_template_dir, "templates/search-starter"},
+    astro_search_starter: {:astro_search_template_dir, "templates/astro-search-starter"}
   }
 
   # Written INSIDE src after the rename — its presence is the idempotency guard.

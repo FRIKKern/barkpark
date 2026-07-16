@@ -245,7 +245,8 @@ defmodule BarkparkCloud.SitesDeployTest do
                  template: "../../etc"
                })
 
-      assert {"must be one of: astro-starter, next-starter, search-starter", _} =
+      assert {"must be one of: astro-search-starter, astro-starter, next-starter, search-starter",
+              _} =
                cs.errors[:template]
     end
 

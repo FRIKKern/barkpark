@@ -18,7 +18,7 @@ defmodule Barkpark.Sites.DeployRequest do
         "content_rev"    => "1f2e...",        # optional, baked as bp-content-rev
         "mode"           => "deploy" | "rollback",
         "runtime_target" => "static" | "node",# where the artifact runs (default "static")
-        "template"       => "astro-starter" | "next-starter" | "search-starter", # which starter (optional)
+        "template"       => "astro-starter" | "next-starter" | "search-starter" | "astro-search-starter", # which starter (optional)
         "env"            => %{"BARKPARK_API_URL" => _, "BARKPARK_TOKEN" => _, ...}
       }
 
@@ -59,7 +59,7 @@ defmodule Barkpark.Sites.DeployRequest do
           content_rev: String.t() | nil,
           mode: :deploy | :rollback,
           runtime_target: :static | :node,
-          template: :astro_starter | :next_starter | :search_starter | nil,
+          template: :astro_starter | :next_starter | :search_starter | :astro_search_starter | nil,
           env: %{optional(String.t()) => String.t()}
         }
 
@@ -168,11 +168,12 @@ defmodule Barkpark.Sites.DeployRequest do
   defp validate_template("astro-starter"), do: {:ok, :astro_starter}
   defp validate_template("next-starter"), do: {:ok, :next_starter}
   defp validate_template("search-starter"), do: {:ok, :search_starter}
+  defp validate_template("astro-search-starter"), do: {:ok, :astro_search_starter}
 
   defp validate_template(_template),
     do:
       {:error, "invalid_template",
-       ~s(template must be one of "astro-starter", "next-starter", "search-starter")}
+       ~s(template must be one of "astro-starter", "next-starter", "search-starter", "astro-search-starter")}
 
   # A rollback is a pure symlink repoint — the engine reads .previous, not a
   # build_id — so we drop any build_id passed with one rather than feed the
