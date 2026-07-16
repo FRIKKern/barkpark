@@ -3908,6 +3908,7 @@
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
         siteOpenLink(siteLiveUrl(s, bp)) +
+        freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -5319,6 +5320,59 @@
     });
   }
 
+  // stw4-freshness (charter D24): the at-a-glance deploy-freshness model for a
+  // site row. PURE + node-pinned. `s.last_deployment` is the SLIM server embed —
+  // status/trigger/timestamps ONLY (HONESTY LAW: never content_rev). Returns null
+  // for a never-deployed site (nil-honest — no badge invented). While a
+  // CONTENT-AUTO rebuild is in flight (queued/building/pushing) the badge pulses
+  // amber; every settled row states its status · trigger · when.
+  function freshnessModel(s) {
+    var d = s && s.last_deployment;
+    if (!d || !d.status) return null;
+    var inFlight = d.status === "queued" || d.status === "building" || d.status === "pushing";
+    var auto = d.trigger === "content-auto";
+    var rebuilding = inFlight && auto;
+    var when = relTime(d.updated_at || d.inserted_at);
+    var triggerWord = auto ? "auto" : "manual";
+    var label, dot;
+    if (rebuilding) { label = "Rebuilding"; dot = "rebuild"; }
+    else if (inFlight) { label = "Deploying"; dot = "deploy"; }
+    else if (d.status === "live") { label = "Live"; dot = "up"; }
+    else if (d.status === "failed") { label = "Deploy failed"; dot = "down"; }
+    else if (d.status === "cancelled") { label = "Canceled"; dot = "unknown"; }
+    else { label = d.status.charAt(0).toUpperCase() + d.status.slice(1); dot = "unknown"; }
+    return {
+      rebuilding: rebuilding,
+      inFlight: inFlight,
+      trigger: d.trigger || null,
+      triggerWord: triggerWord,
+      label: label,
+      dot: dot,
+      when: when,
+      // Settled rows caption trigger · when; an in-flight row shows only the
+      // trigger word (no stale timestamp under a live pulse).
+      meta: inFlight ? triggerWord : (triggerWord + " · " + when),
+    };
+  }
+
+  // The freshness badge markup for a site row (empty string when never deployed).
+  // A DISTINCT slot from the github_webhook_configured "Auto-deploy" capability
+  // badge: this states the LAST deploy's outcome/freshness, not the auto-deploy
+  // wiring.
+  function freshnessBadge(s) {
+    var m = freshnessModel(s);
+    if (!m) return "";
+    var cls = "fresh-badge fresh-badge--" + m.dot + (m.rebuilding ? " is-rebuilding" : "");
+    var title = m.rebuilding
+      ? "Auto-deploy in progress — a content publish is rebuilding this site"
+      : (m.label + " · " + m.meta);
+    return '<span class="' + cls + '" title="' + esc(title) + '">' +
+      '<span class="fresh-dot" aria-hidden="true"></span>' +
+      '<span class="fresh-label">' + esc(m.label) + "</span>" +
+      '<span class="fresh-meta">' + esc(m.meta) + "</span>" +
+      "</span>";
+  }
+
   function globalSiteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
@@ -5329,6 +5383,7 @@
       '<div class="site-meta">' + fw + ' &middot; on <span class="site-inst">' + inst + "</span></div>" +
       '</div><div class="fleet-badges">' +
         siteOpenLink(siteLiveUrl(s, bp)) +
+        freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -11591,6 +11646,10 @@
       deployRailStatus: deployRailStatus, deployRailHtml: deployRailHtml,
       railDeployment: railDeployment, instanceCanDeploy: instanceCanDeploy,
       deployRailStages: DEPLOY_RAIL_STAGES.slice(),
+      // stw4-freshness (charter D24): the site-row deploy-freshness badge — pure
+      // model + markup. Amber-pulse only while a content-auto rebuild is in
+      // flight; nil-honest for a never-deployed site.
+      freshnessModel: freshnessModel, freshnessBadge: freshnessBadge,
       parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
       inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).

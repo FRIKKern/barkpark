@@ -5810,3 +5810,56 @@ test("W4 rail reuses the min-dwell pacer: a fresh live transition dwells, then r
   const after = hooks.paceSteps(truth, ledger, t0 + hooks.newStepMinDwellMs);
   assert.equal(after[0].role, "ok");
 });
+
+// ─────────────────────── stw4-freshness: site-row freshness badge (D24) ──────
+// The server embeds a SLIM last_deployment (status/trigger/timestamps only). The
+// badge pulses amber ONLY while a content-auto rebuild is in flight; every
+// settled row states status · trigger · when; a never-deployed site gets nothing.
+
+test("stw4 freshnessModel: nil-honest — no embed, no status → null (no badge)", () => {
+  assert.equal(hooks.freshnessModel({}), null);
+  assert.equal(hooks.freshnessModel({ last_deployment: null }), null);
+  assert.equal(hooks.freshnessModel({ last_deployment: {} }), null);
+  assert.equal(hooks.freshnessBadge({}), "");
+});
+
+test("stw4 freshnessModel: amber-pulse ONLY for an in-flight content-auto rebuild", () => {
+  for (const status of ["queued", "building", "pushing"]) {
+    const m = hooks.freshnessModel({ last_deployment: { status, trigger: "content-auto" } });
+    assert.equal(m.rebuilding, true, status + " content-auto rebuilds");
+    assert.equal(m.label, "Rebuilding");
+    assert.equal(m.dot, "rebuild");
+  }
+  // A MANUAL in-flight deploy is NOT the amber rebuild pulse — it's a plain
+  // "Deploying" (amber is reserved for the content-triggered rebuild).
+  const manual = hooks.freshnessModel({ last_deployment: { status: "building", trigger: "manual" } });
+  assert.equal(manual.rebuilding, false);
+  assert.equal(manual.label, "Deploying");
+  assert.equal(manual.dot, "deploy");
+});
+
+test("stw4 freshnessModel: settled rows state status · trigger · when", () => {
+  const live = hooks.freshnessModel({ last_deployment: { status: "live", trigger: "content-auto", updated_at: new Date().toISOString() } });
+  assert.equal(live.rebuilding, false);
+  assert.equal(live.label, "Live");
+  assert.equal(live.dot, "up");
+  assert.match(live.meta, /^auto · /);
+  const failed = hooks.freshnessModel({ last_deployment: { status: "failed", trigger: "manual", updated_at: new Date().toISOString() } });
+  assert.equal(failed.label, "Deploy failed");
+  assert.equal(failed.dot, "down");
+  assert.match(failed.meta, /^manual · /);
+});
+
+test("stw4 freshnessBadge: is-rebuilding class + escaped, no content_rev leak", () => {
+  const html = hooks.freshnessBadge({ last_deployment: { status: "building", trigger: "content-auto" } });
+  assert.ok(html.includes("fresh-badge--rebuild"));
+  assert.ok(html.includes("is-rebuilding"), "carries the pulse hook");
+  assert.ok(html.includes("Rebuilding"));
+  const settled = hooks.freshnessBadge({ last_deployment: { status: "live", trigger: "manual", updated_at: new Date().toISOString() } });
+  assert.ok(settled.includes("fresh-badge--up"));
+  assert.ok(!settled.includes("is-rebuilding"), "a settled row never pulses");
+  // HONESTY LAW: the badge renders only status/trigger/time — a content_rev on the
+  // embed (should never be there) is ignored, never surfaced.
+  const sneaky = hooks.freshnessBadge({ last_deployment: { status: "live", trigger: "manual", updated_at: new Date().toISOString(), content_rev: "deadbeef" } });
+  assert.ok(!sneaky.includes("deadbeef"), "content_rev never reaches the badge");
+});

@@ -4757,7 +4757,13 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         sites = Registry.list_sites_for_team(conn.assigns.current_team)
-        json(conn, 200, %{sites: Enum.map(sites, &site_json/1)})
+        # stw4-freshness (charter D24): ONE batched query for the latest
+        # deployment per site so each row carries an at-a-glance freshness badge
+        # (amber while a content-auto rebuild is in flight) without an N+1. The
+        # embed is slim — status/trigger/timestamps only, HONESTY LAW: never
+        # console/build_log_url/content_rev. nil-honest when a site never deployed.
+        fresh = Registry.latest_deployment_status_map(Enum.map(sites, & &1.id))
+        json(conn, 200, %{sites: Enum.map(sites, &put_last_deployment(site_json(&1), &1, fresh))})
     end
   end
 
@@ -8339,6 +8345,15 @@ defmodule BarkparkCloud.Web.Router do
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     }
+  end
+
+  # stw4-freshness (charter D24): fold the batched `latest_deployment_status_map`
+  # entry for `site` into its row JSON as a slim `last_deployment` key. Absent
+  # from the map (a site that never deployed) → nil, never invented. HONESTY LAW:
+  # the map already carries ONLY status/trigger/timestamps — the badge renders
+  # freshness, never a fabricated content_rev.
+  defp put_last_deployment(json, site, fresh_map) do
+    Map.put(json, :last_deployment, Map.get(fresh_map, site.id))
   end
 
   # The stable repo shape the picker renders — just the full name + visibility,
