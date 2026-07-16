@@ -14,10 +14,16 @@ bp cloud site deploy <slug>          # streams PLAN→BUILD→STAGE→HEALTH→S
 ```
 
 `--kind node` is required: the finder is `force-dynamic` Next and runs as a
-long-lived Node SSR process (not static HTML). `create` picks the
-`search-starter` template dir; `deploy` health-gates the build before flipping
-the Caddy upstream. If `HEALTH` fails, nothing switches and visitors keep seeing
-the previous build.
+long-lived Node SSR process (not static HTML). `deploy` health-gates the build
+before flipping the Caddy upstream. If `HEALTH` fails, nothing switches and
+visitors keep seeing the previous build.
+
+> **Template selection is landing across this epic.** The deploy engine already
+> materializes the `search-starter` tree (the `template` axis shipped in Wave 1),
+> but the `--template` / `--barkpark` flags on `bp cloud site create` (and the
+> dashboard picker) are the epic's next surface (Wave 2). Today's create binds by
+> instance: `bp cloud site create --name <name> --dataset <ws/proj/ds>
+> --instance <id> --kind node --framework nextjs`.
 
 ## Prerequisites (all live today)
 
