@@ -251,8 +251,13 @@ health_gate() { # 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
   body="$(mktemp "${TMPDIR:-/tmp}/site-health.XXXXXX")"
+  # Capture curl's exit + wall-time per attempt (mirrors the node engine's HEALTH
+  # probe) so the non-200 detail names attempts+curl-exit+duration — the exact
+  # forensic the #3518 fix added on the node side and this static branch lacked.
+  local curl_rc=0 t_total="" out
   for i in $(seq 1 25); do
-    code="$(curl -s -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/index.html" 2>/dev/null || true)"
+    out="$(curl -s -o "$body" -w '%{http_code} %{time_total}' --max-time 2 "http://127.0.0.1:$port/index.html" 2>/dev/null)"; curl_rc=$?
+    code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     [ "$code" = 200 ] && break
     sleep 0.2
   done
@@ -260,7 +265,7 @@ health_gate() { # 0 healthy, 1 not
   wait "$srv" 2>/dev/null || true
   if [ "$code" != 200 ]; then
     rm -f "$body"
-    HEALTH_DETAIL="throwaway server returned $code (want 200)"
+    HEALTH_DETAIL="throwaway health server on :$port returned $code (want 200) after $i attempts (last: curl exit $curl_rc, ${t_total}s) — the staged bytes will not serve; check python3/caddy is installed and the built index.html is readable"
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
 
@@ -520,6 +525,12 @@ FAKENPM
     check "lying build exit 14"                [ "$rc" = 14 ]
     check "HEALTH failed"                      saw HEALTH failed e3
     check "the reason names the wrong marker value" grep -q 'bp-build-id marker is .TOTALLY-WRONG' "$E2E/out.log"
+    # Dual-channel: the reason must ride the plain human log too, NOT only the
+    # BPSTAGE detail=. On a TERMINAL failure the run-level reason_tail (last 3 log
+    # lines) WINS over stage.detail at the verdict line, so a detail-only hint is
+    # shadowed — the log line is the copy that survives to the user.
+    check "the HEALTH reason ALSO rides the plain human log (dual-channel)" \
+      grep -q '\[site-deploy .*HEALTH: bp-build-id marker is .TOTALLY-WRONG' "$E2E/out.log"
     check "no SWITCH stage line at all"        nosaw SWITCH
     check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
     check "the poisoned release is purged"     [ ! -d "$E2E_SITE/releases/e3" ]
@@ -559,6 +570,22 @@ FAKENPM
       grep -q '^BPSTAGE name=BUILD status=failed .*401 Unauthorized' "$E2E/out.log"
     check "no SWITCH stage line at all"        nosaw SWITCH
     check "no release dir left behind"         [ ! -d "$E2E_SITE/releases/e4" ]
+    check "current unmoved (still e1)"         [ "$(livenow)" = releases/e1 ]
+
+    echo "[selftest] e2e: a preflight-shaped failure (no package.json) names the next move on BOTH channels"
+    NOPKG="$E2E/nopkg"; mkdir -p "$NOPKG"
+    rc="$(env PATH="$FAKEBIN:$PATH" \
+      SITE_SLUG=selftest BUILD_ID=np1 CONTENT_REV=rev-1 SITE_SRC="$NOPKG" \
+      BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+      BARKPARK_SITE_DEPLOY_LOCK="$E2E/deploy.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+      BARKPARK_SITE_NO_CAP=1 bash "$SELF" > "$E2E/out.log" 2> "$E2E/err.log"; echo $?)"
+    check "no-package.json exit 11"            [ "$rc" = 11 ]
+    check "BUILD failed"                       saw BUILD failed np1
+    check "the BPSTAGE detail names the check-this-next move" \
+      grep -q '^BPSTAGE name=BUILD status=failed .*check the payload points at the app dir' "$E2E/out.log"
+    check "the SAME hint rides the plain human log (dual-channel, not detail-only)" \
+      grep -q '\[site-deploy .*has no package.json .* check the payload' "$E2E/out.log"
+    check "no release dir left behind"         [ ! -d "$E2E_SITE/releases/np1" ]
     check "current unmoved (still e1)"         [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: RETIRE reports what it actually removed"
@@ -693,10 +720,12 @@ build_failure_reason() { # <build-log>
 if [ "$SKIP_BUILD" = 0 ]; then
   emit BUILD started
   if [ ! -d "$SITE_SRC" ]; then
-    log "BUILD: no site source dir $SITE_SRC"; emit BUILD failed "no site source dir $SITE_SRC"; exit 10
+    DETAIL="no site source dir $SITE_SRC — expected a checked-out app there; check the deploy payload's repo+ref and that the clone/checkout step actually populated it"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 10
   fi
   if [ ! -f "$SITE_SRC/package.json" ]; then
-    log "BUILD: $SITE_SRC has no package.json"; emit BUILD failed "$SITE_SRC has no package.json"; exit 11
+    DETAIL="$SITE_SRC has no package.json — expected a Node app root; check the payload points at the app dir, not the repo root or a monorepo parent"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
 
   # Build the scrubbed env allow-list.  BUILD_ID + base path + content rev are
@@ -711,7 +740,10 @@ if [ "$SKIP_BUILD" = 0 ]; then
   done
 
   log "BUILD: npm ci && npm run build in $SITE_SRC (scrubbed env, capped)"
-  cd "$SITE_SRC" || { log "BUILD: cannot cd $SITE_SRC"; emit BUILD failed "cannot cd $SITE_SRC"; exit 10; }
+  cd "$SITE_SRC" || {
+    DETAIL="cannot cd into $SITE_SRC — the dir exists but is not enterable; check its permissions/ownership (ls -ld) and that no symlink on the path is broken"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 10
+  }
   # systemd-run --scope caps memory+cpu and inherits cwd; env -i inside scrubs.
   # On a non-systemd box (dev) run the scrubbed env directly — capping is
   # best-effort, the scrub is not.
@@ -745,21 +777,32 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # ---- STAGE — copy ONLY dist/ (D8) ---------------------------------------
   emit STAGE started
   if [ ! -d "$SITE_SRC/dist" ]; then
-    log "STAGE: build produced no $SITE_SRC/dist — abort"; emit STAGE failed "build produced no dist/"; exit 13
+    DETAIL="build produced no dist/ — expected a static export at $SITE_SRC/dist after 'npm run build'; check the framework's output dir (astro/vite=dist) matches this static engine"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   if [ ! -f "$SITE_SRC/dist/index.html" ]; then
-    log "STAGE: $SITE_SRC/dist has no index.html — abort"; emit STAGE failed "dist/ has no index.html"; exit 13
+    DETAIL="dist/ has no index.html — expected a root document; check the build emitted a top-level index.html (a trailingSlash/base config can nest it under a subdir)"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # Stage into a .partial dir then rename, so a crash mid-copy never leaves a
   # half-populated releases/<build_id>/ that a later PLAN mistakes for staged.
   rm -rf "$RELDIR" "$RELDIR.partial"
   mkdir -p "$RELDIR.partial"
-  if ! cp -a "$SITE_SRC/dist/." "$RELDIR.partial/"; then
-    log "STAGE: copy of dist/ failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "copy of dist/ failed"; exit 13
+  # cp/mv carry no forensic of their own — capture the exit code + a disk read
+  # (the copy that fails on a real box almost always fails on a full /opt) so the
+  # detail names the next move instead of a bare "copy failed".
+  cp -a "$SITE_SRC/dist/." "$RELDIR.partial/"; cp_rc=$?
+  if [ "$cp_rc" -ne 0 ]; then
+    disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
+    DETAIL="copy of dist/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
-  mv "$RELDIR.partial" "$RELDIR" || {
-    log "STAGE: rename into place failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "rename into releases/$BUILD_ID failed"; exit 13
-  }
+  mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
+  if [ "$mv_rc" -ne 0 ]; then
+    rm -rf "$RELDIR.partial"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  fi
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
@@ -853,8 +896,9 @@ with_caddy_lock arm_caddy_site_route || true
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
 emit SWITCH started
 if ! do_switch; then
-  log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed)"
-  emit SWITCH failed "atomic swap of current -> releases/$BUILD_ID failed"
+  DETAIL="atomic swap of current -> releases/$BUILD_ID failed — healthy but couldn't go live; check $ROOT is writable and 'current' isn't a dir or an immutable file"
+  log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed): $DETAIL"
+  emit SWITCH failed "$DETAIL"
   exit 16
 fi
 log "SWITCH: '$SITE_SLUG' current -> releases/$BUILD_ID (atomic)"

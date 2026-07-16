@@ -709,6 +709,12 @@ FAKENPM
   check "lying build exit 14"            [ "$rc" = 14 ]
   check "HEALTH failed"                  saw HEALTH failed n3
   check "reason names the wrong marker"  grep -q "bp-build-id marker is .TOTALLY-WRONG" "$TD/out.log"
+  # Dual-channel: the reason must ride the plain human log too, not only the
+  # BPSTAGE detail=. On a terminal failure the run-level reason_tail (last 3 log
+  # lines) wins over stage.detail at the verdict line, so the log line is the copy
+  # that survives to the user.
+  check "the HEALTH reason ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: bp-build-id marker is .TOTALLY-WRONG' "$TD/out.log"
   check "no SWITCH stage line at all"    nosaw SWITCH
   check "Caddy upstream did NOT move"    [ "$(cf_port)" = "$before_port" ]
   check "the poisoned release is purged" [ ! -d "$N_SITE/releases/n3" ]
@@ -727,6 +733,24 @@ FAKENPM
   check "no SWITCH stage line at all"    nosaw SWITCH
   check "Caddy upstream did NOT move"    [ "$(cf_port)" = "$before_port" ]
   check "no release dir left behind"     [ ! -d "$N_SITE/releases/n4" ]
+
+  echo "[selftest] e2e: a missing package.json names the next move on BOTH channels (dual-channel hint)"
+  NOPKG="$TD/nopkg"; mkdir -p "$NOPKG"
+  before_port="$(cf_port)"
+  rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=selftest BUILD_ID=np1 CONTENT_REV=rev-1 \
+    SITE_SRC="$NOPKG" SITE_PORT_A="$T_PORT_A" SITE_PORT_B="$T_PORT_B" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?)"
+  check "no-package.json exit 11"        [ "$rc" = 11 ]
+  check "BUILD failed"                   saw BUILD failed np1
+  check "the BPSTAGE detail names the check-this-next move" \
+    grep -q '^BPSTAGE name=BUILD status=failed .*check the payload points at the app dir' "$TD/out.log"
+  check "the SAME hint rides the plain human log (dual-channel, not detail-only)" \
+    grep -q '\[site-deploy-node .*has no package.json .* check the payload' "$TD/out.log"
+  check "no release dir left behind"     [ ! -d "$N_SITE/releases/np1" ]
+  check "Caddy upstream did NOT move"    [ "$(cf_port)" = "$before_port" ]
 
   echo "[selftest] e2e: RETIRE prunes old release dirs, protecting both live slots"
   # current live = slot a (n1) after the rollback; previous = slot b (n2). Deploy a
@@ -992,10 +1016,12 @@ build_failure_reason() { # <build-log>
 if [ "$SKIP_BUILD" = 0 ]; then
   emit BUILD started
   if [ ! -d "$SITE_SRC" ]; then
-    log "BUILD: no site source dir $SITE_SRC"; emit BUILD failed "no site source dir $SITE_SRC"; exit 10
+    DETAIL="no site source dir $SITE_SRC — expected a checked-out app there; check the deploy payload's repo+ref and that the clone/checkout step actually populated it"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 10
   fi
   if [ ! -f "$SITE_SRC/package.json" ]; then
-    log "BUILD: $SITE_SRC has no package.json"; emit BUILD failed "$SITE_SRC has no package.json"; exit 11
+    DETAIL="$SITE_SRC has no package.json — expected a Node app root; check the payload points at the app dir, not the repo root or a monorepo parent"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
   export BARKPARK_BUILD_ID="$BUILD_ID"
   export BARKPARK_SITE_BASE="/sites/$SITE_SLUG/"
@@ -1005,7 +1031,10 @@ if [ "$SKIP_BUILD" = 0 ]; then
     [ -n "${!v:-}" ] && scrub+=("$v=${!v}")
   done
   log "BUILD: npm ci && npm run build in $SITE_SRC (scrubbed env, capped)"
-  cd "$SITE_SRC" || { log "BUILD: cannot cd $SITE_SRC"; emit BUILD failed "cannot cd $SITE_SRC"; exit 10; }
+  cd "$SITE_SRC" || {
+    DETAIL="cannot cd into $SITE_SRC — the dir exists but is not enterable; check its permissions/ownership (ls -ld) and that no symlink on the path is broken"
+    log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 10
+  }
   if command -v systemd-run >/dev/null 2>&1 && [ "${BARKPARK_SITE_NO_CAP:-0}" != 1 ]; then
     cap=(systemd-run --scope --quiet --collect -p MemoryMax=2000M -p CPUQuota=150%)
   else
@@ -1034,35 +1063,51 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # ---- STAGE (D64) — three-piece standalone copy into an immutable release ----
   emit STAGE started
   if [ ! -d "$SITE_SRC/.next/standalone" ]; then
-    log "STAGE: build produced no $SITE_SRC/.next/standalone — is next.config output:'standalone'?"
-    emit STAGE failed "build produced no .next/standalone (need output:'standalone')"; exit 13
+    DETAIL="build produced no .next/standalone — expected a Next standalone bundle; check next.config has output:'standalone' and the build reached 'next build' (not just lint/typecheck)"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   if [ ! -f "$SITE_SRC/.next/standalone/server.js" ]; then
-    log "STAGE: .next/standalone has no server.js — abort"; emit STAGE failed ".next/standalone has no server.js"; exit 13
+    DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   rm -rf "$RELDIR" "$RELDIR.partial"
   mkdir -p "$RELDIR.partial"
+  # cp/mv carry no forensic of their own — capture the exit code + a disk read (a
+  # copy that fails on a real box almost always fails on a full mount) so each
+  # detail names the next move instead of a bare "copy failed".
   # 1) standalone dir IS the release root (server.js + traced node_modules).
-  if ! cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; then
-    log "STAGE: copy of .next/standalone failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "copy of .next/standalone failed"; exit 13
+  cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; cp_rc=$?
+  if [ "$cp_rc" -ne 0 ]; then
+    disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
+    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # 2) .next/static -> <release>/.next/static (standalone omits it by design).
   if [ -d "$SITE_SRC/.next/static" ]; then
     mkdir -p "$RELDIR.partial/.next/static"
-    if ! cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; then
-      log "STAGE: copy of .next/static failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "copy of .next/static failed"; exit 13
+    cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; cp_rc=$?
+    if [ "$cp_rc" -ne 0 ]; then
+      disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
+      DETAIL="copy of .next/static into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
   # 3) public/ -> <release>/public (static assets; optional).
   if [ -d "$SITE_SRC/public" ]; then
     mkdir -p "$RELDIR.partial/public"
-    if ! cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; then
-      log "STAGE: copy of public/ failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "copy of public/ failed"; exit 13
+    cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; cp_rc=$?
+    if [ "$cp_rc" -ne 0 ]; then
+      disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
+      DETAIL="copy of public/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
-  mv "$RELDIR.partial" "$RELDIR" || {
-    log "STAGE: rename into place failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "rename into releases/$BUILD_ID failed"; exit 13
-  }
+  mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
+  if [ "$mv_rc" -ne 0 ]; then
+    rm -rf "$RELDIR.partial"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  fi
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
@@ -1092,14 +1137,14 @@ if [ -n "$CUR_SLOT" ]; then CUR_BUILD="$(read_slot_build "$CUR_SLOT")"; CUR_PORT
 if [ -z "$CUR_SLOT" ]; then
   if ! with_caddy_lock arm_caddy_node_route "$TARGET_PORT"; then
     stop_slot "$TARGET_SLOT"
-    log "SWITCH: could not arm Caddy /sites/$SITE_SLUG route — new slot stopped, nothing live (fail closed)"
-    emit SWITCH failed "could not arm the /sites/$SITE_SLUG Caddy route"; exit 16
+    DETAIL="could not arm the /sites/$SITE_SLUG Caddy route — new slot stopped, nothing live; check $CADDYFILE is writable, 'caddy validate' passes, and a slot reverse_proxy anchor exists to insert before"
+    log "SWITCH: $DETAIL (fail closed)"; emit SWITCH failed "$DETAIL"; exit 16
   fi
 else
   if ! with_caddy_lock flip_caddy_node_port "$TARGET_PORT"; then
     stop_slot "$TARGET_SLOT"
-    log "SWITCH: could not flip Caddy to slot $TARGET_SLOT :$TARGET_PORT — live slot $CUR_SLOT untouched, still serving (fail closed)"
-    emit SWITCH failed "could not flip Caddy to slot $TARGET_SLOT :$TARGET_PORT"; exit 16
+    DETAIL="could not flip Caddy to slot $TARGET_SLOT :$TARGET_PORT — live slot $CUR_SLOT still serving; check the Caddyfile lock and that 'caddy validate' accepts the per-site port change"
+    log "SWITCH: $DETAIL (fail closed)"; emit SWITCH failed "$DETAIL"; exit 16
   fi
 fi
 # Record the slot we flipped AWAY from as the warm previous (kept running for <1s
