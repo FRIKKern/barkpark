@@ -49,7 +49,12 @@ defmodule BarkparkWeb.FinderLiveTest do
       |> element("form")
       |> render_change(%{"q" => "finder sentinel"})
 
-    assert html =~ "Finder Sentinel Alpha"
+    # The contract: the engine round-trip surfaces the seeded paper as a hit
+    # LINKING INTO the native PortableDoc reader. (The displayed title is
+    # whatever the fixture stored — the slug here — so assert the semantics,
+    # not the fixture's cosmetics.)
+    assert html =~ ~s(href="/papers/finder-sentinel-alpha")
+    assert html =~ "1 hits"
   end
 
   test "an empty query clears hits instead of erroring", %{conn: conn} do
