@@ -46,6 +46,12 @@ var (
 	focusBar    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	allowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
+
+	// The epic-cycle phase ticks (wsc D3): done = evergreen, active = the live
+	// phase, future = dim. No fake breathing in a static paint — the glyph and
+	// colour carry the state (same discipline as railGlyph).
+	tickDoneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	tickActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 )
 
 // cardRoles are the interactive card rows (charter D27/D28: approval/question/
@@ -445,6 +451,115 @@ func cardBody(msg Message) string {
 	return strings.TrimSpace(msg.SourceMarkdown)
 }
 
+// ── the epic-cycle session card (wsc D3/D12) ─────────────────────────────────
+//
+// The session list grows exactly two extra lines when a row carries a workflow
+// summary — the SAME two lines the Studio sidebar card shows (parity law). The
+// data is the COMPACT pre-folded wire summary (apiclient.ChatWorkflowSummary),
+// decoded straight off the list endpoint: there is NO Go fold and NO rail decode
+// here (decodeRail is untouched for lists). A plain session carries no summary
+// and renders exactly as today — the minimalism contract (plain chats pay zero).
+
+// workflowCardLines renders the two epic-cycle card lines for a workflow row,
+// each pre-indented two columns so it aligns under the session title past the
+// picker's cursor gutter. Line one: seven phase ticks + the phase word (or the
+// terminal outcome) + the settled/total agent counter (13/17, Claude-Code-style),
+// plus the token total when the wire carries one. Line two (only when the wire
+// carries an epic goal, wsc D9): the epic title + slices-closed/total. Returns
+// nil for a nil summary — the caller adds nothing, so a non-workflow row is
+// byte-identical to today.
+func workflowCardLines(w int, wf *SessionWorkflow) []string {
+	if wf == nil {
+		return nil
+	}
+	out := []string{"  " + workflowTickLine(w-2, wf)}
+	if wf.EpicGoal != nil {
+		out = append(out, "  "+workflowGoalLine(w-2, wf.EpicGoal))
+	}
+	return out
+}
+
+// workflowTickLine paints the phase ticks + phase/outcome + settled/total counter
+// (+ tokens when present). Elapsed is deliberately omitted on list rows (D15 —
+// there is no per-row clock in the picker); tokens render only when Tokens > 0
+// (never synthesised).
+func workflowTickLine(w int, wf *SessionWorkflow) string {
+	var ticks strings.Builder
+	for _, s := range phaseTicks(wf) {
+		ticks.WriteString(tickGlyph(s))
+	}
+	counter := fmt.Sprintf("%d/%d", wf.AgentsDone, wf.AgentsTotal)
+	word := wf.Phase
+	if wf.Terminal {
+		word = wf.Outcome
+		if word == "" {
+			word = "complete"
+		}
+	} else if word == "" {
+		word = "working"
+	}
+	line := ticks.String() + dimStyle.Render(" · ") + word + dimStyle.Render(" · ") + counter
+	if wf.Tokens > 0 {
+		line += dimStyle.Render("  ·  ↓"+formatTokens(wf.Tokens)+" tok")
+	}
+	return truncate(line, w)
+}
+
+// workflowGoalLine paints the epic-goal card line: the epic title and its
+// slices-closed/total counter (wsc D9). "PRs open" is intentionally absent (D8 —
+// no data source; never fabricated).
+func workflowGoalLine(w int, g *EpicGoal) string {
+	title := strings.TrimSpace(g.Title)
+	if title == "" {
+		title = "epic goal"
+	}
+	meta := fmt.Sprintf("%d/%d slices", g.SlicesClosed, g.SlicesTotal)
+	line := dimStyle.Render("↳ ") + title + dimStyle.Render("  ·  "+meta)
+	return truncate(line, w)
+}
+
+// phaseTicks is the seven phase states to draw. It prefers the wire ticks
+// verbatim (the server's D3 projection); when they are absent it derives them
+// from PhaseIndex/PhasesTotal — presentation-only geometry, NOT a rail fold — so
+// a summary that carries only the phase counters still shows an honest strip.
+func phaseTicks(wf *SessionWorkflow) []string {
+	if len(wf.Ticks) > 0 {
+		return wf.Ticks
+	}
+	total := wf.PhasesTotal
+	if total <= 0 {
+		total = 7
+	}
+	ticks := make([]string, total)
+	for i := range ticks {
+		switch {
+		case i < wf.PhaseIndex:
+			ticks[i] = "done"
+		case i == wf.PhaseIndex && !wf.Terminal:
+			ticks[i] = "active"
+		case wf.Terminal:
+			ticks[i] = "done"
+		default:
+			ticks[i] = "future"
+		}
+	}
+	return ticks
+}
+
+// tickGlyph is the per-phase glyph: done ● (evergreen), active ◉ (the live
+// phase), future ○ (dim). Unknown states render as future (forward-compat, never
+// a crash) — the same tolerance the rest of the decoder shows.
+func tickGlyph(state string) string {
+	switch state {
+	case "done":
+		return tickDoneStyle.Render("●")
+	case "active":
+		return tickActiveStyle.Render("◉")
+	default:
+		return dimStyle.Render("○")
+	}
+}
+
 // ── the sessions picker ──────────────────────────────────────────────────────
 
 // renderPicker paints the launch screen (charter: launch = list/resume/new).
@@ -483,7 +598,16 @@ func (m Model) renderPicker() string {
 
 // pickerRows is the picker's navigable line list: a "+ new session" row (index
 // 0) followed by one row per session summary. The cursor indexes this slice, so
-// the shell and the paint can never disagree (the taskboard spine discipline).
+// the shell and the paint can never disagree (the taskboard spine discipline) —
+// a workflow row is ONE navigable entry that happens to span extra lines, so
+// arrow keys still stop once per session, not once per sub-line.
+//
+// A session running an epic cycle grows the same two lines the Studio card shows
+// (wsc D3/D12): the phase ticks + settled/total counter, then the epic-goal line
+// when the wire carries it — appended to the row's own multi-line string so the
+// picker expands in height and the fleet progress (13/17) is visible at a glance.
+// A plain session carries no workflow summary, so its row string is UNCHANGED —
+// byte-identical to today (the minimalism contract).
 func (m Model) pickerRows() []string {
 	rows := []string{"+ new session"}
 	for _, s := range m.sessions {
@@ -498,7 +622,11 @@ func (m Model) pickerRows() []string {
 		if age := relTime(s.LastActiveAt); age != "" {
 			meta += " · " + age
 		}
-		rows = append(rows, fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta)))
+		row := fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
+		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow); len(extra) > 0 {
+			row += "\n" + strings.Join(extra, "\n")
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }

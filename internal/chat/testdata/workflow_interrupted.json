@@ -1,0 +1,15 @@
+{
+  "label": "epic-cycle — interrupted wave",
+  "ticks": ["done", "done", "active", "future", "future", "future", "future"],
+  "phase": "survey",
+  "phase_index": 2,
+  "phases_total": 7,
+  "agents_done": 6,
+  "agents_total": 16,
+  "running": 0,
+  "terminal": true,
+  "outcome": "interrupted",
+  "tokens": 240000,
+  "started_at": "2026-07-15T10:00:00Z",
+  "ended_at": "2026-07-15T10:12:00Z"
+}

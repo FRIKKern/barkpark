@@ -31,6 +31,14 @@ type (
 	SessionSummary = apiclient.ChatSessionSummary
 	// Message is one persisted transcript row; assistant rows carry `blocks`.
 	Message = apiclient.ChatMessage
+	// SessionWorkflow is the compact pre-folded epic-cycle summary the list wire
+	// carries per workflow row (wsc D3/D10/D12) — the session card's two lines,
+	// decoded straight off the summary. NOT rail_snapshot (the list never carries
+	// that, D14): no Go fold, no decodeRail on the list path.
+	SessionWorkflow = apiclient.ChatWorkflowSummary
+	// EpicGoal is the second card line's task-spine truth (wsc D9): epic title +
+	// slices closed/total. Absent "PRs open" is deliberate (D8: no data source).
+	EpicGoal = apiclient.ChatEpicGoal
 )
 
 // isCard reports whether this row is one of the three interactive card roles.
