@@ -46,14 +46,31 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     {:ok, socket}
   end
 
+  # `Scim.mint_token/2` has NO server-side debounce (every call unconditionally
+  # inserts a new `Scim.Token` row) — a double-click with no guard here mints
+  # TWO live tokens while the UI only ever shows the LAST plaintext (the prior
+  # `assign(minted: %{org_id => plaintext})` REPLACED the map wholesale, so a
+  # second in-flight click silently orphaned the first token). Guarded here:
+  # once a plaintext is minted+shown for an org THIS session, a repeat click
+  # no-ops instead of minting another — Elixir's serial per-process message
+  # handling guarantees the first click's `assign(minted: ...)` is fully
+  # applied before a second, even-near-simultaneous click is handled, so this
+  # is airtight without needing an async round trip. A genuine re-mint (e.g.
+  # provisioning a second IdP) needs a fresh page load, same as the existing
+  # "shown once" plaintext banner already requires.
   @impl true
   def handle_event("mint_scim", %{"org" => org_id}, socket) do
-    case Scim.mint_token(org_id, "admin-portal") do
-      {:ok, {plaintext, _tok}} ->
-        {:noreply, socket |> assign(minted: %{org_id => plaintext}) |> load()}
+    if Map.has_key?(socket.assigns.minted, org_id) do
+      {:noreply, socket}
+    else
+      case Scim.mint_token(org_id, "admin-portal") do
+        {:ok, {plaintext, _tok}} ->
+          {:noreply,
+           socket |> assign(minted: Map.put(socket.assigns.minted, org_id, plaintext)) |> load()}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "could not mint SCIM token")}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "could not mint SCIM token")}
+      end
     end
   end
 
@@ -225,6 +242,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             class="btn btn-sm"
             phx-click="mint_scim"
             phx-value-org={o.org.id}
+            phx-disable-with="Minting..."
+            disabled={Map.has_key?(@minted, o.org.id)}
             data-mint-scim={o.org.slug}
           >
             Mint SCIM token

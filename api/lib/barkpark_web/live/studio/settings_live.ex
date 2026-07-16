@@ -609,7 +609,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <.bp_textarea id="settings_json" name="settings_json" rows={14} value={@settings_json} mono />
 
       <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button type="submit" class="btn btn-primary" disabled={@plugin_name == ""}>Save</button>
+        <button
+          type="submit"
+          class="btn btn-primary"
+          phx-disable-with="Saving..."
+          disabled={@plugin_name == ""}
+        >
+          Save
+        </button>
         <button
           type="button"
           class="btn"
@@ -624,6 +631,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
+          phx-disable-with="Deleting..."
           data-confirm="Delete settings for this plugin?"
           disabled={not @loaded?}
         >
@@ -648,12 +656,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       </fieldset>
 
       <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary" phx-disable-with="Saving...">Save</button>
         <button
           type="button"
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
+          phx-disable-with="Deleting..."
           data-confirm={"Delete settings for #{@plugin_name}?"}
           disabled={not @loaded?}
         >
