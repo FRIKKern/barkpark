@@ -493,6 +493,27 @@ func scaffyRunConsent(out *writer, g globals, path string, vars map[string]strin
 		}
 	}
 
+	// Machine output (-o json|yaml) is non-interactive by definition: never
+	// prompt, never interleave prose with the run's structured envelope. With
+	// --yes the gate passes silently (the run emits the one envelope); without
+	// it the refusal IS an envelope, carrying the same CMD enumeration the
+	// human path prints — usageErrf's machine-parity convention.
+	if out.machineOut() {
+		if g.yes {
+			return true, 0
+		}
+		out.emitStructured(map[string]any{
+			"ok": false,
+			"error": map[string]any{
+				"code":    "consent_required",
+				"message": "refusing to run a pulled command without --yes (consent gate, D49)",
+			},
+			"would_run_cmds": wouldRun,
+			"deferred_cmds":  deferred,
+		})
+		return false, exitUsage
+	}
+
 	out.outf("pulled command (provenance sidecar present) — consent gate:")
 	if len(wouldRun) == 0 {
 		if len(deferred) > 0 {

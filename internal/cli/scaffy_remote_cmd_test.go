@@ -508,3 +508,54 @@ func TestScaffyPullAndLsHelp(t *testing.T) {
 		}
 	}
 }
+
+// TestScaffyRunPulledMachineOutKeepsEnvelopeParity: under -o json the consent
+// gate never interleaves prose with structured output — a refusal is ONE
+// parseable {ok:false, error:{code:"consent_required"}, ...} envelope carrying
+// the same CMD enumeration the human path prints, and --yes passes the gate
+// silently so the run's own envelope is the only stdout (usageErrf's
+// machine-parity convention).
+func TestScaffyRunPulledMachineOutKeepsEnvelopeParity(t *testing.T) {
+	t.Run("refusal is one envelope", func(t *testing.T) {
+		seedPulledNoteTree(t)
+		code, stdout, _ := runScaffyTest(t, globals{}, "json", "run", "pulled-note.scaffy", "--var", "NoteName=Alpha")
+		if code != exitUsage {
+			t.Fatalf("exit = %d, want %d\n%s", code, exitUsage, stdout)
+		}
+		var env struct {
+			Ok    bool `json:"ok"`
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+			WouldRun []string `json:"would_run_cmds"`
+			Deferred []string `json:"deferred_cmds"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatalf("stdout is not one JSON envelope: %v\n%s", err, stdout)
+		}
+		if env.Ok || env.Error.Code != "consent_required" {
+			t.Errorf("envelope ok/code = %v/%q, want false/consent_required\n%s", env.Ok, env.Error.Code, stdout)
+		}
+		if len(env.WouldRun) != 1 || !strings.Contains(env.WouldRun[0], "echo pulled alpha") {
+			t.Errorf("would_run_cmds must carry the substituted CMD: %v", env.WouldRun)
+		}
+		if len(env.Deferred) != 1 {
+			t.Errorf("deferred_cmds = %v, want the one TIER ci CMD", env.Deferred)
+		}
+	})
+
+	t.Run("yes passes silently", func(t *testing.T) {
+		seedPulledNoteTree(t)
+		code, stdout, stderr := runScaffyTest(t, globals{yes: true}, "json", "run", "pulled-note.scaffy", "--var", "NoteName=Alpha")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatalf("stdout is not one JSON envelope: %v\n%s", err, stdout)
+		}
+		if env["ok"] != true {
+			t.Errorf("run envelope not ok:\n%s", stdout)
+		}
+	})
+}

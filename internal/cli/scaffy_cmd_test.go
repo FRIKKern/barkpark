@@ -691,9 +691,9 @@ func TestScaffyRunDryRunTouchesNothing(t *testing.T) {
 	for _, want := range []string{
 		"● would create docs/alpha.txt",
 		"○ would inject docs/list.txt @MARK:note-entry-alpha",
-		"+note alpha",             // per-file -/+ diff (D39)
-		"… would run cmd true",    // LOCAL CMD listed, never executed
-		"… deferred cmd cd api",   // TIER ci stays deferred
+		"+note alpha",           // per-file -/+ diff (D39)
+		"… would run cmd true",  // LOCAL CMD listed, never executed
+		"… deferred cmd cd api", // TIER ci stays deferred
 		"dry-run — 1 created, 1 injected, 1 mark(s)",
 		"nothing written, no receipt",
 	} {
