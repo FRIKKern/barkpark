@@ -30,6 +30,7 @@ defmodule BarkparkCloud.ArchiveStoreTest do
   """
   use BarkparkCloud.DataCase, async: false
 
+  import ExUnit.CaptureLog
   import Plug.Test
   import Plug.Conn
 
@@ -360,6 +361,42 @@ defmodule BarkparkCloud.ArchiveStoreTest do
     inject_fake!()
 
     assert {:ok, [%{slug: "good"}]} = ArchiveStore.list_archives("team-a")
+  end
+
+  test "list_archives aggregates multiple failing manifests into ONE summary warning" do
+    configure!()
+
+    put_bucket(%{
+      "team-a" => [
+        {"good",
+         manifest_json(
+           "good.barkpark.cloud",
+           "good",
+           "hetzner",
+           "2026-07-01T00:00:00Z",
+           "nbg1",
+           "cax11"
+         )},
+        {"broken-1", "{ not json 1"},
+        {"broken-2", "{ not json 2"}
+      ]
+    })
+
+    inject_fake!()
+
+    log =
+      capture_log(fn ->
+        assert {:ok, [%{slug: "good"}]} = ArchiveStore.list_archives("team-a")
+      end)
+
+    # A store outage (or, here, two corrupt manifests) must never flood the
+    # log with one line per key — exactly ONE summary warning per call.
+    occurrences =
+      log |> String.split("manifests failed to fetch/parse") |> length() |> Kernel.-(1)
+
+    assert occurrences == 1, "expected exactly one aggregated warning, got log:\n#{log}"
+    assert log =~ "archive_store: 2/3 manifests failed to fetch/parse:"
+    assert log =~ "not valid JSON"
   end
 
   # ── GET /v1/archives route ──────────────────────────────────────────────────
