@@ -1465,6 +1465,54 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute "PATH" in ClaudeChat.scrubbed_env_names()
     end
 
+    test "the denylist covers every secret-shaped env read in api/lib (scrub-OR-allowlisted)" do
+      # Widen the runtime.exs-only audit to the whole app tree (charter D173):
+      # any `System.get_env/fetch_env!` of a secret-shaped name in api/lib must
+      # be EITHER scrubbed from the chat child OR on the intentional-passthrough
+      # allowlist. A read that is neither reds here, forcing a conscious
+      # scrub-or-allowlist decision before it can ship.
+      lib_root = Path.expand("../../../lib", __DIR__)
+
+      # Secret-shape: the terminal token before the closing quote is one of
+      # TOKEN|SECRET|PASSWORD|KEY|COOKIE (anchored on `_` or start), or the
+      # bare DATABASE_URL. Anchoring on the terminal correctly EXCLUDES
+      # PUBLIC_READ_TOKEN_FILE (…_FILE) and BARKPARK_HOME (…_HOME).
+      read_re = ~r/System\.(?:get_env|fetch_env!?)\(\s*"([A-Z][A-Z0-9_]*)"/
+      secret_re = ~r/(?:^|_)(?:TOKEN|SECRET|PASSWORD|KEY|COOKIE)$/
+
+      lib_secrets =
+        (lib_root <> "/**/*.ex")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          path
+          |> File.read!()
+          |> then(&Regex.scan(read_re, &1, capture: :all_but_first))
+          |> List.flatten()
+        end)
+        |> Enum.filter(fn name ->
+          name == "DATABASE_URL" or Regex.match?(secret_re, name)
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      # Sanity: the scan is finding real reads, not silently matching nothing.
+      assert lib_secrets != [],
+             "the api/lib secret-read scan matched nothing — the regex or path is broken"
+
+      covered = ClaudeChat.scrubbed_env_names() ++ ClaudeChat.intentional_env_passthrough_names()
+      uncovered = lib_secrets -- covered
+
+      assert uncovered == [],
+             "secret-shaped env reads in api/lib that are neither scrubbed nor " <>
+               "allowlisted (add to @scrubbed_env, or to @intentional_env_passthrough " <>
+               "with a rationale): #{inspect(uncovered)}"
+
+      # The allowlist is the deliberate exception — it must never leak HOME/PATH
+      # or accidentally swallow the whole denylist into a passthrough.
+      refute "HOME" in ClaudeChat.intentional_env_passthrough_names()
+      refute "PATH" in ClaudeChat.intentional_env_passthrough_names()
+    end
+
     test "worker_id/1 is claude-chat-<sid8> (cmux precedent — one worker per chat tab)" do
       assert ClaudeChat.worker_id(@sid) == "claude-chat-3f9a1c2e"
       assert ClaudeChat.worker_id(@sid) =~ ~r/^claude-chat-[0-9a-f]{8}$/
