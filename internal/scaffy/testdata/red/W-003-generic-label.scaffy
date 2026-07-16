@@ -1,0 +1,14 @@
+# expect: W-003 6
+# expect: W-003 10
+DIRECTION "add"
+IN "internal/widgets/registry.go"
+INSERT AFTER FIRST
+::: target :::
+	registry["heading"] = headingWidget{}
+::: target :::
+WITH
+::: payload :::
+	// scaffy MARK:m-widget
+	registry["timeline"] = timelineWidget{}
+::: payload :::
+MARK "m-widget"

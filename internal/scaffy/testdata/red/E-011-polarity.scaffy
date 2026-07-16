@@ -1,0 +1,15 @@
+# expect: E-011 15
+DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+IN "internal/widgets/registry.go"
+INSERT AFTER FIRST
+::: registry head anchor :::
+	registry["heading"] = headingWidget{}
+::: registry head anchor :::
+WITH
+::: widget registration :::
+	// scaffy:add-widget MARK:registry-{{.widget-name}}
+	registry["{{.widget-name}}"] = w{}
+::: widget registration :::
+MARK "registry-{{.widget-name}}"
+ASLONG FILE CONTAIN "MARK:registry-{{.widget-name}}"

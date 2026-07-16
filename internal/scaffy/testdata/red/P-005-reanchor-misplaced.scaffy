@@ -1,0 +1,14 @@
+# expect: P-005 14
+DIRECTION "add"
+IN "internal/widgets/registry.go"
+INSERT AFTER FIRST
+::: registry head anchor :::
+	registry["heading"] = headingWidget{}
+::: registry head anchor :::
+WITH
+::: widget registration :::
+	// scaffy MARK:m-widget
+	registry["timeline"] = timelineWidget{}
+::: widget registration :::
+MARK "m-widget"
+REANCHOR "m-"

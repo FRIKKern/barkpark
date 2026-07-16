@@ -1,0 +1,10 @@
+# expect: W-001 8
+DIRECTION "add"
+CREATE FILE IF ABSENT "a/x.txt"
+::: shared block one :::
+hello shared
+::: shared block one :::
+CREATE FILE IF ABSENT "a/y.txt"
+::: shared block two :::
+hello shared
+::: shared block two :::

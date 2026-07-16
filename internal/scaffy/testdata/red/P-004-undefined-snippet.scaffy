@@ -1,0 +1,4 @@
+# expect: P-004 4
+DIRECTION "add"
+CREATE FILE IF ABSENT "web/widgets/shell.html"
+USE missing-snippet

@@ -1,0 +1,4 @@
+# expect: E-012 4
+DIRECTION "add"
+VARIABLE 1 "CardName" TITLE "t" DESCRIPTION "d" EXAMPLES "Tui"
+ASSERT FILE "docs/INDEX.md" CONTAINS "tui,{{.card-name}}}.md"

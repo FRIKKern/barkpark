@@ -1,0 +1,7 @@
+# expect: E-009 4
+DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+CREATE FILE IF ABSENT "internal/widgets/{{.WidgetName}}.go"
+::: widget module :::
+package widgets
+::: widget module :::
