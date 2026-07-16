@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Billing do
   task cloud-17.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
@@ -76,6 +77,18 @@ defmodule BarkparkCloud.Billing do
   def gateway do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:gateway, BarkparkCloud.Billing.StubGateway)
+  end
+
+  # The Registry module `reconcile_plan_limit/1` writes through. Resolved at
+  # call time and swappable ONLY via the same `Application.get_env(:barkpark_cloud,
+  # __MODULE__, [])` keyword this file already uses for `gateway/0` — real code
+  # always gets the real `Registry`; the `:registry` key exists purely so a test
+  # can force ONE barkpark's suspend/unsuspend to fail and prove the per-row
+  # isolation below actually holds (see billing_reconcile_isolation_test.exs).
+  @spec registry() :: module()
+  defp registry do
+    Application.get_env(:barkpark_cloud, __MODULE__, [])
+    |> Keyword.get(:registry, Registry)
   end
 
   @doc "The currency the control plane bills in (ISO-4217, lower-case)."
@@ -216,7 +229,10 @@ defmodule BarkparkCloud.Billing do
 
   Keys STRICTLY on the `"quota_exceeded"` reason: a box suspended by a BILLING
   lapse (`"billing_lapsed"` / `"billing_past_due"`) is NEVER restored here — the
-  two enforcement axes are independent. Returns `%{suspended: n, restored: m}`.
+  two enforcement axes are independent. Returns `%{suspended: n, restored: m}` —
+  counts reflect only the rows that actually transitioned; a single row whose
+  suspend/unsuspend changeset fails is logged and skipped rather than sinking
+  the whole team's batch (see `suspend_one/2` / `unsuspend_one/1`).
   Idempotent; NEVER deletes data (suspend is a reversible flag).
 
   Delivered as a pure context function so it is callable SYNCHRONOUSLY off the
@@ -242,24 +258,56 @@ defmodule BarkparkCloud.Billing do
         live
         |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
         |> Enum.take(overflow)
-        |> Enum.map(fn bp ->
-          {:ok, bp} = Registry.suspend_barkpark(bp, @quota_suspended_reason)
-          Events.broadcast(tid, "barkpark.suspended", %{barkpark_id: bp.id})
-          bp
-        end)
+        |> Enum.map(&suspend_one(&1, tid))
+        |> Enum.reject(&is_nil/1)
 
       %{suspended: length(suspended), restored: 0}
     else
       restored =
         tid
         |> Registry.list_quota_suspended_barkparks()
-        |> Enum.map(fn bp ->
-          {:ok, bp} = Registry.unsuspend_barkpark(bp)
-          Events.broadcast(tid, "barkpark.restored", %{barkpark_id: bp.id})
-          bp
-        end)
+        |> Enum.map(&unsuspend_one(&1, tid))
+        |> Enum.reject(&is_nil/1)
 
       %{suspended: 0, restored: length(restored)}
+    end
+  end
+
+  # Suspend ONE barkpark for the quota reconcile. `{:ok, _}` broadcasts and
+  # returns the updated row; `{:error, changeset}` — a hard-match here would
+  # MatchError and sink the WHOLE team's batch on one bad row — is logged and
+  # skipped (returns nil, filtered by the caller), mirroring the
+  # log-don't-crash-continue intent of `Health.StalenessWorker.evaluate/1`.
+  defp suspend_one(bp, tid) do
+    case registry().suspend_barkpark(bp, @quota_suspended_reason) do
+      {:ok, updated} ->
+        Events.broadcast(tid, "barkpark.suspended", %{barkpark_id: updated.id})
+        updated
+
+      {:error, changeset} ->
+        Logger.error(
+          "Billing.reconcile_plan_limit: suspend failed for barkpark #{bp.id}: #{inspect(changeset.errors)}"
+        )
+
+        nil
+    end
+  end
+
+  # Unsuspend ONE barkpark for the quota reconcile. Same isolation as
+  # `suspend_one/2` — one row's changeset failure is logged and skipped, never
+  # crashes the restore batch.
+  defp unsuspend_one(bp, tid) do
+    case registry().unsuspend_barkpark(bp) do
+      {:ok, updated} ->
+        Events.broadcast(tid, "barkpark.restored", %{barkpark_id: updated.id})
+        updated
+
+      {:error, changeset} ->
+        Logger.error(
+          "Billing.reconcile_plan_limit: unsuspend failed for barkpark #{bp.id}: #{inspect(changeset.errors)}"
+        )
+
+        nil
     end
   end
 
