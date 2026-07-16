@@ -1,0 +1,1708 @@
+{
+  "slug": "scaffy-command-showcase",
+  "style": "article",
+  "description": "Every Wave-1 Scaffy command shown in full: annotated file trees, the complete .scaffy sources byte-identical to scaffy/commands/ on main, run and idempotent re-run transcripts, and the add⇄remove docs-card symmetry demo.",
+  "tags": [
+    {
+      "tag": "scaffy",
+      "strength": 90,
+      "rationale": "The showcase itself — every Wave-1 .scaffy command displayed at full text with run transcripts."
+    },
+    {
+      "tag": "go-cli",
+      "strength": 55,
+      "rationale": "The run/re-run/remove transcripts specify the bp scaffy engine surface that ships in Wave 3."
+    },
+    {
+      "tag": "docs",
+      "strength": 35,
+      "rationale": "Doubles as the corpus's reader-facing documentation alongside scaffy/README.md."
+    }
+  ],
+  "blocks": [
+    {
+      "id": "scs-001",
+      "type": "eyebrow",
+      "text": "Scaffy · Wave 1 · The Command Corpus"
+    },
+    {
+      "id": "scs-002",
+      "type": "heading",
+      "level": 1,
+      "text": "Scaffy in Action — the Command Showcase",
+      "role": "title"
+    },
+    {
+      "id": "scs-003",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "Seven commands, full text, nothing elided. Each one is a chore Barkpark development actually repeats — a new PortableDoc block across three runtimes, an Oban cron worker, a bp CLI verb, a migration, a plugin, a docs card — captured as a "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": ".scaffy"
+        },
+        {
+          "type": "text",
+          "value": " document: declarative, idempotent, reversible. What you see below is the corpus as merged on main, byte for byte, with the file tree each command produces and the transcript of its run, its no-op re-run, and — for the docs pair — the remove that leaves the tree byte-clean."
+        }
+      ]
+    },
+    {
+      "id": "scs-004",
+      "type": "stats",
+      "items": [
+        {
+          "label": "commands, full text",
+          "value": "7"
+        },
+        {
+          "label": "lines of .scaffy",
+          "value": "1005"
+        },
+        {
+          "label": "code surfaces the flagship wires",
+          "value": "3"
+        },
+        {
+          "label": "registries maintained by hand after this",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "scs-005",
+      "type": "diagram",
+      "caption": "One command, four phases: create the files, inject the wiring at marked anchors, assert with the repo's own gates — then every re-run is a no-op and every remove is exact.",
+      "source": "flowchart LR\n  V[\"--var bindings\\n(one variable, four spellings)\"] --> C[\"CREATE \\u25cf\\nnew files\"]\n  C --> I[\"INJECT \\u25cb\\nfenced anchors, MARK planted\"]\n  I --> A[\"ASSERT\\nthe repo's own gates\"]\n  A --> R[\"re-run\\nguards hold, zero writes\"]\n  R --> X[\"remove\\nmarks reversed, tree byte-clean\"]"
+    },
+    {
+      "id": "scs-006",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "How to read each section: the annotated tree marks "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "● created"
+        },
+        {
+          "type": "text",
+          "value": " files (the half a plain generator could also do) and "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "○ injected"
+        },
+        {
+          "type": "text",
+          "value": " files (the accretion surfaces — registries, config maps, routing tables — that generators can never touch). Then the entire .scaffy source, then the run. Every anchor in these commands was verified against the live tree at file:line before the corpus merged (charter D5), and every mutating op carries a MARK — the handle both the re-run and the remove key on."
+        }
+      ]
+    },
+    {
+      "id": "scs-007",
+      "type": "callout",
+      "title": "The transcripts are the contract, not a recording",
+      "tone": "info",
+      "content": [
+        {
+          "type": "text",
+          "value": "Wave 1 ships the corpus without an engine — the terminal blocks below show what "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "bp scaffy run"
+        },
+        {
+          "type": "text",
+          "value": " prints when it lands in Wave 3, exactly. Until then every command is applied by hand in minutes: the grammar pins each anchor to one unambiguous site (scaffy/README.md §Hand-applying a command today)."
+        }
+      ]
+    },
+    {
+      "id": "scs-008",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Command"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "What it scaffolds"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "● created"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "○ injected"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Closing gate"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a PortableDoc block on every surface — parity at birth"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go test + vitest (LOCAL)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cron worker + test + crontab tuple"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-cli-verb"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a working bp verb from one data map — zero Go"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-migration"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a timestamped Ecto migration"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ecto.migrate + rollback (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-plugin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a discovered plugin, five files, zero wiring"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix compile + test (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-docs-card"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "routing row + gated card file"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "check-doc-budgets.sh (LOCAL)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "remove-docs-card"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the symmetric remove — tree byte-clean"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "−2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "budgets + DONT CONTAIN sweep"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "scs-010",
+      "type": "divider"
+    },
+    {
+      "id": "scs-011",
+      "type": "heading",
+      "level": 2,
+      "text": "add-block-type — the flagship — a PortableDoc block on every surface"
+    },
+    {
+      "id": "scs-012",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The chore this replaces is the worst one Barkpark has: a new block type means a Go renderer, its named test, a DefaultRegistry entry, a JS emitter plus its coreEmitters map entry, a CASES fixture plus a count bump, and an Elixir compose_block clause that must land "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "before"
+        },
+        {
+          "type": "text",
+          "value": " the unknown-type catch-all at compose.ex:1190 — clause order is load-bearing. The command does all of it: two files created, six injections across four files, every anchor grep-proven unique. The JS surface is fail-closed at four edits — the react suite asserts CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter alone reds exactly one assertion; the count crosses as a declared CountBefore/CountAfter pair because Scaffy has no arithmetic. And it is honest about its edges: composition tier, walk.ex kinds, and CSS are documented conditional steps, never blind ops — the claim is 3 required code surfaces with test parity at birth, not \"4 surfaces auto-injected\"."
+        }
+      ]
+    },
+    {
+      "id": "scs-013",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n├── internal/pdrender/\n│   ├── timeline.go                            ● created\n│   ├── timeline_test.go                       ● created\n│   └── pdrender.go                            ○ injected  @MARK go-registry-timeline\n├── js/packages/react/\n│   ├── src/blocks/core.ts                     ○ injected ×2  @MARK js-emitter / js-map\n│   └── tests/PortableDoc.test.tsx             ○ injected ×2  @MARK js-case / js-count\n└── api/lib/barkpark/portable_doc/render/\n    └── compose.ex                             ○ injected  @MARK ex-compose-timeline"
+    },
+    {
+      "id": "scs-014",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add PortableDoc Block Type\" DESCRIPTION \"Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper).\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"portabledoc\", \"block\", \"render\" CONCEPT \"block-type\" VARIANT \"starter\" VARIABLES\n  VARIABLE 1 \"BlockName\" TITLE \"Name your block type\" DESCRIPTION \"PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake).\" EXAMPLES \"Timeline\", \"FactBox\", \"Milestone\"\n  VARIABLE 2 \"CountBefore\" TITLE \"Registry count before this run\" DESCRIPTION \"The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). Opaque numeric literal, no casing transform. Scaffy has no arithmetic, so the count crosses as a declared pair; the W2 validator lints CountAfter = CountBefore + 1.\" EXAMPLES \"42\"\n  VARIABLE 3 \"CountAfter\" TITLE \"Registry count after this run\" DESCRIPTION \"CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. Opaque numeric literal, no casing transform.\" EXAMPLES \"43\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND HONESTLY DOES\n#\n# 3 required code surfaces + fail-closed JS test parity + optional CSS and\n# classification. Never \"4 surfaces auto-injected\":\n#\n#   ● internal/pdrender/{{.block_name}}.go          created — Go renderer\n#   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test\n#   ○ internal/pdrender/pdrender.go                 injected — DefaultRegistry entry\n#   ○ js/packages/react/src/blocks/core.ts          injected ×2 — emitter + map entry\n#   ○ js/packages/react/tests/PortableDoc.test.tsx  injected ×2 — CASES fixture + count bump\n#   ○ api/lib/barkpark/portable_doc/render/compose.ex injected — compose_block clause\n#\n# The JS surface is FAIL-CLOSED at four edits: the react test suite asserts\n# CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry\n# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The Go\n# registry is OPEN (no count test) and the Elixir clause set is OPEN (unknown\n# types degrade through the catch-all) — for those two surfaces the MARK-planted\n# injection is the whole story.\n#\n# The starter render is identical on every surface: the block's `text` attr in\n# a `bp-{{.block-name}}` wrapper (terminal: sanitized + width-wrapped text).\n# Grow each surface from its exemplar afterwards; the scaffold guarantees the\n# block EXISTS everywhere with parity at birth, not that it is finished.\n#\n# GUARDS: every payload below plants a `scaffy:add-block-type … MARK:…` comment,\n# so INSERT guards derive from the payload itself (D3c — the mark line IS the\n# re-run check). The one REPLACE carries an explicit ASLONG because a REPLACE\n# without a payload-derived guard is a lint error (A4).\n#\n# CONDITIONAL / MANUAL STEPS (prose, deliberately NOT blind ops — read these):\n#\n# 1. Composition tier (conditional). tiers.ex classifies every block type as\n#    :element | :widget | :section (api/lib/barkpark/portable_doc/tiers.ex).\n#    An UNCLASSIFIED type degrades safely to :element (slots.ex:98 —\n#    `tier_of(block) || :element`), so a leaf block needs nothing. Add\n#    \"{{.block-name}}\" to the tiers.ex word-list ONLY if the block composes\n#    other blocks (:widget) or owns its children's layout (:section).\n#\n# 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs\n#    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`\n#    pre-rendered-HTML kind, which walk.ex already passes through verbatim\n#    (walk.ex:153, `def walk(%{\"kind\" => \"_raw\", \"html\" => html}, …), do: html`\n#    — the same hatch ~68 sibling compose clauses use). If you later replace\n#    the starter with a genuinely new node kind, THAT is when walk.ex gets a\n#    clause — by hand, next to its siblings.\n#\n# 3. Block-view CSS (optional). If the block needs styling beyond bare text,\n#    add a rule to api/assets/paper-surface/paper-surface.css scoped as\n#    `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout` at\n#    paper-surface.css:213). NEVER inject root.html.heex — it has no per-type\n#    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run\n#    rendered fine with zero CSS; this step is genuinely optional.\n#\n# 4. Count prose (optional tidy). Three comments mention the registry count in\n#    prose and go stale by one: the test title \"covers EXACTLY the 42 in-scope\n#    types\" (PortableDoc.test.tsx:309), the CASES doc comment (\"all 42 render\",\n#    PortableDoc.test.tsx:12), and the REGISTERED_TYPES doc comment (\"the 42\n#    in-scope PortableDocument types\", src/blocks/registry.ts). Cosmetic — no\n#    assertion reads them; tidy them when you touch those files.\n# ─────────────────────────────────────────────────────────────────────────────\n\n# ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────\n\n# Topical renderer file. Implements the Renderer interface\n# (pdrender.go:168, `Render(b Block, ctx RenderCtx) []string`). Modeled on\n# eyebrowRenderer (richblocks.go:389) — the minimal single-attr exemplar; see\n# gaugelist.go for a full data block. Helpers used: attrStr (attrs.go:16),\n# sanitizeText (inline.go:427 — strips control bytes so a hostile `text` can't\n# inject ANSI), wrapLines (blocks.go:15).\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}.go\"\nWITH\n::: {{.block-name}} renderer :::\npackage pdrender\n\n// ── {{.block-name}} ─────────────────────────────────────────────────────────\n// Mirrors compose_block({{.block-name}}) (compose.ex): the starter render is\n// the block's `text` attr, sanitized and width-wrapped. Empty text renders\n// nothing (honest empty state — no phantom blank line in the document flow).\n// Grow this into the block's real terminal form; eyebrowRenderer\n// (richblocks.go) shows themed styling, gaugelist.go a full data block.\ntype {{.blockName}}Renderer struct{}\n\nfunc ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string {\n\ttext := sanitizeText(attrStr(b.Attrs, \"text\"))\n\tif text == \"\" {\n\t\treturn nil\n\t}\n\treturn wrapLines(text, ctx.Width)\n}\n::: {{.block-name}} renderer :::\n\n# Named test — the scoped ASSERT CMD below runs exactly this (never the whole\n# pdrender suite: worktree-pollution red). testRegistry() (render_test.go:27)\n# pins the lipgloss profile so output is byte-stable; going through the\n# registry (not the bare struct) also proves the DefaultRegistry injection.\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}_test.go\"\nWITH\n::: {{.block-name}} test :::\npackage pdrender\n\nimport (\n\t\"strings\"\n\t\"testing\"\n\n\t\"github.com/charmbracelet/x/ansi\"\n)\n\n// Test{{.BlockName}}Renderer proves the {{.block-name}} block renders its text\n// THROUGH the registry — one assertion covering both the renderer and its\n// DefaultRegistry registration.\nfunc Test{{.BlockName}}Renderer(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{\"text\": \"hello from {{.block-name}}\"}}\n\tgot := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), \"\\n\"))\n\tif !strings.Contains(got, \"hello from {{.block-name}}\") {\n\t\tt.Fatalf(\"{{.block-name}} render missing text, got %q\", got)\n\t}\n}\n\n// Test{{.BlockName}}RendererEmptyIsSilent pins the honest empty state: a\n// {{.block-name}} block with no text contributes zero lines.\nfunc Test{{.BlockName}}RendererEmptyIsSilent(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{}}\n\tif lines := reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}); len(lines) != 0 {\n\t\tt.Fatalf(\"empty {{.block-name}} should render nothing, got %d lines\", len(lines))\n\t}\n}\n::: {{.block-name}} test :::\n\n# Register in the DefaultRegistry block map (pdrender.go:249-361). The map is\n# OPEN — assignments are order-independent and there is no count test (a 43rd\n# type left the full suite green in the proof run). Anchor is the heading\n# registration, the map's first and structurally most stable line (unique,\n# grep -cF = 1). Guard derives from the payload's MARK line.\nIN \"internal/pdrender/pdrender.go\"\n### Register {{.block-name}} in the DefaultRegistry block map\nINSERT AFTER FIRST\n::: registry head anchor :::\n\tr.blocks[\"heading\"] = headingRenderer{ir: ir}\n::: registry head anchor :::\nWITH\n::: {{.block-name}} registration :::\n\t// scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}\n\tr.blocks[\"{{.block-name}}\"] = {{.blockName}}Renderer{}\n::: {{.block-name}} registration :::\nMARK \"go-registry-{{.block-name}}\"\n\n# ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────\n\n# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,\n# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml\n# and str are already in scope in core.ts. Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Add the {{.block-name}} emitter beside the eyebrow exemplar\nINSERT AFTER FIRST\n::: eyebrow emitter anchor :::\nconst eyebrow: Emit = (b) => `<p class=\"bp-role-eyebrow\">${escapeHtml(str(b.text))}</p>`\n::: eyebrow emitter anchor :::\nWITH\n::: {{.block-name}} emitter :::\n\n// scaffy:add-block-type {{.BlockName}} MARK:js-emitter-{{.block-name}}\n// Mirrors compose_block({{.block-name}}): starter emit — `text` escaped into\n// the bp-{{.block-name}} wrapper, byte-identical to the Elixir _raw clause.\nconst {{.blockName}}: Emit = (b) => `<div class=\"bp-{{.block-name}}\">${escapeHtml(str(b.text))}</div>`\n::: {{.block-name}} emitter :::\nMARK \"js-emitter-{{.block-name}}\"\n\n# Edit 2/4: the coreEmitters map entry (core.ts:700). registry.ts spreads\n# coreEmitters into DISPATCH, and REGISTERED_TYPES = Object.keys(DISPATCH) —\n# this single entry is what makes the type exist for the SDK. The map's last\n# entry `roadmap,` (unique at this indent, grep -c = 1) KEEPS its trailing\n# comma, so a plain INSERT after it is safe — this is not an A3 last-element\n# case. Key is quoted because kebab-case types need it ('status-legend' sets\n# the precedent). Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Register the {{.block-name}} emitter in the coreEmitters map\nINSERT AFTER FIRST\n::: coreEmitters tail anchor :::\n  roadmap,\n::: coreEmitters tail anchor :::\nWITH\n::: {{.block-name}} map entry :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-map-{{.block-name}}\n  '{{.block-name}}': {{.blockName}},\n::: {{.block-name}} map entry :::\nMARK \"js-map-{{.block-name}}\"\n\n# Edit 3/4: the CASES fixture. The suite's self-proof test asserts\n# CASES ≡ REGISTERED_TYPES (PortableDoc.test.tsx:310-313) — without this\n# fixture the toEqual reds. Anchor is the heading case, the array's first and\n# most stable row (unique). Marker = the wrapper class the emitter writes.\n# Guard derives from the MARK line.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Add the {{.block-name}} fixture to CASES\nINSERT AFTER FIRST\n::: cases head anchor :::\n  { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },\n::: cases head anchor :::\nWITH\n::: {{.block-name}} case :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-case-{{.block-name}}\n  { type: '{{.block-name}}', block: { type: '{{.block-name}}', text: 'Starter' }, marker: 'bp-{{.block-name}}' },\n::: {{.block-name}} case :::\nMARK \"js-case-{{.block-name}}\"\n\n# Edit 4/4: the count bump — the fail-closed pin itself. A REPLACE, not an\n# INSERT: the assertion line must change in place. The replacement does not\n# contain the target (CountBefore ≠ CountAfter), but A4 hygiene still applies:\n# the explicit ASLONG below matches the MARK line this op writes, and re-runs\n# anchor at that mark, never at the mutated count. A second add-block-type run\n# (a different block) is authored against the THEN-current count pair — its\n# target is the new toHaveLength line, and its own mark stacks above it.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Bump the registry count assertion from {{.CountBefore}} to {{.CountAfter}}\nREPLACE\n::: count assertion anchor :::\n    expect(registered).toHaveLength({{.CountBefore}})\n::: count assertion anchor :::\nWITH\n::: {{.block-name}} count bump :::\n    // scaffy:add-block-type {{.BlockName}} MARK:js-count-{{.block-name}}\n    expect(registered).toHaveLength({{.CountAfter}})\n::: {{.block-name}} count bump :::\nMARK \"js-count-{{.block-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:js-count-{{.block-name}}\"\n\n# ── Surface 3: Elixir (api compose) ──────────────────────────────────────────\n\n# One compose_block/2 clause, inserted BEFORE the unknown-type catch-all\n# (`def compose_block(%{\"type\" => type}, _style)`, compose.ex:1190) — clause\n# order is load-bearing: anything after the catch-all is unreachable. The\n# anchor is the END of the last typed clause (the chart email clause,\n# compose.ex:1180-1181; `chart_email_html(b)` is unique, grep -cF = 1).\n# Inserting AFTER it — rather than before the catch-all's comment — keeps the\n# catch-all's own doc comment attached to its clause. render.ex is UNTOUCHED:\n# render_block/2 (render.ex:182) is the entry point and dispatches every type\n# through compose; it needs zero edits. Guard derives from the MARK line.\nIN \"api/lib/barkpark/portable_doc/render/compose.ex\"\n### Add the {{.block-name}} compose clause before the unknown-type catch-all\nINSERT AFTER FIRST\n::: last typed clause anchor :::\n    %{\"kind\" => \"_raw\", \"html\" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}\n  end\n::: last typed clause anchor :::\nWITH\n::: {{.block-name}} compose clause :::\n\n  # scaffy:add-block-type {{.BlockName}} MARK:ex-compose-{{.block-name}}\n  # Starter compose for `{{.block-name}}`: the block's `text` attr escaped into\n  # its bp-{{.block-name}} wrapper through the `_raw` pre-rendered-HTML hatch\n  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling\n  # clauses use). Every style gets the same div for now; replace with a real\n  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)\n  # as the block grows semantics. `text` goes through the tolerant stringish/1\n  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of\n  # the wrapper (papers are schemaless — same defense as the catch-all below).\n  def compose_block(%{\"type\" => \"{{.block-name}}\"} = b, _style) do\n    text = stringish(Map.get(b, \"text\", \"\"))\n\n    %{\n      \"kind\" => \"_raw\",\n      \"html\" => ~s(<div class=\"bp-{{.block-name}}\">) <> Util.escape_html(text) <> ~s(</div>)\n    }\n  end\n::: {{.block-name}} compose clause :::\nMARK \"ex-compose-{{.block-name}}\"\n\n# ── Post-conditions ──────────────────────────────────────────────────────────\n\n# Per-surface file asserts — each string is a verbatim substring of what an op\n# above writes (ASCII, brace-free).\nASSERT FILE \"internal/pdrender/{{.block_name}}.go\" CONTAINS \"func ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string\"\nASSERT FILE \"internal/pdrender/{{.block_name}}_test.go\" CONTAINS \"func Test{{.BlockName}}Renderer(t *testing.T)\"\nASSERT FILE \"internal/pdrender/pdrender.go\" CONTAINS \"MARK:go-registry-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-emitter-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-map-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"MARK:js-case-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"toHaveLength({{.CountAfter}})\"\nASSERT FILE \"api/lib/barkpark/portable_doc/render/compose.ex\" CONTAINS \"MARK:ex-compose-{{.block-name}}\"\n\n# Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the\n# NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)\n# — never the whole pdrender suite. The react vitest run is the fail-closed\n# proof: it reds unless all four JS edits landed. Every Elixir gate is TIER ci\n# until scoped local mix test is proven safe.\nASSERT CMD \"go vet ./internal/pdrender/...\"\nASSERT CMD \"CC=/usr/bin/clang go build ./internal/pdrender/\"\nASSERT CMD \"go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1\"\nASSERT CMD \"cd js/packages/react && npx tsc --noEmit\"\nASSERT CMD \"cd js/packages/react && npx vitest run\"\nASSERT CMD \"cd api && mix test test/barkpark/portable_doc/render_test.exs\" TIER ci\n"
+    },
+    {
+      "id": "scs-015",
+      "type": "terminal",
+      "footer": "parity at birth: the same starter form renders in the TUI, the SDK, and the reader",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-block-type --var BlockName=Timeline --var CountBefore=42 --var CountAfter=43"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● internal/pdrender/timeline.go                             created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● internal/pdrender/timeline_test.go                        created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ internal/pdrender/pdrender.go                             injected  @MARK go-registry-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ js/packages/react/src/blocks/core.ts                      injected ×2  emitter + map entry"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ js/packages/react/tests/PortableDoc.test.tsx              injected ×2  CASES fixture + 42→43"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ api/lib/barkpark/portable_doc/render/compose.ex           injected  @MARK ex-compose-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 8/8                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ go vet · go build · go test -run TestTimelineRenderer     ok"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ npx tsc --noEmit · npx vitest run                         188 passed — toHaveLength(43) green"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  … ASSERT CMD mix test …/render_test.exs                     TIER ci — deferred to the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: block-type/starter applied — 2 created · 6 injected · 6 marks · 31s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-016",
+      "type": "terminal",
+      "footer": "idempotent · every guard derives from the MARK line the op itself writes",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-block-type --var BlockName=Timeline --var CountBefore=42 --var CountAfter=43"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = internal/pdrender/timeline.go                             exists — IF ABSENT, skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = internal/pdrender/timeline_test.go                        exists — IF ABSENT, skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = 6/6 injections skipped — MARK lines already present"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 8/8                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: block-type/starter — 0 writes, tree untouched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-009",
+      "type": "callout",
+      "title": "Proven end-to-end before it was written",
+      "tone": "success",
+      "content": [
+        {
+          "type": "text",
+          "value": "This command's anchors are not hopeful: the wave's verify fleet wired a dummy wavecheck block through all three surfaces in a throwaway worktree and ran the real gates — the 43rd Go type left the full pdrender suite green, and the JS emitter-without-fixture run red exactly one assertion, proving the fail-closed pin works. The .scaffy below encodes that proven path, byte for byte."
+        }
+      ]
+    },
+    {
+      "id": "scs-017",
+      "type": "divider"
+    },
+    {
+      "id": "scs-018",
+      "type": "heading",
+      "level": 2,
+      "text": "add-oban-worker — a cron worker with its heartbeat wired in"
+    },
+    {
+      "id": "scs-019",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Creates a worker module and its mirrored test under "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "lib/barkpark/workers/"
+        },
+        {
+          "type": "text",
+          "value": ", then registers the schedule by injecting a tuple into the static "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "Oban.Plugins.Cron"
+        },
+        {
+          "type": "text",
+          "value": " crontab in api/config/config.exs. The injection is the A3 comma-list append in the wild: the crontab's last real element — the full PlaygroundReaper tuple, grep-proven unique at config.exs:251 — carries no trailing comma, so a bare INSERT below it would produce two adjacent list terms (an Elixir syntax error). The command instead REPLACEs that last element with itself, a comma, a MARK comment, and the new tuple. Because the old tuple survives inside its own replacement, idempotency rests entirely on the ASLONG guard (A4) — a verbatim substring of what the op writes."
+        }
+      ]
+    },
+    {
+      "id": "scs-020",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/\n    ├── lib/barkpark/workers/\n    │   └── stale_token_sweeper.ex             ● created\n    ├── test/barkpark/workers/\n    │   └── stale_token_sweeper_test.exs       ● created\n    └── config/\n        └── config.exs                         ○ injected  @MARK oban-cron-stale-token-sweeper"
+    },
+    {
+      "id": "scs-021",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add Oban Cron Worker\" DESCRIPTION \"Scaffold an Oban cron worker (worker module + test) and register its crontab tuple in the static Oban.Plugins.Cron block in config/config.exs — idempotently, on the shared :default queue.\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"oban\", \"worker\", \"cron\" CONCEPT \"oban-worker\" VARIANT \"cron\" VARIABLES\n  VARIABLE 1 \"WorkerName\" TITLE \"Name your worker\" DESCRIPTION \"PascalCase module suffix under Barkpark.Workers. Drives module name, file path (snake_case), test, and crontab entry.\" EXAMPLES \"StaleTokenSweeper\", \"OrphanMediaReaper\", \"UsageRollup\"\n  VARIABLE 2 \"CronExpr\" TITLE \"Cron schedule\" DESCRIPTION \"Standard 5-field crontab expression — how often the worker ticks. Opaque literal, no casing transform.\" EXAMPLES \"0 4 * * *\", \"*/15 * * * *\", \"@daily\"\n\n# Worker module: Barkpark.Workers.{{.WorkerName}}\n# module->file mapping is snake_case (lib/barkpark/workers/tag_distribution.ex\n# == Barkpark.Workers.TagDistribution). Modeled on Barkpark.Audit.ExportWorker.\nCREATE FILE IF ABSENT \"api/lib/barkpark/workers/{{.worker_name}}.ex\"\nWITH\n::: {{.worker-name}} worker :::\ndefmodule Barkpark.Workers.{{.WorkerName}} do\n  @moduledoc \"\"\"\n  Oban cron worker — {{.WorkerName}}.\n\n  Scheduled from the static crontab in `config/config.exs`\n  (`Oban.Plugins.Cron`). Runs on the shared `:default` queue with\n  `max_attempts: 1`: a recurring tick that runs again next cycle, so a single\n  failed run should not retry-storm the queue.\n\n  Fill in `perform/1` with the work this worker owns.\n  \"\"\"\n  use Oban.Worker, queue: :default, max_attempts: 1\n\n  require Logger\n\n  @impl Oban.Worker\n  def perform(%Oban.Job{args: _args}) do\n    Logger.info(\"[{{.worker-name}}] tick\")\n    :ok\n  end\nend\n::: {{.worker-name}} worker :::\n\n# Worker test — proves perform/1 returns :ok; runnable as the scoped ASSERT CMD below.\nCREATE FILE IF ABSENT \"api/test/barkpark/workers/{{.worker_name}}_test.exs\"\nWITH\n::: {{.worker-name}} test :::\ndefmodule Barkpark.Workers.{{.WorkerName}}Test do\n  use Barkpark.DataCase, async: false\n\n  alias Barkpark.Workers.{{.WorkerName}}\n\n  test \"perform/1 returns :ok\" do\n    assert :ok = {{.WorkerName}}.perform(%Oban.Job{args: %{}})\n  end\nend\n::: {{.worker-name}} test :::\n\n# Register the crontab tuple. PlaygroundReaper is the LAST static cron element and\n# carries NO trailing comma; a bare INSERT below it yields two adjacent list terms\n# with no separator (Elixir syntax error). So this is a REPLACE that re-emits the\n# anchor line WITH the comma, then the mark comment, then the new tuple. Anchor is\n# the FULL tuple (unique: count 1) — bare \"* * * * *\" occurs 4x, bare module 2x.\nIN \"api/config/config.exs\"\n### Append {{.WorkerName}} to the static crontab after the PlaygroundReaper entry\nREPLACE\n::: playground-reaper anchor :::\n       {\"* * * * *\", Barkpark.Tenancy.Workers.PlaygroundReaper}\n::: playground-reaper anchor :::\nWITH\n::: {{.worker-name}} cron :::\n       {\"* * * * *\", Barkpark.Tenancy.Workers.PlaygroundReaper},\n       # scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}\n       {\"{{.CronExpr}}\", Barkpark.Workers.{{.WorkerName}}}\n::: {{.worker-name}} cron :::\nMARK \"oban-cron-{{.worker-name}}\"\nASLONG FILE DONT CONTAIN \"# scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}\"\n\n# Post-conditions\nASSERT FILE \"api/lib/barkpark/workers/{{.worker_name}}.ex\" CONTAINS \"defmodule Barkpark.Workers.{{.WorkerName}} do\"\nASSERT FILE \"api/test/barkpark/workers/{{.worker_name}}_test.exs\" CONTAINS \"assert :ok = {{.WorkerName}}.perform\"\nASSERT FILE \"api/config/config.exs\" CONTAINS \"MARK:oban-cron-{{.worker-name}}\"\nASSERT CMD \"cd api && mix test test/barkpark/workers/{{.worker_name}}_test.exs\" TIER ci\n"
+    },
+    {
+      "id": "scs-022",
+      "type": "terminal",
+      "footer": "first run — creates the pair, plants the mark in the crontab",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-oban-worker --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/lib/barkpark/workers/stale_token_sweeper.ex           created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/test/barkpark/workers/stale_token_sweeper_test.exs    created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ api/config/config.exs                                     injected  @MARK oban-cron-stale-token-sweeper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  … ASSERT CMD mix test …/stale_token_sweeper_test.exs        TIER ci — deferred to the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: oban-worker/cron applied — 2 created · 1 injected · 1 mark · 0.4s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-023",
+      "type": "terminal",
+      "footer": "idempotent · guards hold · zero writes",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-oban-worker --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = api/lib/barkpark/workers/stale_token_sweeper.ex           exists — IF ABSENT, skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = api/test/barkpark/workers/stale_token_sweeper_test.exs    exists — IF ABSENT, skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = api/config/config.exs                                     ASLONG guard held — skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: oban-worker/cron — 0 writes, tree untouched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-024",
+      "type": "divider"
+    },
+    {
+      "id": "scs-025",
+      "type": "heading",
+      "level": 2,
+      "text": "add-cli-verb — a working bp verb from one data map, zero Go"
+    },
+    {
+      "id": "scs-026",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The whole command is a single ○ — and that is the boast. bp is manifest-driven: the Go binary has no per-command code, it walks GET /v1/capabilities and builds each HTTP call generically from the command map's own fields. So giving a plugin a new verb is appending one data map to its "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "cli_commands/0"
+        },
+        {
+          "type": "text",
+          "value": " list — templated here on the canonical ticket.inbox read-list shape (cli.ex:87–104). The append REPLACEs the list's final ticket.close map (unique: grep count 1) with itself plus the new map, guarded by the new map's own id: line. On the next capabilities fetch, bp ticket stats exists — no recompile, no registration, no Go file touched."
+        }
+      ]
+    },
+    {
+      "id": "scs-027",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/lib/barkpark/plugins/tickets/\n    └── cli.ex                                 ○ injected  @MARK SCAFFY CLI VERB\n\n(zero ● — the manifest-driven architecture already did the create half)"
+    },
+    {
+      "id": "scs-028",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add a bp CLI Verb\"\nDESCRIPTION \"Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. Zero Go: the manifest-driven CLI grows the verb for free.\"\nDOMAIN \"barkpark\" CONCEPT \"cli-verb\" VARIANT \"read-list\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# Why this command is a ONE-LINE append (the architecture already did the work)\n# ─────────────────────────────────────────────────────────────────────────────\n# There is NO handler key to write. `bp` is manifest-driven: the Go binary\n# (internal/cli) has zero per-command code. It reads GET /v1/capabilities, walks\n# the noun/verb tree (tree.Lookup), and builds the HTTP call GENERICALLY from the\n# command map's own fields — `internal/cli/cli.go:9` composes the request from\n# `http.path_template` via `manifest.BuildURL`, and `internal/cli/run.go:130`\n# takes the method straight from `cmd.HTTP.Method`. No switch, no registration,\n# no recompile.\n#\n# The round-trip, end to end:\n#\n#     cli_commands/0 list entry            (this append — the ONLY edit)\n#        │  Plugins.Tickets.cli_commands/0 delegates to Tickets.CLI.commands/0\n#        ▼\n#     GET /v1/capabilities                 (CapabilitiesController folds every\n#        │                                   plugin's maps in, stamping\n#        │                                   source: \"plugin:tickets\" provenance\n#        │                                   from the noun)\n#        ▼\n#     bp <noun> <verb>                     (tree.Lookup finds the map; the\n#                                           generic HTTP builder calls\n#                                           http.method + http.path_template)\n#\n# So: append the map here, and `bp ticket <verb>` works on the next capabilities\n# fetch. No Go file is touched by this command — that is the whole point.\n#\n# Exemplar payload: the `ticket.inbox` map, api/lib/barkpark/plugins/tickets/cli.ex:87-104\n# — the canonical read-list verb shape (id / noun / verb / summary /\n# http{method,path_template} / auth_tier / args / flags / writes / batch /\n# paginated / dry_run / default_output / scoped_prefix). This command templates\n# that exact archetype: a read-tier GET list verb with a `limit` flag. For a\n# WRITING verb, flip `method`/`writes`/`auth_tier`/`default_output` by hand — the\n# map SHAPE is identical, only these four values change.\n#\n# Optional cosmetic polish (NOT part of this command, never a MARK): if the new\n# verb returns a single wrapped object and you want its fields rendered as\n# key/value lines instead of a one-row table, add the envelope key to\n# `singleObjectEnvelopeKeys` at internal/cli/table.go:96. That is a Go rendering\n# nicety only; the verb is fully functional without it.\n\nVARIABLES\n  VARIABLE 1 \"Noun\" TITLE \"Plugin noun the verb hangs off\"\n    EXAMPLES \"ticket\"\n  VARIABLE 2 \"Verb\" TITLE \"The new verb\"\n    EXAMPLES \"stats\", \"waiting\", \"unassigned\"\n  VARIABLE 3 \"Summary\" TITLE \"One-line operator summary (manifest + --help text)\"\n    EXAMPLES \"Operator dashboard: open / answered / closed counts, oldest-waiting age.\"\n  VARIABLE 4 \"PathTemplate\" TITLE \"The HTTP route the verb calls (GET)\"\n    EXAMPLES \"/v1/tickets/stats\"\n\n# Token spellings-as-transforms (D3d / A1). A verb is a single lowercase word, so\n# the four canonical casings coincide — declared for grammar completeness:\n#   {{.Verb}}   → Stats     (Pascal)\n#   {{.verb}}   → stats     (kebab == camel == snake, lowercase)\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP — append the new verb map to the ticket noun's command list (A3)\n# ─────────────────────────────────────────────────────────────────────────────\n# The list `ticket_commands/0` ends with the `ticket.close` map, whose closing\n# `}` carries NO trailing comma before the `]` (verified: cli.ex:149-166). Under\n# A3 you cannot bare-INSERT a second map after it — two adjacent `%{…} %{…}` terms\n# are a syntax error. The append is therefore a FENCED REPLACE of that last\n# element: re-emit `ticket.close` verbatim, add the separating comma, then the new\n# map. The `ticket.close` target is unique (`grep -c 'id: \"ticket.close\"'` = 1).\n#\n# A4/A5 guard: `ticket.close` survives as a substring of the replacement, so\n# idempotency rests ENTIRELY on the ASLONG guard — a payload-derived, ASCII,\n# per-verb substring of what the op writes (the new map's `id:` line). No `}}`\n# sits adjacent to a literal `}`. On a re-run with the same VARIABLEs the guard is\n# already present and the whole op is skipped (no duplicate verb). The MARK plants\n# the re-anchor + remove handle: first run anchors on the `ticket.close` structural\n# target and plants \"SCAFFY CLI VERB\"; every later run anchors at that mark.\n\nIN \"api/lib/barkpark/plugins/tickets/cli.ex\"\n### Append {{.noun}}.{{.verb}} to ticket_commands/0\nREPLACE\n::: target :::\n      %{\n        id: \"ticket.close\",\n        noun: \"ticket\",\n        verb: \"close\",\n        summary: \"Close a ticket (status=closed, done).\",\n        http: %{method: \"POST\", path_template: \"/v1/tickets/:id/close\"},\n        auth_tier: \"read\",\n        args: [\n          %{name: \"id\", required: true, type: \"string\", summary: \"Ticket id to close.\"}\n        ],\n        flags: [],\n        writes: true,\n        batch: false,\n        paginated: false,\n        dry_run: false,\n        default_output: \"minimal\",\n        scoped_prefix: nil\n      }\n::: target :::\n::: payload :::\n      %{\n        id: \"ticket.close\",\n        noun: \"ticket\",\n        verb: \"close\",\n        summary: \"Close a ticket (status=closed, done).\",\n        http: %{method: \"POST\", path_template: \"/v1/tickets/:id/close\"},\n        auth_tier: \"read\",\n        args: [\n          %{name: \"id\", required: true, type: \"string\", summary: \"Ticket id to close.\"}\n        ],\n        flags: [],\n        writes: true,\n        batch: false,\n        paginated: false,\n        dry_run: false,\n        default_output: \"minimal\",\n        scoped_prefix: nil\n      },\n      %{\n        id: \"{{.noun}}.{{.verb}}\",\n        noun: \"{{.noun}}\",\n        verb: \"{{.verb}}\",\n        summary: \"{{.summary}}\",\n        http: %{method: \"GET\", path_template: \"{{.path_template}}\"},\n        auth_tier: \"read\",\n        args: [],\n        flags: [\n          %{name: \"limit\", type: \"int\", summary: \"Max rows to return.\", default: 50}\n        ],\n        writes: false,\n        batch: false,\n        paginated: true,\n        dry_run: false,\n        default_output: \"table\",\n        scoped_prefix: nil\n      }\n::: payload :::\nASLONG \"id: \\\"{{.noun}}.{{.verb}}\\\"\"\nMARK \"SCAFFY CLI VERB\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n# ASSERT FILE: the new map is present (id + route). Both strings are verbatim\n# substrings the op writes, guard-consistent with the ASLONG above (A4).\nASSERT FILE \"api/lib/barkpark/plugins/tickets/cli.ex\" CONTAINS \"id: \\\"{{.noun}}.{{.verb}}\\\"\"\nASSERT FILE \"api/lib/barkpark/plugins/tickets/cli.ex\" CONTAINS \"path_template: \\\"{{.path_template}}\\\"\"\n\n# ASSERT CMD: the plugin's own CLI-manifest test compiles the map and asserts the\n# frozen cli_command() shape. Every Elixir gate is TIER ci (A2) — never run in the\n# apply worktree, only on CI where the BEAM toolchain and DB are provisioned.\nASSERT CMD \"mix test test/barkpark/plugins/tickets/cli_test.exs\" EXIT 0 TIER ci\n"
+    },
+    {
+      "id": "scs-029",
+      "type": "terminal",
+      "footer": "one data map in, one working verb out — the architecture made this a one-liner",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-cli-verb --var Noun=ticket --var Verb=stats \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'Summary=Operator dashboard: open / answered / closed counts.' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var PathTemplate=/v1/tickets/stats"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ api/lib/barkpark/plugins/tickets/cli.ex                   injected  @MARK SCAFFY CLI VERB"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 2/2                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  … ASSERT CMD mix test …/tickets/cli_test.exs                TIER ci — deferred to the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: cli-verb/read-list applied — 0 created · 1 injected · 1 mark · 0.2s"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp ticket stats"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  open  answered  closed  oldest_waiting"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  12    7         341     2h 14m"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-030",
+      "type": "terminal",
+      "footer": "idempotent · the guard is the new map's own id: line",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-cli-verb --var Noun=ticket --var Verb=stats \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'Summary=Operator dashboard: open / answered / closed counts.' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var PathTemplate=/v1/tickets/stats"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = api/lib/barkpark/plugins/tickets/cli.ex                   guard held (id: \"ticket.stats\") — skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 2/2                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: cli-verb/read-list — 0 writes, no duplicate verb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-031",
+      "type": "divider"
+    },
+    {
+      "id": "scs-032",
+      "type": "heading",
+      "level": 2,
+      "text": "add-migration — a timestamped Ecto migration, ordered by name alone"
+    },
+    {
+      "id": "scs-033",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Pure ● CREATE, zero injection — deliberately. Migrations are never registered anywhere: the migrator discovers them by the 14-digit filename prefix, so the ordering surface IS the filename and there is no accretion file to touch. Two grammar showcases live here. The timestamp is a declared VARIABLE — commands have no clock, the caller supplies it (date -u +%Y%m%d%H%M%S) and the Wave-2 validator checks the shape. And the migration name is the A1 casing transform at full stretch: one variable spells both the snake_case filename suffix and the PascalCase module name, so the two can never disagree. The body mirrors the repo's canonical exemplar (20260714150200_add_chat_execution_event_projection.exs): alter + add + partial backfill index, auto-reversible via change/0."
+        }
+      ]
+    },
+    {
+      "id": "scs-034",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/priv/repo/migrations/\n    └── 20260716120000_add_published_at_to_documents.exs   ● created\n\n(zero ○ — the migrator discovers migrations by filename prefix; nothing to inject)"
+    },
+    {
+      "id": "scs-035",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add Ecto Migration\" DESCRIPTION \"Scaffold one timestamped Ecto migration under api/priv/repo/migrations — a single change/0 that alters a table, adds a column, and creates a partial index. CREATE-only: no accretion file is touched, so it composes with the migrator's filename ordering instead of fighting it.\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"ecto\", \"migration\", \"schema\" CONCEPT \"migration\" VARIANT \"alter-add-index\" VARIABLES\n  VARIABLE 1 \"Ts\" TITLE \"Migration timestamp\" DESCRIPTION \"14-digit UTC stamp YYYYMMDDHHMMSS — the ordering prefix Ecto's own generator emits. A command has no clock, so this is a DECLARED variable: the caller supplies it and the W2 validator checks the shape (exactly 14 ASCII digits, a real UTC calendar instant). Generate it with `date -u +%Y%m%d%H%M%S`. Opaque literal — no casing transform; it only ever appears in the filename prefix.\" EXAMPLES \"20260714150200\", \"20260716093000\", \"20260801120000\"\n  VARIABLE 2 \"MigrationName\" TITLE \"Migration name\" DESCRIPTION \"What the migration does, in words. This is the A1 casing showcase: the SAME variable spells the snake_case filename suffix ({{.migration_name}}) and the PascalCase module suffix ({{.MigrationName}}) — one declaration, two derived surfaces, guaranteed in agreement. Follow the repo convention `add_<thing>` / `create_<thing>`.\" EXAMPLES \"AddChatExecutionEventProjection\", \"AddPublishedAtToDocuments\", \"CreatePaperRevisions\"\n  VARIABLE 3 \"TableName\" TITLE \"Table\" DESCRIPTION \"The existing table to alter, snake_case plural — the argument to `table(:...)`. Opaque literal — no casing transform.\" EXAMPLES \"chat_execution_events\", \"documents\", \"paper_revisions\"\n  VARIABLE 4 \"ColumnName\" TITLE \"Column\" DESCRIPTION \"The column to add, snake_case. Reused verbatim in the add, the index columns list, and the partial-index predicate. Opaque literal — no casing transform.\" EXAMPLES \"projected_at\", \"published_at\", \"archived_at\"\n  VARIABLE 5 \"ColumnType\" TITLE \"Column type\" DESCRIPTION \"The Ecto column type. Opaque literal passed straight into `add :.../2` — no casing transform.\" EXAMPLES \":utc_datetime_usec\", \":string\", \":boolean\"\n\n# Prior art: `mix ecto.gen.migration <name>` already stamps an empty timestamped\n# skeleton — this command formalizes that same convention, then fills the body\n# with the shape we actually reach for (alter + add + partial backfill index),\n# modeled 1:1 on api/priv/repo/migrations/20260714150200_add_chat_execution_event_projection.exs.\n#\n# CREATE-only by design: migrations are never edited in place and never registered\n# anywhere — the migrator discovers them by the {{.Ts}} filename prefix. There is\n# no accretion file to inject into, so this command has zero IN ops.\nCREATE FILE IF ABSENT \"api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs\"\nWITH\n::: {{.migration-name}} migration :::\ndefmodule Barkpark.Repo.Migrations.{{.MigrationName}} do\n  use Ecto.Migration\n\n  def change do\n    alter table(:{{.table_name}}) do\n      add :{{.column_name}}, {{.column_type}}\n    end\n\n    # Partial index, mirroring the exemplar's backfill shape: indexes only the rows\n    # still awaiting a value. Narrow the predicate to the real invariant this column\n    # guards, or drop `where:` for a plain index. `change/0` auto-reverses all three\n    # ops (alter/add + create index), so `mix ecto.rollback` needs no `down/0`.\n    create index(:{{.table_name}}, [:{{.column_name}}], where: \"{{.column_name}} IS NULL\")\n  end\nend\n::: {{.migration-name}} migration :::\n\n# Post-conditions — the file exists with the derived module name and the exemplar body.\n# ASSERT FILE guards are ASCII, brace-safe (every `}}` is followed by a space, `)`, `,`\n# or `]`, never a literal `}`), and each is a verbatim substring of the payload above.\nASSERT FILE \"api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs\" CONTAINS \"defmodule Barkpark.Repo.Migrations.{{.MigrationName}} do\"\nASSERT FILE \"api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs\" CONTAINS \"alter table(:{{.table_name}}) do\"\nASSERT FILE \"api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs\" CONTAINS \"add :{{.column_name}}, {{.column_type}}\"\nASSERT FILE \"api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs\" CONTAINS \"create index(:{{.table_name}}, [:{{.column_name}}]\"\n\n# Run gate — applies the migration against the test DB, then rolls it back so the\n# schema is left as found. TIER ci: every Elixir gate runs in CI only (no scoped\n# single-file mix run is proven locally safe yet — D12/A2).\nASSERT CMD \"cd api && mix ecto.migrate && mix ecto.rollback\" TIER ci\n"
+    },
+    {
+      "id": "scs-036",
+      "type": "terminal",
+      "footer": "one variable, two spellings: add_published_at_to_documents ⇄ AddPublishedAtToDocuments",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-migration --var Ts=20260716120000 \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var MigrationName=AddPublishedAtToDocuments --var TableName=documents \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var ColumnName=published_at --var ColumnType=:utc_datetime_usec"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/priv/repo/migrations/20260716120000_add_published_at_to_documents.exs   created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 4/4                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  … ASSERT CMD mix ecto.migrate && mix ecto.rollback          TIER ci — deferred to the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: migration/alter-add-index applied — 1 created · 0 injected · 0.1s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-037",
+      "type": "terminal",
+      "footer": "idempotent · IF ABSENT is the whole guard for a CREATE-only command",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-migration --var Ts=20260716120000 \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var MigrationName=AddPublishedAtToDocuments --var TableName=documents \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var ColumnName=published_at --var ColumnType=:utc_datetime_usec"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = api/priv/repo/migrations/20260716120000_add_published_at_to_documents.exs   exists — IF ABSENT, skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 4/4                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: migration/alter-add-index — 0 writes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-038",
+      "type": "divider"
+    },
+    {
+      "id": "scs-039",
+      "type": "heading",
+      "level": 2,
+      "text": "add-plugin — a discovered plugin — five files, zero wiring"
+    },
+    {
+      "id": "scs-040",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "All-● CREATE, and the tree explains why: plugin discovery is a disk-walk. Registry.Discovery reads every priv/plugins/*/plugin.json at boot and registers what it finds — dropping the manifest IS the registration, and the config :barkpark, :plugins list is only a kill-switch. No plugin ships a migration either: schemas declared via register_schemas/1 are upserted into the host's generic tables at boot. So the command creates the manifest, the one-line entry module ("
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "use Barkpark.Plugin"
+        },
+        {
+          "type": "text",
+          "value": "), the README, the schemas dir keeper, and a manifest test — mirroring the four EEx templates of the live generator it knowingly formalizes, "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "mix barkpark.plugin.new"
+        },
+        {
+          "type": "text",
+          "value": ". Byte-identical output, now declarative, idempotent, and reversible."
+        }
+      ]
+    },
+    {
+      "id": "scs-041",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/\n    ├── priv/plugins/analytics/\n    │   ├── plugin.json                        ● created\n    │   ├── README.md                          ● created\n    │   └── schemas/.gitkeep                   ● created\n    ├── lib/barkpark/plugins/\n    │   └── analytics.ex                       ● created\n    └── test/barkpark/plugins/\n        └── analytics_test.exs                 ● created\n\n(all-● — discovery walks priv/plugins/ at boot; there is no registry to inject into)"
+    },
+    {
+      "id": "scs-042",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add a Barkpark Plugin\" DESCRIPTION \"Scaffold a minimal, auto-discovered Barkpark plugin — manifest, entry module (use Barkpark.Plugin), README, schemas dir, and a manifest test — with zero registry wiring. Formalizes `mix barkpark.plugin.new` as a declarative, idempotent command.\" LAST_UPDATED \"16-07-2026-11-30-00\" DOMAIN \"barkpark\" TAGS \"plugins\", \"scaffold\" CONCEPT \"plugin\" VARIANT \"minimal\" VARIABLES\n  VARIABLE 1 \"PluginName\" TITLE \"Name your plugin\" DESCRIPTION \"Plugin slug — lowercase, matches ^[a-z][a-z0-9_-]*$. Drives the manifest plugin_name, the priv/ + lib/ + test/ paths (snake), and the Barkpark.Plugins.<Pascal> module name.\" EXAMPLES \"analytics\", \"reviews\", \"blog_engine\"\n  VARIABLE 2 \"Description\" TITLE \"Describe your plugin\" DESCRIPTION \"One-line manifest + @moduledoc description. Plain prose, no braces.\" EXAMPLES \"Pageview analytics for published documents.\", \"Reader reviews with moderation.\"\n\n# ===========================================================================\n# add-plugin — the DECLARATIVE form of `mix barkpark.plugin.new <name>`.\n#\n# PRIOR ART. Today a plugin skeleton is scaffolded imperatively by the Mix\n# task `mix barkpark.plugin.new <name>` (api/lib/mix/tasks/barkpark.plugin.new.ex),\n# which renders four EEx templates under api/priv/templates/plugin_new/. This\n# command formalizes that generator into a single reversible .scaffy document,\n# mirroring those templates VERBATIM (their EEx interpolations become declared\n# VARIABLEs). The older `mix barkpark.gen.plugin` is DEPRECATED and merely\n# delegates to `barkpark.plugin.new` (barkpark.gen.plugin.ex:11-12); the\n# similarly-named `mix barkpark.plugin.gen_types` is a DIFFERENT domain\n# (it regenerates priv/plugin_types.d.ts from the manifest JSON Schema) and\n# does not collide with this command.\n#\n# ALL-CREATE, ZERO INJECTION. Unlike add-block-type or add-oban-worker, this\n# command touches NO accretion file — there is no registry, router, barrel, or\n# config map to inject into. The annotated file tree is therefore all-● (five\n# created files, zero ○ injected rows). The reason is architectural, not an\n# oversight:\n#\n#   * DISCOVERY IS AUTOMATIC. `Barkpark.Plugins.Registry.Discovery` walks\n#     priv/plugins/*/plugin.json at boot (plugin_dirs_in/1, read in\n#     registry/boot_collectors.ex:140-142) and registers every manifest it\n#     finds — reached via `discover_and_register/0` (registry.ex:366). Dropping\n#     a plugin.json under priv/plugins/ IS the registration. The\n#     `config :barkpark, :plugins` list is NOT a registry: unset ⇒ discover\n#     everything; set ⇒ it acts only as a kill-switch / whitelist of\n#     plugin_names (registry.ex:13, :33). A minimal plugin needs no config\n#     edit, so this command plants none.\n#\n#   * NO MIGRATION. A plugin ships no migration. Schemas declared by a plugin's\n#     `register_schemas/1` callback are UPSERTED into the host's generic tables\n#     at boot by `Barkpark.Plugins.Bootstrap.register_all_schemas/0`\n#     (bootstrap.ex:61) — idempotent on (name, dataset). Plugin data rides the\n#     host schema; there are no plugin-owned tables to create.\n#\n# Because every op below is a whole-file CREATE FILE IF ABSENT, idempotency and\n# reversibility are structural: IF ABSENT is the guard (a second run writes\n# nothing), and the created file paths are the remove handles (Wave-3 `remove`\n# deletes exactly this set, leaving the tree byte-clean). No in-file MARK is\n# needed — MARK anchors a marker INSIDE a host file, and this command has no\n# host file. Hand-apply check (D7): the output is byte-identical to\n# `mix barkpark.plugin.new {{.plugin_name}}` run with no --capabilities.\n# ===========================================================================\n\n# ---------------------------------------------------------------------------\n# 1/5 ● Manifest — priv/plugins/<name>/plugin.json\n#     Mirrors plugin.json.eex. Discovery reads this file; `module` must match\n#     the entry module so Registry.resolve_module/1 agrees. Minimal plugin\n#     declares no capabilities (empty list, exactly as the generator emits\n#     with no --capabilities flag).\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/priv/plugins/{{.plugin_name}}/plugin.json\"\nWITH\n::: start of .json file :::\n{\n  \"plugin_name\": \"{{.plugin_name}}\",\n  \"version\": \"0.1.0\",\n  \"description\": \"{{.Description}}\",\n  \"capabilities\": [],\n  \"module\": \"Barkpark.Plugins.{{.PluginName}}\"\n}\n::: end of .json file :::\n\n# ---------------------------------------------------------------------------\n# 2/5 ● Entry module — lib/barkpark/plugins/<name>.ex\n#     Mirrors lib/plugin.ex.eex. ONE line of body: `use Barkpark.Plugin`. The\n#     behaviour reads + validates the manifest at COMPILE time (no runtime\n#     eval). Lives in the compiled tree (elixirc_paths sees it) so the plugin\n#     actually registers. manifest_path climbs three dirs from\n#     lib/barkpark/plugins/ to the app root, then down into priv/plugins/.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/lib/barkpark/plugins/{{.plugin_name}}.ex\"\nWITH\n::: start of .ex file :::\ndefmodule Barkpark.Plugins.{{.PluginName}} do\n  @moduledoc \"\"\"\n  {{.Description}}\n\n  Generated by `mix barkpark.plugin.new {{.plugin_name}}`.\n\n  Capabilities: (none)\n\n  This module lives in the compiled tree at\n  `lib/barkpark/plugins/{{.plugin_name}}.ex` so it is reachable by\n  `elixirc_paths` and registers via `Barkpark.Plugins.Registry`. The\n  manifest at `priv/plugins/{{.plugin_name}}/plugin.json` is read +\n  validated at compile time by `Barkpark.Plugin.__using__/1` (D7 — no\n  runtime eval), and its `\"module\"` key points back at this module so\n  discovery matches.\n\n  Drop schemas into `priv/plugins/{{.plugin_name}}/schemas/` and add any\n  custom logic below.\n  \"\"\"\n\n  use Barkpark.Plugin, manifest_path: \"../../../priv/plugins/{{.plugin_name}}/plugin.json\"\nend\n::: end of .ex file :::\n\n# ---------------------------------------------------------------------------\n# 3/5 ● README — priv/plugins/<name>/README.md\n#     Mirrors README.md.eex. The Capabilities section renders empty for a\n#     minimal (zero-capability) plugin — byte-identical to the generator.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/priv/plugins/{{.plugin_name}}/README.md\"\nWITH\n::: start of .md file :::\n# {{.plugin_name}}\n\n{{.Description}}\n\n## Capabilities\n\n\n\n## Layout\n\nThe entry module lives in the compiled tree so it actually registers; the\nmanifest, schemas, and this README live under `priv/plugins/{{.plugin_name}}/`.\n\n```\nlib/barkpark/plugins/{{.plugin_name}}.ex     # plugin module (use Barkpark.Plugin)\ntest/barkpark/plugins/{{.plugin_name}}_test.exs  # on the mix test path\npriv/plugins/{{.plugin_name}}/\n├── plugin.json                   # manifest (validated at compile time)\n├── README.md                     # this file\n└── schemas/                      # plugin schema definitions\n```\n\n## Adding code\n\n- Schemas: drop JSON or Elixir schema files into\n  `priv/plugins/{{.plugin_name}}/schemas/`.\n- Logic: extend the module in `lib/barkpark/plugins/{{.plugin_name}}.ex`.\n- Tests: add cases to `test/barkpark/plugins/{{.plugin_name}}_test.exs`\n  and run `mix test`.\n\n## Verifying\n\n```bash\ncd api\nmix compile\nmix test test/barkpark/plugins/{{.plugin_name}}_test.exs\n```\n\n## Further reading\n\n- `docs/plugins/SCHEMA_V2.md` — composite, arrayOf, codelist, localizedText\n- `Barkpark.Plugin` behaviour — `lib/barkpark/plugin.ex`\n- `Barkpark.Plugins.Registry` — discovery & registration entrypoint\n::: end of .md file :::\n\n# ---------------------------------------------------------------------------\n# 4/5 ● Schemas dir keeper — priv/plugins/<name>/schemas/.gitkeep\n#     The generator writes an empty .gitkeep so the (initially empty) schemas\n#     directory is tracked. Drop schema definitions here later.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep\"\nWITH\n::: start of keep file :::\n::: end of keep file :::\n\n# ---------------------------------------------------------------------------\n# 5/5 ● Manifest test — test/barkpark/plugins/<name>_test.exs\n#     Mirrors test/plugin_test.exs.eex. Proves the entry module parses its\n#     manifest. Lives on the `mix test` path so CI exercises it.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/test/barkpark/plugins/{{.plugin_name}}_test.exs\"\nWITH\n::: start of .exs file :::\ndefmodule Barkpark.Plugins.{{.PluginName}}Test do\n  use ExUnit.Case, async: true\n\n  test \"manifest/0 returns the parsed plugin.json map\" do\n    manifest = Barkpark.Plugins.{{.PluginName}}.manifest()\n\n    assert is_map(manifest)\n    assert manifest[\"plugin_name\"] == \"{{.plugin_name}}\"\n    assert manifest[\"version\"] == \"0.1.0\"\n    assert is_list(manifest[\"capabilities\"])\n  end\nend\n::: end of .exs file :::\n\n# ===========================================================================\n# Post-conditions — assert the five files landed with the right content.\n# Guards are ASCII substrings of what the ops above write (payload-derived).\n# ===========================================================================\nASSERT FILE \"api/priv/plugins/{{.plugin_name}}/plugin.json\" CONTAINS \"\\\"module\\\": \\\"Barkpark.Plugins.{{.PluginName}}\\\"\"\nASSERT FILE \"api/priv/plugins/{{.plugin_name}}/plugin.json\" CONTAINS \"\\\"plugin_name\\\": \\\"{{.plugin_name}}\\\"\"\nASSERT FILE \"api/lib/barkpark/plugins/{{.plugin_name}}.ex\" CONTAINS \"use Barkpark.Plugin, manifest_path: \\\"../../../priv/plugins/{{.plugin_name}}/plugin.json\\\"\"\nASSERT FILE \"api/priv/plugins/{{.plugin_name}}/README.md\" CONTAINS \"# {{.plugin_name}}\"\nASSERT FILE \"api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep\" EXISTS\nASSERT FILE \"api/test/barkpark/plugins/{{.plugin_name}}_test.exs\" CONTAINS \"defmodule Barkpark.Plugins.{{.PluginName}}Test do\"\n\n# Compile + run the generated test. Both are Elixir gates — TIER ci (never run\n# locally per A2: all Elixir gates stay CI-tier until a verifier proves scoped\n# single-file `mix test` locally safe). No new-plugin registry edit exists to\n# assert; discovery is proven at boot by the host, not by this command.\nASSERT CMD \"cd api && mix compile\" TIER ci\nASSERT CMD \"cd api && mix test test/barkpark/plugins/{{.plugin_name}}_test.exs\" TIER ci\n"
+    },
+    {
+      "id": "scs-043",
+      "type": "terminal",
+      "footer": "the declarative form of mix barkpark.plugin.new — same bytes, now reversible",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-plugin --var PluginName=analytics \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'Description=Pageview analytics for published documents.'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/priv/plugins/analytics/plugin.json                    created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/lib/barkpark/plugins/analytics.ex                     created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/priv/plugins/analytics/README.md                      created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/priv/plugins/analytics/schemas/.gitkeep               created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● api/test/barkpark/plugins/analytics_test.exs              created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 6/6                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  … ASSERT CMD mix compile · mix test …/analytics_test.exs    TIER ci — deferred to the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: plugin/minimal applied — 5 created · 0 injected · 0.3s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-044",
+      "type": "terminal",
+      "footer": "idempotent · a second run writes nothing · remove deletes exactly this set",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-plugin --var PluginName=analytics \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'Description=Pageview analytics for published documents.'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = 5/5 files exist — IF ABSENT, all skipped"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 6/6                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: plugin/minimal — 0 writes, tree untouched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-045",
+      "type": "divider"
+    },
+    {
+      "id": "scs-046",
+      "type": "heading",
+      "level": 2,
+      "text": "add-docs-card ⇄ remove-docs-card — the symmetry pair"
+    },
+    {
+      "id": "scs-047",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The doc spine is hard-governed: docs/cards/ is capped at exactly 7 cards (scripts/check-doc-budgets.sh reds on anything else) and all 7 slots are taken — so a new card can never simply land. That constraint is why this is a pair. add-docs-card creates the card file (G1 header, Code anchors section, 2400-byte budget) and wires it into the spine: a routing-table row in CLAUDE.md below the Meta catch-all (grep-proven unique at :44) and the Cards: brace-expansion line in docs/INDEX.md — where the new element deliberately lands "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "before"
+        },
+        {
+          "type": "text",
+          "value": " the final 'tui', because appending after it would put the token flush against the closing brace: the exact }}} adjacency A5 forbids. remove-docs-card is the MARK-anchored inverse, ops in reverse order so no intermediate state points the router at a deleted file. Run add, gate it, run remove with the same --var values: the tree is byte-clean."
+        }
+      ]
+    },
+    {
+      "id": "scs-048",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n├── docs/cards/\n│   └── wavecheck.md                           ● created   (then ✕ removed)\n├── CLAUDE.md                                  ○ injected  @MARK claude-route-wavecheck\n└── docs/INDEX.md                              ○ injected  (Cards: brace list — no mark\n                                                            survives a brace expansion;\n                                                            the payload literal IS the handle)"
+    },
+    {
+      "id": "scs-049",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "# add-docs-card.scaffy — create a docs/ card and wire it into the doc spine.\n#\n# ==========================================================================\n# SCRATCH-ONLY TODAY: THE 7-CARD CAP IS FULL\n# ==========================================================================\n# docs/cards/ is hard-capped at EXACTLY 7 cards (scripts/check-doc-budgets.sh\n# :70-84 reds on \"docs/cards/ holds N cards, hard cap is exactly 7\") and all\n# 7 slots are taken: cli, js-sdk, onix-bokbasen, plugins, search-media,\n# studio, tui. Creating a card requires RETIRING OR MERGING one first\n# (CLAUDE.md \"Doc contract\"). Until a slot frees up, this command CANNOT\n# land for real — it exists as the create half of a symmetric scratch\n# demonstration: apply add-docs-card, inspect and gate the result, then\n# apply remove-docs-card with the SAME --var values and the tree is\n# byte-clean again (git diff empty). The pair proves the remove/retraction\n# half of the scaffy doctrine on the doc-governance surface.\n#\n# Every anchor below was verified against the live tree on 2026-07-16:\n#   CLAUDE.md:23-24                 routing-table header\n#   CLAUDE.md:44                    the Meta catch-all row — the LAST row,\n#                                   grep -cF of the full row = 1\n#   docs/INDEX.md:4                 the Cards: brace-expansion line\n#                                   (file is 1197 B against a 1200 B cap)\n#   scripts/docs-anchors-check.sh:37   the G1 header regex the card's\n#                                   line 1 must match\n#   scripts/check-doc-budgets.sh:70-84 per-card 2400 B cap + exactly-7 count\n\nCOMMAND \"Add Docs Card\" DESCRIPTION \"Create a docs/cards/<name>.md card (G1 header, Code anchors section, <=2400 bytes) and wire it into the doc spine: a routing-table row in CLAUDE.md and the Cards: brace list in docs/INDEX.md — idempotently, with MARK handles for symmetric removal by remove-docs-card.\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"docs\", \"card\", \"routing\" CONCEPT \"docs-card\" VARIANT \"add\" VARIABLES\n  VARIABLE 1 \"CardName\" TITLE \"Name your card\" DESCRIPTION \"Card topic, PascalCase. The kebab spelling {{.card-name}} drives the filename, the routing target, the INDEX entry and the canonical-for slug ({{.card-name}}-overview) — the slug must be unique repo-wide or docs-anchors-check.sh gate 5 reds. Pick a fresh name: an existing card's name makes every op below a guarded no-op.\" EXAMPLES \"Wavecheck\", \"RenderPath\", \"AgentOnramps\"\n  VARIABLE 2 \"Group\" TITLE \"Routing group\" DESCRIPTION \"The Group column of the CLAUDE.md routing table. Opaque literal, no casing transform.\" EXAMPLES \"Ops\", \"API/SDK\", \"CLI/TUI\", \"Studio\"\n  VARIABLE 3 \"TaskPattern\" TITLE \"Task pattern\" DESCRIPTION \"The 'Task pattern' cell of the routing row — the phrases an agent matches to get routed to this card. Opaque literal, no casing transform.\" EXAMPLES \"render path / paper surface\", \"wavecheck scratch demo\"\n\n# --------------------------------------------------------------------------\n# 1. The card file.\n# Line 1 MUST match the G1 header regex (scripts/docs-anchors-check.sh:37):\n#   ^<!-- doc-tier: (agent|human|cold) \\| canonical-for: [A-Za-z0-9._-]+ \\| budget: [0-9]+tok -->\n# canonical-for must be unique repo-wide (gate 5, one owner per fact-topic).\n# The '## Code anchors' section is gate 3's contract: every '- <path> — <desc>'\n# line must point at an existing path. The docs/INDEX.md placeholder below\n# resolves today; replace it with the card's real anchors as the card is\n# filled in. The 2400-byte cap (check-doc-budgets.sh:70-75) binds the\n# FINISHED card, not just this skeleton.\n# --------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"docs/cards/{{.card-name}}.md\"\nWITH\n::: {{.card-name}} card :::\n<!-- doc-tier: agent | canonical-for: {{.card-name}}-overview | budget: 600tok -->\n# {{.CardName}}\n\nOne-paragraph identity: what surface this card owns and when the router\nsends an agent here. Keep the whole card under 2400 bytes — the budget gate\n(scripts/check-doc-budgets.sh) is CI-enforced; on overflow split to the\nowning contract/runbook or retire content, never raise the cap.\n\n- Key fact one (own it here — one owner per fact-topic).\n- Key fact two.\n\n## Code anchors\n- docs/INDEX.md — doc catalog (placeholder: replace with this card's real code anchors before the card ships)\n::: {{.card-name}} card :::\n\n# --------------------------------------------------------------------------\n# 2. The routing row.\n# The routing table header sits at CLAUDE.md:23-24; the Meta catch-all row\n# (CLAUDE.md:44) is the LAST row and greps to exactly one occurrence, so the\n# new row + its MARK comment land below it. The HTML comment terminates the\n# GFM table invisibly (it renders as nothing) and is the handle\n# remove-docs-card anchors at. The guard is the comment's own text —\n# a verbatim substring of what this op writes (payload-derived, D3c).\n# --------------------------------------------------------------------------\nIN \"CLAUDE.md\"\n### Insert the {{.card-name}} routing row at the end of the routing table\nINSERT\n::: {{.card-name}} route row :::\n| {{.Group}} | {{.TaskPattern}} | `docs/cards/{{.card-name}}.md` |\n<!-- scaffy:add-docs-card {{.CardName}} MARK:claude-route-{{.card-name}} -->\n::: {{.card-name}} route row :::\nBELOW LAST\n::: meta row anchor :::\n| Meta | \"is X deferred?\" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |\n::: meta row anchor :::\nMARK \"claude-route-{{.card-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:claude-route-{{.card-name}}\"\n\n# --------------------------------------------------------------------------\n# 3. The INDEX sweep.\n# docs/INDEX.md:4 is a brace-expansion line:\n#   Cards: cards/{studio,plugins,cli,js-sdk,onix-bokbasen,search-media,tui}.md\n# A3 comma-append = a fenced REPLACE that re-emits an element. The new\n# element lands BEFORE the final 'tui', not after it: appending after tui\n# would put the token flush against the closing brace — '{{.card-name}}}',\n# a '}}}' run, the exact A5 adjacency violation — so the element goes one\n# slot earlier, commas on both sides. No comment syntax survives inside a\n# brace expansion, so no in-file mark can be planted here: the payload\n# literal ',{{.card-name}},tui' IS the handle (unique, payload-derived,\n# brace-free per A5) and re-run idempotency rests ENTIRELY on the guard\n# (A4 — the structural target does not survive its own replacement).\n# --------------------------------------------------------------------------\nIN \"docs/INDEX.md\"\n### Sweep the Cards: brace list with {{.card-name}}\nREPLACE\n::: cards list tail :::\nsearch-media,tui}.md\n::: cards list tail :::\nWITH\n::: cards list tail swept :::\nsearch-media,{{.card-name}},tui}.md\n::: cards list tail swept :::\nMARK \"index-cards-{{.card-name}}\"\nASLONG FILE DONT CONTAIN \",{{.card-name}},tui\"\n\n# ==========================================================================\n# HONESTY BLOCK — what the gates say MID-SCRATCH (before remove-docs-card)\n# ==========================================================================\n# bash scripts/check-doc-budgets.sh is deliberately NOT asserted here: on\n# today's tree it MUST red after this command runs, and that red is the gate\n# doing its job, not this command misfiring:\n#   1. card count — \"docs/cards/ holds 8 cards, hard cap is exactly 7\"\n#      (check-doc-budgets.sh:78-84);\n#   2. docs/INDEX.md budget — 1197 B against a 1200 B cap; the swept Cards:\n#      line overflows it for any card name longer than 2 characters;\n#   3. CLAUDE.md budget — 9930 B against a 10000 B cap; the routing row +\n#      MARK comment (~115 B) overflow the 70 B of headroom.\n# The pair's budget-gate PASS lives in remove-docs-card, after the tree is\n# byte-clean again. docs-anchors-check.sh, by contrast, is green\n# mid-scratch: the new card satisfies G1 + gate 3 + gate 5, and the routing\n# row's target exists on disk.\n# ==========================================================================\n\n# Post-conditions\nASSERT FILE \"docs/cards/{{.card-name}}.md\" CONTAINS \"canonical-for: {{.card-name}}-overview\"\nASSERT FILE \"CLAUDE.md\" CONTAINS \"MARK:claude-route-{{.card-name}}\"\nASSERT FILE \"docs/INDEX.md\" CONTAINS \",{{.card-name}},tui\"\nASSERT CMD \"bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only\"\n"
+    },
+    {
+      "id": "scs-050",
+      "type": "terminal",
+      "footer": "mid-scratch: anchors-check green; the budget gate is EXPECTED red — see below",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run add-docs-card --var CardName=Wavecheck --var Group=Meta \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ● docs/cards/wavecheck.md                                   created"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ CLAUDE.md                                                 injected  @MARK claude-route-wavecheck"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ docs/INDEX.md                                             injected  ,wavecheck,tui swept in"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ bash scripts/docs-anchors-check.sh                        green — G1 header, anchors, unique slug"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: docs-card/add applied — 1 created · 2 injected · 2 marks · 0.2s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-051",
+      "type": "callout",
+      "title": "Mid-scratch, the budget gate reds — and that is the gate working",
+      "tone": "warning",
+      "content": [
+        {
+          "type": "text",
+          "value": "add-docs-card deliberately does not assert check-doc-budgets.sh: on today's tree it MUST red after the add — \"docs/cards/ holds 8 cards, hard cap is exactly 7\" — plus the INDEX and CLAUDE.md byte budgets overflow. The pair's green budget gate lives in remove-docs-card, after the tree is byte-clean again. A command that hid this by skipping the gate would be lying about the doc contract."
+        }
+      ]
+    },
+    {
+      "id": "scs-052",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "# remove-docs-card.scaffy — the exact MARK-anchored inverse of add-docs-card.\n#\n# ==========================================================================\n# THE SECOND HALF OF THE SCRATCH PAIR\n# ==========================================================================\n# The 7-card cap is FULL (scripts/check-doc-budgets.sh:70-84 — exactly 7,\n# all slots taken), so add-docs-card cannot land for real on today's tree.\n# The pair is demonstrated as scratch create -> verify -> remove: run\n# add-docs-card, gate it, then run THIS command with the SAME --var values.\n# The fenced targets below re-derive, byte for byte, exactly what\n# add-docs-card wrote — after add -> remove,\n# 'git status --porcelain -- CLAUDE.md docs/' is EMPTY (byte-clean).\n#\n# Ops run in REVERSE order of add (INDEX un-sweep -> routing row -> card\n# file) so no intermediate state leaves a routing-table target pointing at\n# a deleted file. Every op is guarded with POSITIVE polarity — act only\n# while the planted text is present — so a second run is a no-op\n# (idempotent remove), and on a remove-direction op MARK names the handle\n# being CONSUMED, not planted. Post-conditions assume the pair ran with a\n# fresh, non-colliding card name (add-docs-card VARIABLE 1).\n\nCOMMAND \"Remove Docs Card\" DESCRIPTION \"Retract everything add-docs-card planted: un-sweep the Cards: brace list in docs/INDEX.md, remove the CLAUDE.md routing row plus its MARK comment, delete the card file — byte-clean, idempotent (a second run is a guarded no-op).\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"docs\", \"card\", \"remove\" CONCEPT \"docs-card\" VARIANT \"remove\" VARIABLES\n  VARIABLE 1 \"CardName\" TITLE \"Card to remove\" DESCRIPTION \"SAME value as the add-docs-card run — the kebab spelling {{.card-name}} re-derives the filename, routing target, INDEX entry and mark names.\" EXAMPLES \"Wavecheck\", \"RenderPath\", \"AgentOnramps\"\n  VARIABLE 2 \"Group\" TITLE \"Routing group\" DESCRIPTION \"SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. Opaque literal.\" EXAMPLES \"Ops\", \"API/SDK\", \"CLI/TUI\", \"Studio\"\n  VARIABLE 3 \"TaskPattern\" TITLE \"Task pattern\" DESCRIPTION \"SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. Opaque literal.\" EXAMPLES \"render path / paper surface\", \"wavecheck scratch demo\"\n\n# --------------------------------------------------------------------------\n# 1. Un-sweep the INDEX Cards: line.\n# The byte-exact inverse of add's REPLACE: swept tail back to the original\n# tail, guarded on the same payload literal (present -> act; absent ->\n# no-op). The mark was never plantable in a brace expansion (no comment\n# syntax survives inside one), so the payload literal ',{{.card-name}},tui'\n# is the handle here, exactly as in add-docs-card.\n# --------------------------------------------------------------------------\nIN \"docs/INDEX.md\"\n### Un-sweep the Cards: brace list\nREPLACE\n::: cards list tail swept :::\nsearch-media,{{.card-name}},tui}.md\n::: cards list tail swept :::\nWITH\n::: cards list tail :::\nsearch-media,tui}.md\n::: cards list tail :::\nMARK \"index-cards-{{.card-name}}\"\nASLONG FILE CONTAIN \",{{.card-name}},tui\"\n\n# --------------------------------------------------------------------------\n# 2. Retract the routing row + its MARK comment.\n# REMOVE deletes the fenced block byte-exactly (both lines, including their\n# newlines), anchored at the mark add-docs-card planted at the end of the\n# routing table (below the Meta row, CLAUDE.md:44 on the clean tree).\n# --------------------------------------------------------------------------\nIN \"CLAUDE.md\"\n### Retract the {{.card-name}} routing row and its MARK comment\nREMOVE\n::: {{.card-name}} route row :::\n| {{.Group}} | {{.TaskPattern}} | `docs/cards/{{.card-name}}.md` |\n<!-- scaffy:add-docs-card {{.CardName}} MARK:claude-route-{{.card-name}} -->\n::: {{.card-name}} route row :::\nMARK \"claude-route-{{.card-name}}\"\nASLONG FILE CONTAIN \"MARK:claude-route-{{.card-name}}\"\n\n# --------------------------------------------------------------------------\n# 3. Delete the card file.\n# Guarded on the canonical-for line add-docs-card wrote into line 1, so a\n# hand-authored card that merely shares the filename is never deleted.\n# --------------------------------------------------------------------------\nDELETE FILE IF PRESENT \"docs/cards/{{.card-name}}.md\"\nASLONG FILE CONTAIN \"canonical-for: {{.card-name}}-overview\"\n\n# ==========================================================================\n# HONESTY BLOCK — the INDEX Cards: line is UN-GATED\n# ==========================================================================\n# The Cards: brace line this command un-sweeps is provably covered by NO CI\n# gate: the INDEX gate extracts entries with\n#   grep -oE '[A-Za-z0-9._/-]+\\.md'    (scripts/docs-anchors-check.sh:69)\n# and that charset excludes '{', '}' and ',' — a brace-expansion line never\n# yields a resolvable entry, so no gate anywhere parses, resolves, or diffs\n# it (a stale or half-swept Cards: line would sail through CI green). The\n# first DONT CONTAIN assert below is therefore honestly LOCAL — it is the\n# ONLY check of the un-sweep that exists. Do not read CI green as covering\n# it.\n# ==========================================================================\n\n# Post-conditions — after add-docs-card then remove-docs-card, the working\n# tree is byte-clean: git diff is EMPTY and the card file is gone.\nASSERT FILE \"docs/INDEX.md\" DONT CONTAIN \",{{.card-name}},tui\"\nASSERT FILE \"CLAUDE.md\" DONT CONTAIN \"MARK:claude-route-{{.card-name}}\"\nASSERT FILE \"CLAUDE.md\" DONT CONTAIN \"docs/cards/{{.card-name}}.md\"\nASSERT FILE \"docs/cards/{{.card-name}}.md\" ABSENT\nASSERT CMD \"bash scripts/check-doc-budgets.sh\"\nASSERT CMD \"bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only\"\n"
+    },
+    {
+      "id": "scs-053",
+      "type": "terminal",
+      "footer": "the remove demo: every mutating op reversed from its MARK — git sees nothing",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove docs-card --var CardName=Wavecheck --var Group=Meta \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ docs/INDEX.md                                             un-swept  ,wavecheck,tui gone"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ○ CLAUDE.md                                                 row + MARK comment removed"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✕ docs/cards/wavecheck.md                                   deleted   (canonical-for guard held)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ ASSERT FILE DONT CONTAIN 3/3 + ABSENT 1/1                 pass"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ✔ bash scripts/check-doc-budgets.sh                         green — 7 cards, budgets hold"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  $ git status --porcelain -- CLAUDE.md docs/"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  $"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: docs-card/remove — tree byte-clean, add ⇄ remove symmetric"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-054",
+      "type": "terminal",
+      "footer": "idempotent both ways: a second remove is a guarded no-op",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove docs-card --var CardName=Wavecheck --var Group=Meta \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  = 3/3 ops skipped — positive-polarity guards found nothing to retract"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  scaffy: docs-card/remove — 0 writes, already clean"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-055",
+      "type": "divider"
+    },
+    {
+      "id": "scs-056",
+      "type": "heading",
+      "level": 2,
+      "text": "What ships next"
+    },
+    {
+      "id": "scs-057",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Wave 2 turns this corpus into test fixtures: bp scaffy validate / fmt — the grammar as Go code, with the derived-guard check, the weak-guard lint, and the casing-consistency lint. Wave 3 ships the engine: bp scaffy run / remove with marks, receipts and dry-run diffs — the transcripts above become real output. Wave 4 makes commands content: a command document type, authored in Studio, versioned and tagged, served over one connect — bp add <concept> fetching from the connected Barkpark. The full design case is the masterplan: "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "/papers/scaffy-commands-as-content"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "scs-058",
+      "type": "callout",
+      "title": "The fast path is the standard path",
+      "tone": "success",
+      "content": [
+        {
+          "type": "text",
+          "value": "Every command above closes with the repo's own gates, so a green apply means the slice compiles, tests, and complies — standards became executable. The doctrine, stated once: every fact has one owner; every derived surface is collected at runtime, generated from a manifest, or applied by a command — never maintained by hand."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "_comment": "Post-ingest mutations for the scaffy showcase (D18). Applied AFTER the two ingest payloads in this directory are POSTed to /v1/plugins/bulldocs/papers (admin bearer): the ingest whitelist does not pass the schema-native 'related' field, so the masterplan->showcase link is set via POST /v1/data/mutate/production with this body. Reproducibility: ingest scaffy-command-showcase.json, then scaffy-commands-as-content-repost.json, then this mutation batch.",
+  "mutations": [
+    {
+      "patch": {
+        "id": "scaffy-commands-as-content",
+        "type": "paper",
+        "set": {
+          "related": [
+            "scaffy-command-showcase"
+          ]
+        }
+      }
+    },
+    {
+      "publish": {
+        "id": "scaffy-commands-as-content",
+        "type": "paper"
+      }
+    }
+  ]
+}
