@@ -1395,6 +1395,133 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "agents rail → {:chat_workflow} broadcast (charter D5–D7)" do
+    defp workflow_progress(tid, state, opts \\ []) do
+      tokens = Keyword.get(opts, :tokens, 10)
+
+      progress_frame(%{
+        "task_id" => tid,
+        "workflow_progress" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Plan"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "explorer",
+            "model" => "fable",
+            "state" => state,
+            "startedAt" => 1_782_767_557_221,
+            "tokens" => tokens
+          }
+        ],
+        "usage" => %{"total_tokens" => tokens}
+      })
+    end
+
+    test "a workflow-bearing structural change broadcasts {:chat_workflow}; token-only ticks emit none",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      # A background-only rail change carries no workflow node ⇒ zero broadcasts.
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # The FIRST workflow tree is a structural change ⇒ exactly one broadcast.
+      frame(recorder, workflow_progress("t", "running"))
+
+      assert_receive {:chat_workflow, ^sid, summary}, 200
+      assert summary.agents_total == 1
+      assert summary.running == 1
+      assert summary.agents_done == 0
+      assert summary.label == "run"
+      assert summary.terminal? == false
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # Two token-only ticks (same tree + states, only tokens advance) leave the
+      # structural signature untouched ⇒ ZERO additional broadcasts (charter D6).
+      frame(recorder, workflow_progress("t", "running", tokens: 500))
+      frame(recorder, workflow_progress("t", "running", tokens: 9_999))
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # A genuine state flip (running → completed) is one structural change ⇒
+      # exactly one further broadcast, now carrying the settled counts.
+      frame(recorder, workflow_progress("t", "completed", tokens: 9_999))
+
+      assert_receive {:chat_workflow, ^sid, settled}, 200
+      assert settled.running == 0
+      assert settled.agents_done == 1
+      refute_receive {:chat_workflow, ^sid, _}, 100
+    end
+
+    test "task_updated folds patch.end_time onto the rail entry; workflow_summary surfaces ended_at (charter D5)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(recorder, workflow_progress("t", "completed"))
+
+      # Before the terminal patch there is no end_time and ended_at is nil.
+      refute Map.has_key?(session_rail(sid)["t"], "end_time")
+      assert StudioChat.workflow_summary(session_rail(sid)).ended_at == nil
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      frame(
+        recorder,
+        task_event("task_updated", %{
+          "task_id" => "t",
+          "patch" => %{"status" => "completed", "end_time" => 1_782_767_600_000}
+        })
+      )
+
+      # The persisted entry now carries the terminal end_time…
+      assert session_rail(sid)["t"]["end_time"] == 1_782_767_600_000
+      # …and workflow_summary/1 surfaces it as a real ended_at.
+      assert StudioChat.workflow_summary(session_rail(sid)).ended_at == 1_782_767_600_000
+
+      # Stamping the terminal status was a structural change ⇒ the broadcast
+      # carries the same real ended_at to every subscribed card.
+      assert_receive {:chat_workflow, ^sid, summary}, 200
+      assert summary.ended_at == 1_782_767_600_000
+      assert summary.terminal? == true
+    end
+
+    test "plain chats pay zero: a session whose rail never carries workflow nodes never broadcasts {:chat_workflow}",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      # A pure text turn — no rail at all.
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "hello"}]}
+         }}
+      )
+
+      # A background-task lifecycle that moves the rail but never carries a
+      # workflow node list — still zero {:chat_workflow}.
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "t", "patch" => %{"status" => "completed"}})
+      )
+
+      refute_receive {:chat_workflow, ^sid, _}, 150
+    end
+  end
+
   test "the runtime survives a viewer's death — the whole point",
        %{sid: sid, recorder: recorder} do
     # a "tab": subscribes, then dies

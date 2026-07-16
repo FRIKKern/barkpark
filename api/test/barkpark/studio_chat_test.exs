@@ -1250,6 +1250,79 @@ defmodule Barkpark.StudioChatTest do
       assert out["t"]["row"]["description"] == "x"
     end
 
+    test "rail_stamp_status folds a terminal end_time onto the entry (charter D5)" do
+      rail = %{"t" => %{"status" => "running", "row" => %{"description" => "x"}}}
+
+      # a non-terminal stamp (no end_time) never adds the key
+      out = StudioChat.rail_stamp_status(rail, "t", "running")
+      refute Map.has_key?(out["t"], "end_time")
+
+      # a terminal stamp with end_time lands it verbatim
+      out = StudioChat.rail_stamp_status(rail, "t", "completed", 1_782_767_600_000)
+      assert out["t"]["status"] == "completed"
+      assert out["t"]["end_time"] == 1_782_767_600_000
+
+      # a ghost task with an end_time still stamps nothing
+      assert StudioChat.rail_stamp_status(%{}, "ghost", "completed", 123) == %{}
+    end
+
+    test "workflow_summary/1 is nil for a plain rail, real for a workflow-bearing one" do
+      # no entry carries a workflow list ⇒ plain chats pay zero
+      assert StudioChat.workflow_summary(%{}) == nil
+
+      assert StudioChat.workflow_summary(%{
+               "t" => %{"status" => "running", "row" => %{"description" => "run"}}
+             }) == nil
+
+      rail = %{
+        "t" => %{
+          "status" => "running",
+          "seq" => 1,
+          "end_time" => 1_782_767_600_000,
+          "row" => %{"description" => "epic-cycle · wsc"},
+          "workflow" => [
+            %{"type" => "workflow_phase", "index" => 1, "title" => "Design"},
+            %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "label" => "design:a",
+              "state" => "completed",
+              "startedAt" => 1_782_767_557_221,
+              "tokens" => 10
+            },
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "label" => "design:b",
+              "state" => "error",
+              "startedAt" => 1_782_767_557_999,
+              "tokens" => 5
+            }
+          ]
+        }
+      }
+
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.label == "epic-cycle · wsc"
+      assert summary.phases_total == 2
+      # settled + failed = the honest done counter (1 completed + 1 error)
+      assert summary.agents_done == 2
+      assert summary.agents_total == 2
+      assert summary.running == 0
+      assert summary.tokens == 15
+      # min startedAt across the workflow nodes
+      assert summary.started_at == 1_782_767_557_221
+      # the stamped terminal end_time surfaces as ended_at
+      assert summary.ended_at == 1_782_767_600_000
+      # phase 1 (has the agents, the live frontier) breathes; phase 2 is future
+      assert summary.ticks == [:active, :future]
+      assert summary.phase == "Design"
+      assert summary.phase_index == 1
+      assert summary.terminal? == false
+      assert summary.outcome == :live
+    end
+
     test "the rail caps at 20, pruning oldest-terminal first and never a runner" do
       # 21 terminal entries + 1 running; the running one must survive the cap
       tasks =

@@ -1175,13 +1175,17 @@ defmodule Barkpark.StudioChat.Recorder do
   defp task_updated(state, ev) do
     tid = ev["task_id"]
     status = get_in(ev, ["patch", "status"])
+    end_time = get_in(ev, ["patch", "end_time"])
 
     with tuid when is_binary(tuid) <- tool_use_for(state, tid),
          s when is_binary(s) <- status do
       stamp_task(state.session_id, tuid, %{"task_status" => s})
     end
 
-    rail_stamp_status(state, tid, status)
+    # The terminal `end_time` (D5) rides the SAME rail stamp so a settled wave's
+    # `workflow_summary/1` surfaces a real `ended_at` — a non-terminal patch (no
+    # end_time) leaves the key absent.
+    rail_stamp_status(state, tid, status, end_time)
   end
 
   # The PRIMARY completion driver — it carries `tool_use_id` directly, so no index
@@ -1249,8 +1253,9 @@ defmodule Barkpark.StudioChat.Recorder do
   defp rail_capture_progress(state, ev),
     do: commit_rail(state, StudioChat.rail_capture_progress(state.rail_snapshot, ev))
 
-  defp rail_stamp_status(state, tid, status),
-    do: commit_rail(state, StudioChat.rail_stamp_status(state.rail_snapshot, tid, status))
+  defp rail_stamp_status(state, tid, status, end_time \\ nil),
+    do:
+      commit_rail(state, StudioChat.rail_stamp_status(state.rail_snapshot, tid, status, end_time))
 
   # Persist the rail COARSELY (charter D47): only when the token/usage-stripped
   # structural signature actually changed. A token-only progress tick updates the
@@ -1259,9 +1264,33 @@ defmodule Barkpark.StudioChat.Recorder do
   defp commit_rail(state, new_rail) do
     if StudioChat.rail_signature(new_rail) != StudioChat.rail_signature(state.rail_snapshot) do
       persist_rail(state.session_id, new_rail)
+      broadcast_workflow(state.session_id, new_rail)
     end
 
     %{state | rail_snapshot: new_rail}
+  end
+
+  # The session card's workflow overlay (charter D5–D7). A DISTINCT tuple from
+  # {:chat_activity}: the overlay keys on the rail summary, never the assistant
+  # activity line — reusing {:chat_activity} would trip the D45 blanket refute
+  # AND KeyError the `activity.state` read in ChatLive, so this stays its own
+  # channel. Rides commit_rail's EXISTING change-only signature gate (no second
+  # gate): a hundred token-only ticks leave the signature untouched and collapse
+  # to zero broadcasts. A plain chat carries no workflow-bearing rail entry, so
+  # `workflow_summary/1` returns nil and nothing is broadcast (plain chats pay
+  # zero, D7).
+  defp broadcast_workflow(session_id, rail) do
+    case StudioChat.workflow_summary(rail) do
+      nil ->
+        :ok
+
+      summary ->
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          activity_topic(),
+          {:chat_workflow, session_id, summary}
+        )
+    end
   end
 
   defp persist_rail(session_id, rail) do
