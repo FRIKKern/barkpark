@@ -30,6 +30,13 @@ export type {
   CustomBlock,
 } from './PortableText'
 
+// The type-keyed PortableDocument renderer — context-free (no createContext, no
+// hooks), so it is RSC-safe and exported IDENTICALLY here and in index.ts. A
+// Server Component drops in `<PortableDoc value={blocks} />` for Phoenix-faithful
+// output, or calls `renderPortableDocument(blocks)` for the raw HTML string.
+export { PortableDoc, renderPortableDocument } from './PortableDoc'
+export type { PortableDocProps, Block, Inline } from './PortableDoc'
+
 // Plain-text extraction — pure and RSC-safe (the common `generateMetadata`
 // use case runs server-side). Mirrors index.ts.
 export { toPlainText } from './toPlainText'

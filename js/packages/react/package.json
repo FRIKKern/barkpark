@@ -29,6 +29,7 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./paper-surface.css": "./dist/paper-surface.css",
     "./package.json": "./package.json"
   },
   "files": [

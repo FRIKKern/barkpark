@@ -15,6 +15,13 @@ export type {
   CustomBlock,
 } from './PortableText'
 
+// The canonical type-keyed PortableDocument renderer — Barkpark's OWN block
+// grammar, emitting the `bp-*` classes Phoenix's Walk emits (NOT Sanity
+// PortableText, which stays the legacy `PortableText` shim above). Context-free,
+// so it is mirrored verbatim in server.ts for RSC.
+export { PortableDoc, renderPortableDocument } from './PortableDoc'
+export type { PortableDocProps, Block, Inline } from './PortableDoc'
+
 // Plain-text extraction (excerpts / meta descriptions / reading time) — pure,
 // so it works in a Server Component too. Mirrored in server.ts.
 export { toPlainText } from './toPlainText'

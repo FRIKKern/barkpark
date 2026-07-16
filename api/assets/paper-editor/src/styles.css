@@ -110,6 +110,11 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.15);
   --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --primary: hsl(163 46% 22%);
+  --muted-surface: hsl(240 4.8% 95.9%);
+  --border-muted: hsl(240 5.9% 90%);
+  --fg-dim: hsl(240 4% 47%);
+  --font-mono: var(--paper-font-mono);
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
@@ -152,6 +157,11 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.2);
   --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --primary: hsl(160 42% 62%);
+  --muted-surface: hsl(240 3.7% 12%);
+  --border-muted: hsl(240 3.7% 11%);
+  --fg-dim: hsl(240 5% 51%);
+  --font-mono: var(--paper-font-mono);
 }
 
 :root[data-bp-theme="evergreen"], :host([data-bp-theme="evergreen"]) {
