@@ -262,6 +262,52 @@ describe("runTurn — ack-first (D21)", () => {
   });
 });
 
+describe("runTurn — post-open teardown when postMessage rejects (leak fix)", () => {
+  it("closes the iterator and aborts the controller before rethrowing", async () => {
+    // The stream opens successfully (its HTTP connection now exists) but the
+    // send that follows fails. Before the fix, the outer `finally` only
+    // cleared the timeout — the open stream leaked forever, since nothing had
+    // pulled a frame yet to notice the abort.
+    const calls = { iteratorReturn: 0 };
+    let capturedSignal: AbortSignal | undefined;
+
+    const client: ChatClient = {
+      async createSession() {
+        return session(SESSION);
+      },
+      async getSession(id) {
+        return session(id);
+      },
+      async postMessage(): Promise<PostMessageResult> {
+        throw new Error("network down");
+      },
+      async openEventStream(_id, options?: OpenEventStreamOptions) {
+        capturedSignal = options?.signal;
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              async next(): Promise<IteratorResult<ChatEvent>> {
+                throw new Error("should never be pulled — postMessage fails first");
+              },
+              async return(value?: unknown): Promise<IteratorResult<ChatEvent>> {
+                calls.iteratorReturn += 1;
+                return { value, done: true } as IteratorResult<ChatEvent>;
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await expect(
+      runTurn(client, { sessionUuid: SESSION, content: "hi" }),
+    ).rejects.toThrow("network down");
+
+    expect(calls.iteratorReturn).toBe(1);
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
 describe("runTurn — timeouts", () => {
   it("converts a hung turn into a typed TurnTimeoutError", async () => {
     const client: ChatClient = {
