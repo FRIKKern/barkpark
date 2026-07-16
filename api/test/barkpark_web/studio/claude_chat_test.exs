@@ -849,6 +849,178 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # The Cloud execution-profile seam (connectors D107–D110). The profile is a
+  # config-keyed resolver in `command/2` — `:self_hosted` (default) stays
+  # byte-identical to the pre-D107 host-CLI argv; `:cloud` returns the
+  # `cloud-sandbox-runner` shim + the D109 argv, gated on a concrete workspace
+  # principal (D110). Pure tests pin the argv contract; the end-to-end tests
+  # drive a chmod+x fake shim through the REAL Port + parse pipeline so a
+  # bogus-key result frame proves the wire without a live sandbox.
+  describe "execution profile — self-hosted default (connectors D107)" do
+    test "no config ⇒ :self_hosted, and command/0 is byte-identical to the pre-D107 host argv" do
+      put_chat_config([])
+      assert ClaudeChat.execution_profile() == :self_hosted
+
+      {exe, args} = ClaudeChat.command()
+      assert exe == "claude"
+      # Routes through build_args/2 unchanged — the :cloud branch must never
+      # perturb the default path.
+      assert {exe, args} == {ClaudeChat.binary(), ClaudeChat.build_args("plan", %{})}
+
+      # Concrete interactive-argv prefix — a drift tripwire on the host path.
+      assert Enum.take(args, 11) == [
+               "--print",
+               "--verbose",
+               "--input-format",
+               "stream-json",
+               "--output-format",
+               "stream-json",
+               "--include-partial-messages",
+               "--permission-mode",
+               "plan",
+               "--permission-prompt-tool",
+               "stdio"
+             ]
+
+      assert "--disallowedTools" in args
+      assert "Workflow" in args
+    end
+
+    test "an unrecognized :execution_profile value fails to :self_hosted (never silently cloud)" do
+      put_chat_config(execution_profile: :bogus)
+      assert ClaudeChat.execution_profile() == :self_hosted
+      assert {"claude", _args} = ClaudeChat.command()
+    end
+  end
+
+  describe "execution profile — cloud (connectors D108/D109/D110)" do
+    test ":cloud returns the shim runner + the D109 cloud argv (workspace principal in argv)" do
+      put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
+
+      {exe, args} = ClaudeChat.command("plan", %{workspace_id: "ws-42"})
+      assert exe == "cloud-sandbox-runner"
+
+      # The shim's OWN argv: `--workspace <id> --` then the claude args.
+      assert Enum.take(args, 3) == ["--workspace", "ws-42", "--"]
+
+      assert Enum.drop(args, 3) == [
+               "--input-format",
+               "stream-json",
+               "--output-format",
+               "stream-json",
+               "--include-partial-messages",
+               "--verbose",
+               "--permission-mode",
+               "plan"
+             ]
+    end
+
+    test ":cloud DROPS the permission-prompt bridge and ALL mcp args (D109)" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1", mcp_config_path: "/host/mcp.json"})
+      refute "--permission-prompt-tool" in args
+      refute "stdio" in args
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+      refute "/host/mcp.json" in args
+    end
+
+    test ":cloud NEVER emits a bypass flag — not even for an ARMED bypassPermissions (structural, D109/D24)" do
+      for opts <- [
+            %{workspace_id: "ws-1"},
+            %{workspace_id: "ws-1", bypass_armed: true},
+            %{workspace_id: "ws-1", bypass_armed: true, session_id: "s-1"}
+          ] do
+        args = ClaudeChat.cloud_build_args("bypassPermissions", opts)
+        refute "--allow-dangerously-skip-permissions" in args
+        refute "--dangerously-skip-permissions" in args
+      end
+    end
+
+    test ":cloud HARD-FAILS on a nil/:global/blank workspace_id — never an unattributed turn (D110)" do
+      assert_raise ArgumentError, ~r/workspace_id/, fn ->
+        ClaudeChat.cloud_build_args("plan", %{})
+      end
+
+      for bad <- [nil, "", "global"] do
+        assert_raise ArgumentError, ~r/workspace_id/, fn ->
+          ClaudeChat.cloud_build_args("plan", %{workspace_id: bad})
+        end
+      end
+    end
+
+    test ":cloud command/2 refuses to assemble an argv without a workspace principal" do
+      put_chat_config(execution_profile: :cloud)
+
+      assert_raise ArgumentError, ~r/workspace_id/, fn ->
+        ClaudeChat.command("plan", %{})
+      end
+    end
+  end
+
+  describe "cloud runtime wiring (connectors D110 — recorder→session_opts principal)" do
+    test "Runtime.Claude threads workspace_id into the cloud shim argv (today dropped)" do
+      argv_file = capture_path("argv")
+      put_chat_config(execution_profile: :cloud, sandbox_runner: argv_echo_binary(argv_file))
+
+      {:ok, session} =
+        Barkpark.StudioChat.Runtime.Claude.start(%{
+          sink: self(),
+          workspace_id: "ws-threaded-99",
+          session_opts: %{}
+        })
+
+      argv = read_lines(argv_file)
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--workspace", "ws-threaded-99"])
+
+      ClaudeChat.close(session)
+    end
+
+    test "Runtime.Claude refuses a cloud spawn that carries no workspace principal (fail-closed)" do
+      put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
+
+      assert {:error, _reason} =
+               Barkpark.StudioChat.Runtime.Claude.start(%{sink: self(), session_opts: %{}})
+    end
+  end
+
+  describe "cloud turn end-to-end — fake shim through the real pipeline (connectors D113b)" do
+    test "a bogus-key result frame reaches the sink via the SAME parse_chunk pipeline and classifies as an auth failure" do
+      put_chat_config(execution_profile: :cloud, sandbox_runner: bogus_key_shim())
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{workspace_id: "ws-7"}})
+
+      assert_receive {:claude_chat_event, %{"type" => "result"} = frame}, 2_000
+      assert frame["is_error"] == true
+      assert frame["api_error_status"] == 401
+      assert frame["result"] =~ "Invalid API key"
+      # The non-vacuous bar: the frame the runtime auth guard actually reads.
+      assert ClaudeChat.auth_failure?(frame)
+      refute ClaudeChat.result_success?(frame)
+
+      ClaudeChat.close(session)
+    end
+  end
+
+  # A chmod +x fake `cloud-sandbox-runner` that emits the canned bogus-key result
+  # frame (non-volatile fields byte-matched to unauthed_stream.ndjson) then `cat`s
+  # to keep the Port alive. Stands in for the real shim's terminal frame WITHOUT a
+  # live Vercel Sandbox — the live sandbox proof is the committed harness
+  # (w11-isolated-turn-proof.sh) and the human gate.
+  defp bogus_key_shim do
+    frame =
+      ~s({"type":"result","subtype":"success","is_error":true,"api_error_status":401,) <>
+        ~s("result":"Invalid API key","terminal_reason":"api_error"})
+
+    path =
+      Path.join(System.tmp_dir!(), "cloud_shim_#{System.unique_integer([:positive])}.sh")
+
+    File.write!(path, "#!/bin/sh\nprintf '%s\\n' '#{frame}'\ncat\n")
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm_rf(path) end)
+    path
+  end
+
   # The spawn-env seam (chat-task-hands charter D1/D3): the child gets bp
   # credentials injected and the BEAM's prod secrets SCRUBBED. Before this seam
   # the child inherited the FULL server env — DATABASE_URL, SECRET_KEY_BASE,

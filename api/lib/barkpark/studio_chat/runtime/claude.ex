@@ -54,10 +54,15 @@ defmodule Barkpark.StudioChat.Runtime.Claude do
   def tool_name(name), do: ClaudeChat.mcp_tool_name(name)
 
   defp start_session(opts, resume?) do
+    # Thread the workspace principal the recorder already delivers (recorder.ex:139
+    # → runtime_opts top-level) into session_opts — today it is silently dropped.
+    # The cloud execution profile hard-fails on a nil/:global workspace (D110); the
+    # self-hosted path simply ignores the extra key, so this is inert there.
     session_opts =
       opts
       |> Map.get(:session_opts, %{})
       |> Map.put(:resume, resume?)
+      |> Map.put(:workspace_id, Map.get(opts, :workspace_id))
 
     ClaudeChat.start_session(%{
       sink: Map.fetch!(opts, :sink),
