@@ -289,8 +289,11 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
     } do
       {:ok, _view, html} = live(conn, "/studio/styleguide/swatch?theme=evergreen&mode=dark")
 
-      # the mode is forced client-side (data-theme is otherwise client-owned)
-      assert html =~ ~s(document.documentElement.dataset.theme = "dark")
+      # the mode is forced client-side (data-theme is otherwise client-owned).
+      # BYTE-EXACT form matters: #3545 allow-lists this script by sha256 in
+      # BarkparkWeb.CSP (no spaces around =) — keep the assertion in lockstep
+      # with CSP.swatch_theme_script/1.
+      assert html =~ ~s(document.documentElement.dataset.theme="dark")
       # samples paint through shipped CSS vars, never inline role hex
       assert html =~ "background: var(--primary)"
       assert html =~ "background: var(--ok)"
