@@ -916,7 +916,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
 
     test ":cloud DROPS the permission-prompt bridge and ALL mcp args (D109)" do
-      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1", mcp_config_path: "/host/mcp.json"})
+      args =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-1",
+          mcp_config_path: "/host/mcp.json"
+        })
+
       refute "--permission-prompt-tool" in args
       refute "stdio" in args
       refute "--mcp-config" in args
