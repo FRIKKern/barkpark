@@ -166,6 +166,132 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
     end
   end
 
+  describe "dead-sandbox binding clears on a loud reuse failure (connectors D139 half B / D152–D156)" do
+    test "turn 3 mints FRESH after the bound sandbox vanishes on turn 2 — honest reset, not --resume into the void" do
+      argv1 = capture_path("argv1")
+      argv2 = capture_path("argv2")
+      argv3 = capture_path("argv3")
+      counter = capture_path("counter")
+
+      put_chat_config(
+        enabled: true,
+        execution_profile: :cloud,
+        sandbox_runner: three_turn_reset_shim(argv1, argv2, argv3, counter)
+      )
+
+      sid = Ecto.UUID.generate()
+      {:ok, _session} = StudioChat.create_session(%{id: sid, mode: "plan"}, :global)
+
+      # ── TURN 1 — fresh create binds sbx-stub-1 ─────────────────────────────
+      {:ok, _rec1} =
+        Recorder.ensure(%{
+          session_id: sid,
+          mode: "plan",
+          execution_target: "managed",
+          workspace_id: @workspace_id
+        })
+
+      assert_recorder_gone(sid)
+      assert %{cloud_sandbox_id: "sbx-stub-1"} = StudioChat.get_session(sid)
+
+      a1 = read_argv(argv1)
+      refute "--sandbox-id" in a1, "turn 1 is a fresh create — no --sandbox-id"
+      refute "--resume" in a1, "turn 1 mints a session, it does not resume"
+      assert "--keep-sandbox" in a1
+      assert_w12_belt_intact(a1)
+
+      # ── TURN 2 — the bound sandbox is GONE: reuse exits nonzero, zero frames ─
+      {:ok, _rec2} =
+        Recorder.ensure(%{
+          session_id: sid,
+          mode: "plan",
+          execution_target: "managed",
+          workspace_id: @workspace_id
+        })
+
+      assert_recorder_gone(sid)
+
+      # THE binding-clear assertion (fail-first: reds on origin/main with
+      # `right: %Session{cloud_sandbox_id: "sbx-stub-1"}` — the dead binding
+      # survives the loud failure and would --resume the NEXT turn into an empty
+      # filesystem). After wiring, the loud nonzero exit clears it inline.
+      assert %{cloud_sandbox_id: nil} = StudioChat.get_session(sid),
+             "a loud reuse failure (nonzero exit) must clear the dead sandbox binding"
+
+      # Non-vacuity: turn 2 genuinely ATTEMPTED to reuse the dead sandbox —
+      # its own argv carried --sandbox-id sbx-stub-1 (the gaslighting scenario).
+      a2 = read_argv(argv2)
+
+      assert consecutive?(a2, ["--sandbox-id", "sbx-stub-1"]),
+             "turn 2 tried to reuse the bound (now-dead) sandbox"
+
+      # ── TURN 3 — a fresh Recorder re-reads the CLEARED column → fresh shape ─
+      {:ok, _rec3} =
+        Recorder.ensure(%{
+          session_id: sid,
+          mode: "plan",
+          execution_target: "managed",
+          workspace_id: @workspace_id
+        })
+
+      assert_recorder_gone(sid)
+
+      a3 = read_argv(argv3)
+      {pre3, ["--" | post3]} = Enum.split_while(a3, &(&1 != "--"))
+
+      assert consecutive?(pre3, ["--workspace", @workspace_id])
+      assert "--keep-sandbox" in pre3
+
+      refute "--sandbox-id" in a3,
+             "turn 3 mints fresh — the cleared binding means no --sandbox-id"
+
+      refute "--resume" in a3, "turn 3 mints a NEW session id, it does not resume the void"
+      assert consecutive?(post3, ["--session-id", sid]), "turn 3 is an honest fresh --session-id"
+      assert_w12_belt_intact(a3)
+
+      # …and it RE-BOUND a DIFFERENT sandbox (proving re-establish, not stale reuse).
+      assert %{cloud_sandbox_id: "sbx-stub-2"} = StudioChat.get_session(sid),
+             "turn 3's fresh sandbox re-binds the session to a new id"
+
+      # The invocation ledger: create, a failed reuse, then a fresh create.
+      assert read_lines(counter) == ["create", "reuse-fail", "create"]
+    end
+
+    test "a CREATE turn that binds a sandbox then exits NONZERO PRESERVES the fresh binding (at-spawn nil ⇒ no clear)" do
+      argv = capture_path("argv")
+
+      put_chat_config(
+        enabled: true,
+        execution_profile: :cloud,
+        sandbox_runner: create_then_fail_shim(argv)
+      )
+
+      sid = Ecto.UUID.generate()
+      {:ok, _session} = StudioChat.create_session(%{id: sid, mode: "plan"}, :global)
+
+      {:ok, _rec} =
+        Recorder.ensure(%{
+          session_id: sid,
+          mode: "plan",
+          execution_target: "managed",
+          workspace_id: @workspace_id
+        })
+
+      assert_recorder_gone(sid)
+
+      # A fresh create turn's at-spawn binding is nil, so even a loud nonzero
+      # exit must NOT clear — the bp_sandbox frame minted a LIVE box mid-turn and
+      # clearing it (or re-reading the column at exit) would orphan a healthy
+      # sandbox. The next turn legitimately reuses it.
+      assert %{cloud_sandbox_id: "sbx-preserve-1"} = StudioChat.get_session(sid),
+             "a create turn (at-spawn nil) keeps the freshly-bound sandbox even on nonzero exit"
+
+      a = read_argv(argv)
+      refute "--sandbox-id" in a, "the create turn spawned with no binding"
+      assert "--keep-sandbox" in a
+    end
+  end
+
   # ── helpers ───────────────────────────────────────────────────────────────
 
   # Mirror of claude_chat_test.exs:69 — flip the chat config on, hard-disable the
@@ -216,6 +342,63 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       printf '%s\\n' '{"type":"bp_sandbox","subtype":"created","sandbox_id":"#{@sandbox_id}"}'
       printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
     fi
+    """
+
+    write_shim(script)
+  end
+
+  # The three-turn honest-reset stub (charter D152/D156). Branches on whether
+  # `--sandbox-id` rides its OWN argv, exactly like `two_turn_shim`, but the
+  # reuse turn stands in for a VANISHED sandbox — it emits ZERO frames and exits
+  # NONZERO (the D152 signature: a reuse-path failure propagates the vercel
+  # child's raw nonzero code, no NDJSON, so the binding must clear):
+  #
+  #   * no `--sandbox-id`, first time (argv1 absent) — turn 1 fresh create,
+  #     binds `sbx-stub-1`, emits `bp_sandbox` + `result`, EXIT 0.
+  #   * `--sandbox-id` present — turn 2 reuse of the dead box: append
+  #     `reuse-fail`, emit NOTHING, EXIT 1 → the Recorder clears the binding.
+  #   * no `--sandbox-id`, second time (argv1 present) — turn 3 fresh create off
+  #     the CLEARED column, binds a DIFFERENT `sbx-stub-2`, emits frames, EXIT 0.
+  #
+  # Turn 1-vs-3 is disambiguated by argv1's existence (deterministic, no counter
+  # parsing) so the emitted id proves a genuine RE-BIND, not a stale reuse.
+  defp three_turn_reset_shim(argv1, argv2, argv3, counter) do
+    script = """
+    #!/bin/sh
+    has_sandbox=0
+    for a in "$@"; do
+      case "$a" in --sandbox-id) has_sandbox=1 ;; esac
+    done
+    if [ "$has_sandbox" = "1" ]; then
+      printf '%s\\n' "$@" > '#{argv2}'
+      printf 'reuse-fail\\n' >> '#{counter}'
+      exit 1
+    elif [ -f '#{argv1}' ]; then
+      printf '%s\\n' "$@" > '#{argv3}'
+      printf 'create\\n' >> '#{counter}'
+      printf '%s\\n' '{"type":"bp_sandbox","subtype":"created","sandbox_id":"sbx-stub-2"}'
+      printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
+    else
+      printf '%s\\n' "$@" > '#{argv1}'
+      printf 'create\\n' >> '#{counter}'
+      printf '%s\\n' '{"type":"bp_sandbox","subtype":"created","sandbox_id":"sbx-stub-1"}'
+      printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
+    fi
+    """
+
+    write_shim(script)
+  end
+
+  # A create turn that MINTS a live sandbox (bp_sandbox frame) then dies LOUD
+  # (nonzero exit). The at-spawn binding was nil, so the clear must NOT fire —
+  # the preserve counterfactual for D154 (a re-read at exit would orphan the
+  # healthy fresh box).
+  defp create_then_fail_shim(argv) do
+    script = """
+    #!/bin/sh
+    printf '%s\\n' "$@" > '#{argv}'
+    printf '%s\\n' '{"type":"bp_sandbox","subtype":"created","sandbox_id":"sbx-preserve-1"}'
+    exit 3
     """
 
     write_shim(script)

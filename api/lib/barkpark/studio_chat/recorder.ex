@@ -117,6 +117,13 @@ defmodule Barkpark.StudioChat.Recorder do
     # process's principal. Never mint or forward Task hands for that process.
     minter = if runtime_attempt, do: nil, else: Map.get(opts, :minter)
 
+    # The AT-SPAWN Cloud sandbox binding (charter D139/D154): read ONCE here so
+    # both `runtime_opts` (which resumes the box) and Recorder state (which
+    # decides at exit whether this was a resume turn) see the SAME value. nil on
+    # a create/first turn or a self-hosted session. Never re-read at exit — a
+    # create turn's mid-turn bp_sandbox capture would otherwise mask the truth.
+    cloud_sandbox_id = load_cloud_sandbox_id(id)
+
     session_opts =
       %{
         session_id: id,
@@ -143,7 +150,7 @@ defmodule Barkpark.StudioChat.Recorder do
         # `session_opts` (mirroring `workspace_id`, D110) where W14-1's
         # `cloud_build_args` reads it to `--resume` the same box. NULL/inert for a
         # self-hosted session (the build_args there ignore the key).
-        cloud_sandbox_id: load_cloud_sandbox_id(id),
+        cloud_sandbox_id: cloud_sandbox_id,
         cwd: Map.get(opts, :cwd),
         provider_session_id: Map.get(opts, :provider_session_id),
         runtime_ingress_token: runtime_ingress_token,
@@ -166,7 +173,8 @@ defmodule Barkpark.StudioChat.Recorder do
                provider,
                admission,
                runtime_attempt,
-               runtime_ingress_token
+               runtime_ingress_token,
+               cloud_sandbox_id
              )}
 
           {:error, {:already_started, session}} ->
@@ -184,7 +192,8 @@ defmodule Barkpark.StudioChat.Recorder do
                provider,
                admission,
                runtime_attempt,
-               runtime_ingress_token
+               runtime_ingress_token,
+               cloud_sandbox_id
              )}
 
           {:error, reason} ->
@@ -218,12 +227,27 @@ defmodule Barkpark.StudioChat.Recorder do
   defp maybe_put_minter(opts, nil), do: opts
   defp maybe_put_minter(opts, minter), do: Map.put(opts, :minter, minter)
 
-  defp new_state(id, session, provider, admission, runtime_attempt, runtime_ingress_token) do
+  defp new_state(
+         id,
+         session,
+         provider,
+         admission,
+         runtime_attempt,
+         runtime_ingress_token,
+         cloud_sandbox_id
+       ) do
     %{
       session_id: id,
       provider: provider,
       session: session,
       admission: admission,
+      # The Cloud sandbox binding captured AT SPAWN (charter D154), NOT the
+      # mutable `chat_sessions.cloud_sandbox_id` column: a create turn's
+      # bp_sandbox capture writes the column mid-turn, so re-reading it at exit
+      # would orphan a healthy fresh sandbox. nil for a create/first turn or a
+      # self-hosted session; a non-nil value means this turn tried to RESUME an
+      # existing box, so a loud exit means that box is gone → clear the binding.
+      cloud_sandbox_id: cloud_sandbox_id,
       monitor_pid: Runtime.runtime_pid(session),
       timer: arm_idle(nil),
       activity: nil,
@@ -558,9 +582,15 @@ defmodule Barkpark.StudioChat.Recorder do
     {:noreply, touch(state)}
   end
 
-  def handle_info({:claude_chat_exit, _status, _stderr_tail} = msg, state) do
+  def handle_info({:claude_chat_exit, status, _stderr_tail} = msg, state) do
     session_exited(state.session_id)
     release_admission(state)
+    # A loud reuse failure means the bound Cloud sandbox is gone — clear the
+    # binding SYNCHRONOUSLY here (charter D139 half B / D152–D155), before the
+    # {:stop, :normal} below releases the Registry `:via` name. The Ecto commit
+    # must precede that release so the next turn's fresh Recorder never re-reads
+    # a stale binding and `--resume`s into an empty filesystem.
+    maybe_clear_dead_sandbox_binding(state, status)
     # Rebroadcast verbatim so the stderr tail (charter D54) rides through to
     # every viewer's ChatLive; the tail is what lets it refuse a doomed resume.
     broadcast(state, msg)
@@ -1010,6 +1040,35 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp capture_cloud_sandbox_id(_session_id, _sandbox_id), do: :ok
+
+  # Clear the Cloud sandbox binding when a RESUME turn dies LOUD (charter D139
+  # half B / D152). The coarse Elixir-only signature: this turn was spawned WITH
+  # a binding (at-spawn `is_binary(id)` — only the `:cloud` shim's bp_sandbox
+  # frame ever sets the column, so self-hosted sessions never trip this) AND the
+  # port exited nonzero (`is_integer(status) and status != 0`). A reuse-path
+  # failure propagates the runner's raw nonzero code (create-fail is 1 via the
+  # shim's catch, reuse-fail propagates raw codes like 47), so NEVER key a fixed
+  # code. The accepted cost (D152): a transient control-plane blip clears a live
+  # binding → one loud honest re-create, never a `--resume` into the void.
+  # Atom statuses (:crashed, :idle_reaped) and clean exit 0 all fall through the
+  # catch-all and PRESERVE the binding (the sandbox is presumed alive).
+  defp maybe_clear_dead_sandbox_binding(
+         %{cloud_sandbox_id: id, session_id: session_id},
+         status
+       )
+       when is_binary(id) and is_integer(status) and status != 0 do
+    case StudioChat.set_cloud_sandbox_id(session_id, nil) do
+      {:ok, _session} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: failed to clear dead cloud sandbox binding: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp maybe_clear_dead_sandbox_binding(_state, _status), do: :ok
 
   defp monitor_runtime(runtime_ref) do
     case Runtime.runtime_pid(runtime_ref) do
