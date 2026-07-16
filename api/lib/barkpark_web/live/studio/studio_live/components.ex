@@ -976,10 +976,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             optional "disconnect references first" branch. --%>
       <%= if @show_unpublish_guard do %>
         <div class="image-picker-overlay" phx-click="close-unpublish-guard"></div>
-        <div class="delete-modal" data-test-id="unpublish-guard-modal">
+        <div
+          class="delete-modal"
+          data-test-id="unpublish-guard-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unpublish-guard-modal-title"
+          phx-window-keydown="close-unpublish-guard"
+          phx-key="escape"
+        >
           <div class="delete-modal-header">
-            <span style="font-weight: 600; font-size: 16px;">Unpublish document</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-unpublish-guard">x</button>
+            <span id="unpublish-guard-modal-title" style="font-weight: 600; font-size: 16px;">Unpublish document</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-unpublish-guard" aria-label="Close">x</button>
           </div>
           <div class="delete-modal-body">
             <div class="delete-warning">
@@ -1028,10 +1036,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             cannot see" remainder here. --%>
       <%= if @valueref_panel do %>
         <div class="image-picker-overlay" phx-click="valueref-writeback-close"></div>
-        <div class="delete-modal" data-test-id="valueref-writeback-modal">
+        <div
+          class="delete-modal"
+          data-test-id="valueref-writeback-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="valueref-writeback-modal-title"
+          phx-window-keydown="valueref-writeback-close"
+          phx-key="escape"
+        >
           <div class="delete-modal-header">
-            <span style="font-weight: 600; font-size: 16px;">Shared value</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="valueref-writeback-close">x</button>
+            <span id="valueref-writeback-modal-title" style="font-weight: 600; font-size: 16px;">Shared value</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="valueref-writeback-close" aria-label="Close">x</button>
           </div>
           <div class="delete-modal-body">
             <p class="text-sm" style="margin-bottom: 8px;">
