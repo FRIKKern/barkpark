@@ -123,9 +123,13 @@ func runLoginCloud(out *writer, args []string) int {
 		}
 	}
 
-	email, password, url, device, perr := parseLoginArgs(args)
+	email, password, url, device, deviceStart, devicePollCode, perr := parseLoginArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+	devicePollCode = strings.TrimSpace(devicePollCode)
+	if deviceStart && devicePollCode != "" {
+		return useError(out, "usage", "pass EITHER --device-start OR --device-poll <code>, not both", exitUsage)
 	}
 
 	cfg, err := LoadConfig()
@@ -141,6 +145,19 @@ func runLoginCloud(out *writer, args []string) int {
 	}
 	if base == "" {
 		base = cloudclient.DefaultBaseURL
+	}
+
+	// Non-interactive device-login steps (BP-ONB-13): split the blocking browser
+	// login into two script-drivable one-shots BEFORE the interactive branch, so a
+	// headless / agent wrapper owns the poll cadence itself. --device-start mints
+	// the code pair and exits; --device-poll <code> does exactly ONE poll and
+	// exits (no 15-min loop). Both emit a single JSON envelope; neither blocks and
+	// neither auto-registers a fleet (that is the human-TTY tail below).
+	if deviceStart {
+		return runDeviceStartStep(out, base)
+	}
+	if devicePollCode != "" {
+		return runDevicePollStep(out, cfg, base, devicePollCode)
 	}
 
 	// Copy-a-link browser login (charter decision 10): the friendly default when
@@ -1077,13 +1094,25 @@ const (
 	flagPassEq  = flagPass + "="
 	flagURLEq   = flagURL + "="
 	flagTeamEq  = flagTeam + "="
+
+	// Non-interactive device-login steps (BP-ONB-13): --device-start (bare bool)
+	// mints the code pair and exits; --device-poll <code> performs one poll and
+	// exits. They split the blocking browser login so a headless/agent wrapper
+	// owns the poll cadence.
+	flagDeviceStart  = "--device-start"
+	flagDevicePoll   = "--device-poll"
+	flagDevicePollEq = flagDevicePoll + "="
 )
 
 // parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass,
-// --url, and the bare boolean --device (force the browser device-link flow).
-// Each value-flag accepts both `--flag value` and `--flag=value`. Any positional
-// or unknown flag is a usage error.
-func parseLoginArgs(args []string) (email, password, url string, device bool, err error) {
+// --url, the bare boolean --device (force the browser device-link flow), and the
+// two non-interactive device-login steps --device-start (bare bool) and
+// --device-poll <device_code> (BP-ONB-13). Each value-flag accepts both
+// `--flag value` and `--flag=value`. Any positional or unknown flag is a usage error.
+func parseLoginArgs(args []string) (email, password, url string, device, deviceStart bool, devicePoll string, err error) {
+	fail := func(e error) (string, string, string, bool, bool, string, error) {
+		return "", "", "", false, false, "", e
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -1103,19 +1132,28 @@ func parseLoginArgs(args []string) (email, password, url string, device bool, er
 			url, i, err = nextFlagValue(args, i)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
+		case a == flagDeviceStart:
+			// Bare boolean — the non-interactive first leg: mint a code pair and
+			// exit without polling.
+			deviceStart = true
+		case a == flagDevicePoll:
+			devicePoll, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, flagDevicePollEq):
+			devicePoll = a[len(flagDevicePollEq):]
 		case a == flagDevice:
 			// Bare boolean — no value consumed. Forces the browser device-link
 			// flow even when a credential or non-tty would otherwise route to the
-			// password path.
+			// password path. Matched AFTER the --device-* flags so it never shadows
+			// them (exact-equality cases, so order is belt-and-braces).
 			device = true
 		default:
-			return "", "", "", false, fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--url <url>])", a)
+			return fail(fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--device-start] [--device-poll <code>] [--url <url>])", a))
 		}
 		if err != nil {
-			return "", "", "", false, err
+			return fail(err)
 		}
 	}
-	return email, password, url, device, nil
+	return email, password, url, device, deviceStart, devicePoll, nil
 }
 
 // parseSignupArgs splits `bp signup` flags: --email/--user, --password/--pass,
@@ -1278,6 +1316,8 @@ func printLoginHelp(out *writer) {
 
 USAGE
   bp login [--email <addr>] [--password <pw>] [--device] [--url <url>]
+  bp login --device-start -o json           # mint a code pair, exit (no polling)
+  bp login --device-poll <device_code> -o json   # ONE poll, exit (script owns cadence)
 
 WHAT IT DOES
   On a terminal with no credentials given, opens a copy-a-link BROWSER login: it
@@ -1288,12 +1328,23 @@ WHAT IT DOES
   echoed) — the path headless/CI use. Either way the session token is stored
   (0600) so 'bp barkparks', 'bp launch', and 'bp go-live' work.
 
+  For headless / agent wrappers, --device-start and --device-poll split the
+  browser flow into two non-interactive steps: --device-start emits the code pair
+  as JSON and exits; --device-poll <code> does exactly ONE poll and exits, so a
+  script drives the cadence itself — e.g.
+      resp=$(bp login --device-start -o json); code=$(jq -r .device_code <<<"$resp")
+      until bp login --device-poll "$code" -o json; do sleep 5; done
+  --device-poll exits 0 ONLY on approval; a non-zero exit (with a {status:…}
+  envelope) means keep polling.
+
 FLAGS
-  --device          force the browser device-link flow (even with a credential)
-  --email <addr>    your account email (prompted when omitted) — password path
-  --password <pw>   your password (prompted, not echoed; or BARKPARK_PASSWORD)
-  --url <url>       control-plane URL (default https://api.barkpark.cloud)
-  -o json           emit one machine-readable JSON object on stdout`
+  --device            force the browser device-link flow (even with a credential)
+  --device-start      mint a device code pair as JSON and exit (no polling)
+  --device-poll <c>   perform ONE device poll for code <c> and exit
+  --email <addr>      your account email (prompted when omitted) — password path
+  --password <pw>     your password (prompted, not echoed; or BARKPARK_PASSWORD)
+  --url <url>         control-plane URL (default https://api.barkpark.cloud)
+  -o json             emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
 

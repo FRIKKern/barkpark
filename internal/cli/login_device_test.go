@@ -459,6 +459,157 @@ func TestLoginCloudDeviceJSONEnvelopeNoAutoConnect(t *testing.T) {
 	}
 }
 
+// TestDeviceStartReturnsCodesWithoutPolling proves the non-interactive FIRST leg
+// (`bp login --device-start`, BP-ONB-13): it mints the code pair via DeviceStart,
+// emits it as a single JSON envelope (device_code/user_code/verification_uri/
+// verification_uri_complete/interval/expires_in), and exits WITHOUT ever polling —
+// the script drives the poll cadence itself. The pollHits==0 assertion is the
+// heart of it: --device-start must NEVER block on a poll loop.
+func TestDeviceStartReturnsCodesWithoutPolling(t *testing.T) {
+	withTempConfigHome(t)
+
+	var ds deviceServer
+	srv := newDeviceServer(t, &ds, 0, "unused", "unused")
+
+	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runLoginCloud(out, []string{"--url", srv.URL, "--device-start"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK\n%s", code, stdout)
+	}
+	if ds.startHits.Load() != 1 {
+		t.Fatalf("device/start hits = %d, want 1", ds.startHits.Load())
+	}
+	if ds.pollHits.Load() != 0 {
+		t.Fatalf("--device-start must NOT poll; device/poll hits = %d, want 0", ds.pollHits.Load())
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout)
+	}
+	if env["device_code"] != "dev-secret" || env["user_code"] != "WXYZ-1234" {
+		t.Fatalf("envelope missing the code pair: %v", env)
+	}
+	for _, k := range []string{"verification_uri", "verification_uri_complete", "interval", "expires_in"} {
+		if _, ok := env[k]; !ok {
+			t.Fatalf("envelope missing %q: %v", k, env)
+		}
+	}
+	// A start-only step stores NOTHING — the token arrives on a later poll.
+	if loaded, _ := LoadConfig(); loaded.CloudToken != "" {
+		t.Fatalf("--device-start must not persist a token; got %q", loaded.CloudToken)
+	}
+}
+
+// TestDevicePollSingleShotStatuses proves the non-interactive SECOND leg
+// (`bp login --device-poll <code>`, BP-ONB-13): it performs EXACTLY ONE poll
+// (pollHits==1 in every case — no 15-min loop) and maps the outcome to an exit
+// code a shell `until` loop can drive: exitOK ONLY on approval, non-zero on
+// pending/slow_down. On approval it persists token+team+url like the interactive
+// flow; on pending it persists nothing.
+func TestDevicePollSingleShotStatuses(t *testing.T) {
+	t.Run("pending → one poll, non-zero exit, no token", func(t *testing.T) {
+		withTempConfigHome(t)
+		var pollHits atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/auth/device/poll" {
+				pollHits.Add(1)
+				_, _ = io.WriteString(w, `{"status":"pending"}`)
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+			return runLoginCloud(out, []string{"--url", srv.URL, "--device-poll", "dev-secret"})
+		})
+		if code == exitOK {
+			t.Fatalf("pending must be a non-zero exit so `until` keeps polling; got %d", code)
+		}
+		if pollHits.Load() != 1 {
+			t.Fatalf("--device-poll must poll EXACTLY once; hits = %d", pollHits.Load())
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout)
+		}
+		if env["status"] != "pending" {
+			t.Fatalf("envelope status = %v, want pending", env["status"])
+		}
+		if loaded, _ := LoadConfig(); loaded.CloudToken != "" {
+			t.Fatalf("a pending poll must not persist a token; got %q", loaded.CloudToken)
+		}
+	})
+
+	t.Run("slow_down → one poll, non-zero exit", func(t *testing.T) {
+		withTempConfigHome(t)
+		var pollHits atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/auth/device/poll" {
+				pollHits.Add(1)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, `{"error":"slow_down"}`)
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+			return runLoginCloud(out, []string{"--url", srv.URL, "--device-poll", "dev-secret"})
+		})
+		if code == exitOK {
+			t.Fatalf("slow_down must be a non-zero exit; got %d", code)
+		}
+		if pollHits.Load() != 1 {
+			t.Fatalf("--device-poll must poll EXACTLY once; hits = %d", pollHits.Load())
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout)
+		}
+		if env["status"] != "slow_down" {
+			t.Fatalf("envelope status = %v, want slow_down", env["status"])
+		}
+	})
+
+	t.Run("approved → one poll, exitOK, token persisted", func(t *testing.T) {
+		withTempConfigHome(t)
+		var pollHits atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/auth/device/poll" {
+				pollHits.Add(1)
+				_, _ = io.WriteString(w, `{"token":"sess-oneshot","team_id":"team-oneshot"}`)
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+			return runLoginCloud(out, []string{"--url", srv.URL, "--device-poll", "dev-secret"})
+		})
+		if code != exitOK {
+			t.Fatalf("approval must exit exitOK so `until` terminates; got %d\n%s", code, stdout)
+		}
+		if pollHits.Load() != 1 {
+			t.Fatalf("--device-poll must poll EXACTLY once; hits = %d", pollHits.Load())
+		}
+		// Approval persists the session byte-identically to the interactive flow.
+		loaded, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if loaded.CloudToken != "sess-oneshot" || loaded.CloudTeam != "team-oneshot" || loaded.CloudURL != srv.URL {
+			t.Fatalf("approved poll must persist token+team+url; got %+v", loaded)
+		}
+		// devicePollStep emitted the success envelope; stdout stays a single doc.
+		var env map[string]any
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout)
+		}
+		if env["ok"] != true || env["team_id"] != "team-oneshot" {
+			t.Fatalf("approved envelope = %v", env)
+		}
+	})
+}
+
 // TestLoginGatingTable is the CORE backward-compat proof: only a
 // zero-credential + both-TTY (or --device) invocation takes the device path;
 // every credential input, and any non-TTY, takes the password path verbatim
