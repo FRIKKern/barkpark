@@ -226,9 +226,13 @@ function frameIterable(body: ReadableStream<Uint8Array>): AsyncIterable<ChatEven
           if (done) break;
         }
       } finally {
-        // Release the reader so the underlying connection can be torn down even
-        // if the consumer breaks out of the loop early.
-        reader.releaseLock();
+        // Cancel (not just release) the reader so an early break — the turn
+        // loop calling iterator.return() after a result frame, or any other
+        // consumer walking away mid-stream — actually tears the underlying
+        // HTTP connection down. releaseLock() alone only detaches the reader
+        // from the stream; it does not cancel the fetch, so the connection
+        // (and the server-side subprocess reading from it) leaked open.
+        await reader.cancel().catch(() => {});
       }
     },
   };

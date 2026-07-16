@@ -349,6 +349,56 @@ describe("openEventStream", () => {
     expect((err as ChatClientError).status).toBe(403);
   });
 
+  it("cancels the underlying reader (not just releases it) when the consumer breaks early", async () => {
+    // Regression guard for the teardown leak: the finally block used to call
+    // ONLY reader.releaseLock(), which detaches the reader without canceling
+    // the source — the underlying fetch (and the server-side subprocess
+    // reading from it) stayed open forever on an early break. cancel()
+    // reaches the ReadableStream's underlying source, so this test fails on
+    // any regression back to releaseLock()-only teardown.
+    //
+    // Driven through an injected `config.fetch` (not msw) so the raw
+    // ReadableStream's cancel() callback is observed directly, with no
+    // service-worker passthrough in between.
+    let cancelled = false;
+    let cancelReason: unknown;
+    const enc = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          enc.encode(chatFrame('{"type":"result","result":"first"}')),
+        );
+        // Deliberately never closes — a live connection until torn down.
+      },
+      cancel(reason) {
+        cancelled = true;
+        cancelReason = reason;
+      },
+    });
+    const fakeFetch = (async () =>
+      new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+
+    const stream = await openEventStream(
+      { baseUrl: TEST_BASE, token: TOKEN_WS_BOUND, fetch: fakeFetch },
+      SESSION_ID,
+    );
+    const iterator = stream[Symbol.asyncIterator]();
+
+    const first = await iterator.next();
+    expect(first.done).toBe(false);
+    expect(cancelled).toBe(false); // still consuming — nothing torn down yet
+
+    // The turn loop's early-break case (turn-loop.ts, on a result frame):
+    // stop iterating without draining the rest of the stream.
+    await iterator.return?.();
+
+    expect(cancelled).toBe(true);
+    expect(cancelReason).toBeUndefined();
+  });
+
   it("yields a permission frame verbatim without an id", async () => {
     server.use(
       http.get(`${TEST_BASE}/v1/chat/sessions/:id/events`, () =>

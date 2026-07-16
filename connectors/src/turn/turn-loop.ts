@@ -91,8 +91,19 @@ export async function runTurn(
     const iterator = stream[Symbol.asyncIterator]();
 
     // 2. Send the turn. 202 = accepted, the model has not spoken yet.
-    await client.postMessage(sessionUuid, content);
-    if (onAck) await onAck();
+    try {
+      await client.postMessage(sessionUuid, content);
+      if (onAck) await onAck();
+    } catch (err) {
+      // The stream is already open (its HTTP connection exists) but nothing
+      // has iterated it yet, so it would otherwise leak: close the iterator
+      // (a no-op if the underlying generator never started) and abort the
+      // controller (the actual teardown — sse.ts wired this signal through to
+      // the fetch that owns the connection) before rethrowing.
+      await iterator.return?.().catch(() => {});
+      controller.abort();
+      throw err;
+    }
 
     // 3. Drain until the stream-json `result` frame.
     let accumulated = "";
