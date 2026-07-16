@@ -1747,6 +1747,224 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # ── Card-level workflow_summary/1 (D1–D4) ───────────────────────────────────
+  #
+  # Fold the two committed epic-cycle fixtures into a rail exactly as the Recorder
+  # does, then project the pinned D3 card shape. The interrupted fixture ends
+  # mid-flight (no terminal frames), so — as production replays — the teardown
+  # `interrupt_flip` supplies "interrupted" before the summary is read.
+
+  defp summary_of(fixture, transform) do
+    fixture
+    |> load_ndjson()
+    |> fold_rail()
+    |> transform.()
+    |> StudioChat.workflow_summary()
+  end
+
+  describe "workflow_summary/1 — completed fixture (D3 shape)" do
+    test "the completed 7-phase 29-agent run projects a settled complete card" do
+      entry = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail() |> only_entry()
+      journey = StudioChat.workflow_journey(entry)
+      card = StudioChat.workflow_summary(%{"t" => entry})
+
+      # every field of the pinned shape
+      assert Map.keys(card) |> Enum.sort() ==
+               ~w(agents_done agents_total ended_at label outcome phase phase_index
+                  phases_total running started_at terminal? ticks tokens)a
+
+      assert card.ticks == List.duplicate(:done, 7)
+      assert card.phases_total == 7
+      # a completed cycle collapses the active phase — no m/n phase, just the settle line
+      assert card.phase == nil
+      assert card.phase_index == nil
+      assert card.outcome == :completed
+      assert card.terminal? == true
+      assert card.running == 0
+      assert card.agents_done == 29
+      assert card.agents_total == 29
+      assert card.tokens == 2_137_873
+      # timestamps are READ: startedAt present, end_time absent today (S2 stamps later)
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+
+      # agents_done/agents_total are journey's OWN counts — not a parallel tally
+      assert card.agents_done == journey.summary.done + journey.summary.failed
+      assert card.agents_total == journey.summary.agents_total
+      assert card.running == journey.summary.running
+    end
+  end
+
+  describe "workflow_summary/1 — interrupted fixture (D3 shape)" do
+    test "a killed run shows the interrupted frontier, honest settled count, live agents kept" do
+      journey =
+        "epic_cycle_interrupted.ndjson"
+        |> load_ndjson()
+        |> fold_rail()
+        |> interrupt_flip()
+        |> only_entry()
+        |> StudioChat.workflow_journey()
+
+      card = summary_of("epic_cycle_interrupted.ndjson", &interrupt_flip/1)
+
+      assert card.outcome == :interrupted
+      assert card.terminal? == true
+      # frontier phase = the one that breathed when the run died
+      assert card.phase == "Explore"
+      assert card.phase_index == 2
+      assert card.ticks == [:done, :interrupted] ++ List.duplicate(:unreached, 5)
+      # the 4 explorers are still `progress` (non-terminal) — running, never done
+      assert card.agents_done == 1
+      assert card.agents_total == 5
+      assert card.running == 4
+
+      # progress-state agents keep startedAt and never got durationMs/ended_at
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+
+      # cross-assert against journey's own summary — one truth table
+      assert card.agents_done == journey.summary.done + journey.summary.failed
+      assert card.agents_total == journey.summary.agents_total
+      assert card.running == journey.summary.running
+    end
+
+    test "before teardown the same rail is honestly live (outcome :live, not terminal)" do
+      card = summary_of("epic_cycle_interrupted.ndjson", & &1)
+      assert card.outcome == :live
+      assert card.terminal? == false
+      # the frontier still breathes while live
+      assert card.phase == "Explore"
+      assert card.running == 4
+    end
+  end
+
+  describe "workflow_summary/1 — derived-truth edges (D3)" do
+    test "an `error` agent is a settled FAILURE — counted in agents_done, never running" do
+      entry = %{
+        "seq" => 1,
+        "row" => %{"description" => "epic — fix the leak"},
+        "status" => "completed",
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Judge"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:ok",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 100
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:boom",
+            "state" => "error",
+            "startedAt" => 90,
+            "tokens" => 50
+          }
+        ]
+      }
+
+      card = StudioChat.workflow_summary(%{"t" => entry})
+      # label is the opaque composite — a bare em-dash inside is NEVER split
+      assert card.label == "epic — fix the leak"
+      assert card.agents_done == 2
+      assert card.agents_total == 2
+      assert card.running == 0
+      assert card.tokens == 150
+      # earliest start across the tree
+      assert card.started_at == 90
+    end
+
+    test "the highest-seq workflow-bearing entry wins across a mixed rail" do
+      wf_a = %{
+        "seq" => 3,
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "A"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "done"}
+        ]
+      }
+
+      wf_b = %{
+        "seq" => 9,
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "B"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "b", "state" => "start"}
+        ]
+      }
+
+      # a plain-chat entry with no workflow list is ignored
+      plain = %{"seq" => 12, "status" => "running"}
+
+      card = StudioChat.workflow_summary(%{"a" => wf_a, "b" => wf_b, "p" => plain})
+      # wf_b has the higher seq → its phase title is the card's
+      assert card.phase == "B"
+    end
+
+    test "nil for empty rail, a no-workflow rail, and non-map input" do
+      assert StudioChat.workflow_summary(%{}) == nil
+      assert StudioChat.workflow_summary(%{"t" => %{"status" => "running"}}) == nil
+      # an entry with an empty workflow list is not workflow-bearing
+      assert StudioChat.workflow_summary(%{"t" => %{"workflow" => []}}) == nil
+      assert StudioChat.workflow_summary(nil) == nil
+      assert StudioChat.workflow_summary([]) == nil
+      assert StudioChat.workflow_summary("nope") == nil
+    end
+  end
+
+  # ── Shared parity fixtures (Mechanism A) ────────────────────────────────────
+  #
+  # workflow_summary/1 output for both committed fixtures, written byte-identical
+  # to an api mirror and a Go mirror so the Go card surface reads the SAME truth.
+  # Regenerate by running this file with REGEN_WORKFLOW_SUMMARY=1 (writes both
+  # mirrors from one encoded string), then re-run without it to prove freshness.
+  @summary_api_path Path.expand(
+                      "../support/fixtures/workflow_summary/workflow_summary.json",
+                      __DIR__
+                    )
+  @summary_go_path Path.expand(
+                     "../../../internal/chat/testdata/workflow_summary.json",
+                     __DIR__
+                   )
+
+  defp fresh_summaries do
+    %{
+      "epic_cycle_progress" => summary_of("epic_cycle_progress.ndjson", & &1),
+      "epic_cycle_interrupted" => summary_of("epic_cycle_interrupted.ndjson", &interrupt_flip/1)
+    }
+  end
+
+  # JSON round-trip normalizes atom values/keys (statuses, outcomes) to the strings
+  # the committed bytes carry — so a fresh fold compares cleanly to the mirror.
+  defp normalized_fresh, do: fresh_summaries() |> Jason.encode!() |> Jason.decode!()
+
+  describe "workflow_summary parity fixtures (Mechanism A)" do
+    test "the committed api mirror equals a fresh fold" do
+      if System.get_env("REGEN_WORKFLOW_SUMMARY") do
+        json = Jason.encode!(fresh_summaries(), pretty: true) <> "\n"
+        File.write!(@summary_api_path, json)
+        File.write!(@summary_go_path, json)
+      end
+
+      assert File.read!(@summary_api_path) |> Jason.decode!() == normalized_fresh(),
+             "workflow_summary.json is stale — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the api and Go mirrors are byte-identical" do
+      assert File.read!(@summary_api_path) == File.read!(@summary_go_path),
+             "the Go mirror drifted — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the fixture carries both the completed and interrupted card shapes" do
+      committed = File.read!(@summary_api_path) |> Jason.decode!()
+      assert committed["epic_cycle_progress"]["outcome"] == "completed"
+      assert committed["epic_cycle_interrupted"]["outcome"] == "interrupted"
+      # the 13/17-style settled counter survives the round-trip
+      assert committed["epic_cycle_progress"]["agents_done"] == 29
+      assert committed["epic_cycle_interrupted"]["agents_done"] == 1
+    end
+  end
+
   describe "format_tokens/1 (charter D59)" do
     test "raw < 1k; one-decimal k < 10k; integer k < 1M; one-decimal M above" do
       assert StudioChat.format_tokens(845) == "845"
