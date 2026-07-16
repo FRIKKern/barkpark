@@ -63,10 +63,9 @@ import {
   type LeaseStore,
 } from "./tenant/install-lease.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
-import { createBridgeState } from "./state/state-adapter.js";
+import { createBridgeState, scopeStateAdapter } from "./state/state-adapter.js";
 import {
-  createPgThreadSessionStore,
-  createThreadSessionMap,
+  createPgLockedThreadSessionMap,
   type ThreadSessionMap,
 } from "./state/thread-session-map.js";
 import {
@@ -294,7 +293,11 @@ export function mountInstall(
   const chat = new Chat({
     userName: deps.config.userName,
     adapters: { [connector.id]: adapter },
-    state: deps.state,
+    // Namespaced per install (D160): the SDK keys its state on thread id
+    // ALONE, and state-pg's key_prefix is global to the bridge — without this
+    // scope, two installs sharing a raw provider thread id would share
+    // subscriptions, cache, and locks across tenants.
+    state: scopeStateAdapter(deps.state, connector.id, install.installKey),
   });
 
   const handle = async (
@@ -493,7 +496,10 @@ export async function startBridge(
 
   const state = createBridgeState(pool);
   const installs = createInstallsLookup(pool, cipher);
-  const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+  // Reserve-first: the mint is serialised under a per-thread advisory lock so a
+  // concurrent first-message can never orphan a Barkpark Session
+  // (connectors-orphan-session-on-mint-race).
+  const map = createPgLockedThreadSessionMap(pool);
 
   // THIS replica's identity for the socket/poll ownership lease (D93). A fresh
   // per-PROCESS UUID, not the hostname: templated pods share a hostname and would

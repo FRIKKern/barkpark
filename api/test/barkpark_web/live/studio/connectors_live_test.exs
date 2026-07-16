@@ -217,7 +217,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
 
       refute render(view) =~ "SEALED"
 
-      install = :sys.get_state(view.pid).socket.assigns.installs["telegram"]
+      # installs is grouped by provider → a LIST per provider (D161). One telegram
+      # install ⇒ a one-element list; the sealed blobs are absent from the member.
+      [install] = :sys.get_state(view.pid).socket.assigns.installs["telegram"]
       refute Map.has_key?(install, :credential_ref)
       refute Map.has_key?(install, :chat_token_ref)
       refute inspect(:sys.get_state(view.pid).socket.assigns) =~ "SEALED"
@@ -554,6 +556,57 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       # would leave a live bot that 401s on every message.
       assert [%ApiToken{revoked_at: nil}] = live_tokens(ws, "telegram", @telegram_key)
       assert [%{install_key: @telegram_key}] = Catalog.installs_for_workspace(ws)
+    end
+
+    test "TWO installs of one provider both render and each is INDEPENDENTLY disconnectable (D161)",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script(ws, %{})
+
+      # The bridge is the only writer; a workspace with two Telegram bots lands as
+      # two rows. Inserted …002 before …001 to prove render order is install_key,
+      # not insertion order.
+      key_a = "8100000001"
+      key_b = "8100000002"
+
+      for key <- [key_b, key_a] do
+        Repo.query!(
+          """
+          INSERT INTO chat_bridge.connector_installs
+            (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+          VALUES ('telegram', $1, $2, 'SEALED-CREDENTIAL-BLOB', 'SEALED-CHAT-TOKEN-BLOB', now())
+          """,
+          [key, ws.id]
+        )
+      end
+
+      {:ok, view, html} = live(as(conn, raw), path)
+
+      # BOTH installs render — the pre-D161 collapse showed only the first, so the
+      # second was invisible AND (its bare-provider handler already taken) unremovable.
+      assert html =~ key_a
+      assert html =~ key_b
+
+      # Two disconnect buttons on the one card, each keyed by its install_key.
+      disconnect = fn key ->
+        ~s([data-test-id="connector-disconnect-telegram"][phx-value-install_key="#{key}"])
+      end
+
+      # Disconnect the SECOND install specifically — the one the old bare-provider
+      # lookup could never reach.
+      html = view |> element(disconnect.(key_b)) |> render_click()
+      assert html =~ ~s(data-test-id="connectors-disconnect-modal")
+      # The modal names the SPECIFIC install, not the first one.
+      assert html =~ key_b
+
+      html = view |> element(~s([data-test-id="connectors-confirm-disconnect"])) |> render_click()
+      assert html =~ "Disconnected Telegram"
+
+      # The bridge was asked to unmount the SECOND install by ITS OWN key.
+      assert {:disconnect, _ticket, ^key_b} = List.last(Stub.calls())
+
+      # …and the FIRST install survives — still rendered, still its own row.
+      assert render(view) =~ key_a
+      assert [%{install_key: ^key_a}] = Catalog.installs_for_workspace(ws)
     end
   end
 

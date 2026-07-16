@@ -29,6 +29,7 @@ import {
 } from "../src/db/pool.js";
 import { createBridgeState } from "../src/state/state-adapter.js";
 import {
+  createPgLockedThreadSessionMap,
   createPgThreadSessionStore,
   createThreadSessionMap,
 } from "../src/state/thread-session-map.js";
@@ -359,6 +360,62 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
           ["ws-race", "thread-race"],
         );
         expect(rows).toEqual([{ session_uuid: x.sessionUuid }]);
+      });
+
+      it("mints EXACTLY ONE session under a concurrent first message — no orphan (D159)", async () => {
+        // The regression the reserve-first factory closes
+        // (connectors-orphan-session-on-mint-race). The mint-before-insert path
+        // has BOTH racers call mint() and only one wins the insert, so the
+        // loser's Barkpark Session is bound to nothing — a leaked chat_sessions
+        // row. The :341 race test above proves CONVERGENCE + a single row (which
+        // the leaky path already satisfies) but never counts the mints, so it is
+        // structurally blind to the orphan. This one pins createSessionCalls.
+        const chat = new SpyChatClient();
+        const map = createPgLockedThreadSessionMap(pool);
+        const mint = async () => (await chat.createSession()).id;
+
+        const [x, y] = await Promise.all([
+          map.resolveOrMint("ws-lock-race", "thread-lock-race", mint),
+          map.resolveOrMint("ws-lock-race", "thread-lock-race", mint),
+        ]);
+
+        // The heart of the fix: only ONE Barkpark Session is ever minted, so no
+        // orphan can exist. On origin/main this reads 2 ("expected 2 to be 1").
+        expect(chat.createSessionCalls).toBe(1);
+        // Both racers still converge on the single winner…
+        expect(x.sessionUuid).toBe(y.sessionUuid);
+        // …exactly one of them reports having minted it…
+        expect([x.minted, y.minted].filter(Boolean)).toHaveLength(1);
+        // …and the winner's uuid is the one that was actually minted.
+        expect(x.sessionUuid).toBe("00000000-0000-4000-8000-000000000001");
+
+        const { rows } = await pool.query(
+          "SELECT session_uuid FROM chat_bridge.thread_session_map WHERE workspace_id = $1 AND thread_id = $2",
+          ["ws-lock-race", "thread-lock-race"],
+        );
+        expect(rows).toEqual([{ session_uuid: x.sessionUuid }]);
+      });
+
+      it("resumes a locked-factory thread without minting or taking the lock again", async () => {
+        // The fast path: once bound, resolveOrMint reads lock-free and never
+        // mints — the reserve-first factory must not regress resume-cheapness.
+        const chat = new SpyChatClient();
+        const map = createPgLockedThreadSessionMap(pool);
+        const mint = async () => (await chat.createSession()).id;
+
+        const first = await map.resolveOrMint("ws-lock-resume", "t-1", mint);
+        expect(first.minted).toBe(true);
+        expect(chat.createSessionCalls).toBe(1);
+
+        const second = await map.resolveOrMint("ws-lock-resume", "t-1", mint);
+        const third = await map.resolveOrMint("ws-lock-resume", "t-1", mint);
+        expect(second.sessionUuid).toBe(first.sessionUuid);
+        expect(third.sessionUuid).toBe(first.sessionUuid);
+        expect(second.minted).toBe(false);
+        expect(third.minted).toBe(false);
+        expect(chat.createSessionCalls).toBe(1);
+
+        expect(await map.get("ws-lock-resume", "t-1")).toBe(first.sessionUuid);
       });
     });
   },
