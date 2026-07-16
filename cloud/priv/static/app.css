@@ -3012,3 +3012,118 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .usage-card--over .usage-spark { color: var(--danger); }
 .usage-card--warn .usage-bar-quota { color: var(--warn); }
 .usage-card--over .usage-bar-quota { color: var(--danger); }
+
+/* ═══════════════════════════════════════════════ DEPLOY RAIL (site detail)
+   The console's live deploy rail — the premium twin of .bp-timeline (stw5 D22).
+   Same vertical card shell (border / radius / surface); the BODY is the shared
+   .new-steps step list (dot / ring / spin, already mature), so only this wrapper
+   chrome is authored here. Tone-only status pill + honest live/fail footers.
+   Every colour resolves through the token contract — zero new literals, so the
+   theme compiler and design/check.mjs Part E stay in lockstep across all themes. */
+.deploy-rail {
+  margin: 0 0 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  background: var(--surface);
+}
+.deploy-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.deploy-rail-title { font-size: 15px; margin: 0; }
+/* The shared step list sits a touch tighter inside the card, matching the
+   .bp-timeline house rhythm. */
+.deploy-rail .new-steps { margin-top: 16px; }
+
+/* Honest status pill: neutral by default, tinted per tone. --active carries a
+   soft breathing ring while the box is still working; --live / --failed settle. */
+.deploy-rail-status {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  padding: 5px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  color: var(--muted-text);
+  background: var(--muted-surface);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.deploy-rail-status--active {
+  color: var(--info);
+  background: var(--info-soft);
+  border-color: hsl(var(--info-hsl) / 0.35);
+  animation: deploy-rail-breathe 1.8s var(--ease) infinite;
+}
+.deploy-rail-status--live {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: hsl(var(--ok-hsl) / 0.35);
+}
+.deploy-rail-status--failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: hsl(var(--danger-hsl) / 0.35);
+}
+@keyframes deploy-rail-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--info-hsl) / 0.28); }
+  50% { box-shadow: 0 0 0 4px hsl(var(--info-hsl) / 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The pill's word already names the state — the ring is redundant motion. */
+  .deploy-rail-status--active { animation: none; }
+}
+
+/* Live footer: the copyable URL once every stage is done — a calm top rule
+   separates it from the last (RETIRE) step. */
+.deploy-rail-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.deploy-rail-live .site-open { font-family: var(--mono); word-break: break-all; min-width: 0; }
+.deploy-rail-live .copy-btn { flex: 0 0 auto; }
+
+/* Failure footer: the observed→next hint — the danger-soft twin of .bp-tl-fail. */
+.deploy-rail-fail {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  border: 1px solid hsl(var(--danger-hsl) / 0.3);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ── Create-site "Deploy now" field ────────────────────────────────────────
+   The one-motion create-and-deploy checkbox reads as a grouped, opt-in card
+   rather than a loose form field — bordered, muted, with a dim sub-note aligned
+   under the label when deploy isn't available yet (instance still provisioning). */
+.field-check {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  background: var(--muted-surface);
+}
+.field-check .check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.field-check .check-row input[type="checkbox"] { margin-top: 1px; flex: 0 0 auto; }
+.field-check .check-row input:disabled { cursor: not-allowed; }
+.field-check .check-note { margin-top: 7px; padding-left: 24px; font-size: 12px; line-height: 1.4; }
