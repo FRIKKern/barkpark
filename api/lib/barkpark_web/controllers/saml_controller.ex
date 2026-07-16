@@ -121,9 +121,16 @@ defmodule BarkparkWeb.SamlController do
         }
       })
 
+      # The :sso_browser pipeline bypasses root.html.heex, so the SLO form's
+      # CSP + nonce are plumbed by hand here: a per-request nonce lets esaml's
+      # auto-submit <script> run under a strict script-src while any injected
+      # inline script is blocked (task-0fc9d55c).
+      nonce = BarkparkWeb.CSP.nonce()
+
       conn
       |> put_resp_content_type("text/html")
-      |> send_resp(200, Saml.logout_response_html(c, slug))
+      |> put_resp_header("content-security-policy", BarkparkWeb.CSP.sso_policy(nonce))
+      |> send_resp(200, Saml.logout_response_html(c, slug, nonce))
     else
       :no_conn ->
         conn |> put_status(404) |> json(%{error: "no SAML connection for this organization"})

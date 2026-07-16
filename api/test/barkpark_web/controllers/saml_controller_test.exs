@@ -276,6 +276,19 @@ defmodule BarkparkWeb.SamlControllerTest do
       assert html =~ "SAMLResponse"
       assert html =~ "https://idp.example.com/slo"
 
+      # CSP survival (task-0fc9d55c): the :sso_browser pipeline bypasses
+      # root.html.heex, so slo/2 sets a strict script-src 'nonce-…' by hand and
+      # esaml stamps the SAME nonce onto its auto-submit <script>. Prove the
+      # policy is present, has no 'unsafe-inline' (a real backstop, not vacuous
+      # green), the script carries the exact header nonce, and the form still
+      # auto-submits — so the logout completes under the tightened policy.
+      [policy] = get_resp_header(resp, "content-security-policy")
+      assert [_, nonce] = Regex.run(~r/script-src 'self' 'nonce-([^']+)'/, policy)
+      refute policy =~ "'unsafe-inline'"
+      assert html =~ ~s|<script nonce="#{nonce}">|
+      assert html =~ "saml-req-form"
+      assert html =~ ".submit()"
+
       # Sobelow Config.Headers fix (task-f76e9b7b): the SLO auto-submit HTML form
       # rides the :sso_browser pipeline, which now sets secure browser headers.
       # Regression fence — this HTML page must never ship without them again.
