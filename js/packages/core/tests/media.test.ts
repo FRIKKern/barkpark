@@ -200,6 +200,7 @@ describe('listAssets / getAsset / deleteAsset', () => {
           highlights: { a1: { altText: ['<em>cat</em>'] } },
           parsedQuery: { terms: ['cat'] },
           ms: 7,
+          searchEventId: 'evt_media456',
         })
       }),
     )
@@ -215,6 +216,8 @@ describe('listAssets / getAsset / deleteAsset', () => {
     // ...highlights/parsedQuery/ms from the TOP level (asymmetric envelope).
     expect(res.highlights).toEqual({ a1: { altText: ['<em>cat</em>'] } })
     expect(res.ms).toBe(7)
+    // searchEventId round-trips — required by /search/interaction (was dropped before).
+    expect(res.searchEventId).toBe('evt_media456')
 
     // `mimeType` is sent as the server's `type` param; q + filters forwarded.
     const url = new URL(seenUrl)
@@ -296,6 +299,8 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(new URL(seenUrl).searchParams.has('q')).toBe(false)
     expect(new URL(seenUrl).searchParams.get('collection')).toBe('c1')
     expect(res).toMatchObject({ hits: [], total: 0, hasMore: false, nextCursor: null })
+    // Absent on the wire -> defaults to null, not undefined.
+    expect(res.searchEventId).toBeNull()
   })
 
   it('getAssetSearchSuggestions GETs .../search/suggestions with the prefix + limit', async () => {
