@@ -51,5 +51,5 @@ Shared golden home: `fixtures/portable-doc-inline/` cases mirrored VERBATIM in `
 - `api/lib/barkpark/content/papers.ex` — `resolve_values_in_blocks/3` (valueref-resolve), `accept_valueref_baseline/6` (drift-accept), `resolve_wikilink/3` (task-chip-resolve)
 - `api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex` — `valueref_accept_baseline/2` (the Studio accept event)
 - `internal/pdrender/inline.go` — Go valueref case + `valuerefText`
-- `web/components/portable-doc.tsx` — React valueref case + unknown-inline degrade
+- `js/packages/react/src/inline.tsx` — canonical React valueref case (`valuerefHtml`) + unknown-inline degrade (web/ now consumes this; the old `web/components/portable-doc.tsx` fork was retired)
 - `api/assets/paper-editor/src/convert.js` — editor node↔mark mapping (both directions)
