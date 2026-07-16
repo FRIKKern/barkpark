@@ -133,6 +133,16 @@ func TestScaffyUsageErrorsExitTwo(t *testing.T) {
 		{"validate", "--bogus", "x.scaffy"}, // unknown validate flag
 		{"fmt", "--bogus", "x.scaffy"},      // unknown fmt flag
 		{"frobnicate", "x.scaffy"},          // unknown verb
+		{"run"},                             // no command path
+		{"run", "a.scaffy", "b.scaffy"},     // two command paths
+		{"run", "x.scaffy", "--var"},        // dangling --var
+		{"run", "x.scaffy", "--var", "KV"},  // malformed --var (no =)
+		{"run", "x.scaffy", "--var", "=v"},  // malformed --var (empty key)
+		{"run", "x.scaffy", "--var", "K=1", "--var", "K=2"}, // duplicate --var
+		{"run", "--bogus", "x.scaffy"},                      // unknown run flag
+		{"remove"},                                          // no command path
+		{"remove", "x.scaffy", "--var", "KV"},               // malformed --var
+		{"remove", "--bogus", "x.scaffy"},                   // unknown remove flag
 	}
 	for _, args := range cases {
 		code, _, stderr := runScaffyTest(t, globals{}, "", args...)
@@ -277,9 +287,11 @@ func TestScaffyHelpTexts(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{nil, []string{"usage: bp scaffy <validate|fmt>", "validate <path>...", "fmt [--check] <path>...", "examples:", "exit codes:", "5  validation findings"}},
+		{nil, []string{"usage: bp scaffy <validate|fmt|run|remove>", "validate <path>...", "fmt [--check] <path>...", "run <command.scaffy> --var K=V...", "remove <command.scaffy> --var K=V...", "examples:", "exit codes:", "SCAFFY-DRIFT"}},
 		{[]string{"validate"}, []string{"usage: bp scaffy validate <path>...", "file:line: RULE-ID message", "exit codes:", "-o json"}},
 		{[]string{"fmt"}, []string{"usage: bp scaffy fmt [--check] <path>...", "--check", "exit codes:", "fixpoint"}},
+		{[]string{"run"}, []string{"usage: bp scaffy run <command.scaffy> --var K=V...", "--var K=V", "--dry-run", "duration_ms", "examples:", "exit codes:", "5  validation findings"}},
+		{[]string{"remove"}, []string{"usage: bp scaffy remove <command.scaffy> --var K=V...", "RECEIPT REPLAY", "D36", "--dry-run", "exit codes:", "SCAFFY-DRIFT"}},
 	}
 	for _, c := range cases {
 		code, stdout, _ := runScaffyTest(t, globals{help: true}, "", c.args...)
@@ -290,6 +302,376 @@ func TestScaffyHelpTexts(t *testing.T) {
 			if !strings.Contains(stdout, w) {
 				t.Errorf("help(%v) missing %q:\n%s", c.args, w, stdout)
 			}
+		}
+	}
+}
+
+// ---- run/remove wiring (W3, D33–D43) --------------------------------------
+
+// cliAddNoteSrc is the run/remove wiring fixture: one CREATE (guarded IF
+// ABSENT), one marked INSERT, a FILE assert, a LOCAL CMD assert carrying a
+// trailing hash-comment (display-strip probe) and a TIER ci CMD (deferred).
+const cliAddNoteSrc = `COMMAND "add-note" DESCRIPTION "CLI wiring fixture: one CREATE plus one marked INSERT." CONCEPT "cli-note" DIRECTION "add"
+
+VARIABLE 1 "NoteName" TITLE "Note" DESCRIPTION "Name of the note." EXAMPLES "Alpha"
+
+CREATE FILE IF ABSENT "docs/{{.note-name}}.txt"
+::: note file :::
+note {{.note-name}}
+::: note file :::
+
+IN "docs/list.txt"
+INSERT AFTER FIRST
+::: list head :::
+head-anchor
+::: list head :::
+WITH
+::: note entry :::
+entry {{.note-name}} MARK:note-entry-{{.note-name}}
+::: note entry :::
+MARK "note-entry-{{.note-name}}"
+
+ASSERT FILE "docs/{{.note-name}}.txt" CONTAINS "note {{.note-name}}"
+ASSERT CMD "true # local sanity gate"
+ASSERT CMD "cd api && mix test" TIER ci
+`
+
+// cliRemoveNoteSrc is a DIRECTION "remove" command — a `bp scaffy run`
+// target; handing it to `bp scaffy remove` must be a usage error (D36).
+const cliRemoveNoteSrc = `COMMAND "remove-note" DESCRIPTION "Retract a note (authored inverse)." CONCEPT "cli-note" DIRECTION "remove"
+
+VARIABLE 1 "NoteName" TITLE "Note" DESCRIPTION "Name of the note." EXAMPLES "Alpha"
+
+IN "docs/list.txt"
+REMOVE
+::: note entry :::
+entry {{.note-name}} MARK:note-entry-{{.note-name}}
+::: note entry :::
+MARK "note-entry-{{.note-name}}"
+ASLONG FILE CONTAIN "MARK:note-entry-{{.note-name}}"
+`
+
+func writeCliFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedCliNoteTree builds a temp repo tree for the fixture and chdirs into it
+// (run/remove resolve the repo root from the cwd).
+func seedCliNoteTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeCliFile(t, root, "add-note.scaffy", cliAddNoteSrc)
+	writeCliFile(t, root, "remove-note.scaffy", cliRemoveNoteSrc)
+	writeCliFile(t, root, "docs/list.txt", "head-anchor\ntail\n")
+	t.Chdir(root)
+	return root
+}
+
+// snapshotCliTree captures every file under root except .scaffy/ (receipts
+// are allowed to persist across a byte-clean run→remove cycle).
+func snapshotCliTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snap := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		if info.IsDir() {
+			if rel == ".scaffy" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		snap[rel] = string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+func TestScaffyRunAppliesWritesReceiptAndRerunNoOps(t *testing.T) {
+	root := seedCliNoteTree(t)
+
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("run exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	// House voice, one line per op / per assert (D39).
+	for _, want := range []string{
+		"● created docs/alpha.txt",
+		"○ injected docs/list.txt @MARK:note-entry-alpha",
+		"✔ pass file-contains",
+		"✔ pass cmd true",
+		"… deferred cmd cd api && mix test — TIER ci, runs in the PR",
+		"receipt: ",
+		"applied — 1 created, 1 injected, 1 mark(s), ",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("run output missing %q:\n%s", want, stdout)
+		}
+	}
+	// The LOCAL CMD echo strips its trailing hash-comment for display only.
+	if strings.Contains(stdout, "local sanity gate") {
+		t.Errorf("CMD echo did not strip the trailing hash-comment:\n%s", stdout)
+	}
+	// Files landed and the fat receipt exists under .scaffy/receipts/.
+	if got := readCliFile(t, root, "docs/alpha.txt"); got != "note alpha\n" {
+		t.Errorf("created file = %q", got)
+	}
+	if !strings.Contains(readCliFile(t, root, "docs/list.txt"), "entry alpha MARK:note-entry-alpha") {
+		t.Error("injected entry missing from docs/list.txt")
+	}
+	receipts, err := filepath.Glob(filepath.Join(root, ".scaffy", "receipts", "*.json"))
+	if err != nil || len(receipts) != 1 {
+		t.Fatalf("want exactly 1 receipt, got %v (err %v)", receipts, err)
+	}
+
+	// Re-run: every op skips clean, exit 0, receipt not clobbered.
+	snap := snapshotCliTree(t, root)
+	code, stdout, _ = runScaffyTest(t, globals{}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("re-run exit = %d, want %d\n%s", code, exitOK, stdout)
+	}
+	for _, want := range []string{"= skipped docs/alpha.txt — file already exists (IF ABSENT)", "= skipped docs/list.txt", "no-op — nothing to do (2 skipped)"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("re-run output missing %q:\n%s", want, stdout)
+		}
+	}
+	if after := snapshotCliTree(t, root); len(after) != len(snap) {
+		t.Errorf("no-op re-run changed the tree: %d files -> %d", len(snap), len(after))
+	} else {
+		for rel, b := range snap {
+			if after[rel] != b {
+				t.Errorf("no-op re-run mutated %s", rel)
+			}
+		}
+	}
+}
+
+func readCliFile(t *testing.T, root, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return string(b)
+}
+
+func TestScaffyRemoveRoundTripsByteClean(t *testing.T) {
+	root := seedCliNoteTree(t)
+	before := snapshotCliTree(t, root)
+
+	if code, stdout, stderr := runScaffyTest(t, globals{}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha"); code != exitOK {
+		t.Fatalf("run exit = %d\n%s\n%s", code, stdout, stderr)
+	}
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "remove", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("remove exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	for _, want := range []string{"✕ deleted docs/alpha.txt", "✕ removed docs/list.txt @MARK:note-entry-alpha", "removed — 1 removed, 1 deleted"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("remove output missing %q:\n%s", want, stdout)
+		}
+	}
+	// Byte-clean (D34): the tree outside .scaffy/ is exactly the pre-run tree.
+	after := snapshotCliTree(t, root)
+	if len(after) != len(before) {
+		t.Fatalf("remove not byte-clean: %d files, want %d\nafter: %v", len(after), len(before), after)
+	}
+	for rel, b := range before {
+		if after[rel] != b {
+			t.Errorf("remove left %s dirty:\n%s", rel, after[rel])
+		}
+	}
+
+	// Idempotent second remove: every op skips clean, exit 0.
+	code, stdout, _ = runScaffyTest(t, globals{}, "", "remove", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("second remove exit = %d, want %d\n%s", code, exitOK, stdout)
+	}
+	if !strings.Contains(stdout, "no-op — already retracted (2 skipped)") {
+		t.Errorf("second remove should be an already-retracted no-op:\n%s", stdout)
+	}
+}
+
+func TestScaffyRemoveMissingReceiptExitsFour(t *testing.T) {
+	seedCliNoteTree(t)
+	// Never run at all → no receipt for any key.
+	code, _, stderr := runScaffyTest(t, globals{}, "", "remove", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitNotFound {
+		t.Fatalf("remove-without-receipt exit = %d, want %d\nstderr:\n%s", code, exitNotFound, stderr)
+	}
+	if !strings.Contains(stderr, "no receipt") {
+		t.Errorf("stderr should explain the receipt miss:\n%s", stderr)
+	}
+
+	// Run with Alpha, remove with Beta: different vars key a different
+	// receipt — a miss, never a fuzzy match.
+	if code, stdout, stderr := runScaffyTest(t, globals{}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha"); code != exitOK {
+		t.Fatalf("run exit = %d\n%s\n%s", code, stdout, stderr)
+	}
+	code, _, _ = runScaffyTest(t, globals{}, "", "remove", "add-note.scaffy", "--var", "NoteName=Beta")
+	if code != exitNotFound {
+		t.Fatalf("wrong-vars remove exit = %d, want %d", code, exitNotFound)
+	}
+}
+
+func TestScaffyRemoveDirectionRemoveIsUsageError(t *testing.T) {
+	seedCliNoteTree(t)
+	code, _, stderr := runScaffyTest(t, globals{}, "", "remove", "remove-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitUsage {
+		t.Fatalf("remove of a DIRECTION-remove command exit = %d, want %d\nstderr:\n%s", code, exitUsage, stderr)
+	}
+	if !strings.Contains(stderr, "D36") || !strings.Contains(stderr, "bp scaffy run") {
+		t.Errorf("refusal must cite D36 and point at `bp scaffy run`:\n%s", stderr)
+	}
+}
+
+func TestScaffyRunJSONEnvelope(t *testing.T) {
+	seedCliNoteTree(t)
+	code, stdout, _ := runScaffyTest(t, globals{}, "json", "run", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stdout)
+	}
+	var env struct {
+		OK        bool              `json:"ok"`
+		Command   string            `json:"command"`
+		Direction string            `json:"direction"`
+		Vars      map[string]string `json:"vars"`
+		Ops       []struct {
+			Kind   string `json:"kind"`
+			Path   string `json:"path"`
+			Status string `json:"status"`
+		} `json:"ops"`
+		Asserts []struct {
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Tier   string `json:"tier"`
+		} `json:"asserts"`
+		Receipt    string `json:"receipt"`
+		DurationMS *int64 `json:"duration_ms"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v\n%s", err, stdout)
+	}
+	if !env.OK || env.Command != "add-note" || env.Direction != "add" {
+		t.Errorf("envelope head wrong: ok=%v command=%q direction=%q", env.OK, env.Command, env.Direction)
+	}
+	if env.Vars["NoteName"] != "Alpha" {
+		t.Errorf("vars = %v", env.Vars)
+	}
+	if len(env.Ops) != 2 || env.Ops[0].Status != "created" || env.Ops[1].Status != "injected" {
+		t.Errorf("ops = %+v", env.Ops)
+	}
+	if len(env.Asserts) != 3 || env.Asserts[2].Status != "deferred" || env.Asserts[2].Tier != "ci" {
+		t.Errorf("asserts = %+v", env.Asserts)
+	}
+	if env.Receipt == "" {
+		t.Error("receipt path missing from the envelope")
+	}
+	if env.DurationMS == nil {
+		t.Error("duration_ms missing from the envelope")
+	}
+}
+
+func TestScaffyRunDryRunTouchesNothing(t *testing.T) {
+	root := seedCliNoteTree(t)
+	before := snapshotCliTree(t, root)
+
+	code, stdout, stderr := runScaffyTest(t, globals{dryRun: true}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitOK {
+		t.Fatalf("dry-run exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	for _, want := range []string{
+		"● would create docs/alpha.txt",
+		"○ would inject docs/list.txt @MARK:note-entry-alpha",
+		"+note alpha",             // per-file -/+ diff (D39)
+		"… would run cmd true",    // LOCAL CMD listed, never executed
+		"… deferred cmd cd api",   // TIER ci stays deferred
+		"dry-run — 1 created, 1 injected, 1 mark(s)",
+		"nothing written, no receipt",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, stdout)
+		}
+	}
+	// ZERO writes: tree byte-identical, no receipt, no .scaffy dir at all.
+	after := snapshotCliTree(t, root)
+	if len(after) != len(before) {
+		t.Fatalf("dry-run wrote files: %d -> %d", len(before), len(after))
+	}
+	for rel, b := range before {
+		if after[rel] != b {
+			t.Errorf("dry-run mutated %s", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".scaffy")); !os.IsNotExist(err) {
+		t.Errorf(".scaffy/ exists after a dry-run (stat err %v) — no receipt may be written", err)
+	}
+}
+
+func TestScaffyRunValidationFindingsExitFive(t *testing.T) {
+	// The red fixture fails the validate-first gate: exit 5, nothing applied.
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "run", scaffyRedFile)
+	if code != exitValidation {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "E-020") {
+		t.Errorf("findings should print compiler-style:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "nothing applied") {
+		t.Errorf("stderr should state nothing was applied:\n%s", stderr)
+	}
+}
+
+func TestScaffyRunMissingCommandFileExitsFour(t *testing.T) {
+	code, _, stderr := runScaffyTest(t, globals{}, "", "run", "no/such/command.scaffy")
+	if code != exitNotFound {
+		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, exitNotFound, stderr)
+	}
+	if !strings.Contains(stderr, "no/such/command.scaffy") {
+		t.Errorf("stderr should name the missing command file:\n%s", stderr)
+	}
+}
+
+func TestScaffyRemoveDriftExitsFive(t *testing.T) {
+	root := seedCliNoteTree(t)
+	if code, stdout, stderr := runScaffyTest(t, globals{}, "", "run", "add-note.scaffy", "--var", "NoteName=Alpha"); code != exitOK {
+		t.Fatalf("run exit = %d\n%s\n%s", code, stdout, stderr)
+	}
+	// Hand-mutate the created file: remove must refuse with SCAFFY-DRIFT
+	// (exit 5) and write NOTHING.
+	writeCliFile(t, root, "docs/alpha.txt", "note alpha\nhand edit\n")
+	before := snapshotCliTree(t, root)
+
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "remove", "add-note.scaffy", "--var", "NoteName=Alpha")
+	if code != exitValidation {
+		t.Fatalf("drifted remove exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "SCAFFY-DRIFT") {
+		t.Errorf("drift refusal must print a SCAFFY-DRIFT finding:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "nothing written") {
+		t.Errorf("stderr should state nothing was written:\n%s", stderr)
+	}
+	after := snapshotCliTree(t, root)
+	for rel, b := range before {
+		if after[rel] != b {
+			t.Errorf("refused remove mutated %s", rel)
 		}
 	}
 }
