@@ -268,7 +268,10 @@ defmodule BarkparkWeb.ShareMeta do
   defp name(_), do: nil
 
   defp strings(nil), do: []
-  defp strings(list) when is_list(list), do: list |> Enum.map(&tag_name/1) |> Enum.reject(&is_nil/1)
+
+  defp strings(list) when is_list(list),
+    do: list |> Enum.map(&tag_name/1) |> Enum.reject(&is_nil/1)
+
   defp strings(one) when is_binary(one), do: strings([one])
   defp strings(_), do: []
 
