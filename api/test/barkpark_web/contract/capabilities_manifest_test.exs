@@ -460,6 +460,22 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["writes"] == true
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
+
+    # router.ex mounts POST /v1/webhooks/:dataset/:id/reenable
+    # (webhook_controller.ex) alongside deliveries/replay/rotate above, but the
+    # manifest carried its three siblings and not this one — undiscoverable by
+    # `bp`/the cloud SPA. This pins the fourth C5 entry to the same shape.
+    test "webhook.reenable is POST /v1/webhooks/:dataset/:id/reenable (admin, writes, id arg)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "webhook.reenable")
+
+      assert cmd != nil, "webhook.reenable not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id/reenable"
+      assert cmd["auth_tier"] == "admin"
+      assert cmd["writes"] == true
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
   end
 
   describe "media collection commands" do
@@ -760,6 +776,42 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "anon manifest leaked a chat command"
       refute Enum.any?(anon["nouns"], &(&1["name"] == "chat")),
              "anon manifest leaked the chat noun name"
+    end
+
+    # DOCUMENTING pin, not a fix — see the "OPEN D36 GAP" comment above the
+    # chat core_cmd block in capabilities.ex. RequireChatAccess.chat_scope/1
+    # (require_chat_access.ex) DOES authorize a workspace-bound
+    # `permissions: ["chat"]` Connector token at `/v1/chat/*` (resolves to
+    # `{:workspace, ws}`), but tier_for_token/1 here only recognizes
+    # admin/write/read, so that same token projects at manifest tier "none"
+    # and existence-hiding strips the whole `chat` noun from its own manifest.
+    # Remapping `chat` into tier_for_token/1 is D36-gated (chat_* is a HOT
+    # connectors surface) — this test intentionally PINS the current
+    # (stripped) behavior so a future D36-confirmed remap changes this
+    # assertion on purpose, not by accident.
+    test "a workspace token carrying only `chat` (no admin/write/read) still gets chat stripped (D36 open)",
+         %{conn: conn} do
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      raw_token = "chat-only-#{System.unique_integer([:positive])}"
+      {:ok, _} = Barkpark.Auth.create_token(raw_token, "chat-only", "test", ["chat"], ws.id)
+
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["auth_tier"] == "none",
+             "chat-only workspace token currently projects at tier \"none\" (D36 open); " <>
+               "got: #{inspect(manifest["auth_tier"])}"
+
+      refute Enum.any?(manifest["commands"], &(&1["noun"] == "chat")),
+             "chat-only token unexpectedly sees a chat command — if D36 shipped the tier " <>
+               "remap, update this pin instead of leaving it red"
+
+      refute Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
+             "chat-only token unexpectedly sees the chat noun — if D36 shipped the tier " <>
+               "remap, update this pin instead of leaving it red"
     end
   end
 

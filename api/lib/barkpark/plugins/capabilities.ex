@@ -1378,6 +1378,18 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "webhook.reenable",
+        "webhook",
+        "reenable",
+        "Reenable a webhook endpoint after it was auto-disabled.",
+        "POST",
+        "/v1/webhooks/:dataset/:id/reenable",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "plugin.ls",
         "plugin",
         "ls",
@@ -1942,6 +1954,16 @@ defmodule Barkpark.Plugins.Capabilities do
       # in the `chat` noun summary. `writes: false` throughout: these are chat
       # transport calls, not content mutations, so bp does not run the content
       # --dry-run/confirm path (same treatment as the auth.* exchanges).
+      #
+      # OPEN D36 GAP (documented, NOT fixed here): `tier_for_token/1` above only
+      # recognizes admin/write/read, so a workspace-bound `permissions: ["chat"]`
+      # Connector token (RequireChatAccess.chat_scope/1 DOES authorize it, at
+      # `{:workspace, ws}`) projects at manifest tier "none" — the whole `chat`
+      # noun gets existence-hidden from its own token. Remapping `chat` into
+      # tier_for_token/1 touches the HOT connectors chat_* surface and needs D36
+      # charter confirmation first; see
+      # `capabilities_manifest_test.exs` "chat-only token" pin for the
+      # regression guard on the CURRENT (stripped) behavior.
       core_cmd(
         "chat.create_session",
         "chat",
