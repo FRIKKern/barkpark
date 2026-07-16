@@ -85,6 +85,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)
     }
 
+  def compose_block(%{"type" => "gauge-list"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_email_html(b, theme)
+    }
+
   # Task-family fleet email variants (gp-w4a). Same three-clause split as the
   # data-viz slate: the theme-aware /3 entry threads `theme` into the inline-
   # styled emitters; the classed article emitters (Components.*_html) stay
@@ -1178,6 +1184,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   def compose_block(%{"type" => "chart"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "gauge-list"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_html(b)}
+  end
+
+  def compose_block(%{"type" => "gauge-list"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_email_html(b)}
   end
 
   # Unknown / unregistered block type — degrade gracefully instead of crashing
