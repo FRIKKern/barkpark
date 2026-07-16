@@ -3157,3 +3157,47 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .field-check .check-row input[type="checkbox"] { margin-top: 1px; flex: 0 0 auto; }
 .field-check .check-row input:disabled { cursor: not-allowed; }
 .field-check .check-note { margin-top: 7px; padding-left: 24px; font-size: 12px; line-height: 1.4; }
+/* -- stw5 deploy-history panel + site-level synchronous rollback (D25/D28) ---- */
+/* The Deployments section header — title on the left, the one-click "Roll back"
+   affordance on the right. Reuses existing button classes; only the row layout is
+   new. Tokens only (below the GENERATED marker), so the design gate stays parity. */
+.deploys-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin: 6px 0 10px;
+}
+.deploys-head h2 { margin: 0; }
+/* D28: the honest capped-history footer — "Showing the N most recent deployments."
+   Muted + small; never a "full history" claim. */
+.deploys-note { font-size: 12px; color: var(--muted-text); margin: 8px 2px 0; }
+/* The restored "Now live" chip — distinguished from a plain restore-free current
+   chip by an info tint so "rolled back" reads as an intentional state, not a fault.
+   Info tokens are theme-invariant (shared status hues), so no [data-theme] override. */
+.dep-current--restored {
+  background: var(--info-soft);
+  color: var(--info);
+  border-color: hsl(var(--info-hsl) / 0.32);
+}
+/* The deployment_id:null completion banner — a "Rolled back" pill + the previous-
+   release sentence + a link to the now-serving URL. Calm info tone (a settled
+   success, not a warning). */
+.deploys-rollback-note {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  font-size: 13px; color: var(--text);
+  background: var(--info-soft);
+  border: 1px solid hsl(var(--info-hsl) / 0.28);
+  border-radius: var(--radius);
+  padding: 9px 12px; margin: 0 0 10px;
+  animation: new-detail-in 0.28s ease;
+}
+.deploys-rollback-pill {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center;
+  height: 20px; padding: 0 9px;
+  font-size: 11px; font-weight: 600;
+  border-radius: var(--pill);
+  background: hsl(var(--info-hsl) / 0.16);
+  color: var(--info);
+  border: 1px solid hsl(var(--info-hsl) / 0.32);
+}
+.deploys-rollback-note a { color: var(--info); text-decoration: none; }
+.deploys-rollback-note a:hover { text-decoration: underline; }

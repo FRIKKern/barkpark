@@ -5397,6 +5397,21 @@
   // deploy (queued/building/pushing), collapsed for a terminal one.
   var deployConsoleOpen = {};
 
+  // stw5 (D25): the per-site synchronous-rollback "flash" — the completion state a
+  // successful POST /v1/sites/:id/rollback leaves behind so the very next site
+  // render can mark the restored row (or show the "rolled back to previous" note)
+  // without re-deriving it from the wire. Keyed by site id; self-expiring via TTL
+  // so no manual clearing is needed (a fresh deploy that moves current_deployment_id
+  // also invalidates a "restored" flash — see siteRollbackFlashView).
+  var siteRollbackFlash = {};
+  // How long the rollback completion cue lingers on the detail page. Long enough to
+  // survive the settling "deployments" SSE refetch + a glance; then the row reads as
+  // a plain "Now live" (the restore already settled — no perpetual banner).
+  var SITE_ROLLBACK_FLASH_TTL_MS = 45000;
+  // D28: the deploy-history read is capped to the most-recent N (the endpoint returns
+  // up to 200, but pagination is DEFERRED). Honest bounded list, never "full history".
+  var DEPLOY_HISTORY_MAX = 12;
+
   // opts.quiet skips the full-body "Loading site…" spinner. Used after the
   // optimistic post-promote repaint: the reconciled list is already on screen,
   // so wiping #site-body with a spinner would (a) throw the optimistic paint
@@ -5436,6 +5451,8 @@
       box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews);
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
+      var srb = $("#site-rollback");
+      if (srb) srb.addEventListener("click", function () { confirmSiteRollback(site, domain); });
       wireDeployConsoles(box);
       wireDeployActions(box, site, deployments);
       // W4: mount the live six-stage rail for the in-flight deployment (if any),
@@ -5480,7 +5497,23 @@
       : "—";
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
-    var list = deployListHtml(deployments, site.current_deployment_id);
+    // stw5 (D25): resolve the stored rollback flash against server truth + the clock
+    // ONCE, then thread it through the list (restored-row marker) and the banner
+    // (deployment_id:null "previous release" note). Stale/expired flashes resolve to
+    // null so the panel reads normally.
+    var flashView = siteRollbackFlashView(siteRollbackFlash[String(site.id)], site, Date.now());
+    var list = deployListHtml(deployments, site.current_deployment_id, flashView);
+    var rollbackBanner = deployRollbackBannerHtml(flashView);
+    // stw5 (D25): the one-honest-click SITE rollback — offered only when there's a
+    // live release AND at least one prior deployment to fall back to. The SERVER owns
+    // the final word (a typed refusal is surfaced honestly on click), but gating the
+    // affordance here keeps it from being a guaranteed dead-end button.
+    var canSiteRollback = !!site.current_deployment_id && (deployments && deployments.length >= 2);
+    var deploysHead = '<div class="deploys-head"><h2>Deployments</h2>' +
+      (canSiteRollback
+        ? '<button class="btn btn-ghost btn-sm" id="site-rollback" type="button">Roll back</button>'
+        : "") +
+      "</div>";
     var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
@@ -5502,7 +5535,8 @@
           '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><div id="deploy-rail-slot"></div><h2>Deployments</h2><div class="deploys" id="site-deploys">' + list + "</div>" +
+        '<div class="detail-main"><div id="deploy-rail-slot"></div>' + deploysHead + rollbackBanner +
+          '<div class="deploys" id="site-deploys">' + list + "</div>" +
           previewSection + "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
@@ -5737,10 +5771,19 @@
   // The production deployment list markup — shared by the initial site render
   // and the optimistic post-promote repaint so the empty state and the Current
   // chip logic can never drift between the two paint paths.
-  function deployListHtml(deployments, currentId) {
-    return deployments && deployments.length
-      ? deployments.map(function (d) { return deployRow(d, currentId); }).join("")
-      : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+  function deployListHtml(deployments, currentId, flash) {
+    if (!deployments || !deployments.length) {
+      return '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+    }
+    // D28: honest capped recent-N. The endpoint returns up to 200 rows but pagination
+    // is deferred — show a bounded list + a plain-spoken footer when truncated (never
+    // a "full history" claim).
+    var rows = deployments.slice(0, DEPLOY_HISTORY_MAX)
+      .map(function (d) { return deployRow(d, currentId, flash); }).join("");
+    var note = deployments.length > DEPLOY_HISTORY_MAX
+      ? '<p class="deploys-note">Showing the ' + DEPLOY_HISTORY_MAX + " most recent deployments.</p>"
+      : "";
+    return rows + note;
   }
 
   // Paint a deployment list into its container and (re)wire consoles + promote
@@ -5818,6 +5861,169 @@
         var d = byId[btn.getAttribute("data-dep-id")];
         if (d) confirmPromote(site, d, btn.getAttribute("data-kind"), deployments);
       });
+    });
+  }
+
+  // ── stw5 site-level synchronous rollback (charter D25/D28) ─────────────────
+  // DISTINCT from the per-row "Roll back to this" promote above (D7): that mints a
+  // fresh build (async, drives the six-stage rail) targeting one chosen deployment;
+  // THIS flips the whole site back to its previous release in place — SYNCHRONOUS,
+  // no rebuild, no stage events, no new Deployment row. The 200 carries the settled
+  // state directly; we NEVER poll (the async 202+poll of the INSTANCE rollback,
+  // rollbackInstance app.js:~3237, is the named regression trap).
+
+  // Human label for how a deployment shipped. Only rendered when the server sent a
+  // trigger; unknown values pass through humanized (_/- → spaces). Pure.
+  function deployTriggerLabel(trigger) {
+    switch (trigger) {
+      case "content-auto": return "auto";
+      case "github_webhook":
+      case "github-push": return "GitHub push";
+      case "manual": return "manual";
+      case "cli": return "CLI";
+      case "rollback": return "rollback";
+      case "promote": return "promote";
+      default: return trigger ? String(trigger).replace(/[_-]+/g, " ") : "";
+    }
+  }
+
+  // The site-rollback POST target. The id rides encodeURIComponent so a hostile id
+  // can't break out of its path segment.
+  function siteRollbackPath(siteId) {
+    return "/v1/sites/" + encodeURIComponent(String(siteId)) + "/rollback";
+  }
+
+  // The confirm-modal markup — clones the isu-w6 instance idiom (rollbackConfirmHtml
+  // / confirmRollbackInstance) but points at the SITE endpoint. Honest consequence
+  // copy: an in-place flip to the previous release, no rebuild, current stays in
+  // history (roll-forward stays possible). `domain` is server data → escaped.
+  function siteRollbackConfirmHtml(site, domain) {
+    return '<h2 class="modal-title" id="modal-title">Roll back ' + esc(domain) + "?</h2>" +
+      '<p class="modal-sub">This flips the live site back to its <b>previous release</b> right ' +
+        "now &mdash; no rebuild, no waiting. The release you're leaving stays in history, so you " +
+        "can roll forward again. To ship a specific earlier build instead, use " +
+        "<b>Roll back to this</b> on a deployment below.</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" type="button" id="site-rollback-go">Roll back</button></div>';
+  }
+
+  // Fold the SYNCHRONOUS 200 rollback envelope
+  //   {ok, status:'rolled_back', deployment_id, previous_deployment_id, url}
+  // into the render flash. Two honest branches keyed off deployment_id:
+  //   present → "restored": the server resolved the previous build + flipped
+  //     current_deployment_id to it → mark THAT row "Now live — rolled back".
+  //   null    → "previous": the build id didn't resolve; current_deployment_id is
+  //     UNCHANGED → highlight NO row, name the previous_deployment_id + url instead.
+  // Pure; ids coerced to strings for stable equality against row ids.
+  function siteRollbackResult(data) {
+    data = data || {};
+    var dep = data.deployment_id != null ? String(data.deployment_id) : null;
+    return {
+      kind: dep ? "restored" : "previous",
+      deploymentId: dep,
+      previousDeploymentId: data.previous_deployment_id != null ? String(data.previous_deployment_id) : null,
+      url: typeof data.url === "string" ? data.url : null,
+      at: Date.now(),
+    };
+  }
+
+  // Typed rollback refusals → one honest sentence each (D25). The server owns whether
+  // a site CAN roll back; this maps its named refusals so a click never dead-ends in
+  // a raw code. Static strings only (no server free-text embedded) except the generic
+  // fallback, which routes through friendly(). Reads both {error:"code"} and
+  // {error:{code}} envelope shapes.
+  function siteRollbackFailure(status, data) {
+    var err = (data && data.error) || {};
+    var code = typeof err === "string" ? err : err.code;
+    if (status === 422 && code === "not_rollbackable") {
+      return {
+        title: "This site can't be rolled back in place",
+        body: "It rebuilds a fresh image on every deploy, so there's no previous release to flip " +
+          "back to. Use “Roll back to this” on an earlier deployment to rebuild from it instead.",
+      };
+    }
+    if (status === 422 && code === "no_previous") {
+      return {
+        title: "Nothing to roll back to",
+        body: "This site has only ever had one release — there's no previous release to return to yet.",
+      };
+    }
+    if (status === 409 || code === "rollback_failed") {
+      return {
+        title: "A deploy is already running",
+        body: "Let the in-flight deploy finish, then roll back.",
+      };
+    }
+    return { title: "Couldn't roll back", body: friendly(data, "Please try again in a moment.") };
+  }
+
+  // Resolve the stored rollback flash against the current site + clock into what to
+  // render — or null when there's nothing to show: no flash, TTL expired, or a
+  // "restored" flash whose row is no longer current (a later deploy superseded it).
+  // Pure; node-pinned.
+  function siteRollbackFlashView(flash, site, now) {
+    now = typeof now === "number" ? now : Date.now();
+    if (!flash) return null;
+    if (flash.at && now - flash.at > SITE_ROLLBACK_FLASH_TTL_MS) return null;
+    if (flash.kind === "restored") {
+      var curId = (site && site.current_deployment_id != null) ? String(site.current_deployment_id) : null;
+      // Only mark the row that is ACTUALLY current now — a newer deploy that moved
+      // current_deployment_id makes the "restored" cue stale.
+      if (flash.deploymentId == null || flash.deploymentId !== curId) return null;
+      return { kind: "restored", deploymentId: flash.deploymentId, at: flash.at };
+    }
+    return { kind: "previous", previousDeploymentId: flash.previousDeploymentId, url: flash.url, at: flash.at };
+  }
+
+  // The deployment_id:null completion banner — the rollback resolved to the previous
+  // release WITHOUT a build id (current_deployment_id UNCHANGED), so no row is
+  // highlighted; the honest "Rolled back" completion pill + a link to the now-serving
+  // URL read here instead. The "restored" branch shows nothing here (its cue is the
+  // marked row). `url` is server data → escaped. Pure.
+  function deployRollbackBannerHtml(flashView) {
+    if (!flashView || flashView.kind !== "previous") return "";
+    var link = flashView.url
+      ? ' <a href="' + esc(flashView.url) + '" target="_blank" rel="noopener">' +
+          esc(flashView.url) + "&nbsp;&#8599;</a>"
+      : "";
+    return '<div class="deploys-rollback-note" role="status">' +
+      '<span class="deploys-rollback-pill">Rolled back</span>' +
+      "<span>Rolled back to the previous release." + link + "</span></div>";
+  }
+
+  // Open the confirm modal + wire its danger button (the isu-w6 idiom, browser-verified).
+  function confirmSiteRollback(site, domain) {
+    openModal(siteRollbackConfirmHtml(site, domain));
+    var go = $("#site-rollback-go");
+    if (go) go.addEventListener("click", function () { runSiteRollback(site, domain, go); });
+  }
+
+  // POST /v1/sites/:id/rollback on its SYNCHRONOUS transport. On 200 {ok:true}: stash
+  // the flash, show a "Rolled back" completion toast, and quiet-refetch so the history
+  // panel settles over the single "deployments" SSE tick (the restored row marker /
+  // previous-release banner appear on that repaint). NO six-stage rail — a rollback
+  // mints no Deployment row, so mountDeployRail has nothing to mount. A typed refusal
+  // is terminal: close + honest toast (never a silent retry, never a poll).
+  function runSiteRollback(site, domain, btn) {
+    btn = btn || $("#site-rollback-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Rolling back…"; }
+    api("POST", siteRollbackPath(site.id), {}).then(function (r) {
+      if (r.status === 200 && r.data && r.data.ok) {
+        closeModal();
+        var res = siteRollbackResult(r.data);
+        siteRollbackFlash[String(site.id)] = res;
+        toast({
+          kind: "success", title: "Rolled back",
+          body: res.kind === "restored"
+            ? "The site is serving its restored release again."
+            : "The site is serving the previous release again.",
+        });
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id, { quiet: true });
+        return;
+      }
+      var copy = siteRollbackFailure(r.status, r.data);
+      closeModal();
+      toast({ kind: "error", title: copy.title, body: copy.body });
     });
   }
 
@@ -6161,7 +6367,7 @@
     });
   }
 
-  function deployRow(d, currentId) {
+  function deployRow(d, currentId, flash) {
     var st = d.status || "queued";
     // Headline ref: a full 40-char commit sha is noise, not information — show
     // the 7-char short form (full sha on hover). Only hex-sha-shaped refs are
@@ -6172,21 +6378,36 @@
           esc(isSha ? shortSha(d.git_ref) : d.git_ref) + "</span>"
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
     var isCurrent = currentId != null && String(d.id) === String(currentId);
+    // stw5 (D25): a synchronous rollback that RESOLVED a build id leaves a "restored"
+    // flash. It applies ONLY to the row that is now current (the server flipped
+    // current_deployment_id to it) — so the restored row reads as an intentional
+    // restore, never as a stale timestamp.
+    var rolledBack = isCurrent && flash && flash.kind === "restored" &&
+      flash.deploymentId != null && String(flash.deploymentId) === String(d.id);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    // Git meta the row already carries (D7): branch, sha (when the headline is
-    // an image tag), and WHEN — "live since" once the row went live.
+    // Git meta the row already carries (D7): branch, trigger (how it shipped), sha
+    // (when the headline is an image tag), and WHEN — "live since" once it went live.
     var metaBits = [];
     if (d.branch) metaBits.push(esc(d.branch));
+    if (d.trigger) metaBits.push(esc(deployTriggerLabel(d.trigger)));
     if (d.git_ref && d.image_tag) metaBits.push('<span class="mono">' + esc(shortSha(d.git_ref)) + "</span>");
     metaBits.push(esc((st === "live" && d.became_live_at ? "live since " : "") + fmtWhen(when)));
+    // The restored row keeps its ORIGINAL became_live_at, so name it a restore or the
+    // old time reads as staleness (D25). Static prefix — only the time is server data.
+    if (rolledBack) metaBits.push("restored build from " + esc(fmtWhen(d.became_live_at || when)));
     var fail = (st === "failed" && d.failure_reason)
       ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
     var action = promoteActionFor(d, currentId);
     var actionBtn = action
       ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
       : "";
+    // "Now live" keys off current_deployment_id equality (isCurrent), NOT status —
+    // every history row reads status:"live", so status alone can't tell which one is
+    // actually serving traffic. A rolled-back restore names itself.
     var current = isCurrent
-      ? '<span class="dep-current" title="Production traffic is served from this deployment">Current</span>'
+      ? '<span class="dep-current' + (rolledBack ? " dep-current--restored" : "") +
+          '" title="Production traffic is served from this deployment">' +
+          (rolledBack ? "Now live &mdash; rolled back" : "Now live") + "</span>"
       : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + ref + current + "</div>" +
@@ -11673,6 +11894,14 @@
       // until the new build is live) + the loadInstanceSites stale-paint guard.
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
       staleGuard: staleGuard,
+      // stw5 (charter D25/D28): the SITE-level synchronous rollback (distinct from the
+      // per-row async promote) + the capped deploy-history render. Only the PURE
+      // path/fold/copy/markup helpers are node-pinned; confirmSiteRollback /
+      // runSiteRollback (openModal + api + toast) are browser-verified.
+      siteRollbackPath: siteRollbackPath, siteRollbackConfirmHtml: siteRollbackConfirmHtml,
+      siteRollbackResult: siteRollbackResult, siteRollbackFailure: siteRollbackFailure,
+      siteRollbackFlashView: siteRollbackFlashView, deployRollbackBannerHtml: deployRollbackBannerHtml,
+      deployTriggerLabel: deployTriggerLabel,
       // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
       // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
       // node-pinned; the EventSource wiring + DOM mount are browser-verified.
