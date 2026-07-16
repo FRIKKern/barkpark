@@ -1912,6 +1912,168 @@ test("deployRow escapes hostile git meta (branch, ref, id)", () => {
   assert.match(html, /&lt;script&gt;/);
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// stw5 (charter D25/D28): the SITE-level synchronous rollback + capped deploy
+// history. DISTINCT from the per-row async promote above — this flips the whole
+// site to its previous release in place, synchronously, minting NO Deployment row.
+// ═════════════════════════════════════════════════════════════════════════════
+
+test("the stw5 site-rollback helpers are exported", () => {
+  for (const name of [
+    "siteRollbackPath", "siteRollbackConfirmHtml", "siteRollbackResult",
+    "siteRollbackFailure", "siteRollbackFlashView", "deployRollbackBannerHtml",
+    "deployTriggerLabel",
+  ]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("siteRollbackPath targets the site rollback endpoint and encodes a hostile id", () => {
+  assert.equal(hooks.siteRollbackPath("s1"), "/v1/sites/s1/rollback");
+  assert.match(hooks.siteRollbackPath('a/b?x=1'), /\/v1\/sites\/a%2Fb%3Fx%3D1\/rollback/);
+});
+
+test("siteRollbackConfirmHtml clones the W6 idiom: danger confirm + Cancel, escaped domain, honest copy", () => {
+  const html = hooks.siteRollbackConfirmHtml({ id: "s1" }, "shop.example.com");
+  assert.match(html, /id="site-rollback-go"/);
+  assert.match(html, /btn-danger/);
+  assert.match(html, /data-close/);                 // Cancel
+  assert.match(html, /previous release/);           // honest consequence
+  assert.match(html, /no rebuild/);                 // NOT the async build path
+  // Hostile domain never injects markup.
+  const evil = hooks.siteRollbackConfirmHtml({ id: "s1" }, '<img src=x onerror="y">');
+  assert.doesNotMatch(evil, /<img src=x/);
+  assert.match(evil, /&lt;img/);
+});
+
+test("siteRollbackResult: deployment_id PRESENT → 'restored' branch (row to mark)", () => {
+  const r = hooks.siteRollbackResult({
+    ok: true, status: "rolled_back",
+    deployment_id: "d7", previous_deployment_id: "d9", url: "https://x/sites/shop/",
+  });
+  assert.equal(r.kind, "restored");
+  assert.equal(r.deploymentId, "d7");
+  assert.equal(r.previousDeploymentId, "d9");
+  assert.equal(r.url, "https://x/sites/shop/");
+  assert.equal(typeof r.at, "number");
+});
+
+test("siteRollbackResult: deployment_id NULL → 'previous' branch (no row, previous+url only)", () => {
+  const r = hooks.siteRollbackResult({
+    ok: true, status: "rolled_back",
+    deployment_id: null, previous_deployment_id: "d9", url: "https://x/sites/shop/",
+  });
+  assert.equal(r.kind, "previous");
+  assert.equal(r.deploymentId, null);
+  assert.equal(r.previousDeploymentId, "d9");
+  assert.equal(r.url, "https://x/sites/shop/");
+  // A missing url is honest-null, never the string "undefined".
+  assert.equal(hooks.siteRollbackResult({ ok: true, deployment_id: null }).url, null);
+});
+
+test("siteRollbackFailure maps every typed refusal to one honest sentence", () => {
+  const notRb = hooks.siteRollbackFailure(422, { error: "not_rollbackable" });
+  assert.match(notRb.title, /can't be rolled back/);
+  assert.match(notRb.body, /rebuilds a fresh image/);
+  assert.match(notRb.body, /Roll back to this/);        // points to the promote path
+  const noPrev = hooks.siteRollbackFailure(422, { error: "no_previous" });
+  assert.match(noPrev.title, /Nothing to roll back to/);
+  assert.match(noPrev.body, /only ever had one release/);
+  const running = hooks.siteRollbackFailure(409, { error: "rollback_failed" });
+  assert.match(running.title, /deploy is already running/);
+  assert.match(running.body, /finish, then roll back/);
+  // Envelope shape parity: {error:{code}} reads the same as {error:"code"}.
+  assert.match(hooks.siteRollbackFailure(422, { error: { code: "no_previous" } }).title, /Nothing to roll back to/);
+  // Unknown → a generic, non-throwing sentence.
+  assert.match(hooks.siteRollbackFailure(500, {}).title, /Couldn't roll back/);
+});
+
+test("siteRollbackFlashView: restored cue applies ONLY while its row is current + inside the TTL", () => {
+  const site = { current_deployment_id: "d7" };
+  const flash = { kind: "restored", deploymentId: "d7", at: 1000 };
+  // Fresh + row still current → shows.
+  const v = hooks.siteRollbackFlashView(flash, site, 1000);
+  assert.equal(v.kind, "restored");
+  assert.equal(v.deploymentId, "d7");
+  // A later deploy moved current_deployment_id → the cue is stale → null.
+  assert.equal(hooks.siteRollbackFlashView(flash, { current_deployment_id: "d9" }, 1000), null);
+  // Past the TTL → null (no perpetual banner).
+  assert.equal(hooks.siteRollbackFlashView(flash, site, 1000 + 45001), null);
+  // No flash → null.
+  assert.equal(hooks.siteRollbackFlashView(null, site, 1000), null);
+});
+
+test("siteRollbackFlashView: the 'previous' branch passes through (no row to gate on)", () => {
+  const flash = { kind: "previous", previousDeploymentId: "d9", url: "https://x/", at: 1000 };
+  const v = hooks.siteRollbackFlashView(flash, { current_deployment_id: "d7" }, 1500);
+  assert.equal(v.kind, "previous");
+  assert.equal(v.previousDeploymentId, "d9");
+  assert.equal(v.url, "https://x/");
+  // Still TTL-bounded.
+  assert.equal(hooks.siteRollbackFlashView(flash, {}, 1000 + 45001), null);
+});
+
+test("deployRollbackBannerHtml: 'previous' → 'Rolled back' pill + previous-release note + escaped url; 'restored' → nothing", () => {
+  const html = hooks.deployRollbackBannerHtml({ kind: "previous", url: "https://x/sites/shop/" });
+  assert.match(html, /deploys-rollback-pill/);
+  assert.match(html, />Rolled back</);
+  assert.match(html, /previous release/);
+  assert.match(html, /https:\/\/x\/sites\/shop\//);
+  // The restored branch has its cue on the row, not a banner.
+  assert.equal(hooks.deployRollbackBannerHtml({ kind: "restored", deploymentId: "d7" }), "");
+  assert.equal(hooks.deployRollbackBannerHtml(null), "");
+  // Hostile url can't inject.
+  const evil = hooks.deployRollbackBannerHtml({ kind: "previous", url: '"><img src=x>' });
+  assert.doesNotMatch(evil, /<img src=x>/);
+});
+
+test("deployRow: 'Now live' marks the current_deployment_id row by ID equality, never by status", () => {
+  // Two rows both status:'live' (history rows all read live) — only the id match wins.
+  const cur = { id: "d2", status: "live", git_ref: "9c1f2ab", became_live_at: "2026-07-03T10:00:00Z" };
+  const other = { id: "d1", status: "live", git_ref: "4e7d0c9", became_live_at: "2026-07-01T10:00:00Z" };
+  const curHtml = hooks.deployRow(cur, "d2");
+  assert.match(curHtml, /dep-current/);
+  assert.match(curHtml, /Now live/);
+  assert.doesNotMatch(curHtml, /rolled back/);          // no flash → plain "Now live"
+  assert.doesNotMatch(hooks.deployRow(other, "d2"), /dep-current/);
+});
+
+test("deployRow: a 'restored' flash on the current row → 'Now live — rolled back' + a 'restored build from' qualifier", () => {
+  const cur = { id: "d2", status: "live", git_ref: "9c1f2ab", became_live_at: "2026-07-01T10:00:00Z" };
+  const flash = { kind: "restored", deploymentId: "d2" };
+  const html = hooks.deployRow(cur, "d2", flash);
+  assert.match(html, /dep-current--restored/);
+  assert.match(html, /Now live &mdash; rolled back/);
+  assert.match(html, /restored build from/);            // the original became_live_at, named as a restore
+  // The flash is inert on a NON-current row (only the current row is the restore).
+  const priorHtml = hooks.deployRow({ id: "d1", status: "live" }, "d2", flash);
+  assert.doesNotMatch(priorHtml, /rolled back/);
+});
+
+test("deployRow renders the trigger when present, humanized; absent trigger adds nothing", () => {
+  assert.match(hooks.deployRow({ id: "d1", status: "live", trigger: "content-auto" }, null), /auto/);
+  assert.match(hooks.deployRow({ id: "d2", status: "live", trigger: "github_webhook" }, null), /GitHub push/);
+  // A hostile trigger is escaped.
+  const evil = hooks.deployRow({ id: "d3", status: "live", trigger: "<b>x</b>" }, null);
+  assert.doesNotMatch(evil, /<b>x<\/b>/);
+});
+
+test("deployListHtml: caps to the recent-N with an HONEST footer (no 'full history' claim); flash threads to the current row", () => {
+  const many = [];
+  for (let i = 0; i < 20; i++) many.push({ id: "d" + i, status: "live" });
+  const html = hooks.deployListHtml(many, "d0", { kind: "restored", deploymentId: "d0" });
+  // Exactly 12 rows rendered (recent-N), rest omitted.
+  assert.equal((html.match(/class="deploy-row"/g) || []).length, 12);
+  assert.match(html, /Showing the 12 most recent deployments\./);
+  assert.doesNotMatch(html, /full history/i);
+  // The flash marker reached the current row.
+  assert.match(html, /Now live &mdash; rolled back/);
+  // A short list shows no footer.
+  assert.doesNotMatch(hooks.deployListHtml([{ id: "d0", status: "live" }], "d0"), /most recent deployments/);
+  // Empty stays the honest empty-state.
+  assert.match(hooks.deployListHtml([], null), /No deployments yet/);
+});
+
 // ── invitation accept: the minted URL shape parses EXACTLY (router accept_url) ─
 
 test("parseInviteToken accepts the minted shape (#/invitations/accept?token=…) and the canonical one", () => {
