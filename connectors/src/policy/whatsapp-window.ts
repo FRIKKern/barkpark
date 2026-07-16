@@ -131,8 +131,13 @@ export interface WhatsappWindowStore {
  * On restart every window reads as `no-inbound-recorded` — i.e. CLOSED. That is the
  * safe direction (a refused proactive send, never a rejected one), and it is why an
  * in-memory store is honest rather than a stub: the reply path never consults it, so
- * nothing user-visible degrades. Durable last-inbound (a `chat_bridge.whatsapp_window`
- * row) is filed as `connectors-whatsapp-window-persistence` — not built here.
+ * nothing user-visible degrades.
+ *
+ * Durable last-inbound now ships: {@link createPgWhatsappWindowStore} (a
+ * `chat_bridge.whatsapp_window` row) survives a restart and implements this exact
+ * interface. That store is STORE-ONLY (charter D169) — feeding it from the webhook seam
+ * is the still-open `connectors-whatsapp-window-wiring`, so this in-memory store remains
+ * the wired default until then.
  */
 export function createInMemoryWhatsappWindowStore(): WhatsappWindowStore {
   // JSON-encoded pair, so no separator character can be smuggled across the composite.

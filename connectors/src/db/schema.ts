@@ -36,6 +36,35 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.thread_session_map (
 )`;
 
 /**
+ * whatsapp_window — the durable last-inbound-at behind the WhatsApp 24h-window
+ * policy (charter D43/D169). (workspace_id, thread_id) -> the epoch-ms timestamp
+ * of that thread's most recent INBOUND message from the user.
+ *
+ * WhatsApp's Cloud API accepts a free-form business-initiated send only within 24h
+ * of the user's last inbound; the adapter does not auto-substitute templates
+ * (policy/whatsapp-window.ts). The in-memory store loses every window on restart, so
+ * a proactive/scheduled agent would read `no-inbound-recorded` — CLOSED — after every
+ * deploy. This row is the persistence that survives the restart.
+ *
+ * PK is composite for the SAME reason thread_session_map's is: two workspaces' threads
+ * can collide on a provider thread id, and a single-column key would let one tenant's
+ * inbound open another tenant's send window.
+ *
+ * `last_inbound_at` is `bigint` epoch-ms — the exact shape recordInbound/getLastInboundAt
+ * exchange — so the monotonic upsert is a plain numeric `GREATEST(...)` with no timestamp
+ * conversion. Bridge-internal, NEVER read by Elixir (like connector_install_leases, D93):
+ * no `@schema_prefix` schema, no test_helper.exs transcription, and the connector_installs
+ * DDL drift gate does not touch it.
+ */
+export const CREATE_WHATSAPP_WINDOW_SQL = `
+CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.whatsapp_window (
+  workspace_id    text   NOT NULL,
+  thread_id       text   NOT NULL,
+  last_inbound_at bigint NOT NULL,
+  PRIMARY KEY (workspace_id, thread_id)
+)`;
+
+/**
  * connector_installs — the tenant-routing seam P3/OAuth writes into (D29/D35).
  * (provider, install_key) -> workspace_id + the tenant's TWO sealed secrets.
  * Designed so all six P3 channels land with zero core changes.
@@ -187,6 +216,10 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_install_leases (
  */
 export const BRIDGE_TABLE_DDL: readonly string[] = [
   CREATE_THREAD_SESSION_MAP_SQL,
+  // Durable last-inbound-at for the WhatsApp 24h-window policy (D43/D169).
+  // Bridge-internal, never Elixir-read, so it does NOT touch the connector_installs
+  // column set the drift gate guards.
+  CREATE_WHATSAPP_WINDOW_SQL,
   CREATE_CONNECTOR_INSTALLS_SQL,
   // AFTER the create: on a fresh database the column is already there and this is
   // a no-op; on a P2 database it is the only thing that adds it.
