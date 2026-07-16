@@ -77,6 +77,10 @@ api/.artifacts/
 .claude/scheduled_tasks.lock
 api/.claude/
 
+# Scaffy run receipts (bp scaffy run, D35) — machine-local fat records under
+# .scaffy/receipts/ that remove-replay inverts; never committed.
+.scaffy/
+
 # Host-side deploy state (written by deploy/instance-deploy.sh on the server)
 .instance-deploy-last
 .slots/
