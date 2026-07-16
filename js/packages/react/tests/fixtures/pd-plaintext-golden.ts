@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Barkpark contributors
+//
+// JS-OWNED per-type plain-text golden map for `toPlainText` over the 42-type
+// PortableDocument grammar.
+//
+// There is NO per-type plain-text source of truth anywhere else in the repo — Go
+// pdrender, the JS SDK, and Elixir `preview.ex` all lack a per-block extractor
+// (preview.ex reads only paragraph/ingress/title-role), and every one of the 42
+// frozen `pd-golden/*.golden.json` `.input` blocks returns `''` from the legacy
+// Sanity-shaped `toPlainText`. So THIS map is the contract: each string is the
+// exact plain text `toPlainText([golden.input])` must produce for that type,
+// derived from the SAME frozen `pd-golden` fixtures (never re-authoring them).
+//
+// PARTITION (18 prose / 24 textless = 42). Every one of the 42 grammar types
+// appears in EXACTLY ONE of the two maps below; the test fails if any golden
+// type is in neither (silent-drop ≠ intentional-skip) or in both.
+
+/**
+ * PROSE-bearing types → the exact expected plain text.
+ *
+ * Each is asserted non-empty AND exactly equal to this string. Because each type
+ * has its own dispatch clause in `blockText`, reverting a clause flips its output
+ * to `''`, which no longer equals the non-empty golden → the test goes red
+ * (anti-vacuous-green). Reading order + `\n\n` block joins mirror the renderer.
+ */
+export const PROSE_GOLDEN: Record<string, string> = {
+  // headings / roles
+  heading: 'The render path',
+  eyebrow: 'Dispatches',
+  byline: 'Jane Rae · 2026-07-16',
+  // prose runs (marks contribute no text)
+  paragraph: 'A body paragraph with bold emphasis inside it.',
+  ingress: 'A lead paragraph that opens the article.',
+  pullquote: 'The best interface is no interface.',
+  list: 'First point\nSecond point',
+  callout: 'Heads up\n\nThis is a warning callout body.',
+  code: 'def hello do\n  :world\nend',
+  // annotation rows (label + bold run-in lead + body)
+  note: 'Note Run-in A single annotated row.',
+  notes: 'Upgrade Instant The board updates live.\n\nWhy Trust You always feel progress.',
+  // tables (cell inline content, head then rows)
+  table: 'Surface Renderer\nPhoenix Elixir\nNext React',
+  // containers (recurse into prose descendants)
+  figure: 'The figure body.\n\nFigure with a captioned child',
+  card: 'Card title\n\nCard body text.',
+  cards: 'Rule one\n\nThe first rule body.\n\nRule two\n\nThe second rule body.',
+  columns: 'Left column body.\n\nRight column body.',
+  section: 'Alpha cell\n\nBeta cell',
+  terminal: 'Inside the frame.',
+}
+
+/**
+ * Intentionally-TEXTLESS types → the rationale each returns `''`.
+ *
+ * This is the explicit SKIP allow-list. Each type is asserted to return exactly
+ * `''`. A type that returns `''` but is NOT listed here fails the coverage test —
+ * that is precisely what separates an intentional skip from a silent drop. The
+ * rationale strings are the committed justification (families: data-viz / forms /
+ * chat / media / structural). Some of these blocks DO carry human-readable
+ * strings (an image `alt`, a chart `caption`, a task-board card `title`, a CTA
+ * `label`); those are accessibility metadata, viz/chrome labels or live-widget
+ * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
+ */
+export const TEXTLESS_SKIP: Record<string, string> = {
+  // ── structural / interactive ──────────────────────────────────────────────
+  divider: 'structural rule — a decorative separator, carries no text',
+  action:
+    'interactive CTA control — its `label` is button chrome, not reading-flow prose',
+  // ── media ─────────────────────────────────────────────────────────────────
+  image: 'media embed — `alt` is accessibility metadata, not body prose',
+  asciicast: 'media embed (terminal recording) — `caption` is a media label',
+  diagram: 'media/diagram (mermaid) — `source` is diagram DSL, `caption` a viz label',
+  // ── data-viz ────────────────────────────────────────────────────────────────
+  chart: 'data-viz — numeric series + axis labels; `caption` is a viz label',
+  heatmap: 'data-viz — a numeric cell matrix, no prose',
+  stat: 'data-viz metric — `label`/`value` are viz chrome, not prose',
+  'stat-grid': 'data-viz metric grid — label/value chrome',
+  stats: 'data-viz metric grid (alias of stat-grid) — label/value chrome',
+  'status-legend': 'data-viz legend — generated glyph/name/meaning chrome, no content',
+  pipeline: 'data-viz flow diagram — node titles are diagram labels',
+  stage: 'data-viz flow node — kind/title/detail are diagram labels',
+  roadmap: 'data-viz timeline — phase titles are viz labels',
+  // ── forms ─────────────────────────────────────────────────────────────────
+  form: 'interactive form — question prompts are form controls, not article prose',
+  questionnaire: 'interactive form (alias of form) — question-prompt controls',
+  // ── chat transcript widgets ─────────────────────────────────────────────────
+  'chat-thinking': 'chat-transcript widget — a token count, no prose',
+  'chat-todo': 'chat-transcript todo widget — live agent-todo state',
+  'chat-tool-diff': 'chat-transcript tool-call widget — a code diff payload, not prose',
+  // ── data-grid / task widgets ────────────────────────────────────────────────
+  sheet: 'spreadsheet-snapshot data grid — a live external-sheet widget, tabular chrome',
+  'task-board': 'task-board widget — card titles are live board chrome, not article prose',
+  'task-list': 'task-list widget (alias) — live task state chrome',
+  tasks: 'task-list widget (alias) — live task state chrome',
+  'task-detail': 'task widget — criteria/timeline/labels are live task chrome',
+}
