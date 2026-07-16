@@ -2,12 +2,16 @@ package cli
 
 // scaffy_cmd.go is `bp scaffy` — the CLI surface over internal/scaffy, the one
 // implementation of the pinned Scaffy v2 grammar (charter D27/D31/D33–D43).
-// Four verbs:
+// The four local verbs:
 //
 //	bp scaffy validate <path>...             parse + lint, compiler-style findings
 //	bp scaffy fmt [--check] <path>...        canonical structural form, in place
 //	bp scaffy run <cmd.scaffy> --var K=V...  validate, then apply to the cwd tree
 //	bp scaffy remove <cmd.scaffy> --var ...  receipt replay, drift-refused (D36)
+//
+// The two remote verbs — `pull` and `ls --remote` (W4, D48–D50) — and the
+// pulled-command consent gate live ENTIRELY in scaffy_remote_cmd.go; this
+// file only dispatches to them.
 //
 // PURE LOCAL like make/style: no network, no auth, no manifest — this file
 // never touches the server. All grammar + engine work lives in internal/scaffy
@@ -76,6 +80,20 @@ func runScaffy(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runScaffyRemove(out, g, args[1:])
+	case "pull":
+		// Remote verbs live in scaffy_remote_cmd.go (W4, D48) — this file stays
+		// pure-local, so these cases are dispatch ONLY.
+		if g.help {
+			printScaffyPullHelp(out)
+			return exitOK
+		}
+		return runScaffyPull(out, g, args[1:])
+	case "ls":
+		if g.help {
+			printScaffyLsHelp(out)
+			return exitOK
+		}
+		return runScaffyLs(out, g, args[1:])
 	case "":
 		if g.help {
 			printScaffyHelp(out)
@@ -83,7 +101,7 @@ func runScaffy(out *writer, g globals, args []string) int {
 		}
 		// A bare `bp scaffy` with no verb is incomplete usage (the `bp <noun>`
 		// convention in Execute's manifest path); usageErrf keeps -o json parity.
-		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, or remove")
+		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, remove, pull, or ls")
 	default:
 		return usageErrf(out, func() { printScaffyHelp(out) }, "unknown command %q %q", "scaffy", verb)
 	}
@@ -350,6 +368,17 @@ func runScaffyRun(out *writer, g globals, args []string) int {
 	root, err := os.Getwd()
 	if err != nil {
 		return useError(out, "io", "scaffy run: "+err.Error(), exitNotFound)
+	}
+	// A PULLED command (adjacent .provenance.json sidecar) is consent-gated
+	// before a real run (D49): dry-run first, enumerate the substituted CMDs,
+	// then --yes or an interactive confirm. The gate lives with the rest of
+	// the remote surface in scaffy_remote_cmd.go; sidecar-less (repo-authored)
+	// files skip it entirely — the W3 behavior, unchanged.
+	if !g.dryRun && scaffyIsPulled(path) {
+		proceed, code := scaffyRunConsent(out, g, path, vars, root)
+		if !proceed {
+			return code
+		}
 	}
 	report, err := scaffy.Run(scaffy.RunOptions{CommandPath: path, Vars: vars, DryRun: g.dryRun, RepoRoot: root})
 	if err != nil {
@@ -741,6 +770,13 @@ commands:
                             command + exact vars, in reverse, drift-refused
                             per op. DIRECTION "remove" commands run FORWARD
                             (bp scaffy run) — never through remove (D36).
+  pull <concept>[/<variant>]
+                            fetch a command document from the connected
+                            server: validate-first, byte-identical write +
+                            provenance sidecar, never executes anything.
+  ls --remote               the server's command catalog. pull and ls are
+                            the two server-touching verbs; running a PULLED
+                            command is consent-gated (D49).
 
 examples:
   bp scaffy validate scaffy/commands/             # lint the whole corpus
