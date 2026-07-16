@@ -1,0 +1,4 @@
+# vitest browser-mode failure artifacts (screenshots + attachments) — never committed
+.vitest-attachments/
+tests/__screenshots__/
+node_modules/
