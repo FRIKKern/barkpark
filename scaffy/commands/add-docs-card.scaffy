@@ -24,10 +24,10 @@
 #                                   line 1 must match
 #   scripts/check-doc-budgets.sh:70-84 per-card 2400 B cap + exactly-7 count
 
-COMMAND "Add Docs Card" DESCRIPTION "Create a docs/cards/<name>.md card (G1 header, Code anchors section, <=2400 bytes) and wire it into the doc spine: a routing-table row in CLAUDE.md and the Cards: brace list in docs/INDEX.md — idempotently, with MARK handles for symmetric removal by remove-docs-card." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "routing" CONCEPT "docs-card" VARIANT "add" VARIABLES
+COMMAND "Add Docs Card" DESCRIPTION "Create a docs/cards/<name>.md card (G1 header, Code anchors section, <=2400 bytes) and wire it into the doc spine: a routing-table row in CLAUDE.md and the Cards: brace list in docs/INDEX.md — idempotently, with MARK handles for symmetric removal by remove-docs-card." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "routing" CONCEPT "docs-card" VARIANT "add" DIRECTION "add" VARIABLES
   VARIABLE 1 "CardName" TITLE "Name your card" DESCRIPTION "Card topic, PascalCase. The kebab spelling {{.card-name}} drives the filename, the routing target, the INDEX entry and the canonical-for slug ({{.card-name}}-overview) — the slug must be unique repo-wide or docs-anchors-check.sh gate 5 reds. Pick a fresh name: an existing card's name makes every op below a guarded no-op." EXAMPLES "Wavecheck", "RenderPath", "AgentOnramps"
-  VARIABLE 2 "Group" TITLE "Routing group" DESCRIPTION "The Group column of the CLAUDE.md routing table. Opaque literal, no casing transform." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
-  VARIABLE 3 "TaskPattern" TITLE "Task pattern" DESCRIPTION "The 'Task pattern' cell of the routing row — the phrases an agent matches to get routed to this card. Opaque literal, no casing transform." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
+  VARIABLE 2 "Group" OPAQUE TITLE "Routing group" DESCRIPTION "The Group column of the CLAUDE.md routing table. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
+  VARIABLE 3 "TaskPattern" OPAQUE TITLE "Task pattern" DESCRIPTION "The 'Task pattern' cell of the routing row — the phrases an agent matches to get routed to this card. OPAQUE: never re-cased, one spelling per file." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
 
 # --------------------------------------------------------------------------
 # 1. The card file.
@@ -90,10 +90,12 @@ ASLONG FILE DONT CONTAIN "MARK:claude-route-{{.card-name}}"
 # would put the token flush against the closing brace — '{{.card-name}}}',
 # a '}}}' run, the exact A5 adjacency violation — so the element goes one
 # slot earlier, commas on both sides. No comment syntax survives inside a
-# brace expansion, so no in-file mark can be planted here: the payload
-# literal ',{{.card-name}},tui' IS the handle (unique, payload-derived,
-# brace-free per A5) and re-run idempotency rests ENTIRELY on the guard
-# (A4 — the structural target does not survive its own replacement).
+# brace expansion, so no plantable mark exists here — this is the corpus's
+# MARK VIRTUAL case (D24): the mark is a nominal handle with ZERO in-file
+# bytes, and idempotency must rest ENTIRELY on the required ASLONG guard —
+# the payload literal ',{{.card-name}},tui' (unique, payload-derived,
+# brace-free per A5; the structural target does not survive its own
+# replacement, A4).
 # --------------------------------------------------------------------------
 IN "docs/INDEX.md"
 ### Sweep the Cards: brace list with {{.card-name}}
@@ -105,7 +107,7 @@ WITH
 ::: cards list tail swept :::
 search-media,{{.card-name}},tui}.md
 ::: cards list tail swept :::
-MARK "index-cards-{{.card-name}}"
+MARK VIRTUAL "index-cards-{{.card-name}}"
 ASLONG FILE DONT CONTAIN ",{{.card-name}},tui"
 
 # ==========================================================================

@@ -1,7 +1,7 @@
-COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" VARIABLES
+COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
   VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
-  VARIABLE 2 "CountBefore" TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). Opaque numeric literal, no casing transform. Scaffy has no arithmetic, so the count crosses as a declared pair; the W2 validator lints CountAfter = CountBefore + 1." EXAMPLES "42"
-  VARIABLE 3 "CountAfter" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. Opaque numeric literal, no casing transform." EXAMPLES "43"
+  VARIABLE 2 "CountBefore" OPAQUE TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints." EXAMPLES "42"
+  VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "43"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHAT THIS COMMAND HONESTLY DOES
@@ -68,7 +68,8 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 # ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────
 
 # Topical renderer file. Implements the Renderer interface
-# (pdrender.go:168, `Render(b Block, ctx RenderCtx) []string`). Modeled on
+# (pdrender.go:168-170; the `Render(b Block, ctx RenderCtx) []string`
+# signature is :169). Modeled on
 # eyebrowRenderer (richblocks.go:389) — the minimal single-attr exemplar; see
 # gaugelist.go for a full data block. Helpers used: attrStr (attrs.go:16),
 # sanitizeText (inline.go:427 — strips control bytes so a hostile `text` can't
@@ -134,7 +135,7 @@ func Test{{.BlockName}}RendererEmptyIsSilent(t *testing.T) {
 }
 ::: {{.block-name}} test :::
 
-# Register in the DefaultRegistry block map (pdrender.go:249-361). The map is
+# Register in the DefaultRegistry block map (pdrender.go:249-389). The map is
 # OPEN — assignments are order-independent and there is no count test (a 43rd
 # type left the full suite green in the proof run). Anchor is the heading
 # registration, the map's first and structurally most stable line (unique,
@@ -294,6 +295,12 @@ ASSERT FILE "api/lib/barkpark/portable_doc/render/compose.ex" CONTAINS "MARK:ex-
 ASSERT CMD "go vet ./internal/pdrender/..."
 ASSERT CMD "CC=/usr/bin/clang go build ./internal/pdrender/"
 ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1"
+# Precondition for BOTH JS gates below (D29): in a fresh worktree the js
+# workspace has no node_modules and no built package dists — tsc reds with
+# ~103 cannot-find-module errors and vitest cannot resolve the workspace
+# deps. One install + build greens both (proven: 103 errors -> 0, exit 0
+# twice; vitest 12 files / 192 tests).
+ASSERT CMD "cd js && pnpm install && pnpm build"
 ASSERT CMD "cd js/packages/react && npx tsc --noEmit"
 ASSERT CMD "cd js/packages/react && npx vitest run"
 ASSERT CMD "cd api && mix test test/barkpark/portable_doc/render_test.exs" TIER ci

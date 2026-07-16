@@ -19,18 +19,21 @@
 # being CONSUMED, not planted. Post-conditions assume the pair ran with a
 # fresh, non-colliding card name (add-docs-card VARIABLE 1).
 
-COMMAND "Remove Docs Card" DESCRIPTION "Retract everything add-docs-card planted: un-sweep the Cards: brace list in docs/INDEX.md, remove the CLAUDE.md routing row plus its MARK comment, delete the card file — byte-clean, idempotent (a second run is a guarded no-op)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "remove" CONCEPT "docs-card" VARIANT "remove" VARIABLES
+COMMAND "Remove Docs Card" DESCRIPTION "Retract everything add-docs-card planted: un-sweep the Cards: brace list in docs/INDEX.md, remove the CLAUDE.md routing row plus its MARK comment, delete the card file — byte-clean, idempotent (a second run is a guarded no-op)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "remove" CONCEPT "docs-card" VARIANT "remove" DIRECTION "remove" VARIABLES
   VARIABLE 1 "CardName" TITLE "Card to remove" DESCRIPTION "SAME value as the add-docs-card run — the kebab spelling {{.card-name}} re-derives the filename, routing target, INDEX entry and mark names." EXAMPLES "Wavecheck", "RenderPath", "AgentOnramps"
-  VARIABLE 2 "Group" TITLE "Routing group" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. Opaque literal." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
-  VARIABLE 3 "TaskPattern" TITLE "Task pattern" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. Opaque literal." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
+  VARIABLE 2 "Group" OPAQUE TITLE "Routing group" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
+  VARIABLE 3 "TaskPattern" OPAQUE TITLE "Task pattern" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. OPAQUE: never re-cased, one spelling per file." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
 
 # --------------------------------------------------------------------------
 # 1. Un-sweep the INDEX Cards: line.
 # The byte-exact inverse of add's REPLACE: swept tail back to the original
 # tail, guarded on the same payload literal (present -> act; absent ->
 # no-op). The mark was never plantable in a brace expansion (no comment
-# syntax survives inside one), so the payload literal ',{{.card-name}},tui'
-# is the handle here, exactly as in add-docs-card.
+# syntax survives inside one), so this is MARK VIRTUAL (D24), exactly as in
+# add-docs-card: a nominal handle with zero in-file bytes — the required
+# ASLONG guard on the literal ',{{.card-name}},tui' carries the whole
+# idempotency contract. On this remove-direction op the virtual mark names
+# the handle being CONSUMED.
 # --------------------------------------------------------------------------
 IN "docs/INDEX.md"
 ### Un-sweep the Cards: brace list
@@ -42,7 +45,7 @@ WITH
 ::: cards list tail :::
 search-media,tui}.md
 ::: cards list tail :::
-MARK "index-cards-{{.card-name}}"
+MARK VIRTUAL "index-cards-{{.card-name}}"
 ASLONG FILE CONTAIN ",{{.card-name}},tui"
 
 # --------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-COMMAND "Add Oban Cron Worker" DESCRIPTION "Scaffold an Oban cron worker (worker module + test) and register its crontab tuple in the static Oban.Plugins.Cron block in config/config.exs — idempotently, on the shared :default queue." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "oban", "worker", "cron" CONCEPT "oban-worker" VARIANT "cron" VARIABLES
+COMMAND "Add Oban Cron Worker" DESCRIPTION "Scaffold an Oban cron worker (worker module + test) and register its crontab tuple in the static Oban.Plugins.Cron block in config/config.exs — idempotently, on the shared :default queue." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "oban", "worker", "cron" CONCEPT "oban-worker" VARIANT "cron" DIRECTION "add" VARIABLES
   VARIABLE 1 "WorkerName" TITLE "Name your worker" DESCRIPTION "PascalCase module suffix under Barkpark.Workers. Drives module name, file path (snake_case), test, and crontab entry." EXAMPLES "StaleTokenSweeper", "OrphanMediaReaper", "UsageRollup"
-  VARIABLE 2 "CronExpr" TITLE "Cron schedule" DESCRIPTION "Standard 5-field crontab expression — how often the worker ticks. Opaque literal, no casing transform." EXAMPLES "0 4 * * *", "*/15 * * * *", "@daily"
+  VARIABLE 2 "CronExpr" OPAQUE TITLE "Cron schedule" DESCRIPTION "Standard 5-field crontab expression — how often the worker ticks. OPAQUE: never re-cased, one spelling per file." EXAMPLES "0 4 * * *", "*/15 * * * *", "@daily"
 
 # Worker module: Barkpark.Workers.{{.WorkerName}}
 # module->file mapping is snake_case (lib/barkpark/workers/tag_distribution.ex
@@ -51,6 +51,15 @@ end
 # with no separator (Elixir syntax error). So this is a REPLACE that re-emits the
 # anchor line WITH the comma, then the mark comment, then the new tuple. Anchor is
 # the FULL tuple (unique: count 1) — bare "* * * * *" occurs 4x, bare module 2x.
+#
+# The REPLACE matches those exact fenced BYTES and swaps only them (D20) — never
+# the enclosing line or region. And because a SECOND add-oban-worker run (a
+# different worker) would find the structural target already consumed into a
+# longer line, the op carries REANCHOR (D21): when any planted MARK:oban-cron-…
+# exists in this file, the effective anchor is the LAST planted mark block of
+# that family (the mark comment line + its marked tuple line) and WITH re-emits
+# that block + comma + the new mark comment + tuple — sibling accretion appends
+# at the family's tail instead of corrupting the original anchor.
 IN "api/config/config.exs"
 ### Append {{.WorkerName}} to the static crontab after the PlaygroundReaper entry
 REPLACE
@@ -64,6 +73,7 @@ WITH
        {"{{.CronExpr}}", Barkpark.Workers.{{.WorkerName}}}
 ::: {{.worker-name}} cron :::
 MARK "oban-cron-{{.worker-name}}"
+REANCHOR "oban-cron-"
 ASLONG FILE DONT CONTAIN "# scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}"
 
 # Post-conditions
