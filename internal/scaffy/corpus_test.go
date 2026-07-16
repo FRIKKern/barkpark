@@ -175,8 +175,8 @@ func TestCorpusCensus(t *testing.T) {
 // that differ so a red test names exactly what moved.
 func censusDiff(want, got census) string {
 	rows := []struct {
-		name       string
-		want, got  int
+		name      string
+		want, got int
 	}{
 		{"CREATE", want.create, got.create},
 		{"INSERT AFTER FIRST", want.insertAfterFirst, got.insertAfterFirst},
