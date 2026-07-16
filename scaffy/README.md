@@ -19,12 +19,13 @@ The north star is a 30-second vertical slice with parity at birth:
 ```console
 $ bp add block-type --var BlockName=timeline
   ● internal/pdrender/timeline.go            created
-  ○ internal/pdrender/pdrender.go            injected  @MARK block:timeline
-  ○ api/lib/barkpark/portable_doc/render/compose.ex   injected  @MARK block:timeline
-  ○ js/packages/react/src/blocks/core.ts     injected  @MARK block:timeline
-  ○ js/packages/react/tests/PortableDoc.test.tsx      injected  @MARK block:timeline
-  ✔ go test -run TestTimeline ./internal/pdrender/     ok
-  ✔ npx vitest run PortableDoc                          42→43 passing
+  ● internal/pdrender/timeline_test.go       created
+  ○ internal/pdrender/pdrender.go            injected  MARK:go-registry-timeline
+  ○ js/packages/react/src/blocks/core.ts     injected  MARK:js-emitter-timeline +js-map
+  ○ js/packages/react/tests/PortableDoc.test.tsx      injected  MARK:js-case-timeline +js-count
+  ○ api/lib/barkpark/portable_doc/render/compose.ex   injected  MARK:ex-compose-timeline
+  ✔ go test -run TestTimelineRenderer ./internal/pdrender/   ok
+  ✔ npx vitest run                                            42→43 passing
   scaffy: timeline block scaffolded across 3 surfaces + test parity in 28s
 ```
 
@@ -77,10 +78,16 @@ never left bare. The fence is what lets a payload span lines without the parser 
 where it ends.
 
 ```scaffy
-INTO "api/config/config.exs"
-REPLACE ::: {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper} :::
-WITH    ::: {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
-        {"{{.cron}}", Barkpark.Workers.{{.WorkerName}}} :::
+IN "api/config/config.exs"
+REPLACE
+::: playground-reaper anchor :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
+::: playground-reaper anchor :::
+WITH
+::: {{.worker-name}} cron :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
+       {"{{.CronExpr}}", Barkpark.Workers.{{.WorkerName}}}
+::: {{.worker-name}} cron :::
 ```
 
 **(b) MARK on every mutating op.** Every op that mutates a file carries `MARK "NAME"`.
@@ -89,9 +96,18 @@ plants the mark; on **later** runs it anchors *at the mark*. The mark is also th
 `remove` uses. No mark ⇒ not reversible, not idempotent.
 
 ```scaffy
-INTO "internal/pdrender/pdrender.go"
-MARK "block:{{.block-name}}"
-INSERT LAST ::: r.blocks["{{.block-name}}"] = New{{.BlockName}}Renderer() :::
+IN "internal/pdrender/pdrender.go"
+### Register {{.block-name}} in the DefaultRegistry block map
+INSERT AFTER FIRST
+::: registry head anchor :::
+	r.blocks["heading"] = headingRenderer{ir: ir}
+::: registry head anchor :::
+WITH
+::: {{.block-name}} registration :::
+	// scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}
+	r.blocks["{{.block-name}}"] = {{.blockName}}Renderer{}
+::: {{.block-name}} registration :::
+MARK "go-registry-{{.block-name}}"
 ```
 
 **(c) Guards derive from the payload.** By default the idempotency guard is *the text the op
@@ -101,12 +117,13 @@ style or whitespace the op doesn't actually emit is the canonical failure: the g
 matches, so the op re-inserts on every run.
 
 ```scaffy
-# GOOD — guard is a verbatim substring of the payload
-INSERT LAST ::: r.blocks["{{.block-name}}"] = New{{.BlockName}}Renderer() :::
-# guard defaults to: r.blocks["{{.block-name}}"] = New{{.BlockName}}Renderer()
+# GOOD — the payload plants a MARK comment; that line IS the implicit guard:
+#   // scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}
+# present ⇒ the op is already applied ⇒ skip.
 
-# BAD — payload emits double quotes, guard expects single ⇒ re-inserts forever
-INSERT LAST ::: r.blocks["{{.block-name}}"] = … :::  ASLONG r.blocks['{{.block-name}}']
+# BAD — payload emits double quotes, guard expects single ⇒ never matches ⇒
+# the op re-inserts on every run (the canonical quote-mismatch failure)
+ASLONG FILE DONT CONTAIN "r.blocks['{{.block-name}}']"
 ```
 
 **(d) Every token resolves to a declared `VARIABLE`.** No free-floating tokens. Casing is a
@@ -114,25 +131,32 @@ INSERT LAST ::: r.blocks["{{.block-name}}"] = … :::  ASLONG r.blocks['{{.block
 needs (see A1).
 
 ```scaffy
-VARIABLE BlockName   # supplied as --var BlockName=timeline
-# then {{.BlockName}} → Timeline, {{.block-name}} → timeline, {{.blockName}} → timeline
+VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "…" EXAMPLES "Timeline"
+# supplied as --var BlockName=Timeline, then:
+# {{.BlockName}} → Timeline · {{.block-name}} → timeline · {{.blockName}} → timeline · {{.block_name}} → timeline
 ```
 
 **(e) Shared payloads use `SNIPPET` / `USE`, never paste-twice.** A payload that appears in
 two ops is defined once and referenced.
 
 ```scaffy
-SNIPPET clause ::: compose_block(%{"type" => "{{.block-name}}"} = b, style), do: … :::
-INTO "…/compose.ex" INSERT ::: USE clause :::
+SNIPPET starter-div
+::: starter-div :::
+<div class="bp-{{.block-name}}">
+::: starter-div :::
+# … later ops reference it:  WITH USE starter-div
 ```
+
+(No W1 command needed one — every payload appears exactly once. The rule exists so a
+payload is never pasted twice when one does.)
 
 **(f) Commands close with assertions.** Postconditions: `ASSERT FILE … CONTAINS` (and
 `DONT CONTAIN` for removes), and where a real gate exists, `ASSERT CMD` invoking it. A green
 apply then *means* the slice is wired and compiles.
 
 ```scaffy
-ASSERT FILE "internal/pdrender/pdrender.go" CONTAINS ::: r.blocks["{{.block-name}}"] :::
-ASSERT CMD ::: go test -run Test{{.BlockName}} ./internal/pdrender/ :::
+ASSERT FILE "internal/pdrender/pdrender.go" CONTAINS "MARK:go-registry-{{.block-name}}"
+ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1"
 ```
 
 **(g) Path-position and URL-position tokens of the same variable must agree on casing.**
@@ -161,8 +185,8 @@ too heavy or too unsafe to run on a dev box). See [Gate tiers](#gate-tiers) for 
 proven-safe list.
 
 ```scaffy
-ASSERT CMD ::: go test -run Test{{.BlockName}} ./internal/pdrender/ :::           # LOCAL
-ASSERT CMD ::: mix test test/barkpark/workers/{{.worker_name}}_test.exs ::: TIER ci
+ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1"
+ASSERT CMD "cd api && mix test test/barkpark/workers/{{.worker_name}}_test.exs" TIER ci
 ```
 
 **A3 — comma-list append is a fenced REPLACE of the last element.** When you append to a
@@ -174,9 +198,16 @@ keeps `FIRST`/`LAST`; the retired bare `ABOVE`/`AFTER`/`BEFORE INLINE` spellings
 ```scaffy
 # last element `{"* * * * *", PlaygroundReaper}` has no trailing comma —
 # so re-emit it WITH a comma and append, don't insert a dangling tuple
-REPLACE ::: {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper} :::
-WITH    ::: {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
-        {"{{.cron}}", Barkpark.Workers.{{.WorkerName}}} :::
+REPLACE
+::: playground-reaper anchor :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
+::: playground-reaper anchor :::
+WITH
+::: {{.worker-name}} cron :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
+       # scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}
+       {"{{.CronExpr}}", Barkpark.Workers.{{.WorkerName}}}
+::: {{.worker-name}} cron :::
 ```
 
 **A4 — REPLACE guards are load-bearing.** When a `REPLACE` target survives as a *substring of
@@ -186,9 +217,10 @@ a lint error. Anchor the ≥2nd run at the planted **MARK**, never at the now-mu
 structural target.
 
 ```scaffy
-MARK "cron:{{.worker-name}}"
 REPLACE … WITH …
-ASLONG {"{{.cron}}", Barkpark.Workers.{{.WorkerName}}}   # guard = the NEW element only
+MARK "oban-cron-{{.worker-name}}"
+# guard = text the op itself writes (the planted mark line), never the old target
+ASLONG FILE DONT CONTAIN "MARK:oban-cron-{{.worker-name}}"
 ```
 
 **A5 — guard/assert hygiene: ASCII-only, brace-free.** Guards and asserts are ASCII-only and
@@ -197,15 +229,17 @@ adjacent to a literal `}` in a guard or assert string — the `}}}` run is ambig
 tokenizer.
 
 ```scaffy
-# GOOD — guard picks a brace-free slice of the payload
-ASSERT FILE "…/compose.ex" CONTAINS ::: "type" => "{{.block-name}}" :::
-# BAD  — {{.type}} immediately followed by a literal } ⇒ }}} ambiguity
-ASSERT FILE "…" CONTAINS ::: %{"{{.type}}"} :::
+# GOOD — the docs-card INDEX sweep puts the token one slot early, commas both sides
+ASSERT FILE "docs/INDEX.md" CONTAINS ",{{.card-name}},tui"
+# BAD — token flush against the brace-expansion's closing brace ⇒ '{{.card-name}}}',
+# a }}} run the tokenizer cannot split
+ASSERT FILE "docs/INDEX.md" CONTAINS "tui,{{.card-name}}}.md"
 ```
 
 **FIRST / LAST pins (carried from D7).** Whenever a positional anchor could match twice,
-the occurrence is pinned explicitly — `INSERT FIRST` / `INSERT LAST` — so a human (and later
-the engine) applies it at exactly one unambiguous site. No implicit "first match wins."
+the occurrence is pinned explicitly — `INSERT AFTER FIRST` / `INSERT AFTER LAST` — so a
+human (and later the engine) applies it at exactly one unambiguous site. No implicit
+"first match wins."
 
 ## Gate tiers
 
@@ -242,10 +276,10 @@ designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
    Pascal / kebab / camel / snake.
 2. **Do the CREATEs (`●`).** For each `CREATE FILE`, write the file with tokens expanded. These
    are the new-file half — the part a plain generator could also do.
-3. **Do the INJECTs (`○`) in order.** For each mutating op, open the `INTO` file, find the
+3. **Do the INJECTs (`○`) in order.** For each mutating op, open the `IN` file, find the
    fenced structural anchor **at the pinned occurrence** (`FIRST`/`LAST`), and apply the
-   `INSERT` / `REPLACE`. Leave a comment carrying the `MARK "NAME"` at the site so the edit is
-   findable again (that's what a future `remove` and a re-run will key on).
+   `INSERT` / `REPLACE`. The payload plants its own `MARK:<name>` comment at the site so the
+   edit is findable again (that's what a future `remove` and a re-run will key on).
 4. **Check the guards.** Before each injection, confirm the guard text (payload-derived, A3/A4)
    isn't already present — if it is, the op is already applied; skip it. That's the
    idempotency contract you're enforcing by hand.
