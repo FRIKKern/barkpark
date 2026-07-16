@@ -8,9 +8,11 @@
 package agent
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -100,9 +102,24 @@ type CommandRunner interface {
 // ExecRunner is the production CommandRunner: it runs the argv via os/exec.
 type ExecRunner struct{}
 
-// Run executes name+args and returns combined stdout+stderr.
+// execRunnerTimeout bounds every ExecRunner.Run call. A stuck remote command
+// (approved but hung — e.g. `make rebuild` wedged on a lock) must never freeze
+// the agent forever; it is unexported so report_test.go can lower it to
+// exercise the timeout path without a real 5-minute sleep.
+var execRunnerTimeout = 5 * time.Minute
+
+// Run executes name+args under a bounded internal deadline and returns
+// combined stdout+stderr. The deadline is entirely internal to Run — the
+// CommandRunner interface and its call sites (runCommand in commands.go,
+// gitProbe.git above) are untouched, so a hung approved command surfaces as an
+// honest "timed out after ..." error instead of wedging the agent.
 func (ExecRunner) Run(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), execRunnerTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("timed out after %s: %s %s", execRunnerTimeout, name, strings.Join(args, " "))
+	}
 	return string(out), err
 }
 
