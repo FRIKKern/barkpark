@@ -94,6 +94,12 @@ on:
       # + an `on_exit` restore (preview-route pollution tripwire).
       - "api/test/**/*.exs"
       - "scripts/preview-env-isolation-check.sh"
+      # Site templates (search-template epic D12) — a standalone template tree
+      # (its own package.json, vendored CSS/theme slice + bp-graph snapshot). Its
+      # files ride none of the app-scoped globs above (web/**, api/lib/**), so a
+      # template-only CSS/theme PR would never run the design gate. This trigger
+      # opens the frontier to templates/** so those PRs at least run doc-gates.
+      - "templates/**"
   pull_request:
     paths:
       - "**/*.md"
@@ -181,6 +187,12 @@ on:
       # + an `on_exit` restore (preview-route pollution tripwire). `**/*.exs`
       # already triggers; the script path re-runs the gate on a scanner edit.
       - "scripts/preview-env-isolation-check.sh"
+      # Site templates (search-template epic D12) — a standalone template tree
+      # (its own package.json, vendored CSS/theme slice + bp-graph snapshot). Its
+      # files ride none of the app-scoped globs above (web/**, api/lib/**), so a
+      # template-only CSS/theme PR would never run the design gate. This trigger
+      # opens the frontier to templates/** so those PRs at least run doc-gates.
+      - "templates/**"
 
 concurrency:
   group: doc-gates-${{ github.ref }}

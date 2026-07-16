@@ -3059,6 +3059,25 @@
         // sim — a list hover should focus the node, not stir the layout.
         wake();
       },
+      // Re-skin to a new theme in place. The host reads the site's real theme
+      // from document.documentElement.dataset.theme — which our "auto" never
+      // sees, since it resolves via matchMedia ONLY — and pushes it here on
+      // every toggle. Reassigns the closure `theme` the paint helpers read (same
+      // resolution as construction), then repaints; no destroy/recreate, so the
+      // layout, camera, hover and filter state are all untouched.
+      setTheme: function (next) {
+        var choice = next || "auto";
+        if (choice === "auto") {
+          var pd = true;
+          try {
+            pd = !window.matchMedia("(prefers-color-scheme: light)").matches;
+          } catch (e) {}
+          theme = pd ? "dark" : "light";
+        } else {
+          theme = choice;
+        }
+        wake();
+      },
       destroy: function () {
         destroyed = true;
         if (rafId) cancelAnimationFrame(rafId);
