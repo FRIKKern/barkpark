@@ -1,0 +1,64 @@
+---
+// Wave-2 render-path-unification parity page (charter D16-D23).
+//
+// This is the SSR-to-HTML consumption proof: it drops the canonical
+// `@barkpark/react` renderer into an Astro STATIC build and, for EACH of the 42
+// frozen pd-golden fixtures (produced by W1 slice rpu-w1-golden-gen from the REAL
+// Elixir `:article` emitter), renders that block through the SAME
+// `renderPortableDocument` the parity harness proved shape-equal in W1 — here via
+// Astro `set:html` with NO client directive (D21). The block array is NOT
+// re-authored: the golden mirror is canonical and the fixtures are read verbatim.
+//
+// Each block gets its OWN `.bp-paper-surface[data-pd-type]` container so the
+// vitest suite can extract it from the built HTML and compare its outerHTML to the
+// golden via the UNCHANGED `dom-shape.ts` comparator (unwrapClass: bp-paper-surface).
+//
+// Zero hydration: no framework integration, no client directive → the built
+// `dist/**` ships ZERO JS. `renderPortableDocument` is a pure string function, so
+// React is a BUILD-TIME concern only (it never reaches the browser).
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { renderPortableDocument } from '@barkpark/react'
+// Skin asset for visual fidelity — a global CSS import Astro bundles into a
+// `dist/_astro/*.css` file (CSS, not JS; the zero-JS guard globs only *.js).
+import '@barkpark/react/paper-surface.css'
+
+interface GoldenFixture {
+  type: string
+  input: unknown
+  expectedHtml: string
+}
+
+// pnpm runs this package's `build` script with cwd = the package root
+// (packages/astro-parity), so the sibling react fixtures resolve deterministically.
+const FIXTURE_DIR = join(process.cwd(), '..', 'react', 'tests', 'fixtures', 'pd-golden')
+
+const fixtures: GoldenFixture[] = readdirSync(FIXTURE_DIR)
+  .filter((f) => f.endsWith('.golden.json'))
+  .sort()
+  .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as GoldenFixture)
+
+// Render each block to its Phoenix-faithful inner HTML. `renderPortableDocument`
+// takes the block ARRAY, so wrap the single authored block; the returned string is
+// the block markup WITHOUT the wrapper — we provide the `.bp-paper-surface`
+// container ourselves so the comparator can unwrap past it to the block.
+const rendered = fixtures.map((fx) => ({
+  type: fx.type,
+  html: renderPortableDocument([fx.input as never]),
+}))
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PortableDoc × Astro SSR parity ({rendered.length} blocks)</title>
+  </head>
+  <body>
+    <main class="bp-parity-fixtures">
+      {rendered.map((block) => (
+        <div class="bp-paper-surface" data-pd-type={block.type} set:html={block.html} />
+      ))}
+    </main>
+  </body>
+</html>

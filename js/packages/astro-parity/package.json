@@ -1,0 +1,27 @@
+{
+  "name": "@barkpark/astro-parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wave-2 render-path-unification proof: SSR the canonical @barkpark/react PortableDoc into an Astro STATIC build (set:html, zero hydration) and re-run the EXISTING DOM-shape parity harness against the 42 pd-golden fixtures. Test-only — never published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "( [ -f ../react/dist/index.mjs ] || ( pnpm --filter @barkpark/core build && pnpm --filter @barkpark/react build ) ) && astro build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@barkpark/react": "workspace:^"
+  },
+  "devDependencies": {
+    "astro": "5.18.2",
+    "happy-dom": "^20.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
