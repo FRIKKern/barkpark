@@ -19,7 +19,7 @@ seed → publish → read-token → env/deploy — `internal/cli/vercel_cmd.go`)
   "name": "place-directory",         // lowercase kebab slug — the deploy-UI key
   "title": "Place Directory",        // human title
   "description": "A map-backed …",   // one line
-  "framework": "nextjs",             // enum: nextjs
+  "framework": "nextjs",             // enum: nextjs | astro | phoenix
   "repo": "https://github.com/…",    // optional git URL of the deployable app
   "dataset": "production",           // optional, default "production"
   "demoContent": true,               // optional — ships sample content vs bare scaffold
@@ -72,12 +72,29 @@ Env keys follow the **starter convention** (`BARKPARK_API_URL`,
 `BARKPARK_PROJECT`, `BARKPARK_DATASET`) — the naming dwb-3 unifies across
 surfaces.
 
+An optional **`theme`** field (search-template W2) pins a shipped palette for
+the deploy: `evergreen | ember | fjord | charple` — surfaced at runtime as the
+`data-bp-theme` default (a visitor's own picker choice still wins).
+
 ## Retrofitted manifests
 
 - `templates/place-directory/barkpark.template.json` — JSON schema + mutations seed, publishes `place`.
 - `templates/website-starter/` + `templates/blog-starter/` — JSON schema + mutations
   seed variants of the starters, server-bootstrappable (dwb-4): the provisioner's
   embedded catalog (`internal/provisioner/catalog`) applies them post-provision.
+- `templates/search-starter/` — the FLAGSHIP (search-template W1/W2): the finder +
+  corpus graph + canonical PortableDoc pages as a standalone Next.js node-slot
+  app; seeds the reference-rich `entry` corpus so the graph is alive from the
+  first deploy. Selectable in the dashboard's create-site dialog and via
+  `bp cloud site create --template search-starter`.
+- `templates/astro-search-starter/` — the flagship, Astro edition (W3): every
+  document statically pre-rendered by the canonical PortableDoc at build, the
+  graph corpus baked to `graph.json`, live search browser-direct; deploys on
+  the static symlink-swap engine.
+
+Phoenix carries the flagship natively: the public `/finder` LiveView (pure
+LiveView per-keystroke search + the shared Canvas2D graph) and the `/papers`
+PortableDoc reader ship with every Barkpark instance — no template needed.
 - `js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json` — `.ts` schemas + script seed (CLI-scaffold only; a script seed can't run server-side).
 - `js/packages/create-barkpark-app/templates/blog-starter/barkpark.template.json` — same, plus a `webhook_secret` env.
 
