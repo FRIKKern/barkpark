@@ -17,7 +17,13 @@ config :barkpark, BarkparkWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: BarkparkWeb.ErrorHTML, json: BarkparkWeb.ErrorJSON],
+    # JSON-first: Phoenix renders the FIRST format when Accept can't be
+    # resolved, and NoRouteError fires before the :accepts plug runs — so the
+    # Go apiclient (no Accept header on ordinary calls) and the JS SDK (sends
+    # the vendor Accept registered below, which is otherwise unmapped) both
+    # need JSON to win by default. Browsers are unaffected: they always send
+    # an explicit `Accept: text/html`.
+    formats: [json: BarkparkWeb.ErrorJSON, html: BarkparkWeb.ErrorHTML],
     layout: false
   ],
   pubsub_server: Barkpark.PubSub,
@@ -34,6 +40,15 @@ config :logger, :default_formatter,
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
+
+# Register the JS SDK's vendor Accept header so it resolves to the JSON error
+# format above instead of falling through to ErrorHTML. Mapping it under the
+# "json" extension also makes :mime's reverse extension->type lookup
+# ambiguous ("extension .json currently maps to different mime-types") unless
+# we pin the canonical reverse mapping back to application/json — the vendor
+# type still resolves forward, it just isn't what .json reverse-resolves to.
+config :mime, :types, %{"application/vnd.barkpark+json" => ["json"]}
+config :mime, :extensions, %{"json" => "application/json"}
 
 # Mailer (core auth email flows — verify-email / password reset). Swoosh's
 # default API client (hackney) is unused: dev renders to the local mailbox,
