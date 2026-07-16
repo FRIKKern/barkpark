@@ -1,0 +1,47 @@
+name: console-harness
+
+# Gate for the Cloud console client (cloud/priv/static/app.js). The console
+# is the surface that renders the deploy stage rail, the freshness badge, and
+# the one-click rollback control — all pure helpers with rich edge cases
+# (min-dwell pacing, stale-vs-fresh classification, deploy-eligibility). Its
+# node:vm harness (__app.test.mjs, 415 tests) pins that logic against the
+# SHIPPED file but until now gated NOTHING: cloud.yml runs Elixir only, and
+# ci.yml's node:test is scoped to web/**. A regression to the rail/freshness/
+# rollback helpers shipped blind. This zero-dependency job closes that gap.
+#
+# NOTE: this workflow only *gates* a PR once it is registered as a required
+# check in the repo's branch-protection settings (a human GitHub step). Until
+# then it still runs and reds the PR page on failure.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloud/priv/static/**"
+      - ".github/workflows/console-harness.yml"
+  pull_request:
+    paths:
+      - "cloud/priv/static/**"
+      - ".github/workflows/console-harness.yml"
+
+concurrency:
+  group: console-harness-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  console-unit:
+    name: Console client unit harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax-check the shipped console client
+        run: node --check cloud/priv/static/app.js
+
+      - name: Run console harness
+        run: node --test cloud/priv/static/__app.test.mjs
