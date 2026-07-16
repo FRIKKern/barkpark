@@ -354,14 +354,22 @@ locally (Elixir compiles the world; a partial build can wedge a dev machine).
 | **LOCAL** | `npx vitest run` (react pkg) | the PortableDoc fixture + count assertion |
 | **LOCAL** | `bash scripts/check-doc-budgets.sh` | 0.1s byte-gate for the doc spine |
 | **LOCAL*** | `bash scripts/docs-anchors-check.sh` | **clean-checkout caveat** ↓ |
-| **TIER ci** | `mix test <file>` | Elixir compiles the world — CI only until a scoped local proof lands |
-| **TIER ci** | `mix format --check-formatted` | same |
-| **TIER ci** | *all other `mix …` gates* | same |
+| **LOCAL**** | `CC=/usr/bin/clang mix test <single file>` | **warm-build caveat** ↓ — proven 2026-07-16 |
+| **TIER ci** | `mix format --check-formatted` | Elixir compiles the world |
+| **TIER ci** | *all other `mix …` gates* (full `mix test`, `mix phx.server`) | same — full suite OOMs locally |
 
 **\* `docs-anchors-check.sh` clean-checkout caveat.** It's LOCAL-safe *only in a fresh
 worktree* — there it runs green in ~24s. In the litter-saturated primary checkout (many live
 worktrees, stray files) it hangs past 115s scanning the tree. A command that asserts it must
 say so in the command text: run it in a clean checkout, or defer to CI.
+
+**\*\* scoped `mix test` warm-build caveat (A2's open half, resolved 2026-07-16).** A
+*single-file* `CC=/usr/bin/clang mix test test/…_test.exs` is LOCAL-safe **with a warm
+`api/_build`** — proven: `plugins/media_test.exs` green in 9.0s wall,
+`plugins/cli_commands_manifest_test.exs` in 2s, no OOM. What OOMs is the FULL suite (and
+`mix phx.server` boot). In a cold fresh worktree the first run pays a full compile
+(`_build` cannot be borrowed across worktrees) — budget minutes for it or run the scoped
+test from a warm checkout.
 
 ## Hand-applying a command today
 
