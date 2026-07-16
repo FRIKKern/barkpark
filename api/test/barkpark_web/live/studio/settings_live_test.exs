@@ -744,18 +744,4 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       content: %{}
     })
   end
-
-  defp pick_plugin do
-    Barkpark.Plugins.Registry.all()
-    |> Enum.map(& &1.name)
-    |> Enum.sort()
-    |> List.first()
-  end
-
-  defp audited?(plugin, action) do
-    Repo.exists?(
-      from a in SettingsAudit,
-        where: a.plugin_name == ^plugin and a.action == ^action
-    )
-  end
 end
