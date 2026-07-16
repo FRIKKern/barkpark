@@ -7,7 +7,8 @@ import {
 } from "@/lib/papers";
 import type { PostDocument } from "@/lib/posts";
 import { PostArticle } from "@/components/post-article";
-import { PortableDoc, PaperEditorDoc } from "@/components/portable-doc";
+import { PortableDoc } from "@barkpark/react";
+import { PaperEditorDoc } from "@/components/paper-editor-doc";
 import { SheetGrid, type SheetTab } from "@/components/sheet-grid";
 import { MetaCard } from "@/components/meta-card";
 import { DetailChrome } from "@/components/detail-chrome";
@@ -42,7 +43,7 @@ function renderBody(
           {paperReadMode ? (
             <PaperEditorDoc blocks={blocks} />
           ) : (
-            <PortableDoc blocks={blocks} />
+            <PortableDoc value={blocks} />
           )}
         </article>
       );

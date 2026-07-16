@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@barkpark/core": "file:../js/packages/core",
+    "@barkpark/react": "file:../js/packages/react",
     "@barkpark/nextjs": "1.0.0-preview.3",
     "@vercel/speed-insights": "^2.0.0",
     "next": "16.2.4",
