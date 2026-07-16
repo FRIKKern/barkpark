@@ -35,21 +35,54 @@ defmodule BarkparkWeb.FinderLive do
   @impl true
   def mount(params, _session, socket) do
     dataset = sanitize_dataset(params["dataset"])
-    {nodes_json, edges_json, root, node_count} = graph_payload(dataset)
 
-    {:ok,
-     socket
-     |> assign(
-       page_title: "Search — Barkpark",
-       dataset: dataset,
-       q: "",
-       hits: [],
-       hit_count: 0,
+    # The corpus derivation walks every schema x up-to-1000 docs + edges — on a
+    # loaded box that is SECONDS, and doing it inline here made the whole page
+    # time out under a concurrent site build (live-caught). Mount renders the
+    # shell instantly; start_async derives the corpus off-mount and the hook
+    # ingests it when it lands. The static render (connected?: false) skips the
+    # derivation entirely — crawlers and the first HTML paint stay instant.
+    socket =
+      socket
+      |> assign(
+        page_title: "Search — Barkpark",
+        dataset: dataset,
+        q: "",
+        hits: [],
+        hit_count: 0,
+        node_count: 0,
+        graph_nodes: "[]",
+        graph_edges: "[]",
+        graph_root: ""
+      )
+
+    socket =
+      if connected?(socket) do
+        start_async(socket, :graph_corpus, fn -> graph_payload(dataset) end)
+      else
+        socket
+      end
+
+    {:ok, socket}
+  end
+
+  @impl true
+  def handle_async(:graph_corpus, {:ok, {nodes_json, edges_json, root, node_count}}, socket) do
+    {:noreply,
+     assign(socket,
        node_count: node_count,
        graph_nodes: nodes_json,
        graph_edges: edges_json,
        graph_root: root
      )}
+  end
+
+  def handle_async(:graph_corpus, {:exit, reason}, socket) do
+    # Honest degrade: the search box works without the graph; log and keep the
+    # empty canvas rather than crashing the view.
+    require Logger
+    Logger.warning("finder: graph corpus derivation failed: #{inspect(reason)}")
+    {:noreply, socket}
   end
 
   @impl true
@@ -78,10 +111,10 @@ defmodule BarkparkWeb.FinderLive do
         id="finder-graph"
         class="bp-finder-graph"
         phx-hook="FinderGraph"
-        phx-update="ignore"
         data-nodes={@graph_nodes}
         data-edges={@graph_edges}
         data-root={@graph_root}
+        data-rev={@node_count}
       >
       </div>
       <section class="bp-finder-panel">

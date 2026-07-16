@@ -30,13 +30,18 @@ defmodule BarkparkWeb.FinderLiveTest do
   end
 
   test "mounts anonymously with the graph hook contract", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/finder")
+    {:ok, view, html} = live(conn, "/finder")
 
     assert html =~ "Search everything."
-    # The hook div carries the renderer's full wire contract.
+    # The hook div carries the renderer's full wire contract (shell renders
+    # instantly; the corpus arrives via start_async and patches data-*).
     assert html =~ ~s(phx-hook="FinderGraph")
     assert html =~ "data-nodes="
     assert html =~ "data-edges="
+
+    # The async corpus lands and the attrs update in place.
+    html = render_async(view)
+    assert html =~ "data-rev="
   end
 
   test "a search event returns hits from the engine", %{conn: conn} do
