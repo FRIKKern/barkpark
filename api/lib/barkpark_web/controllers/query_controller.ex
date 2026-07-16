@@ -494,6 +494,11 @@ defmodule BarkparkWeb.QueryController do
     |> Enum.reject(&(&1 == ""))
   end
 
+  # Catch-all: a list param (`?expand[]=author` → Plug parses to `["author"]`) or
+  # a map param (`?expand[k]=v` → `%{"k" => "v"}`) falls back to no expansion
+  # instead of raising FunctionClauseError → 500.
+  defp parse_expand(_), do: []
+
   # `?fields=title,slug` — projection. Returns the requested content field names, or
   # nil (no projection → whole document) when the param is absent/blank.
   defp parse_fields(s) when is_binary(s) do
