@@ -5719,6 +5719,29 @@ test("W4 deployRailLedgerFromConsole: folds rail entries latest-wins, ignores no
   assert.ok(!("NOISE" in ledger));
 });
 
+test("stw5 deployRailLedgerFromConsole: first entry stamps startedAt, terminal stamps finishedAt", () => {
+  // The console carries a per-entry `at`; the fold keeps the FIRST `at` as the
+  // stage start and the done/failed `at` as its finish — the two stamps the
+  // completed-stage duration reads from (D23).
+  const ledger = hooks.deployRailLedgerFromConsole([
+    { stage: "BUILD", status: "running", detail: "npm ci", at: "2026-07-16T10:00:00Z" },
+    { stage: "BUILD", status: "done", detail: "built", at: "2026-07-16T10:00:42Z" },
+    { stage: "HEALTH", status: "running", detail: "probing", at: "2026-07-16T10:00:50Z" },
+    { stage: "HEALTH", status: "failed", detail: "probe 500", at: "2026-07-16T10:01:05Z" },
+    { stage: "SWITCH", status: "running", detail: "flipping", at: "2026-07-16T10:01:10Z" }, // no terminal
+  ]);
+  assert.equal(ledger.BUILD.startedAt, "2026-07-16T10:00:00Z");
+  assert.equal(ledger.BUILD.finishedAt, "2026-07-16T10:00:42Z");
+  assert.equal(ledger.HEALTH.startedAt, "2026-07-16T10:00:50Z");
+  assert.equal(ledger.HEALTH.finishedAt, "2026-07-16T10:01:05Z"); // failed also stamps finish
+  assert.equal(ledger.SWITCH.startedAt, "2026-07-16T10:01:10Z");
+  assert.equal(ledger.SWITCH.finishedAt, null); // in-flight → no finish stamp
+  // A stampless console (older event) folds to null stamps, never NaN.
+  const bare = hooks.deployRailLedgerFromConsole([{ stage: "PLAN", status: "done", detail: "" }]);
+  assert.equal(bare.PLAN.startedAt, null);
+  assert.equal(bare.PLAN.finishedAt, null);
+});
+
 test("W4 deployRailRows: empty ledger → all six pending", () => {
   const rows = hooks.deployRailRows({});
   assert.equal(rows.length, 6);
@@ -5734,6 +5757,31 @@ test("W4 deployRailRows: a mid-flight ledger folds to done/active/pending in ord
   });
   assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "active", "pending", "pending", "pending"]);
   assert.equal(rows[2].caption, "staging release");
+});
+
+test("stw5 deployRailRows: a completed stage carries its real duration; active/pending stay null", () => {
+  // Seed via the console fold so the stamps flow end-to-end, then assert the
+  // pinned elapsed math newStepsHtml renders through fmtDur (D23).
+  const ledger = hooks.deployRailLedgerFromConsole([
+    { stage: "PLAN", status: "running", detail: "", at: "2026-07-16T10:00:00Z" },
+    { stage: "PLAN", status: "done", detail: "", at: "2026-07-16T10:00:03Z" },   // 3s
+    { stage: "BUILD", status: "running", detail: "npm ci", at: "2026-07-16T10:00:03Z" },
+    { stage: "BUILD", status: "done", detail: "", at: "2026-07-16T10:00:45Z" },   // 42s
+    { stage: "STAGE", status: "failed", detail: "cp failed", at: "2026-07-16T10:00:50Z" }, // start=end → 0
+    { stage: "HEALTH", status: "running", detail: "probing", at: "2026-07-16T10:00:55Z" }, // active
+  ]);
+  const rows = hooks.deployRailRows(ledger);
+  assert.equal(rows[0].elapsedMs, 3000);  // PLAN done: 3s
+  assert.equal(rows[1].elapsedMs, 42000); // BUILD done: 42s
+  assert.equal(rows[2].elapsedMs, 0);     // STAGE failed, only a terminal stamp → 0, never NaN
+  assert.ok(!Number.isNaN(rows[2].elapsedMs));
+  assert.equal(rows[3].elapsedMs, null);  // HEALTH active → no duration (ETA/ring is backlog)
+  assert.equal(rows[4].elapsedMs, null);  // SWITCH pending → null
+  assert.equal(rows[5].elapsedMs, null);  // RETIRE pending → null
+  // A completed stage with a missing stamp is an honest null (total-over-partial),
+  // not a guessed or NaN duration.
+  const bare = hooks.deployRailRows(hooks.deployRailLedgerFromConsole([{ stage: "PLAN", status: "done" }]));
+  assert.equal(bare[0].elapsedMs, null);
 });
 
 test("W4 deployRailRows: a FAILED stage marks the stages after it skipped, not pending-forever", () => {

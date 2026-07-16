@@ -5798,14 +5798,26 @@
   // {stage,status,detail,at}) into a stage→latest map. Non-rail lines are ignored
   // and the LAST entry per stage wins (a stage moves running→done). Seeds the rail
   // from a deployment fetched MID-flight so opening the page lands at the right
-  // stage instantly instead of replaying from PLAN.
+  // stage instantly instead of replaying from PLAN. The FIRST entry seen for a
+  // stage stamps its `startedAt`; the terminal (done/failed) entry stamps its
+  // `finishedAt` — the two `at`s the completed-stage duration reads from (D23).
+  // Mirrors buildProvisionRow's entries[0].at start rule.
   function deployRailLedgerFromConsole(arr) {
     var ledger = {};
     (arr || []).forEach(function (e) {
       if (!e || DEPLOY_RAIL_STAGES.indexOf(e.stage) === -1) return;
+      var prev = ledger[e.stage];
+      var startedAt = prev && prev.startedAt != null ? prev.startedAt
+        : (e.at != null ? e.at : null);
+      var finishedAt = prev ? prev.finishedAt : null;
+      if (e.status === "done" || e.status === "failed") {
+        finishedAt = e.at != null ? e.at : finishedAt;
+      }
       ledger[e.stage] = {
         status: e.status,
         detail: (typeof e.detail === "string" && e.detail) ? e.detail : "",
+        startedAt: startedAt,
+        finishedAt: finishedAt,
       };
     });
     return ledger;
@@ -5821,11 +5833,20 @@
     ledger = ledger || {};
     var rows = DEPLOY_RAIL_STAGES.map(function (name) {
       var e = ledger[name];
+      var role = e ? deployStageRole(e.status) : "pending";
+      // A completed stage (done/failed) carries its real duration from the two
+      // stamps the ledger folded (start → finish); newStepsHtml renders it via
+      // fmtDur. Active/pending stay null — the active-stage live ETA/ring is
+      // out of scope this wave (D23), and stepElapsed is total-over-partial so a
+      // missing stamp is an honest "—", never a guessed or NaN duration.
+      var elapsedMs = (e && (role === "ok" || role === "failed"))
+        ? stepElapsed(e.startedAt, e.finishedAt)
+        : null;
       return {
         step: name,
         label: DEPLOY_RAIL_LABELS[name] || name,
-        role: e ? deployStageRole(e.status) : "pending",
-        elapsedMs: null,
+        role: role,
+        elapsedMs: elapsedMs,
         caption: (e && e.detail) || "",
         probes: [],
       };
@@ -5931,11 +5952,25 @@
   }
 
   // Record one stage transition (from an SSE site.deploy.stage payload) into a
-  // deployment's ledger — latest-wins per stage.
+  // deployment's ledger — latest-wins per stage. The stage SSE frame carries no
+  // timestamp (server change is out of scope, D23), so a live-observed
+  // transition is CLIENT-clock stamped: start on first sight, finish when it
+  // settles — and a prior (console-seeded, server-clock) stamp is preserved so a
+  // duplicate tick never wipes an already-computed duration.
   function recordDeployStage(depId, stage, status, detail) {
     if (DEPLOY_RAIL_STAGES.indexOf(stage) === -1) return;
     var st = deployRailStateFor(depId);
-    st.ledger[stage] = { status: status, detail: (typeof detail === "string" && detail) ? detail : "" };
+    var prev = st.ledger[stage];
+    var now = Date.now();
+    var startedAt = prev && prev.startedAt != null ? prev.startedAt : now;
+    var finishedAt = prev ? prev.finishedAt : null;
+    if (status === "done" || status === "failed") finishedAt = now;
+    st.ledger[stage] = {
+      status: status,
+      detail: (typeof detail === "string" && detail) ? detail : "",
+      startedAt: startedAt,
+      finishedAt: finishedAt,
+    };
   }
 
   // Truth fold → min-dwell pacer. seedPaceLedger on FIRST sight so an
