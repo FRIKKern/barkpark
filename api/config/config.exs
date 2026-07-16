@@ -345,6 +345,22 @@ config :barkpark, Barkpark.Sites.DeployRunner,
   max_log_lines: 500,
   run_deadline_ms: 1_800_000
 
+# Site SOURCE PROVISIONER (Barkpark.Sites.Provisioner) — materializes a shipped
+# starter template into `<sites_dir>/<slug>/src` before BUILD (site-spawner
+# D33/D34, search-template D7). The template is chosen by the request's
+# `template` slug (falling back to the runtime_target default), and EACH shipped
+# starter has its OWN overridable source-dir key so a test/box can point any one
+# at a stand-in: `:template_dir` (astro-starter), `:node_template_dir`
+# (next-starter), `:search_template_dir` (search-starter). All nil here ⇒ the
+# module's cwd-relative `templates/<slug>` defaults; runtime.exs maps the
+# BARKPARK_*_TEMPLATE_DIR env vars over them, and BARKPARK_SITES_DIR over
+# `:sites_dir`.
+config :barkpark, Barkpark.Sites.Provisioner,
+  sites_dir: nil,
+  template_dir: nil,
+  node_template_dir: nil,
+  search_template_dir: nil
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). This is the
 # compile-time DEV/TEST default — a deterministic, non-secret 32-byte key.
 # Production OVERRIDES it from BARKPARK_KEK in runtime.exs (which raises if the

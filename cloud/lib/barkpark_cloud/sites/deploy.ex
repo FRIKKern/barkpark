@@ -313,12 +313,34 @@ defmodule BarkparkCloud.Sites.Deploy do
       }
     }
     |> maybe_put_target_port(site)
+    |> maybe_put_template(site)
   end
 
   # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
   # from `kind` — node sites boot a process, everything else swaps a symlink.
   defp runtime_target(%Site{kind: "node"}), do: "node"
   defp runtime_target(_site), do: "static"
+
+  # search-template charter D7: WHICH shipped starter tree the box provisions for
+  # this site — the third deploy axis, forwarded on the payload so the box's
+  # Provisioner selects it (DeployRequest validates it as a closed, path-indexing
+  # slug — never an open string). Derived from `framework`: astro→astro-starter,
+  # nextjs→next-starter. A framework with no shipped starter yet (nuxt/sveltekit/
+  # hugo/static) carries NO template — the box then falls back to the
+  # runtime_target default, byte-identical to the pre-template payload. The
+  # Site.template column + dashboard picker that would let a site pick
+  # search-starter directly is deferred to W2 (charter D8); this wave carries the
+  # axis end-to-end on the wire.
+  defp maybe_put_template(payload, %Site{framework: framework}) do
+    case site_template(framework) do
+      nil -> payload
+      template -> Map.put(payload, :template, template)
+    end
+  end
+
+  defp site_template("astro"), do: "astro-starter"
+  defp site_template("nextjs"), do: "next-starter"
+  defp site_template(_framework), do: nil
 
   # For a node deploy, carry down the IDLE slot's PORT — the port the box builds+
   # boots the new Node process on, health-gates, THEN flips the Caddy upstream to

@@ -10,17 +10,21 @@ defmodule Barkpark.Sites.Provisioner do
   template onto the box, so `deploy/site-deploy.sh` walked PLAN and then died at
   BUILD with `no site source dir /opt/barkpark/sites/<slug>/src` (exit 10).
 
-  ## Which template (charter D63/D71)
+  ## Which template (charter D63/D71, search-template D7)
 
-  The template is selected by the request's `runtime_target` — the second axis
-  of the deploy engine:
+  The template is a KEYED LOOKUP over `@templates`, selected by the request's
+  `template` slug — the third axis of the deploy engine:
 
-    * `:static` (default) → `templates/astro-starter` — the Astro symlink-swap
-      site the box has always built;
-    * `:node` → `templates/next-starter` — the Next.js node-slot SSR site.
+    * `:astro_starter` → `templates/astro-starter` — the Astro symlink-swap site;
+    * `:next_starter` → `templates/next-starter` — the Next.js node-slot SSR site;
+    * `:search_starter` → `templates/search-starter` — the flagship search app
+      (finder + graph + map, node-slot SSR).
 
-  Everything BELOW the selection (partial-rename atomicity, the `.bp-provisioned`
-  marker, self-heal, fail-closed) is framework-agnostic and identical for both.
+  A request WITHOUT a `template` derives its default from `runtime_target`
+  (static→astro, node→next — see `resolve_template/2`), so every pre-template
+  caller lands EXACTLY where it did before. Everything BELOW the selection
+  (partial-rename atomicity, the `.bp-provisioned` marker, self-heal,
+  fail-closed) is framework-agnostic and identical for all templates.
 
   `provision/1` runs INLINE at the top of `DeployRunner.start_run/2`, for a
   `deploy` only (a `rollback` is a pure symlink/slot repoint — the source is
@@ -63,12 +67,22 @@ defmodule Barkpark.Sites.Provisioner do
 
   # Same default as site-deploy.sh's `${BARKPARK_SITES_DIR:-/opt/barkpark/sites}`.
   @default_sites_dir "/opt/barkpark/sites"
-  # Default template paths, relative to the repo root, keyed by runtime_target.
-  # The BEAM's cwd is api/ under both `mix phx.server` and start.sh, so its
-  # parent is the repo root — the same assumption DeployRunner.run_cd/0 makes
-  # for `bash deploy/…`.
-  @default_static_template_subpath "templates/astro-starter"
-  @default_node_template_subpath "templates/next-starter"
+
+  # The template registry (search-template charter D7): each shipped starter maps
+  # to its Application-env override KEY and its default repo-relative SUBPATH. The
+  # `template` axis on the request selects a row directly; a request without one
+  # derives its default from runtime_target (resolve_template/2). Adding a starter
+  # is one row here + one clause in DeployRequest.validate_template/1 + its env
+  # override in runtime.exs. The default subpaths are relative to the repo root:
+  # the BEAM's cwd is api/ under both `mix phx.server` and start.sh, so its parent
+  # is the repo root — the same assumption DeployRunner.run_cd/0 makes for
+  # `bash deploy/…`.
+  @templates %{
+    astro_starter: {:template_dir, "templates/astro-starter"},
+    next_starter: {:node_template_dir, "templates/next-starter"},
+    search_starter: {:search_template_dir, "templates/search-starter"}
+  }
+
   # Written INSIDE src after the rename — its presence is the idempotency guard.
   @marker ".bp-provisioned"
 
@@ -87,13 +101,18 @@ defmodule Barkpark.Sites.Provisioner do
   @spec provision(DeployRequest.t()) :: :ok | {:error, {:provision_failed, term()}}
   def provision(%DeployRequest{mode: :rollback}), do: :ok
 
-  def provision(%DeployRequest{mode: :deploy, slug: slug, runtime_target: runtime_target}) do
+  def provision(%DeployRequest{
+        mode: :deploy,
+        slug: slug,
+        runtime_target: runtime_target,
+        template: template
+      }) do
     src = src_dir(slug)
 
     if provisioned?(src) do
       :ok
     else
-      materialize(src, template_dir(runtime_target))
+      materialize(src, template_dir(resolve_template(template, runtime_target)))
     end
   rescue
     # A bang File op (cp_r!/mkdir_p!/rm_rf! on unwritable/absent paths) raises —
@@ -147,18 +166,23 @@ defmodule Barkpark.Sites.Provisioner do
 
   defp sites_dir, do: Keyword.get(config(), :sites_dir) || @default_sites_dir
 
-  # Template selection by runtime_target (charter D63/D71). Each target has its
-  # own overridable config key so a test can point either at a tmp stand-in; the
-  # legacy `:template_dir` key remains the STATIC override (backward-compatible).
-  defp template_dir(:node),
-    do:
-      Keyword.get(config(), :node_template_dir) ||
-        default_template_dir(@default_node_template_subpath)
+  # The effective template (search-template charter D7): an explicit request
+  # `template` wins; a nil one falls back to the runtime_target default
+  # (static→astro, node→next), so a caller that never sets `template` behaves
+  # EXACTLY as before this axis existed.
+  defp resolve_template(nil, :node), do: :next_starter
+  defp resolve_template(nil, _static), do: :astro_starter
+  defp resolve_template(template, _runtime_target), do: template
 
-  defp template_dir(_static),
-    do:
-      Keyword.get(config(), :template_dir) ||
-        default_template_dir(@default_static_template_subpath)
+  # Keyed lookup over @templates (charter D63/D71/D7). Each starter has its own
+  # overridable config key (falling back to its repo subpath) so a test/box can
+  # point any one at a stand-in. `fetch!` on an unknown slug raises — but
+  # DeployRequest's closed enum + resolve_template/2 mean only known atoms reach
+  # here, and a stray one is caught by provision/1's rescue (fail-closed).
+  defp template_dir(template) do
+    {config_key, subpath} = Map.fetch!(@templates, template)
+    Keyword.get(config(), config_key) || default_template_dir(subpath)
+  end
 
   defp default_template_dir(subpath),
     do: Path.join(Path.dirname(File.cwd!()), subpath)

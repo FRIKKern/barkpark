@@ -741,6 +741,37 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       end
     end
 
+    test "template defaults to nil and accepts the closed enum (search-template D7)" do
+      # Absent ⇒ nil (the Provisioner derives the template from runtime_target,
+      # so every pre-template caller is unaffected).
+      assert {:ok, %DeployRequest{template: nil}} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b1"})
+
+      assert {:ok, %DeployRequest{template: :astro_starter}} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "template" => "astro-starter"})
+
+      assert {:ok, %DeployRequest{template: :next_starter}} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "template" => "next-starter"})
+
+      assert {:ok, %DeployRequest{template: :search_starter}} =
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "template" => "search-starter"
+               })
+    end
+
+    test "rejects an unknown template (it indexes a filesystem path — never String.to_atom)" do
+      # An open string here would index `templates/<value>` — a path-traversal /
+      # arbitrary-source seam — so a garbage value is a 400, never an atom.
+      for bad <- ["../etc", "search_starter", "Search-Starter", "", "wp-starter", "a/b"] do
+        assert {:error, "invalid_template", message} =
+                 DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "template" => bad})
+
+        assert message =~ "search-starter"
+      end
+    end
+
     test "rejects an unknown env var rather than silently dropping it" do
       assert {:error, "invalid_env", message} =
                DeployRequest.new(%{
