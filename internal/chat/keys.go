@@ -81,6 +81,26 @@ func (m Model) openPickerRow() (tea.Model, tea.Cmd) {
 // (PATCHing the draft), and the scroll keys drive the manual viewport. Every
 // other printable key edits the composer.
 func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The workflow strip's focus zone (wave session-card charter D14). A strip
+	// that vanished (the run settled on a turn-boundary refetch) drops focus back
+	// to the composer before any key is read — no dead zone survives its panel.
+	if m.focus == focusWorkflow && !m.workflowStripVisible() {
+		m.focus = focusComposer
+		m.wfExpanded = false
+	}
+	if m.focus == focusWorkflow {
+		if nm, cmd, handled := m.handleWorkflowKey(msg); handled {
+			return nm, cmd
+		}
+		// Any key the panel does not own falls through to the composer grammar —
+		// and a TYPING key snaps focus home first, so composing always wins over
+		// panel selection (the D14 KeyRunes law).
+		switch msg.Type {
+		case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace:
+			m.focus = focusComposer
+			m.wfExpanded = false
+		}
+	}
 	switch msg.Type {
 	case tea.KeyEnter:
 		content := m.input
@@ -119,6 +139,14 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyUp:
 		return m.scrollBy(-1), nil
 	case tea.KeyDown:
+		// Arrow-down hands focus to the workflow strip — ONLY when the strip is
+		// visible AND the transcript is already following the bottom (a scrolled
+		// reader keeps the scroll semantics until they reach the bottom again;
+		// with no strip, KeyDown is pure scroll as before — charter D14).
+		if m.workflowStripVisible() && m.scroll < 0 {
+			m.focus = focusWorkflow
+			return m, nil
+		}
 		return m.scrollBy(1), nil
 	case tea.KeyPgUp:
 		return m.scrollBy(-m.bodyHeight() / 2), nil
@@ -135,6 +163,57 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// handleWorkflowKey is the workflow panel's own grammar while it holds focus
+// (wave session-card charter D14) — view-only navigation, no stop/pause:
+//
+//	collapsed strip:  enter expands the two-pane detail · ↑/esc back to composer
+//	expanded detail:  ↑/↓ select a phase · esc collapses back to the composer
+//
+// handled=false lets every unowned key (typing, ctrl+b, tab, …) fall through to
+// the composer grammar, so the panel never steals a key it has no verb for.
+func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		if !m.wfExpanded {
+			j := journeyOf(m.st.Workflow)
+			if len(j.Phases) == 0 {
+				return m, nil, true // nothing to expand — an honest no-op
+			}
+			m.wfExpanded = true
+			// land on the breathing phase (the one worth reading first), else the top
+			if j.Active >= 0 {
+				m.wfPhase = j.Active
+			} else {
+				m.wfPhase = 0
+			}
+		}
+		return m, nil, true
+	case tea.KeyEsc:
+		// Esc collapses back to the composer (charter D14) — it NEVER interrupts
+		// the turn from inside the panel (the composer owns that verb).
+		m.wfExpanded = false
+		m.focus = focusComposer
+		return m, nil, true
+	case tea.KeyUp:
+		if m.wfExpanded {
+			if m.wfPhase > 0 {
+				m.wfPhase--
+			}
+			return m, nil, true
+		}
+		m.focus = focusComposer // arrow-up returns from the strip
+		return m, nil, true
+	case tea.KeyDown:
+		if m.wfExpanded {
+			if n := len(journeyOf(m.st.Workflow).Phases); m.wfPhase < n-1 {
+				m.wfPhase++
+			}
+		}
+		return m, nil, true
+	}
+	return m, nil, false
 }
 
 // answerFocused answers the currently focused pending card with the given

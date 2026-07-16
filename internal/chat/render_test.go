@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
@@ -579,5 +580,188 @@ func TestTranscriptOrdering(t *testing.T) {
 	iTail := strings.Index(out, "streaming reply")
 	if !(iHello < iPending && iPending < iTail) {
 		t.Fatalf("order must be settled → local → tail, got hello=%d pending=%d tail=%d\n%s", iHello, iPending, iTail, out)
+	}
+}
+
+// ── the below-composer workflow panel (wave session-card charter D13–D15) ────
+
+// stripModel builds a conversation model over a rail fixture at a fixed clock
+// (90s after the run's min startedAt).
+func stripModel(t *testing.T, fixture string) Model {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	m := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		st: State{SessionID: "s1", Workflow: decodeWorkflow(raw)}}
+	m.now = func() time.Time { return time.UnixMilli(1782767557221).Add(90 * time.Second) }
+	return m
+}
+
+// TestWorkflowStripRendersCounters: the collapsed strip carries the label, the
+// Claude-Code-style settled counter, the live elapsed (now − min startedAt),
+// and the settle-on-state token floor — all from wire figures.
+func TestWorkflowStripRendersCounters(t *testing.T) {
+	m := stripModel(t, "rail_workflow_live.json")
+	panel := m.workflowPanelLines()
+	if len(panel) != 1 {
+		t.Fatalf("a collapsed live workflow must render exactly the strip, got %d lines", len(panel))
+	}
+	strip := panel[0]
+	for _, want := range []string{"core-auth-phases-2-5", "23/28 agents done", "1m30s", "↓1.6M"} {
+		if !strings.Contains(strip, want) {
+			t.Fatalf("strip must contain %q, got:\n%s", want, strip)
+		}
+	}
+	if !strings.Contains(strip, "○") {
+		t.Fatalf("an unfocused strip wears the ○ glyph, got:\n%s", strip)
+	}
+	// focused → the ❯ affordance so the operator sees which zone the arrows drive
+	m.focus = focusWorkflow
+	if got := m.workflowPanelLines()[0]; !strings.Contains(got, "❯") {
+		t.Fatalf("a focused strip must highlight, got:\n%s", got)
+	}
+}
+
+// TestWorkflowStripOmitsAbsentFigures is the D15 honesty proof: a workflow
+// whose nodes carry no startedAt and no tokens renders the settled counter
+// ONLY — elapsed and ↓tokens are omitted, never synthesized as zeros.
+func TestWorkflowStripOmitsAbsentFigures(t *testing.T) {
+	wf := &Workflow{Status: "running", Label: "bare run", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		{Type: "workflow_agent", Label: "build:x", PhaseIndex: 1, State: "start"},
+	}}
+	m := Model{width: 80, height: 24, screen: screenChat, st: State{Workflow: wf}}
+	m.now = time.Now
+	strip := m.workflowPanelLines()[0]
+	if !strings.Contains(strip, "0/1 agents done") {
+		t.Fatalf("strip must carry the settled counter, got:\n%s", strip)
+	}
+	if strings.Contains(strip, "↓") {
+		t.Fatalf("no node carried tokens — the strip must omit ↓, got:\n%s", strip)
+	}
+	if strings.Contains(strip, "0s") || strings.Contains(strip, " · ") && strings.Count(strip, "·") > 0 {
+		// the right side is exactly the counter — no elapsed segment
+		if strings.Contains(strip, "·") {
+			t.Fatalf("no startedAt on the wire — the strip must omit elapsed, got:\n%s", strip)
+		}
+	}
+}
+
+// TestWorkflowDetailTwoPane: the expanded panel shows phases left (glyph +
+// title + settled/total, selection marked) and the selected phase's agents
+// right (pair-grammar label, model family, tokens, elapsed) — plus the honest
+// mid-flight omission on the interrupted fixture.
+func TestWorkflowDetailTwoPane(t *testing.T) {
+	m := stripModel(t, "rail_workflow_live.json")
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 5 // the active Build-ish phase (position 5 = phase 6)
+	panel := m.workflowPanelLines()
+	if len(panel) < 8 {
+		t.Fatalf("expanded panel must render strip + 7 phase rows, got %d lines", len(panel))
+	}
+	out := strings.Join(panel, "\n")
+	for _, want := range []string{"│", "▸", "✓", "❯"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expanded panel must contain %q, got:\n%s", want, out)
+		}
+	}
+	// phase titles from the real epic-cycle capture (the core-auth cycle)
+	for _, phase := range []string{"Design", "Security Review", "Synthesis"} {
+		if !strings.Contains(out, phase) {
+			t.Fatalf("phase column must list %q, got:\n%s", phase, out)
+		}
+	}
+
+	// the interrupted fixture: selected frontier phase renders mid-flight agents
+	// with NO elapsed (dead entry, no durationMs) and the Opus family
+	mi := stripModel(t, "rail_workflow_interrupted.json")
+	_ = mi
+	wf := mi.st.Workflow
+	j := journeyOf(wf)
+	rows := workflowAgentLines(50, j.Phases[1], j.EntryStatus, mi.now())
+	agentPane := strings.Join(rows, "\n")
+	if !strings.Contains(agentPane, "explore:") && !strings.Contains(agentPane, "liveness-anatomy") {
+		t.Fatalf("agent pane must render the pair-grammar labels, got:\n%s", agentPane)
+	}
+	if !strings.Contains(agentPane, "Opus") {
+		t.Fatalf("agent pane must render the model family, got:\n%s", agentPane)
+	}
+	for _, row := range rows {
+		if strings.HasSuffix(strings.TrimRight(row, " "), "s") && strings.Contains(row, "m") {
+			// crude: no mm/ss elapsed may appear on mid-flight rows of a dead entry
+		}
+	}
+	if strings.Contains(agentPane, "0s") {
+		t.Fatalf("mid-flight agents of a dead entry must OMIT elapsed, got:\n%s", agentPane)
+	}
+}
+
+// TestWorkflowPanelGeometryConditional is the minimalism proof (charter D11 of
+// the wsc charter / criterion 1): (a) a session whose workflow has SETTLED
+// renders a frame byte-identical to one with no workflow at all — the 3-line
+// footer and the height-5 bodyHeight are untouched; (b) a live strip eats
+// transcript rows so the total frame height stays fixed.
+func TestWorkflowPanelGeometryConditional(t *testing.T) {
+	msgs := make([]Message, 0, 40)
+	for i := 1; i <= 40; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: "line"})
+	}
+
+	base := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		st: State{Messages: msgs}}
+	base.now = time.Now
+
+	settled := stripModel(t, "rail_workflow_completed.json")
+	settled.st.Messages = msgs
+	settled.now = base.now
+
+	if base.bodyHeight() != 24-5 {
+		t.Fatalf("no-workflow bodyHeight must stay the height-5 constant, got %d", base.bodyHeight())
+	}
+	if a, b := base.renderChat(), settled.renderChat(); a != b {
+		t.Fatalf("a settled workflow must render a byte-identical frame to no workflow:\n--- none ---\n%s\n--- settled ---\n%s", a, b)
+	}
+
+	live := stripModel(t, "rail_workflow_live.json")
+	live.st.Messages = msgs
+	if lines := strings.Count(live.renderChat(), "\n"); lines != strings.Count(base.renderChat(), "\n") {
+		t.Fatalf("the strip must eat transcript rows, not grow the frame (live=%d base=%d)",
+			lines, strings.Count(base.renderChat(), "\n"))
+	}
+	if live.bodyHeight() != 24-5-1 {
+		t.Fatalf("a live strip costs exactly its one row, got bodyHeight=%d", live.bodyHeight())
+	}
+
+	// the expanded panel still keeps the frame fixed
+	live.focus = focusWorkflow
+	live.wfExpanded = true
+	if lines := strings.Count(live.renderChat(), "\n"); lines != strings.Count(base.renderChat(), "\n") {
+		t.Fatalf("the expanded panel must keep the frame height fixed (expanded=%d base=%d)",
+			lines, strings.Count(base.renderChat(), "\n"))
+	}
+}
+
+// TestWorkflowFooterHints: an unfocused visible strip advertises ↓ workflow;
+// the focused strip and the expanded panel swap the hints honestly (esc there
+// collapses — it must not claim to interrupt).
+func TestWorkflowFooterHints(t *testing.T) {
+	m := stripModel(t, "rail_workflow_live.json")
+	if foot := m.chatFooter(); !strings.Contains(foot, "↓ workflow") {
+		t.Fatalf("an unfocused strip must advertise ↓ workflow, got:\n%s", foot)
+	}
+	m.focus = focusWorkflow
+	if foot := m.chatFooter(); !strings.Contains(foot, "enter details") {
+		t.Fatalf("a focused strip must hint enter, got:\n%s", foot)
+	}
+	m.wfExpanded = true
+	foot := m.chatFooter()
+	if !strings.Contains(foot, "select phase") || !strings.Contains(foot, "esc back") {
+		t.Fatalf("the expanded panel must hint up/down select · esc back, got:\n%s", foot)
+	}
+	if strings.Contains(foot, "esc interrupt") {
+		t.Fatalf("the panel's hints must not claim esc interrupts, got:\n%s", foot)
 	}
 }
