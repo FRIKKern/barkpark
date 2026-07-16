@@ -1,0 +1,8 @@
+{
+  "plugin_name": "scaffy",
+  "version": "0.1.0",
+  "description": "Scaffy — commands as content. Registers the `command` document type: a .scaffy scaffolding command stored verbatim as one `source` string plus queryable label-spine metadata (concept/variant/domain/direction + weighted tags). Public visibility, so a connected repo pulls its scaffolding over one tokenless connect — like Papers and Tasks. Schemas-only: the generic query endpoint serves it, no bespoke routes.",
+  "capabilities": ["schemas"],
+  "module": "Barkpark.Plugins.Scaffy",
+  "schemas": [{ "name": "command", "version": "1", "file": "schemas/command.json" }]
+}
