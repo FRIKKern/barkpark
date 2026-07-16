@@ -1,0 +1,15 @@
+---
+// The decoy page: a React island hydrated on load. `client:load` is what makes
+// Astro emit `<astro-island>` and ship the island's JS into `dist/_astro/`.
+import Counter from '../components/Counter'
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>astro-decoy — hydration SHOULD ship JS</title>
+  </head>
+  <body>
+    <Counter client:load />
+  </body>
+</html>
