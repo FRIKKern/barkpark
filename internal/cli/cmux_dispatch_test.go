@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -217,6 +218,42 @@ func TestDispatchDefaultNeverClaims(t *testing.T) {
 	}
 	if len(captured) != 0 {
 		t.Errorf("default dispatch claimed %d task(s), want 0 (pane self-claims):\n%v", len(captured), captured)
+	}
+}
+
+// TestDispatchFetchFailureEmitsJSONEnvelope pins the fetchSnapshotErr fix
+// (wbqs-go-board-fetch-error-envelope): before the fix, a failed
+// taskboard.FetchSnapshotFull hit `out.userErr(...); return exitGeneric` with
+// no machineOut() check, so `bp cmux dispatch -o json | jq` on a broken board
+// fetch got EMPTY stdout. It must now emit a parseable
+// {"ok":false,"error":{"code":...,"message":...}} envelope on stdout.
+func TestDispatchFetchFailureEmitsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runCmuxDispatch(w, globals{dryRun: true}, dispatchCtx(srv.URL), nil)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric (%d)", code, exitGeneric)
+	}
+	if se.Len() != 0 {
+		t.Errorf("json mode must not also leak the human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable (empty stdout is exactly the pre-fix bug): %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
+		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
 	}
 }
 

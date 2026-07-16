@@ -68,8 +68,7 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 
 	snap, details, err := taskboard.FetchSnapshotFull(client)
 	if err != nil {
-		out.userErr("dispatch: %v", err)
-		return exitGeneric
+		return fetchSnapshotErr(out, "dispatch", err)
 	}
 
 	now := time.Now().UTC()
