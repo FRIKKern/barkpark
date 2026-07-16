@@ -668,7 +668,10 @@ FAKENPM
   check "STAGE pulled public/ in"        [ -f "$N_SITE/releases/n1/public/robots.txt" ]
   check "Caddy armed to slot a :A"       [ "$(cf_port)" = "$T_PORT_A" ]
   check "slot a env RELEASE_DIR=n1"      grep -q "RELEASE_DIR=$N_SITE/releases/n1" "$SENV/selftest__a.env"
-  check "slot a env is 0600"             [ "$(stat -f '%Lp' "$SENV/selftest__a.env" 2>/dev/null || stat -c '%a' "$SENV/selftest__a.env")" = 600 ]
+  # GNU stat first (-c; on Linux `stat -f` SUCCEEDS with filesystem info, so a
+  # BSD-first fallback never fires and the check reads garbage on CI runners),
+  # BSD (-f '%Lp') second for macOS where -c errors.
+  check "slot a env is 0600"             [ "$(stat -c '%a' "$SENV/selftest__a.env" 2>/dev/null || stat -f '%Lp' "$SENV/selftest__a.env")" = 600 ]
   check "npm really ran"                 grep -q 'npm run build' "$SRC/.npm-calls"
 
   echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
