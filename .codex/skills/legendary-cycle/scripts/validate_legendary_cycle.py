@@ -228,10 +228,33 @@ def validate_cycle_ledger(
                 errors.append(
                     "paper Scale profile does not exactly match the live CycleFleet scale contract and capacity"
                 )
-            if live_capacity.get("failure_threshold") != live_scale.get("failure_threshold"):
-                errors.append("live CycleFleet capacity failure_threshold drifted from Scale contract")
-            if live_capacity.get("quality_rubric") != live_scale.get("quality_rubric"):
-                errors.append("live CycleFleet capacity quality_rubric drifted from Scale contract")
+            sealed = live_capacity.get("sealed")
+            if not isinstance(sealed, bool):
+                errors.append("live CycleFleet capacity sealed flag is not boolean")
+            elif phase in {"decide", "build", "review"} and not sealed:
+                errors.append(f"live CycleFleet capacity is not sealed before {phase}")
+            if sealed:
+                if live_capacity.get("failure_threshold") != live_scale.get("failure_threshold"):
+                    errors.append(
+                        "live CycleFleet capacity failure_threshold drifted from Scale contract"
+                    )
+                if live_capacity.get("quality_rubric") != live_scale.get("quality_rubric"):
+                    errors.append(
+                        "live CycleFleet capacity quality_rubric drifted from Scale contract"
+                    )
+            elif sealed is False:
+                for field in (
+                    "chosen_format",
+                    "proven_batch_capacity",
+                    "failure_rate",
+                    "failure_threshold",
+                    "golden_fixtures",
+                    "quality_rubric",
+                ):
+                    if live_capacity.get(field) is not None:
+                        errors.append(
+                            f"live CycleFleet unsealed capacity {field} is not null"
+                        )
 
     if live_fleet is None:
         errors.append("could not resolve the live CycleFleet fleet for this Paper projection")

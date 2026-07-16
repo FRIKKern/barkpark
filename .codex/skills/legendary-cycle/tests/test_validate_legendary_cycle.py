@@ -543,14 +543,86 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                     MODULE.validate(self.args(paper=paper)),
                 )
 
-    def test_live_capacity_must_retain_frozen_contract_fields(self):
-        args = self.args()
-        live = json.loads(args.cycle_json.read_text(encoding="utf-8"))
-        live["cycle_ledger"]["capacity"]["quality_rubric"] = {"drifted": True}
-        args.cycle_json = self.write("drifted-capacity.json", live)
+    def test_unsealed_strategize_accepts_null_copied_capacity_fields(self):
+        paper = copy.deepcopy(self.paper)
+        profile = next(
+            block["scale_profile"]
+            for block in paper["body"]["blocks"]
+            if "scale_profile" in block
+        )
+        profile.pop("proven_batch_capacity")
+        ledger = next(
+            block["cycle_ledger"]
+            for block in paper["body"]["blocks"]
+            if "cycle_ledger" in block
+        )
+        ledger["capacity"] = {
+            "sealed": False,
+            "chosen_format": None,
+            "proven_batch_capacity": None,
+            "failure_rate": None,
+            "failure_threshold": None,
+            "golden_fixtures": None,
+            "quality_rubric": None,
+        }
+
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, phase="strategize")))
+
+    def test_unsealed_capacity_rejects_premature_copied_contract_fields(self):
+        drift_cases = {
+            "chosen_format": "paper-v1",
+            "proven_batch_capacity": 20,
+            "failure_rate": 0.0,
+            "failure_threshold": 0.1,
+            "golden_fixtures": ["paper://fixtures/good"],
+            "quality_rubric": {"drifted": True},
+        }
+
+        for field, value in drift_cases.items():
+            with self.subTest(field=field):
+                paper = copy.deepcopy(self.paper)
+                ledger = next(
+                    block["cycle_ledger"]
+                    for block in paper["body"]["blocks"]
+                    if "cycle_ledger" in block
+                )
+                ledger["capacity"]["sealed"] = False
+                ledger["capacity"][field] = value
+
+                self.assertIn(
+                    f"live CycleFleet unsealed capacity {field} is not null",
+                    MODULE.validate(self.args(paper=paper, phase="strategize")),
+                )
+
+    def test_sealed_capacity_must_retain_frozen_contract_fields(self):
+        drift_cases = {
+            "failure_threshold": 0.1,
+            "quality_rubric": {"drifted": True},
+        }
+
+        for field, value in drift_cases.items():
+            with self.subTest(field=field):
+                args = self.args()
+                live = json.loads(args.cycle_json.read_text(encoding="utf-8"))
+                live["cycle_ledger"]["capacity"][field] = value
+                args.cycle_json = self.write(f"drifted-{field}.json", live)
+                self.assertIn(
+                    f"live CycleFleet capacity {field} drifted from Scale contract",
+                    MODULE.validate(args),
+                )
+
+    def test_decide_requires_sealed_capacity(self):
+        paper = copy.deepcopy(self.paper)
+        ledger = next(
+            block["cycle_ledger"]
+            for block in paper["body"]["blocks"]
+            if "cycle_ledger" in block
+        )
+        ledger["capacity"]["sealed"] = False
+
         self.assertIn(
-            "live CycleFleet capacity quality_rubric drifted from Scale contract",
-            MODULE.validate(args),
+            "live CycleFleet capacity is not sealed before decide",
+            MODULE.validate(self.args(paper=paper, phase="decide")),
         )
 
     def test_cycle_ledger_must_be_reader_visible(self):
