@@ -23,10 +23,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  alias Barkpark.Chat.ToolRows
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render.StatusVocab
   alias Barkpark.PortableDoc.Slots
-  alias BarkparkWeb.Studio.ChatToolRenderer
 
   @doc """
   Render a `tasks` block's snapshot as the upgraded task list: an optional
@@ -701,7 +701,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   @doc "Build a `chat-todo` block straight from a raw TodoWrite `input` map."
   @spec chat_todo_block_from_input(map() | any()) :: map()
-  def chat_todo_block_from_input(input), do: chat_todo_block(ChatToolRenderer.parse_todos(input))
+  def chat_todo_block_from_input(input), do: chat_todo_block(ToolRows.parse_todos(input))
 
   @doc """
   Build a `chat-thinking` block from a cumulative thinking-token count (charter
@@ -1091,7 +1091,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # `ChatToolRenderer` but string-keyed for JSON. `TextDiff.diff_lines/2` is the
   # ONE line engine; `ChatToolRenderer.classify/1` is the ONE shape dispatch.
   defp chat_diff_line_maps(input) do
-    case ChatToolRenderer.classify(input) do
+    case ToolRows.classify(input) do
       :edit ->
         input |> Map.get("old_string") |> chat_diff(Map.get(input, "new_string"))
 
@@ -1174,7 +1174,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
     content = Map.get(todo, "content", "")
     active_form = Map.get(todo, "active_form")
 
-    glyph = ChatToolRenderer.todo_glyph(chat_todo_status_atom(status))
+    glyph = ToolRows.todo_glyph(chat_todo_status_atom(status))
 
     active_html =
       if status == "in_progress" and is_binary(active_form) and active_form != "" do

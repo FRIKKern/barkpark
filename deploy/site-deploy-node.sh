@@ -265,7 +265,26 @@ arm_caddy_node_route() { # <port>
   # root). Set ONCE at arm time; a later port flip only rewrites reverse_proxy.
   local route_handle="handle_path"
   [ "$SITE_BASEPATH" = 1 ] && route_handle="handle"
-  local block; block="$(cat <<SITEROUTE
+  local block
+  if [ "$SITE_BASEPATH" = 1 ]; then
+    # basePath site: the app OWNS canonicalization (Next 308s `${basePath}/` ->
+    # `${basePath}`, proven live), so Caddy must NOT arm a bare->slash redir —
+    # the pair would 308 each other forever. Instead the matcher covers the bare
+    # path AND the subtree, and everything proxies through un-stripped.
+    block="$(cat <<SITEROUTE
+	# $marker — node SSR site '$SITE_SLUG' (basePath), reverse-proxied un-stripped.
+	# No bare-path redir: the baked basePath canonicalizes slash -> bare itself;
+	# a Caddy bare -> slash redir would form a 308 loop with it. (NB: heredoc
+	# comments must not carry unpaired apostrophes; bash 3.2 mis-scans them
+	# inside command substitution.)
+	@$mname path /sites/$SITE_SLUG /sites/$SITE_SLUG/*
+	handle @$mname {
+		reverse_proxy localhost:$port
+	}
+SITEROUTE
+)"
+  else
+    block="$(cat <<SITEROUTE
 	# $marker — node SSR site '$SITE_SLUG', reverse-proxied to its active slot.
 	# The bare path (no trailing slash) does NOT match the handle, so redirect it
 	# to the canonical slashed form via an EXACT 'path' matcher (never a prefix, so
@@ -277,6 +296,7 @@ arm_caddy_node_route() { # <port>
 	}
 SITEROUTE
 )"
+  fi
   local tmp; tmp="$(mktemp)"
   BP_BLOCK="$block" awk '
     BEGIN { blk = ENVIRON["BP_BLOCK"] }
@@ -345,16 +365,31 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local body code=000 i
+  local body code=000 i curl_rc=0 t_total=""
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
-  for i in $(seq 1 60); do            # 60 * 0.2s = 12s deadline (>=10s, D65)
-    code="$(curl -s -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port$path" 2>/dev/null || true)"
+  # 20 attempts, 8s ceiling each, >=20s wall minimum (D65 raised for SSR): a
+  # force-dynamic SSR page fetches content per request, and a 2s per-attempt
+  # ceiling made EVERY probe abort mid-render — curl then reports the last
+  # COMPLETED hop, so a basePath site read as an eternal 308 (proven live:
+  # search-capstone b-…-stw1d "308 within 12s" while the slot rendered 200 in
+  # ~1s when probed without the ceiling; HEALTH burned 60x2s = 131s, and the
+  # "12s deadline" comment was a lie in node mode). The overall bound stays
+  # finite: worst case 20*(8+0.5)s = 170s, and a healthy slot passes on the
+  # first sub-second attempt.
+  for i in $(seq 1 20); do
+    # -L --max-redirs 2: canonicalization is framework-owned. Next with a baked
+    # basePath 308s `${basePath}/` -> `${basePath}` (proven live: search-capstone
+    # b-…-stw1c HEALTH read 308 at /sites/<slug>/), while a plain static server
+    # 301s bare -> slashed. Follow up to 2 loopback hops and gate on the FINAL
+    # code — the marker-by-value assertion below still proves the served bytes.
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time 8 "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     [ "$code" = 200 ] && break
-    sleep 0.2
+    sleep 0.5
   done
   if [ "$code" != 200 ]; then
     rm -f "$body"; stop_slot "$slot"
-    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path within 12s — boot failed, live slot untouched"
+    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path after $i attempts (last: curl exit $curl_rc, ${t_total}s) — boot failed, live slot untouched"
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
@@ -745,8 +780,12 @@ FAKENPM
   check "basePath deploy exit 0"               [ "$rc" = 0 ]
   check "basePath HEALTH ok (probed the sub-path)" saw HEALTH ok bp1
   check "SWITCH ok"                            saw SWITCH ok bp1
-  check "armed a NON-stripping 'handle /sites/basepath/*'" \
-    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "armed the two-path basePath matcher (bare + subtree)" \
+    grep -qF '@bare_basepath path /sites/basepath /sites/basepath/*' "$CF"
+  check "armed a NON-stripping 'handle @bare_basepath'" \
+    grep -qF 'handle @bare_basepath' "$CF"
+  check "did NOT arm a bare->slash redir (would 308-loop with the app's own canonicalization)" \
+    sh -c "! grep -qF 'redir @bare_basepath' '$CF'"
   check "did NOT arm a stripping handle_path for basepath" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
@@ -767,8 +806,8 @@ FAKENPM
   rm -f "$SRC/.basepath"
   check "marker-only deploy exit 0"            [ "$rc" = 0 ]
   check "marker-only HEALTH ok (probed the sub-path)" saw HEALTH ok bpm1
-  check "marker-only kept the NON-stripping 'handle'" \
-    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "marker-only kept the NON-stripping 'handle @bare_basepath'" \
+    grep -qF 'handle @bare_basepath' "$CF"
   check "marker-only did NOT arm handle_path" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
