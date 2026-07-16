@@ -120,3 +120,99 @@ func paginatedWriteCommand(defaultLimit int) manifest.Command {
 	cmd.Writes = true
 	return cmd
 }
+
+// flagValueGuardCommand declares two string value-flags (--a and --b) so
+// splitArgs' "next token is a declared flag, not a value" guard has something
+// to trip over.
+func flagValueGuardCommand() manifest.Command {
+	return manifest.Command{
+		ID:   "widget.frob",
+		Noun: "widget",
+		Verb: "frob",
+		HTTP: manifest.HTTP{Method: http.MethodPost, PathTemplate: "/widgets"},
+		Flags: []manifest.Flag{
+			{Name: "a", Type: "string"},
+			{Name: "b", Type: "string"},
+		},
+	}
+}
+
+func TestSplitArgsRejectsFlagShapedValue(t *testing.T) {
+	cmd := flagValueGuardCommand()
+
+	tests := []struct {
+		name    string
+		tail    []string
+		wantErr bool
+		wantVal string
+	}{
+		{name: "declared long flag swallowed as value", tail: []string{"--a", "--b"}, wantErr: true},
+		{name: "dash-prefixed declared flag name swallowed as value", tail: []string{"--a", "-b"}, wantErr: true},
+		{name: "flag at end of args with no value", tail: []string{"--a"}, wantErr: true},
+		{name: "undeclared token still binds", tail: []string{"--a", "notaflag"}, wantErr: false, wantVal: "notaflag"},
+		{name: "negative number still binds", tail: []string{"--a", "-5"}, wantErr: false, wantVal: "-5"},
+		{name: "inline value bypasses the guard entirely", tail: []string{"--a=--b"}, wantErr: false, wantVal: "--b"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, flags, err := splitArgs(cmd, tc.tail)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("splitArgs(%v) = nil error, want a %q error", tc.tail, "needs a value")
+				}
+				if !strings.Contains(err.Error(), "needs a value") {
+					t.Fatalf("splitArgs(%v) error = %q, want it to mention %q", tc.tail, err.Error(), "needs a value")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("splitArgs(%v) unexpected error: %v", tc.tail, err)
+			}
+			if got := flags["a"]; len(got) != 1 || got[0] != tc.wantVal {
+				t.Fatalf("splitArgs(%v) flags[a] = %v, want [%q]", tc.tail, got, tc.wantVal)
+			}
+		})
+	}
+}
+
+func TestSplitArgsShortAliasRejectsFlagShapedValue(t *testing.T) {
+	cmd := manifest.Command{
+		ID:    "widget.frob",
+		Noun:  "widget",
+		Verb:  "frob",
+		HTTP:  manifest.HTTP{Method: http.MethodPost, PathTemplate: "/widgets"},
+		Flags: []manifest.Flag{{Name: "file", Type: "string"}, {Name: "b", Type: "string"}},
+	}
+
+	tests := []struct {
+		name    string
+		tail    []string
+		wantErr bool
+	}{
+		{name: "short alias swallows declared long flag", tail: []string{"-f", "--b"}, wantErr: true},
+		{name: "short alias at end of args", tail: []string{"-f"}, wantErr: true},
+		{name: "short alias still binds a literal", tail: []string{"-f", "payload.json"}, wantErr: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, flags, err := splitArgs(cmd, tc.tail)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("splitArgs(%v) = nil error, want a %q error", tc.tail, "needs a value")
+				}
+				if !strings.Contains(err.Error(), "needs a value") {
+					t.Fatalf("splitArgs(%v) error = %q, want it to mention %q", tc.tail, err.Error(), "needs a value")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("splitArgs(%v) unexpected error: %v", tc.tail, err)
+			}
+			if got := flags["file"]; len(got) != 1 || got[0] != tc.tail[1] {
+				t.Fatalf("splitArgs(%v) flags[file] = %v, want [%q]", tc.tail, got, tc.tail[1])
+			}
+		})
+	}
+}
