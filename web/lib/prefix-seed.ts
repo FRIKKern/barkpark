@@ -45,7 +45,7 @@ import type { FindHit } from "./find";
  * seed helpers stay zero-runtime-dep. The path is the same `/d/<type>/<slug>`
  * unified detail route. Keep these two in lockstep. */
 function readerHrefForSeed(type: string, slug: string): string {
-  return `/d/${type}/${slug}`;
+  return `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
 }
 
 /** One indexable document — minimum the finder row needs. */

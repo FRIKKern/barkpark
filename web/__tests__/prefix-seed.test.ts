@@ -16,6 +16,10 @@ import {
   MAX_PER_PREFIX,
   type SeedDoc,
 } from "../lib/prefix-seed.ts";
+// Real (non-type-only) import — find.ts is the encoding source of truth for
+// readerHref, so the seed's href is asserted against ITS output, not a
+// literal, to machine-check the lockstep the seed's comment demands.
+import { readerHref } from "../lib/find.ts";
 
 /** A fixture corpus that exercises every interesting branch:
  *
@@ -171,6 +175,28 @@ test("seedDocToFindHit produces a renderable FindHit", () => {
   assert.equal(hit.body, null);
   assert.equal(hit.date, null);
   assert.deepEqual(hit.facets, { type: "paper" });
+});
+
+test("seedDocToFindHit percent-encodes href segments (matches find.ts's readerHref)", () => {
+  // Non-ASCII/reserved chars in a live-authored slug or type must not break
+  // the finder link. seedDocToFindHit's href must stay in lockstep with
+  // find.ts's readerHref — asserted by equality, not a literal, so the two
+  // can never silently drift again.
+  const cases: Array<{ type: string; slug: string }> = [
+    { type: "post", slug: "hello world" },
+    { type: "post", slug: "a#b" },
+    { type: "post", slug: "a?b=c" },
+    { type: "post", slug: "a%b" },
+    { type: "page type", slug: "javascript-guide" },
+  ];
+  for (const { type, slug } of cases) {
+    const hit = seedDocToFindHit({ id: "1", title: "t", slug, type });
+    assert.equal(
+      hit.href,
+      readerHref(type, slug),
+      `href for type=${JSON.stringify(type)} slug=${JSON.stringify(slug)} must equal find.ts's readerHref`,
+    );
+  }
 });
 
 test("EXIT GATE: `j` and `ja` queries surface relevant candidates from fixture", () => {
