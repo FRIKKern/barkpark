@@ -2995,7 +2995,9 @@
           // live box — update truth + policy controls sit above Sites.
           (hasHost
             ? updatePanelHtml(bp) +
-              '<section><h2>Sites</h2><div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
+              '<section><h2 style="display:flex;align-items:center;justify-content:space-between">Sites ' +
+                '<button class="btn" id="site-new-btn" type="button" style="font-size:.85em">+ New site</button></h2>' +
+                '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
             : '<div id="instance-sites"></div>') +
         "</div>" +
         '<aside class="detail-rail">' +
@@ -3700,6 +3702,10 @@
   function staleGuard(reqId, currentId) { return reqId !== currentId; }
 
   function loadInstanceSites(bp) {
+    // The "+ New site" header button renders with the section (idempotent
+    // wiring: onclick assignment survives repeated loads without stacking).
+    var nb = $("#site-new-btn");
+    if (nb) nb.onclick = function () { openCreateSiteModal(bp); };
     var reqId = ++instanceSitesReq;
     api("GET", "/v1/sites").then(function (r) {
       // A newer instance switch won the race — discard this late response
@@ -3755,6 +3761,119 @@
     return url
       ? '<a class="site-open" href="' + esc(url) + '" target="_blank" rel="noopener" title="Open the live site">Visit&nbsp;&#8599;</a>'
       : "";
+  }
+
+  // ── Create-site flow (search-template W2, charter D8) ─────────────────────
+  //
+  // The dashboard twin of `bp cloud site create`: a modal on the instance
+  // Overview posts /v1/sites with the same body the CLI sends. The three pure
+  // helpers below are node-pinned via __bpTestHook.
+
+  // Pure: the runtime kind a framework deploys as (mirrors the engine default —
+  // astro is the static symlink-swap flagship, nextjs rides the node slot).
+  function siteKindFor(framework) {
+    return framework === "astro" ? "static" : "node";
+  }
+
+  // Pure: the shipped starters offerable for a framework ("" = the engine's
+  // framework-derived default). search-starter is FEATURED for nextjs — the
+  // flagship search site (finder + corpus graph + PortableDoc pages).
+  function siteTemplateOptions(framework) {
+    if (framework === "astro") return ["", "astro-starter"];
+    if (framework === "nextjs") return ["", "search-starter", "next-starter"];
+    return [""];
+  }
+
+  // Pure: the POST /v1/sites body from the form fields. Empty optionals are
+  // OMITTED (the server owns every default); template "" = framework-derived.
+  function siteCreateBody(f) {
+    var body = {
+      name: f.name,
+      framework: f.framework,
+      kind: siteKindFor(f.framework),
+      workspace: f.workspace,
+      project: f.project,
+      dataset: f.dataset,
+      barkpark_id: f.barkpark_id
+    };
+    if (f.template) body.template = f.template;
+    if (f.doc_type) body.doc_type = f.doc_type;
+    return body;
+  }
+
+  function siteTemplateLabel(t) {
+    if (t === "") return "Auto (framework default)";
+    if (t === "search-starter") return "\u2605 Search Starter \u2014 flagship: live search + corpus graph + PortableDoc";
+    if (t === "next-starter") return "Next Starter \u2014 minimal SSR page";
+    if (t === "astro-starter") return "Astro Starter \u2014 minimal static page";
+    return t;
+  }
+
+  function siteTemplateSelectHtml(framework) {
+    return siteTemplateOptions(framework).map(function (t) {
+      return '<option value="' + esc(t) + '"' + (t === "search-starter" ? " selected" : "") + ">" +
+        esc(siteTemplateLabel(t)) + "</option>";
+    }).join("");
+  }
+
+  function openCreateSiteModal(bp) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">New site on ' + esc(bp.name || bp.slug || "this instance") + "</h2>" +
+      '<p class="modal-sub">Spawned next to Phoenix on the box, built from a shipped starter through the six-stage engine (health-gated, instant rollback).</p>' +
+      '<div class="field"><label class="label" for="site-nc-name">Name</label>' +
+        '<input class="form-input" id="site-nc-name" type="text" autocomplete="off" spellcheck="false" placeholder="my-search" /></div>' +
+      '<div class="field"><label class="label" for="site-nc-framework">Framework</label>' +
+        '<select class="form-input" id="site-nc-framework">' +
+          '<option value="nextjs" selected>Next.js (SSR, node slot)</option>' +
+          '<option value="astro">Astro (static, symlink swap)</option>' +
+        "</select></div>" +
+      '<div class="field"><label class="label" for="site-nc-template">Starter</label>' +
+        '<select class="form-input" id="site-nc-template">' + siteTemplateSelectHtml("nextjs") + "</select></div>" +
+      '<div class="field"><label class="label" for="site-nc-dataset">Content (workspace/project/dataset)</label>' +
+        '<input class="form-input" id="site-nc-dataset" type="text" autocomplete="off" spellcheck="false" placeholder="default/default/production" /></div>' +
+      '<div class="field"><label class="label" for="site-nc-doctype">Content type <span class="dim">(optional)</span></label>' +
+        '<input class="form-input" id="site-nc-doctype" type="text" autocomplete="off" spellcheck="false" placeholder="entry" /></div>' +
+      '<div class="cred-remediation" id="site-nc-err" role="alert" hidden></div>' +
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="site-nc-submit" type="button">Create site</button></div>'
+    );
+    var fw = $("#site-nc-framework");
+    if (fw) fw.addEventListener("change", function () {
+      var sel = $("#site-nc-template");
+      if (sel) sel.innerHTML = siteTemplateSelectHtml(fw.value);
+    });
+    var submit = $("#site-nc-submit");
+    if (submit) submit.addEventListener("click", function () {
+      var errBox = $("#site-nc-err");
+      var name = ($("#site-nc-name").value || "").trim();
+      var triple = (($("#site-nc-dataset").value || "").trim() || "").split("/");
+      if (!name || triple.length !== 3 || triple.some(function (p) { return !p; })) {
+        errBox.textContent = "A name and a workspace/project/dataset triple are required.";
+        errBox.hidden = false;
+        return;
+      }
+      var body = siteCreateBody({
+        name: name,
+        framework: fw ? fw.value : "nextjs",
+        template: ($("#site-nc-template") || {}).value || "",
+        workspace: triple[0], project: triple[1], dataset: triple[2],
+        doc_type: ($("#site-nc-doctype").value || "").trim(),
+        barkpark_id: bp.id
+      });
+      submit.disabled = true;
+      api("POST", "/v1/sites", body).then(function (r) {
+        submit.disabled = false;
+        if (r.ok) {
+          closeModal();
+          toast("Site created \u2014 first deploy makes it live");
+          loadInstanceSites(bp);
+        } else {
+          var msg = (r.data && (r.data.error || r.data.message)) || ("create failed (" + r.status + ")");
+          var known = r.data && r.data.known_templates;
+          errBox.textContent = String(msg) + (known ? " \u2014 templates: " + known.join(", ") : "");
+          errBox.hidden = false;
+        }
+      });
+    });
   }
 
   function siteRow(s, bp) {
@@ -10982,6 +11101,9 @@
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
     globalThis.__bpTestHook({
       esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
+      // search-template W2 (D8): create-site modal pure helpers.
+      siteKindFor: siteKindFor, siteTemplateOptions: siteTemplateOptions,
+      siteCreateBody: siteCreateBody,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,
