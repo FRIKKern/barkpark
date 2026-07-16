@@ -1,0 +1,5 @@
+---
+'@barkpark/react': minor
+---
+
+Add a framework-free `@barkpark/react/client` subpath exporting `hydratePortableDoc(root)` — the consuming-app media hook for PortableDoc's two static mount points. `PortableDoc` emits `diagram` blocks as `<pre class="mermaid">` and `asciicast` blocks as `<div class="bp-asciicast" data-cast-src="…">`, byte-exact to the Phoenix emitter; rendering the SVG / mounting the terminal player is the consumer's job (exactly as `bulldocs.html.heex`, not `compose.ex`, owns hydration in Phoenix). `hydratePortableDoc` scans a subtree, lazily `import()`s `mermaid` + `asciinema-player` (both `external`, so a media-free page bundles neither), and is idempotent (`data-processed` / `data-asciicast-done` guards) — drop it in a Next `useEffect`, an Astro island `<script>`, or after any DOM update. The subpath is client-only (no `react-server` condition); the RSC-safe `server.mjs` chunk is byte-identical and unaffected. Proven end-to-end in a real headless-chromium browser by the new test-only `@barkpark/media-parity` package (mermaid → live SVG, asciicast → attached `.ap-player`).

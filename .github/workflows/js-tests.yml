@@ -74,6 +74,24 @@ jobs:
             --output ../web/lib/barkpark.types.ts
           git -C .. diff --exit-code -- web/lib/barkpark.types.ts
 
+      # The @barkpark/media-parity W4 proof runs its vitest suite in BROWSER mode
+      # (headless Playwright chromium) — the only runtime where mermaid emits a
+      # real SVG and asciinema-player mounts. `pnpm test` (turbo) runs that
+      # package's default `test` script, so chromium MUST be installed BEFORE the
+      # test step or the browser proof errors out. Without this the media
+      # hydration vertical never gates. Cache keyed on the lockfile so a browser
+      # is fetched only when a dependency (hence a pinned Playwright) changes.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Test
         run: pnpm test
 

@@ -17,5 +17,12 @@
     "path": "dist/server.mjs",
     "limit": "17 KB",
     "gzip": true
+  },
+  {
+    "name": "Media hydration client (dist/client.mjs — mermaid + asciinema, both external + dynamic)",
+    "path": "dist/client.mjs",
+    "limit": "2 KB",
+    "gzip": true,
+    "ignore": ["mermaid", "asciinema-player"]
   }
 ]
