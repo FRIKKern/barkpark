@@ -1177,6 +1177,9 @@ func TestBuildBodyDocCreateStdinAndUnusedPipe(t *testing.T) {
 		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
 		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
 		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		// doc.create's real manifest declares the file flag — the unused-pipe
+		// guard only recommends `--file -` for commands that declare it.
+		Flags: []manifest.Flag{{Name: "file", Type: "file"}},
 	}
 
 	withPipe := func(input string, fn func()) {
@@ -1237,6 +1240,150 @@ func TestBuildBodyDocCreateStdinAndUnusedPipe(t *testing.T) {
 		}
 		if want := `{"jsonrpc":"2.0","method":"tools/call"}`; string(remaining) != want {
 			t.Fatalf("headless dispatch consumed protocol stdin: got %q, want %q", remaining, want)
+		}
+	})
+}
+
+// TestBuildBodyEmptyPipeStdin is the W18-5 regression for the empty-pipe
+// false-trip (task-e6bf5dfd3db4caa8): CI `run:` steps, cron, and Makefile
+// pipelines hand bp a pipe carrying NO data (`: | bp schema apply --file f`),
+// and the unused-stdin guard — whose whole purpose is to stop DATA being
+// silently swallowed — must not hard-error when there is no data. A NON-empty
+// unused pipe still trips (TestBuildBodyDocCreateStdinAndUnusedPipe above
+// stays the unchanged lock for that). The one unacceptable failure mode is a
+// BLOCKING read on an open-but-empty pipe with a live writer — every case
+// below runs under a watchdog so a regression to a blocking probe fails fast
+// instead of hanging the suite.
+func TestBuildBodyEmptyPipeStdin(t *testing.T) {
+	swapStdin := func(t *testing.T, f *os.File) {
+		t.Helper()
+		original := os.Stdin
+		os.Stdin = f
+		t.Cleanup(func() { os.Stdin = original })
+	}
+
+	// buildBody must return promptly whether or not the guard fires: the
+	// stdin probe has to be a non-blocking readiness/size check, never a read.
+	runBuildBody := func(t *testing.T, cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, err error) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			body, _, _, err = buildBody(cmd, flags, args)
+		}()
+		select {
+		case <-done:
+			return body, err
+		case <-time.After(5 * time.Second):
+			t.Fatal("buildBody blocked on an empty stdin pipe (the probe must be non-blocking, never a read)")
+			return nil, nil
+		}
+	}
+
+	docCreate := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{
+			{Name: "file", Type: "file"},
+			{Name: "set", Type: "string", Repeatable: true},
+		},
+	}
+	schemaApply := manifest.Command{
+		ID: "schema.apply", Noun: "schema", Verb: "apply", Writes: true,
+		HTTP:  manifest.HTTP{Method: "POST", PathTemplate: "/v1/schemas/apply"},
+		Flags: []manifest.Flag{{Name: "file", Type: "file"}},
+	}
+
+	t.Run("closed empty pipe without --file proceeds", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		body, err := runBuildBody(t, docCreate, map[string][]string{}, map[string]string{"type": "paper"})
+		if err != nil {
+			t.Fatalf("empty pipe must not trip the unused-stdin guard: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("request body = %s, want %s", body, want)
+		}
+	})
+
+	t.Run("closed empty pipe with --file <path> proceeds", func(t *testing.T) {
+		// The live repro this pins: `: | bp schema apply --file f --dry-run`
+		// exited 2 on origin/main while `< /dev/null` exited 0 — the same
+		// invocation must now build the same body either way.
+		path := filepath.Join(t.TempDir(), "schema.json")
+		if err := os.WriteFile(path, []byte(`{"name":"post"}`), 0o644); err != nil {
+			t.Fatalf("write schema fixture: %v", err)
+		}
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		body, err := runBuildBody(t, schemaApply, map[string][]string{"file": {path}}, nil)
+		if err != nil {
+			t.Fatalf("empty pipe + --file <path> must not trip the unused-stdin guard: %v", err)
+		}
+		if want := `{"name":"post"}`; string(body) != want {
+			t.Fatalf("request body = %s, want %s", body, want)
+		}
+	})
+
+	t.Run("open empty pipe with live writer never blocks", func(t *testing.T) {
+		// A writer that holds the pipe open but has written nothing yet:
+		// missing the unused-stdin warning here is acceptable; blocking is
+		// not (runBuildBody's watchdog is the real assertion).
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
+		swapStdin(t, r)
+
+		if _, err := runBuildBody(t, docCreate, map[string][]string{}, map[string]string{"type": "paper"}); err != nil {
+			t.Fatalf("open-but-empty pipe must not error: %v", err)
+		}
+	})
+
+	t.Run("non-empty pipe on a command without --file trips honestly", func(t *testing.T) {
+		// doc.patch's manifest declares flags [set] only — the guard must
+		// still trip on real unused data, but must NOT recommend --file,
+		// which this command's parser rightly rejects.
+		docPatch := manifest.Command{
+			ID: "doc.patch", Noun: "doc", Verb: "patch", Writes: true, MutationOp: "patch", SetKey: "set",
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+			Args: []manifest.Arg{
+				{Name: "type", Required: true, Type: "string"},
+				{Name: "id", Required: true, Type: "string"},
+			},
+			Flags: []manifest.Flag{{Name: "set", Type: "string", Repeatable: true}},
+		}
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		if _, err := io.WriteString(w, `{"title":"ignored"}`); err != nil {
+			t.Fatalf("write stdin pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		_, err = runBuildBody(t, docPatch, map[string][]string{"set": {"title=x"}}, map[string]string{"type": "paper", "id": "p1"})
+		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") {
+			t.Fatalf("non-empty unused pipe must still trip the guard, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "--file -") {
+			t.Fatalf("guard must not recommend --file for doc patch (manifest declares no file flag): %v", err)
 		}
 	})
 }
