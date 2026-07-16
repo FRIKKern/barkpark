@@ -36,7 +36,22 @@ interface GraphController {
   /** Focus the node whose `doc_id` matches (same hop-cascade as a real hover);
    * `null` clears it. Drives the list→graph half of the hover bridge. */
   setHovered: (docId: string | null) => void;
+  /** Re-skin the live canvas to a new theme without destroy/recreate. `"auto"`
+   * defers to the renderer's own matchMedia resolution; `"dark"`/`"light"` force
+   * it. The host pushes the site's real `document.documentElement.dataset.theme`
+   * here on every toggle (the renderer's `"auto"` never reads the DOM). */
+  setTheme: (theme: "dark" | "light" | "auto") => void;
   destroy: () => void;
+}
+
+/** The site's theme lives on `document.documentElement.dataset.theme` (flipped
+ * by theme-toggle.tsx). Read it as the renderer's theme source — its own `"auto"`
+ * resolves via matchMedia ONLY and never sees the DOM, so a user who toggled
+ * against OS preference would otherwise get a mismatched graph. Missing/unknown
+ * value ⇒ `"auto"`, letting the renderer fall back to matchMedia. */
+function domTheme(): "dark" | "light" | "auto" {
+  const t = document.documentElement.dataset.theme;
+  return t === "dark" || t === "light" ? t : "auto";
 }
 
 type GraphRendererFactory = (
@@ -136,7 +151,7 @@ export function GraphView({
         host,
         { nodes, edges },
         {
-          theme: "dark",
+          theme: domTheme(),
           fullColor: false,
           rootId,
           externalSearch: true,
@@ -220,6 +235,19 @@ export function GraphView({
   useEffect(() => {
     ctlRef.current?.setHovered(hoveredId);
   }, [hoveredId]);
+
+  // THEME (site → graph) — theme-toggle.tsx flips
+  // `document.documentElement.dataset.theme` and broadcasts `bp:themechange`.
+  // The renderer's own `"auto"` resolves via matchMedia only and never reads the
+  // DOM, so we push the DOM's truth into the live controller on every toggle for
+  // an in-place re-skin (no destroy/recreate — layout, camera and filter survive).
+  // init() already reads the current theme via domTheme(), so no mount-time sync
+  // is needed here; a toggle before init is a no-op the next construction covers.
+  useEffect(() => {
+    const onThemeChange = () => ctlRef.current?.setTheme(domTheme());
+    window.addEventListener("bp:themechange", onThemeChange);
+    return () => window.removeEventListener("bp:themechange", onThemeChange);
+  }, []);
 
   return (
     <>
