@@ -60,6 +60,11 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Do NOT hand-edit a mirror — re-run this task. The Elixir freshness + mirror-identity
   lock lives in `test/barkpark/portable_doc/render/pd_golden_parity_test.exs`.
   """
+
+  # LazyHTML is a :test-only dep (mix.exs) — the runtime guard at run/1 already
+  # errors cleanly outside the test env. Silence the prod-compile undefined-module
+  # warning so the warnings-as-errors Prod compile gate stays green.
+  @compile {:no_warn_undefined, LazyHTML}
   @shortdoc "Regenerate the cross-surface PortableDoc render-parity golden (two mirrors)"
 
   use Mix.Task
