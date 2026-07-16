@@ -217,6 +217,16 @@ defmodule BarkparkWeb.ChatController do
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
       case ensure_and_send(id, session, content, conn) do
         :ok ->
+          # Persist the user's OWN turn (D140). ensure_and_send has already derived
+          # `resume?` from the pre-turn `session.message_count` and dispatched, so
+          # appending here — AFTER derivation — cannot false-flip turn 1 into a
+          # resume. Unlike the Studio LiveView composer (which persists its own
+          # `role:"user"` rows), the API path had ZERO append call sites, leaving
+          # every channel/bridge session's replay history assistant-only; a real
+          # Barkpark Chat session needs the human side too. Fail-soft: the turn is
+          # already on its way, so a persist miss must not turn a live send into an
+          # error — log and still 202 (the SSE seq-replay simply misses this row).
+          persist_user_turn(id, content)
           conn |> put_status(:accepted) |> json(%{accepted: true})
 
         {:error, reason} ->
@@ -561,6 +571,26 @@ defmodule BarkparkWeb.ChatController do
            }),
          {:ok, session_pid} <- Recorder.session_pid(recorder) do
       Runtime.send_turn(session.provider, session_pid, content)
+    end
+  end
+
+  # Append the caller's turn as an organic `role:"user"` row so the Session's
+  # replayable history carries the human side (the LiveView composer persists its
+  # own rows; the API path did not). `origin: "api"` distinguishes it from a
+  # composer-authored row. Best-effort — the caller already got its turn
+  # dispatched, so a persist error is logged, never surfaced.
+  defp persist_user_turn(id, content) do
+    case StudioChat.append_message(id, %{
+           role: "user",
+           source_markdown: content,
+           metadata: %{"origin" => "api"}
+         }) do
+      {:ok, _message} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("chat transport: failed to persist user turn: #{inspect(reason)}")
+        :ok
     end
   end
 
