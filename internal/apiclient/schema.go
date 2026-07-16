@@ -3,6 +3,7 @@ package apiclient
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -120,7 +121,8 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch schemas: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("fetch schemas: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	var result struct {
@@ -251,7 +253,8 @@ func (c *Client) LoadStructure() (*DeskNode, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("structure endpoint: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("structure endpoint: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	var out struct {
