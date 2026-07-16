@@ -12,6 +12,11 @@ on:
       - "api/**"
       - "internal/**"
       - "deploy/**"
+      # Shipped starter templates: the box builds sites FROM these trees, so a
+      # templates-only merge (e.g. a search-starter fix) must roll the box too —
+      # without this, sites keep building from a stale template until an
+      # unrelated merge deploys (found during the search-template W1 live proof).
+      - "templates/**"
       # The Connectors bridge (a persistent Node service on the content
       # instance, behind Caddy's /connectors path route). Without this, merging
       # bridge code would deploy NOTHING.
