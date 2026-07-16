@@ -6,6 +6,92 @@ import (
 	"testing"
 )
 
+// seedServersConfig writes the same two-server config every snapshot case in
+// this file exercises: an active cloud server "prod" and an inactive local
+// server "localdev".
+func seedServersConfig(t *testing.T) {
+	t.Helper()
+	withTempConfigHome(t)
+	cfg := &Config{
+		Server: "https://api.example.com",
+		KnownServers: []ServerEntry{
+			{Name: "prod", Server: "https://api.example.com", Tier: "starter"},
+			{Name: "localdev", Server: "http://localhost:4000"},
+		},
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+}
+
+// runServersSnapshot runs fn against a freshly-seeded config with -o output
+// and returns stdout. Used by the byte-identical snapshot tests below.
+func runServersSnapshot(t *testing.T, output string, fn func(w *writer) int) string {
+	t.Helper()
+	seedServersConfig(t)
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = output
+	fn(w)
+	return stdout.String()
+}
+
+// TestServersEmitStructuredByteIdentical pins the -o json / -o yaml output of
+// every `bp use`/`bp servers` code path that used to inline its own
+// json/yaml switch (servers_cmd.go:84-92, 125-133, 163-171, 211-219) to the
+// bytes captured BEFORE those switches were replaced with the shared
+// (*writer).emitStructured helper (output.go:282). The refactor must be
+// byte-identical — any drift here means emitStructured stopped matching the
+// old inline switch, not that the golden bytes are wrong.
+func TestServersEmitStructuredByteIdentical(t *testing.T) {
+	cases := []struct {
+		name string
+		fn   func(w *writer) int
+		json string
+		yaml string
+	}{
+		{
+			name: "runUse known name",
+			fn:   func(w *writer) int { return runUse(w, []string{"prod"}) },
+			json: "{\n  \"active\": {\n    \"dataset\": \"\",\n    \"kind\": \"cloud\",\n    \"name\": \"prod\",\n    \"project\": \"\",\n    \"server\": \"https://api.example.com\",\n    \"workspace\": \"\"\n  },\n  \"ok\": true\n}\n",
+			yaml: "active:\n  dataset: \"\"\n  kind: cloud\n  name: prod\n  project: \"\"\n  server: \"https://api.example.com\"\n  workspace: \"\"\nok: true\n",
+		},
+		{
+			name: "runUse no arg (status)",
+			fn:   func(w *writer) int { return runUse(w, nil) },
+			json: "{\n  \"active\": {\n    \"dataset\": \"\",\n    \"kind\": \"cloud\",\n    \"name\": \"prod\",\n    \"project\": \"\",\n    \"server\": \"https://api.example.com\",\n    \"workspace\": \"\"\n  },\n  \"known\": [\n    \"prod\",\n    \"localdev\"\n  ],\n  \"ok\": true\n}\n",
+			yaml: "active:\n  dataset: \"\"\n  kind: cloud\n  name: prod\n  project: \"\"\n  server: \"https://api.example.com\"\n  workspace: \"\"\nknown:\n  - prod\n  - localdev\nok: true\n",
+		},
+		{
+			name: "runUse unknown name",
+			fn:   func(w *writer) int { return runUse(w, []string{"nope"}) },
+			json: "{\n  \"error\": {\n    \"code\": \"not_found\",\n    \"known\": [\n      \"prod\",\n      \"localdev\"\n    ],\n    \"message\": \"no known server matches nope\"\n  },\n  \"ok\": false\n}\n",
+			yaml: "error:\n  code: not_found\n  known:\n    - prod\n    - localdev\n  message: no known server matches nope\nok: false\n",
+		},
+		{
+			name: "runServers",
+			fn:   func(w *writer) int { return runServers(w, nil) },
+			json: "{\n  \"active\": \"prod\",\n  \"servers\": [\n    {\n      \"active\": true,\n      \"aliases\": [],\n      \"instance_id\": \"\",\n      \"kind\": \"cloud\",\n      \"last_connected\": \"\",\n      \"name\": \"prod\",\n      \"server\": \"https://api.example.com\",\n      \"tier\": \"starter\"\n    },\n    {\n      \"active\": false,\n      \"aliases\": [],\n      \"instance_id\": \"\",\n      \"kind\": \"local\",\n      \"last_connected\": \"\",\n      \"name\": \"localdev\",\n      \"server\": \"http://localhost:4000\",\n      \"tier\": \"\"\n    }\n  ]\n}\n",
+			yaml: "active: prod\nservers:\n  -\n    active: true\n    aliases: []\n    instance_id: \"\"\n    kind: cloud\n    last_connected: \"\"\n    name: prod\n    server: \"https://api.example.com\"\n    tier: starter\n  -\n    active: false\n    aliases: []\n    instance_id: \"\"\n    kind: local\n    last_connected: \"\"\n    name: localdev\n    server: \"http://localhost:4000\"\n    tier: \"\"\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/json", func(t *testing.T) {
+			got := runServersSnapshot(t, "json", tc.fn)
+			if got != tc.json {
+				t.Errorf("-o json output drifted from the pre-refactor snapshot.\ngot:  %q\nwant: %q", got, tc.json)
+			}
+		})
+		t.Run(tc.name+"/yaml", func(t *testing.T) {
+			got := runServersSnapshot(t, "yaml", tc.fn)
+			if got != tc.yaml {
+				t.Errorf("-o yaml output drifted from the pre-refactor snapshot.\ngot:  %q\nwant: %q", got, tc.yaml)
+			}
+		})
+	}
+}
+
 // bp servers used to print rows with the column labels living only in a source
 // comment — the only headerless table in the CLI. The human table must now lead
 // with a NAME/KIND/SERVER header and a dashed separator, both BEFORE the entries.
