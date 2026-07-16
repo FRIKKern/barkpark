@@ -339,6 +339,32 @@ var shortFlagAliases = map[string]string{
 	"-f": "file",
 }
 
+// flagShaped reports whether tok names a flag DECLARED on this command — long
+// form (--name, --name=val) or a dash-prefixed form (-name, or a registered
+// short alias like -f) whose resolved name is in byName. It exists solely to
+// stop a value-flag from silently swallowing the next flag as its value
+// (`--foo --bar` binding --foo="--bar"): a dash-prefixed token that does NOT
+// resolve to a declared flag (a negative number, an arbitrary literal) is left
+// alone and still binds as the value.
+func flagShaped(tok string, byName map[string]manifest.Flag) bool {
+	if tok == "-" || !strings.HasPrefix(tok, "-") {
+		return false
+	}
+	if long, aliased := shortFlagAliases[tok]; aliased {
+		_, ok := byName[long]
+		return ok
+	}
+	name := strings.TrimLeft(tok, "-")
+	if name == "" {
+		return false
+	}
+	if eq := strings.IndexByte(name, '='); eq >= 0 {
+		name = name[:eq]
+	}
+	_, ok := byName[name]
+	return ok
+}
+
 // splitArgs separates positional args from command-local flags in tail.
 // Command flags are looked up in cmd.Flags; an unknown -flag is an error so a
 // typo doesn't get silently swallowed as a positional. Long flags use
@@ -380,6 +406,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 					if i+1 >= len(tail) {
 						return nil, nil, fmt.Errorf("flag --%s needs a value", name)
 					}
+					if flagShaped(tail[i+1], byName) {
+						return nil, nil, fmt.Errorf("flag --%s needs a value", name)
+					}
 					val = tail[i+1]
 					i++
 				}
@@ -406,6 +435,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 				continue
 			}
 			if i+1 >= len(tail) {
+				return nil, nil, fmt.Errorf("flag %s needs a value", a)
+			}
+			if flagShaped(tail[i+1], byName) {
 				return nil, nil, fmt.Errorf("flag %s needs a value", a)
 			}
 			flags[long] = append(flags[long], tail[i+1])
