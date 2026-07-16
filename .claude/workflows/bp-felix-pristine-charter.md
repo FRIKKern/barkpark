@@ -837,7 +837,151 @@ Felix doctrine violation). A 6-assignment RUN-verify fleet collapsed all three t
   `api/lib/barkpark/tenancy/**` or the W6 search read-path. The W7-fenced `tenancy_delete_workspace_test.exs`
   is proven NOT the leaker (zero `DeployRunner`/`node_command` refs) and stays off-limits regardless.
 
+## Wave 12 Decisions (2026-07-16) — EMPTY THE NAMED-FAILURE BACKLOG, HONESTLY
+
+Wave Paper: **`felix-pristine-wave-12-2026-07-16`** (guerrilla, style=article). Wave 11 LANDED: the
+deploy_runner anchor (`0b303bc59`, #3435) is MERGED on origin/main — main is green on that flake.
+Epic `task-96a908af98698118` = 46 children. Wave 12 is a SHIP-THE-BACKLOG wave: convert the remaining
+ripe named-failure children into merged, protective-test-backed fixes, and — with the same rigor —
+RETIRE the ones that collapse under verification (a watch-item with no reproducible red-before is
+vacuous green, not a slice). 13 survey scouts + a 6-assignment RUN-verify fleet (proofs with pasted
+`sobelow`/`mix test` output) collapsed the tentative 3-slice set to **2 build slices** and OVERTURNED
+the wish's central CSP mental model. Builders branch from ORIGIN/main (local checkout diverged with
+unrelated authoring/omx charter commits — NEVER build from it).
+
+- **D68 — Wave 12 = SHIP-THE-BACKLOG + RETIRE-THE-VACUOUS, exactly 2 build slices.** Why: the RUN-verify
+  fleet (the epic's recurring "~2 premises overturned per wave" pattern held) collapsed the tentative
+  {CSP, pulse, accounts-toctou} set — pulse trended verify-only (no reproducible red-before). No fresh
+  audit: v6 read the last un-assigned corner (config/runtime.exs, 848 lines) and found it honestly
+  clean. The 12 domains + Part XI stay closed.
+- **D69 — CSP slice (`task-0fc9d55c4725ab92`): BUILD, but the direction's downstream-plug model is
+  REFUTED — reshaped to inline-CSP-map-into-`put_secure_browser_headers`.** Why: v1 PROVED with live
+  probes that Sobelow's `Config.CSP` check (`deps/sobelow/.../csp.ex:55-96`) is a purely syntactic
+  per-pipeline AST check — it credits ONLY a CSP map passed inside the `:put_secure_browser_headers`
+  plug call, NEVER a downstream plug (Way-A: adding a downstream `PaperReaderCsp` to a pipeline left its
+  finding flagged; the already-CSP'd `shared_paper_browser` is flagged every run). So the direction's
+  "mirror the PaperReaderCsp downstream plug" mental model is FALSE and the `.sobelow-skips` entries
+  CANNOT be cleared by a downstream plug. Way-B: an inline map DID clear the finding — but `include_csp?`
+  checks KEY PRESENCE only, never the value, so a permissive `'unsafe-inline'` or bare `default-src 'self'`
+  map clears all 5 findings **vacuous-green** → REJECTED. The slice ships REAL per-surface `script-src`
+  that blocks inline script (`refute policy =~ "'unsafe-inline'"` is the load-bearing test lock).
+  Load-bearing justification = qualifier #2 (kills the 3×-paid rebaseline toil — `Finding.fingerprint`
+  hashes the LINE NUMBER, so any router.ex line-shift re-fingerprints every Config.* finding; 5 git
+  rebaseline-only commits efc02d635/d5db09e57/aefba0809/ada18782e/3d7e0ebe2) + qualifier #3
+  (defense-in-depth on operator surfaces). The "named security failure" axis is WEAKER — no concrete
+  un-backstopped XSS sink found; Studio/admin are operator-authenticated — so toil-removal is the spine.
+- **D70 — CSP blast radius: ONE coherent slice (not split), nonce-thread root.html.heex.** Why: the 4
+  root-layout browser pipelines (browser / scoped_browser / shared_studio_browser / shared_paper_browser)
+  all share ONE `root.html.heex` via `put_root_layout {BarkparkWeb.Layouts, :root}` — a tightened
+  `script-src` there is felt on ALL FOUR (public root, full Studio, doc-shared Studio, paper-shared
+  reader). `root.html.heex` has 4 un-nonced inline `<script>` blocks (theme-boot, `BP_PAPER_EDITOR_NO_INJECT`,
+  self-update poll, the liveSocket boot ~:5160) that a nonce-less `script-src` would DEAD-CLICK (broken
+  liveSocket boot = studio-nav-bug class) — thread a per-request nonce onto each. Keep `cdn.jsdelivr.net`
+  in `script-src` (mermaid); leave `style-src` UNtightened (inline `@font-face` + `style=` attrs; PaperReaderCsp
+  omits style-src for this reason). `shared_paper_browser` uses an inline `# sobelow_skip ["Config.CSP"]`
+  (PaperReaderCsp already overwrites its header downstream → a pipeline map there is a cosmetic double-set).
+  Splitting into a second router.ex-touching slice was rejected — both would edit router.ex → self-collision.
+- **D71 — SAML SLO is IN-SCOPE and cheap; the "esaml form rewrite" blocker is REFUTED (v4).** Why: esaml
+  4.6.0 (`mix.lock:25`) emits a plain `<script>` block (`addEventListener('DOMContentLoaded',…)`, NOT an
+  inline `onload=` attribute — the router.ex:104-106 comment is STALE; read the vendored source
+  `esaml_binding.erl`, not the comment) and ALREADY supports a `script-src` nonce via `encode_http_post/4`.
+  `saml.ex:189` calls the no-nonce arity-3 variant. Fix = switch `saml.ex:189` to `/4` with a per-request
+  nonce + `saml_controller.ex` `slo/2` sets a matching `script-src 'nonce-…'` header on that response
+  (the `:sso_browser` pipeline bypasses `root.html.heex`; SLO nonce plumbing is by-hand in the controller).
+  No PR#3514 collision (v4: chat-tui W3 touches neither router.ex nor root.html.heex).
+- **D72 — pulse (`task-felix-pulse-ratelimit-scope-isolation`): VERIFY-ONLY, CLOSED keep-serial.** Why:
+  v2 RAN the pulse suite (34 tests, 0 failures). The `{:pulse,ip,channel}`/`{:pulse_read,ip,channel}` keys
+  (pulse_controller.ex:113/134, the ONLY producers) do bypass the per-test `rate_limit_scope` (which lives
+  only in the RateLimit plug, rate_limit.ex:88-91) — but it is DORMANT: all 3 pulse test files are
+  `async:false` and engineer DISJOINT client IPs per test (documented at pulse_abuse_drill_test.exs:192-195).
+  There is NO reproducible red-before without manufacturing churn (flip a pulse test to `async:true` +
+  force a same-IP collision) → under charter line "a flake fix with no reproduction is vacuous-green and
+  rejected" it fails all four qualifiers. Closed via the criterion's own documented-accepted (keep-serial)
+  branch. The direction's ship-slice #2 was correctly collapsed by the survey.
+- **D73 — accounts-toctou (`task-5f4c0d03c05cd10e`): BUILD (thin but honest).** Why: v3 PROVED the harden
+  and RAN it green — raise `accounts_test.exs:250` `Task.await/1` to `Task.await(&1, :infinity)` (ExUnit's
+  own 60s per-test timeout is the real backstop; no timeout override exists), then flip line 3 to
+  `async: true`. Proof: 3 solo seeds (459749/973762/74610) 33 tests 0 failures each, AND the full
+  `test/barkpark/` suite under real `max_cases=20` contention = 7410 tests 0 failures. Diff is exactly
+  2 lines, TEST-ONLY — the prod CAS (`consume_recovery_code`, accounts.ex:703, atomic `array_remove` UPDATE
+  gated by `hash=ANY(...)`) is UNTOUCHED. Value is completing the honest `async:true` label, NOT a speedup
+  (D28 net-neutral; 1 of 80 already-async files). Do NOT write "55/55 full-dir async" — 30 async:false
+  files remain in `test/barkpark`; this completes a prior scoped campaign's set only. DEDUP: the
+  byte-identical draft twin `drafts.task-b50cd380be7f0dd5` was DISCARDED; the slice is filed against
+  `task-5f4c0d03c05cd10e`.
+- **D74 — Honest-ledger reconcile (NO build; done this wave).** Why: (a) 3 done children had a
+  merged-but-unstamped MERGE-GATE criterion — restamped via `/v1/data/mutate` (`bp task stamp` rejects a
+  done task, 409): `task-felix-phantom-media-atomicity` [3]→met (#2955/38c68c81f), `task-felix-roothtml-durable-sobelow-skip`
+  [3]→met (#2956/1be597c4d), `task-felix-interop-resource-bound-sweep` [5]→met (#2954/841fc2845), each PR
+  an ancestor of origin/main. (b) `task-a9adc82f820db065` crit[1]'s "HONEST MISS: never produced" evidence
+  was factually STALE — the N=2000 wall-time+byte measurement ALREADY SHIPPED (commit 3d66c0ddc,
+  `chat_transcript_window_test.exs:98-146`); v5 RAN it twice (full 4584-10354us/~1.91MB vs capped
+  2156-3578us/478007B, ~4× byte / 2-3× wall-time). Corrected + stamped met:true. (c) `task-4bc654f703da9d4a`
+  (the measurement task) closed verify-only done. This is ledger-only reconciliation — the chat-fenced
+  test file was NOT edited.
+- **D75 — Fresh-eyes last corner honestly clean (v6); backlog on the ledger.** Why: config/runtime.exs
+  (848 lines) — zero `String.to_atom` on env (BARKPARK_UPSTREAM_CHANNEL is a match-based whitelist,
+  :731), every required env raises a loud documented prod error, the 3 Oban workers added since D55
+  (findability_posttest, playground_reaper, tag_distribution) sit at/above the D55 idempotency bar. The
+  ONE sub-doctrine-bar inconsistency (~8 `String.to_integer(env)` sites raise a generic ArgumentError vs
+  the graceful `Integer.parse`+`IO.warn`+default of BARKPARK_TASK_LEASE_TTL) is a LOUD boot crash on an
+  operator-supplied malformed env — not attacker-reachable, no incident, no measured cost — filed as a
+  watch-item (`task-felix-runtime-env-integer-graceful-parse`), NOT built (idiom uniformity the doctrine
+  rejects). `task-felix-suite-seed-determinism` (no protective test possible — reproducibility already
+  ships in ExUnit `--seed`) and `task-felix-sobelow-gate-blocking-eval` (flip precondition is baseline
+  file:line entries → 0, sequenced AFTER the CSP slice) STAY honest backlog. Tier-3 watch-items
+  (sweep-worker-unique, pusher-timeout, auth-genserver-async — the last DROPPED as churn by D63) confirmed
+  vacuous-green, NO promotion.
+- **D76 — Guardrails (unchanged from D58/D66): all builders opus (Fable exhausted), branch from
+  ORIGIN/main, main checkout stays on main, isolated worktrees, `CC=/usr/bin/clang`, borrow-warm `_build`
+  (copy `_build/test`, symlink `deps`).** HARD FENCES: strictly OFF chat_* / studio_chat / chat_live
+  (chat-tui cycle), settings_live / structure (studio-structure-polish), content authoring-wall / paper-tags
+  (verify-only sealed area), and the W7-fenced `tenancy_delete_workspace_test.exs` `:media_cdn`. `.ex` PRs
+  WAIT for the Elixir Test gate (local flakes QueueTest `ready/1` + sandbox-ownership are NOT ours; gate
+  locally). The 2 slices are file-disjoint (CSP: router.ex + root.html.heex + saml.ex + saml_controller.ex
+  + a new CSP plug/helper + a new test; accounts: `accounts_test.exs` ONLY) → dispatch in parallel.
+
+### Wave 12 roadmap (2 opus slices, parallel — disjoint files)
+
+1. **[P1, large] Sobelow tailored per-surface CSP + SAML SLO nonce** — `task-0fc9d55c4725ab92` — opus.
+   Files: `api/lib/barkpark_web/router.ex` (5 browser pipelines' `put_secure_browser_headers`),
+   `api/lib/barkpark_web/layouts/root.html.heex` (nonce-thread 4 inline scripts),
+   `api/lib/barkpark/sso/saml.ex` (:189 `/3`→`/4`), `api/lib/barkpark_web/controllers/saml_controller.ex`
+   (SLO nonce header), a new CSP plug/helper + new plug/integration test, `api/.sobelow-skips` (remove the
+   router.ex Config.CSP entries). Gate: `cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low` exits 0
+   with the router.ex Config.CSP baseline entries gone, AND the new CSP test green
+   (`refute policy =~ "'unsafe-inline'"`, cdn.jsdelivr.net retained, per-surface nonce present, SLO
+   auto-submits).
+2. **[P3, small] accounts_test TOCTOU harden → async:true** — `task-5f4c0d03c05cd10e` — opus.
+   Files: `api/test/barkpark/accounts_test.exs` ONLY (raise Task.await to :infinity, flip line 3
+   async:true; prod accounts.ex UNTOUCHED). Gate: `cd api && CC=/usr/bin/clang mix test
+   test/barkpark/accounts_test.exs` twice with different `--seed`, 0 failures each.
+
+Backlog on the ledger after this wave: `task-felix-runtime-env-integer-graceful-parse` (NEW watch-item),
+`task-felix-suite-seed-determinism` + `task-felix-sobelow-gate-blocking-eval` (verify-only, honest
+backlog), `task-felix-sweep-worker-unique-guard` + `task-felix-pusher-explicit-timeout` +
+`task-felix-auth-genserver-async-fetch` (Tier-3 vacuous-green watch-items). Closed this wave without a
+build: pulse keep-serial, N=2000 measurement, + 4 ledger restamps.
+
 ## Wave log
+
+- **Wave 12 — 2026-07-16 — DECIDED (building).** Ratified D68–D76. TWO opus build slices under
+  `task-96a908af98698118`, both linked to `felix-pristine-wave-12-2026-07-16`, file-disjoint (parallel):
+  (1) Sobelow tailored per-surface CSP + SAML SLO nonce (`task-0fc9d55c4725ab92`, P1) — the direction's
+  downstream-plug model REFUTED by v1 (Sobelow credits only an inline CSP map on `put_secure_browser_headers`,
+  and any CSP key vacuous-green), reshaped to inline-map + nonce-threaded root.html.heex + SLO
+  `encode_http_post/4` nonce (v4: no esaml form rewrite; no PR#3514 collision); load-bearing justification is
+  killing the 3×-paid router.ex rebaseline toil, not a demonstrated XSS. (2) accounts_test TOCTOU harden →
+  async:true (`task-5f4c0d03c05cd10e`, P3) — v3 PROVED the 2-line test-only fix green (3 seeds + 7410-test
+  suite), prod CAS untouched; draft twin `drafts.task-b50cd380be7f0dd5` DISCARDED. The pulse slice
+  (`task-felix-pulse-ratelimit-scope-isolation`) was COLLAPSED to verify-only by v2 (dormant scope-bypass,
+  no reproducible red-before → vacuous green) and CLOSED keep-serial. Honest-ledger reconcile (no build):
+  restamped 3 merged-but-unstamped merge-gate criteria (#2955/#2956/#2954) + corrected `task-a9adc82f820db065`
+  crit[1]'s stale "never produced" evidence (N=2000 measurement already shipped on main, 3d66c0ddc) +
+  closed `task-4bc654f703da9d4a` verify-only. v6 read the last un-assigned corner (config/runtime.exs) —
+  honestly clean; the sole sub-doctrine-bar `String.to_integer` nit filed as a watch-item
+  (`task-felix-runtime-env-integer-graceful-parse`). Fable exhausted — both builders opus. Grade: pending
+  build+review.
 
 - **Wave 11 — 2026-07-16 — DECIDED (building).** Ratified D59–D67. ONE opus ship slice under
   `task-96a908af98698118`, linked to `felix-pristine-wave-2026-07-16`: the anchor — hermetic fix of
