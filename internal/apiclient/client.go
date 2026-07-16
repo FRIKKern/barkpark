@@ -227,6 +227,16 @@ func (c *Client) scopedURL(suffix string) string {
 	return ScopedURL(c.baseURL, c.Workspace, c.Project, suffix)
 }
 
+// flatURL builds a NOT-scoped endpoint (no /w/<ws>/p/<proj> prefix) of the
+// form <base><path>, normalizing a trailing slash on the base the same way
+// ScopedURL does — a bare c.baseURL+path splice would otherwise produce
+// "//v1/..." when BARKPARK_API_URL/-s carries a trailing slash, which Phoenix
+// 404s. path is already-built (its dynamic segments PathEscaped at the call
+// site) and is passed through untouched.
+func (c *Client) flatURL(path string) string {
+	return strings.TrimRight(c.baseURL, "/") + path
+}
+
 // authGet issues a GET to url with the Client's bearer token attached.
 // Scoped /v1/ reads run ResolveWorkspace, which fails closed (403) for an
 // anonymous caller — so every read must carry the token, exactly like
@@ -524,6 +534,7 @@ func (c *Client) Query(typeName, filter string) []Doc {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return nil
 	}
 
@@ -728,9 +739,11 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return Doc{}, DocReadNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return Doc{}, DocReadUnreachable
 	}
 
@@ -936,7 +949,7 @@ func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*task
 		return nil, 0, err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.flatURL(path), bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1142,11 +1155,12 @@ type GraphResult struct {
 // REAL cross-root block edges (df-graph-crossdep) — the fetch happens here,
 // OUTSIDE the pure taskboard.Frontier model.
 func (c *Client) GraphShow(id string) (*GraphResult, error) {
-	u := c.baseURL + "/v1/graph/" + url.PathEscape(id) +
+	path := "/v1/graph/" + url.PathEscape(id) +
 		"?drafts=true&direction=both&kinds=blocks"
 	if c.Dataset != "" {
-		u += "&dataset=" + url.QueryEscape(c.Dataset)
+		path += "&dataset=" + url.QueryEscape(c.Dataset)
 	}
+	u := c.flatURL(path)
 	resp, err := c.authGet(u)
 	if err != nil {
 		return nil, err
@@ -1177,7 +1191,7 @@ func (c *Client) tenancyPost(path, name string, out interface{}) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.flatURL(path), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -1220,20 +1234,24 @@ func (c *Client) CreateProject(workspaceSlug, name string) (ProjectInfo, error) 
 }
 
 func (c *Client) ListWorkspaces() ([]WorkspaceInfo, error) {
-	resp, err := c.authGet(c.baseURL + "/api/workspaces")
+	resp, err := c.authGet(c.flatURL("/api/workspaces"))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list workspaces: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list workspaces: status %d", resp.StatusCode)
+		return nil, humanAPIError(resp.StatusCode, body)
 	}
 
 	var result struct {
 		Workspaces []WorkspaceInfo `json:"workspaces"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse workspaces: %w", err)
 	}
 	return result.Workspaces, nil
@@ -1243,21 +1261,25 @@ func (c *Client) ListWorkspaces() ([]WorkspaceInfo, error) {
 // GET /api/workspaces/:workspace_slug/projects. A non-member (or unknown slug)
 // returns 404, which surfaces here as an error.
 func (c *Client) ListProjects(workspaceSlug string) ([]ProjectInfo, error) {
-	resp, err := c.authGet(c.baseURL + "/api/workspaces/" + url.PathEscape(workspaceSlug) + "/projects")
+	resp, err := c.authGet(c.flatURL("/api/workspaces/" + url.PathEscape(workspaceSlug) + "/projects"))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list projects: status %d", resp.StatusCode)
+		return nil, humanAPIError(resp.StatusCode, body)
 	}
 
 	var result struct {
 		Workspace WorkspaceInfo `json:"workspace"`
 		Projects  []ProjectInfo `json:"projects"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse projects: %w", err)
 	}
 	return result.Projects, nil
