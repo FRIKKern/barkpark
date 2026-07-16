@@ -135,8 +135,8 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // Astro/static are the defaults; --instance has no default because there is no
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter]"
-	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template"}, nil, usage)
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter] [--deploy]"
+	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template"}, []string{"deploy"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -201,20 +201,37 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 		return cloudFail(out, "create site", cerr)
 	}
 
-	if out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
+	// --deploy (D19) turns create into the one-motion: on a successful create the CLI
+	// chains CLIENT-SIDE straight into the deploy stream and ends on the live URL — no
+	// second command, no copy-pasting the ref. Without it, behavior is byte-identical:
+	// the create envelope is the whole machine-mode result and the human view prints
+	// the `deploy it with …` hint.
+	wantDeploy := a.bools["deploy"]
+
+	if !wantDeploy && out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
 		return exitOK
 	}
 	ref := spawnSiteRef(site)
-	out.outf("✓ site %s created — %s build, kind %s", hzCell(site.Name), hzCell(siteOr(site.Framework, framework)), hzCell(siteOr(site.Kind, kind)))
-	out.outf("  dataset: %s", siteDatasetLabel(site, ws, proj, ds))
+	// The create summary. In the one-motion it rides progressf so a machine-mode
+	// caller still gets a single deployment envelope on stdout (the deploy stream
+	// owns it); a plain create keeps its outf lines byte-identical.
+	emit := out.outf
+	if wantDeploy {
+		emit = out.progressf
+	}
+	emit("✓ site %s created — %s build, kind %s", hzCell(site.Name), hzCell(siteOr(site.Framework, framework)), hzCell(siteOr(site.Kind, kind)))
+	emit("  dataset: %s", siteDatasetLabel(site, ws, proj, ds))
 	if req.DocType != "" {
-		out.outf("  content: %s docs", hzCell(req.DocType))
+		emit("  content: %s docs", hzCell(req.DocType))
 	}
 	if req.Template != "" {
-		out.outf("  starter: %s", hzCell(req.Template))
+		emit("  starter: %s", hzCell(req.Template))
 	}
-	if u := spawnSiteURL(site); u != "" {
-		out.outf("  url:     %s (live after the first deploy)", u)
+	// A plain create can only promise the URL goes live after the first deploy; the
+	// one-motion is ABOUT to deploy, so it skips the caveat and lets the deploy stream
+	// print the real live URL when it lands.
+	if u := spawnSiteURL(site); u != "" && !wantDeploy {
+		emit("  url:     %s (live after the first deploy)", u)
 	}
 	// Runtime-target note: a node site runs a long-running SSR process on its own
 	// slot port (health-gated, Caddy-fronted); the flagship container framework is
@@ -224,15 +241,48 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	effFramework := siteOr(site.Framework, framework)
 	switch {
 	case siteIsNode(siteOr(site.Kind, kind), site.RuntimeTarget):
-		out.outf("  runtime: %s — a long-running node SSR process on its own slot port, health-gated behind Caddy", hzCell(siteOr(site.RuntimeTarget, cloudclient.RuntimeTargetNode)))
+		emit("  runtime: %s — a long-running node SSR process on its own slot port, health-gated behind Caddy", hzCell(siteOr(site.RuntimeTarget, cloudclient.RuntimeTargetNode)))
 		if effFramework != "nextjs" {
-			out.outf("  note:    nextjs is the flagship container framework; %q rides the same node-slot engine on the roadmap and may not build yet", effFramework)
+			emit("  note:    nextjs is the flagship container framework; %q rides the same node-slot engine on the roadmap and may not build yet", effFramework)
 		}
 	case effFramework != "astro":
-		out.outf("  note:    astro is the flagship static framework; %q rides the same engine on the roadmap and may not build yet", effFramework)
+		emit("  note:    astro is the flagship static framework; %q rides the same engine on the roadmap and may not build yet", effFramework)
 	}
-	out.outf("  deploy it with `bp cloud site deploy %s`", ref)
+	if wantDeploy {
+		return chainSiteDeploy(out, cfg, ref, site)
+	}
+	emit("  deploy it with `bp cloud site deploy %s`", ref)
 	return exitOK
+}
+
+// chainSiteDeploy is the create --deploy one-motion tail: it enqueues the first
+// build for the just-created site and hands off to streamSiteDeploy, which narrates
+// the six visible stages and ends on the live URL. The site's own id drives the
+// deploy — no fleet-list resolve, the create response already carries it.
+//
+// instance-not-live is handled honestly: a box that is still provisioning answers
+// the deploy with a 422 instance_not_live, and the site IS created — so the CLI says
+// exactly that and points at `bp cloud site deploy <ref>` to retry, never a crash or
+// a bare error slug. Every other deploy error rides the shared cloudFail contract.
+func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.SpawnSite) int {
+	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), site.ID, false, "", "")
+	if derr != nil {
+		if siteInstanceNotLive(derr) {
+			out.userErr("site %s created, but its instance is still provisioning — deploy it in a moment with `bp cloud site deploy %s`", ref, ref)
+			return exitGeneric
+		}
+		return cloudFail(out, "deploy site", derr)
+	}
+	return streamSiteDeploy(out, cfg, ref, site.ID, dep, true)
+}
+
+// siteInstanceNotLive reports whether a deploy error is the control plane's 422
+// instance_not_live — the box the site lives on is still provisioning and cannot
+// build yet. cloudError renders the wire code (optionally `code: detail`) into the
+// message, so the substring is the honest, decode-independent signal; the create
+// --deploy one-motion degrades to a retry hint on it rather than a bare failure.
+func siteInstanceNotLive(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "instance_not_live")
 }
 
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
@@ -859,7 +909,7 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
-  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>]
+  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
   bp cloud site deploy    <site> [--no-follow] [--force]      (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
@@ -875,6 +925,9 @@ USAGE
   when your dataset serves another type (e.g. 'paper').
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
+  --deploy on create is the one-motion: it chains straight into the deploy stream
+  and ends on the live URL, so create-and-deploy is a single command. If the box is
+  still provisioning it says so and points you at 'bp cloud site deploy <site>'.
 
 WHAT IT DOES
   Spawns a site that reads your Barkpark content over the internal link and serves
