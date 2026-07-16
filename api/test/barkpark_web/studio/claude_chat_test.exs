@@ -903,16 +903,24 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       # The shim's OWN argv: `--workspace <id> --` then the claude args.
       assert Enum.take(args, 3) == ["--workspace", "ws-42", "--"]
 
-      assert Enum.drop(args, 3) == [
-               "--input-format",
-               "stream-json",
-               "--output-format",
-               "stream-json",
-               "--include-partial-messages",
-               "--verbose",
-               "--permission-mode",
-               "plan"
-             ]
+      # The full D109 base + the D116/D117 CloudPolicy belts (mode clamped, all
+      # built-ins removed, deny set, deny JSON string, disallowedTools last).
+      assert Enum.drop(args, 3) ==
+               [
+                 "--input-format",
+                 "stream-json",
+                 "--output-format",
+                 "stream-json",
+                 "--include-partial-messages",
+                 "--verbose",
+                 "--permission-mode",
+                 "plan",
+                 "--tools",
+                 "",
+                 "--settings",
+                 Barkpark.Connectors.CloudPolicy.settings_deny_json()
+               ] ++
+                 ["--disallowedTools" | Barkpark.Connectors.CloudPolicy.cloud_disallowed_tools()]
     end
 
     test ":cloud DROPS the permission-prompt bridge and ALL mcp args (D109)" do
@@ -962,6 +970,103 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # The D24 permission reversal at the ARGV layer (D116/D117): the :cloud argv
+  # clamps the mode and carries CloudPolicy's three tool-removal belts. Every
+  # assertion pins what the launch contract REQUESTS — the live host-denial
+  # observation rides `connectors-hg-live-isolated-cloud-turn`, never faked here.
+  describe "cloud policy belts — CloudPolicy on the :cloud argv (connectors D116/D117)" do
+    alias Barkpark.Connectors.CloudPolicy
+
+    # The variadic `--disallowedTools` list is emitted LAST, so everything after
+    # the flag is the deny set (unambiguous argv boundary).
+    defp cloud_disallowed_argv(args) do
+      args |> Enum.drop_while(&(&1 != "--disallowedTools")) |> Enum.drop(1)
+    end
+
+    defp settings_deny_from_argv(args) do
+      idx = Enum.find_index(args, &(&1 == "--settings"))
+      json = Enum.at(args, idx + 1)
+      Jason.decode!(json)["permissions"]["deny"]
+    end
+
+    test "knob 2a — `--tools \"\"` removes ALL built-in tools" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--tools", ""])
+    end
+
+    test "knob 2b — `--disallowedTools` carries the full host-FS/exec/network deny set" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      assert cloud_disallowed_argv(args) == CloudPolicy.cloud_disallowed_tools()
+
+      # The concrete built-ins that must never reach a Cloud turn.
+      for tool <- ~w(Bash Edit Write Read NotebookEdit WebFetch WebSearch Task) do
+        assert tool in cloud_disallowed_argv(args), "#{tool} must be denied on the cloud argv"
+      end
+    end
+
+    test "knob 2c — `--settings` is a deny JSON STRING, decoding to the deny list" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      assert Enum.chunk_every(args, 2, 1)
+             |> Enum.member?(["--settings", CloudPolicy.settings_deny_json()])
+
+      assert settings_deny_from_argv(args) == CloudPolicy.cloud_disallowed_tools()
+    end
+
+    test "NO-DRIFT — the argv `--disallowedTools` list equals the `--settings` deny list" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      # The two belts are built from the SAME source; if a future edit forks one,
+      # this reds before the divergence can ship.
+      assert cloud_disallowed_argv(args) == settings_deny_from_argv(args)
+    end
+
+    test "knob 1 — a bypassPermissions mode CLAMPS to plan on the cloud argv" do
+      args = ClaudeChat.cloud_build_args("bypassPermissions", %{workspace_id: "ws-1"})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+
+      refute Enum.chunk_every(args, 2, 1)
+             |> Enum.member?(["--permission-mode", "bypassPermissions"])
+    end
+
+    test "knob 1 — an unknown/garbage mode CLAMPS to plan on the cloud argv" do
+      for bad <- ["nonsense", "", "DROP TABLE", "default"] do
+        args = ClaudeChat.cloud_build_args(bad, %{workspace_id: "ws-1"})
+
+        assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"]),
+               "mode #{inspect(bad)} must clamp to plan"
+      end
+    end
+
+    test "knob 1 — a Cloud-valid mode passes through verbatim (clamp is validity, not force-plan)" do
+      for mode <- CloudPolicy.cloud_modes() do
+        args = ClaudeChat.cloud_build_args(mode, %{workspace_id: "ws-1"})
+        assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", mode])
+      end
+    end
+
+    test "bypass is STILL structurally unreachable through the clamp (extends the W11 down-payment)" do
+      for mode <- ["bypassPermissions", "plan", "acceptEdits"],
+          opts <- [%{workspace_id: "ws-1"}, %{workspace_id: "ws-1", bypass_armed: true}] do
+        args = ClaudeChat.cloud_build_args(mode, opts)
+        refute "--allow-dangerously-skip-permissions" in args
+        refute "--dangerously-skip-permissions" in args
+      end
+    end
+
+    test "self-hosted argv NEVER carries the cloud belts (byte-identical host path)" do
+      # The cloud belts live only on the cloud path; the host build_args is
+      # untouched (the D107 byte-identical guarantee).
+      host = ClaudeChat.build_args("plan", %{})
+      refute "--tools" in host
+      refute "--settings" in host
+      # The host path's only --disallowedTools is the plan-mode Workflow road-block
+      # (a single token), never the cloud deny set.
+      refute "Bash" in host
+    end
+  end
+
   describe "cloud runtime wiring (connectors D110 — recorder→session_opts principal)" do
     test "Runtime.Claude threads workspace_id into the cloud shim argv (today dropped)" do
       argv_file = capture_path("argv")
@@ -985,6 +1090,40 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       assert {:error, _reason} =
                Barkpark.StudioChat.Runtime.Claude.start(%{sink: self(), session_opts: %{}})
+    end
+  end
+
+  # D123: the two production entry points (chat_live.ex, chat_controller.ex)
+  # thread `workspace_id` correctly, but NO existing D110 test crosses
+  # `Recorder.ensure` — the actual server-owned spawn path. This closes that gap:
+  # a `:cloud` turn with a nil workspace must fail CLOSED all the way through the
+  # real Session pipeline, and the SAME path WITH a workspace must spawn (so the
+  # refusal is the workspace gate, not a broken harness). Needs live Postgres —
+  # Recorder.init reads CycleFleet + acquires admission before the spawn.
+  describe "Recorder-level cloud fail-close (connectors D123)" do
+    alias Barkpark.StudioChat.Recorder
+
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+      Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual) end)
+      :ok
+    end
+
+    test ":cloud + a nil workspace fails CLOSED through Recorder.ensure — no spawn, no live recorder" do
+      # A shim that WOULD record its argv if it ever launched — it must not.
+      never = capture_path("never")
+      put_chat_config(execution_profile: :cloud, sandbox_runner: argv_echo_binary(never))
+      sid = Ecto.UUID.generate()
+
+      assert {:error, _reason} =
+               Recorder.ensure(%{session_id: sid, mode: "plan", execution_target: "managed"})
+
+      # NON-VACUITY: were the workspace gate broken, cloud_build_args would return
+      # an argv, the shim WOULD spawn, `ensure` would return `{:ok, pid}`, and the
+      # argv-echo shim would have written `never`. All three refute a spawn:
+      assert Recorder.whereis(sid) == nil
+      refute File.exists?(never)
     end
   end
 

@@ -78,6 +78,39 @@ function clampInt(raw, dflt, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
+// ── Explicit env allowlist for the LOCAL `vercel` CLI child (D121) ─────────────
+//
+// The shim is spawned by the Elixir Port and inherits its FULL env — which
+// includes the minted per-session `BARKPARK_API_TOKEN` and the operator's
+// `ANTHROPIC_API_KEY`. A full ambient inherit would leak BOTH into the local
+// `vercel` process (capture-proven pre-fix: a planted HOST_SECRET and the minted
+// BARKPARK_API_TOKEN appeared verbatim in the vercel child's env). `vercel` needs
+// only its OWN auth env — `VERCEL_AUTH_TOKEN`/`VERCEL_OIDC_TOKEN` and the org/
+// project ids (all `VERCEL_*`-prefixed) — plus HOME/PATH/TMPDIR to run. So every
+// local `vercel` spawn gets an EXPLICIT allowlist and nothing else.
+//
+// `ANTHROPIC_API_KEY` is deliberately NOT on the allowlist: the shim reads it from
+// its OWN env in `runTurn()` to build the single `--env ANTHROPIC_API_KEY=…` pair
+// that `vercel sandbox exec` forwards into the sandbox — the key crosses the remote
+// boundary as an EXPLICIT `--env` flag, never as an ambient var of the local child.
+// `BARKPARK_*` never crosses at all.
+const VERCEL_ENV_PASS = ["HOME", "PATH", "TMPDIR"];
+
+function vercelChildEnv() {
+  const env = {};
+  for (const k of VERCEL_ENV_PASS) {
+    if (process.env[k] !== undefined) env[k] = process.env[k];
+  }
+  // Prefix-allow every VERCEL_*-namespaced var: VERCEL_AUTH_TOKEN/VERCEL_OIDC_TOKEN
+  // are the CLI's auth env (confirmed from `vercel --help`); org/project id vars are
+  // unconfirmed by name, so the whole namespace is allowed rather than leaked-by-
+  // omission. Nothing outside HOME/PATH/TMPDIR/VERCEL_* reaches the vercel child.
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("VERCEL_")) env[k] = v;
+  }
+  return env;
+}
+
 function log(msg) {
   // Diagnostics go to STDERR — stdout stays pure NDJSON (D112).
   process.stderr.write(`[cloud-sandbox-runner] ${msg}\n`);
@@ -110,11 +143,16 @@ function shq(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-// ── Run a local process, capturing stdout (for `vercel sandbox create` id etc.) ─
+// ── Run a local `vercel` process, capturing stdout (for `sandbox create` id etc.) ─
+// EVERY spawn here is the local `vercel` CLI (createSandbox/runTurn/teardown all
+// route through this one function), so it is the single choke point where the D121
+// env allowlist is enforced: the child sees ONLY `vercelChildEnv()`, never the
+// shim's full inherited env.
 function run(cmd, args, { capture = false, inheritStdout = false } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       stdio: ["ignore", inheritStdout ? "inherit" : "pipe", "pipe"],
+      env: vercelChildEnv(),
     });
     let out = "";
     let err = "";
