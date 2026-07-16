@@ -265,7 +265,26 @@ arm_caddy_node_route() { # <port>
   # root). Set ONCE at arm time; a later port flip only rewrites reverse_proxy.
   local route_handle="handle_path"
   [ "$SITE_BASEPATH" = 1 ] && route_handle="handle"
-  local block; block="$(cat <<SITEROUTE
+  local block
+  if [ "$SITE_BASEPATH" = 1 ]; then
+    # basePath site: the app OWNS canonicalization (Next 308s `${basePath}/` ->
+    # `${basePath}`, proven live), so Caddy must NOT arm a bare->slash redir —
+    # the pair would 308 each other forever. Instead the matcher covers the bare
+    # path AND the subtree, and everything proxies through un-stripped.
+    block="$(cat <<SITEROUTE
+	# $marker — node SSR site '$SITE_SLUG' (basePath), reverse-proxied un-stripped.
+	# No bare-path redir: the baked basePath canonicalizes slash -> bare itself;
+	# a Caddy bare -> slash redir would form a 308 loop with it. (NB: heredoc
+	# comments must not carry unpaired apostrophes; bash 3.2 mis-scans them
+	# inside command substitution.)
+	@$mname path /sites/$SITE_SLUG /sites/$SITE_SLUG/*
+	handle @$mname {
+		reverse_proxy localhost:$port
+	}
+SITEROUTE
+)"
+  else
+    block="$(cat <<SITEROUTE
 	# $marker — node SSR site '$SITE_SLUG', reverse-proxied to its active slot.
 	# The bare path (no trailing slash) does NOT match the handle, so redirect it
 	# to the canonical slashed form via an EXACT 'path' matcher (never a prefix, so
@@ -277,6 +296,7 @@ arm_caddy_node_route() { # <port>
 	}
 SITEROUTE
 )"
+  fi
   local tmp; tmp="$(mktemp)"
   BP_BLOCK="$block" awk '
     BEGIN { blk = ENVIRON["BP_BLOCK"] }
@@ -348,7 +368,12 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   local body code=000 i
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
   for i in $(seq 1 60); do            # 60 * 0.2s = 12s deadline (>=10s, D65)
-    code="$(curl -s -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port$path" 2>/dev/null || true)"
+    # -L --max-redirs 2: canonicalization is framework-owned. Next with a baked
+    # basePath 308s `${basePath}/` -> `${basePath}` (proven live: search-capstone
+    # b-…-stw1c HEALTH read 308 at /sites/<slug>/), while a plain static server
+    # 301s bare -> slashed. Follow up to 2 loopback hops and gate on the FINAL
+    # code — the marker-by-value assertion below still proves the served bytes.
+    code="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port$path" 2>/dev/null || true)"
     [ "$code" = 200 ] && break
     sleep 0.2
   done
@@ -745,8 +770,12 @@ FAKENPM
   check "basePath deploy exit 0"               [ "$rc" = 0 ]
   check "basePath HEALTH ok (probed the sub-path)" saw HEALTH ok bp1
   check "SWITCH ok"                            saw SWITCH ok bp1
-  check "armed a NON-stripping 'handle /sites/basepath/*'" \
-    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "armed the two-path basePath matcher (bare + subtree)" \
+    grep -qF '@bare_basepath path /sites/basepath /sites/basepath/*' "$CF"
+  check "armed a NON-stripping 'handle @bare_basepath'" \
+    grep -qF 'handle @bare_basepath' "$CF"
+  check "did NOT arm a bare->slash redir (would 308-loop with the app's own canonicalization)" \
+    sh -c "! grep -qF 'redir @bare_basepath' '$CF'"
   check "did NOT arm a stripping handle_path for basepath" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
@@ -767,8 +796,8 @@ FAKENPM
   rm -f "$SRC/.basepath"
   check "marker-only deploy exit 0"            [ "$rc" = 0 ]
   check "marker-only HEALTH ok (probed the sub-path)" saw HEALTH ok bpm1
-  check "marker-only kept the NON-stripping 'handle'" \
-    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "marker-only kept the NON-stripping 'handle @bare_basepath'" \
+    grep -qF 'handle @bare_basepath' "$CF"
   check "marker-only did NOT arm handle_path" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
