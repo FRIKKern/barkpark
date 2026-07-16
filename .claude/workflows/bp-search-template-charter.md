@@ -46,4 +46,17 @@ The flagship artifact is the extraction of the web demo's finder — `web/app/(f
 
 ## Wave log
 
-_(empty — Wave 1 Review appends the first entry)_
+_(Waves 1–3 predate this log; their full stories live in their wave Papers: search-template-wave-2026-07-16 (W1), search-template-wave-2-2026-07-16 (W2), and the W3 finder/PortableDoc-parity papers. Decisions D15–D21 — the deploy-UX pivot — live in the W4 wave Paper's Decide section, not yet folded into the Decisions block above.)_
+
+### Wave 2026-07-16 (W4) — deploy UX goes premium
+
+The epic pivots from building the template to making the engine that ships it *feel* premium. Grade **A−**. Paper: `search-template-wave-4-2026-07-16`.
+
+**Landed (3/3 slices green, unmerged — the lead closes the merge-gated criteria):**
+- **stw4-console-live-stage-rail** (`loop-epic/console-live-stage-rail-one-motion-creat-0`) — ONE new closed SSE type `site.deploy.stage` across all four artifacts; deploy.ex broadcasts per-stage on a WON CAS only; a live six-stage rail (PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE) on site-detail driven by the SSE push (no poll), reusing the /new step component + min-dwell pacer + region-diff; a default-checked Deploy-now checkbox → one-motion create→deploy→copyable-live-URL toast; bare-string toast bug fixed. Elixir 31/0, node harness 415/0. Rail chrome CSS is unstyled this wave (index.html frozen) — degrades gracefully, follow-up pass owed.
+- **stw4-cli-create-deploy-motion** (`loop-epic/bp-cloud-site-create-deploy-cli-one-moti-1`) — `bp cloud site create --deploy` chains into the existing stream and ends on the live URL; plain create byte-identical; honest instance-not-live path (never claims live, never crashes). Go build+vet+test green; 4 new tests.
+- **stw4-deploy-failure-hints** (`loop-epic/dual-channel-failure-hints-across-both-d-2`) — every bare `BPSTAGE … failed` path in both engines dual-authors an observed→expected→check-this-next hint into BOTH channels (log + emit); the static HEALTH #3518 parity gap closed; cp/mv failures capture exit code + `disk_free()`. Static 87/87, node 76/76. Hints re-measured to fit the 240-char budget with a realistic content-hash BUILD_ID.
+
+**Stalled:** none. The "visible freshness" pillar ships only as groundwork (list/overview refetch on the deploy tick); the amber-while-rebuilding badge is filed backlog, blocked on content-rev-truth.
+
+**Next wave should take:** style the `deploy-rail-*`/`field-check` chrome so the flagship rail looks as premium as it behaves; land the freshness badge once content-rev-truth exists; wire the console node:vm harness + node-engine self-test into CI (both CI-invisible today); then the sub-second box-emits-SSE stream + `bp cloud site deploy --watch`, and per-site deploy history + one-click rollback in the console. All filed as `stw4-backlog-*` children.

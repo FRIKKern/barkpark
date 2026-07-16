@@ -51,6 +51,21 @@ emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|fail
 }
 
 # ---------------------------------------------------------------------------
+# disk_free — a one-line free-space summary for the filesystem that holds <path>,
+# for a STAGE copy/rename failure detail. cp(1)/mv(1) give no forensic of their
+# own, and "copy failed" with no disk read is the single most common dead-end on a
+# real box (a full /opt is invisible to a stdout-only caller). Prints
+# "12G free (85% used)" or "" when df is unavailable or the path is gone. -P =
+# portable single-line columns (Avail=$4, Capacity=$5), -h = human sizes; both are
+# in macOS + GNU df (the self-test runs on stock macOS bash 3.2). Call it on a dir
+# that still exists at the failure point (the release parent), never on the
+# .partial dir a cleanup may already have removed.
+# ---------------------------------------------------------------------------
+disk_free() { # <path>
+  df -Ph "$1" 2>/dev/null | awk 'NR==2 {print $4" free ("$5" used)"}'
+}
+
+# ---------------------------------------------------------------------------
 # Identity validators. A slug names a filesystem dir under SITES_DIR AND a Caddy
 # `/sites/<slug>/*` path matcher AND a systemd instance token; a build_id names
 # releases/<id>/. Pure predicates — the caller logs + exits with its typed code.
