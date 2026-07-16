@@ -274,6 +274,48 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert payload.template == "search-starter"
     end
 
+    # search-template W6 — the deploy-pinned palette rides the env only when the
+    # row pins one; nil deploys byte-identical (no BARKPARK_THEME key at all).
+    test "a site with a pinned theme drives the box with BARKPARK_THEME" do
+      bp = team_fixture() |> live_barkpark()
+      site = static_site(bp, %{theme: "ember"})
+      assert site.theme == "ember"
+
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.env[:BARKPARK_THEME] == "ember"
+    end
+
+    test "a themeless site carries NO BARKPARK_THEME key (byte-identical env)" do
+      {bp, site} = setup_site()
+      assert site.theme == nil
+
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      refute Map.has_key?(payload.env, :BARKPARK_THEME)
+    end
+
+    test "an unknown theme is rejected at create" do
+      bp = team_fixture() |> live_barkpark()
+
+      assert {:error, cs} =
+               Registry.create_site(bp, %{
+                 name: "vaporwave",
+                 slug: "vaporwave",
+                 kind: "static",
+                 framework: "astro",
+                 theme: "vaporwave"
+               })
+
+      assert {"must be one of: charple, ember, evergreen, fjord", _} = cs.errors[:theme]
+    end
+
     test "an unknown template is rejected at create — never discovered on the box" do
       bp = team_fixture() |> live_barkpark()
 

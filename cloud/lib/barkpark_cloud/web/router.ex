@@ -9033,6 +9033,9 @@ defmodule BarkparkCloud.Web.Router do
       # OPTIONAL — nil keeps the framework-derived default (astro->astro-starter,
       # nextjs->next-starter); Site.changeset validates the closed slug set.
       {:template, ["template"]},
+      # search-template W6: the deploy-pinned palette. OPTIONAL — nil keeps the
+      # template default; Site.changeset validates the closed palette set.
+      {:theme, ["theme"]},
       {:read_token, ["read_token"]}
     ]
     |> Enum.reduce(attrs, fn {key, params}, acc ->

@@ -78,6 +78,9 @@ defmodule BarkparkCloud.Registry.Site do
     # framework-derived default (deploy relay: astro->astro-starter, nextjs->
     # next-starter). Closed set — the slug indexes a filesystem path on the box.
     field :template, :string
+    # search-template W6: the deploy-pinned palette. Nullable — nil keeps the
+    # template default; the relay injects BARKPARK_THEME only when set.
+    field :theme, :string
     field :domains, {:array, :string}, default: []
     field :env_encrypted, :binary
     field :scale_mode, :string, default: "always_on"
@@ -202,6 +205,7 @@ defmodule BarkparkCloud.Registry.Site do
       :kind,
       :framework,
       :template,
+      :theme,
       :domains,
       :env_encrypted,
       :scale_mode,
@@ -230,6 +234,7 @@ defmodule BarkparkCloud.Registry.Site do
     |> validate_inclusion(:kind, @kinds)
     |> validate_framework_for_kind()
     |> validate_template()
+    |> validate_theme()
     |> validate_inclusion(:scale_mode, @scale_modes)
     |> validate_github_repo()
     |> validate_length(:github_branch, max: 255)
@@ -276,9 +281,19 @@ defmodule BarkparkCloud.Registry.Site do
   # DeployRequest.validate_template/1. nil = framework-derived default.
   @known_site_templates ~w(astro-search-starter astro-starter next-starter search-starter)
 
+  # The shipped palettes (design/themes/<name>.json) — mirror of the manifest
+  # schema's theme enum and the template loader's knownThemes.
+  @known_site_themes ~w(charple ember evergreen fjord)
+
   defp validate_template(changeset) do
     validate_inclusion(changeset, :template, @known_site_templates,
       message: "must be one of: #{Enum.join(@known_site_templates, ", ")}"
+    )
+  end
+
+  defp validate_theme(changeset) do
+    validate_inclusion(changeset, :theme, @known_site_themes,
+      message: "must be one of: #{Enum.join(@known_site_themes, ", ")}"
     )
   end
 
