@@ -137,6 +137,18 @@
       ]
     },
     {
+      "id": "scs-059",
+      "type": "callout",
+      "tone": "info",
+      "title": "W3 amendment — these transcripts are now REAL engine output",
+      "content": [
+        {
+          "type": "text",
+          "value": "Captured live 2026-07-16 by the W3 north-star dispatch (task scaffy-backlog-w3-engine) in a detached worktree at origin/main: the add-block-type run/re-run/dry-run/remove, the add-oban-worker REANCHOR ×2 accretion, and the docs-card pair below are verbatim `bp scaffy` output (D39 voice) — registry count 46→47 as of capture, every LOCAL assert executed by the engine itself, TIER ci asserts honestly deferred, and `git diff --stat` EMPTY after every remove (the D34 byte-clean gate, not a parse-only check). These supersede the W1 authored mock transcripts this paper originally shipped with, which predate REANCHOR and the engine voice. The add-cli-verb, add-migration and add-plugin transcripts remain W1 authored illustrations — those commands validate clean under the same contract but have not yet been captured live. Receipt paths are shown repo-relative."
+        }
+      ]
+    },
+    {
       "id": "scs-008",
       "type": "table",
       "head": [
@@ -444,14 +456,14 @@
     {
       "id": "scs-015",
       "type": "terminal",
-      "footer": "parity at birth: the same starter form renders in the TUI, the SDK, and the reader",
+      "footer": "run 1, live — 8 ops, 8 FILE + 6 LOCAL CMD asserts executed by the engine; the Elixir suite is TIER ci, deferred to the PR (D38)",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy run add-block-type --var BlockName=Timeline --var CountBefore=42 --var CountAfter=43"
+              "value": "$ bp scaffy run scaffy/commands/add-block-type.scaffy \\"
             }
           ]
         },
@@ -460,7 +472,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ● internal/pdrender/timeline.go                             created"
+              "value": "    --var BlockName=Timeline --var CountBefore=46 --var CountAfter=47"
             }
           ]
         },
@@ -469,7 +481,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ● internal/pdrender/timeline_test.go                        created"
+              "value": "● created internal/pdrender/timeline.go"
             }
           ]
         },
@@ -478,7 +490,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ internal/pdrender/pdrender.go                             injected  @MARK go-registry-timeline"
+              "value": "● created internal/pdrender/timeline_test.go"
             }
           ]
         },
@@ -487,7 +499,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ js/packages/react/src/blocks/core.ts                      injected ×2  emitter + map entry"
+              "value": "○ injected internal/pdrender/pdrender.go @MARK:go-registry-timeline"
             }
           ]
         },
@@ -496,7 +508,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ js/packages/react/tests/PortableDoc.test.tsx              injected ×2  CASES fixture + 42→43"
+              "value": "○ injected js/packages/react/src/blocks/core.ts @MARK:js-emitter-timeline"
             }
           ]
         },
@@ -505,7 +517,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ api/lib/barkpark/portable_doc/render/compose.ex           injected  @MARK ex-compose-timeline"
+              "value": "○ injected js/packages/react/src/blocks/core.ts @MARK:js-map-timeline"
             }
           ]
         },
@@ -514,7 +526,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE 8/8                                           pass"
+              "value": "○ injected js/packages/react/tests/PortableDoc.test.tsx @MARK:js-case-timeline"
             }
           ]
         },
@@ -523,7 +535,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ go vet · go build · go test -run TestTimelineRenderer     ok"
+              "value": "○ injected js/packages/react/tests/PortableDoc.test.tsx @MARK:js-count-timeline"
             }
           ]
         },
@@ -532,7 +544,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ npx tsc --noEmit · npx vitest run                         188 passed — toHaveLength(43) green"
+              "value": "○ injected api/lib/barkpark/portable_doc/render/compose.ex @MARK:ex-compose-timeline"
             }
           ]
         },
@@ -541,7 +553,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  … ASSERT CMD mix test …/render_test.exs                     TIER ci — deferred to the PR"
+              "value": "✔ pass file-contains internal/pdrender/timeline.go \"func (timelineRenderer) Render(b Block, ctx RenderCtx) []string\""
             }
           ]
         },
@@ -550,7 +562,142 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: block-type/starter applied — 2 created · 6 injected · 6 marks · 31s"
+              "value": "✔ pass file-contains internal/pdrender/timeline_test.go \"func TestTimelineRenderer(t *testing.T)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains internal/pdrender/pdrender.go \"MARK:go-registry-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/src/blocks/core.ts \"MARK:js-emitter-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/src/blocks/core.ts \"MARK:js-map-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/tests/PortableDoc.test.tsx \"MARK:js-case-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/tests/PortableDoc.test.tsx \"toHaveLength(47)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/portable_doc/render/compose.ex \"MARK:ex-compose-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd go vet ./internal/pdrender/..."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd CC=/usr/bin/clang go build ./internal/pdrender/"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd go test ./internal/pdrender/ -run TestTimelineRenderer -count=1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js && pnpm install && pnpm build"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js/packages/react && npx tsc --noEmit"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js/packages/react && npx vitest run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/portable_doc/render_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "receipt: .scaffy/receipts/block-type--timeline--cfa7632af3eb.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "applied — 2 created, 6 injected, 6 mark(s), 28293ms"
             }
           ]
         }
@@ -559,14 +706,14 @@
     {
       "id": "scs-016",
       "type": "terminal",
-      "footer": "idempotent · every guard derives from the MARK line the op itself writes",
+      "footer": "idempotent · every guard derives from the MARK line the op itself writes — 8/8 skipped, no new receipt, asserts still green",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy run add-block-type --var BlockName=Timeline --var CountBefore=42 --var CountAfter=43"
+              "value": "$ bp scaffy run scaffy/commands/add-block-type.scaffy \\"
             }
           ]
         },
@@ -575,7 +722,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = internal/pdrender/timeline.go                             exists — IF ABSENT, skipped"
+              "value": "    --var BlockName=Timeline --var CountBefore=46 --var CountAfter=47"
             }
           ]
         },
@@ -584,7 +731,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = internal/pdrender/timeline_test.go                        exists — IF ABSENT, skipped"
+              "value": "= skipped internal/pdrender/timeline.go — file already exists (IF ABSENT)"
             }
           ]
         },
@@ -593,7 +740,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = 6/6 injections skipped — MARK lines already present"
+              "value": "= skipped internal/pdrender/timeline_test.go — file already exists (IF ABSENT)"
             }
           ]
         },
@@ -602,7 +749,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE 8/8                                           pass"
+              "value": "= skipped internal/pdrender/pdrender.go @MARK:go-registry-timeline — mark \"MARK:go-registry-timeline\" already planted"
             }
           ]
         },
@@ -611,7 +758,561 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: block-type/starter — 0 writes, tree untouched"
+              "value": "= skipped js/packages/react/src/blocks/core.ts @MARK:js-emitter-timeline — mark \"MARK:js-emitter-timeline\" already planted"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped js/packages/react/src/blocks/core.ts @MARK:js-map-timeline — mark \"MARK:js-map-timeline\" already planted"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped js/packages/react/tests/PortableDoc.test.tsx @MARK:js-case-timeline — mark \"MARK:js-case-timeline\" already planted"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped js/packages/react/tests/PortableDoc.test.tsx @MARK:js-count-timeline — mark \"MARK:js-count-timeline\" already planted"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped api/lib/barkpark/portable_doc/render/compose.ex @MARK:ex-compose-timeline — mark \"MARK:ex-compose-timeline\" already planted"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains internal/pdrender/timeline.go \"func (timelineRenderer) Render(b Block, ctx RenderCtx) []string\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains internal/pdrender/timeline_test.go \"func TestTimelineRenderer(t *testing.T)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains internal/pdrender/pdrender.go \"MARK:go-registry-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/src/blocks/core.ts \"MARK:js-emitter-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/src/blocks/core.ts \"MARK:js-map-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/tests/PortableDoc.test.tsx \"MARK:js-case-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains js/packages/react/tests/PortableDoc.test.tsx \"toHaveLength(47)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/portable_doc/render/compose.ex \"MARK:ex-compose-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd go vet ./internal/pdrender/..."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd CC=/usr/bin/clang go build ./internal/pdrender/"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd go test ./internal/pdrender/ -run TestTimelineRenderer -count=1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js && pnpm install && pnpm build"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js/packages/react && npx tsc --noEmit"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd cd js/packages/react && npx vitest run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/portable_doc/render_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "no-op — nothing to do (8 skipped), 23538ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-060",
+      "type": "terminal",
+      "footer": "D39 dry-run: computes everything, touches NOTHING — zero writes, no receipt, CMDs listed as would-run, exit 0",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-block-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var BlockName=Timeline --var CountBefore=46 --var CountAfter=47 --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● would create internal/pdrender/timeline.go"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● would create internal/pdrender/timeline_test.go"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject internal/pdrender/pdrender.go @MARK:go-registry-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject js/packages/react/src/blocks/core.ts @MARK:js-emitter-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject js/packages/react/src/blocks/core.ts @MARK:js-map-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject js/packages/react/tests/PortableDoc.test.tsx @MARK:js-case-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject js/packages/react/tests/PortableDoc.test.tsx @MARK:js-count-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/portable_doc/render/compose.ex @MARK:ex-compose-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "⋮ full -/+ diff printed for all 6 files (79 lines) — excerpt:"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- js/packages/react/tests/PortableDoc.test.tsx"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  // scaffy:add-block-type Timeline MARK:js-case-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  { type: 'timeline', block: { type: 'timeline', text: 'Starter' }, marker: 'bp-timeline' },"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "-    expect(registered).toHaveLength(46)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    // scaffy:add-block-type Timeline MARK:js-count-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    expect(registered).toHaveLength(47)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "⋮"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd go vet ./internal/pdrender/..."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd CC=/usr/bin/clang go build ./internal/pdrender/"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd go test ./internal/pdrender/ -run TestTimelineRenderer -count=1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd cd js && pnpm install && pnpm build"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd cd js/packages/react && npx tsc --noEmit"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd cd js/packages/react && npx vitest run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/portable_doc/render_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 2 created, 6 injected, 6 mark(s), 24ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-061",
+      "type": "terminal",
+      "footer": "receipt replay in reverse (D36) — and the D34 acceptance bar: git diff --stat EMPTY, byte-clean, never parse-only",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove scaffy/commands/add-block-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var BlockName=Timeline --var CountBefore=46 --var CountAfter=47"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ removed api/lib/barkpark/portable_doc/render/compose.ex @MARK:ex-compose-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● restored js/packages/react/tests/PortableDoc.test.tsx @MARK:js-count-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ removed js/packages/react/tests/PortableDoc.test.tsx @MARK:js-case-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ removed js/packages/react/src/blocks/core.ts @MARK:js-map-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ removed js/packages/react/src/blocks/core.ts @MARK:js-emitter-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ removed internal/pdrender/pdrender.go @MARK:go-registry-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted internal/pdrender/timeline_test.go"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted internal/pdrender/timeline.go"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "removed — 1 restored, 5 removed, 2 deleted, 6 mark(s), 5ms"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ git diff --stat"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ git status --porcelain"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$"
             }
           ]
         }
@@ -686,14 +1387,14 @@
     {
       "id": "scs-022",
       "type": "terminal",
-      "footer": "first run — creates the pair, plants the mark in the crontab",
+      "footer": "run 1, live — creates the pair, plants the mark tuple in the static crontab",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy run add-oban-worker --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
+              "value": "$ bp scaffy run scaffy/commands/add-oban-worker.scaffy \\"
             }
           ]
         },
@@ -702,7 +1403,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ● api/lib/barkpark/workers/stale_token_sweeper.ex           created"
+              "value": "    --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
             }
           ]
         },
@@ -711,7 +1412,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ● api/test/barkpark/workers/stale_token_sweeper_test.exs    created"
+              "value": "● created api/lib/barkpark/workers/stale_token_sweeper.ex"
             }
           ]
         },
@@ -720,7 +1421,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ api/config/config.exs                                     injected  @MARK oban-cron-stale-token-sweeper"
+              "value": "● created api/test/barkpark/workers/stale_token_sweeper_test.exs"
             }
           ]
         },
@@ -729,7 +1430,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+              "value": "○ injected api/config/config.exs @MARK:oban-cron-stale-token-sweeper"
             }
           ]
         },
@@ -738,7 +1439,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  … ASSERT CMD mix test …/stale_token_sweeper_test.exs        TIER ci — deferred to the PR"
+              "value": "✔ pass file-contains api/lib/barkpark/workers/stale_token_sweeper.ex \"defmodule Barkpark.Workers.StaleTokenSweeper do\""
             }
           ]
         },
@@ -747,7 +1448,43 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: oban-worker/cron applied — 2 created · 1 injected · 1 mark · 0.4s"
+              "value": "✔ pass file-contains api/test/barkpark/workers/stale_token_sweeper_test.exs \"assert :ok = StaleTokenSweeper.perform\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/config/config.exs \"MARK:oban-cron-stale-token-sweeper\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/workers/stale_token_sweeper_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "receipt: .scaffy/receipts/oban-worker--stale-token-sweeper--b32aa3310a89.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "applied — 2 created, 1 injected, 1 mark(s), 7ms"
             }
           ]
         }
@@ -756,14 +1493,14 @@
     {
       "id": "scs-023",
       "type": "terminal",
-      "footer": "idempotent · guards hold · zero writes",
+      "footer": "run 2, live — REANCHOR ×2: the second sibling re-anchors on the mark-family tail and accretes in forward order (D21/D33). This exact accretion produced a SyntaxError before the W2 fix.",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy run add-oban-worker --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
+              "value": "$ bp scaffy run scaffy/commands/add-oban-worker.scaffy \\"
             }
           ]
         },
@@ -772,7 +1509,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = api/lib/barkpark/workers/stale_token_sweeper.ex           exists — IF ABSENT, skipped"
+              "value": "    --var WorkerName=OrphanMediaReaper --var 'CronExpr=*/15 * * * *'"
             }
           ]
         },
@@ -781,7 +1518,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = api/test/barkpark/workers/stale_token_sweeper_test.exs    exists — IF ABSENT, skipped"
+              "value": "● created api/lib/barkpark/workers/orphan_media_reaper.ex"
             }
           ]
         },
@@ -790,7 +1527,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = api/config/config.exs                                     ASLONG guard held — skipped"
+              "value": "● created api/test/barkpark/workers/orphan_media_reaper_test.exs"
             }
           ]
         },
@@ -799,7 +1536,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+              "value": "○ injected api/config/config.exs @MARK:oban-cron-orphan-media-reaper"
             }
           ]
         },
@@ -808,7 +1545,264 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: oban-worker/cron — 0 writes, tree untouched"
+              "value": "✔ pass file-contains api/lib/barkpark/workers/orphan_media_reaper.ex \"defmodule Barkpark.Workers.OrphanMediaReaper do\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/test/barkpark/workers/orphan_media_reaper_test.exs \"assert :ok = OrphanMediaReaper.perform\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/config/config.exs \"MARK:oban-cron-orphan-media-reaper\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/workers/orphan_media_reaper_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "receipt: .scaffy/receipts/oban-worker--orphan-media-reaper--009ef5d2e31d.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "applied — 2 created, 1 injected, 1 mark(s), 5ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-062",
+      "type": "terminal",
+      "footer": "the accreted crontab: run-1 tuple first, run-2 appended after — forward order, and the whole config parses",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ sed -n '252,255p' api/config/config.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "       # scaffy:add-oban-worker StaleTokenSweeper MARK:oban-cron-stale-token-sweeper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "       {\"0 4 * * *\", Barkpark.Workers.StaleTokenSweeper},"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "       # scaffy:add-oban-worker OrphanMediaReaper MARK:oban-cron-orphan-media-reaper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "       {\"*/15 * * * *\", Barkpark.Workers.OrphanMediaReaper}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ cd api && elixir -e 'Code.string_to_quoted!(File.read!(\"config/config.exs\")); IO.puts(\"config.exs parses -- both tuples live\")'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "config.exs parses -- both tuples live"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-063",
+      "type": "terminal",
+      "footer": "both siblings removed LIFO (later sibling first) — tree byte-clean",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove scaffy/commands/add-oban-worker.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var WorkerName=OrphanMediaReaper --var 'CronExpr=*/15 * * * *'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● restored api/config/config.exs @MARK:oban-cron-orphan-media-reaper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted api/test/barkpark/workers/orphan_media_reaper_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted api/lib/barkpark/workers/orphan_media_reaper.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "removed — 1 restored, 2 deleted, 1 mark(s), 4ms"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove scaffy/commands/add-oban-worker.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var WorkerName=StaleTokenSweeper --var 'CronExpr=0 4 * * *'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● restored api/config/config.exs @MARK:oban-cron-stale-token-sweeper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted api/test/barkpark/workers/stale_token_sweeper_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted api/lib/barkpark/workers/stale_token_sweeper.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "removed — 1 restored, 2 deleted, 1 mark(s), 1ms"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ git diff --stat"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ git status --porcelain"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$"
             }
           ]
         }
@@ -1427,14 +2421,14 @@
     {
       "id": "scs-050",
       "type": "terminal",
-      "footer": "mid-scratch: anchors-check green; the budget gate is EXPECTED red — see below",
+      "footer": "live — anchors-check green mid-scratch; add deliberately does not assert the budget gate (see below)",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy run add-docs-card --var CardName=Wavecheck --var Group=Meta \\"
+              "value": "$ bp scaffy run scaffy/commands/add-docs-card.scaffy --var CardName=Wavecraft \\"
             }
           ]
         },
@@ -1443,7 +2437,7 @@
           "content": [
             {
               "type": "text",
-              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+              "value": "    --var Group=Meta --var 'TaskPattern=wavecraft / wave decks'"
             }
           ]
         },
@@ -1452,7 +2446,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ● docs/cards/wavecheck.md                                   created"
+              "value": "● created docs/cards/wavecraft.md"
             }
           ]
         },
@@ -1461,7 +2455,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ CLAUDE.md                                                 injected  @MARK claude-route-wavecheck"
+              "value": "○ injected CLAUDE.md @MARK:claude-route-wavecraft"
             }
           ]
         },
@@ -1470,7 +2464,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ docs/INDEX.md                                             injected  ,wavecheck,tui swept in"
+              "value": "○ injected docs/INDEX.md @MARK:index-cards-wavecraft"
             }
           ]
         },
@@ -1479,7 +2473,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE 3/3                                           pass"
+              "value": "✔ pass file-contains docs/cards/wavecraft.md \"canonical-for: wavecraft-overview\""
             }
           ]
         },
@@ -1488,7 +2482,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ bash scripts/docs-anchors-check.sh                        green — G1 header, anchors, unique slug"
+              "value": "✔ pass file-contains CLAUDE.md \"MARK:claude-route-wavecraft\""
             }
           ]
         },
@@ -1497,7 +2491,34 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: docs-card/add applied — 1 created · 2 injected · 2 marks · 0.2s"
+              "value": "✔ pass file-contains docs/INDEX.md \",wavecraft,tui\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd bash scripts/docs-anchors-check.sh"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "receipt: .scaffy/receipts/docs-card--wavecraft--898e860fe72f.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "applied — 1 created, 2 injected, 2 mark(s), 35971ms"
             }
           ]
         }
@@ -1524,14 +2545,14 @@
     {
       "id": "scs-053",
       "type": "terminal",
-      "footer": "the remove demo: every mutating op reversed from its MARK — git sees nothing",
+      "footer": "the authored inverse runs FORWARD via bp scaffy run (D36) — giving it to bp scaffy remove is a usage error. Both doc gates green on the clean tree.",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy remove docs-card --var CardName=Wavecheck --var Group=Meta \\"
+              "value": "$ bp scaffy run scaffy/commands/remove-docs-card.scaffy --var CardName=Wavecraft \\"
             }
           ]
         },
@@ -1540,7 +2561,7 @@
           "content": [
             {
               "type": "text",
-              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+              "value": "    --var Group=Meta --var 'TaskPattern=wavecraft / wave decks'"
             }
           ]
         },
@@ -1549,7 +2570,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ docs/INDEX.md                                             un-swept  ,wavecheck,tui gone"
+              "value": "○ injected docs/INDEX.md @MARK:index-cards-wavecraft"
             }
           ]
         },
@@ -1558,7 +2579,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ○ CLAUDE.md                                                 row + MARK comment removed"
+              "value": "✕ removed CLAUDE.md @MARK:claude-route-wavecraft"
             }
           ]
         },
@@ -1567,7 +2588,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✕ docs/cards/wavecheck.md                                   deleted   (canonical-for guard held)"
+              "value": "✕ deleted docs/cards/wavecraft.md"
             }
           ]
         },
@@ -1576,7 +2597,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ ASSERT FILE DONT CONTAIN 3/3 + ABSENT 1/1                 pass"
+              "value": "✔ pass file-dont-contain docs/INDEX.md \",wavecraft,tui\""
             }
           ]
         },
@@ -1585,7 +2606,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  ✔ bash scripts/check-doc-budgets.sh                         green — 7 cards, budgets hold"
+              "value": "✔ pass file-dont-contain CLAUDE.md \"MARK:claude-route-wavecraft\""
             }
           ]
         },
@@ -1594,7 +2615,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  $ git status --porcelain -- CLAUDE.md docs/"
+              "value": "✔ pass file-dont-contain CLAUDE.md \"docs/cards/wavecraft.md\""
             }
           ]
         },
@@ -1603,7 +2624,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  $"
+              "value": "✔ pass file-absent docs/cards/wavecraft.md"
             }
           ]
         },
@@ -1612,7 +2633,34 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: docs-card/remove — tree byte-clean, add ⇄ remove symmetric"
+              "value": "✔ pass cmd bash scripts/check-doc-budgets.sh"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass cmd bash scripts/docs-anchors-check.sh"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "receipt: .scaffy/receipts/docs-card--wavecraft--898e860fe72f.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "applied — 1 injected, 1 removed, 1 deleted, 2 mark(s), 37679ms"
             }
           ]
         }
@@ -1621,14 +2669,14 @@
     {
       "id": "scs-054",
       "type": "terminal",
-      "footer": "idempotent both ways: a second remove is a guarded no-op",
+      "footer": "the OTHER retraction path (D36): receipt replay of add-docs-card lands the same byte-clean end state; a second remove is an already-retracted no-op",
       "children": [
         {
           "type": "paragraph",
           "content": [
             {
               "type": "text",
-              "value": "$ bp scaffy remove docs-card --var CardName=Wavecheck --var Group=Meta \\"
+              "value": "$ bp scaffy remove scaffy/commands/add-docs-card.scaffy --var CardName=Wavecraft \\"
             }
           ]
         },
@@ -1637,7 +2685,7 @@
           "content": [
             {
               "type": "text",
-              "value": "    --var 'TaskPattern=wavecheck scratch demo'"
+              "value": "    --var Group=Meta --var 'TaskPattern=wavecraft / wave decks'"
             }
           ]
         },
@@ -1646,7 +2694,7 @@
           "content": [
             {
               "type": "text",
-              "value": "  = 3/3 ops skipped — positive-polarity guards found nothing to retract"
+              "value": "● restored docs/INDEX.md @MARK:index-cards-wavecraft"
             }
           ]
         },
@@ -1655,7 +2703,79 @@
           "content": [
             {
               "type": "text",
-              "value": "  scaffy: docs-card/remove — 0 writes, already clean"
+              "value": "✕ removed CLAUDE.md @MARK:claude-route-wavecraft"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✕ deleted docs/cards/wavecraft.md"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "removed — 1 restored, 1 removed, 1 deleted, 2 mark(s), 2ms"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove scaffy/commands/add-docs-card.scaffy --var CardName=Wavecraft \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Group=Meta --var 'TaskPattern=wavecraft / wave decks'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped docs/INDEX.md @MARK:index-cards-wavecraft — already retracted: pre-image state present"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped CLAUDE.md @MARK:claude-route-wavecraft — already retracted: post-image absent"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "= skipped docs/cards/wavecraft.md — already retracted: file absent"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "no-op — already retracted (3 skipped), 0ms"
             }
           ]
         }
