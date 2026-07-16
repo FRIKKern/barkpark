@@ -487,4 +487,154 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     refute html =~ "<script>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
   end
+
+  # ── gauge-list ───────────────────────────────────────────────────────────────
+
+  test "gauge-list share mode: author order, value/max proportion, percent readout, note" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "mode" => "share",
+        "title" => "judge votes",
+        "max" => 12,
+        "rows" => [
+          %{"label" => "regular", "value" => 11, "note" => "won 3 duels"},
+          %{"label" => "optical", "value" => 1}
+        ]
+      })
+
+    assert html =~ ~s|class="bp-gauge"|
+    assert html =~ "judge votes"
+    # author order preserved: regular before optical
+    assert :binary.match(html, "regular") < :binary.match(html, "optical")
+    # meter = value/max: 11/12 → 92%, 1/12 → 8%
+    assert html =~ ~s|style="width:91.7%"|
+    assert html =~ ">92%</span>"
+    assert html =~ ">8%</span>"
+    assert html =~ "won 3 duels"
+  end
+
+  test "gauge-list share mode without max divides by the sum; clamps negatives" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "rows" => [
+          %{"label" => "a", "value" => 3},
+          %{"label" => "b", "value" => 1},
+          %{"label" => "neg", "value" => -5}
+        ]
+      })
+
+    # bare rows + no snapshot infers share mode; denom = Σ = 4 (neg contributes -5 to sum
+    # per pdrender attrFloat semantics? No: pdrender sums raw values; mirror = 3+1-5=-1 → guard 1)
+    # our port mirrors: sum <= 0 → denom 1; a=3 clamps to 100%, neg clamps to 0%.
+    assert html =~ ~s|class="bp-gauge"|
+    assert html =~ ">100%</span>"
+    assert html =~ ">0%</span>"
+  end
+
+  test "gauge-list count mode buckets a snapshot, sorts desc-count then label, (none) bucket" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "mode" => "count",
+        "groupBy" => "status",
+        "snapshot" => [
+          %{"status" => "open"},
+          %{"status" => "open"},
+          %{"status" => "closed"},
+          %{"title" => "no status"}
+        ]
+      })
+
+    assert html =~ ~s|class="bp-gauge"|
+    # open(2) first, then closed(1)/(none)(1) label-asc
+    assert :binary.match(html, "open") < :binary.match(html, "closed")
+    assert :binary.match(html, "closed") < :binary.match(html, "(none)")
+    # counts as readout digits, meter = count/maxCount
+    assert html =~ ">2</span>"
+    assert html =~ ~s|style="width:100%"|
+    assert html =~ ~s|style="width:50%"|
+  end
+
+  test "gauge-list count mode: priority buckets wear the P<n> label" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "mode" => "count",
+        "groupBy" => "priority",
+        "snapshot" => [%{"priority" => 1}, %{"priority" => 1}, %{"priority" => 0}]
+      })
+
+    assert html =~ "P1"
+    assert html =~ "P0"
+  end
+
+  test "gauge-list groupBy epic renders the honest unbacked note, never fakes" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "mode" => "count",
+        "groupBy" => "epic",
+        "snapshot" => [%{"parent_id" => "t1", "status" => "open"}]
+      })
+
+    assert html =~ "unbacked"
+    refute html =~ "bp-gauge__bar"
+  end
+
+  test "gauge-list absent data degrades to the honest empty box; query is never read" do
+    for block <- [
+          %{"type" => "gauge-list"},
+          %{"type" => "gauge-list", "mode" => "share"},
+          %{"type" => "gauge-list", "mode" => "count", "query" => %{"groupBy" => "status"}}
+        ] do
+      html = DataViz.gauge_list_html(block)
+      assert html =~ "bp-dataviz--empty"
+      assert html =~ "gauge-list"
+    end
+  end
+
+  test "gauge-list email variant is inline-styled, classless, and table-based" do
+    %{"kind" => "_raw", "html" => html} =
+      Compose.compose_block(
+        %{
+          "type" => "gauge-list",
+          "mode" => "share",
+          "max" => 10,
+          "rows" => [%{"label" => "a", "value" => 5, "note" => "half"}]
+        },
+        :email
+      )
+
+    assert html =~ "<table"
+    assert html =~ "width:50%"
+    assert html =~ ">50%</td>"
+    assert html =~ "half"
+    refute html =~ ~s(class="bp-)
+  end
+
+  test "gauge-list article dispatch rides the classed emitter" do
+    %{"kind" => "_raw", "html" => html} =
+      Compose.compose_block(
+        %{"type" => "gauge-list", "rows" => [%{"label" => "a", "value" => 1}]},
+        :article
+      )
+
+    assert html =~ ~s|class="bp-gauge"|
+  end
+
+  test "gauge-list author strings are escaped" do
+    html =
+      DataViz.gauge_list_html(%{
+        "type" => "gauge-list",
+        "title" => "<script>",
+        "rows" => [%{"label" => "<b>x</b>", "value" => 1, "note" => "<i>n</i>"}]
+      })
+
+    refute html =~ "<script>"
+    refute html =~ "<b>x</b>"
+    refute html =~ "<i>n</i>"
+    assert html =~ "&lt;b&gt;x&lt;/b&gt;"
+  end
 end

@@ -467,6 +467,160 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   def chart_html(_), do: empty("chart")
 
+  # ── gauge-list ───────────────────────────────────────────────────────────────
+  #
+  # Browser twin of pdrender's gaugelist.go (ratified TUI slate). Semantics
+  # mirrored EXACTLY: mode 'count'|'share' (absent mode infers share from a bare
+  # `rows` key with no `snapshot`, else count); SHARE rows {label,value,note?}
+  # in author order, denom = max when positive else Σvalue (guarded to 1),
+  # proportion clamped [0,1], readout digit = round(prop*100)%; COUNT buckets the
+  # verbatim snapshot rows by groupBy (worker|phase|status|priority, default
+  # status; priority via its P<n> label; missing/empty → "(none)"), sorted DESC
+  # by count then label ASC, meter = count/maxCount, digit = the count. groupBy
+  # "epic" is UNBACKED (the parent→epic join is the wave-3 resolver's job): an
+  # honest dim note, never faked. Absent data key → the honest empty box. The
+  # `query` field is NEVER read (snapshot-authoritative, same as the TUI).
+
+  @doc "Meter list: label + fill bar + exact readout per row (share or count mode)."
+  def gauge_list_html(block) when is_map(block) do
+    title = block |> get("title") |> display_string()
+
+    title_html =
+      if title == "", do: "", else: ~s|<div class="bp-gauge__t">#{escape_html(title)}</div>|
+
+    case gauge_rows(block) do
+      {:error, :epic} ->
+        ~s|<div class="bp-gauge">| <>
+          title_html <>
+          ~s|<div class="bp-gauge__note">groupBy "epic" is unbacked here — needs the epic resolver</div></div>|
+
+      {:ok, []} ->
+        empty("gauge-list")
+
+      {:ok, rows} ->
+        body =
+          Enum.map_join(rows, "", fn g ->
+            note_html =
+              if g.note == "",
+                do: "",
+                else: ~s|<span class="bp-gauge__n">#{escape_html(g.note)}</span>|
+
+            ~s|<div class="bp-gauge__row">| <>
+              ~s|<span class="bp-gauge__l">#{escape_html(g.label)}</span>| <>
+              ~s|<span class="bp-gauge__bar"><i style="width:#{fmt(g.prop * 100)}%"></i></span>| <>
+              ~s|<span class="bp-gauge__d">#{escape_html(g.digit)}</span>| <>
+              note_html <> "</div>"
+          end)
+
+        ~s|<div class="bp-gauge">#{title_html}#{body}</div>|
+    end
+  end
+
+  def gauge_list_html(_), do: empty("gauge-list")
+
+  # Resolved gauge rows for either mode: {:ok, [%{label, prop, digit, note}]},
+  # {:ok, []} when the mode's data key is absent/empty, {:error, :epic} for the
+  # unbacked count groupBy.
+  defp gauge_rows(block) do
+    case gauge_mode(block) do
+      "share" -> {:ok, share_gauges(block)}
+      "count" -> count_gauges(block)
+    end
+  end
+
+  defp gauge_mode(block) do
+    case block |> get("mode") |> display_string() |> String.downcase() do
+      "count" ->
+        "count"
+
+      "share" ->
+        "share"
+
+      _ ->
+        if is_map(block) and Map.has_key?(block, "rows") and not Map.has_key?(block, "snapshot"),
+          do: "share",
+          else: "count"
+    end
+  end
+
+  defp share_gauges(block) do
+    items = block |> get("rows") |> as_list() |> Enum.filter(&is_map/1)
+
+    if items == [] do
+      []
+    else
+      sum = items |> Enum.map(&(numeric(get(&1, "value")) || 0.0)) |> Enum.sum()
+      max = numeric(get(block, "max"))
+      denom = if max != nil and max > 0, do: max, else: sum
+      denom = if denom > 0, do: denom, else: 1.0
+
+      Enum.map(items, fn it ->
+        prop = clamp((numeric(get(it, "value")) || 0.0) / denom, 0.0, 1.0)
+
+        %{
+          label: it |> get("label") |> display_string(),
+          prop: prop,
+          digit: "#{round(prop * 100)}%",
+          note: it |> get("note") |> display_string()
+        }
+      end)
+    end
+  end
+
+  defp count_gauges(block) do
+    group_by =
+      case block |> get("groupBy") |> display_string() do
+        "" -> "status"
+        g -> g
+      end
+
+    cond do
+      group_by == "epic" ->
+        {:error, :epic}
+
+      true ->
+        rows = block |> get("snapshot") |> as_list() |> Enum.filter(&is_map/1)
+
+        if rows == [] do
+          {:ok, []}
+        else
+          counts = Enum.frequencies_by(rows, &gauge_bucket_key(&1, group_by))
+          max_count = counts |> Map.values() |> Enum.max() |> max(1)
+
+          gauges =
+            counts
+            |> Enum.sort_by(fn {label, count} -> {-count, label} end)
+            |> Enum.map(fn {label, count} ->
+              %{
+                label: label,
+                prop: count / max_count,
+                digit: Integer.to_string(count),
+                note: ""
+              }
+            end)
+
+          {:ok, gauges}
+        end
+    end
+  end
+
+  # A task row's bucket label: priority via its P<n> label, every other field
+  # by its trimmed string; missing/empty → "(none)" so unassigned work is
+  # counted, never dropped (gaugelist.go gaugeBucketKey).
+  defp gauge_bucket_key(row, "priority") do
+    case row |> get("priority") |> display_string() do
+      "" -> "(none)"
+      p -> "P" <> p
+    end
+  end
+
+  defp gauge_bucket_key(row, group_by) do
+    case row |> get(group_by) |> display_string() do
+      "" -> "(none)"
+      key -> key
+    end
+  end
+
   # The effective y-span: pdrender semantics (chart.go). Partial pins work;
   # malformed pins (non-numeric, both pinned min >= max) → auto-scale; a
   # degenerate flat span expands by 1 so the floor never divides by zero.
@@ -805,6 +959,52 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   end
 
   def chart_email_html(_, theme), do: empty_email("chart", theme)
+
+  @doc "Email-safe gauge list: inline-styled label/track/readout rows as a table."
+  def gauge_list_email_html(block, theme \\ :evergreen)
+
+  def gauge_list_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
+    title = block |> get("title") |> display_string()
+
+    title_html =
+      if title == "",
+        do: "",
+        else:
+          ~s|<div style="font-weight:700;color:#{sk.ink};margin-bottom:8px">#{escape_html(title)}</div>|
+
+    case gauge_rows(block) do
+      {:error, :epic} ->
+        ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+          title_html <>
+          ~s|<div style="font-size:12px;color:#{sk.muted}">groupBy "epic" is unbacked here — needs the epic resolver</div></div>|
+
+      {:ok, []} ->
+        empty_email("gauge-list", theme)
+
+      {:ok, rows} ->
+        body =
+          Enum.map_join(rows, "", fn g ->
+            note_html =
+              if g.note == "",
+                do: "",
+                else:
+                  ~s|<td style="font-size:11px;color:#{sk.muted};padding:3px 0 3px 10px;white-space:nowrap">#{escape_html(g.note)}</td>|
+
+            ~s|<tr>| <>
+              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.ink};padding:3px 10px 3px 0;white-space:nowrap">#{escape_html(g.label)}</td>| <>
+              ~s|<td style="width:60%;padding:3px 0"><div style="height:8px;border-radius:4px;background:#{sk.border}"><div style="height:8px;border-radius:4px;width:#{fmt(g.prop * 100)}%;background:#{sk.accent}"></div></div></td>| <>
+              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.ink};padding:3px 0 3px 10px;text-align:right;white-space:nowrap">#{escape_html(g.digit)}</td>| <>
+              note_html <> "</tr>"
+          end)
+
+        ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+          title_html <>
+          ~s|<table role="presentation" style="border-collapse:collapse;width:100%">#{body}</table></div>|
+    end
+  end
+
+  def gauge_list_email_html(_, theme), do: empty_email("gauge-list", theme)
 
   # accent mixed over the ground at intensity t, computed here because email
   # has no color-mix() — the same read the stylesheet gives the reader. The
