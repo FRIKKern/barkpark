@@ -34,6 +34,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   require Logger
 
+  alias Barkpark.Connectors.CloudPolicy
+
   @default_binary "claude"
   # The real `--permission-mode` choices the CLI documents (probed v2.1.205,
   # charter D48). Moves TOGETHER with Session's @modes. `default` (our retired
@@ -170,6 +172,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   output). It **structurally never** emits `--allow-dangerously-skip-permissions`
   — bypass is unreachable from this builder (a down-payment on D24 knob 1).
 
+  The D24 permission reversal (D116/D117) rides here: the mode is CLAMPED through
+  `Barkpark.Connectors.CloudPolicy` (bypass/unknown → `"plan"`) and the argv
+  carries `CloudPolicy`'s three tool-removal belts — `--tools ""`,
+  `--disallowedTools <deny set>`, and a `--settings` deny JSON STRING (the SAME
+  deny list, pinned no-drift). `CloudPolicy` is the single legible owner of the
+  cloud posture; this function only emits it.
+
   Fail-closed principal (D110): a nil/`:global`/blank `workspace_id` RAISES here
   (the `registered_host` `Map.fetch!` shape) rather than spawning an
   unattributed cloud turn.
@@ -180,10 +189,15 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     ["--workspace", workspace_id, "--"] ++ cloud_claude_args(mode)
   end
 
-  # The claude argv that runs INSIDE the sandbox (D109). Never derived from any
-  # bypass/arming knob, so `--allow-dangerously-skip-permissions` is structurally
-  # unreachable; the mode string rides `--permission-mode` verbatim (a bare
-  # `bypassPermissions` mode without the dangerous flag does NOT bypass on the CLI).
+  # The claude argv that runs INSIDE the sandbox (D109/D116/D117). Never derived
+  # from any bypass/arming knob, so `--allow-dangerously-skip-permissions` is
+  # structurally unreachable. The mode is CLAMPED through CloudPolicy (a bypass or
+  # unknown mode → plan — knob 1's validity clamp, NOT a tool-confinement claim).
+  # The three tool-removal belts (knob 2) are emitted from the single CloudPolicy
+  # owner: `--tools ""` (remove all built-ins), `--disallowedTools <deny set>`
+  # (structural per-tool removal), and a `--settings` deny JSON STRING carrying the
+  # SAME deny list (pinned argv-deny == settings-deny, no drift). `--disallowedTools`
+  # is emitted LAST so its variadic tool list has an unambiguous argv boundary.
   defp cloud_claude_args(mode) do
     [
       "--input-format",
@@ -193,8 +207,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "--include-partial-messages",
       "--verbose",
       "--permission-mode",
-      mode
-    ]
+      CloudPolicy.cloud_permission_mode(mode),
+      "--tools",
+      "",
+      "--settings",
+      CloudPolicy.settings_deny_json()
+    ] ++ ["--disallowedTools" | CloudPolicy.cloud_disallowed_tools()]
   end
 
   # Fail-closed workspace principal for a Cloud turn (D110). A concrete workspace
