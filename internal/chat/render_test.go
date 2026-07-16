@@ -268,44 +268,88 @@ func loadWorkflowFixture(t *testing.T, name string) SessionWorkflow {
 	return wf
 }
 
+// loadSharedSummaries decodes wsc-s1's SHARED parity fixture — the byte-mirror
+// of api/test/support/fixtures/workflow_summary/workflow_summary.json, real
+// workflow_summary/1 folds of the two committed epic-cycle captures. THE
+// mechanism-A seam: the Elixir side proves the bytes fresh; this side proves
+// they decode onto the wire struct with every rendered field intact.
+func loadSharedSummaries(t *testing.T) map[string]SessionWorkflow {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "workflow_summary.json"))
+	if err != nil {
+		t.Fatalf("read shared fixture: %v", err)
+	}
+	var m map[string]SessionWorkflow
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode shared fixture: %v", err)
+	}
+	return m
+}
+
+// validTickStates is the six-state journey vocabulary (charter D58) every wire
+// tick must speak — the render tolerates unknowns, but the parity fixtures may
+// never drift outside the truth table.
+var validTickStates = map[string]bool{
+	"done": true, "active": true, "interrupted": true,
+	"future": true, "skipped": true, "unreached": true,
+}
+
 // TestWorkflowSummaryFieldProjection is the Go↔Elixir parity proof (wsc D12,
-// mechanism-A): decoding the shared D3 fixtures projects exactly the fields the
-// session card renders — ticks, phase, agents_done/total, terminal, outcome,
-// label (+ tokens) — with the wave-11 invariants intact (seven ticks, settled ≤
-// total, terminal ⇒ a non-empty outcome). No byte-diff; the fold lives on the
-// server, this side only decodes.
+// mechanism-A): decoding wsc-s1's shared D3 fixtures — the REAL Elixir folds of
+// the committed epic-cycle captures — projects exactly the fields the session
+// card renders, with the wave-11 invariants intact (seven ticks, settled ≤
+// total, terminal ⇒ an honest lifecycle word). No byte-diff; the fold lives on
+// the server, this side only decodes.
 func TestWorkflowSummaryFieldProjection(t *testing.T) {
+	shared := loadSharedSummaries(t)
+
 	cases := []struct {
-		file        string
+		key         string
 		phase       string
+		phaseIndex  int
 		agentsDone  int
 		agentsTotal int
+		running     int
 		terminal    bool
 		outcome     string
-		hasTokens   bool
+		tokens      int
+		ticks       []string
 	}{
-		{"workflow_building.json", "building", 13, 17, false, "", true},
-		{"workflow_interrupted.json", "survey", 6, 16, true, "interrupted", true},
-		{"workflow_complete.json", "review", 29, 29, true, "complete", true},
+		{
+			key: "epic_cycle_progress", phase: "", phaseIndex: 0,
+			agentsDone: 29, agentsTotal: 29, running: 0,
+			terminal: true, outcome: "completed", tokens: 2137873,
+			ticks: []string{"done", "done", "done", "done", "done", "done", "done"},
+		},
+		{
+			key: "epic_cycle_interrupted", phase: "Explore", phaseIndex: 2,
+			agentsDone: 1, agentsTotal: 5, running: 4,
+			terminal: true, outcome: "interrupted", tokens: 68272,
+			ticks: []string{"done", "interrupted", "unreached", "unreached", "unreached", "unreached", "unreached"},
+		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.file, func(t *testing.T) {
-			wf := loadWorkflowFixture(t, tc.file)
+		t.Run(tc.key, func(t *testing.T) {
+			wf, ok := shared[tc.key]
+			if !ok {
+				t.Fatalf("shared fixture must carry %q", tc.key)
+			}
 			if wf.Label == "" {
 				t.Errorf("label must project (opaque 'slug — one-liner'), got empty")
 			}
 			if len(wf.Ticks) != 7 {
-				t.Errorf("expected seven phase ticks, got %d: %v", len(wf.Ticks), wf.Ticks)
+				t.Fatalf("expected seven phase ticks, got %d: %v", len(wf.Ticks), wf.Ticks)
 			}
-			for _, s := range wf.Ticks {
-				switch s {
-				case "done", "active", "future":
-				default:
-					t.Errorf("tick state must be done|active|future, got %q", s)
+			for i, s := range wf.Ticks {
+				if !validTickStates[s] {
+					t.Errorf("tick state must speak the D58 vocabulary, got %q", s)
+				}
+				if s != tc.ticks[i] {
+					t.Errorf("tick %d = %q, want %q", i, s, tc.ticks[i])
 				}
 			}
-			if wf.Phase != tc.phase {
-				t.Errorf("phase = %q, want %q", wf.Phase, tc.phase)
+			if wf.Phase != tc.phase || wf.PhaseIndex != tc.phaseIndex {
+				t.Errorf("phase = %q/%d, want %q/%d", wf.Phase, wf.PhaseIndex, tc.phase, tc.phaseIndex)
 			}
 			if wf.AgentsDone != tc.agentsDone || wf.AgentsTotal != tc.agentsTotal {
 				t.Errorf("agents = %d/%d, want %d/%d", wf.AgentsDone, wf.AgentsTotal, tc.agentsDone, tc.agentsTotal)
@@ -313,31 +357,41 @@ func TestWorkflowSummaryFieldProjection(t *testing.T) {
 			if wf.AgentsDone > wf.AgentsTotal {
 				t.Errorf("settled (%d) must never exceed total (%d)", wf.AgentsDone, wf.AgentsTotal)
 			}
+			if wf.Running != tc.running {
+				t.Errorf("running = %d, want %d", wf.Running, tc.running)
+			}
 			if wf.Terminal != tc.terminal {
-				t.Errorf("terminal = %v, want %v", wf.Terminal, tc.terminal)
+				t.Errorf("terminal? = %v, want %v", wf.Terminal, tc.terminal)
 			}
 			if wf.Outcome != tc.outcome {
 				t.Errorf("outcome = %q, want %q", wf.Outcome, tc.outcome)
 			}
-			if tc.terminal && wf.Outcome == "" {
-				t.Errorf("a terminal wave must carry an honest outcome word, got empty")
+			if wf.Tokens != tc.tokens {
+				t.Errorf("tokens = %d, want %d", wf.Tokens, tc.tokens)
 			}
-			if tc.hasTokens && wf.Tokens <= 0 {
-				t.Errorf("expected wire-carried tokens, got %d", wf.Tokens)
+			// timestamps are wire-read epoch ms — present here, never a string
+			if wf.StartedAt == nil || *wf.StartedAt <= 0 {
+				t.Errorf("started_at must decode as epoch ms, got %v", wf.StartedAt)
+			}
+			if wf.EndedAt != nil {
+				t.Errorf("ended_at is honestly nil until the D5 stamp, got %v", *wf.EndedAt)
 			}
 		})
 	}
 }
 
 // TestSessionSummaryDecodesWorkflow proves the compact summary rides on the
-// ChatSessionSummary list wire (nested `workflow` key) and decodes through the
-// alias — the field the picker reads. A plain session (no key) decodes to a nil
-// Workflow, the compile-time signal that the row renders as today.
+// ChatSessionSummary list wire (nested `workflow` key, SIBLING `epic` key — the
+// exact bytes sidebar_json emits) and decodes through the alias — the fields
+// the picker reads. A plain session (no keys) decodes to nil Workflow/Epic, the
+// compile-time signal that the row renders as today.
 func TestSessionSummaryDecodesWorkflow(t *testing.T) {
 	withWF := []byte(`{"id":"s1","title":"cycle","message_count":3,
-		"workflow":{"ticks":["done","active","future"],"phase":"survey",
-		"agents_done":5,"agents_total":17,"terminal":false,
-		"epic_goal":{"title":"Epic Cycle","slices_closed":2,"slices_total":5}}}`)
+		"workflow":{"ticks":["done","active","future"],"phase":"Survey",
+		"agents_done":5,"agents_total":17,"running":12,"terminal?":false,
+		"outcome":"live","started_at":1783633546962,"ended_at":null},
+		"epic":{"id":"task-x","title":"Epic Cycle","slices_done":2,
+		"slices_total":5,"wave_status":"wave: building 5 slices"}}`)
 	var s SessionSummary
 	if err := json.Unmarshal(withWF, &s); err != nil {
 		t.Fatalf("decode summary: %v", err)
@@ -348,8 +402,17 @@ func TestSessionSummaryDecodesWorkflow(t *testing.T) {
 	if s.Workflow.AgentsDone != 5 || s.Workflow.AgentsTotal != 17 {
 		t.Fatalf("counter must project, got %d/%d", s.Workflow.AgentsDone, s.Workflow.AgentsTotal)
 	}
-	if s.Workflow.EpicGoal == nil || s.Workflow.EpicGoal.SlicesTotal != 5 {
-		t.Fatalf("epic goal must project, got %+v", s.Workflow.EpicGoal)
+	if s.Workflow.Terminal || s.Workflow.Outcome != "live" {
+		t.Fatalf("lifecycle must project (terminal?/outcome), got %v/%q", s.Workflow.Terminal, s.Workflow.Outcome)
+	}
+	if s.Workflow.StartedAt == nil || *s.Workflow.StartedAt != 1783633546962 {
+		t.Fatalf("started_at must decode as epoch ms, got %v", s.Workflow.StartedAt)
+	}
+	if s.Epic == nil || s.Epic.SlicesDone != 2 || s.Epic.SlicesTotal != 5 {
+		t.Fatalf("sibling epic goal must project, got %+v", s.Epic)
+	}
+	if s.Epic.WaveStatus != "wave: building 5 slices" {
+		t.Fatalf("wave_status heartbeat must project, got %q", s.Epic.WaveStatus)
 	}
 
 	plain := []byte(`{"id":"s2","title":"chat","message_count":1}`)
@@ -357,8 +420,8 @@ func TestSessionSummaryDecodesWorkflow(t *testing.T) {
 	if err := json.Unmarshal(plain, &p); err != nil {
 		t.Fatalf("decode plain: %v", err)
 	}
-	if p.Workflow != nil {
-		t.Fatal("a plain session must decode to a nil workflow (renders as today)")
+	if p.Workflow != nil || p.Epic != nil {
+		t.Fatal("a plain session must decode to nil workflow/epic (renders as today)")
 	}
 }
 
@@ -368,7 +431,9 @@ func TestSessionSummaryDecodesWorkflow(t *testing.T) {
 // is what makes '13/17 agents done' visible in the session list.
 func TestWorkflowCardLinesRender(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
-	lines := workflowCardLines(80, &wf)
+	epic := &EpicGoal{ID: "task-x", Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5,
+		WaveStatus: "wave: building 5 slices"}
+	lines := workflowCardLines(80, &wf, epic)
 	if len(lines) != 2 {
 		t.Fatalf("a workflow row with an epic goal grows two lines, got %d:\n%v", len(lines), lines)
 	}
@@ -376,7 +441,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	if !strings.Contains(out, "13/17") {
 		t.Errorf("tick line must carry the settled/total counter 13/17, got:\n%s", out)
 	}
-	if !strings.Contains(out, "building") {
+	if !strings.Contains(out, "Build") {
 		t.Errorf("tick line must carry the active phase word, got:\n%s", out)
 	}
 	if !strings.Contains(out, "●") || !strings.Contains(out, "◉") || !strings.Contains(out, "○") {
@@ -385,27 +450,31 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	if !strings.Contains(out, "1.5M") {
 		t.Errorf("tick line must render wire-carried tokens (1.5M), got:\n%s", out)
 	}
-	if !strings.Contains(out, "slices") {
+	if !strings.Contains(out, "2/5 slices") {
 		t.Errorf("epic-goal line must carry the slices counter, got:\n%s", out)
 	}
+	if !strings.Contains(out, "wave: building 5 slices") {
+		t.Errorf("epic-goal line must carry the wave_status heartbeat, got:\n%s", out)
+	}
 
-	// A terminal wave settles honestly to its outcome word, never a stuck phase.
-	interrupted := loadWorkflowFixture(t, "workflow_interrupted.json")
-	iout := strings.Join(workflowCardLines(80, &interrupted), "\n")
+	// A terminal wave settles honestly to its lifecycle word, never a stuck
+	// phase — straight off s1's shared interrupted fold.
+	interrupted := loadSharedSummaries(t)["epic_cycle_interrupted"]
+	iout := strings.Join(workflowCardLines(80, &interrupted, nil), "\n")
 	if !strings.Contains(iout, "interrupted") {
 		t.Errorf("an interrupted wave must render 'interrupted', got:\n%s", iout)
 	}
-	if strings.Contains(iout, "survey ·") {
-		t.Errorf("a settled wave must not show a live phase word, got:\n%s", iout)
+	if !strings.Contains(iout, "✕") {
+		t.Errorf("the dead-frontier tick must render the interrupted glyph, got:\n%s", iout)
 	}
-	// No epic goal on this fixture → exactly one line (no fabricated goal line).
-	if got := len(workflowCardLines(80, &interrupted)); got != 1 {
+	// No epic goal → exactly one line (no fabricated goal line).
+	if got := len(workflowCardLines(80, &interrupted, nil)); got != 1 {
 		t.Errorf("a goal-less workflow row grows exactly one line, got %d", got)
 	}
 
 	// A nil summary adds nothing — the minimalism contract.
-	if workflowCardLines(80, nil) != nil {
-		t.Fatal("a nil workflow summary must add no lines")
+	if workflowCardLines(80, nil, epic) != nil {
+		t.Fatal("a nil workflow summary must add no lines (even with a stray epic)")
 	}
 }
 
@@ -414,12 +483,14 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 // from phase_index/phases_total (NOT a rail fold) — done before the active phase,
 // active at it, future after.
 func TestPhaseTicksFallback(t *testing.T) {
+	// phase_index is 1-based on the wire (the journey's phase index): index 2
+	// means the SECOND phase breathes.
 	wf := SessionWorkflow{PhaseIndex: 2, PhasesTotal: 5}
 	ticks := phaseTicks(&wf)
 	if len(ticks) != 5 {
 		t.Fatalf("derived ticks must honour phases_total, got %d", len(ticks))
 	}
-	want := []string{"done", "done", "active", "future", "future"}
+	want := []string{"done", "active", "future", "future", "future"}
 	for i := range want {
 		if ticks[i] != want[i] {
 			t.Fatalf("derived ticks = %v, want %v", ticks, want)
@@ -442,7 +513,8 @@ func TestPickerRowsWorkflowMultiline(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	m := Model{width: 80, sessions: []SessionSummary{
 		{ID: "plain", Title: "just a chat", MessageCount: 4},
-		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, Workflow: &wf},
+		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, Workflow: &wf,
+			Epic: &EpicGoal{Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5}},
 	}}
 	rows := m.pickerRows()
 	if len(rows) != 3 { // "+ new session" + two sessions

@@ -180,6 +180,9 @@ type ChatSessionSummary struct {
 	// Workflow is the compact epic-cycle summary (wsc D10/D12). Present only for
 	// a session running/settling a workflow; nil for plain chats.
 	Workflow *ChatWorkflowSummary `json:"workflow,omitempty"`
+	// Epic is the epic-goal line (wsc D9), a SIBLING of workflow on the wire —
+	// present only when the ledger resolves the session's one-hop epic chain.
+	Epic *ChatEpicGoal `json:"epic,omitempty"`
 }
 
 // ChatWorkflowSummary is the COMPACT, pre-folded epic-cycle workflow summary the
@@ -195,41 +198,47 @@ type ChatWorkflowSummary struct {
 	// Label is the workflow's "slug — one-liner" combined string. It is OPAQUE
 	// (never split on the em-dash, per the survey's naming correction).
 	Label string `json:"label,omitempty"`
-	// Ticks are the seven epic-cycle phase states, each "done" | "active" |
-	// "future". The picker renders one glyph per tick. When absent, the render
-	// falls back to PhaseIndex/PhasesTotal (presentation-only, not a rail fold).
-	Ticks       []string `json:"ticks,omitempty"`
-	Phase       string   `json:"phase,omitempty"`
-	PhaseIndex  int      `json:"phase_index,omitempty"`
-	PhasesTotal int      `json:"phases_total,omitempty"`
+	// Ticks are the per-phase journey states in phase order — the D58 truth
+	// table's vocabulary: "done" | "active" | "interrupted" | "future" |
+	// "skipped" | "unreached". The picker renders one glyph per tick. When
+	// absent, the render falls back to PhaseIndex/PhasesTotal
+	// (presentation-only, not a rail fold).
+	Ticks []string `json:"ticks,omitempty"`
+	// Phase/PhaseIndex name the breathing (active/interrupted) phase; both are
+	// null on the wire once the cycle settles (PhaseIndex is 1-based).
+	Phase       string `json:"phase,omitempty"`
+	PhaseIndex  int    `json:"phase_index,omitempty"`
+	PhasesTotal int    `json:"phases_total,omitempty"`
 	// AgentsDone counts settled agents = done+failed (so 13/17 settles honestly,
 	// Claude-Code-style); AgentsTotal is the fleet size.
 	AgentsDone  int `json:"agents_done,omitempty"`
 	AgentsTotal int `json:"agents_total,omitempty"`
 	Running     int `json:"running,omitempty"`
-	// Terminal is true once the wave has settled; Outcome is its terminal word
-	// (e.g. "complete", a grade, or "interrupted").
-	Terminal bool   `json:"terminal,omitempty"`
+	// Terminal is true once the wave has settled (the wire key is the Elixir
+	// atom `terminal?` verbatim); Outcome is the entry lifecycle word:
+	// "live" | "completed" | "interrupted".
+	Terminal bool   `json:"terminal?,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 	// Tokens is the settle-on-state fleet token total; 0/absent => not rendered.
-	Tokens    int    `json:"tokens,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
-	EndedAt   string `json:"ended_at,omitempty"`
-
-	// EpicGoal is the second card line's task-spine truth (wsc D9): the epic this
-	// wave advances. Present only when the wire carries it (the session's claimed
-	// build task resolves an epic parent); nil => no goal line.
-	EpicGoal *ChatEpicGoal `json:"epic_goal,omitempty"`
+	Tokens int `json:"tokens,omitempty"`
+	// StartedAt/EndedAt are wire-carried epoch-ms figures (min agent startedAt /
+	// the entry's stamped end_time); nil on the wire when absent — never
+	// synthesised (D15).
+	StartedAt *int64 `json:"started_at,omitempty"`
+	EndedAt   *int64 `json:"ended_at,omitempty"`
 }
 
 // ChatEpicGoal is the epic-goal line's compact projection (wsc D9): the epic
-// task title and its slices-closed/total counter. "PRs open" is intentionally
-// ABSENT — it has no data source anywhere in the tree (wsc D8: dropped, never
-// synthesised — fabricating it would violate the honesty north star).
+// task id/title, its slices-done/total counter, and the epic's wave_status
+// heartbeat. "PRs open" is intentionally ABSENT — it has no data source
+// anywhere in the tree (wsc D8: dropped, never synthesised — fabricating it
+// would violate the honesty north star).
 type ChatEpicGoal struct {
-	Title        string `json:"title,omitempty"`
-	SlicesClosed int    `json:"slices_closed,omitempty"`
-	SlicesTotal  int    `json:"slices_total,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	SlicesDone  int    `json:"slices_done,omitempty"`
+	SlicesTotal int    `json:"slices_total,omitempty"`
+	WaveStatus  string `json:"wave_status,omitempty"`
 }
 
 // ChatRailEntry is one task's cell of the agents-rail snapshot (charter D47):

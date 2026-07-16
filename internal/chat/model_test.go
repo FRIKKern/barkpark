@@ -93,11 +93,11 @@ func TestPickerRendersWorkflowCard(t *testing.T) {
 		AgentsDone:  13,
 		AgentsTotal: 17,
 		Tokens:      1543000,
-		EpicGoal:    &EpicGoal{Title: "Epic Cycle chat", SlicesClosed: 2, SlicesTotal: 5},
 	}
 	f := &fakeTransport{summaries: []SessionSummary{
 		{ID: "plain", Title: "just chatting", MessageCount: 2},
-		{ID: "cycle", Title: "wave run", MessageCount: 9, Workflow: &wf},
+		{ID: "cycle", Title: "wave run", MessageCount: 9, Workflow: &wf,
+			Epic: &EpicGoal{Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5}},
 	}}
 	m := newTestModel(f)
 	m.width, m.height = 80, 24

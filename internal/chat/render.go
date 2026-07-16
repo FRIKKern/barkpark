@@ -462,19 +462,19 @@ func cardBody(msg Message) string {
 
 // workflowCardLines renders the two epic-cycle card lines for a workflow row,
 // each pre-indented two columns so it aligns under the session title past the
-// picker's cursor gutter. Line one: seven phase ticks + the phase word (or the
+// picker's cursor gutter. Line one: the phase ticks + the phase word (or the
 // terminal outcome) + the settled/total agent counter (13/17, Claude-Code-style),
 // plus the token total when the wire carries one. Line two (only when the wire
-// carries an epic goal, wsc D9): the epic title + slices-closed/total. Returns
-// nil for a nil summary — the caller adds nothing, so a non-workflow row is
-// byte-identical to today.
-func workflowCardLines(w int, wf *SessionWorkflow) []string {
+// carries the SIBLING epic goal, wsc D9): the epic title + slices-done/total +
+// wave_status. Returns nil for a nil summary — the caller adds nothing, so a
+// non-workflow row is byte-identical to today.
+func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal) []string {
 	if wf == nil {
 		return nil
 	}
 	out := []string{"  " + workflowTickLine(w-2, wf)}
-	if wf.EpicGoal != nil {
-		out = append(out, "  "+workflowGoalLine(w-2, wf.EpicGoal))
+	if epic != nil {
+		out = append(out, "  "+workflowGoalLine(w-2, epic))
 	}
 	return out
 }
@@ -491,37 +491,45 @@ func workflowTickLine(w int, wf *SessionWorkflow) string {
 	counter := fmt.Sprintf("%d/%d", wf.AgentsDone, wf.AgentsTotal)
 	word := wf.Phase
 	if wf.Terminal {
+		// the wire's lifecycle word verbatim ("completed"/"interrupted") — an
+		// honest settle, never a stuck phase word
 		word = wf.Outcome
 		if word == "" {
-			word = "complete"
+			word = "completed"
 		}
 	} else if word == "" {
 		word = "working"
 	}
 	line := ticks.String() + dimStyle.Render(" · ") + word + dimStyle.Render(" · ") + counter
 	if wf.Tokens > 0 {
-		line += dimStyle.Render("  ·  ↓"+formatTokens(wf.Tokens)+" tok")
+		line += dimStyle.Render("  ·  ↓" + formatTokens(wf.Tokens) + " tok")
 	}
 	return truncate(line, w)
 }
 
-// workflowGoalLine paints the epic-goal card line: the epic title and its
-// slices-closed/total counter (wsc D9). "PRs open" is intentionally absent (D8 —
-// no data source; never fabricated).
+// workflowGoalLine paints the epic-goal card line — the same vocabulary the
+// Studio sidebar renders: ↳ epic title · slices done/total · wave_status
+// heartbeat when the ledger carries one (wsc D9). "PRs open" is intentionally
+// absent (D8 — no data source; never fabricated).
 func workflowGoalLine(w int, g *EpicGoal) string {
 	title := strings.TrimSpace(g.Title)
 	if title == "" {
 		title = "epic goal"
 	}
-	meta := fmt.Sprintf("%d/%d slices", g.SlicesClosed, g.SlicesTotal)
+	meta := fmt.Sprintf("%d/%d slices", g.SlicesDone, g.SlicesTotal)
+	if hb := strings.TrimSpace(g.WaveStatus); hb != "" {
+		meta += " · " + hb
+	}
 	line := dimStyle.Render("↳ ") + title + dimStyle.Render("  ·  "+meta)
 	return truncate(line, w)
 }
 
-// phaseTicks is the seven phase states to draw. It prefers the wire ticks
-// verbatim (the server's D3 projection); when they are absent it derives them
-// from PhaseIndex/PhasesTotal — presentation-only geometry, NOT a rail fold — so
-// a summary that carries only the phase counters still shows an honest strip.
+// phaseTicks is the phase states to draw. It prefers the wire ticks verbatim
+// (the server's D3 projection — always present on the real wire); when they are
+// absent it derives them from PhaseIndex/PhasesTotal — presentation-only
+// geometry, NOT a rail fold — so a summary that carries only the phase counters
+// still shows an honest strip. PhaseIndex is 1-based (the journey's phase
+// index); 0 means "no breathing phase named".
 func phaseTicks(wf *SessionWorkflow) []string {
 	if len(wf.Ticks) > 0 {
 		return wf.Ticks
@@ -533,12 +541,12 @@ func phaseTicks(wf *SessionWorkflow) []string {
 	ticks := make([]string, total)
 	for i := range ticks {
 		switch {
-		case i < wf.PhaseIndex:
-			ticks[i] = "done"
-		case i == wf.PhaseIndex && !wf.Terminal:
-			ticks[i] = "active"
 		case wf.Terminal:
 			ticks[i] = "done"
+		case i+1 < wf.PhaseIndex:
+			ticks[i] = "done"
+		case i+1 == wf.PhaseIndex:
+			ticks[i] = "active"
 		default:
 			ticks[i] = "future"
 		}
@@ -546,15 +554,19 @@ func phaseTicks(wf *SessionWorkflow) []string {
 	return ticks
 }
 
-// tickGlyph is the per-phase glyph: done ● (evergreen), active ◉ (the live
-// phase), future ○ (dim). Unknown states render as future (forward-compat, never
-// a crash) — the same tolerance the rest of the decoder shows.
+// tickGlyph is the per-phase glyph over the journey's six-state vocabulary:
+// done ● (evergreen), active ◉ (the live phase), interrupted ✕ (the dead
+// frontier — honesty over symmetry), and future/skipped/unreached a dim ○.
+// Unknown states render dim too (forward-compat, never a crash) — the same
+// tolerance the rest of the decoder shows.
 func tickGlyph(state string) string {
 	switch state {
 	case "done":
 		return tickDoneStyle.Render("●")
 	case "active":
 		return tickActiveStyle.Render("◉")
+	case "interrupted":
+		return noticeStyle.Render("✕")
 	default:
 		return dimStyle.Render("○")
 	}
@@ -623,7 +635,7 @@ func (m Model) pickerRows() []string {
 			meta += " · " + age
 		}
 		row := fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
-		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow); len(extra) > 0 {
+		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic); len(extra) > 0 {
 			row += "\n" + strings.Join(extra, "\n")
 		}
 		rows = append(rows, row)
