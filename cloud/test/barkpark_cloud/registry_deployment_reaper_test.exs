@@ -370,4 +370,34 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     assert [%Deployment{id: id}] = Registry.list_orphaned_static_deployments()
     assert id == d.id
   end
+
+  ## 9. (search-template W6) NODE rows strand identically — W7 put node on the
+  ##    same box relay, so a requeued node row also has no claimer. Live-caught
+  ##    twice in one evening (a CP self-deploy, then a box self-deploy, each
+  ##    killed an in-flight ember build). The orphan sweep must cover it.
+
+  test "a requeued (orphaned) NODE row is re-driven too — same box relay, same recovery" do
+    bp = team_fixture() |> barkpark_fixture()
+
+    site =
+      static_site_fixture(bp, %{
+        kind: "node",
+        framework: "nextjs",
+        template: "search-starter"
+      })
+
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "bn1", content_rev: "cn1"})
+
+    Repo.update_all(
+      from(x in Deployment, where: x.id == ^d.id),
+      set: [claim_epoch: 1]
+    )
+
+    # The container builder is still fenced off node rows.
+    assert {:error, :no_queued} = Registry.claim_next_deployment("container-builder-1")
+
+    assert {:ok, %{resumed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert [%Deployment{id: id}] = Registry.list_orphaned_static_deployments()
+    assert id == d.id
+  end
 end
