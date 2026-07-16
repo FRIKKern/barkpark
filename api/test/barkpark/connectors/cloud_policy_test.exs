@@ -259,6 +259,13 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
 
       idx = Enum.find_index(args, &(&1 == "--settings"))
       assert Enum.at(args, idx + 1) == CloudPolicy.settings_deny_json()
+
+      # W14 (D137/D141): every Cloud turn ALWAYS carries `--keep-sandbox` pre-`--`
+      # (teardown stops-not-removes; the sandbox survives to the next turn). The
+      # session flags are additive — the deny belt is invariant across turns.
+      sep = Enum.find_index(args, &(&1 == "--"))
+      keep = Enum.find_index(args, &(&1 == "--keep-sandbox"))
+      assert is_integer(keep) and keep < sep, "--keep-sandbox must ride pre-`--`"
     end
 
     defp decode_mcp_flag(args) do
@@ -312,6 +319,47 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
              }
 
       assert_full_belt(a2)
+    end
+
+    # W14 session identity (D135/D137/D139) rides ON TOP of the deny belt: a bound
+    # session adds `--sandbox-id`/`--resume`, a fresh session adds `--session-id`,
+    # and either way the full W12/W13 belt is invariant. Resume-ness derives from
+    # the BINDING, never `resume:`/message_count (D139 LAW).
+    test "session identity is additive to the belt — binding ⇒ --sandbox-id + --resume; fresh ⇒ --session-id (D135/D139)",
+         %{ws: ws} do
+      uuid = "22222222-2222-4222-8222-222222222222"
+
+      # Fresh session (no binding): --session-id post-`--`, --keep-sandbox pre-`--`,
+      # NO --sandbox-id. A `resume: true` transport flag does NOT force --resume.
+      fresh =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: ws.id,
+          session_id: uuid,
+          resume: true
+        })
+
+      assert Enum.chunk_every(fresh, 2, 1) |> Enum.member?(["--session-id", uuid])
+      refute "--resume" in fresh
+      refute "--sandbox-id" in fresh
+      assert_full_belt(fresh)
+
+      # Bound session: --sandbox-id <id> --keep-sandbox pre-`--`, --resume post-`--`,
+      # NEVER --session-id — even with `resume: false`.
+      bound =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: ws.id,
+          session_id: uuid,
+          resume: false,
+          cloud_sandbox_id: "sbx_policy_test_1"
+        })
+
+      sep = Enum.find_index(bound, &(&1 == "--"))
+      sbx = Enum.find_index(bound, &(&1 == "--sandbox-id"))
+      assert is_integer(sbx) and sbx < sep, "--sandbox-id must ride pre-`--`"
+      assert Enum.at(bound, sbx + 1) == "sbx_policy_test_1"
+      assert Enum.chunk_every(bound, 2, 1) |> Enum.member?(["--resume", uuid])
+      refute "--session-id" in bound
+      assert_full_belt(bound)
     end
   end
 end
