@@ -1,0 +1,299 @@
+COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" VARIABLES
+  VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
+  VARIABLE 2 "CountBefore" TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). Opaque numeric literal, no casing transform. Scaffy has no arithmetic, so the count crosses as a declared pair; the W2 validator lints CountAfter = CountBefore + 1." EXAMPLES "42"
+  VARIABLE 3 "CountAfter" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. Opaque numeric literal, no casing transform." EXAMPLES "43"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THIS COMMAND HONESTLY DOES
+#
+# 3 required code surfaces + fail-closed JS test parity + optional CSS and
+# classification. Never "4 surfaces auto-injected":
+#
+#   ● internal/pdrender/{{.block_name}}.go          created — Go renderer
+#   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test
+#   ○ internal/pdrender/pdrender.go                 injected — DefaultRegistry entry
+#   ○ js/packages/react/src/blocks/core.ts          injected ×2 — emitter + map entry
+#   ○ js/packages/react/tests/PortableDoc.test.tsx  injected ×2 — CASES fixture + count bump
+#   ○ api/lib/barkpark/portable_doc/render/compose.ex injected — compose_block clause
+#
+# The JS surface is FAIL-CLOSED at four edits: the react test suite asserts
+# CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry
+# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The Go
+# registry is OPEN (no count test) and the Elixir clause set is OPEN (unknown
+# types degrade through the catch-all) — for those two surfaces the MARK-planted
+# injection is the whole story.
+#
+# The starter render is identical on every surface: the block's `text` attr in
+# a `bp-{{.block-name}}` wrapper (terminal: sanitized + width-wrapped text).
+# Grow each surface from its exemplar afterwards; the scaffold guarantees the
+# block EXISTS everywhere with parity at birth, not that it is finished.
+#
+# GUARDS: every payload below plants a `scaffy:add-block-type … MARK:…` comment,
+# so INSERT guards derive from the payload itself (D3c — the mark line IS the
+# re-run check). The one REPLACE carries an explicit ASLONG because a REPLACE
+# without a payload-derived guard is a lint error (A4).
+#
+# CONDITIONAL / MANUAL STEPS (prose, deliberately NOT blind ops — read these):
+#
+# 1. Composition tier (conditional). tiers.ex classifies every block type as
+#    :element | :widget | :section (api/lib/barkpark/portable_doc/tiers.ex).
+#    An UNCLASSIFIED type degrades safely to :element (slots.ex:98 —
+#    `tier_of(block) || :element`), so a leaf block needs nothing. Add
+#    "{{.block-name}}" to the tiers.ex word-list ONLY if the block composes
+#    other blocks (:widget) or owns its children's layout (:section).
+#
+# 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs
+#    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`
+#    pre-rendered-HTML kind, which walk.ex already passes through verbatim
+#    (walk.ex:153, `def walk(%{"kind" => "_raw", "html" => html}, …), do: html`
+#    — the same hatch ~68 sibling compose clauses use). If you later replace
+#    the starter with a genuinely new node kind, THAT is when walk.ex gets a
+#    clause — by hand, next to its siblings.
+#
+# 3. Block-view CSS (optional). If the block needs styling beyond bare text,
+#    add a rule to api/assets/paper-surface/paper-surface.css scoped as
+#    `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout` at
+#    paper-surface.css:213). NEVER inject root.html.heex — it has no per-type
+#    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run
+#    rendered fine with zero CSS; this step is genuinely optional.
+#
+# 4. Count prose (optional tidy). Three comments mention the registry count in
+#    prose and go stale by one: the test title "covers EXACTLY the 42 in-scope
+#    types" (PortableDoc.test.tsx:309), the CASES doc comment ("all 42 render",
+#    PortableDoc.test.tsx:12), and the REGISTERED_TYPES doc comment ("the 42
+#    in-scope PortableDocument types", src/blocks/registry.ts). Cosmetic — no
+#    assertion reads them; tidy them when you touch those files.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────
+
+# Topical renderer file. Implements the Renderer interface
+# (pdrender.go:168, `Render(b Block, ctx RenderCtx) []string`). Modeled on
+# eyebrowRenderer (richblocks.go:389) — the minimal single-attr exemplar; see
+# gaugelist.go for a full data block. Helpers used: attrStr (attrs.go:16),
+# sanitizeText (inline.go:427 — strips control bytes so a hostile `text` can't
+# inject ANSI), wrapLines (blocks.go:15).
+CREATE FILE IF ABSENT "internal/pdrender/{{.block_name}}.go"
+WITH
+::: {{.block-name}} renderer :::
+package pdrender
+
+// ── {{.block-name}} ─────────────────────────────────────────────────────────
+// Mirrors compose_block({{.block-name}}) (compose.ex): the starter render is
+// the block's `text` attr, sanitized and width-wrapped. Empty text renders
+// nothing (honest empty state — no phantom blank line in the document flow).
+// Grow this into the block's real terminal form; eyebrowRenderer
+// (richblocks.go) shows themed styling, gaugelist.go a full data block.
+type {{.blockName}}Renderer struct{}
+
+func ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string {
+	text := sanitizeText(attrStr(b.Attrs, "text"))
+	if text == "" {
+		return nil
+	}
+	return wrapLines(text, ctx.Width)
+}
+::: {{.block-name}} renderer :::
+
+# Named test — the scoped ASSERT CMD below runs exactly this (never the whole
+# pdrender suite: worktree-pollution red). testRegistry() (render_test.go:27)
+# pins the lipgloss profile so output is byte-stable; going through the
+# registry (not the bare struct) also proves the DefaultRegistry injection.
+CREATE FILE IF ABSENT "internal/pdrender/{{.block_name}}_test.go"
+WITH
+::: {{.block-name}} test :::
+package pdrender
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+// Test{{.BlockName}}Renderer proves the {{.block-name}} block renders its text
+// THROUGH the registry — one assertion covering both the renderer and its
+// DefaultRegistry registration.
+func Test{{.BlockName}}Renderer(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "{{.block-name}}", Attrs: map[string]any{"text": "hello from {{.block-name}}"}}
+	got := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), "\n"))
+	if !strings.Contains(got, "hello from {{.block-name}}") {
+		t.Fatalf("{{.block-name}} render missing text, got %q", got)
+	}
+}
+
+// Test{{.BlockName}}RendererEmptyIsSilent pins the honest empty state: a
+// {{.block-name}} block with no text contributes zero lines.
+func Test{{.BlockName}}RendererEmptyIsSilent(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "{{.block-name}}", Attrs: map[string]any{}}
+	if lines := reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}); len(lines) != 0 {
+		t.Fatalf("empty {{.block-name}} should render nothing, got %d lines", len(lines))
+	}
+}
+::: {{.block-name}} test :::
+
+# Register in the DefaultRegistry block map (pdrender.go:249-361). The map is
+# OPEN — assignments are order-independent and there is no count test (a 43rd
+# type left the full suite green in the proof run). Anchor is the heading
+# registration, the map's first and structurally most stable line (unique,
+# grep -cF = 1). Guard derives from the payload's MARK line.
+IN "internal/pdrender/pdrender.go"
+### Register {{.block-name}} in the DefaultRegistry block map
+INSERT AFTER FIRST
+::: registry head anchor :::
+	r.blocks["heading"] = headingRenderer{ir: ir}
+::: registry head anchor :::
+WITH
+::: {{.block-name}} registration :::
+	// scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}
+	r.blocks["{{.block-name}}"] = {{.blockName}}Renderer{}
+::: {{.block-name}} registration :::
+MARK "go-registry-{{.block-name}}"
+
+# ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────
+
+# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,
+# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml
+# and str are already in scope in core.ts. Guard derives from the MARK line.
+IN "js/packages/react/src/blocks/core.ts"
+### Add the {{.block-name}} emitter beside the eyebrow exemplar
+INSERT AFTER FIRST
+::: eyebrow emitter anchor :::
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+::: eyebrow emitter anchor :::
+WITH
+::: {{.block-name}} emitter :::
+
+// scaffy:add-block-type {{.BlockName}} MARK:js-emitter-{{.block-name}}
+// Mirrors compose_block({{.block-name}}): starter emit — `text` escaped into
+// the bp-{{.block-name}} wrapper, byte-identical to the Elixir _raw clause.
+const {{.blockName}}: Emit = (b) => `<div class="bp-{{.block-name}}">${escapeHtml(str(b.text))}</div>`
+::: {{.block-name}} emitter :::
+MARK "js-emitter-{{.block-name}}"
+
+# Edit 2/4: the coreEmitters map entry (core.ts:700). registry.ts spreads
+# coreEmitters into DISPATCH, and REGISTERED_TYPES = Object.keys(DISPATCH) —
+# this single entry is what makes the type exist for the SDK. The map's last
+# entry `roadmap,` (unique at this indent, grep -c = 1) KEEPS its trailing
+# comma, so a plain INSERT after it is safe — this is not an A3 last-element
+# case. Key is quoted because kebab-case types need it ('status-legend' sets
+# the precedent). Guard derives from the MARK line.
+IN "js/packages/react/src/blocks/core.ts"
+### Register the {{.block-name}} emitter in the coreEmitters map
+INSERT AFTER FIRST
+::: coreEmitters tail anchor :::
+  roadmap,
+::: coreEmitters tail anchor :::
+WITH
+::: {{.block-name}} map entry :::
+  // scaffy:add-block-type {{.BlockName}} MARK:js-map-{{.block-name}}
+  '{{.block-name}}': {{.blockName}},
+::: {{.block-name}} map entry :::
+MARK "js-map-{{.block-name}}"
+
+# Edit 3/4: the CASES fixture. The suite's self-proof test asserts
+# CASES ≡ REGISTERED_TYPES (PortableDoc.test.tsx:310-313) — without this
+# fixture the toEqual reds. Anchor is the heading case, the array's first and
+# most stable row (unique). Marker = the wrapper class the emitter writes.
+# Guard derives from the MARK line.
+IN "js/packages/react/tests/PortableDoc.test.tsx"
+### Add the {{.block-name}} fixture to CASES
+INSERT AFTER FIRST
+::: cases head anchor :::
+  { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
+::: cases head anchor :::
+WITH
+::: {{.block-name}} case :::
+  // scaffy:add-block-type {{.BlockName}} MARK:js-case-{{.block-name}}
+  { type: '{{.block-name}}', block: { type: '{{.block-name}}', text: 'Starter' }, marker: 'bp-{{.block-name}}' },
+::: {{.block-name}} case :::
+MARK "js-case-{{.block-name}}"
+
+# Edit 4/4: the count bump — the fail-closed pin itself. A REPLACE, not an
+# INSERT: the assertion line must change in place. The replacement does not
+# contain the target (CountBefore ≠ CountAfter), but A4 hygiene still applies:
+# the explicit ASLONG below matches the MARK line this op writes, and re-runs
+# anchor at that mark, never at the mutated count. A second add-block-type run
+# (a different block) is authored against the THEN-current count pair — its
+# target is the new toHaveLength line, and its own mark stacks above it.
+IN "js/packages/react/tests/PortableDoc.test.tsx"
+### Bump the registry count assertion from {{.CountBefore}} to {{.CountAfter}}
+REPLACE
+::: count assertion anchor :::
+    expect(registered).toHaveLength({{.CountBefore}})
+::: count assertion anchor :::
+WITH
+::: {{.block-name}} count bump :::
+    // scaffy:add-block-type {{.BlockName}} MARK:js-count-{{.block-name}}
+    expect(registered).toHaveLength({{.CountAfter}})
+::: {{.block-name}} count bump :::
+MARK "js-count-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:js-count-{{.block-name}}"
+
+# ── Surface 3: Elixir (api compose) ──────────────────────────────────────────
+
+# One compose_block/2 clause, inserted BEFORE the unknown-type catch-all
+# (`def compose_block(%{"type" => type}, _style)`, compose.ex:1190) — clause
+# order is load-bearing: anything after the catch-all is unreachable. The
+# anchor is the END of the last typed clause (the chart email clause,
+# compose.ex:1180-1181; `chart_email_html(b)` is unique, grep -cF = 1).
+# Inserting AFTER it — rather than before the catch-all's comment — keeps the
+# catch-all's own doc comment attached to its clause. render.ex is UNTOUCHED:
+# render_block/2 (render.ex:182) is the entry point and dispatches every type
+# through compose; it needs zero edits. Guard derives from the MARK line.
+IN "api/lib/barkpark/portable_doc/render/compose.ex"
+### Add the {{.block-name}} compose clause before the unknown-type catch-all
+INSERT AFTER FIRST
+::: last typed clause anchor :::
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
+  end
+::: last typed clause anchor :::
+WITH
+::: {{.block-name}} compose clause :::
+
+  # scaffy:add-block-type {{.BlockName}} MARK:ex-compose-{{.block-name}}
+  # Starter compose for `{{.block-name}}`: the block's `text` attr escaped into
+  # its bp-{{.block-name}} wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  def compose_block(%{"type" => "{{.block-name}}"} = b, _style) do
+    text = stringish(Map.get(b, "text", ""))
+
+    %{
+      "kind" => "_raw",
+      "html" => ~s(<div class="bp-{{.block-name}}">) <> Util.escape_html(text) <> ~s(</div>)
+    }
+  end
+::: {{.block-name}} compose clause :::
+MARK "ex-compose-{{.block-name}}"
+
+# ── Post-conditions ──────────────────────────────────────────────────────────
+
+# Per-surface file asserts — each string is a verbatim substring of what an op
+# above writes (ASCII, brace-free).
+ASSERT FILE "internal/pdrender/{{.block_name}}.go" CONTAINS "func ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string"
+ASSERT FILE "internal/pdrender/{{.block_name}}_test.go" CONTAINS "func Test{{.BlockName}}Renderer(t *testing.T)"
+ASSERT FILE "internal/pdrender/pdrender.go" CONTAINS "MARK:go-registry-{{.block-name}}"
+ASSERT FILE "js/packages/react/src/blocks/core.ts" CONTAINS "MARK:js-emitter-{{.block-name}}"
+ASSERT FILE "js/packages/react/src/blocks/core.ts" CONTAINS "MARK:js-map-{{.block-name}}"
+ASSERT FILE "js/packages/react/tests/PortableDoc.test.tsx" CONTAINS "MARK:js-case-{{.block-name}}"
+ASSERT FILE "js/packages/react/tests/PortableDoc.test.tsx" CONTAINS "toHaveLength({{.CountAfter}})"
+ASSERT FILE "api/lib/barkpark/portable_doc/render/compose.ex" CONTAINS "MARK:ex-compose-{{.block-name}}"
+
+# Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the
+# NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)
+# — never the whole pdrender suite. The react vitest run is the fail-closed
+# proof: it reds unless all four JS edits landed. Every Elixir gate is TIER ci
+# until scoped local mix test is proven safe.
+ASSERT CMD "go vet ./internal/pdrender/..."
+ASSERT CMD "CC=/usr/bin/clang go build ./internal/pdrender/"
+ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1"
+ASSERT CMD "cd js/packages/react && npx tsc --noEmit"
+ASSERT CMD "cd js/packages/react && npx vitest run"
+ASSERT CMD "cd api && mix test test/barkpark/portable_doc/render_test.exs" TIER ci
