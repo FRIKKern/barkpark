@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -267,18 +268,33 @@ func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// discardTwinStatusMessage maps a non-OK published-twin read to armDiscard's
+// status line. NotFound means there truly is no published twin — today's
+// copy, byte-identical (D's plain delete-outright path applies). Unreachable
+// means the probe itself failed (timeout, transport error, bad body) — it
+// must NOT be reported as "no published twin" (that would assert the twin is
+// absent when we simply don't know, and D would delete the draft outright on
+// a false premise), so it gets a distinct message instead.
+func discardTwinStatusMessage(outcome apiclient.DocReadOutcome) string {
+	if outcome == apiclient.DocReadNotFound {
+		return "no published twin — D deletes the draft outright"
+	}
+	return "could not check published twin — network error, try again"
+}
+
 // armDiscard arms the R×2 discard confirm for doc — a DRAFT whose published
-// twin exists. The twin probe (Get on the bare id) runs here at arm time
-// because the server's discardDraft does NOT twin-guard: discarding the only
-// draft deletes the document outright, which is D's job with its own confirm.
+// twin exists. The twin probe (GetPerspectiveResult on the bare id) runs here
+// at arm time because the server's discardDraft does NOT twin-guard:
+// discarding the only draft deletes the document outright, which is D's job
+// with its own confirm.
 func (m *model) armDiscard(doc *Doc, typeName string) {
 	if doc.Status != "draft" {
 		m.setStatus("nothing to discard — not a draft", true)
 		return
 	}
 	bare := strings.TrimPrefix(doc.ID, "drafts.")
-	if _, ok := m.ds.Get(typeName, bare); !ok {
-		m.setStatus("no published twin — D deletes the draft outright", true)
+	if _, outcome := m.ds.GetPerspectiveResult(typeName, bare, ""); outcome != apiclient.DocReadOK {
+		m.setStatus(discardTwinStatusMessage(outcome), true)
 		return
 	}
 	m.discardArmed = true
