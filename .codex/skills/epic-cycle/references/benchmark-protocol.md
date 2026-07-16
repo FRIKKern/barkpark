@@ -5,10 +5,19 @@
 
 ## Frozen experiment
 
-- Schema: `epic-cycle-concurrency-v1`.
+- Schemas: `epic-cycle-concurrency-v1` for the legacy boolean evaluation path,
+  `epic-cycle-concurrency-v2` for the legacy retrieval attribution contract, and
+  `epic-cycle-concurrency-v3` for physical CycleFleet attribution.
 - Seed: `20260715`; any other seed is rejected.
 - Work: exactly six unique assignment ids and argv lists. Every treatment receives all six assignments once per look.
-- Retrieval v2 corpus: `references/codex-epic-cycle-wave-3-real-corpus-v1.jsonl`, frozen at repository commit `55519257db1377e4e747683204fe902fe8d562a9`. Its identity is SHA-256 `a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26` over exact file bytes, including its single final LF; newline-stripped digests are not corpus identities. The six ordered records each own three claim ids, yielding claim-domain digest `ad364452e4288061ecb1b972bb301b9d8cfdbe91e8f142a62ef3ded02f13176a`.
+- Retrieval v2/v3 corpus: `references/codex-epic-cycle-wave-3-real-corpus-v1.jsonl`, frozen at repository commit `55519257db1377e4e747683204fe902fe8d562a9`. Its identity is SHA-256 `a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26` over exact file bytes, including its single final LF; newline-stripped digests are not corpus identities. The six ordered records each own three claim ids, yielding claim-domain digest `ad364452e4288061ecb1b972bb301b9d8cfdbe91e8f142a62ef3ded02f13176a`.
+- Retrieval v3 provenance: every assignment records the physical `cycle_phase` and
+  exact CycleFleet `unit_ids`. Build attribution owns exactly its corpus unit;
+  non-Build attribution, including the six-agent Verify replay, has
+  `unit_ids: []`. Corpus identity is bound by the logical `assignment_id`, which
+  must still equal the ordered corpus record id. This prevents Verify agents
+  from pretending to own Build units. Legacy v2 remains accepted for replaying
+  already-frozen artifacts.
 - Treatments: exactly `1/2/3/6`; no other width is accepted.
 - Design: one complete four-row Williams cycle:
 
@@ -24,13 +33,18 @@
 - Looks: analysis is emitted after Williams rows 1, 2, 3, and 4. All are recorded; only look 4 is decision-binding. There is no optional early stopping.
 - ITT: all six scheduled assignments stay in the denominator. Launch failures, crashes, malformed/missing evaluation JSON, and timeouts are retained rather than dropped.
 
-Each assignment's final non-empty stdout line must be JSON with two booleans:
+For v1, each assignment's final non-empty stdout line must be JSON with two booleans:
 
 ```json
 {"complete": true, "contradiction_unsupported": false}
 ```
 
 Missing or malformed evaluation is conservatively incomplete and contradiction/unsupported. A non-zero exit or timeout is incomplete regardless of its payload.
+
+For retrieval v2/v3, the final line is the exact retrieval evaluation object
+`{complete, witnesses, attribution, usage}`. The returned attribution must
+byte-for-byte match the manifest entry. Unknown provider usage remains a typed
+`unsupported`, `missing`, or `invalid` state with a non-empty reason.
 
 ## Selection rule
 
@@ -81,7 +95,7 @@ The result's `contamination_scope` is deliberately explicit: load1 and available
 
 ## Manifest and commands
 
-The manifest accepts only this narrow shape:
+The v1 manifest accepts only this narrow shape:
 
 ```json
 {
@@ -105,6 +119,12 @@ The manifest accepts only this narrow shape:
 ```
 
 Unknown fields are rejected. Generate and inspect the deterministic plan first:
+
+Retrieval v3 keeps the same six ordered assignment ids and command fields, adds
+the frozen corpus admission object, and gives each assignment an attribution
+object with `cycle_phase`, physical CycleFleet ids/digests, exact physical
+`unit_ids`, and the bound Task claim fence. The runner rejects v2/v3 field
+mixing and phase/unit ownership mismatches.
 
 ```bash
 python3 .codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py \

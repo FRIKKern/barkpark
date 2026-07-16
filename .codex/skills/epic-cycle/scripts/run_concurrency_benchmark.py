@@ -33,9 +33,12 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 SCHEMA_VERSION = "epic-cycle-concurrency-v1"
 RETRIEVAL_SCHEMA_VERSION = "epic-cycle-concurrency-v2"
+RETRIEVAL_SCHEMA_VERSION_V3 = "epic-cycle-concurrency-v3"
 RETRIEVAL_CORPUS_SCHEMA_VERSION = "barkpark.retrieval-corpus.v1"
 RETRIEVAL_CONTROL_SCHEMA_VERSION = "epic-cycle-control-proof-v2"
 RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION = "barkpark.epic-retrieval-attribution.v2"
+RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION_V3 = "barkpark.epic-retrieval-attribution.v3"
+RETRIEVAL_CYCLE_PHASES = ("survey", "verify", "experiment", "build", "review")
 RETRIEVAL_CORPUS_SHA256 = "a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26"
 RETRIEVAL_CORPUS_SHA256_SCOPE = "exact_file_bytes"
 RETRIEVAL_REPO_COMMIT = "55519257db1377e4e747683204fe902fe8d562a9"
@@ -298,13 +301,20 @@ def _validate_v1_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate either the byte-stable v1 protocol or the opt-in retrieval v2 protocol."""
-    if manifest.get("schema_version") == RETRIEVAL_SCHEMA_VERSION:
+    """Validate byte-stable v1 or one of the versioned retrieval protocols."""
+    if is_retrieval_schema(manifest.get("schema_version")):
         return validate_retrieval_manifest(manifest)
     return _validate_v1_manifest(manifest)
 
 
+def is_retrieval_schema(schema_version: Any) -> bool:
+    return schema_version in {RETRIEVAL_SCHEMA_VERSION, RETRIEVAL_SCHEMA_VERSION_V3}
+
+
 def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    schema_version = manifest.get("schema_version")
+    if not is_retrieval_schema(schema_version):
+        raise ProtocolError("retrieval schema_version is unsupported")
     allowed = {
         "schema_version",
         "seed",
@@ -339,7 +349,11 @@ def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         assignment_id = assignment.get("id")
         if not isinstance(assignment_id, str) or not assignment_id:
             raise ProtocolError("retrieval assignment id must be a non-empty string")
-        attribution = validate_cycle_attribution(assignment.get("attribution"), assignment_id)
+        attribution = validate_cycle_attribution(
+            assignment.get("attribution"),
+            assignment_id,
+            schema_version=schema_version,
+        )
         ids.append(assignment_id)
         normalized_assignments.append(
             {
@@ -383,7 +397,7 @@ def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     )
     return {
         **common,
-        "schema_version": RETRIEVAL_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "assignments": normalized_assignments,
         "corpus": corpus,
     }
@@ -471,7 +485,12 @@ def admit_retrieval_corpus(value: Any, *, already_admitted: bool = False) -> dic
     }
 
 
-def validate_cycle_attribution(value: Any, assignment_id: str) -> dict[str, Any]:
+def validate_cycle_attribution(
+    value: Any,
+    assignment_id: str,
+    *,
+    schema_version: str = RETRIEVAL_SCHEMA_VERSION,
+) -> dict[str, Any]:
     expected_keys = {
         "epic_id",
         "wave_id",
@@ -482,10 +501,24 @@ def validate_cycle_attribution(value: Any, assignment_id: str) -> dict[str, Any]
         "snapshot_digest",
         "task",
     }
+    if schema_version == RETRIEVAL_SCHEMA_VERSION_V3:
+        expected_keys.add("cycle_phase")
+    elif schema_version != RETRIEVAL_SCHEMA_VERSION:
+        raise ProtocolError("retrieval schema_version is unsupported")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise ProtocolError("cycle attribution has an invalid shape")
-    if value.get("assignment_id") != assignment_id or value.get("unit_ids") != [assignment_id]:
-        raise ProtocolError("cycle attribution assignment/unit mismatch")
+    if value.get("assignment_id") != assignment_id:
+        raise ProtocolError("cycle attribution assignment mismatch")
+    if schema_version == RETRIEVAL_SCHEMA_VERSION:
+        if value.get("unit_ids") != [assignment_id]:
+            raise ProtocolError("cycle attribution assignment/unit mismatch")
+    else:
+        cycle_phase = value.get("cycle_phase")
+        if cycle_phase not in RETRIEVAL_CYCLE_PHASES:
+            raise ProtocolError("cycle attribution phase is invalid")
+        expected_unit_ids = [assignment_id] if cycle_phase == "build" else []
+        if value.get("unit_ids") != expected_unit_ids:
+            raise ProtocolError("cycle attribution phase/unit mismatch")
     for key in ("epic_id", "wave_id"):
         if not isinstance(value.get(key), str) or not value[key]:
             raise ProtocolError(f"cycle attribution {key} must be non-empty")
@@ -539,7 +572,7 @@ def plan_artifact(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "schedule": build_schedule(ids),
         "manifest_digest": digest_json(normalized),
     }
-    if normalized["schema_version"] == RETRIEVAL_SCHEMA_VERSION:
+    if is_retrieval_schema(normalized["schema_version"]):
         corpus = normalized["corpus"]
         frozen["retrieval_admission"] = {
             key: corpus[key]
@@ -1730,7 +1763,7 @@ def default_treatment_runner(
             "BARKPARK_BENCH_SENSITIVITY_OF": sensitivity_of or "",
         }
     )
-    retrieval = manifest["schema_version"] == RETRIEVAL_SCHEMA_VERSION
+    retrieval = is_retrieval_schema(manifest["schema_version"])
     reset = run_control_command(
         manifest["cold_reset_argv"],
         env,
@@ -1938,7 +1971,11 @@ def build_epicfleet_attribution(
             }
         )
     return {
-        "schema_version": RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION,
+        "schema_version": (
+            RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION_V3
+            if manifest["schema_version"] == RETRIEVAL_SCHEMA_VERSION_V3
+            else RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION
+        ),
         "epic_id": assignments[0]["epic_id"],
         "wave_id": assignments[0]["wave_id"],
         "corpus": {
@@ -2040,7 +2077,7 @@ def execute_protocol(
         "fixed_look_results": fixed_look_results,
         "final_selection": fixed_look_results[-1]["selection"],
     }
-    if normalized["schema_version"] == RETRIEVAL_SCHEMA_VERSION:
+    if is_retrieval_schema(normalized["schema_version"]):
         result["epicfleet_attribution"] = build_epicfleet_attribution(
             normalized, originals, reruns
         )

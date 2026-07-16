@@ -88,7 +88,12 @@ def retrieval_record(index):
     }
 
 
-def cycle_attribution(index):
+def cycle_attribution(
+    index,
+    *,
+    schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION,
+    cycle_phase="verify",
+):
     value = json.loads(
         (FIXTURES / "retrieval_cycle_assignment_v1.json").read_text(encoding="utf-8")
     )
@@ -98,6 +103,9 @@ def cycle_attribution(index):
     value["cycle_assignment_uuid"] = f"00000000-0000-4000-8000-{index:012d}"
     value["task"]["doc_id"] = f"codex-epic-cycle-w3-survey-{index:02d}"
     value["task"]["worker_id"] = f"codex-epic-cycle-w3-surveyor-{index:02d}"
+    if schema_version == MODULE.RETRIEVAL_SCHEMA_VERSION_V3:
+        value["cycle_phase"] = cycle_phase
+        value["unit_ids"] = [assignment_id] if cycle_phase == "build" else []
     return value
 
 
@@ -110,7 +118,12 @@ def usage_receipt(index):
     return value
 
 
-def retrieval_evaluation(index):
+def retrieval_evaluation(
+    index,
+    *,
+    schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION,
+    cycle_phase="verify",
+):
     record = retrieval_record(index)
     return {
         "complete": True,
@@ -122,7 +135,11 @@ def retrieval_evaluation(index):
             }
             for claim in record["gold_claims"]
         ],
-        "attribution": cycle_attribution(index),
+        "attribution": cycle_attribution(
+            index,
+            schema_version=schema_version,
+            cycle_phase=cycle_phase,
+        ),
         "usage": usage_receipt(index),
     }
 
@@ -137,19 +154,36 @@ def write_retrieval_corpus(root):
     return path, hashlib.sha256(raw).hexdigest()
 
 
-def retrieval_manifest(path, digest):
+def retrieval_manifest(
+    path,
+    digest,
+    *,
+    schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION,
+    cycle_phase="verify",
+):
     assignments = []
     for index, assignment_id in enumerate(MODULE.RETRIEVAL_UNIT_IDS, start=1):
-        payload = json.dumps(retrieval_evaluation(index), separators=(",", ":"))
+        payload = json.dumps(
+            retrieval_evaluation(
+                index,
+                schema_version=schema_version,
+                cycle_phase=cycle_phase,
+            ),
+            separators=(",", ":"),
+        )
         assignments.append(
             {
                 "id": assignment_id,
                 "argv": [sys.executable, "-c", f"print({payload!r})"],
-                "attribution": cycle_attribution(index),
+                "attribution": cycle_attribution(
+                    index,
+                    schema_version=schema_version,
+                    cycle_phase=cycle_phase,
+                ),
             }
         )
     return {
-        "schema_version": MODULE.RETRIEVAL_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "seed": MODULE.SEED,
         "assignments": assignments,
         "corpus": {
@@ -352,6 +386,121 @@ class ManifestTest(unittest.TestCase):
                 self.assertEqual("invalid", parsed["vui"]["state"])
                 self.assertEqual("invalid", parsed["usage"]["state"])
 
+    def test_v2_shape_and_assignment_unit_binding_remain_unchanged(self):
+        attribution = cycle_attribution(1)
+        self.assertNotIn("cycle_phase", attribution)
+        self.assertEqual(
+            attribution,
+            MODULE.validate_cycle_attribution(
+                attribution,
+                MODULE.RETRIEVAL_UNIT_IDS[0],
+            ),
+        )
+
+        extended = {**attribution, "cycle_phase": "verify"}
+        with self.assertRaisesRegex(MODULE.ProtocolError, "invalid shape"):
+            MODULE.validate_cycle_attribution(
+                extended,
+                MODULE.RETRIEVAL_UNIT_IDS[0],
+            )
+
+    def test_v3_verify_replay_keeps_corpus_binding_with_empty_physical_units(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = write_retrieval_corpus(temporary)
+            with mock.patch.object(MODULE, "RETRIEVAL_CORPUS_SHA256", digest):
+                normalized = MODULE.validate_manifest(
+                    retrieval_manifest(
+                        path,
+                        digest,
+                        schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+                        cycle_phase="verify",
+                    )
+                )
+                plan = MODULE.plan_artifact(normalized)
+                MODULE.verify_replay(plan, normalized)
+
+        self.assertEqual(
+            MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+            normalized["schema_version"],
+        )
+        self.assertEqual(
+            list(MODULE.RETRIEVAL_UNIT_IDS),
+            [assignment["id"] for assignment in normalized["assignments"]],
+        )
+        self.assertTrue(
+            all(
+                assignment["attribution"]["assignment_id"] == assignment["id"]
+                and assignment["attribution"]["cycle_phase"] == "verify"
+                and assignment["attribution"]["unit_ids"] == []
+                for assignment in normalized["assignments"]
+            )
+        )
+
+        self.assertEqual(
+            MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+            plan["schema_version"],
+        )
+
+        artifact = MODULE.build_epicfleet_attribution(
+            normalized,
+            [{"trial_id": "v3", "assignment_results": []}],
+            [],
+        )
+        self.assertEqual(
+            MODULE.RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION_V3,
+            artifact["schema_version"],
+        )
+
+    def test_v3_phase_requires_physical_unit_ownership_consistency(self):
+        assignment_id = MODULE.RETRIEVAL_UNIT_IDS[0]
+
+        build = cycle_attribution(
+            1,
+            schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+            cycle_phase="build",
+        )
+        self.assertEqual(
+            [assignment_id],
+            MODULE.validate_cycle_attribution(
+                build,
+                assignment_id,
+                schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+            )["unit_ids"],
+        )
+
+        for cycle_phase, unit_ids in (
+            ("verify", [assignment_id]),
+            ("survey", [assignment_id]),
+            ("experiment", [assignment_id]),
+            ("review", [assignment_id]),
+            ("build", []),
+        ):
+            with self.subTest(cycle_phase=cycle_phase, unit_ids=unit_ids):
+                attribution = cycle_attribution(
+                    1,
+                    schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+                    cycle_phase=cycle_phase,
+                )
+                attribution["unit_ids"] = unit_ids
+                with self.assertRaisesRegex(MODULE.ProtocolError, "phase/unit"):
+                    MODULE.validate_cycle_attribution(
+                        attribution,
+                        assignment_id,
+                        schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+                    )
+
+        invalid_phase = cycle_attribution(
+            1,
+            schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+        )
+        invalid_phase["cycle_phase"] = "digest"
+        with self.assertRaisesRegex(MODULE.ProtocolError, "phase is invalid"):
+            MODULE.validate_cycle_attribution(
+                invalid_phase,
+                assignment_id,
+                schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+            )
+
 
 class RetrievalEvidenceTest(unittest.TestCase):
     def test_vui_scoring_distinguishes_complete_absent_contradictory_and_tampered_evidence(self):
@@ -440,6 +589,36 @@ class RetrievalEvidenceTest(unittest.TestCase):
         self.assertEqual("unsupported", result["metrics"]["context_cost"]["state"])
         self.assertTrue(
             all(item["stdout_tail"].startswith("[REDACTED") for item in result["assignment_results"])
+        )
+
+    def test_end_to_end_v3_verify_fixture_accepts_empty_physical_units(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = write_retrieval_corpus(temporary)
+            with mock.patch.object(MODULE, "RETRIEVAL_CORPUS_SHA256", digest):
+                source = MODULE.validate_manifest(
+                    retrieval_manifest(
+                        path,
+                        digest,
+                        schema_version=MODULE.RETRIEVAL_SCHEMA_VERSION_V3,
+                        cycle_phase="verify",
+                    )
+                )
+                result = MODULE.run_assignment_set(
+                    source["assignments"],
+                    list(MODULE.RETRIEVAL_UNIT_IDS),
+                    3,
+                    timeout_seconds=2,
+                    environment={},
+                    corpus=source["corpus"],
+                )
+
+        self.assertTrue(all(item["complete"] for item in result["assignment_results"]))
+        self.assertTrue(
+            all(
+                item["attribution"]["cycle_phase"] == "verify"
+                and item["attribution"]["unit_ids"] == []
+                for item in result["assignment_results"]
+            )
         )
 
     def test_duplicate_provider_identity_is_invalid_and_secret_bearing_payload_is_not_echoed(self):

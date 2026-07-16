@@ -447,7 +447,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     test "round-trips attribution while preserving the nested v1 ledger", %{attrs: attrs} do
       contract = retrieval_contract(attrs)
       attribution = retrieval_attribution(contract, attrs)
-      attrs = %{attrs | manifest: Map.put(manifest(), "retrieval_attribution_contract", contract)}
+      attrs = %{attrs | manifest: retrieval_manifest(contract)}
 
       assert {:ok, experiment} =
                EpicFleet.create_retrieval_benchmark_experiment(attrs, attribution)
@@ -472,6 +472,110 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:ok, ^v2_json} = EpicFleet.export_benchmark_v2_json(replay)
     end
 
+    test "accepts six task-fenced Verify assignments under the v3 retrieval contract", %{
+      attrs: attrs
+    } do
+      contract = retrieval_contract_v3(attrs, "verify")
+      attribution = retrieval_attribution(contract, attrs)
+
+      attrs = %{attrs | manifest: retrieval_manifest(contract)}
+
+      assert Enum.all?(contract["assignments"], fn assignment ->
+               assignment["cycle_phase"] == "verify" and assignment["unit_ids"] == []
+             end)
+
+      assert 6 ==
+               contract["assignments"]
+               |> Enum.map(& &1["cycle_assignment_uuid"])
+               |> MapSet.new()
+               |> MapSet.size()
+
+      assert 6 ==
+               contract["assignments"]
+               |> Enum.map(& &1["task"]["doc_id"])
+               |> MapSet.new()
+               |> MapSet.size()
+
+      assert {:ok, experiment} =
+               EpicFleet.create_retrieval_benchmark_experiment(attrs, attribution)
+
+      assert {:ok, _attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+      assert {:ok, json} = EpicFleet.export_benchmark_v2_json(experiment)
+      assert Jason.decode!(json)["format"] == "barkpark-epic-benchmark-v2"
+      assert {:ok, %{attempts: 1}} = EpicFleet.import_benchmark_json(json)
+    end
+
+    test "v3 enforces physical unit_ids by cycle phase while v2 remains accepted", %{attrs: attrs} do
+      verify_contract = retrieval_contract_v3(attrs, "verify")
+
+      invalid_verify =
+        put_in(
+          verify_contract,
+          ["assignments", Access.at(0), "unit_ids"],
+          ["survey-2-1-01"]
+        )
+
+      assert {:error, :attribution_contract_invalid} =
+               create_retrieval_experiment(attrs, invalid_verify)
+
+      build_contract = retrieval_contract_v3(attrs, "build")
+      assert {:ok, _experiment} = create_retrieval_experiment(attrs, build_contract)
+
+      invalid_build =
+        put_in(build_contract, ["assignments", Access.at(0), "unit_ids"], [])
+
+      assert {:error, :attribution_contract_invalid} =
+               create_retrieval_experiment(
+                 %{attrs | experiment_id: "invalid-build-empty"},
+                 invalid_build
+               )
+
+      mismatched_build =
+        put_in(
+          build_contract,
+          ["assignments", Access.at(0), "unit_ids"],
+          ["survey-2-1-02"]
+        )
+
+      assert {:error, :attribution_contract_invalid} =
+               create_retrieval_experiment(
+                 %{attrs | experiment_id: "invalid-build-mismatch"},
+                 mismatched_build
+               )
+
+      assert {:ok, _v2_experiment} =
+               create_retrieval_experiment(
+                 %{attrs | experiment_id: "v2-backward-compatible"},
+                 retrieval_contract(attrs)
+               )
+    end
+
+    test "rejects absent and mismatched outer retrieval manifest schema versions", %{attrs: attrs} do
+      v2_contract = retrieval_contract(attrs)
+      v3_contract = retrieval_contract_v3(attrs, "verify")
+
+      for {experiment_id, manifest_schema, contract} <- [
+            {"missing-outer-schema", nil, v2_contract},
+            {"v3-outer-v2-contract", "epic-cycle-concurrency-v3", v2_contract},
+            {"v2-outer-v3-contract", "epic-cycle-concurrency-v2", v3_contract}
+          ] do
+        manifest =
+          manifest()
+          |> Map.put("retrieval_attribution_contract", contract)
+          |> then(fn value ->
+            if manifest_schema, do: Map.put(value, "schema_version", manifest_schema), else: value
+          end)
+
+        attribution = retrieval_attribution(contract, attrs)
+
+        assert {:error, :attribution_scope_mismatch} =
+                 EpicFleet.create_retrieval_benchmark_experiment(
+                   %{attrs | experiment_id: experiment_id, manifest: manifest},
+                   attribution
+                 )
+      end
+    end
+
     test "imports the exact attribution bytes emitted by the Python producer", %{attrs: attrs} do
       attrs = %{
         attrs
@@ -484,6 +588,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
       producer_input = %{
         "manifest" => %{
+          "schema_version" => "epic-cycle-concurrency-v2",
           "corpus" => contract["corpus"],
           "assignments" => Enum.map(contract["assignments"], &%{"attribution" => &1})
         },
@@ -532,7 +637,55 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
         experiment_id: attrs.experiment_id,
         phase: attrs.phase,
         protocol_version: 2,
-        manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+        manifest: retrieval_manifest(contract),
+        artifact_format: "barkpark-epic-benchmark-v2",
+        retrieval_attribution: attribution,
+        retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
+      }
+
+      document = Benchmark.document_v2(experiment, [attempt_attrs()])
+      assert {:ok, %{attempts: 1}} = import_document(document)
+    end
+
+    test "imports exact v3 attribution bytes emitted by the Python producer", %{attrs: attrs} do
+      attrs = %{
+        attrs
+        | epic_id: "codex-epic-cycle-w3-real-replay",
+          wave_id: "codex-epic-cycle-wave-3-real-replay-2026-07-16",
+          experiment_id: "python-elixir-v3"
+      }
+
+      contract = retrieval_contract_v3(attrs, "verify")
+      handoff = retrieval_attribution(contract, attrs)
+
+      attribution =
+        python_attribution(%{
+          "manifest" => %{
+            "schema_version" => "epic-cycle-concurrency-v3",
+            "corpus" => contract["corpus"],
+            "assignments" => Enum.map(contract["assignments"], &%{"attribution" => &1})
+          },
+          "originals" => [
+            %{
+              "trial_id" => "python-elixir-v3-golden",
+              "assignment_results" => get_in(handoff, ["trials", Access.at(0), "assignments"])
+            }
+          ]
+        })
+
+      assert attribution["schema_version"] == "barkpark.epic-retrieval-attribution.v3"
+      assert Enum.all?(attribution["assignments"], &(&1["cycle_phase"] == "verify"))
+      assert Enum.all?(attribution["assignments"], &(&1["unit_ids"] == []))
+
+      experiment = %Experiment{
+        id: Ecto.UUID.generate(),
+        workspace_id: attrs.workspace_id,
+        epic_id: attrs.epic_id,
+        wave_id: attrs.wave_id,
+        experiment_id: attrs.experiment_id,
+        phase: attrs.phase,
+        protocol_version: 3,
+        manifest: retrieval_manifest(contract),
         artifact_format: "barkpark-epic-benchmark-v2",
         retrieval_attribution: attribution,
         retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
@@ -555,7 +708,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
         experiment_id: "experiment-v2-golden",
         phase: "legendary",
         protocol_version: 2,
-        manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+        manifest: retrieval_manifest(contract),
         artifact_format: "barkpark-epic-benchmark-v2",
         retrieval_attribution: attribution,
         retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
@@ -567,7 +720,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
                "6fbfe73118abe1443f3bdf55263f1aad3de2a3d1ad7aee793a61349426b6c2f2"
 
       assert document["ledger_digest"] ==
-               "541921a954f8fc057d5b05dfe3d0119131df6948469fc17619606aa93a365d0a"
+               "70b7c28b4e2806133cb54bb4085167086fb9834a7aeceeedfe2b9e24fcaa159b"
     end
 
     test "rejects tamper, scope, task, duplicate, receipt, and secret-bearing attribution", %{
@@ -887,6 +1040,33 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     }
   end
 
+  defp retrieval_contract_v3(attrs, cycle_phase) do
+    retrieval_contract(attrs)
+    |> Map.put("schema_version", "barkpark.epic-retrieval-contract.v3")
+    |> Map.update!("assignments", fn assignments ->
+      Enum.map(assignments, fn assignment ->
+        assignment
+        |> Map.put("cycle_phase", cycle_phase)
+        |> Map.put(
+          "unit_ids",
+          if(cycle_phase == "build", do: [assignment["assignment_id"]], else: [])
+        )
+      end)
+    end)
+  end
+
+  defp retrieval_manifest(contract) do
+    schema_version =
+      case contract["schema_version"] do
+        "barkpark.epic-retrieval-contract.v3" -> "epic-cycle-concurrency-v3"
+        _other -> "epic-cycle-concurrency-v2"
+      end
+
+    manifest()
+    |> Map.put("schema_version", schema_version)
+    |> Map.put("retrieval_attribution_contract", contract)
+  end
+
   defp retrieval_assignment(index, attrs) do
     assignment_id = "survey-2-1-0#{index}"
 
@@ -930,7 +1110,14 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       end)
 
     %{
-      "schema_version" => "barkpark.epic-retrieval-attribution.v2",
+      "schema_version" =>
+        case contract["schema_version"] do
+          "barkpark.epic-retrieval-contract.v3" ->
+            "barkpark.epic-retrieval-attribution.v3"
+
+          _other ->
+            "barkpark.epic-retrieval-attribution.v2"
+        end,
       "epic_id" => attrs.epic_id,
       "wave_id" => attrs.wave_id,
       "corpus" => contract["corpus"],
@@ -970,7 +1157,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
         Experiment,
         Map.merge(attrs, %{
           id: Ecto.UUID.generate(),
-          manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+          manifest: retrieval_manifest(contract),
           artifact_format: "barkpark-epic-benchmark-v2",
           retrieval_attribution: attribution,
           retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
@@ -978,6 +1165,43 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       )
 
     Benchmark.document_v2(experiment, [attempt_attrs()])
+  end
+
+  defp create_retrieval_experiment(attrs, contract) do
+    attribution = retrieval_attribution(contract, attrs)
+
+    EpicFleet.create_retrieval_benchmark_experiment(
+      %{attrs | manifest: retrieval_manifest(contract)},
+      attribution
+    )
+  end
+
+  defp python_attribution(payload) do
+    input_path =
+      Path.join(
+        System.tmp_dir!(),
+        "barkpark-python-attribution-#{System.unique_integer([:positive, :monotonic])}.json"
+      )
+
+    on_exit(fn -> File.rm(input_path) end)
+    File.write!(input_path, Jason.encode!(payload))
+
+    script = Path.expand("../.codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py")
+
+    python = """
+    import importlib.util, json, sys
+    spec = importlib.util.spec_from_file_location("epic_cycle_runner", sys.argv[1])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    with open(sys.argv[2], encoding="utf-8") as handle:
+        payload = json.load(handle)
+    value = module.build_epicfleet_attribution(payload["manifest"], payload["originals"], [])
+    print(module.canonical_json(value), end="")
+    """
+
+    assert {python_json, 0} = System.cmd("python3", ["-c", python, script, input_path])
+    Jason.decode!(python_json)
   end
 
   defp import_document(document) do

@@ -8,8 +8,12 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   @format "barkpark-epic-benchmark-v1"
   @format_v2 "barkpark-epic-benchmark-v2"
-  @attribution_schema "barkpark.epic-retrieval-attribution.v2"
-  @contract_schema "barkpark.epic-retrieval-contract.v2"
+  @attribution_schema_v2 "barkpark.epic-retrieval-attribution.v2"
+  @attribution_schema_v3 "barkpark.epic-retrieval-attribution.v3"
+  @contract_schema_v2 "barkpark.epic-retrieval-contract.v2"
+  @contract_schema_v3 "barkpark.epic-retrieval-contract.v3"
+  @manifest_schema_v2 "epic-cycle-concurrency-v2"
+  @manifest_schema_v3 "epic-cycle-concurrency-v3"
   @experiment_fields ~w(
     workspace_id epic_id wave_id experiment_id phase protocol_version manifest artifact_format
     retrieval_attribution retrieval_attribution_digest
@@ -26,9 +30,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @corpus_keys ~w(
     sha256 repo_commit schema_version unit_ids claim_domain claim_domain_digest
   )
-  @cycle_attribution_keys ~w(
+  @cycle_attribution_keys_v2 ~w(
     epic_id wave_id cycle_assignment_uuid assignment_id unit_ids inventory_digest snapshot_digest task
   )
+  @cycle_attribution_keys_v3 @cycle_attribution_keys_v2 ++ ["cycle_phase"]
+  @cycle_phases ~w(survey verify experiment build review)
   @task_fence_keys ~w(doc_id worker_id claim_epoch work_digest)
   @trial_keys ~w(trial_id sensitivity_of assignments)
   @trial_assignment_keys ~w(assignment_id attribution usage vui)
@@ -427,14 +433,20 @@ defmodule Barkpark.EpicFleet.Benchmark do
     contract = manifest["retrieval_attribution_contract"]
 
     with :ok <- validate_attribution_scope(attribution, experiment),
-         {:ok, claim_domain} <- validate_attribution_contract(attribution, contract, experiment),
+         {:ok, claim_domain} <-
+           validate_attribution_contract(
+             attribution,
+             contract,
+             experiment,
+             manifest["schema_version"]
+           ),
          :ok <- validate_attribution_trials(attribution, claim_domain) do
       :ok
     end
   end
 
   defp validate_attribution_scope(attribution, experiment) do
-    if attribution["schema_version"] == @attribution_schema and
+    if attribution["schema_version"] in [@attribution_schema_v2, @attribution_schema_v3] and
          attribution["epic_id"] == experiment["epic_id"] and
          attribution["wave_id"] == experiment["wave_id"] do
       :ok
@@ -443,17 +455,29 @@ defmodule Barkpark.EpicFleet.Benchmark do
     end
   end
 
-  defp validate_attribution_contract(attribution, contract, experiment) do
+  defp validate_attribution_contract(attribution, contract, experiment, manifest_schema) do
+    contract_schema = is_map(contract) && contract["schema_version"]
+
     cond do
       not is_map(contract) or not exact_keys?(contract, @contract_keys) or
-          contract["schema_version"] != @contract_schema ->
+          contract_schema not in [@contract_schema_v2, @contract_schema_v3] ->
         {:error, :attribution_contract_missing}
+
+      not matching_retrieval_schema_versions?(
+        manifest_schema,
+        contract_schema,
+        attribution["schema_version"]
+      ) ->
+        {:error, :attribution_scope_mismatch}
 
       not valid_corpus?(contract["corpus"]) or attribution["corpus"] != contract["corpus"] ->
         {:error, :attribution_corpus_mismatch}
 
       not is_list(contract["assignments"]) or length(contract["assignments"]) != 6 or
-          not Enum.all?(contract["assignments"], &valid_cycle_attribution?/1) ->
+          not Enum.all?(
+            contract["assignments"],
+            &valid_cycle_attribution?(&1, contract_schema)
+          ) ->
         {:error, :attribution_contract_invalid}
 
       not assignments_match_scope?(contract["assignments"], experiment) or
@@ -463,7 +487,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
       attribution["assignments"] != contract["assignments"] ->
         {:error, :attribution_assignment_mismatch}
 
-      not unique_contract_assignments?(contract["assignments"], contract["corpus"]) ->
+      not unique_contract_assignments?(
+        contract["assignments"],
+        contract["corpus"],
+        contract_schema
+      ) ->
         {:error, :duplicate_attribution}
 
       true ->
@@ -577,16 +605,18 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   defp valid_claim_domain?(_claim_domain, _unit_ids), do: false
 
-  defp valid_cycle_attribution?(value) do
+  defp valid_cycle_attribution?(value, contract_schema) do
     task = is_map(value) && value["task"]
+    expected_keys = cycle_attribution_keys(contract_schema)
 
-    is_map(value) and exact_keys?(value, @cycle_attribution_keys) and
+    is_map(value) and exact_keys?(value, expected_keys) and
       is_binary(value["epic_id"]) and value["epic_id"] != "" and
       is_binary(value["wave_id"]) and value["wave_id"] != "" and
       match?({:ok, _}, Ecto.UUID.cast(value["cycle_assignment_uuid"])) and
       is_binary(value["assignment_id"]) and value["assignment_id"] != "" and
-      is_list(value["unit_ids"]) and value["unit_ids"] != [] and
-      unique_strings?(value["unit_ids"]) and sha256?(value["inventory_digest"]) and
+      valid_cycle_phase?(value, contract_schema) and
+      valid_physical_unit_ids?(value, contract_schema) and
+      sha256?(value["inventory_digest"]) and
       sha256?(value["snapshot_digest"]) and is_map(task) and
       exact_keys?(task, @task_fence_keys) and is_binary(task["doc_id"]) and
       task["doc_id"] != "" and is_binary(task["worker_id"]) and task["worker_id"] != "" and
@@ -594,7 +624,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
       hex?(task["work_digest"], 16)
   end
 
-  defp unique_contract_assignments?(assignments, corpus) do
+  defp unique_contract_assignments?(assignments, corpus, contract_schema) do
     assignment_ids = Enum.map(assignments, & &1["assignment_id"])
     cycle_ids = Enum.map(assignments, & &1["cycle_assignment_uuid"])
     task_ids = Enum.map(assignments, & &1["task"]["doc_id"])
@@ -602,9 +632,50 @@ defmodule Barkpark.EpicFleet.Benchmark do
     unique_strings?(assignment_ids) and unique_strings?(cycle_ids) and unique_strings?(task_ids) and
       MapSet.new(assignment_ids) == MapSet.new(corpus["unit_ids"]) and
       Enum.all?(assignments, fn assignment ->
-        assignment["unit_ids"] == [assignment["assignment_id"]] and
+        valid_physical_unit_ids?(assignment, contract_schema) and
           assignment["epic_id"] != "" and assignment["wave_id"] != ""
       end)
+  end
+
+  defp matching_retrieval_schema_versions?(
+         @manifest_schema_v2,
+         @contract_schema_v2,
+         @attribution_schema_v2
+       ),
+       do: true
+
+  defp matching_retrieval_schema_versions?(
+         @manifest_schema_v3,
+         @contract_schema_v3,
+         @attribution_schema_v3
+       ),
+       do: true
+
+  defp matching_retrieval_schema_versions?(
+         _manifest_schema,
+         _contract_schema,
+         _attribution_schema
+       ),
+       do: false
+
+  defp cycle_attribution_keys(@contract_schema_v2), do: @cycle_attribution_keys_v2
+  defp cycle_attribution_keys(@contract_schema_v3), do: @cycle_attribution_keys_v3
+
+  defp valid_cycle_phase?(_assignment, @contract_schema_v2), do: true
+
+  defp valid_cycle_phase?(assignment, @contract_schema_v3),
+    do: assignment["cycle_phase"] in @cycle_phases
+
+  defp valid_physical_unit_ids?(assignment, @contract_schema_v2) do
+    assignment["unit_ids"] == [assignment["assignment_id"]]
+  end
+
+  defp valid_physical_unit_ids?(assignment, @contract_schema_v3) do
+    case assignment["cycle_phase"] do
+      "build" -> assignment["unit_ids"] == [assignment["assignment_id"]]
+      phase when phase in @cycle_phases -> assignment["unit_ids"] == []
+      _other -> false
+    end
   end
 
   defp assignments_match_scope?(assignments, experiment) when is_list(assignments) do
