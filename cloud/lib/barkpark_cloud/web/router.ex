@@ -8969,6 +8969,10 @@ defmodule BarkparkCloud.Web.Router do
       # part of require_content_binding (the content binding is workspace/project/
       # dataset, doc_type just selects which type within it).
       {:doc_type, ["doc_type"]},
+      # search-template W2 (charter D8): explicit shipped-starter selection.
+      # OPTIONAL — nil keeps the framework-derived default (astro->astro-starter,
+      # nextjs->next-starter); Site.changeset validates the closed slug set.
+      {:template, ["template"]},
       {:read_token, ["read_token"]}
     ]
     |> Enum.reduce(attrs, fn {key, params}, acc ->

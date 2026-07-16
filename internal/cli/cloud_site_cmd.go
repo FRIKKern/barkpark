@@ -135,8 +135,8 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // Astro/static are the defaults; --instance has no default because there is no
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>]"
-	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type"}, nil, usage)
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter]"
+	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -190,6 +190,10 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 		// guerrilla's content is `paper`, and passing it via an env prefix is inert
 		// (the allowlist drops it) — it has to reach the box through create (D35).
 		DocType: strings.TrimSpace(a.val("doc-type")),
+		// --template selects the shipped starter tree explicitly (search-template
+		// W2, D8) — e.g. the flagship search-starter on a node site. Empty keeps
+		// the framework-derived default.
+		Template: strings.TrimSpace(a.val("template")),
 	}
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
@@ -205,6 +209,9 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	out.outf("  dataset: %s", siteDatasetLabel(site, ws, proj, ds))
 	if req.DocType != "" {
 		out.outf("  content: %s docs", hzCell(req.DocType))
+	}
+	if req.Template != "" {
+		out.outf("  starter: %s", hzCell(req.Template))
 	}
 	if u := spawnSiteURL(site); u != "" {
 		out.outf("  url:     %s (live after the first deploy)", u)
