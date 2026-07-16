@@ -138,7 +138,7 @@ func TestParseGreenRemoveDirection(t *testing.T) {
 		t.Fatalf("got %d ops, want 2", len(cmd.Ops))
 	}
 	rm, ok := cmd.Ops[0].(*InOp)
-	if !ok || rm.Verb != Remove {
+	if !ok || rm.Verb != RemoveVerb {
 		t.Fatalf("op 0 = %#v, want REMOVE", cmd.Ops[0])
 	}
 	if rm.Payload != nil {

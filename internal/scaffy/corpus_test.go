@@ -122,7 +122,7 @@ func countCorpus(t *testing.T) census {
 					c.insertAfterLast++
 				case Replace:
 					c.replace++
-				case Remove:
+				case RemoveVerb:
 					c.remove++
 				}
 				if o.Mark != nil {

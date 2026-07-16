@@ -205,7 +205,7 @@ func (p *parser) run() {
 		case "REPLACE":
 			p.parseInVerb(fs, ln, Replace, 1)
 		case "REMOVE":
-			p.parseInVerb(fs, ln, Remove, 1)
+			p.parseInVerb(fs, ln, RemoveVerb, 1)
 		case "MARK":
 			p.parseMark(fs, ln)
 		case "REANCHOR":
@@ -457,7 +457,7 @@ func (p *parser) parseInVerb(fs []field, ln int, verb InOpVerb, wantFields int) 
 		op.InPos = p.curInPos
 	}
 	op.Target = p.expectFence(fmt.Sprintf("%s target", verb))
-	if verb != Remove {
+	if verb != RemoveVerb {
 		op.Payload = p.expectWith(verb)
 	}
 	p.cmd.Ops = append(p.cmd.Ops, op)
