@@ -26,7 +26,7 @@ defmodule BarkparkCloud.VerifyTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo, Verify}
-  alias BarkparkCloud.Registry.{AgentEvent, Vault}
+  alias BarkparkCloud.Registry.{AgentEvent, Barkpark, Vault}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -408,6 +408,41 @@ defmodule BarkparkCloud.VerifyTest do
 
       # The admin token never rides the HTTP response.
       refute conn.resp_body =~ @admin_token
+    end
+
+    test "persists the headline verdict onto the barkpark row (BP-ONB-09)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # Before the run the row carries no verify verdict — an honest NULL, not a
+      # false. This is the red-without-persist guard: a fire-and-forget verify
+      # would leave both nil forever.
+      assert is_nil(bp.last_verified_at)
+      assert is_nil(bp.verify_reachable)
+
+      program_green()
+      conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
+      assert conn.status == 200
+      assert json_body(conn)["reachable"] == true
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.verify_reachable == true
+      assert %DateTime{} = reloaded.last_verified_at
+    end
+
+    test "persists reachable:false for an unreachable box, never failing the response" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      FakeHttp.program(%{__all__: {:error, {:http_client, :nxdomain}}})
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
+      # An unreachable box is a 200 reachable:false envelope, NOT an error.
+      assert conn.status == 200
+      assert json_body(conn)["reachable"] == false
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      # A real false verdict, distinct from the pre-run NULL.
+      assert reloaded.verify_reachable == false
+      assert %DateTime{} = reloaded.last_verified_at
     end
 
     test "a wrong-team / nonexistent / malformed id is the SAME 404" do

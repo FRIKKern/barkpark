@@ -1622,6 +1622,14 @@ defmodule BarkparkCloud.Web.Router do
           {:error, cs} -> Logger.error("verify event insert failed: #{inspect(cs)}")
         end
 
+        # BP-ONB-09: cache the headline verdict onto the fleet row so the fleet
+        # list carries a queryable "last verified" fact. Best-effort, right
+        # beside the telemetry seam — a failed persist must never fail the proof.
+        case Registry.record_verify_result(bp, result) do
+          {:ok, _bp} -> :ok
+          {:error, cs} -> Logger.error("verify result persist failed: #{inspect(cs)}")
+        end
+
         # OC24: the suite ran — record who asked, and the headline verdict
         # (never the probe envelope; the `verify` instance event above carries
         # the full detail on the Timeline).
@@ -6843,6 +6851,12 @@ defmodule BarkparkCloud.Web.Router do
       # Instance custom domain — the attached platform-zone host (nil until a
       # team attaches one), so the dashboard can render it on the fleet row.
       custom_host: bp.custom_host,
+      # BP-ONB-09 on-demand VERIFY verdict — the cached headline of the last
+      # golden-path probe run (nil until the suite first runs), so the fleet row
+      # can render a "last verified" fact. `verify_reachable` false is a real
+      # verdict, distinct from the null "never verified".
+      last_verified_at: bp.last_verified_at,
+      verify_reachable: bp.verify_reachable,
       inserted_at: bp.inserted_at
     }
 

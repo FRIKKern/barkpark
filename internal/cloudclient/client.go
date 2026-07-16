@@ -139,6 +139,20 @@ type Barkpark struct {
 	AutoupdatePaused     bool   `json:"autoupdate_paused"`
 	PinnedRelease        string `json:"pinned_release"`
 	Channel              string `json:"channel"`
+
+	// On-demand VERIFY verdict (BP-ONB-09) — the cached headline of the last
+	// golden-path probe run the control plane persisted onto the row. Purely
+	// ADDITIVE and DECODED TOLERANTLY: an older control plane omits both and they
+	// decode to their zero value — never an error.
+	//
+	//   - VerifiedReachable — a POINTER on purpose (mirrors AutoupdateEnabled):
+	//     nil means the CP said nothing (never verified / older CP), so the fleet
+	//     view shows no verify state instead of lying "unreachable". A present
+	//     false is a real "last run was unreachable"; a present true is reachable.
+	//   - LastVerifiedAt — when the suite last ran (RFC3339). Empty until the CP
+	//     emits it.
+	VerifiedReachable *bool  `json:"verify_reachable"`
+	LastVerifiedAt    string `json:"last_verified_at"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

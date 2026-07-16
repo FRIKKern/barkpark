@@ -401,6 +401,32 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row["team_id"] == team.id
     end
 
+    test "the fleet row carries the BP-ONB-09 verify verdict fields" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{name: "Prod", slug: "prod"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # A never-verified row: barkpark_json still carries BOTH keys, honest NULL.
+      conn = call(:get, "/v1/barkparks", nil, token)
+      [row] = json_body(conn)["barkparks"]
+      assert Map.has_key?(row, "verify_reachable")
+      assert Map.has_key?(row, "last_verified_at")
+      assert is_nil(row["verify_reachable"])
+      assert is_nil(row["last_verified_at"])
+
+      # After a persisted verdict the fleet row reflects it.
+      {:ok, _} =
+        Registry.record_verify_result(bp, %{
+          reachable: true,
+          verified_at: "2026-07-16T00:00:00.000000Z"
+        })
+
+      conn2 = call(:get, "/v1/barkparks", nil, token)
+      [row2] = json_body(conn2)["barkparks"]
+      assert row2["verify_reachable"] == true
+      assert row2["last_verified_at"] =~ "2026-07-16"
+    end
+
     test "no token → 401" do
       conn = call(:get, "/v1/barkparks")
       assert conn.status == 401
