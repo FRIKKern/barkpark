@@ -289,15 +289,6 @@ type Pool struct {
 	created int
 }
 
-// NewPool seeds a warm pool with the given ready hosts against provider. The
-// hosts are assumed already created (e.g. via provider.Create at seed time);
-// callers seed with SeedPool to also register them in a FakeProvider.
-func NewPool(provider CloudProvider, ready ...Server) *Pool {
-	rs := make([]Server, len(ready))
-	copy(rs, ready)
-	return &Pool{provider: provider, ready: rs}
-}
-
 // SeedPool creates n warm hosts via provider (names warm-1..warm-n) and returns
 // a Pool holding them ready. This is the test/seed-time helper: against a
 // FakeProvider it costs nothing and pre-registers the hosts so pop's replacement

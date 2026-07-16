@@ -261,12 +261,10 @@ func TestCloudDNSResolveApex(t *testing.T) {
 	}
 }
 
-// TestCloudDNSSatisfiesInterface is a runtime check that CloudDNS is usable
-// wherever a DNSProvider is expected (the warm-pool seam).
-func TestCloudDNSSatisfiesInterface(t *testing.T) {
-	var d DNSProvider = NewCloudDNS()
-	_ = d
-}
+// cloudDNSSatisfiesInterface is a compile-time check that *CloudDNS is usable
+// wherever a DNSProvider is expected (the warm-pool seam) — fails the build,
+// not a test run, if the interface ever drifts.
+var _ DNSProvider = (*CloudDNS)(nil)
 
 // TestCloudDNSTokenInjectsEnv asserts the dual-token path: a CloudDNS with a
 // Token (and no Run seam) runs the live exec through runCaptureWithEnv with
