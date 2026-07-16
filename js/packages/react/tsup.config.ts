@@ -23,8 +23,39 @@ async function prependUseClient(file: string) {
   await writeFile(full, USE_CLIENT + body)
 }
 
+// The `image` entry is only a re-export shim (`export { BarkparkImage } from
+// './chunk-XXX'`) — esbuild parks the actual client code (the `useEffect` call)
+// in a hashed chunk that BOTH `image.*` and `server.*` re-export from. Bannering
+// only the shim would leave that chunk directive-free, so a Server Component
+// importing `BarkparkImage` via `server.mjs` would still drag `useEffect` into
+// the RSC graph. So resolve the chunk each client entry re-exports from and
+// banner IT too. The hook-free renderer chunk is never referenced by a client
+// entry, so it is never bannered and stays server-evaluable.
+async function bannerClientChunksOf(entryFile: string) {
+  await prependUseClient(entryFile)
+  const body = await readFile(join('dist', entryFile), 'utf8')
+  const chunks = new Set<string>()
+  for (const m of body.matchAll(/from\s*['"]\.\/(chunk-[A-Za-z0-9]+\.(?:mjs|cjs))['"]/g)) {
+    chunks.add(m[1])
+  }
+  for (const chunk of chunks) await prependUseClient(chunk)
+}
+
 export default defineConfig({
-  entry: { index: 'src/index.ts', server: 'src/server.ts' },
+  // `image` is a build-only entry (NOT a package.json `exports` subpath): it
+  // exists solely to force esbuild's code-splitting to isolate the ONE client
+  // module — `BarkparkImage` (`'use client'`, calls `useEffect`) — into its own
+  // chunk. Without it, `Image.tsx` is imported by BOTH `index` and `server`, so
+  // splitting co-bundles it into the single shared renderer chunk, whose head
+  // becomes `import { …, useEffect } from 'react'`. `server.mjs` re-exports the
+  // hook-free `PortableDoc`/`renderPortableDocument` from that same chunk, so a
+  // Next Server Component that imports `PortableDoc` under the `react-server`
+  // condition drags `useEffect` into the server graph and `next build` fails.
+  // Making `Image.tsx` its own entry pins it to `dist/image.*`; the shared
+  // renderer chunk (what `server.mjs` re-exports the renderers from) stays
+  // hook-free, and the client surface lands in its own `'use client'`-bannered
+  // chunk. Guarded by `tests/rsc-chunk-hook-free.test.ts`.
+  entry: { index: 'src/index.ts', server: 'src/server.ts', image: 'src/Image.tsx' },
   format: ['cjs', 'esm'],
   dts: true,
   sourcemap: true,
@@ -40,11 +71,21 @@ export default defineConfig({
     }
   },
   async onSuccess() {
-    // Only the client-boundary bundle needs the "use client" banner; the
+    // Only the client-boundary bundles need the "use client" banner; the
     // server entry must stay directive-free so Next can treat it as a
     // normal server module under the `react-server` condition.
     await prependUseClient('index.mjs')
     await prependUseClient('index.cjs')
+
+    // The isolated client-surface entry (`BarkparkImage`, which calls
+    // `useEffect`) plus the hashed chunk it re-exports from. Bannering the
+    // real code chunk makes any bundler treat `BarkparkImage` as a client
+    // boundary — a client reference, NOT server-evaluated — so `server.mjs`
+    // re-exporting it never drags a hook into the RSC server graph. The
+    // hook-free renderer chunk is re-exported by `index.*` too but never by a
+    // client *entry*, so it is never bannered and stays server-evaluable.
+    await bannerClientChunksOf('image.mjs')
+    await bannerClientChunksOf('image.cjs')
 
     // Ship the shared paper stylesheet as a consumable asset (see above).
     await copyFile(PAPER_SURFACE_SRC, join('dist', 'paper-surface.css'))
