@@ -138,7 +138,10 @@ defmodule Barkpark.Content.Sheets do
       # the full block list) and the projected content[fieldName] /
       # content["body"] keys, whose html also embeds the rendered grid.
       # Projection remains the SOLE writer of the projected keys.
-      render_opts = Labels.paper_render_opts(doc.dataset, Map.get(content, "style"))
+      scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+
+      render_opts =
+        Labels.paper_render_opts(doc.dataset, Map.get(content, "style"), scope)
 
       content =
         case content do

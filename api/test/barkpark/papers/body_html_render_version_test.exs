@@ -16,6 +16,8 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
   alias Barkpark.Repo
   alias Mix.Tasks.Barkpark.RehydrateBodyHtml
 
+  import Barkpark.TenancyFixtures
+
   @dataset "body_html_sv_test"
 
   defp para(id, text) do
@@ -36,7 +38,14 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
   end
 
   defp reload(doc) do
-    {:ok, doc} = Content.get_document(doc.doc_id, "paper", @dataset)
+    opts =
+      if is_binary(doc.workspace_id) do
+        [workspace_id: doc.workspace_id, project_id: doc.project_id]
+      else
+        []
+      end
+
+    {:ok, doc} = Content.get_document(doc.doc_id, "paper", @dataset, opts)
     doc
   end
 
@@ -76,6 +85,91 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
 
       assert doc.content["body_html"] =~ "blocks win"
       refute doc.content["body_html"] =~ "STALE CALLER CACHE"
+      assert doc.content["body_html_sv"] == Render.body_html_render_version()
+    end
+
+    test "the generic writer binds reference labels to the paper tenant" do
+      ws_a = create_workspace!("body-html-writer-a")
+      proj_a = create_project!(ws_a, "body-html-writer-pa")
+      ws_b = create_workspace!("body-html-writer-b")
+      proj_b = create_project!(ws_b, "body-html-writer-pb")
+
+      {:ok, _} =
+        Content.create_document(
+          "author",
+          %{"doc_id" => "shared-author", "title" => "Author in A"},
+          @dataset,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "author",
+          %{"doc_id" => "shared-author", "title" => "Author in B"},
+          @dataset,
+          workspace_id: ws_b.id,
+          project_id: proj_b.id
+        )
+
+      blocks = [
+        %{
+          "id" => "title",
+          "type" => "heading",
+          "role" => "title",
+          "level" => 1,
+          "text" => "Scoped Writer"
+        },
+        %{
+          "id" => "author",
+          "type" => "field-reference",
+          "label" => "Author",
+          "refType" => "author",
+          "value" => "shared-author"
+        }
+      ]
+
+      {:ok, doc} =
+        Content.create_document(
+          "paper",
+          %{
+            "doc_id" => "scoped-writer-authority",
+            "title" => "Scoped Writer",
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "blocks" => blocks,
+                "body_html" => "<p>STALE</p>"
+              })
+          },
+          @dataset,
+          workspace_id: ws_b.id,
+          project_id: proj_b.id
+        )
+
+      assert doc.content["body_html"] =~ "Author in B"
+      refute doc.content["body_html"] =~ "Author in A"
+    end
+
+    test "the generic writer derives from historical content.body.blocks" do
+      blocks = [para("legacy-p", "historical nested blocks win")]
+
+      {:ok, doc} =
+        Content.create_document(
+          "paper",
+          %{
+            "doc_id" => "writer-historical-body",
+            "title" => "Historical Body",
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "body" => %{"blocks" => blocks},
+                "body_html" => "<p>STALE HISTORICAL CACHE</p>"
+              })
+          },
+          @dataset
+        )
+
+      assert doc.content["body_html"] =~ "historical nested blocks win"
+      refute doc.content["body_html"] =~ "STALE HISTORICAL CACHE"
       assert doc.content["body_html_sv"] == Render.body_html_render_version()
     end
   end
@@ -161,6 +255,203 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
       refute refreshed.content["body_html"] =~ "before"
       assert refreshed.content["body_html_sv"] == Render.body_html_render_version()
       assert refreshed.rev != stale.rev
+    end
+
+    test "historical content.body.blocks is readable authority" do
+      doc = create_paper("rh-historical", [para("p1", "original")])
+
+      historical_content =
+        doc.content
+        |> Map.delete("blocks")
+        |> Map.put("body", %{"blocks" => [para("legacy", "nested authority")]})
+        |> Map.put("body_html", "<p>STALE</p>")
+
+      {:ok, stale} =
+        doc
+        |> Document.changeset(%{"content" => historical_content, "rev" => "historical-rev"})
+        |> Repo.update()
+
+      assert %{scanned: 1, rewritten: 1, errors: 0, conflicts: 0} =
+               RehydrateBodyHtml.rehydrate()
+
+      refreshed = reload(stale)
+      assert refreshed.content["body_html"] =~ "nested authority"
+      refute refreshed.content["body_html"] =~ "STALE"
+    end
+
+    test "an empty top-level blocks list is authoritative over historical nested blocks" do
+      doc = create_paper("rh-empty-authority", [para("p1", "original")])
+
+      empty_authority =
+        doc.content
+        |> Map.put("blocks", [])
+        |> Map.put("body", %{"blocks" => [para("legacy", "must not render")]})
+        |> Map.put("body_html", "<p>STALE</p>")
+
+      {:ok, stale} =
+        doc
+        |> Document.changeset(%{"content" => empty_authority, "rev" => "empty-authority-rev"})
+        |> Repo.update()
+
+      assert %{scanned: 1, rewritten: 1} = RehydrateBodyHtml.rehydrate()
+
+      refreshed = reload(stale)
+      assert refreshed.content["body_html"] == ""
+      refute refreshed.content["body_html"] =~ "must not render"
+    end
+
+    test "rehydration resolves same-id references inside the paper tenant" do
+      ws_a = create_workspace!("body-html-rh-a")
+      proj_a = create_project!(ws_a, "body-html-rh-pa")
+      ws_b = create_workspace!("body-html-rh-b")
+      proj_b = create_project!(ws_b, "body-html-rh-pb")
+
+      for {ws, proj, title} <- [
+            {ws_a, proj_a, "Rehydrate Author A"},
+            {ws_b, proj_b, "Rehydrate Author B"}
+          ] do
+        {:ok, _} =
+          Content.create_document(
+            "author",
+            %{"doc_id" => "shared-rh-author", "title" => title},
+            @dataset,
+            workspace_id: ws.id,
+            project_id: proj.id
+          )
+      end
+
+      blocks = [
+        %{
+          "id" => "title",
+          "type" => "heading",
+          "role" => "title",
+          "level" => 1,
+          "text" => "Scoped Rehydrate"
+        },
+        %{
+          "id" => "author",
+          "type" => "field-reference",
+          "label" => "Author",
+          "refType" => "author",
+          "value" => "shared-rh-author"
+        }
+      ]
+
+      {:ok, doc} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "rh-scoped-reference",
+            "blocks" => blocks,
+            "dataset" => @dataset,
+            "workspace_id" => ws_b.id,
+            "project_id" => proj_b.id
+          })
+        )
+
+      stale_content = Map.put(doc.content, "body_html", "<p>STALE</p>")
+
+      doc
+      |> Document.changeset(%{"content" => stale_content, "rev" => "rh-scoped-stale"})
+      |> Repo.update!()
+
+      assert %{rewritten: 1, conflicts: 0, errors: 0} = RehydrateBodyHtml.rehydrate()
+
+      refreshed = reload(doc)
+      assert refreshed.content["body_html"] =~ "Rehydrate Author B"
+      refute refreshed.content["body_html"] =~ "Rehydrate Author A"
+    end
+
+    test "a concurrent edit wins and is reported as a rev conflict" do
+      doc = create_paper("rh-race", [para("p1", "before")])
+
+      stale_content =
+        doc.content
+        |> Map.put("blocks", [para("p1", "rehydrator candidate")])
+        |> Map.put("body_html", "<p>STALE</p>")
+
+      {:ok, stale} =
+        doc
+        |> Document.changeset(%{"content" => stale_content, "rev" => "race-base-rev"})
+        |> Repo.update()
+
+      before_fenced_write = fn race_doc ->
+        concurrent_content =
+          race_doc.content
+          |> Map.put("blocks", [para("p1", "concurrent author edit")])
+          |> Map.put("body_html", "<p>CONCURRENT CACHE</p>")
+
+        race_doc
+        |> Document.changeset(%{
+          "content" => concurrent_content,
+          "rev" => "race-concurrent-rev"
+        })
+        |> Repo.update!()
+
+        :ok
+      end
+
+      assert %{
+               scanned: 1,
+               rewritten: 0,
+               noop: 0,
+               conflicts: 1,
+               errors: 0,
+               conflict_details: [
+                 %{
+                   doc_id: "rh-race",
+                   type: "paper",
+                   dataset: @dataset,
+                   rev: "race-base-rev"
+                 }
+               ]
+             } =
+               RehydrateBodyHtml.rehydrate(before_fenced_write: before_fenced_write)
+
+      refreshed = reload(stale)
+      assert refreshed.rev == "race-concurrent-rev"
+      assert refreshed.content["body_html"] == "<p>CONCURRENT CACHE</p>"
+
+      assert get_in(refreshed.content, ["blocks", Access.at(0), "content", Access.at(0), "value"]) ==
+               "concurrent author edit"
+    end
+
+    test "one failed row is reported with identity while other rows still progress" do
+      failed = create_paper("rh-error", [para("p1", "error candidate")])
+      successful = create_paper("rh-success", [para("p1", "success candidate")])
+
+      for doc <- [failed, successful] do
+        stale_content = Map.put(doc.content, "body_html", "<p>STALE</p>")
+
+        doc
+        |> Document.changeset(%{"content" => stale_content, "rev" => "#{doc.doc_id}-stale"})
+        |> Repo.update!()
+      end
+
+      persist_fun = fn changeset ->
+        if changeset.data.doc_id == "rh-error" do
+          {:error, Ecto.Changeset.add_error(changeset, :content, "deterministic failure")}
+        else
+          Repo.update(changeset)
+        end
+      end
+
+      assert %{
+               scanned: 2,
+               rewritten: 1,
+               conflicts: 0,
+               errors: 1,
+               error_details: [
+                 %{
+                   doc_id: "rh-error",
+                   type: "paper",
+                   dataset: @dataset,
+                   reason: %{content: ["deterministic failure"]}
+                 }
+               ]
+             } = RehydrateBodyHtml.rehydrate(persist_fun: persist_fun)
+
+      assert reload(failed).content["body_html"] == "<p>STALE</p>"
+      assert reload(successful).content["body_html"] =~ "success candidate"
     end
   end
 end

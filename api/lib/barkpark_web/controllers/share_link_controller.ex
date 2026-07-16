@@ -18,7 +18,9 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
+  alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.PortableDoc.{Projection, Render}
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
 
@@ -39,9 +41,11 @@ defmodule BarkparkWeb.ShareLinkController do
   # so the redirect grants nothing the token didn't already grant. Falls
   # back to the static render when the link's scope no longer resolves.
   defp serve(conn, %ShareLink{kind: "doc", ref_type: "paper"} = link, raw_token) do
+    tenancy = conn.private[:share_link_tenancy] || Tenancy
+
     with ws_id when is_binary(ws_id) <- link.workspace_id,
-         %{slug: ws_slug} <- Barkpark.Tenancy.get_workspace_by_id(ws_id),
-         %{slug: proj_slug} <- Barkpark.Tenancy.get_project_by_id(link.project_id) do
+         %{slug: ws_slug} <- tenancy.get_workspace_by_id(ws_id),
+         %{slug: proj_slug} <- tenancy.get_project_by_id(link.project_id) do
       redirect(conn,
         to:
           "/w/#{ws_slug}/p/#{proj_slug}/papers/#{link.ref_id}?share=" <>
@@ -68,7 +72,7 @@ defmodule BarkparkWeb.ShareLinkController do
         |> put_view(BarkparkWeb.ScopedPaperHTML)
         |> render(:show,
           article?: paper_article?(paper),
-          body_html: paper_body_html(paper),
+          body_html: paper_body_html(paper, link),
           preview: preview,
           page_title: preview["title"],
           slug: link.ref_id,
@@ -287,7 +291,29 @@ defmodule BarkparkWeb.ShareLinkController do
   # or relative when no share host is detectable (caller prepends its own host).
   defp share_url(token), do: "#{Sharing.share_link_base() || ""}/s/#{token}"
 
-  defp paper_body_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+  # Static fallback follows the same authority rule as every live Paper reader:
+  # a readable block list wins over the cache, including historical
+  # content.body.blocks and an intentionally-empty top-level blocks list.
+  # Bind reference resolution to the LINK scope (not request/global scope).
+  defp paper_body_html(%{content: content}, %ShareLink{} = link)
+       when is_map(content) do
+    case Projection.read_blocks(content) do
+      blocks when is_list(blocks) ->
+        render_opts =
+          Labels.paper_render_opts(
+            link.dataset,
+            Map.get(content, "style"),
+            scope(link)
+          )
+
+        Render.render_blocks(blocks, render_opts)
+
+      nil ->
+        Map.get(content, "body_html") || ""
+    end
+  end
+
+  defp paper_body_html(_paper, _link), do: ""
   defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the

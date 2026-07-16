@@ -511,20 +511,28 @@ defmodule Barkpark.Content.Writer do
   # still-current renderer stamp. Re-render AFTER field encryption/template
   # normalization and immediately before the changeset, making blocks + cache +
   # stamp one atomic row write. HTML-only legacy papers keep the sanitizer path.
-  defp maybe_render_paper_body_html(
-         %{"content" => %{"blocks" => blocks} = content} = attrs,
-         "paper",
-         dataset
-       )
-       when is_list(blocks) do
-    render_opts = Labels.paper_render_opts(dataset, Map.get(content, "style"))
+  defp maybe_render_paper_body_html(%{"content" => content} = attrs, "paper", dataset)
+       when is_map(content) do
+    case Projection.read_blocks(content) do
+      blocks when is_list(blocks) ->
+        scope = [
+          workspace_id: Map.get(attrs, "workspace_id"),
+          project_id: Map.get(attrs, "project_id")
+        ]
 
-    content =
-      content
-      |> Map.put("body_html", Render.render_blocks(blocks, render_opts))
-      |> Map.put("body_html_sv", Render.body_html_render_version())
+        render_opts =
+          Labels.paper_render_opts(dataset, Map.get(content, "style"), scope)
 
-    Map.put(attrs, "content", content)
+        content =
+          content
+          |> Map.put("body_html", Render.render_blocks(blocks, render_opts))
+          |> Map.put("body_html_sv", Render.body_html_render_version())
+
+        Map.put(attrs, "content", content)
+
+      nil ->
+        attrs
+    end
   end
 
   defp maybe_render_paper_body_html(attrs, _type, _dataset), do: attrs
@@ -668,7 +676,7 @@ defmodule Barkpark.Content.Writer do
       %{media_resolver: Preview.media_resolver(scope), doc_type: type}
       |> maybe_put_preview_url(type, attrs)
 
-    Map.put(Labels.render_opts(dataset), :preview, preview)
+    Map.put(Labels.render_opts(dataset, scope), :preview, preview)
   end
 
   defp maybe_put_preview_url(preview, "paper", %{"doc_id" => doc_id}) when is_binary(doc_id) do

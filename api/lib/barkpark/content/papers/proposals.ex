@@ -143,7 +143,8 @@ defmodule Barkpark.Content.Papers.Proposals do
          {:ok, new_blocks} <- encrypt_blocks(normalized, dataset, draft.workspace_id) do
       rev = current_rev(draft) + 1
       style = get_in(draft.content || %{}, ["style"])
-      render_opts = Labels.paper_render_opts(dataset, style)
+      scope = [workspace_id: draft.workspace_id, project_id: draft.project_id]
+      render_opts = Labels.paper_render_opts(dataset, style, scope)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       content =

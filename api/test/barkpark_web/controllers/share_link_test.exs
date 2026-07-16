@@ -7,6 +7,7 @@ defmodule BarkparkWeb.ShareLinkTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Media}
+  alias Barkpark.Content.Document
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
@@ -15,6 +16,11 @@ defmodule BarkparkWeb.ShareLinkTest do
   @dataset "production"
   @admin "share-link-admin"
   @junior "share-link-junior"
+
+  defmodule MissingRedirectTenancy do
+    def get_workspace_by_id(_id), do: nil
+    def get_project_by_id(_id), do: nil
+  end
 
   setup %{conn: conn} do
     # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
@@ -172,24 +178,89 @@ defmodule BarkparkWeb.ShareLinkTest do
   # path must (a) not KeyError on the shared template's backlinks/driven-tasks
   # sections and (b) still carry the branded social-share head, because a share
   # link IS the sharing flow.
-  test "a PAPER link whose scope no longer resolves serves the static render with a branded share head",
-       %{conn: conn, scope_str: scope} do
+  test "a PAPER link static fallback renders scoped blocks instead of stale cache",
+       %{conn: conn, scope_str: scope, ws: ws, proj: proj} do
     %{"token" => token} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
 
-    # Simulate a link whose workspace/project can no longer be resolved (the
-    # serve/3 `with` chain falls through to serve_paper_static).
-    {1, _} =
-      Repo.update_all(Barkpark.Sharing.ShareLink, set: [workspace_id: nil, project_id: nil])
+    # Same referenced id in another tenant. The static fallback must bind label
+    # resolution to the LINK's still-valid scope, not global/default scope.
+    other_ws = create_workspace!("link-static-other-ws")
+    other_proj = create_project!(other_ws, "link-static-other-proj")
+    other_scope = [workspace_id: other_ws.id, project_id: other_proj.id]
 
-    resp = get(build_conn(), "/s/#{token}")
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "type" => "string"}]
+        },
+        @dataset,
+        other_scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "post1", "title" => "Other Tenant Post"},
+        @dataset,
+        other_scope
+      )
+
+    {:ok, _} = Content.publish_document("post1", "post", @dataset, other_scope)
+
+    {:ok, paper} =
+      Content.get_document(
+        "demo-paper",
+        "paper",
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    blocks = [
+      %{
+        "id" => "title",
+        "type" => "heading",
+        "role" => "title",
+        "level" => 1,
+        "text" => "Static Block Authority"
+      },
+      %{
+        "id" => "ref",
+        "type" => "field-reference",
+        "label" => "Linked post",
+        "refType" => "post",
+        "value" => "post1"
+      }
+    ]
+
+    stale_content =
+      paper.content
+      |> Map.put("blocks", blocks)
+      |> Map.put("body_html", "<p>STALE STATIC CACHE</p>")
+
+    paper
+    |> Document.changeset(%{"content" => stale_content, "rev" => "share-static-stale"})
+    |> Repo.update!()
+
+    # Deterministically force the redirect lookup to miss while retaining the
+    # link's real workspace/project ids for the static reader scope.
+    resp =
+      build_conn()
+      |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
+      |> get("/s/#{token}")
 
     assert resp.status == 200
-    # The article body renders (no KeyError on @backlinks_html/@driven_tasks_html).
-    assert resp.resp_body =~ "Shared via a direct link"
+    assert resp.resp_body =~ "Static Block Authority"
+    assert resp.resp_body =~ "A Post"
+    refute resp.resp_body =~ "Other Tenant Post"
+    refute resp.resp_body =~ "STALE STATIC CACHE"
     # The share head: og/twitter tags with the paper title and (no manifest
     # image on this classic doc) the branded default card.
-    assert resp.resp_body =~ ~s(property="og:title" content="Demo Paper")
+    assert resp.resp_body =~ ~s(property="og:title" content="Static Block Authority")
     assert resp.resp_body =~ ~s(property="og:site_name" content="Barkpark")
     assert resp.resp_body =~ "/images/og-default.jpg"
     assert resp.resp_body =~ ~s(name="twitter:card" content="summary_large_image")

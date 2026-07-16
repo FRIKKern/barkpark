@@ -199,7 +199,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (so a partial update never silently demotes an article paper). Threaded
     # into render_opts so the body_html cache is rendered in the article palette.
     style = Labels.paper_style(attrs, existing)
-    render_opts = Labels.paper_render_opts(dataset, style)
+
+    render_opts =
+      Labels.paper_render_opts(dataset, style, paper_scope(existing, scope_attrs))
 
     body_html =
       cond do
@@ -415,7 +417,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # Carry the doc's stored article marker into the render so both the
       # body_html cache and the delta fragment match the article palette.
       style = get_in(doc.content || %{}, ["style"])
-      render_opts = Labels.paper_render_opts(dataset, style)
+      scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+      render_opts = Labels.paper_render_opts(dataset, style, scope)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       fragment_html =
@@ -539,7 +542,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
         true ->
           rev = paper_next_rev(doc)
           style = get_in(doc.content || %{}, ["style"])
-          render_opts = Labels.paper_render_opts(dataset, style)
+          scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+          render_opts = Labels.paper_render_opts(dataset, style, scope)
           body_html = Render.render_blocks(new_blocks, render_opts)
 
           content =
@@ -1364,7 +1368,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
   defp maybe_project(content, blocks, dataset, slug, scope) when is_list(blocks) do
-    render_opts = Map.put(Labels.render_opts(dataset), :preview, paper_preview_opts(slug, scope))
+    render_opts =
+      Map.put(Labels.render_opts(dataset, scope), :preview, paper_preview_opts(slug, scope))
+
     Projection.project(content, blocks, render_opts)
   end
 
@@ -1395,7 +1401,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
-    Map.put(Labels.render_opts(dataset), :preview, %{
+    Map.put(Labels.render_opts(dataset, scope), :preview, %{
       media_resolver: Preview.media_resolver(scope),
       doc_type: type
     })
