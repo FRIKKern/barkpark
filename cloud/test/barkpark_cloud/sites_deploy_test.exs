@@ -195,7 +195,8 @@ defmodule BarkparkCloud.SitesDeployTest do
         assert_receive {:bpcloud_event,
                         %{
                           type: "site.deploy.stage",
-                          payload: %{deployment_id: dep_id, stage: ^stage, status: "done"} = payload
+                          payload:
+                            %{deployment_id: dep_id, stage: ^stage, status: "done"} = payload
                         }}
 
         assert dep_id == d.id
