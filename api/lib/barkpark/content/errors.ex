@@ -277,6 +277,20 @@ defmodule Barkpark.Content.Errors do
       details: %{field: field, op: op}
     }
 
+  # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
+  # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
+  # that doesn't split into a field=value pair (e.g. "price>10") used to fall
+  # through to an empty filter map — fail-OPEN, silently returning every
+  # document. Fail CLOSED with the same "invalid_filter" code the modern
+  # /v1/data/query surface uses for filter garbage (no new envelope code).
+  defp build({:error, {:invalid_filter, raw}}),
+    do: %{
+      code: "invalid_filter",
+      message: "malformed filter #{inspect(raw)}; expected \"field=value\"",
+      status: 400,
+      details: %{filter: raw}
+    }
+
   # A filter/order targets a field the caller may not READ. 422 so the WHERE/ORDER
   # never runs over a hidden field (an oracle to binary-search or sort by its
   # value even though the body is redacted). Canonical envelope — QueryController

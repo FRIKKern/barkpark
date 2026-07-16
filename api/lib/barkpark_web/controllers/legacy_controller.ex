@@ -17,32 +17,33 @@ defmodule BarkparkWeb.LegacyController do
     # `bin/1` collapses a non-binary `?filter[]=x` / `?filter[k]=v` to nil
     # BEFORE parse_legacy_filter's `String.split/2` — which would otherwise
     # 500 with a FunctionClauseError on a list/map. nil → the empty-filter path.
-    filter_map = parse_legacy_filter(bin(Map.get(params, "filter")))
-    schema = fetch_schema(conn, type)
-    caller_context = CallerContext.from_conn(conn)
+    with {:ok, filter_map} <- parse_legacy_filter(bin(Map.get(params, "filter"))) do
+      schema = fetch_schema(conn, type)
+      caller_context = CallerContext.from_conn(conn)
 
-    # WS-B MEDIUM-4 (legacy path): a `filter=field=value` over a field the caller
-    # may not SEE turns row-selection + `count` into an equality oracle on a
-    # hidden value, even though the response BODY is redacted. Reject BEFORE the
-    # query so the WHERE never runs over a forbidden field — the same guard
-    # /v1/data/query enforces, now closed on the legacy surface too.
-    case forbidden_filter_field(filter_map, schema, caller_context) do
-      nil ->
-        documents =
-          Content.list_documents(
-            type,
-            @dataset,
-            [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
-          )
+      # WS-B MEDIUM-4 (legacy path): a `filter=field=value` over a field the caller
+      # may not SEE turns row-selection + `count` into an equality oracle on a
+      # hidden value, even though the response BODY is redacted. Reject BEFORE the
+      # query so the WHERE never runs over a forbidden field — the same guard
+      # /v1/data/query enforces, now closed on the legacy surface too.
+      case forbidden_filter_field(filter_map, schema, caller_context) do
+        nil ->
+          documents =
+            Content.list_documents(
+              type,
+              @dataset,
+              [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+            )
 
-        json(conn, %{
-          type: type,
-          documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
-          count: length(documents)
-        })
+          json(conn, %{
+            type: type,
+            documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
+            count: length(documents)
+          })
 
-      field ->
-        {:error, {:forbidden_field, field}}
+        field ->
+          {:error, {:forbidden_field, field}}
+      end
     end
   end
 
@@ -127,13 +128,18 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   # Parse legacy "field=value" filter string into a map for list_documents/3.
-  defp parse_legacy_filter(nil), do: %{}
-  defp parse_legacy_filter(""), do: %{}
+  # Nil/empty means "no filter" (unchanged). A non-empty string that doesn't
+  # parse to a field=value pair (e.g. "price>10") used to fall through to a
+  # bare `%{}` — silently returning EVERY document instead of erroring, the
+  # same fail-open class query_controller.ex guards for its filter operators.
+  # Fail CLOSED here too: route it through action_fallback as a 400.
+  defp parse_legacy_filter(nil), do: {:ok, %{}}
+  defp parse_legacy_filter(""), do: {:ok, %{}}
 
   defp parse_legacy_filter(s) do
     case String.split(s, "=", parts: 2) do
-      [field, value] -> %{field => value}
-      _ -> %{}
+      [field, value] -> {:ok, %{field => value}}
+      _ -> {:error, {:invalid_filter, s}}
     end
   end
 
