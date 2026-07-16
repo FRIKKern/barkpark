@@ -1,0 +1,3 @@
+# Vitest browser-mode run artifacts (failure screenshots + attachments) — never committed.
+__screenshots__/
+.vitest-attachments/
