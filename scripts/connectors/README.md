@@ -180,6 +180,67 @@ scripts/connectors/w11-isolated-turn-proof.sh           # LIVE: one bogus-key is
 Vercel deploy are NAMED human gates (`connectors-hg-live-isolated-cloud-turn`) —
 this harness never fabricates a model answer.
 
+# Wave 12 — the shim's LOCAL boundary: the vercel child's env allowlist (D121–D125)
+
+Wave 11 wired the `:cloud` profile and proved the *remote* boundary is narrow — the
+in-sandbox turn exec carries EXACTLY one `--env ANTHROPIC_API_KEY` pair, and
+`vercel sandbox exec` forwards ONLY explicit `--env` pairs. Wave 12's verify round
+found the leak that framing missed: the **LOCAL** `vercel` CLI child was spawned
+with a **full env inherit**, so the shim's own environment — including the minted
+per-session `BARKPARK_API_TOKEN` and the operator's `ANTHROPIC_API_KEY` — was
+handed verbatim to every `vercel` invocation on the host.
+
+### The fix — an explicit env allowlist on every local `vercel` spawn (D121)
+
+`cloud-sandbox-runner.mjs`'s `run()` (the single choke point through which
+create / exec / teardown all spawn `vercel`) now passes `env: vercelChildEnv()`:
+
+- **Allowed:** `HOME`, `PATH`, `TMPDIR`, and every `VERCEL_*`-prefixed var
+  (`VERCEL_AUTH_TOKEN` / `VERCEL_OIDC_TOKEN` are the CLI's auth env, confirmed from
+  `vercel --help`; org/project id vars are unconfirmed by name, so the whole
+  namespace is prefix-allowed rather than leaked-by-omission).
+- **Never crosses:** `BARKPARK_*` and `ANTHROPIC_API_KEY`. The key is read from the
+  shim's OWN env in `runTurn()` to build the single `--env ANTHROPIC_API_KEY=…`
+  pair — it crosses the *remote* boundary as an explicit flag, never as an ambient
+  var of the local child.
+
+### `w12-shim-confinement-proof.sh`
+
+The **black-box confinement proof** (D122) — hermetic, provisions NO real sandbox.
+`CLOUD_SANDBOX_VERCEL_BIN` points the shim at a generated fake `vercel` that records
+every invocation's argv (NUL-delimited, so the multi-line in-sandbox script
+survives) + full env and emulates just enough of create→exec→remove for the shim to
+complete. It drives the REAL `cloud-sandbox-runner.mjs` end to end with planted
+`HOST_SECRET` / `BARKPARK_API_TOKEN` / `ANTHROPIC_API_KEY=sk-test` and asserts:
+
+- **(a)** the turn exec (located by its `-lc` argv token — never by capture-file
+  ordering, since the no-snapshot fallback's `npm i -g` exec shifts numbering)
+  carries EXACTLY one `--env`: `ANTHROPIC_API_KEY=sk-test`;
+- **(b)** `HOST_SECRET` / `BARKPARK_API_TOKEN` / `ANTHROPIC_API_KEY` are ABSENT from
+  every captured child env, while `PATH` is still forwarded (the allowlist reverses
+  the pre-fix leak without starving `vercel`);
+- **(c)** the in-sandbox bash script isolates `HOME=/tmp/bp-cloud-home` +
+  `cd /tmp/bp-cloud-cwd` (D112);
+- **(d)** `--workspace global` AND a missing `--workspace` both exit 2 with ZERO
+  vercel invocations (the fail-closed principal gate, front-run).
+
+No GNU `timeout` is used (absent on darwin — the shim self-terminates in <1s against
+the fake). `--check` lints the shim + verifies the allowlist is wired into `run()`
+and prints the plan without spawning anything.
+
+```bash
+scripts/connectors/w12-shim-confinement-proof.sh --check   # lint + allowlist check + plan, spawns nothing
+scripts/connectors/w12-shim-confinement-proof.sh           # hermetic black-box run (fake vercel; no real sandbox)
+```
+
+This proof finally rides CI: `.github/workflows/connectors.yml` gains
+`scripts/connectors/**` in its `paths` and a BLOCKING `shim-confinement` job (node +
+bash + the fake vercel; no Postgres) — the shim was invisible to every path filter
+before Wave 12. The **live host-denial observation** (a real Firecracker VM
+refusing a host touch) rides the same human gate,
+`connectors-hg-live-isolated-cloud-turn`; this proof asserts the *launch contract*
+(what the shim REQUESTS/confines), never a fabricated live denial.
+
 ## Gate
 
 ```bash
@@ -189,7 +250,9 @@ bash -n scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d1
   && scripts/connectors/d10-local-claude-cli-coldstart.sh --check \
   && node --check scripts/connectors/cloud-sandbox-runner.mjs \
   && bash -n scripts/connectors/w11-isolated-turn-proof.sh \
-  && scripts/connectors/w11-isolated-turn-proof.sh --check
+  && scripts/connectors/w11-isolated-turn-proof.sh --check \
+  && shellcheck -S error scripts/connectors/w12-shim-confinement-proof.sh \
+  && scripts/connectors/w12-shim-confinement-proof.sh
 ```
 
 ## What Wave 11 does NOT do (filed as backlog)

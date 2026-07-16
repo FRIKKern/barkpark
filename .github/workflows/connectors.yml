@@ -31,10 +31,16 @@ on:
     branches: [main]
     paths:
       - "connectors/**"
+      # The Cloud execution-profile shim + its confinement proof (Connectors
+      # Wave 12, D122) — invisible to every CI path filter before this line, so a
+      # regression in cloud-sandbox-runner.mjs's local-vercel env allowlist could
+      # ship unproven. The shim-confinement job below runs its black-box proof.
+      - "scripts/connectors/**"
       - ".github/workflows/connectors.yml"
   pull_request:
     paths:
       - "connectors/**"
+      - "scripts/connectors/**"
       - ".github/workflows/connectors.yml"
 
 concurrency:
@@ -44,6 +50,35 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The Cloud execution-profile shim's confinement proof (Connectors Wave 12,
+  # D121/D122). A SEPARATE job from `test`: it needs neither Postgres nor
+  # `connectors/`'s npm install — only node + bash + a generated fake `vercel`. It
+  # drives the REAL scripts/connectors/cloud-sandbox-runner.mjs end to end and
+  # asserts the local `vercel` child is env-confined (the minted BARKPARK token and
+  # ANTHROPIC key never leak into it), the turn exec carries exactly one
+  # `--env ANTHROPIC_API_KEY`, HOME/cwd are isolated, and the principal gate fails
+  # closed. BLOCKING — no continue-on-error (matching this file's whole-workflow
+  # discipline); a red here means a real confinement regression.
+  shim-confinement:
+    name: Cloud shim confinement proof (black-box, no real Vercel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Hermetic: the proof generates a fake `vercel` and never touches the real
+      # platform. `node --check` + `shellcheck -S error` mirror the local gate; the
+      # ubuntu runner has `shellcheck` preinstalled.
+      - name: Shim confinement proof (D121 env allowlist)
+        run: |
+          node --check scripts/connectors/cloud-sandbox-runner.mjs
+          shellcheck -S error scripts/connectors/w12-shim-confinement-proof.sh
+          bash scripts/connectors/w12-shim-confinement-proof.sh
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest
