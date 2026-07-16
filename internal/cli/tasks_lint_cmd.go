@@ -60,8 +60,7 @@ func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) in
 
 	snap, _, err := taskboard.FetchSnapshotFull(client)
 	if err != nil {
-		out.userErr("lint: %v", err)
-		return exitGeneric
+		return fetchSnapshotErr(out, "lint", err)
 	}
 	if len(tail) == 1 {
 		return renderCompletenessLint(out, snap, tail[0])

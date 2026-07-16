@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // claimReply is the scripted response for one task's /claim endpoint.
@@ -259,4 +260,40 @@ func runTaskNextFrontierArgs(w *writer, ctx manifest.Context, tail []string) int
 		return exitUsage
 	}
 	return runTaskNextFrontier(w, globals{}, ctx, worker, opts)
+}
+
+// TestNextFrontierFetchFailureEmitsJSONEnvelope pins the fetchSnapshotErr fix
+// (wbqs-go-board-fetch-error-envelope): before the fix, a failed
+// taskboard.FetchSnapshotFull hit `out.userErr(...); return exitGeneric` with
+// no machineOut() check, so `bp task next <worker> --frontier -o json | jq` on
+// a broken board fetch got EMPTY stdout. It must now emit a parseable
+// {"ok":false,"error":{"code":...,"message":...}} envelope on stdout.
+func TestNextFrontierFetchFailureEmitsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runTaskNextFrontier(w, globals{}, dispatchCtx(srv.URL), "worker-1", taskboard.FrontierOpts{})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric (%d)", code, exitGeneric)
+	}
+	if se.Len() != 0 {
+		t.Errorf("json mode must not also leak the human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable (empty stdout is exactly the pre-fix bug): %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
+		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
+	}
 }

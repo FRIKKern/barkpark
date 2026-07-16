@@ -83,8 +83,7 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 	for round := 0; round < frontierClaimRounds; round++ {
 		snap, details, err := taskboard.FetchSnapshotFull(client)
 		if err != nil {
-			out.userErr("task next --frontier: %v", err)
-			return exitGeneric
+			return fetchSnapshotErr(out, "task next --frontier", err)
 		}
 		now := time.Now().UTC()
 		board := taskboard.BuildBoard(snap, taskboard.RepoContext{}, now)

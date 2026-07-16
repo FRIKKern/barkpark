@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -365,5 +367,41 @@ func TestEmitFrontierJSONOverlaps(t *testing.T) {
 	o := payload.Overlaps[0]
 	if o.A != "a" || o.B != "b" || o.Kind != "files" || o.Shared != "internal/cli/onramp_cmd.go" || o.AWorker != "w1" || o.BWorker != "w2" {
 		t.Errorf("overlap = %+v", o)
+	}
+}
+
+// TestFrontierFetchFailureEmitsJSONEnvelope pins the fetchSnapshotErr fix
+// (wbqs-go-board-fetch-error-envelope): before the fix, a failed
+// taskboard.FetchSnapshotFull hit `out.userErr(...); return exitGeneric` with
+// no machineOut() check, so `bp task frontier -o json | jq` on a broken board
+// fetch got EMPTY stdout. It must now emit a parseable
+// {"ok":false,"error":{"code":...,"message":...}} envelope on stdout.
+func TestFrontierFetchFailureEmitsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runTaskFrontier(w, globals{}, dispatchCtx(srv.URL), nil)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric (%d)", code, exitGeneric)
+	}
+	if se.Len() != 0 {
+		t.Errorf("json mode must not also leak the human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable (empty stdout is exactly the pre-fix bug): %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
+		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
 	}
 }

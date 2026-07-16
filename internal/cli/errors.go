@@ -261,6 +261,30 @@ func usageErrf(out *writer, usageHelp func(), format string, args ...any) int {
 	return exitUsage
 }
 
+// fetchSnapshotErr reports a failed taskboard.FetchSnapshotFull as the shared
+// board-fetch failure path for the client-side read verbs that intercept
+// entirely before manifest dispatch (`bp task frontier`, `bp task lint`,
+// `bp task next --frontier`, `bp cmux dispatch`). FetchSnapshotFull returns a
+// plain wrapped Go error (a transport failure or a bare non-200 status,
+// wrapped via fmt.Errorf in taskboard/fetch.go) rather than a decoded API
+// envelope, so there is no server `code` for classifyError to key on; this
+// mints the one fresh "fetch_failed" code for it instead of inventing a
+// per-verb variant. On a machine output (json/yaml) it emits the canonical
+// {ok:false,error:{code,message}} envelope on stdout via renderErrorEnvelope —
+// closing exactly the gap renderErrorEnvelope's own doc comment describes:
+// these four verbs used to `out.userErr(...)` unconditionally, leaving
+// `bp task frontier -o json | jq` with empty stdout on a failed fetch even
+// though the same verb emits proper json/yaml on success. Otherwise it prints
+// the unchanged human "bp: <verb>: <err>" stderr line. Always returns
+// exitGeneric — a board-fetch failure is operational, never a usage error.
+func fetchSnapshotErr(out *writer, verb string, err error) int {
+	msg := fmt.Sprintf("%s: %v", verb, err)
+	if !renderErrorEnvelope(out, "fetch_failed", msg, "", "") {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric
+}
+
 // bodyMessage extracts a top-level "message" string from an error body, used to
 // give the {"ok":false,"reason":…} shape a human one-liner (e.g. "task not
 // found") instead of the bare reason token. Returns "" when absent.
