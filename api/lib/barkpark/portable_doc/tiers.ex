@@ -77,7 +77,7 @@ defmodule Barkpark.PortableDoc.Tiers do
     task-detail task-list tasks task-board roadmap
     notes note cards card pipeline stage
     form questionnaire
-    stat stats stat-grid heatmap chart
+    stat stats stat-grid heatmap chart gauge-list
     sheet embed asciicast status-legend
     chat-thinking chat-todo chat-tool-diff
     chat-approval chat-question chat-plan
