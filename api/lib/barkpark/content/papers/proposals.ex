@@ -150,6 +150,7 @@ defmodule Barkpark.Content.Papers.Proposals do
         (draft.content || %{})
         |> Map.put("blocks", new_blocks)
         |> Map.put("body_html", body_html)
+        |> Map.put("body_html_sv", Render.body_html_render_version())
         |> Map.put("rev", rev)
         |> Projection.project(blocks, new_blocks, render_opts)
         |> record_provenance(applied_ids, source)

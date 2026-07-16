@@ -37,6 +37,29 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     assert edit_html =~ ~s(data-test-id="paper-add-block")
   end
 
+  test "Studio view renders stored blocks instead of a stale current-version body_html cache", %{
+    conn: conn
+  } do
+    paper = Content.get_paper(@slug, @dataset)
+
+    stale_content =
+      paper.content
+      |> Map.put("body_html", "<p>STALE STUDIO CACHE</p>")
+      |> Map.put(
+        "body_html_sv",
+        Barkpark.PortableDoc.Render.body_html_render_version()
+      )
+
+    paper
+    |> Ecto.Changeset.change(content: stale_content)
+    |> Barkpark.Repo.update!()
+
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+    assert html =~ "Original intro text."
+    refute html =~ "STALE STUDIO CACHE"
+  end
+
   test "rich-text blocks render a <bp-paper-editor> WC carrying the block JSON",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))

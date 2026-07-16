@@ -46,6 +46,38 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
       assert doc.content["body_html_sv"] == Render.body_html_render_version()
       assert is_binary(doc.content["body_html"])
     end
+
+    test "the generic document writer derives paper HTML from blocks atomically" do
+      blocks = [
+        %{
+          "id" => "title",
+          "type" => "heading",
+          "role" => "title",
+          "level" => 1,
+          "text" => "Writer authority"
+        },
+        para("p1", "blocks win")
+      ]
+
+      {:ok, doc} =
+        Content.create_document(
+          "paper",
+          %{
+            "doc_id" => "writer-authority",
+            "title" => "Writer authority",
+            "content" => %{
+              "blocks" => blocks,
+              "body_html" => "<p>STALE CALLER CACHE</p>",
+              "body_html_sv" => Render.body_html_render_version()
+            }
+          },
+          @dataset
+        )
+
+      assert doc.content["body_html"] =~ "blocks win"
+      refute doc.content["body_html"] =~ "STALE CALLER CACHE"
+      assert doc.content["body_html_sv"] == Render.body_html_render_version()
+    end
   end
 
   describe "rehydrate_body_html backfill task" do
@@ -103,6 +135,32 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
       # A fresh block_ops write is already stamped current — the task skips it.
       create_paper("rh-3", [para("p1", "current")])
       assert %{scanned: 1, rewritten: 0, noop: 1} = RehydrateBodyHtml.rehydrate()
+    end
+
+    test "changed blocks with a current stamp still regenerate stale body_html" do
+      doc = create_paper("rh-4", [para("p1", "before")])
+
+      stale_content =
+        doc.content
+        |> Map.put("blocks", [para("p1", "after")])
+        |> Map.put("body_html_sv", Render.body_html_render_version())
+
+      {:ok, stale} =
+        doc
+        |> Document.changeset(%{"content" => stale_content, "rev" => "stale-current-rev"})
+        |> Repo.update()
+
+      assert stale.content["body_html"] =~ "before"
+      refute stale.content["body_html"] =~ "after"
+      assert stale.content["body_html_sv"] == Render.body_html_render_version()
+
+      assert %{scanned: 1, rewritten: 1, noop: 0} = RehydrateBodyHtml.rehydrate()
+
+      refreshed = reload(stale)
+      assert refreshed.content["body_html"] =~ "after"
+      refute refreshed.content["body_html"] =~ "before"
+      assert refreshed.content["body_html_sv"] == Render.body_html_render_version()
+      assert refreshed.rev != stale.rev
     end
   end
 end

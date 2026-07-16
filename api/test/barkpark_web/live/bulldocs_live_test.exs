@@ -133,6 +133,40 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ ~s(data-block-id="nested-body")
       assert html =~ "Nested body blocks are visible."
     end
+
+    test "block-backed public reader ignores a stale current-version body_html cache", %{
+      conn: conn
+    } do
+      slug = "2026-07-16-public-block-authority"
+
+      blocks = [
+        %{
+          "id" => "public-authority",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Public blocks are authoritative."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      stale_content =
+        paper.content
+        |> Map.put("body_html", "<p>STALE PUBLIC CACHE</p>")
+        |> Map.put(
+          "body_html_sv",
+          Barkpark.PortableDoc.Render.body_html_render_version()
+        )
+
+      paper
+      |> Ecto.Changeset.change(content: stale_content)
+      |> Barkpark.Repo.update!()
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ "Public blocks are authoritative."
+      refute html =~ "STALE PUBLIC CACHE"
+    end
   end
 
   describe "backlinks: engine-backed 'Linked mentions' section (public flat reader)" do

@@ -6,18 +6,18 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
   `Barkpark.PortableDoc.Render.body_html_render_version/0`.
 
   `content["body_html"]` is rendered ONCE from `content["blocks"]` at write time
-  and served verbatim by the public paper reader, the HTML-only Bulldocs branch,
-  and the data API/SDK — while Studio's block reader re-renders fresh. After a
+  and served verbatim by HTML-cache readers and the data API/SDK, while the
+  block-backed public and Studio readers render the blocks directly. After a
   renderer semantics change (e.g. the #857/#861 tolerance change class) a paper
-  last written by the old renderer serves divergent frozen HTML with no way to
-  detect the drift. Each fresh render now stamps `content["body_html_sv"]`; this
-  task sweeps every doc whose stamp is absent or lags the current version,
-  re-renders body_html from its blocks with the SAME `render_opts` the write
-  path uses (the article palette must match), and rewrites the cache + stamp.
+  last written by the old renderer serves divergent frozen HTML. A generic
+  mutation could also change blocks while retaining a current render-version
+  stamp, so the stamp alone is not sufficient authority. Each sweep renders the
+  expected HTML from the stored blocks with the SAME `render_opts` the write
+  path uses, then rewrites when either the version lags or the cache bytes differ.
 
-  Idempotent: a doc already at the current stamp is left untouched, so a second
-  run rewrites nothing. Docs with no block list are skipped — client-supplied
-  HTML can't be re-rendered from blocks.
+  Idempotent: a doc at the current stamp whose cache matches a fresh block
+  render is left untouched, so a second run rewrites nothing. Docs with no
+  block list are skipped — client-supplied HTML can't be re-rendered from blocks.
 
       mix barkpark.rehydrate_body_html
 
@@ -42,7 +42,8 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
   @doc """
   Sweep every document carrying both a `content["body_html"]` and a
   `content["blocks"]`, re-rendering the cache from blocks when its
-  `content["body_html_sv"]` stamp is absent or lags the current render version.
+  `content["body_html_sv"]` stamp is absent/lags the current render version OR
+  the stored HTML differs from a fresh render of those blocks.
   Returns a `%{scanned, rewritten, noop}` tally. Extracted from `run/1` so tests
   can call it inside the DB sandbox without going through `Mix.Task`.
   """
@@ -74,12 +75,11 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
     end)
   end
 
-  # Re-render ONE doc's body_html cache when it lags the current render version.
+  # Re-render ONE doc's body_html cache when its version or rendered bytes drift.
   # Skips a doc with no block list (client-supplied HTML — nothing to re-render
-  # from) and a doc already at/above the current stamp (idempotency). Otherwise
-  # re-renders from blocks with the write path's `render_opts` (article palette
-  # threaded off the doc's stored style) and rewrites body_html + stamp, bumping
-  # the doc `rev` so downstream caches invalidate.
+  # from). A current stamp is a fast provenance hint, not proof that the blocks
+  # stayed unchanged: compare the cache to a fresh render too. Rewrites bump the
+  # doc `rev` so downstream caches invalidate.
   defp rehydrate_doc(%Barkpark.Content.Document{content: content} = doc, current)
        when is_map(content) do
     alias Barkpark.Content.{Document, Labels}
@@ -87,31 +87,32 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
     alias Barkpark.Repo
 
     blocks = Map.get(content, "blocks")
+    cached = Map.get(content, "body_html")
     sv = Map.get(content, "body_html_sv")
 
-    cond do
-      not (is_list(blocks) and blocks != []) ->
+    if is_list(blocks) and blocks != [] do
+      # SAME render_opts the paper write path builds (block_ops ~line 145):
+      # the article palette must match, threaded off the doc's stored style.
+      render_opts = Labels.paper_render_opts(doc.dataset, Map.get(content, "style"))
+      body_html = Render.render_blocks(blocks, render_opts)
+
+      if is_integer(sv) and sv >= current and cached == body_html do
         :noop
-
-      is_integer(sv) and sv >= current ->
-        :noop
-
-      true ->
-        # SAME render_opts the paper write path builds (block_ops ~line 145):
-        # the article palette must match, threaded off the doc's stored style.
-        render_opts = Labels.paper_render_opts(doc.dataset, Map.get(content, "style"))
-        body_html = Render.render_blocks(blocks, render_opts)
-
+      else
         new_content =
           content
           |> Map.put("body_html", body_html)
           |> Map.put("body_html_sv", current)
 
-        doc
-        |> Document.changeset(%{"content" => new_content, "rev" => generate_rev()})
-        |> Repo.update()
+        {:ok, _saved} =
+          doc
+          |> Document.changeset(%{"content" => new_content, "rev" => generate_rev()})
+          |> Repo.update()
 
         :rewritten
+      end
+    else
+      :noop
     end
   end
 

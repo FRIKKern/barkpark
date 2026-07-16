@@ -143,7 +143,9 @@ defmodule Barkpark.Content.Sheets do
       content =
         case content do
           %{"body_html" => _} ->
-            Map.put(content, "body_html", Render.render_blocks(blocks, render_opts))
+            content
+            |> Map.put("body_html", Render.render_blocks(blocks, render_opts))
+            |> Map.put("body_html_sv", Render.body_html_render_version())
 
           _ ->
             content
