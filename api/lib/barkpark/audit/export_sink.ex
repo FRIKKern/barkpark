@@ -29,8 +29,6 @@ defmodule Barkpark.Audit.ExportSink do
     timestamps(type: :utc_datetime_usec)
   end
 
-  def formats, do: @formats
-
   def changeset(sink, attrs) do
     sink
     |> cast(attrs, [:workspace_id, :name, :url, :secret, :format, :active])

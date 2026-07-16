@@ -55,9 +55,6 @@ defmodule BarkparkWeb.RequestStats do
       compute([], now, now, @window_ms)
   end
 
-  @doc "The rolling window length in seconds (contract field `window_s`)."
-  def window_s, do: div(@window_ms, 1000)
-
   # ── Telemetry handler (write path — runs in the request process) ──────────
 
   @doc false

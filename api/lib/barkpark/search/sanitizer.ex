@@ -60,9 +60,6 @@ defmodule Barkpark.Search.Sanitizer do
   @spec suggest_sanitize(String.t() | nil) :: {:ok, String.t()} | {:reject, atom()}
   def suggest_sanitize(query), do: sanitize(query, min_length: @min_suggest_length)
 
-  @doc false
-  def min_suggest_length, do: @min_suggest_length
-
   @spec normalize(String.t()) :: String.t()
   def normalize(query) when is_binary(query) do
     query |> String.trim() |> collapse_ws() |> String.downcase()
