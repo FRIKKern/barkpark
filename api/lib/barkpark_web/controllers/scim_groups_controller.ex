@@ -177,6 +177,10 @@ defmodule BarkparkWeb.ScimGroupsController do
     end
   end
 
+  # Catch-all: a list param (`?filter[]=x` → Plug parses to `["x"]`) or any other
+  # non-scalar falls back to no-filter instead of raising FunctionClauseError → 500.
+  defp parse_display_name_filter(_), do: nil
+
   defp render_group(conn, group) do
     %{
       "schemas" => [@group_schema],

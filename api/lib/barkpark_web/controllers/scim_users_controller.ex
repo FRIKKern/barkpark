@@ -158,4 +158,8 @@ defmodule BarkparkWeb.ScimUsersController do
       _ -> nil
     end
   end
+
+  # Catch-all: a list param (`?filter[]=x` → Plug parses to `["x"]`) or any other
+  # non-scalar falls back to no-filter instead of raising FunctionClauseError → 500.
+  defp parse_username_filter(_), do: nil
 end
