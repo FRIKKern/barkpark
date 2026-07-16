@@ -1,0 +1,5 @@
+---
+'create-barkpark-app': minor
+---
+
+blog-starter: migrate the post pages off the legacy Sanity `PortableText` renderer onto the canonical `@barkpark/react` `PortableDoc`. The server post page (`app/posts/[slug]/page.tsx`) and the draft-preview island now render `renderPortableDocument(blocks)` inside a `.bp-paper-surface` skinned by `@barkpark/react/paper-surface.css`, and a small `'use client'` island (`portable-doc-surface.tsx`) hydrates the media mount points via `hydratePortableDoc` from `@barkpark/react/client` (mermaid diagrams + asciicasts; images stay static `<img>`). The flagship seed post now carries the full 42-type PortableDocument grammar (`seeds/showcase-content.ts`, generated from the parity fixtures), the `content` field is a `richText` body region, and `mermaid` + `asciinema-player` join the template deps. `@barkpark/react` is pinned to `^1.0.0-preview.2`. A new vitest proves all 42 types render with their `bp-*` class-markers and the 3 media families expose their hydration mounts.
