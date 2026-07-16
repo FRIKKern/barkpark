@@ -391,7 +391,9 @@ defmodule BarkparkCloud.ArchiveStoreTest do
 
     # A store outage (or, here, two corrupt manifests) must never flood the
     # log with one line per key — exactly ONE summary warning per call.
-    occurrences = log |> String.split("manifests failed to fetch/parse") |> length() |> Kernel.-(1)
+    occurrences =
+      log |> String.split("manifests failed to fetch/parse") |> length() |> Kernel.-(1)
+
     assert occurrences == 1, "expected exactly one aggregated warning, got log:\n#{log}"
     assert log =~ "archive_store: 2/3 manifests failed to fetch/parse:"
     assert log =~ "not valid JSON"
