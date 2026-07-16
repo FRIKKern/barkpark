@@ -57,7 +57,7 @@
     </p>
   </div>
 
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     document.querySelectorAll(".bp-auth-eye").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var input = document.getElementById(btn.dataset.eyeFor);

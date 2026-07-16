@@ -5,20 +5,26 @@ defmodule BarkparkWeb.Router do
   # router. See `BarkparkWeb.Router.Plugins` and Goal barkpark-G2.
   import BarkparkWeb.Router.Plugins
 
-  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): a
-  # pipeline-level CSP here would apply to the whole Studio/admin/public-root
-  # HTML surface (LiveView with inline styles/JS, the paper reader, plugin
-  # readers) and a wrong policy silently breaks rendering. The public paper
-  # reader ALREADY carries a tailored script-blocking CSP via PaperReaderCsp
-  # (#2389), layered per-scope. A carefully-scoped Studio/admin CSP is filed as
-  # a follow-up rather than shipped blind here. CSRF/Headers ARE present.
+  # Tailored, script-blocking CSP (task-0fc9d55c). The static map on
+  # put_secure_browser_headers is what Sobelow's syntactic Config.CSP check
+  # credits (a downstream plug is invisible to it); BrowserCsp then replaces the
+  # header with the real per-request value — a `script-src` with a per-request
+  # nonce (for the inline <script> blocks), 'unsafe-hashes' for the enumerated
+  # Studio inline handlers, cdn.jsdelivr.net (mermaid) and no 'unsafe-inline'.
+  # style-src is left untightened. Full rationale: BarkparkWeb.CSP @moduledoc.
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    plug(:put_secure_browser_headers)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
+    plug(BarkparkWeb.Plugs.BrowserCsp)
   end
 
   pipeline :api do
@@ -101,13 +107,21 @@ defmodule BarkparkWeb.Router do
   #     structurally cannot carry a Phoenix CSRF token. protect_from_forgery would
   #     BREAK SSO. The session holds only transient state/nonce, never a trust
   #     anchor — the IdP assertion (XML-dsig, pinned cert) is what authenticates.
-  #   * Config.CSP — follow-up (task filed). A meaningful CSP would block the
-  #     esaml SLO form's inline `onload` auto-submit; a nonce-based policy needs
-  #     an esaml form rewrite. Tracked separately.
+  #   * Config.CSP — FIXED (task-0fc9d55c). The static map below is credited by
+  #     Sobelow's syntactic check; SamlController.slo replaces it per-request
+  #     with a `script-src 'self' 'nonce-…'` matching the esaml auto-submit
+  #     `<script nonce=…>` (esaml 4.6.0 emits a DOMContentLoaded handler, NOT an
+  #     inline onload — the old "needs a form rewrite" note was stale; the
+  #     nonce is threaded via encode_http_post/4). Redirect/JSON responses on
+  #     this pipeline carry no inline script, so the strict static map fits them.
   pipeline :sso_browser do
     plug(:accepts, ["html", "json"])
     plug(:fetch_session)
-    plug(:put_secure_browser_headers)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
   end
 
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
@@ -300,17 +314,22 @@ defmodule BarkparkWeb.Router do
   # session cookie (`session["api_token"]`) — a real member with only the
   # cookie resolves their token and clears the gate instead of 403'ing
   # before mount. The LV's own on_mount admin/ops hook is the UI auth gate.
-  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): same as
-  # :browser — this serves scoped Studio/admin LiveView HTML where a blind
-  # pipeline-level CSP risks breaking inline-style/JS rendering. Scoped-CSP work
-  # is filed as a follow-up. CSRF + secure headers are present.
+  # Tailored, script-blocking CSP (task-0fc9d55c) — shares root.html.heex with
+  # :browser, so the same BrowserCsp nonce+hash policy applies. Static map =
+  # Sobelow credit; BrowserCsp = real per-request header. See BarkparkWeb.CSP.
   pipeline :scoped_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    plug(:put_secure_browser_headers)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
+    plug(BarkparkWeb.Plugs.BrowserCsp)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     # Anonymous resolves the DEFAULT workspace only while the public-demo
     # flag is on (:studio_demo — dev/test true, PROD OFF unless
@@ -343,16 +362,22 @@ defmodule BarkparkWeb.Router do
   # RequireShareScope (read-only; LiveScope attaches the server-side write
   # gate at mount); otherwise byte-identical to :scoped_browser — members via
   # membership, anonymous via the Default allowance, everything else closed.
-  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): scoped Studio
-  # HTML surface — same blind-CSP risk as :browser/:scoped_browser; scoped-CSP is
-  # a filed follow-up. CSRF + secure headers present.
+  # Tailored, script-blocking CSP (task-0fc9d55c) — doc-shared Studio, shares
+  # root.html.heex, so the same BrowserCsp nonce+hash policy applies. Static map
+  # = Sobelow credit; BrowserCsp = real per-request header. See BarkparkWeb.CSP.
   pipeline :shared_studio_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    plug(:put_secure_browser_headers)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
+    plug(BarkparkWeb.Plugs.BrowserCsp)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: :studio_demo)
@@ -382,20 +407,25 @@ defmodule BarkparkWeb.Router do
   # exposure: the reader resolves by slug (a `drafts.` row never matches) and
   # renders wikilinks/valuerefs as the anonymous principal over published rows
   # (D2/D5) on BOTH surfaces.
-  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): the scoped
-  # paper reader at /w/:ws/p/:project/papers/:slug ALREADY carries the tailored
-  # script-blocking CSP — its scope layers [:shared_paper_browser,
-  # :paper_reader_csp] (see the scope block below), and PaperReaderCsp (#2389)
-  # self-gates to `.../papers/:slug` to emit the policy per-response. A
-  # pipeline-level CSP here would double-set / conflict with it. CSRF + secure
-  # headers present.
+  # Sobelow Config.CSP (task-0fc9d55c): this pipeline ONLY serves the scoped
+  # paper reader (/w/:ws/p/:project/papers/:slug), whose scope layers
+  # [:shared_paper_browser, :paper_reader_csp]; PaperReaderCsp (#2389) REPLACES
+  # the header per-response with the tailored reader policy + its own nonce. A
+  # pipeline map here is a cosmetic double-set — so a static map on
+  # put_secure_browser_headers (the Sobelow-credit form) is all that is needed,
+  # matching the reader's already-strict script-src. CSRF + secure headers stay.
   pipeline :shared_paper_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    plug(:put_secure_browser_headers)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
     plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
