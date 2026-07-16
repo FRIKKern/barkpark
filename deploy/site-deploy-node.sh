@@ -750,6 +750,28 @@ FAKENPM
   check "did NOT arm a stripping handle_path for basepath" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
+  echo "[selftest] e2e: the src-tree .basepath MARKER alone (no env) activates basePath mode (self-describing template)"
+  # The real engine path: the provisioner materializes a template that SHIPS
+  # .basepath; the runner passes no BARKPARK_SITE_BASEPATH env. The deploy must
+  # behave exactly like the env-armed case — probe the sub-path, keep `handle`.
+  : > "$SRC/.basepath"
+  bpm_deploy() { # <build_id>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG=basepath BUILD_ID="$1" CONTENT_REV=bpm-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$T_PORT_E" SITE_PORT_B="$T_PORT_F" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/basepath.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+  rc="$(bpm_deploy bpm1)"
+  rm -f "$SRC/.basepath"
+  check "marker-only deploy exit 0"            [ "$rc" = 0 ]
+  check "marker-only HEALTH ok (probed the sub-path)" saw HEALTH ok bpm1
+  check "marker-only kept the NON-stripping 'handle'" \
+    grep -qF 'handle /sites/basepath/*' "$CF"
+  check "marker-only did NOT arm handle_path" \
+    sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
+
   echo "[selftest] rollback preflight is read-only + typed"
   # Fresh site with no previous -> not_supported / no_previous.
   rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=fresh SITE_PORT_A="$T_PORT_A" SITE_PORT_B="$T_PORT_B" \
@@ -777,6 +799,16 @@ fi
 ROOT="$SITES_DIR/$SITE_SLUG"
 RELEASES="$ROOT/releases"
 SITE_SRC="${SITE_SRC:-$ROOT/src}"
+# Self-describing basePath (search-template W1 live-proof fix): a template that
+# bakes basePath ships a `.basepath` marker in its tree, so no caller-side env
+# plumbing is needed — the source itself declares how it must be served (Caddy
+# `handle`, no strip) and probed (HEALTH at the sub-path). An explicit
+# BARKPARK_SITE_BASEPATH env always wins. Without this, a basePath app 404s the
+# HEALTH probe at `/` and the deploy fail-closes (proven live: search-capstone
+# b-20260716040040-stw1, HEALTH "slot a returned 404 (want 200) at /").
+if [ "${BARKPARK_SITE_BASEPATH+x}" != x ] && [ -f "$SITE_SRC/.basepath" ]; then
+  SITE_BASEPATH=1
+fi
 LOCK="${BARKPARK_SITE_DEPLOY_LOCK:-/var/lock/barkpark-site-deploy-$SITE_SLUG.lock}"
 
 # Per-site slot ports. A real caller injects a UNIQUE pair per site; absent one,
