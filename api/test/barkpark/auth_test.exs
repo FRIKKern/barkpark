@@ -235,6 +235,40 @@ defmodule Barkpark.AuthTest do
     end
   end
 
+  # relabel_token/2 (connectors D179). The Add-to-Slack flow mints its chat token
+  # as `connector:slack:oauth` BEFORE the callback knows the team_id; once the
+  # install lands, the label is reconciled to `connector:slack:<install_key>` so
+  # disconnect rides the single install_key path. A plain label update, never a
+  # revoke — the credential the install is using must stay live.
+  describe "relabel_token/2 — connector oauth→install_key reconciliation" do
+    test "updates the label in place, stays live, and still authenticates" do
+      ws = workspace("ws-relabel")
+
+      {:ok, raw, token} =
+        Auth.create_chat_token("connector:slack:oauth", "production", ws.id)
+
+      assert token.label == "connector:slack:oauth"
+
+      assert {:ok, r1} = Auth.relabel_token(token, "connector:slack:T_TEAM")
+      assert r1.label == "connector:slack:T_TEAM"
+      # Relabel ≠ revoke: the token is still live and still verifies under its raw.
+      assert is_nil(r1.revoked_at)
+      assert {:ok, verified} = Auth.verify_token(raw)
+      assert verified.id == token.id
+    end
+
+    test "is idempotent — relabelling to the current label is a clean no-op update" do
+      ws = workspace("ws-relabel-idem")
+
+      {:ok, _raw, token} =
+        Auth.create_chat_token("connector:slack:T_TEAM", "production", ws.id)
+
+      assert {:ok, r} = Auth.relabel_token(token, "connector:slack:T_TEAM")
+      assert r.label == "connector:slack:T_TEAM"
+      assert is_nil(r.revoked_at)
+    end
+  end
+
   describe "touch_last_used/1 — throttled liveness stamp" do
     test "stamps last_used_at; a quick re-touch is throttled" do
       raw = "touch-" <> Ecto.UUID.generate()

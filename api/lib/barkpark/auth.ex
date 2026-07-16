@@ -362,6 +362,28 @@ defmodule Barkpark.Auth do
 
   def live_tokens_by_label(_workspace_id, _label), do: []
 
+  @doc """
+  Relabel an api_token in place (Connectors D179) — a plain changeset update on
+  the `label` column, nothing else touched.
+
+  The Add-to-Slack flow (D62/D63) mints its workspace chat token BEFORE the OAuth
+  callback learns the team_id, so it is labelled `connector:slack:oauth`. Once the
+  callback lands the install, `Barkpark.Connectors.Catalog.token_label/2` gives the
+  canonical `connector:slack:<install_key>`, and this reconciles the token to it so
+  DISCONNECT can revoke it by the same single label as every other provider.
+
+  A RELABEL, never a revoke: the credential the live install is authenticating
+  with must keep working. `label` has no uniqueness constraint, so there is no
+  conflict path; relabelling to the current label is a clean no-op update.
+  """
+  @spec relabel_token(ApiToken.t(), String.t()) ::
+          {:ok, ApiToken.t()} | {:error, Ecto.Changeset.t()}
+  def relabel_token(%ApiToken{} = token, new_label) when is_binary(new_label) do
+    token
+    |> Ecto.Changeset.change(label: new_label)
+    |> Repo.update()
+  end
+
   defp insert_token_with_membership(token_attrs, ws_id, permissions) do
     role = TenancyAuth.role_for_permissions(permissions)
 
