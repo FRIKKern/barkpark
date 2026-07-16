@@ -418,6 +418,130 @@ func TestSiteCreateHasNoWorkspaceResolutionClaim(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteCreateDeployMotion is the D19 one-motion proof: `create --deploy`
+// chains CLIENT-SIDE straight into the deploy stream — one POST /v1/sites, then one
+// POST …/deploy, then the poll — and ends on the live URL, narrating the six visible
+// stages along the way. The create summary rides progressf so it never crashes into
+// the deploy verdict.
+func TestRunCloudSiteCreateDeployMotion(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"b-1","stages":[{"name":"PLAN","status":"running"}]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// One create, one deploy enqueue, at least one poll — the full one-motion.
+	if cp.deployHits != 1 {
+		t.Fatalf("create --deploy must enqueue exactly one deploy, hit %d", cp.deployHits)
+	}
+	if cp.pollHits < 1 {
+		t.Fatalf("create --deploy must stream the deploy (never polled)")
+	}
+	// The create verdict AND the deploy stages are both narrated.
+	if !strings.Contains(stdout, "site blog created") {
+		t.Fatalf("one-motion must still print the create verdict:\n%s", stdout)
+	}
+	for _, stage := range []string{"PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"} {
+		if !strings.Contains(stdout, stage) {
+			t.Fatalf("stage %s not streamed by create --deploy:\n%s", stage, stdout)
+		}
+	}
+	// It ends on the live URL — not the `deploy it with …` hint a plain create prints.
+	if !strings.Contains(stdout, "site live") || !strings.Contains(stdout, "https://acme.barkpark.cloud/sites/blog/") {
+		t.Fatalf("one-motion must end on the live URL:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "deploy it with") {
+		t.Fatalf("create --deploy must NOT print the separate-deploy hint:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteCreateDeployJSON proves the one-motion honours the single-envelope
+// contract: with -o json the create summary rides stderr (progressf) and stdout is
+// exactly the deployment envelope the deploy stream owns.
+func TestRunCloudSiteCreateDeployJSON(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	// stdout is a single parseable envelope — the deployment, not the site.
+	var env struct {
+		Deployment struct {
+			Status string
+			Stages []struct{ Name, Status string }
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("one-motion -o json must be a single deployment envelope: %v\n%s", err, stdout)
+	}
+	if env.Deployment.Status != "live" || len(env.Deployment.Stages) != 6 {
+		t.Fatalf("one-motion json deployment wrong: %+v", env.Deployment)
+	}
+}
+
+// TestRunCloudSiteCreateDeployInstanceNotLive is the honest instance-still-provisioning
+// path: the box answers the chained deploy with a 422 instance_not_live, and because
+// the site IS created the CLI says exactly that and points at the retry command — it
+// never crashes, never claims live, and never dumps a bare error slug.
+func TestRunCloudSiteCreateDeployInstanceNotLive(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.deployResp = fakeResp{422, `{"error":"instance_not_live","detail":"the instance is still provisioning"}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+	if code != exitGeneric {
+		t.Fatalf("instance-not-live exit=%d want %d\nstdout:%s\nstderr:%s", code, exitGeneric, stdout, stderr)
+	}
+	// The site was created and the deploy was attempted once — no retry storm.
+	if cp.deployHits != 1 {
+		t.Fatalf("instance-not-live should attempt the deploy exactly once, hit %d", cp.deployHits)
+	}
+	if cp.pollHits != 0 {
+		t.Fatalf("a rejected deploy must never poll (hit %d)", cp.pollHits)
+	}
+	// The honest message: the site exists, the instance is provisioning, here's the retry.
+	if !strings.Contains(stderr, "still provisioning") {
+		t.Fatalf("instance-not-live must say the instance is still provisioning:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "bp cloud site deploy") {
+		t.Fatalf("instance-not-live must point at the retry command:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "site live") {
+		t.Fatalf("instance-not-live must never claim the site is live:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteCreateNoDeployKeepsHint is the tripwire on the unchanged default:
+// without --deploy, create prints the separate-deploy hint and NEVER touches the
+// deploy route — so the 30+ pinned deploy tests stay green and a plain create is
+// byte-identical.
+func TestRunCloudSiteCreateNoDeployKeepsHint(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.deployHits != 0 {
+		t.Fatalf("a plain create must never hit the deploy route (hit %d)", cp.deployHits)
+	}
+	if !strings.Contains(stdout, "deploy it with `bp cloud site deploy blog`") {
+		t.Fatalf("plain create must print the separate-deploy hint:\n%s", stdout)
+	}
+}
+
 // --- deploy (streamed stages) ------------------------------------------------
 
 const sixStagesLive = `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","url":"https://acme.barkpark.cloud/sites/blog/","stages":[` +
