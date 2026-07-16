@@ -55,15 +55,21 @@ const siteDeployPollMax = 300
 // of `deploy` (both enqueue a build); `sites` is accepted as a plural alias at
 // the dispatcher above.
 func runCloudSite(out *writer, g globals, args []string) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
+	// `preflight` owns its OWN -h/--help (a dedicated page that disambiguates it
+	// from the box-side --rollback-preflight), so route it before the family-level
+	// help catch below would swallow `preflight -h` into the family usage.
+	isPreflight := len(args) > 0 && args[0] == "preflight"
+	if !isPreflight {
+		for _, a := range args {
+			if a == "-h" || a == "--help" {
+				printCloudSiteHelp(out)
+				return exitOK
+			}
+		}
+		if g.help || (len(args) > 0 && args[0] == "help") {
 			printCloudSiteHelp(out)
 			return exitOK
 		}
-	}
-	if g.help || (len(args) > 0 && args[0] == "help") {
-		printCloudSiteHelp(out)
-		return exitOK
 	}
 	if len(args) == 0 {
 		return useError(out, "usage", "missing site command (run `bp cloud site -h` for usage)", exitUsage)
@@ -81,6 +87,8 @@ func runCloudSite(out *writer, g globals, args []string) int {
 		return runCloudSiteStatus(out, g, rest)
 	case "open":
 		return runCloudSiteOpen(out, g, rest)
+	case "preflight":
+		return runCloudSitePreflight(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage)", verb), exitUsage)
 	}
@@ -914,6 +922,7 @@ USAGE
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
+  bp cloud site preflight [--dir <path>] [--skip-build]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
@@ -941,6 +950,9 @@ WHAT IT DOES
   SWITCH → RETIRE — health-gated so a broken build never reaches visitors.
   rollback is a sub-second flip to the previous good build: an atomic symlink swap
   for a static site, a Caddy upstream port-flip to the warm previous slot for node.
+  preflight catches a broken build on your laptop BEFORE it reaches the box — it
+  runs the engine's own --self-test harnesses plus a real npm build + marker scan
+  of your site. It is offline and needs no login (see 'bp cloud site preflight -h').
 
   <site> is a site name or id; needs 'bp login'.
 
