@@ -1203,6 +1203,38 @@
       ]
     },
     {
+      "id": "scf-056",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Commands are served now. The Wave-4 loop this paper argued for is live: the seven commands above exist as command documents on the connected Barkpark, served over one connect exactly like Papers and Tasks — "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "bp scaffy ls --remote"
+        },
+        {
+          "type": "text",
+          "value": " renders the server's catalog, and any command is pulled from a connected Barkpark via "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "bp scaffy pull <concept>/<variant>"
+        },
+        {
+          "type": "text",
+          "value": " — validated before anything can run, written byte-identical (sha256-verified against the served source) beside a provenance sidecar. Remote content stays inside the trust model: pull never executes, and running a pulled command is consent-gated — without an explicit --yes it refuses with the full list of substituted CMDs it would run — see the showcase."
+        }
+      ]
+    },
+    {
       "content": [
         {
           "type": "text",

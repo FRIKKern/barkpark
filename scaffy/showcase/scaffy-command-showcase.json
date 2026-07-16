@@ -2789,7 +2789,7 @@
       "id": "scs-056",
       "type": "heading",
       "level": 2,
-      "text": "What ships next"
+      "text": "Commands are served now"
     },
     {
       "id": "scs-057",
@@ -2797,7 +2797,7 @@
       "content": [
         {
           "type": "text",
-          "value": "Wave 2 turns this corpus into test fixtures: bp scaffy validate / fmt — the grammar as Go code, with the derived-guard check, the weak-guard lint, and the casing-consistency lint. Wave 3 ships the engine: bp scaffy run / remove with marks, receipts and dry-run diffs — the transcripts above become real output. Wave 4 makes commands content: a command document type, authored in Studio, versioned and tagged, served over one connect — bp add <concept> fetching from the connected Barkpark. The full design case is the masterplan: "
+          "value": "Every wave above this line has shipped. Wave 2 turned the corpus into the grammar as Go code: bp scaffy validate / fmt, with the derived-guard check, the weak-guard lint and the casing-consistency lint. Wave 3 shipped the engine: bp scaffy run / remove with marks, receipts and dry-run diffs — the live transcripts above are its verbatim output. And Wave 4 made commands content: this corpus now lives as command documents on the connected Barkpark, versioned and tagged, served over one connect exactly like Papers and Tasks. bp scaffy ls --remote renders the server's catalog; bp scaffy pull <concept>/<variant> fetches a command validate-first, writes it byte-identical (sha256-verified against the served source) beside a provenance sidecar, and never executes anything — running a pulled command is consent-gated: without an explicit --yes it refuses, enumerating every substituted CMD it would run. The transcripts below are that loop, captured live. The full design case is the masterplan: "
         },
         {
           "type": "text",
@@ -2809,6 +2809,414 @@
         {
           "type": "text",
           "value": "."
+        }
+      ]
+    },
+    {
+      "id": "scs-064",
+      "type": "terminal",
+      "footer": "Captured live 2026-07-16 against guerrilla.barkpark.cloud — the seeded W4 corpus, one tokenless connect (D46), one row per concept×variant",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy ls --remote -o table"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "_id                                   title                       concept      description                                                   domain    variant"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "------------------------------------  --------------------------  -----------  ------------------------------------------------------------  --------  ---------------"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--block-type--starter         Add PortableDoc Block Type  block-type   Scaffold a new PortableDoc block type across all three re...  barkpark  starter"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--cli-verb--read-list         Add a bp CLI Verb           cli-verb     Give a plugin a working `bp <noun> <verb>` by appending o...  barkpark  read-list"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--docs-card--remove           Remove Docs Card            docs-card    Retract everything add-docs-card planted: un-sweep the Ca...  barkpark  remove"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--docs-card--add              Add Docs Card               docs-card    Create a docs/cards/<name>.md card (G1 header, Code ancho...  barkpark  add"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--migration--alter-add-index  Add Ecto Migration          migration    Scaffold one timestamped Ecto migration under api/priv/re...  barkpark  alter-add-index"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--oban-worker--cron           Add Oban Cron Worker        oban-worker  Scaffold an Oban cron worker (worker module + test) and r...  barkpark  cron"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "barkpark--plugin--minimal             Add a Barkpark Plugin       plugin       Scaffold a minimal, auto-discovered Barkpark plugin — man...  barkpark  minimal"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "count: 7"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-065",
+      "type": "terminal",
+      "footer": "pull is validate-first and never executes: written byte-identical to the served source (sha256 over the wire == on disk == the checked-in original) + provenance sidecar (D48)",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy pull docs-card/add"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "{"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"concept\": \"docs-card\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"direction\": \"add\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"doc_id\": \"barkpark--docs-card--add\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"domain\": \"barkpark\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"ok\": true,"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"path\": \"scaffy/commands/barkpark--docs-card--add.scaffy\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"provenance\": \"scaffy/commands/barkpark--docs-card--add.provenance.json\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"rev\": \"7565347e7363fc599360c66d5e99ce2a\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"server\": \"https://guerrilla.barkpark.cloud\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"source_sha256\": \"b83fa44f54627772bb4fbef38045dc606a0f7402d3cf9b7bafc7cfe49327a28c\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"variant\": \"add\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ shasum -a 256 scaffy/commands/barkpark--docs-card--add.scaffy scaffy/commands/add-docs-card.scaffy"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "b83fa44f54627772bb4fbef38045dc606a0f7402d3cf9b7bafc7cfe49327a28c  scaffy/commands/barkpark--docs-card--add.scaffy"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "b83fa44f54627772bb4fbef38045dc606a0f7402d3cf9b7bafc7cfe49327a28c  scaffy/commands/add-docs-card.scaffy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-066",
+      "type": "terminal",
+      "footer": "The consent gate (D49): a PULLED command refuses to run without --yes on a non-TTY — exit 2, every substituted CMD enumerated, nothing written. With --yes the full apply → docs-anchors-check.sh pass → receipt remove left the tree byte-clean.",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/barkpark--docs-card--add.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var CardName=LiveProof --var Group=Meta --var \"TaskPattern=w4 live proof demo\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "{"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"error\": {"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    \"code\": \"consent_required\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    \"message\": \"refusing to run a pulled command without --yes (consent gate, D49)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  },"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"ok\": false,"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  \"would_run_cmds\": ["
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    \"bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "  ]"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ echo $?"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ]
         }
       ]
     },
