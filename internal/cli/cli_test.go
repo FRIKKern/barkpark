@@ -187,6 +187,52 @@ func TestParseGlobalsErrors(t *testing.T) {
 	}
 }
 
+// A value-taking global flag (-o, -s, --token, ...) followed by another
+// KNOWN global flag must never bind that flag as its value — it must report
+// the same "flag needs a value" usage error the end-of-args case reports,
+// not a confusing downstream error like invalid --output "-v". Fails before
+// the fix: parseGlobals used to consume the following flag as the value,
+// surfacing the enum-validation error for -o/--output instead.
+func TestParseGlobalsFlagShapedValueRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"-o then -s", []string{"-o", "-s", "doc", "ls"}},
+		{"--token then --output", []string{"--token", "--output", "doc", "ls"}},
+		{"-s then -v (bool global)", []string{"-s", "-v", "doc", "ls"}},
+		{"--limit then --offset", []string{"--limit", "--offset", "doc", "ls"}},
+		{"--manifest then --json", []string{"--manifest", "--json", "doc", "ls"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := parseGlobals(tc.args)
+			if err == nil {
+				t.Fatalf("parseGlobals(%v): expected error, got nil", tc.args)
+			}
+			if !strings.Contains(err.Error(), "needs a value") {
+				t.Errorf("parseGlobals(%v) error = %q, want it to mention \"needs a value\"", tc.args, err.Error())
+			}
+			if strings.Contains(err.Error(), "invalid --output") {
+				t.Errorf("parseGlobals(%v) leaked the downstream enum error: %q", tc.args, err.Error())
+			}
+		})
+	}
+}
+
+// A value that merely starts with '-' but is NOT itself a known global flag
+// (an unrecognised long flag, a negative-looking string) is still a
+// legitimate value and must bind normally rather than being rejected.
+func TestParseGlobalsDashShapedNonFlagValueStillBinds(t *testing.T) {
+	g, _, err := parseGlobals([]string{"--token", "-abc123", "doc", "ls"})
+	if err != nil {
+		t.Fatalf("parseGlobals: unexpected error: %v", err)
+	}
+	if g.token != "-abc123" {
+		t.Errorf("token = %q, want -abc123", g.token)
+	}
+}
+
 // An inline value on the --yes bool flag must be a usage error, never a
 // silently-ignored token: `--yes=false` previously set g.yes=true, skipping the
 // prod write-guard — the exact opposite of the caller's intent.

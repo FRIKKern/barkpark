@@ -69,6 +69,18 @@ var boolFlags = map[string]bool{
 	"--version": true, "-V": true,
 }
 
+// isKnownGlobalFlag reports whether tok resolves to a global flag parseGlobals
+// recognises — a bare short/long flag, or a long flag carrying an inline
+// `--flag=value`. Used to guard against consuming a following known flag as a
+// value.
+func isKnownGlobalFlag(tok string) bool {
+	key := tok
+	if eq := strings.IndexByte(tok, '='); eq >= 0 && strings.HasPrefix(tok, "--") {
+		key = tok[:eq]
+	}
+	return valueFlags[key] || boolFlags[key]
+}
+
 // parseGlobals extracts recognised global flags from anywhere in args and
 // returns the remaining tokens (noun, verb, positionals, and command-local
 // flags) as rest, in order. Global flags may appear before OR after the noun —
@@ -132,7 +144,18 @@ func parseGlobals(args []string) (globals, []string, error) {
 			if i+1 >= len(args) {
 				return g, nil, fmt.Errorf("flag %q needs a value", key)
 			}
-			val = args[i+1]
+			next := args[i+1]
+			// A following token that is itself a KNOWN global flag (-v,
+			// --output, ...) is never a legitimate value for this flag — it
+			// means the caller forgot the value. Binding it anyway produces a
+			// confusing downstream error (e.g. invalid --output "-v") instead
+			// of the real complaint. A token that merely starts with '-' but
+			// is not a known global flag (a negative number, an unknown
+			// command-local flag) is still accepted as a value below.
+			if next != "-" && strings.HasPrefix(next, "-") && isKnownGlobalFlag(next) {
+				return g, nil, fmt.Errorf("flag %q needs a value", key)
+			}
+			val = next
 			i++
 		}
 
