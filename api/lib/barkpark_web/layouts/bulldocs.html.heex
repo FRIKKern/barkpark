@@ -1231,6 +1231,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
+  <%!-- The zero-dependency Canvas2D corpus-graph renderer (same asset Studio
+        loads). Non-defer like the phoenix pair above: `window.BarkparkGraph`
+        (the LiveView hook bp-graph.js exports) must exist BEFORE the
+        LiveSocket below registers hooks. Only the /finder page mounts it —
+        every other reader page pays one cached script fetch, no execution. --%>
+  <script src="/assets/bp-graph.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     // PaperMermaid: run Mermaid over any unprocessed `pre.mermaid` inside this
     // hook's element. Registered on the streamed <article>, so its mounted()
@@ -1439,6 +1445,11 @@
         });
       }
     });
+
+    // FinderGraph — the /finder corpus graph. bp-graph.js exports the LiveView
+    // hook itself (window.BarkparkGraph, the same object Studio registers as
+    // GraphPane); guarded so a missing asset never breaks the reader's hooks.
+    if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
 
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
