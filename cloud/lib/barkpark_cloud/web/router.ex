@@ -379,12 +379,22 @@ defmodule BarkparkCloud.Web.Router do
     with true <- is_binary(email) and is_binary(password),
          %{} = user <- Accounts.get_user_by_email_and_password(email, password) do
       if Accounts.two_factor_enabled?(user) do
-        {:ok, pending} = Accounts.create_two_factor_pending_token(user)
-        json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+        case Accounts.create_two_factor_pending_token(user) do
+          {:ok, pending} ->
+            json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
       else
-        {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
-        team = Accounts.primary_team(user)
-        json(conn, 200, %{token: token, team_id: team && team.id})
+        case Accounts.create_user_session_token(user, session_opts(conn)) do
+          {:ok, token} ->
+            team = Accounts.primary_team(user)
+            json(conn, 200, %{token: token, team_id: team && team.id})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
       end
     else
       _ -> json(conn, 401, %{error: "invalid_credentials"})
@@ -430,9 +440,15 @@ defmodule BarkparkCloud.Web.Router do
 
             if ok? do
               Accounts.delete_two_factor_pending_tokens(user)
-              {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
-              team = Accounts.primary_team(user)
-              json(conn, 200, %{token: token, team_id: team && team.id})
+
+              case Accounts.create_user_session_token(user, session_opts(conn)) do
+                {:ok, token} ->
+                  team = Accounts.primary_team(user)
+                  json(conn, 200, %{token: token, team_id: team && team.id})
+
+                {:error, %Ecto.Changeset{} = cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
             else
               json(conn, 401, %{error: "invalid_code"})
             end
@@ -6933,8 +6949,13 @@ defmodule BarkparkCloud.Web.Router do
 
   defp handle_onboarding_action(conn, %{"action" => "advance", "step" => step}, team) do
     if step in Team.onboarding_steps() do
-      {:ok, team} = Accounts.advance_onboarding(team, step)
-      onboarding_ok(conn, team)
+      case Accounts.advance_onboarding(team, step) do
+        {:ok, team} ->
+          onboarding_ok(conn, team)
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
     else
       json(conn, 422, %{error: "unknown_step"})
     end
@@ -6942,22 +6963,37 @@ defmodule BarkparkCloud.Web.Router do
 
   defp handle_onboarding_action(conn, %{"action" => "ack", "step" => step}, team) do
     if step in Team.onboarding_steps() do
-      {:ok, team} = Accounts.ack_onboarding_step(team, step)
-      onboarding_ok(conn, team)
+      case Accounts.ack_onboarding_step(team, step) do
+        {:ok, team} ->
+          onboarding_ok(conn, team)
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
     else
       json(conn, 422, %{error: "unknown_step"})
     end
   end
 
   defp handle_onboarding_action(conn, %{"action" => "skip"}, team) do
-    {:ok, team} = Accounts.skip_onboarding(team)
-    onboarding_ok(conn, team)
+    case Accounts.skip_onboarding(team) do
+      {:ok, team} ->
+        onboarding_ok(conn, team)
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
+    end
   end
 
   defp handle_onboarding_action(conn, %{"action" => "complete"}, team) do
     if Accounts.onboarding_status(team).all_done? do
-      {:ok, team} = Accounts.complete_onboarding(team)
-      onboarding_ok(conn, team)
+      case Accounts.complete_onboarding(team) do
+        {:ok, team} ->
+          onboarding_ok(conn, team)
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
     else
       json(conn, 422, %{error: "steps_incomplete"})
     end
