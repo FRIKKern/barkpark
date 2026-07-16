@@ -324,6 +324,54 @@ function pasteConnector(
   };
 }
 
+/** The reserved id for the tool-direction fixture. Distinct from `paste`. */
+const TOOL_PROVIDER = "toolgh";
+
+/**
+ * A paste-mode TOOL connector (charter D69) — the OUTBOUND direction. Same
+ * onboarding shape as `pasteConnector` (the operator pastes a PAT, `validate`
+ * blesses it), but `direction: "tool"`: it seals ONLY its provider credential,
+ * carries NO chat token, and is NEVER mounted as a Chat (`registry.channels()`
+ * excludes it, and `connect()` branches on direction). The `onAdapter` spy is the
+ * load-bearing part: it proves `adapterFactory` is never invoked for a tool row —
+ * without it, "not mounted" is a claim, not a fact. A distinct id from `paste`
+ * keeps the two fixtures' rows disjoint in the shared table.
+ */
+function toolConnector(
+  options: {
+    onAdapter?: (install: ConnectorInstall) => void;
+  } = {},
+): Connector {
+  return {
+    id: TOOL_PROVIDER,
+    direction: "tool",
+    auth: "token",
+    tenantResolution: "credential-bound",
+    // A tool connector's MCP transport descriptor — present on a tool, absent on
+    // every channel. Non-secret; the PAT arrives per-install on /connect.
+    toolDescriptor: { type: "http", url: "http://mcp.invalid/" },
+    connect: {
+      mode: "paste",
+      credentialLabel: "Personal access token",
+      async validate(credential: string) {
+        if (credential !== GOOD_TOKEN) {
+          return { ok: false, reason: "the provider rejected that token" };
+        }
+        return { ok: true, installKey: GOOD_KEY, displayName: "@acme_gh" };
+      },
+    },
+    adapterFactory(install: ConnectorInstall): Adapter {
+      // If this ever runs for a tool install, the seam mounted something it must
+      // not have — the spy turns that into a hard test failure.
+      options.onAdapter?.(install);
+      return stubAdapter(install.installKey);
+    },
+    async resolveTenant() {
+      return null;
+    },
+  };
+}
+
 describe.skipIf(!reachable && !REQUIRE_DB)(
   "the connect loop — through startBridge, against a real Postgres (D50/D51)",
   () => {
@@ -433,6 +481,21 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
 
     const ticketFor = (workspaceId: string, provider = "paste") =>
       signConnectTicket(workspaceId, provider, CONNECT_SECRET);
+
+    /** The raw tool-provider install row — `h.rawRow` hardcodes `paste`. */
+    const toolRow = async (installKey: string) => {
+      const { rows } = await pool.query<{
+        workspace_id: string | null;
+        credential_ref: string | null;
+        chat_token_ref: string | null;
+      }>(
+        `SELECT workspace_id, credential_ref, chat_token_ref
+           FROM chat_bridge.connector_installs
+          WHERE provider = $1 AND install_key = $2`,
+        [TOOL_PROVIDER, installKey],
+      );
+      return rows[0] ?? null;
+    };
 
     // ── VALIDATE ────────────────────────────────────────────────────────────
 
@@ -968,6 +1031,125 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
         credential: GOOD_TOKEN,
       });
       expect(fixed.status).toBe(200);
+    });
+
+    // ── TOOL DIRECTION: CONNECT SEALS THE PAT, MOUNTS NOTHING (D69) ──────────
+    //
+    // The OTHER direction of the epic. A tool connect writes ONLY the provider
+    // credential (a PAT), carries NO chat token, and NEVER mounts a Chat — the
+    // agent reaches the tool through the MCP `tool-descriptors` seam, not through
+    // this bridge. Two forms of "no chat token" reach the route: the field ABSENT,
+    // and the field explicitly NULL. Both must land identically, and neither may
+    // ever touch `adapterFactory` — the `onAdapter` spy is what makes that a fact
+    // rather than an assertion on a field.
+
+    it("TOOL connect with chat_token ABSENT: 200 mounted:false, PAT sealed, NO chat token, adapterFactory never called", async () => {
+      const adapterCalls: ConnectorInstall[] = [];
+      const h = await boot(
+        registryWith(toolConnector({ onAdapter: (i) => adapterCalls.push(i) })),
+      );
+
+      const response = await h.post("/connectors/connect", {
+        ticket: ticketFor(WS_A, TOOL_PROVIDER),
+        credential: GOOD_TOKEN,
+        // no chat_token key at all
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        provider: TOOL_PROVIDER,
+        install_key: GOOD_KEY,
+        workspace_id: WS_A,
+        mounted: false,
+      });
+
+      // The row: the PAT is sealed (present, not plaintext); the chat token stays
+      // NULL — a tool install has nowhere to put one.
+      const row = await toolRow(GOOD_KEY);
+      expect(row?.workspace_id).toBe(WS_A);
+      expect(row?.credential_ref).not.toBeNull();
+      expect(row?.credential_ref).not.toContain(GOOD_TOKEN);
+      expect(row?.chat_token_ref).toBeNull();
+
+      // …and it OPENS to the pasted PAT, with NO chat token on the opened install.
+      const install = await createInstallsLookup(pool, cipher).lookupInstall(
+        TOOL_PROVIDER,
+        GOOD_KEY,
+      );
+      expect(install?.credentialRef).toBe(GOOD_TOKEN);
+      expect(install?.chatToken ?? null).toBeNull();
+
+      // NOTHING was mounted, and adapterFactory was never invoked. This is the
+      // whole point: a tool connect is a WRITE, not a bring-up.
+      expect(adapterCalls).toHaveLength(0);
+      expect(bridge?.mounts.size()).toBe(0);
+    });
+
+    it("TOOL connect with chat_token:null is byte-identical to absent — still 200 mounted:false, still no adapterFactory", async () => {
+      const adapterCalls: ConnectorInstall[] = [];
+      const h = await boot(
+        registryWith(toolConnector({ onAdapter: (i) => adapterCalls.push(i) })),
+      );
+
+      const response = await h.post("/connectors/connect", {
+        ticket: ticketFor(WS_A, TOOL_PROVIDER),
+        credential: GOOD_TOKEN,
+        chat_token: null,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        provider: TOOL_PROVIDER,
+        install_key: GOOD_KEY,
+        workspace_id: WS_A,
+        mounted: false,
+      });
+
+      const row = await toolRow(GOOD_KEY);
+      expect(row?.workspace_id).toBe(WS_A);
+      expect(row?.credential_ref).not.toBeNull();
+      expect(row?.chat_token_ref).toBeNull();
+
+      expect(adapterCalls).toHaveLength(0);
+      expect(bridge?.mounts.size()).toBe(0);
+    });
+
+    it("TOOL disconnect deletes the row cleanly — no adapterFactory, no mount teardown, unmount no-ops", async () => {
+      const adapterCalls: ConnectorInstall[] = [];
+      const h = await boot(
+        registryWith(toolConnector({ onAdapter: (i) => adapterCalls.push(i) })),
+      );
+
+      // Connect first — a tool install exists, unmounted.
+      const connected = await h.post("/connectors/connect", {
+        ticket: ticketFor(WS_A, TOOL_PROVIDER),
+        credential: GOOD_TOKEN,
+      });
+      expect(connected.status).toBe(200);
+      expect(await toolRow(GOOD_KEY)).not.toBeNull();
+      // Never mounted, so nothing to tear down.
+      expect(bridge?.mounts.size()).toBe(0);
+
+      const response = await h.post("/connectors/disconnect", {
+        ticket: ticketFor(WS_A, TOOL_PROVIDER),
+        install_key: GOOD_KEY,
+      });
+
+      expect(response.status).toBe(200);
+      // `removed:true` — a real row was deleted — even though nothing was unmounted:
+      // `unmountInstall` returns false for a never-mounted install, and the delete is
+      // what makes the disconnect durable. The two are independent by design.
+      expect(await response.json()).toMatchObject({ ok: true, removed: true });
+
+      // The row is GONE — survives a restart, nothing for the next boot to re-read.
+      expect(await toolRow(GOOD_KEY)).toBeNull();
+
+      // Across the WHOLE lifecycle — connect and disconnect — the adapter was never
+      // built and no Chat was ever mounted. A tool never rides the mount path.
+      expect(adapterCalls).toHaveLength(0);
+      expect(bridge?.mounts.size()).toBe(0);
     });
   },
 );
