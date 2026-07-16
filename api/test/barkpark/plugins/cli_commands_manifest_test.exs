@@ -337,6 +337,32 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert flags["set"]["type"] == "string"
       assert flags["set"]["repeatable"]
     end
+
+    test "doc.create-or-replace and doc.create-if-not-exists both accept the --file flag" do
+      commands =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Map.new(&{&1["id"], &1})
+
+      # The generic Writes help (usage.go) advertises --file for every write verb;
+      # these two upsert verbs used to declare only --set, so a `--file x.json`
+      # exited 2 "unknown flag --file". Both must carry the file flag, mirroring
+      # doc.create.
+      for id <- ~w(doc.create-or-replace doc.create-if-not-exists) do
+        command = Map.fetch!(commands, id)
+        flags = Map.new(command["flags"], &{&1["name"], &1})
+
+        file_flag = flags["file"]
+        assert file_flag, "#{id} must declare a --file flag"
+        assert file_flag["type"] == "file"
+        refute file_flag["repeatable"]
+        assert file_flag["summary"] =~ "JSON object"
+        assert file_flag["summary"] =~ "stdin"
+
+        # --set survives alongside --file.
+        assert flags["set"]["type"] == "string"
+        assert flags["set"]["repeatable"]
+      end
+    end
   end
 
   describe "core access (airdrop-grant) verbs" do
