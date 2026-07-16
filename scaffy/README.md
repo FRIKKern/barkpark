@@ -48,8 +48,8 @@ and it becomes the parser's test fixtures in the next wave.
 |---|---|---|
 | **W1** — corpus + showcase | 7 full `.scaffy` commands, this README, the showcase paper | shipped |
 | **W2** — parser + validator | `bp scaffy validate` / `bp scaffy fmt` in Go: the grammar as code — strict tokens, derived-guard check, weak-guard lint, casing-consistency lint. The Wave-2 rulings below are its law | **this wave** |
-| **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | planned |
-| **W4** — commands as content | a `command` document type, Studio authoring, a catalog per concept×variant, `bp add <concept>` fetching from the connected Barkpark | planned |
+| **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | **shipped** |
+| **W4** — commands as content | a `command` document type, the corpus served from the connected Barkpark, `bp scaffy pull <concept>/<variant>` + `bp scaffy ls --remote` (validate-first + consent gate) | **shipped** |
 
 ## The command corpus
 
@@ -373,7 +373,7 @@ test from a warm checkout.
 
 ## Hand-applying a command today
 
-No engine exists yet (W3), so a Scaffy command is applied **by hand** — and the grammar is
+Before the W3 engine shipped, a Scaffy command was applied **by hand** — and the grammar is
 designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
 
 1. **Bind the variables.** Read the `VARIABLE` declarations at the top and pick your values
@@ -403,4 +403,4 @@ designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
 
 Because every anchor in the corpus is verified against the live tree with `file:line` + quoted
 context, and every occurrence is pinned, a reviewer can apply any command deterministically —
-which is exactly the property the W3 engine will automate.
+which is exactly the property the W3 engine now automates (`bp scaffy run`).
