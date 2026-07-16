@@ -112,21 +112,92 @@ scripts/connectors/d10-local-claude-cli-coldstart.sh --check   # resolve real bi
 scripts/connectors/d10-local-claude-cli-coldstart.sh           # LIVE: one streamed turn, timed (spends API budget; needs `claude auth login`)
 ```
 
+# Wave 11 — the Cloud execution-profile runner (D107–D115)
+
+The architectural crux: run a workspace's `claude` turn **inside an isolated Vercel
+Sandbox** instead of on the host, behind a shared execution-profile seam so the same
+Studio-chat Session/runtime layer dispatches to either profile:
+
+- **`:self_hosted`** (default) — the host `claude` CLI subprocess, full host access
+  (today's behavior, byte-identical).
+- **`:cloud`** — the sandboxed runner below, NO host access, gated on a concrete
+  workspace principal.
+
+The Elixir seam lives in `api/lib/barkpark_web/studio/claude_chat.ex`
+(`command/2` → `{sandbox_runner(), cloud_build_args/2}` under
+`config :barkpark, :claude_chat, execution_profile: :cloud`) and
+`api/lib/barkpark/studio_chat/runtime/claude.ex` (threads `workspace_id` into
+`session_opts`). It rides the SAME `{exe,args,env,cwd} → NDJSON` `Port.open`
+contract — only the executable changes.
+
+### `cloud-sandbox-runner.mjs`
+
+The **shim** the `:cloud` profile spawns (dependency-free Node over the `vercel`
+CLI — not the SDK this increment). Invoked `--workspace <id> -- <claude args…>`:
+
+1. Buffers the FIRST `{"type":"user",…}` frame from its own stdin (interactive
+   stdin INTO a sandbox is impossible — D108; the shim's own local stdin works).
+2. `vercel sandbox create` — mandatory `--timeout`, `--scope guerrilla` (Pro team;
+   Hobby's quota overrun pauses creation 30 days), tags `purpose=cloud-turn` +
+   `workspace=<id>`. The **production** path boots from a `claude`-baked snapshot
+   (`$CLOUD_SANDBOX_SNAPSHOT`) with the egress allowlist `--allowed-domain
+   api.anthropic.com`; the **fallback** path (no snapshot) boots plain node24 and
+   `npm i -g @anthropic-ai/claude-code`, which needs the npm registry, so the
+   egress lock rides the snapshot, not this path (the Firecracker no-host-access
+   boundary is intrinsic to every sandbox regardless).
+3. Injects the frame base64-embedded to `/tmp/turn.jsonl`.
+4. One-shot `claude <claude args> < /tmp/turn.jsonl` with an isolated HOME + clean
+   cwd (D112 — a dirty HOME/cwd leaks SessionStart hook frames into the customer
+   NDJSON). `ANTHROPIC_API_KEY` is injected from the SHIM's OWN env only (never
+   `Barkpark.Secrets`, never the connector seal — D110). stdout NDJSON streams
+   verbatim; diagnostics go to stderr.
+5. Teardown (an Elixir Port has NO OS relationship to a remote microVM — D111):
+   `vercel sandbox remove` at turn-complete AND on SIGTERM/SIGINT/SIGHUP/exit
+   (REMOVE, never stop — stopped sandboxes accrue snapshot storage). `--timeout`
+   is the backstop; env-clamped slot concurrency caps parallel turns.
+
+`vercel sandbox exec` does NOT propagate the in-VM exit code, so the terminal
+`result` frame's `is_error` — not the process exit code — is the auth-outcome
+source of truth the Studio side classifies (`auth_failure?/1`).
+
+### `w11-isolated-turn-proof.sh`
+
+The **honest bogus-key proof** (D113c). `--check` lints the shim + fixture and
+provisions nothing (CI). LIVE mode creates ONE real sandbox, injects a **bogus**
+`ANTHROPIC_API_KEY`, drives one isolated turn through the shim, and asserts the
+terminal frame `type:result is_error:true api_error_status:401 "Invalid API key"`
+(field-matched to `api/test/fixtures/claude_chat/unauthed_stream.ndjson`), then
+proves `vercel sandbox ls` shows zero running orphans. A bogus key producing the
+401 IS the wire-level proof that env-injection reached the sandboxed claude
+exactly as `Port.open` does.
+
+```bash
+scripts/connectors/w11-isolated-turn-proof.sh --check   # lint + plan, provisions nothing (CI)
+scripts/connectors/w11-isolated-turn-proof.sh           # LIVE: one bogus-key isolated turn + teardown (needs `vercel` authed)
+```
+
+**The LIVE MODEL turn** (a valid `ANTHROPIC_API_KEY`) and the real per-workspace
+Vercel deploy are NAMED human gates (`connectors-hg-live-isolated-cloud-turn`) —
+this harness never fabricates a model answer.
+
 ## Gate
 
 ```bash
 bash -n scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d10-local-claude-cli-coldstart.sh \
   && shellcheck -S error scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d10-local-claude-cli-coldstart.sh \
   && scripts/connectors/d10-vercel-sandbox-coldstart.sh --check \
-  && scripts/connectors/d10-local-claude-cli-coldstart.sh --check
+  && scripts/connectors/d10-local-claude-cli-coldstart.sh --check \
+  && node --check scripts/connectors/cloud-sandbox-runner.mjs \
+  && bash -n scripts/connectors/w11-isolated-turn-proof.sh \
+  && scripts/connectors/w11-isolated-turn-proof.sh --check
 ```
 
-## What this slice does NOT do (filed as P1-runner backlog)
+## What Wave 11 does NOT do (filed as backlog)
 
-The per-workspace Vercel Sandbox exec **adapter**, the D24 execution-profile build
-(the 5 isolation knobs reversing `bypassPermissions` for Cloud), the Go CLI
-`bp mcp serve --tools <subset>` flag, the per-workspace/region warm-pool shard, and
-**proving one isolated turn** (which needs the D23 credential) are all filed to the
-P1-runner build backlog — they depend on the D9 secrets-scope fix
-(`task-5766dc5ca985ddc8`). This slice commits the runnable harness up to the D23
-wall. Do **not** start P2 (the Chat SDK bridge) from here.
+The D24 5-knob `bypassPermissions` reversal (only the never-emits-bypass argv test
+rides along), the D22 warm pool, D9 per-workspace keys, multi-workspace routing,
+in-sandbox MCP tools, interactive multi-turn, SDK/token auth, the real Vercel
+deploy, and a sandbox reaper cron are all scope-outs (D115). The **live-key** model
+turn is the human gate `connectors-hg-live-isolated-cloud-turn`. This slice proves
+isolation + spawn + env-injection + the stream wire with a bogus key, up to that
+gate. Do **not** start P2 (the Chat SDK bridge) from here.

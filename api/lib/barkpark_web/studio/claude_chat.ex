@@ -91,6 +91,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   `build_args/2` seam (`%{session_id: uuid}` ⇒ `--session-id`,
   `%{session_id: uuid, resume: true}` ⇒ `--resume`).
 
+  ## Execution profile (connectors D107 — the Cloud crux seam)
+
+  A new app config `:execution_profile` under `:claude_chat` selects WHERE the
+  turn runs, WITHOUT touching the `{exe,args,env,cwd} → NDJSON` spawn contract
+  (the same `Port.open`, the same parse pipeline). It is an instance/deployment
+  property, never a per-session user choice — a cloud session still carries
+  `execution_target=managed`:
+
+    * `:self_hosted` (default, greenfield) — the host `claude` CLI subprocess,
+      full host access, `bypassPermissions` reachable via the armed ceremony.
+      The returned tuple is **byte-identical** to the pre-D107 behavior (no
+      config ⇒ this branch is never entered).
+    * `:cloud` — `{sandbox_runner(), cloud_build_args(mode, opts)}`: the turn
+      runs inside an isolated Vercel Sandbox via the `cloud-sandbox-runner`
+      shim, NO host access, connector-scoped tools, gated on a concrete
+      workspace principal. The cloud argv (D109) drops the permission-prompt
+      bridge and ALL mcp args and **never** emits bypass flags; the shim gets
+      the workspace id and hard-fails on a nil/`:global` workspace (D110).
+
   VACUOUS-GREEN LAW: the `:command` config override returns its tuple
   **verbatim**, bypassing `build_args/2` entirely — never assert session/mode
   flags through a `:command` fake. Assert flags either against `build_args/2`
@@ -100,8 +119,98 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec command(String.t(), map()) :: {String.t(), [String.t()]}
   def command(mode \\ @default_mode, session_opts \\ %{}) do
     case Keyword.get(config(), :command) do
-      {exe, args} when is_binary(exe) and is_list(args) -> {exe, args}
-      _ -> {binary(), build_args(mode, session_opts)}
+      {exe, args} when is_binary(exe) and is_list(args) ->
+        {exe, args}
+
+      _ ->
+        case execution_profile() do
+          :cloud -> {sandbox_runner(), cloud_build_args(mode, session_opts)}
+          _self_hosted -> {binary(), build_args(mode, session_opts)}
+        end
+    end
+  end
+
+  @default_execution_profile :self_hosted
+  @default_sandbox_runner "cloud-sandbox-runner"
+
+  @doc """
+  The configured execution profile (`:self_hosted` default | `:cloud`). Greenfield
+  config key (connectors D107) — an unset or unrecognized value fails to the
+  host CLI, never silently into the sandbox path.
+  """
+  @spec execution_profile() :: :self_hosted | :cloud
+  def execution_profile do
+    case Keyword.get(config(), :execution_profile, @default_execution_profile) do
+      :cloud -> :cloud
+      _ -> :self_hosted
+    end
+  end
+
+  @doc """
+  The executable that spawns a Cloud turn — the `cloud-sandbox-runner` shim
+  (connectors D108/D111). Config-overridable (`:sandbox_runner`) so tests inject
+  a chmod+x fake and a real deploy points at the committed
+  `scripts/connectors/cloud-sandbox-runner.mjs`. Resolved through the same
+  `System.find_executable` path as the host binary.
+  """
+  @spec sandbox_runner() :: String.t()
+  def sandbox_runner, do: Keyword.get(config(), :sandbox_runner, @default_sandbox_runner)
+
+  @doc ~S"""
+  The Cloud-profile argv (connectors D109) — the shim's OWN argv. Structure:
+
+      ["--workspace", <workspace_id>, "--" | <claude args>]
+
+  The shim buffers the first user frame from its stdin, creates an isolated
+  sandbox tagged with the workspace, and runs `claude <claude args> < turn.jsonl`
+  inside it. The claude argv KEEPS `--input-format/--output-format stream-json`,
+  `--include-partial-messages`, `--verbose`, `--permission-mode <mode>`; it DROPS
+  `--permission-prompt-tool stdio` (no channel answers asks one-shot) and ALL mcp
+  args (a host-written `--mcp-config` path hard-fails in-sandbox with zero
+  output). It **structurally never** emits `--allow-dangerously-skip-permissions`
+  — bypass is unreachable from this builder (a down-payment on D24 knob 1).
+
+  Fail-closed principal (D110): a nil/`:global`/blank `workspace_id` RAISES here
+  (the `registered_host` `Map.fetch!` shape) rather than spawning an
+  unattributed cloud turn.
+  """
+  @spec cloud_build_args(String.t(), map()) :: [String.t()]
+  def cloud_build_args(mode, session_opts \\ %{}) do
+    workspace_id = cloud_workspace_id!(session_opts)
+    ["--workspace", workspace_id, "--"] ++ cloud_claude_args(mode)
+  end
+
+  # The claude argv that runs INSIDE the sandbox (D109). Never derived from any
+  # bypass/arming knob, so `--allow-dangerously-skip-permissions` is structurally
+  # unreachable; the mode string rides `--permission-mode` verbatim (a bare
+  # `bypassPermissions` mode without the dangerous flag does NOT bypass on the CLI).
+  defp cloud_claude_args(mode) do
+    [
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--verbose",
+      "--permission-mode",
+      mode
+    ]
+  end
+
+  # Fail-closed workspace principal for a Cloud turn (D110). A concrete workspace
+  # binary passes; nil, the sentinel `:global`/`"global"`, or a blank string
+  # RAISE — the cloud profile never spawns an unattributed turn (mirror of the
+  # runtime.ex:349 `registered_host` Map.fetch! posture, never the fail-soft
+  # mcp empty-list pattern).
+  defp cloud_workspace_id!(session_opts) do
+    case Map.get(session_opts, :workspace_id) do
+      id when is_binary(id) and id != "" and id != "global" ->
+        id
+
+      other ->
+        raise ArgumentError,
+              "cloud execution profile requires a concrete workspace_id; refusing to spawn " <>
+                "an unattributed cloud turn (got: #{inspect(other)})"
     end
   end
 
