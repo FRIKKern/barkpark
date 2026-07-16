@@ -168,6 +168,46 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert Repo.get(Site, site.id).current_deployment_id == d.id
     end
 
+    # site-spawner W4 (charter D15-D17): every stage transition PUSHES a
+    # `site.deploy.stage` SSE event the moment it is CAS'd — the console's live
+    # rail advances without polling. Coarse-by-design: the payload names WHICH
+    # deployment reached WHICH stage; the dashboard folds the whole set, so a
+    # missed/duplicated event is harmless. The terminal `deployments` tick still
+    # fires at settle (asserted by its presence in the mailbox alongside).
+    test "broadcasts a site.deploy.stage event per stage, then the terminal deployments tick" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Subscribe THIS process to the site's team group BEFORE the driver runs —
+      # Deploy.run/1 is synchronous here (NoopStarter), so every broadcast lands
+      # in this mailbox.
+      :ok = BarkparkCloud.Events.subscribe(site.team_id)
+
+      FakeBoxRelay.program(
+        polls: [FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      # Each of the six stages pushed one event, carrying this deployment's id and
+      # the stage's name — the exact payload the console rail folds.
+      for stage <- all_stages() do
+        assert_receive {:bpcloud_event,
+                        %{
+                          type: "site.deploy.stage",
+                          payload: %{deployment_id: dep_id, stage: ^stage, status: "done"} = payload
+                        }}
+
+        assert dep_id == d.id
+        assert payload.site_id == site.id
+        assert payload.slug == site.slug
+      end
+
+      # …and the coarse terminal tick still fires so a tab with no rail open (a
+      # sites LIST) still invalidates.
+      assert_receive {:bpcloud_event, %{type: "deployments"}}
+    end
+
     test "the box is driven with the site's OWN read token over the SCOPED route, and the build env is exactly the allow-list" do
       {bp, site} = setup_site()
       {:ok, d} = Deploy.enqueue(site, bp)

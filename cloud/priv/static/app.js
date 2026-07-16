@@ -3817,6 +3817,10 @@
   }
 
   function openCreateSiteModal(bp) {
+    // W4 (charter D18): Deploy-now is checked by default — one motion from create
+    // to a live URL. It is disabled while the instance is still provisioning (a
+    // deploy would 422 instance_not_live), with an honest caption saying why.
+    var canDeploy = instanceCanDeploy(bp);
     openModal(
       '<h2 class="modal-title" id="modal-title">New site on ' + esc(bp.name || bp.slug || "this instance") + "</h2>" +
       '<p class="modal-sub">Spawned next to Phoenix on the box, built from a shipped starter through the six-stage engine (health-gated, instant rollback).</p>' +
@@ -3833,6 +3837,12 @@
         '<input class="form-input" id="site-nc-dataset" type="text" autocomplete="off" spellcheck="false" placeholder="default/default/production" /></div>' +
       '<div class="field"><label class="label" for="site-nc-doctype">Content type <span class="dim">(optional)</span></label>' +
         '<input class="form-input" id="site-nc-doctype" type="text" autocomplete="off" spellcheck="false" placeholder="entry" /></div>' +
+      '<div class="field field-check"><label class="check-row">' +
+        '<input type="checkbox" id="site-nc-deploy"' + (canDeploy ? " checked" : " disabled") + " /> " +
+        "<span>Deploy now <span class=\"dim\">— build and go live immediately</span></span></label>" +
+        (canDeploy ? "" :
+          '<div class="dim check-note">This instance is still provisioning — deploy becomes available once it’s live.</div>') +
+        "</div>" +
       '<div class="cred-remediation" id="site-nc-err" role="alert" hidden></div>' +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="site-nc-submit" type="button">Create site</button></div>'
     );
@@ -3859,13 +3869,23 @@
         doc_type: ($("#site-nc-doctype").value || "").trim(),
         barkpark_id: bp.id
       });
+      // Read the checkbox BEFORE closeModal() empties the modal body.
+      var deployNow = canDeploy && !!($("#site-nc-deploy") && $("#site-nc-deploy").checked);
       submit.disabled = true;
       api("POST", "/v1/sites", body).then(function (r) {
         submit.disabled = false;
         if (r.ok) {
+          var created = r.data && r.data.site;
           closeModal();
-          toast("Site created \u2014 first deploy makes it live");
-          loadInstanceSites(bp);
+          if (created && created.id && deployNow) {
+            // One motion: create \u2192 deploy \u2192 live rail \u2192 copyable URL toast.
+            createAndDeploy(bp, created);
+          } else {
+            // Toast bug fix: a bare-string toast is silently dropped (toast()
+            // reads opts.kind/title/body/action) \u2014 pass an object.
+            toast({ kind: "success", title: "Site created", body: "First deploy makes it live." });
+            loadInstanceSites(bp);
+          }
         } else {
           var msg = (r.data && (r.data.error || r.data.message)) || ("create failed (" + r.status + ")");
           var known = r.data && r.data.known_templates;
@@ -5363,6 +5383,9 @@
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       wireDeployConsoles(box);
       wireDeployActions(box, site, deployments);
+      // W4: mount the live six-stage rail for the in-flight deployment (if any),
+      // driven by the site.deploy.stage SSE push — not a poll.
+      mountDeployRail(box, site, bp, deployments);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
     });
@@ -5424,7 +5447,7 @@
           '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><h2>Deployments</h2><div class="deploys" id="site-deploys">' + list + "</div>" +
+        '<div class="detail-main"><div id="deploy-rail-slot"></div><h2>Deployments</h2><div class="deploys" id="site-deploys">' + list + "</div>" +
           previewSection + "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
@@ -5740,6 +5763,311 @@
         var d = byId[btn.getAttribute("data-dep-id")];
         if (d) confirmPromote(site, d, btn.getAttribute("data-kind"), deployments);
       });
+    });
+  }
+
+  // ── W4 deploy stage rail (charter D15-D17) ─────────────────────────────────
+  // The console's live twin of the /new provisioning timeline: a six-stage rail
+  // PLAN → BUILD → STAGE → HEALTH → SWITCH → RETIRE (PROVISION stays silent),
+  // driven by the `site.deploy.stage` SSE push, NOT a poll. It reuses the shared
+  // step component (newStepsHtml), the min-dwell pacer (paceSteps/seedPaceLedger)
+  // and the region-signature diff so one stage transition never restarts the CSS
+  // animations of the stages around it. The pure fold/signature/markup helpers
+  // are node-pinned via __bpTestHook; the EventSource wiring + DOM mount below are
+  // browser-verified (the harness rule — only string-in/derivation helpers pin).
+  var DEPLOY_RAIL_STAGES = ["PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"];
+  var DEPLOY_RAIL_LABELS = {
+    PLAN: "Plan", BUILD: "Build", STAGE: "Stage",
+    HEALTH: "Health check", SWITCH: "Go live", RETIRE: "Retire old",
+  };
+
+  // Pure: the engine's per-stage status word → a rail display role (the same
+  // vocabulary newStepsHtml renders — ok/failed/active/pending, plus skipped).
+  // Unknown/blank → pending, so a lean report never invents progress.
+  function deployStageRole(status) {
+    switch (status) {
+      case "done": return "ok";
+      case "failed": return "failed";
+      case "running": case "started": return "active";
+      case "skipped": return "skipped";
+      default: return "pending";
+    }
+  }
+
+  // Pure: fold a deployment's console narration (deploy.ex console_entry:
+  // {stage,status,detail,at}) into a stage→latest map. Non-rail lines are ignored
+  // and the LAST entry per stage wins (a stage moves running→done). Seeds the rail
+  // from a deployment fetched MID-flight so opening the page lands at the right
+  // stage instantly instead of replaying from PLAN.
+  function deployRailLedgerFromConsole(arr) {
+    var ledger = {};
+    (arr || []).forEach(function (e) {
+      if (!e || DEPLOY_RAIL_STAGES.indexOf(e.stage) === -1) return;
+      ledger[e.stage] = {
+        status: e.status,
+        detail: (typeof e.detail === "string" && e.detail) ? e.detail : "",
+      };
+    });
+    return ledger;
+  }
+
+  // Pure: the six ordered rail rows from the ledger. A stage with no entry is
+  // pending; once ANY stage has failed, the pending stages AFTER it read
+  // `skipped` — the build died before reaching them, exactly as deploy.ex's
+  // stages/1 folds a failed run, so the rail never shows "pending forever" rows on
+  // a dead deploy. Row shape matches the shared step component so it runs through
+  // paceSteps + newStepsHtml unchanged.
+  function deployRailRows(ledger) {
+    ledger = ledger || {};
+    var rows = DEPLOY_RAIL_STAGES.map(function (name) {
+      var e = ledger[name];
+      return {
+        step: name,
+        label: DEPLOY_RAIL_LABELS[name] || name,
+        role: e ? deployStageRole(e.status) : "pending",
+        elapsedMs: null,
+        caption: (e && e.detail) || "",
+        probes: [],
+      };
+    });
+    var failedIdx = -1;
+    for (var i = 0; i < rows.length; i++) { if (rows[i].role === "failed") { failedIdx = i; break; } }
+    if (failedIdx >= 0) {
+      for (var j = failedIdx + 1; j < rows.length; j++) {
+        if (rows[j].role === "pending") rows[j].role = "skipped";
+      }
+    }
+    return rows;
+  }
+
+  // Pure: the region signature — the rail <ul> is replaced ONLY when a stage's
+  // DISPLAY state actually changed (role/caption/completing dwell), so a
+  // same-signature SSE tick or 1s clock tick never rebuilds the list and restarts
+  // its animations. Mirrors newStepsSig for the /new screen.
+  function deployRailSignature(rows) {
+    return (rows || []).map(function (r) {
+      return r.step + ":" + r.role + (r.completing ? "*" : "") + ":" + (r.caption || "");
+    }).join(",");
+  }
+
+  // Pure: the rail's honest headline from the display rows. Live once every stage
+  // is done; Failed on any failure (naming the stage that broke — never a dead
+  // end); otherwise the active stage's label.
+  function deployRailStatus(rows) {
+    rows = rows || [];
+    var failed = null, active = null, allOk = rows.length > 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.role === "failed" && !failed) failed = r;
+      if (r.role === "active" && !active) active = r;
+      if (r.role !== "ok") allOk = false;
+    }
+    if (failed) return { tone: "failed", text: "Deploy failed at " + failed.label };
+    if (allOk) return { tone: "live", text: "Live" };
+    if (active) return { tone: "active", text: active.label + "…" };
+    return { tone: "active", text: "Starting…" };
+  }
+
+  // Pure: the rail markup — a section wrapping the shared step component. opts:
+  // { deploymentId, url (copyable when live), failureDetail }. data-rail-sig lets
+  // the browser patch it in place by signature.
+  function deployRailHtml(rows, opts) {
+    opts = opts || {};
+    rows = rows || [];
+    var st = deployRailStatus(rows);
+    var head = '<div class="deploy-rail-head">' +
+        '<h2 class="deploy-rail-title">Deploying</h2>' +
+        '<span class="deploy-rail-status deploy-rail-status--' + esc(st.tone) + '">' + esc(st.text) + "</span>" +
+      "</div>";
+    var foot = "";
+    if (st.tone === "live" && opts.url) {
+      foot = '<div class="deploy-rail-live">' +
+        '<a class="site-open" href="' + esc(opts.url) + '" target="_blank" rel="noopener">' + esc(opts.url) + "&nbsp;&#8599;</a>" +
+        '<button class="copy-btn" type="button" data-copy="' + esc(opts.url) + '" aria-label="Copy live URL">' + COPY_SVG + "</button>" +
+        "</div>";
+    } else if (st.tone === "failed" && opts.failureDetail) {
+      foot = '<div class="deploy-rail-fail" role="alert">' + esc(opts.failureDetail) + "</div>";
+    }
+    return '<section class="deploy-rail" data-deploy-rail data-rail-dep="' + esc(String(opts.deploymentId || "")) +
+        '" data-rail-sig="' + esc(deployRailSignature(rows)) + '">' +
+        head + newStepsHtml(rows) + foot +
+      "</section>";
+  }
+
+  // Pure: which deployment the rail tracks — the one still in flight
+  // (queued/building/pushing). Null when every deployment is terminal (the rail
+  // folds away; the deploy list carries the history). Newest-first list → first
+  // active row wins.
+  function railDeployment(deployments) {
+    var arr = deployments || [];
+    for (var i = 0; i < arr.length; i++) {
+      if (deployIsActive(arr[i].status || "queued")) return arr[i];
+    }
+    return null;
+  }
+
+  // Pure: can we deploy on this instance right now? A deploy mid-provision 422s
+  // instance_not_live (the box has no URL yet), so the create modal's Deploy-now
+  // checkbox is disabled until the instance is live.
+  function instanceCanDeploy(bp) {
+    return !!(bp && bp.url);
+  }
+
+  // ── Rail state + SSE-driven mount (browser-verified) ───────────────────────
+  // Per-deployment: the SSE-fed stage ledger + the min-dwell pace ledger + the
+  // last-rendered signature. Keyed by deployment id; survives the site re-renders
+  // a coarse deployments tick triggers.
+  var deployRailState = {};
+  var deployRailCtx = null;   // { siteId, deploymentId, url } for the mounted rail
+  var deployRailTicker = null;
+  var deployLiveWatch = {};   // site id → live URL to toast once the deploy settles
+
+  function deployRailStateFor(depId) {
+    depId = String(depId || "");
+    if (!deployRailState[depId]) {
+      deployRailState[depId] = { ledger: {}, paceLedger: {}, seeded: false, sig: null };
+    }
+    return deployRailState[depId];
+  }
+
+  // Record one stage transition (from an SSE site.deploy.stage payload) into a
+  // deployment's ledger — latest-wins per stage.
+  function recordDeployStage(depId, stage, status, detail) {
+    if (DEPLOY_RAIL_STAGES.indexOf(stage) === -1) return;
+    var st = deployRailStateFor(depId);
+    st.ledger[stage] = { status: status, detail: (typeof detail === "string" && detail) ? detail : "" };
+  }
+
+  // Truth fold → min-dwell pacer. seedPaceLedger on FIRST sight so an
+  // open-mid-deploy renders already-finished history done instantly; only
+  // transitions observed live get the satisfying ≥3s dwell.
+  function deployRailDisplayRows(depId) {
+    var st = deployRailStateFor(depId);
+    var rows = deployRailRows(st.ledger);
+    if (!st.seeded) { st.seeded = true; seedPaceLedger(rows, st.paceLedger); }
+    return paceSteps(rows, st.paceLedger, Date.now());
+  }
+
+  // Render the rail into its slot, region-diffed: replace the DOM only when the
+  // paced display signature moved (a dwell expiring IS a change). Zero rebuilds
+  // on a no-op tick, so the active-stage spinner never resets.
+  function renderDeployRail(slot, depId) {
+    if (!slot) return;
+    var st = deployRailStateFor(depId);
+    var rows = deployRailDisplayRows(depId);
+    var sig = deployRailSignature(rows);
+    if (st.sig === sig && slot.querySelector && slot.querySelector("[data-deploy-rail]")) return;
+    st.sig = sig;
+    var failed = rows.filter(function (r) { return r.role === "failed"; })[0];
+    slot.innerHTML = deployRailHtml(rows, {
+      deploymentId: depId,
+      url: (deployRailCtx && String(deployRailCtx.deploymentId) === String(depId)) ? deployRailCtx.url : "",
+      failureDetail: failed ? failed.caption : "",
+    });
+  }
+
+  // Mount the rail for the in-flight deployment (if any) into #deploy-rail-slot.
+  // Seeds the ledger from the row's console narration (idempotent, latest-wins) so
+  // server truth shows even for events that predate this tab, then renders +
+  // starts the dwell ticker. No active deployment → clear the slot, stop the tick.
+  function mountDeployRail(scope, site, bp, deployments) {
+    var slot = scope && scope.querySelector ? scope.querySelector("#deploy-rail-slot") : null;
+    if (!slot) return;
+    var dep = railDeployment(deployments);
+    if (!dep) { slot.innerHTML = ""; deployRailCtx = null; stopDeployRailTicker(); return; }
+    var st = deployRailStateFor(dep.id);
+    var seeded = deployRailLedgerFromConsole(dep.console || []);
+    Object.keys(seeded).forEach(function (k) { st.ledger[k] = seeded[k]; });
+    st.sig = null; // force a paint into the fresh slot
+    deployRailCtx = { siteId: site.id, deploymentId: dep.id, url: siteLiveUrl(site, bp) || "" };
+    renderDeployRail(slot, dep.id);
+    startDeployRailTicker();
+  }
+
+  function startDeployRailTicker() {
+    if (deployRailTicker) return;
+    deployRailTicker = setInterval(tickDeployRail, 1000);
+  }
+  function stopDeployRailTicker() {
+    if (deployRailTicker) { clearInterval(deployRailTicker); deployRailTicker = null; }
+  }
+  // The 1s dwell tick: expire the min-dwell pacing (completing → done) and sweep
+  // the active dot's ring in place. Self-stops when the slot is gone (navigated
+  // away) so no orphan timer survives.
+  function tickDeployRail() {
+    if (!deployRailCtx) { stopDeployRailTicker(); return; }
+    var slot = document.querySelector("#deploy-rail-slot");
+    if (!slot) { stopDeployRailTicker(); return; }
+    var depId = deployRailCtx.deploymentId;
+    renderDeployRail(slot, depId);
+    tickActiveRing(slot, deployRailRows(deployRailStateFor(depId).ledger));
+  }
+
+  // Once the tracked deploy reaches all-done, fire the one-motion "your site is
+  // live" toast with the copyable URL — exactly once per watch, from ANY view.
+  function maybeDeployLiveToast(siteId, depId) {
+    var url = deployLiveWatch[String(siteId)];
+    if (!url) return;
+    var rows = deployRailRows(deployRailStateFor(depId).ledger);
+    var allDone = rows.length && rows.every(function (r) { return r.role === "ok"; });
+    if (!allDone) return;
+    delete deployLiveWatch[String(siteId)];
+    toast({
+      kind: "success", title: "Your site is live", body: url, duration: 12000,
+      action: {
+        label: "Copy URL",
+        onClick: function () {
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url);
+        },
+      },
+    });
+  }
+
+  // The site.deploy.stage SSE handler (charter D15-D17): record the stage, drive
+  // the live rail on the matching detail WITHOUT a full reload (that would restart
+  // the animations), and refresh the LIST / instance-overview per-site badges.
+  function onDeployStageEvent(v, payload) {
+    payload = payload || {};
+    if (payload.deployment_id && payload.stage) {
+      recordDeployStage(payload.deployment_id, payload.stage, payload.status, payload.detail);
+      maybeDeployLiveToast(payload.site_id, payload.deployment_id);
+    }
+    if (v === "site" && payload.site_id && String(parseHash().id) === String(payload.site_id)) {
+      var slot = document.querySelector("#deploy-rail-slot");
+      if (slot && deployRailCtx && String(deployRailCtx.deploymentId) === String(payload.deployment_id)) {
+        renderDeployRail(slot, payload.deployment_id);
+        tickActiveRing(slot, deployRailRows(deployRailStateFor(payload.deployment_id).ledger));
+      } else {
+        // A deployment we aren't tracking yet (the one-motion chain's fresh build)
+        // — reload once to mount its rail; subsequent stages patch in place.
+        loadSite(payload.site_id, { quiet: true });
+      }
+      return;
+    }
+    // The list + instance Overview show per-site deploy badges — keep them honest.
+    if (v === "sites") loadSites();
+    else if (v === "instance") reloadInstanceView();
+  }
+
+  // One-motion create-and-deploy (charter D18): the create 201 chains straight
+  // into POST /v1/sites/:id/deploy (no server deploy_now param — the chain is
+  // client-side, so a create still stands alone if the deploy leg fails), drops
+  // the user onto the site detail (the live rail), and arms the live-URL toast.
+  function createAndDeploy(bp, site) {
+    location.hash = "#site/" + encodeURIComponent(site.id);
+    deployLiveWatch[String(site.id)] = siteLiveUrl(site, bp) || "";
+    toast({ kind: "info", title: "Creating your site", body: "Kicking off the first deploy…", duration: 3000 });
+    api("POST", "/v1/sites/" + encodeURIComponent(site.id) + "/deploy", {}).then(function (r) {
+      if (r.status === 201) {
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id, { quiet: true });
+      } else {
+        delete deployLiveWatch[String(site.id)];
+        toast({
+          kind: "error", title: "Couldn't start the first deploy",
+          body: friendly(r.data, "The site was created — open it and press Deploy to try again."),
+          action: { label: "Open site", onClick: function () { location.hash = "#site/" + encodeURIComponent(site.id); } },
+        });
+      }
     });
   }
 
@@ -7250,7 +7578,9 @@
       renderLivenessChip();
       var ev;
       try { ev = JSON.parse(e.data); } catch (x) { return; }
-      handleLiveEvent(ev && ev.type);
+      // W4: the stage rail reads the pushed payload (site/deployment/stage), not
+      // just the type — the coarse-invalidation handlers ignore the second arg.
+      handleLiveEvent(ev && ev.type, ev && ev.payload);
     };
     evtSource.onerror = function () {
       // EventSource auto-reconnects on a dropped connection; surface it ONCE so
@@ -7334,7 +7664,14 @@
     },
     deployments: function (v) {
       if (v === "site") loadSite(parseHash().id);
+      // W4: the sites LIST and the instance Overview both carry per-site deploy
+      // badges — a terminal deploy tick must refresh them too, not only the open
+      // detail (the amber-while-rebuilding groundwork).
+      else if (v === "sites") loadSites();
+      else if (v === "instance") reloadInstanceView();
     },
+    // W4 (charter D15-D17): the per-stage deploy push drives the live rail.
+    "site.deploy.stage": onDeployStageEvent,
     audit: function (v) {
       // An audited mutation (delete / go-live / site create / member / token /
       // subscription) just landed an event; refresh Activity if it's open, and
@@ -7356,13 +7693,15 @@
     onboarding: invalidateConservatively,
   };
 
-  function handleLiveEvent(type) {
+  function handleLiveEvent(type, payload) {
     if (!type) return;
     // dwb-6: during the /new deploy flow a "fleet" tick means the provision state
     // may have advanced — re-check the launched instance's real status.
     if (type === "fleet" && isNewFlow() && newFlowFleetHook) { newFlowFleetHook(); return; }
     var action = TYPE_ACTIONS[type];
-    if (action) { action(currentView()); return; }
+    // W4: coarse handlers take (view) and ignore the payload; the stage handler
+    // reads it. Passing it unconditionally is safe — the others drop it.
+    if (action) { action(currentView(), payload); return; }
     // Version-skew safety nets (an already-loaded SPA under a newer control
     // plane mid-deploy). An unregistered barkpark.* event still means an
     // instance's state changed; any other unknown type must not silently no-op
@@ -11244,6 +11583,14 @@
       // until the new build is live) + the loadInstanceSites stale-paint guard.
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
       staleGuard: staleGuard,
+      // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
+      // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
+      // node-pinned; the EventSource wiring + DOM mount are browser-verified.
+      deployStageRole: deployStageRole, deployRailLedgerFromConsole: deployRailLedgerFromConsole,
+      deployRailRows: deployRailRows, deployRailSignature: deployRailSignature,
+      deployRailStatus: deployRailStatus, deployRailHtml: deployRailHtml,
+      railDeployment: railDeployment, instanceCanDeploy: instanceCanDeploy,
+      deployRailStages: DEPLOY_RAIL_STAGES.slice(),
       parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
       inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
