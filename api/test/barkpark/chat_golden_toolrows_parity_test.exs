@@ -115,13 +115,15 @@ defmodule Barkpark.ChatGoldenToolrowsParityTest do
   # ── the projection floor (a gutted regen reds here) ─────────────────────────
 
   describe "projection coverage floor" do
-    test "there are at least five toolrow variants" do
-      assert length(variants()) >= 5
+    test "there are at least eight toolrow variants" do
+      assert length(variants()) >= 8
     end
 
-    test "all three chat block types are present across the variants" do
+    test "all six chat block types are present across the variants" do
       types = variants() |> Enum.map(& &1["block"]["type"]) |> MapSet.new()
-      required = ~w(chat-tool-diff chat-todo chat-thinking)
+
+      required =
+        ~w(chat-tool-diff chat-todo chat-thinking chat-approval chat-question chat-plan)
 
       for t <- required do
         assert MapSet.member?(types, t),
@@ -219,6 +221,38 @@ defmodule Barkpark.ChatGoldenToolrowsParityTest do
       assert html =~ "✻"
       assert html =~ "thought for ~1280 tokens"
     end
+
+    test "the approval render is a read-only card with tool + preview + status" do
+      approval = Enum.find(variants(), &(&1["name"] == "approval_card"))
+      html = render_article(approval["block"])
+
+      assert html =~ "bp-chat-approval"
+      assert html =~ "Allow Bash?"
+      assert html =~ "command:"
+      assert html =~ "pending"
+      # D35: the read-only card carries NO answer control (that rides the envelope).
+      refute html =~ "phx-click"
+    end
+
+    test "the question render lists the prompt and its option chips" do
+      question = Enum.find(variants(), &(&1["name"] == "question_card"))
+      html = render_article(question["block"])
+
+      assert html =~ "bp-chat-question"
+      assert html =~ "Which database should we target?"
+      assert html =~ "Postgres" and html =~ "SQLite"
+      refute html =~ "phx-click"
+    end
+
+    test "the plan render is the title + clamped lede" do
+      plan = Enum.find(variants(), &(&1["name"] == "plan_card"))
+      html = render_article(plan["block"])
+
+      assert html =~ "bp-chat-plan"
+      assert html =~ "Ship the parser"
+      assert html =~ "Refactor the tokenizer"
+      refute html =~ "phx-click"
+    end
   end
 
   # ── the controller projection emits the typed blocks the Go half decodes ─────
@@ -261,6 +295,53 @@ defmodule Barkpark.ChatGoldenToolrowsParityTest do
     test "a thinking row with no persisted count projects no blocks" do
       json = ChatController.message_json(row("thinking", %{}))
       refute Map.has_key?(json, :blocks)
+    end
+
+    test "an approval row projects a chat-approval block from its metadata (D35)" do
+      meta = %{
+        "request_id" => "req-1",
+        "tool_name" => "Bash",
+        "input" => %{"command" => "ls"},
+        "approval_status" => "pending"
+      }
+
+      json = ChatController.message_json(row("approval", meta))
+
+      assert [%{"type" => "chat-approval", "tool_name" => "Bash"} = block] = json.blocks
+      assert block["approval_status"] == "pending"
+      # The ENVELOPE still carries the answer state — answerability is NOT on the
+      # block (D35): the metadata request_id/approval_status must survive.
+      assert json.metadata["request_id"] == "req-1"
+      assert json.metadata["approval_status"] == "pending"
+    end
+
+    test "a question row projects a chat-question block carrying its prompts" do
+      meta = %{
+        "request_id" => "req-2",
+        "tool_name" => "AskUserQuestion",
+        "input" => %{"questions" => [%{"question" => "Ship it?", "options" => ["yes"]}]},
+        "approval_status" => "pending"
+      }
+
+      json = ChatController.message_json(row("question", meta))
+
+      assert [%{"type" => "chat-question", "questions" => [q]}] = json.blocks
+      assert q["question"] == "Ship it?"
+      assert q["options"] == ["yes"]
+    end
+
+    test "a plan row projects a chat-plan block with the first heading as title" do
+      meta = %{
+        "request_id" => "req-3",
+        "tool_name" => "ExitPlanMode",
+        "input" => %{"plan" => "# Do the thing\n\nStep one."},
+        "approval_status" => "allowed"
+      }
+
+      json = ChatController.message_json(row("plan", meta))
+
+      assert [%{"type" => "chat-plan", "title" => "Do the thing"} = block] = json.blocks
+      assert block["approval_status"] == "allowed"
     end
 
     test "an assistant row still projects reply-body blocks (D8 preserved)" do

@@ -72,8 +72,8 @@ func loadChatToolrowsGolden(t *testing.T) chatToolrowsFixture {
 	if !strings.Contains(fx.Comment, "gen_golden_toolrows") {
 		t.Fatalf("fixture floor: comment must name the generator so a hand-edit is caught")
 	}
-	if len(fx.Variants) < 3 {
-		t.Fatalf("fixture floor: %d variants, want >= 3 (one per structural block type)", len(fx.Variants))
+	if len(fx.Variants) < 6 {
+		t.Fatalf("fixture floor: %d variants, want >= 6 (>=1 per promoted block type: 3 inert + 3 cards)", len(fx.Variants))
 	}
 	return fx
 }
@@ -142,9 +142,13 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 		})
 	}
 
-	// (4) Coverage floor: all three promoted block types realized somewhere — a
-	// regen that drops one reds here.
-	for _, want := range []string{"chat-tool-diff", "chat-todo", "chat-thinking"} {
+	// (4) Coverage floor: all six promoted block types realized somewhere — the
+	// three inert rows (D25) plus the three interactive cards (D35). A regen that
+	// drops one reds here.
+	for _, want := range []string{
+		"chat-tool-diff", "chat-todo", "chat-thinking",
+		"chat-approval", "chat-question", "chat-plan",
+	} {
 		if !seenTypes[want] {
 			t.Fatalf("coverage floor: block type %q never appeared — regen dropped coverage", want)
 		}

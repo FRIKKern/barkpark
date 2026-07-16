@@ -382,5 +382,10 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["chat-tool-diff"] = chatToolDiffRenderer{}
 	r.blocks["chat-todo"] = chatTodoRenderer{}
 	r.blocks["chat-thinking"] = chatThinkingRenderer{}
+	// The three INTERACTIVE cards (charter D35): the block is the read-time VISUAL;
+	// answerability rides the message envelope (internal/chat cardView), not here.
+	r.blocks["chat-approval"] = chatApprovalRenderer{}
+	r.blocks["chat-question"] = chatQuestionRenderer{}
+	r.blocks["chat-plan"] = chatPlanRenderer{}
 	return r
 }

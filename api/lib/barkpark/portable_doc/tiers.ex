@@ -69,7 +69,9 @@ defmodule Barkpark.PortableDoc.Tiers do
   # `chat-thinking`/`chat-todo`/`chat-tool-diff` → :widget: the three first-class
   # chat block types (D8), each a self-contained rendered row (raw HTML from
   # Render.Components) — monolithic display units like `terminal`/`asciicast`, not
-  # slot-composable layout.
+  # slot-composable layout. `chat-approval`/`chat-question`/`chat-plan` join them
+  # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
+  # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget ~w(
     callout figure terminal table
     task-detail task-list tasks task-board roadmap
@@ -78,6 +80,7 @@ defmodule Barkpark.PortableDoc.Tiers do
     stat stats stat-grid heatmap chart
     sheet embed asciicast status-legend
     chat-thinking chat-todo chat-tool-diff
+    chat-approval chat-question chat-plan
   )
 
   @section ~w(section columns)

@@ -985,6 +985,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_thinking_html(b)}
   end
 
+  # The three INTERACTIVE chat cards (charter D35): approval / question / plan as
+  # dual-surface block types. The block carries only the read-time VISUAL — the
+  # answer path stays on the message ENVELOPE (role+request_id+approval_status),
+  # so this `_raw` emitter never draws an answer control.
+  def compose_block(%{"type" => "chat-approval"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_approval_html(b)}
+  end
+
+  def compose_block(%{"type" => "chat-question"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_question_html(b)}
+  end
+
+  def compose_block(%{"type" => "chat-plan"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_plan_html(b)}
+  end
+
   def compose_block(%{"type" => "notes"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
   end
