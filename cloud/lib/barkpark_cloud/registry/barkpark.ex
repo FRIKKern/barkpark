@@ -201,6 +201,16 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # check); globally unique via `barkparks_custom_host_unique_idx`.
     field :custom_host, :string
 
+    # On-demand VERIFY verdict (BP-ONB-09 backend) — the cached headline of the
+    # last golden-path probe run (`run_verify/3` → `Registry.record_verify_result/2`),
+    # so the fleet list carries a queryable "last verified" fact without walking
+    # the `verify` agent_event stream. Both NULL until the suite first runs;
+    # `verify_reachable` is the run's envelope `reachable` (a real `false` is
+    # distinct from the NULL "never verified"). Written ONLY through the narrow
+    # `verify_changeset/2` (best-effort, via `Registry.record_verify_result/2`).
+    field :last_verified_at, :utc_datetime_usec
+    field :verify_reachable, :boolean
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -498,6 +508,18 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:update_state, @update_states)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the on-demand VERIFY verdict (BP-ONB-09) — only the two
+  verify cache columns are castable, so persisting a probe run can never rename a
+  Barkpark or reassign its Team (the same containment posture as
+  `update_status_changeset/2` / `health_changeset/2`). Written only by
+  `Registry.record_verify_result/2`, best-effort in `run_verify/3`.
+  """
+  def verify_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:last_verified_at, :verify_reachable])
   end
 
   @doc """

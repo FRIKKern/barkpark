@@ -2212,6 +2212,38 @@ defmodule BarkparkCloud.Registry do
     |> Repo.insert()
   end
 
+  @doc """
+  Cache the on-demand VERIFY verdict onto the fleet row (BP-ONB-09 backend) — the
+  headline `reachable` of the run plus the moment it ran, so the fleet list
+  carries a queryable "last verified" fact without walking the `verify`
+  agent_event stream. Best-effort by contract: the caller (`run_verify/3`) runs
+  this beside `record_event/3` in the `{:ok, result}` arm, so a failed persist
+  logs and NEVER fails the proof the operator just asked for. `verified_at` is
+  the envelope's ISO-8601 stamp when parseable, else `now`.
+  """
+  @spec record_verify_result(Barkpark.t(), map()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def record_verify_result(%Barkpark{} = bp, %{reachable: reachable} = result) do
+    verified_at =
+      case result do
+        %{verified_at: iso} when is_binary(iso) ->
+          case DateTime.from_iso8601(iso) do
+            {:ok, dt, _offset} -> dt
+            _ -> DateTime.utc_now()
+          end
+
+        _ ->
+          DateTime.utc_now()
+      end
+
+    bp
+    |> Barkpark.verify_changeset(%{
+      last_verified_at: verified_at,
+      verify_reachable: reachable
+    })
+    |> Repo.update()
+  end
+
   @doc "Most-recent `limit` events for `barkpark`, newest first."
   @spec recent_events(Barkpark.t() | binary(), pos_integer()) :: [AgentEvent.t()]
   def recent_events(barkpark, limit \\ 50) do
