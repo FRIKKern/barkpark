@@ -118,10 +118,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
             AND i.indisprimary
           ORDER BY a.attnum`,
       );
-      expect(pk.rows.map((r) => r.attname)).toEqual([
-        "workspace_id",
-        "thread_id",
-      ]);
+      expect(pk.rows.map((r) => r.attname)).toEqual(["workspace_id", "thread_id"]);
     });
 
     it("records and reads back the last inbound timestamp", async () => {
@@ -167,10 +164,12 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       // silently refuses a proactive send after every deploy.
       const mem = createInMemoryWhatsappWindowStore();
       await mem.recordInbound("ws-restart", "wa-r", T0);
-      expect(await createInMemoryWhatsappWindowStore().getLastInboundAt(
-        "ws-restart",
-        "wa-r",
-      )).toBeNull();
+      expect(
+        await createInMemoryWhatsappWindowStore().getLastInboundAt(
+          "ws-restart",
+          "wa-r",
+        ),
+      ).toBeNull();
 
       // Now the durable store: write through pool A, then FULLY END pool A so no
       // connection or in-process cache can serve the read.
