@@ -44,6 +44,13 @@
 #
 #     mix test --only plugin_routes test/barkpark_web/plugin_routes_test.exs
 #
+# wbqs-api-vacuous-tests — the generated-thumb-rendition test needs a real
+# `vips` binary on PATH to produce a rendition. Tagged `:requires_vips` so a
+# box without libvips gets a visible ExUnit skip instead of the test quietly
+# passing. Run explicitly on a machine that has vips installed:
+#
+#     mix test --include requires_vips
+#
 ExUnit.start(
   exclude: [
     :bokbasen_integration,
@@ -53,6 +60,7 @@ ExUnit.start(
     :flaky,
     :boot_test,
     :plugin_routes,
+    :requires_vips,
     # Live IdP interop (needs the Keycloak container) — scripts/idp-interop.sh
     :idp_interop,
     # Real-binary Studio-chat E2E (spawns the actual `claude` CLI: ~$0.43 +
