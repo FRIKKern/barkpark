@@ -150,11 +150,18 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
               # A write can fail (Cloak/DB/changeset) — surface it instead of
               # flashing "saved" over a credential that never persisted. Keep
               # the form as typed so the admin can retry without re-entering.
-              {:error, row, _changeset} ->
+              # Mirrors settings_live.ex's save paths: bind the changeset and
+              # append its field-level detail so the admin sees WHICH field
+              # failed, not just that the row did.
+              {:error, row, changeset} ->
                 {:noreply,
                  socket
                  |> assign(form_values: stringify_form(merged))
-                 |> put_flash(:error, "Failed to save settings for " <> row <> ".")}
+                 |> put_flash(
+                   :error,
+                   "Failed to save settings for " <>
+                     row <> ". " <> format_changeset(changeset)
+                 )}
             end
 
           {:error, plugin_errors} ->
@@ -641,6 +648,15 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   end
 
   defp url_like?(_), do: false
+
+  # Mirrors settings_live.ex's format_changeset/1 — same additive
+  # changeset-detail convention so a failed row write names the field
+  # that failed instead of a generic "failed to save" flash.
+  defp format_changeset(%Ecto.Changeset{errors: errors}) do
+    errors
+    |> Enum.map(fn {field, {msg, _}} -> "#{field}: #{msg}" end)
+    |> Enum.join("; ")
+  end
 
   # Persist each settings row in one Settings.put/3 call so the audit log
   # carries one "write" per row and not one per form field. Returns `:ok`, or
