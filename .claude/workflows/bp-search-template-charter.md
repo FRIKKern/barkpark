@@ -52,13 +52,13 @@ The flagship artifact is the extraction of the web demo's finder — `web/app/(f
 
 **Wave 4 — deploy-process UX goes premium (watch it · understand it · one motion).** Live six-stage SSE rail + one-motion create-and-deploy + dual-channel failure hints. Grade A− (see Wave log). D15–D21.
 
-**Wave 5 (this wave) — the premium-surface finish.** Make the deploy surface earn the Kinsta/Vercel bar the W4 mechanics already meet. Six slices (D22–D28), file-partitioned:
-1. **stw5-rail-premium-styling** (fable) — style the `.deploy-rail-*`/`.field-check`/`.check-note` wrapper chrome to the `.bp-timeline` model (vertical, tokenized below the GENERATED marker) + client-only completed-stage duration stamps. app.css + app.js + node harness.
-2. **stw5-freshness-badge** (fable) — `Registry.latest_deployment_status_map/1` batched embed on `GET /v1/sites` + amber-while-rebuilding row badge, status/trigger/timestamp only. Elixir + app.js + app.css.
-3. **stw5-console-rollback-history** (opus) — per-site deploy-history panel + one-honest-click SYNCHRONOUS rollback (W6 confirm-modal idiom, completion state not rail, deployment_id:null-honest). app.js + app.css.
-4. **stw5-cli-site-preflight** (opus) — `bp cloud site preflight [--dir]` runs the engine assertions + a real local build locally before any push. Go + thin bash reuse.
-5. **stw5-wire-console-harness-ci** (opus) — new lightweight workflow gating the `__app.test.mjs` node:vm harness on `cloud/priv/static/**`.
-6. **stw5-node-selftest-ci** (opus) — add the node-engine `--self-test` step to `deploy-harnesses.yml`.
+**Wave 5 (this wave) — the premium-surface finish.** Make the deploy surface earn the Kinsta/Vercel bar the W4 mechanics already meet. Six slices (D22–D28), file-partitioned. Paper: `search-template-wave-5-2026-07-16`.
+1. `stw5-rail-premium-styling` (fable, NEW) — style the `.deploy-rail-*`/`.field-check`/`.check-note` wrapper chrome to the `.bp-timeline` model (vertical, tokenized below the GENERATED marker) + client-only completed-stage duration stamps. app.css + app.js + node harness.
+2. `stw4-backlog-freshness-badge` (fable) — `Registry.latest_deployment_status_map/1` batched embed on `GET /v1/sites` + amber-while-rebuilding row badge, status/trigger/timestamp only. Elixir + app.js + app.css.
+3. `stw4-backlog-console-rollback-history` (opus) — per-site deploy-history panel + one-honest-click SYNCHRONOUS rollback (W6 confirm-modal idiom, completion state not rail, deployment_id:null-honest). app.js + app.css.
+4. `stw4-backlog-site-preflight` (opus) — `bp cloud site preflight [--dir]` runs the engine assertions + a real local build before any push. Go + thin bash reuse.
+5. `stw4-backlog-wire-console-harness-ci` (opus) — new lightweight workflow gating the `__app.test.mjs` node:vm harness on `cloud/priv/static/**`.
+6. `stw4-backlog-node-selftest-ci` (opus) — add the node-engine `--self-test` step to `deploy-harnesses.yml`.
 
 **Later — full theme × framework matrix.** Register each template's CSS token slice as an `emit.mjs` ARTIFACT (self-healing over a raw copy); resolve bp-graph.js Canvas colors from the token lockstep (au-r6) for a 4-theme-aware graph; stamp `data-bp-theme` in each template layout; per-theme dashboard listings.
 
