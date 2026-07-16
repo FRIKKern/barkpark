@@ -19,7 +19,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE="$ROOT/api/lib/barkpark/portable_doc/render/compose.ex"
 FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
-EXPECTED_COUNT=42
+EXPECTED_COUNT=46
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2

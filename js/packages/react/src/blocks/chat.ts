@@ -257,8 +257,120 @@ const chatThinking: Emit = (block) => {
   )
 }
 
+/* ── chat interactive cards (approval / question / plan — components.ex D35) ─── */
+//
+// The three INTERACTIVE chat rows: the read-only VISUAL of a permission ask, an
+// AskUserQuestion, and a proposed plan. The answer affordance is NEVER here (it
+// lives on the message envelope — role + request_id + approval_status, D35); this
+// emits only what a replay / reader shows. Byte-faithful twins of components.ex
+// chat_approval_html/1, chat_question_html/1, chat_plan_html/1 at :article.
+
+// The card status word — pending, or a terminal decision glyph. Twin of
+// components.ex chat_status_label/1 (the block's own read-only badge).
+function chatStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending':
+      return 'pending'
+    case 'allowed':
+      return '✓ allowed'
+    case 'denied':
+      return '⊘ denied'
+    case 'canceled':
+      return '— canceled'
+    default:
+      return status
+  }
+}
+
+// The shared header row: a bold title and a right-aligned status word. Twin of
+// components.ex chat_card_header/2.
+function chatCardHeader(title: string, status: string): string {
+  return (
+    `<div style="display: flex; gap: 6px; align-items: baseline;">` +
+    `<span style="font-weight: 600;">${escapeHtml(title)}</span>` +
+    `<span class="text-dim" style="margin-left: auto; white-space: nowrap;">` +
+    `${escapeHtml(chatStatusLabel(status))}</span></div>`
+  )
+}
+
+// The one-line ask/plan preview beneath the header; blank text renders nothing
+// (the header alone stands). Twin of components.ex chat_card_body/1.
+function chatCardBody(text: unknown): string {
+  const trimmed = str(text).trim()
+  if (trimmed === '') return ''
+  return `<div style="opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;">${escapeHtml(trimmed)}</div>`
+}
+
+// One question row: the prompt over its option chips (labels only). Twin of
+// components.ex chat_question_item_html/1.
+function chatQuestionItem(q: unknown): string {
+  const m = isMap(q) ? q : {}
+  const question = str(m.question)
+  const options = asList(m.options)
+  let chips = ''
+  if (options.length > 0) {
+    const rendered = options
+      .map(
+        (opt) =>
+          `<span style="display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; ` +
+          `border: 1px solid var(--border-muted); border-radius: 4px;">` +
+          `${escapeHtml(str(opt))}</span>`,
+      )
+      .join('')
+    chips = `<div style="margin: 2px 0 0 12px;">${rendered}</div>`
+  }
+  return (
+    `<div style="margin-top: 4px;"><div style="overflow-wrap: anywhere;">` +
+    `${escapeHtml(question)}</div>${chips}</div>`
+  )
+}
+
+const chatApproval: Emit = (block) => {
+  // Map.get defaults fire on an ABSENT key (Elixir), so keep a present-but-empty
+  // value rather than substituting the fallback.
+  const tool = block.tool_name == null ? 'tool' : str(block.tool_name)
+  const status = block.approval_status == null ? 'pending' : str(block.approval_status)
+  // Elixir title branch (NOT Go's pending||empty): pending → "Allow <tool>?".
+  const title = status === 'pending' ? `Allow ${tool}?` : tool
+  return (
+    `<div class="bp-chat-approval text-xs" style="font-family: var(--font-mono);">` +
+    chatCardHeader(title, status) +
+    chatCardBody(block.summary) +
+    `</div>`
+  )
+}
+
+const chatQuestion: Emit = (block) => {
+  const questions = asList(block.questions)
+  const status = block.approval_status == null ? 'pending' : str(block.approval_status)
+  const body =
+    questions.length === 0
+      ? `<div class="text-dim" style="padding-left: 12px;">⎿ no question</div>`
+      : questions.map(chatQuestionItem).join('')
+  return (
+    `<div class="bp-chat-question text-xs" style="font-family: var(--font-mono);">` +
+    chatCardHeader('Question', status) +
+    body +
+    `</div>`
+  )
+}
+
+const chatPlan: Emit = (block) => {
+  const title = block.title == null ? 'Proposed plan' : str(block.title)
+  const status = block.approval_status == null ? 'pending' : str(block.approval_status)
+  return (
+    `<div class="bp-chat-plan text-xs" style="font-family: var(--font-mono);">` +
+    chatCardHeader(title, status) +
+    chatCardBody(block.preview) +
+    `</div>`
+  )
+}
+
 export const chatEmitters: Record<string, Emit> = {
   'chat-tool-diff': chatToolDiff,
   'chat-todo': chatTodo,
   'chat-thinking': chatThinking,
+  'chat-approval': chatApproval,
+  'chat-question': chatQuestion,
+  'chat-plan': chatPlan,
 }

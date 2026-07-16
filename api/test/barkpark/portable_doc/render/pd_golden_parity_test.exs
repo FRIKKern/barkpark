@@ -13,7 +13,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       in-memory; no `Mix.Task`).
     * MIRROR IDENTITY — the api + js mirrors decode term-identical (no drift
       between the surface copies).
-    * SCOPE — the array is exactly the 42 in-scope types: both members of all 3
+    * SCOPE — the array is exactly the 46 in-scope types: both members of all 3
       alias pairs present, none of the 14 excluded, no `quiz`/`onix`.
 
   Regenerate with `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity` whenever
@@ -29,10 +29,10 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
   defp decode!(dir, type),
     do: dir |> Path.join(GenPdParity.filename(type)) |> File.read!() |> Jason.decode!()
 
-  # ── scope: exactly the 42 in-scope types ─────────────────────────────────────
+  # ── scope: exactly the 46 in-scope types ─────────────────────────────────────
 
-  test "the array holds exactly 42 in-scope types" do
-    assert length(GenPdParity.types()) == 42
+  test "the array holds exactly 46 in-scope types" do
+    assert length(GenPdParity.types()) == 46
   end
 
   test "both members of all 3 alias pairs are present" do

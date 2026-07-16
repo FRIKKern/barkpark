@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// JS-OWNED per-type plain-text golden map for `toPlainText` over the 42-type
+// JS-OWNED per-type plain-text golden map for `toPlainText` over the 46-type
 // PortableDocument grammar.
 //
 // There is NO per-type plain-text source of truth anywhere else in the repo — Go
@@ -12,7 +12,7 @@
 // exact plain text `toPlainText([golden.input])` must produce for that type,
 // derived from the SAME frozen `pd-golden` fixtures (never re-authoring them).
 //
-// PARTITION (18 prose / 24 textless = 42). Every one of the 42 grammar types
+// PARTITION (18 prose / 28 textless = 46). Every one of the 46 grammar types
 // appears in EXACTLY ONE of the two maps below; the test fails if any golden
 // type is in neither (silent-drop ≠ intentional-skip) or in both.
 
@@ -88,6 +88,12 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   'chat-thinking': 'chat-transcript widget — a token count, no prose',
   'chat-todo': 'chat-transcript todo widget — live agent-todo state',
   'chat-tool-diff': 'chat-transcript tool-call widget — a code diff payload, not prose',
+  // ── interactive chat cards (D35) — read-only VISUAL of an envelope-driven ask ─
+  'chat-approval': 'interactive chat card — tool-name/summary + status badge, an approval-ask control',
+  'chat-question': 'interactive chat card — AskUserQuestion prompts + option chips, a form control',
+  'chat-plan': 'interactive chat card — plan title/preview + status badge, a plan-approval control',
+  // ── data-viz meter ──────────────────────────────────────────────────────────
+  'gauge-list': 'data-viz meter list — label/digit/note are gauge chrome, not prose',
   // ── data-grid / task widgets ────────────────────────────────────────────────
   sheet: 'spreadsheet-snapshot data grid — a live external-sheet widget, tabular chrome',
   'task-board': 'task-board widget — card titles are live board chrome, not article prose',

@@ -11,16 +11,18 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 42 blog-grammar types
+  this one freezes the REAL `:article` HTML emission for the 46 blog-grammar types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 42 in-scope types (charter D7)
+  ## The 46 in-scope types (charter D7)
 
-  `compose.ex` dispatches 56 distinct block types. The 14 schema-field/embed types
+  `compose.ex` dispatches 60 distinct block types (incl. the 3 interactive chat
+  cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
+  #3670). The 14 schema-field/embed types
   (`field-{string,slug,text,boolean,select,datetime,color,reference,image}`,
   `composite`, `arrayOf`, `codelist`, `localizedText`, `embed`) are OUT — they have
   zero web-fork seed, are schema-editor renderers not blog grammar, and are never
-  named in the wish. The remaining 42 ARE the kitchen-sink array. BOTH members of
+  named in the wish. The remaining 46 ARE the kitchen-sink array. BOTH members of
   the 3 alias pairs are present so the harness exercises alias dispatch:
   `questionnaire`/`form`, `stat-grid`/`stats`, `task-list`/`tasks`. `quiz` (a
   LiveView plugin, no Pd-tree block) and `onix` (separate XML) are NOT compose.ex
@@ -71,7 +73,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 42 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 46 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -226,6 +228,29 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       ]
     },
     "chat-thinking" => %{"type" => "chat-thinking", "tokens" => 1200},
+    # The three INTERACTIVE chat cards (charter D35) — the read-only VISUAL only
+    # (the answer path stays on the message envelope). `approval_status: "pending"`
+    # exercises the pending title branch + the "pending" status label; the summary /
+    # question-with-options / preview are non-empty so the body/chip branches render.
+    "chat-approval" => %{
+      "type" => "chat-approval",
+      "tool_name" => "Bash",
+      "summary" => "rm -rf api/_build/prod",
+      "approval_status" => "pending"
+    },
+    "chat-question" => %{
+      "type" => "chat-question",
+      "questions" => [
+        %{"question" => "Which renderer is canonical?", "options" => ["Elixir", "Go", "JS"]}
+      ],
+      "approval_status" => "pending"
+    },
+    "chat-plan" => %{
+      "type" => "chat-plan",
+      "title" => "Unify the renderers",
+      "preview" => "Collapse five renderers to three, prove parity per block.",
+      "approval_status" => "pending"
+    },
 
     # ── data-viz slate (alias pair: stat-grid + stats) ─────────────────────────
     "stat" => %{
@@ -265,6 +290,19 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         %{"label" => "Covered", "points" => [10, 20, 35, 42]}
       ],
       "axes" => %{"xLabels" => ["W1", "W2", "W3", "W4"]}
+    },
+    # gauge-list share mode (#3670): `rows` present without `snapshot` → share. The
+    # values 2/1/1 over a summed denom of 4 give exactly-representable props
+    # (0.5/0.25/0.25 → widths 50/25/25%), so the frozen bytes are float-stable and
+    # the JS `fmt` twin agrees byte-for-byte.
+    "gauge-list" => %{
+      "type" => "gauge-list",
+      "title" => "Coverage by surface",
+      "rows" => [
+        %{"label" => "Elixir", "value" => 2, "note" => "source of truth"},
+        %{"label" => "Go", "value" => 1},
+        %{"label" => "JS", "value" => 1}
+      ]
     },
 
     # ── task-tracking / composition family ─────────────────────────────────────
@@ -427,7 +465,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 42 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 46 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."
