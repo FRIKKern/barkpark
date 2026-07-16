@@ -635,6 +635,28 @@ func TestAssertCmdTimeout(t *testing.T) {
 	}
 }
 
+// TestMidOpFailureWritesNothing — the overlay abort invariant: when an
+// op FAILS mid-run (here the registry INSERT, after four CREATEs
+// already mutated the overlay), the run aborts with NOTHING on disk —
+// no earlier op's file, no receipt (fail-loud writes nothing).
+func TestMidOpFailureWritesNothing(t *testing.T) {
+	root := seedWidgetTree(t)
+	// Remove the registry anchor so op 4 fails after ops 0–3 succeeded
+	// in the overlay.
+	writeTreeFile(t, root, "internal/widgets/registry.go", "package widgets\n")
+	_, err := Run(RunOptions{CommandPath: fixturePath, Vars: widgetVars("Timeline", "20260716100000", "42", "43"), RepoRoot: root})
+	var ae *ApplyError
+	if !errors.As(err, &ae) {
+		t.Fatalf("want ApplyError from the missing anchor, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "internal", "widgets", "timeline.go")); !os.IsNotExist(statErr) {
+		t.Fatal("mid-op failure leaked an earlier CREATE to disk")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".scaffy")); !os.IsNotExist(statErr) {
+		t.Fatal("mid-op failure persisted a receipt")
+	}
+}
+
 // TestValidateFilePreGate: a command with findings never reaches the
 // applier (D37 — ValidateFile, not bare Parse).
 func TestValidateFilePreGate(t *testing.T) {
