@@ -71,6 +71,22 @@ defmodule Barkpark.StudioChat.SessionProviderIdentityTest do
     assert "is required for registered-host execution" in errors_on(registered_without_host).execution_host_id
   end
 
+  test "the Cloud sandbox binding is a distinct field, unset at create (charter D137)" do
+    # The binding is stamped POST-create by the runtime seam (a swallowed
+    # bp_sandbox frame), never at session birth — so a fresh session carries no
+    # sandbox id and the create changeset does not cast it.
+    assert %Session{cloud_sandbox_id: nil} = %Session{}
+
+    changeset = Session.create_changeset(%Session{}, %{id: @session_id})
+    assert changeset.valid?
+    assert Ecto.Changeset.get_field(changeset, :cloud_sandbox_id) == nil
+
+    # It is independent of the write-once provider identity: setting the sandbox
+    # binding on a struct never touches provider_session_id and vice-versa.
+    assert %Session{cloud_sandbox_id: "sbx-1", provider_session_id: nil} =
+             %Session{cloud_sandbox_id: "sbx-1"}
+  end
+
   defp errors_on(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
       Regex.replace(~r"%{(\w+)}", message, fn _, key ->

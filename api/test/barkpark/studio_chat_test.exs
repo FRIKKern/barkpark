@@ -357,6 +357,56 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "set_cloud_sandbox_id/2 — session-scoped Cloud sandbox binding (charter D137/D139)" do
+    test "SETS, OVERWRITES, and CLEARS — deliberately NOT write-once" do
+      s = new_session()
+      assert s.cloud_sandbox_id == nil
+
+      # SET
+      {:ok, bound} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-alpha")
+      assert bound.cloud_sandbox_id == "sbx-alpha"
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == "sbx-alpha"
+
+      # OVERWRITE — a fresh sandbox after an expiry re-binds (this is the exact
+      # departure from write-once provider_session_id below).
+      {:ok, rebound} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-beta")
+      assert rebound.cloud_sandbox_id == "sbx-beta"
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == "sbx-beta"
+
+      # CLEAR — nil is a legal transition (expiry with no replacement yet, D139).
+      {:ok, cleared} = StudioChat.set_cloud_sandbox_id(s.id, nil)
+      assert cleared.cloud_sandbox_id == nil
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == nil
+    end
+
+    test "CONTRASTS with write-once set_provider_session_id/2 (which refuses overwrite)" do
+      s = new_session()
+
+      # A managed session's provider identity is stamped to its own UUID at create
+      # and is WRITE-ONCE: a different value is rejected, the row is untouched.
+      assert s.provider_session_id == s.id
+      assert {:error, :immutable} = StudioChat.set_provider_session_id(s.id, "native-2")
+      assert StudioChat.get_session(s.id).provider_session_id == s.id
+
+      # The sandbox binding is NOT — the same double-set succeeds and moves the id.
+      {:ok, _} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-1")
+      assert {:ok, moved} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-2")
+      assert moved.cloud_sandbox_id == "sbx-2"
+    end
+
+    test "a blank id trips the non-empty DB check (never a fake binding)" do
+      s = new_session()
+      assert {:error, changeset} = StudioChat.set_cloud_sandbox_id(s.id, "   ")
+      assert %{cloud_sandbox_id: _} = errors_on(changeset)
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == nil
+    end
+
+    test "set on a missing session is honest" do
+      assert {:error, :not_found} =
+               StudioChat.set_cloud_sandbox_id(Ecto.UUID.generate(), "sbx-x")
+    end
+  end
+
   describe "titles — clobber guard (charter D13)" do
     test "AI title lands on a default title, then a human rename overrides it" do
       s = new_session()

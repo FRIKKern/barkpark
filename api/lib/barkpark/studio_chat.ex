@@ -542,6 +542,34 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Persist the session-scoped Cloud sandbox binding (charter D137/D139).
+
+  Deliberately NOT write-once, unlike `set_provider_session_id/2`: the :cloud
+  execution profile's sandbox legitimately expires and a fresh one is created,
+  so this SETS, OVERWRITES, and CLEARS (`nil`). The Barkpark Chat Session row is
+  the durable owner of the binding the next one-shot turn resumes. NEVER stores a
+  transcript — only the opaque sandbox id. Returns `{:ok, session}`,
+  `{:error, changeset}` (a blank string trips the non-empty DB check), or
+  `{:error, :not_found}`.
+  """
+  @spec set_cloud_sandbox_id(String.t(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+  def set_cloud_sandbox_id(session_id, cloud_sandbox_id)
+      when is_binary(cloud_sandbox_id) or is_nil(cloud_sandbox_id) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(cloud_sandbox_id: cloud_sandbox_id)
+      |> Ecto.Changeset.check_constraint(:cloud_sandbox_id,
+        name: :chat_sessions_cloud_sandbox_id_check,
+        message: "must be non-empty"
+      )
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Persist a mid-session permission-mode switch (charter D17). Mirrors
   `update_status/2`: `validate_inclusion` against `Session.modes/0` and refresh
   `last_active_at`, so a reopened session shows the mode you switched to AND the

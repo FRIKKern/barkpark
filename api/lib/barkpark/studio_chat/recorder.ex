@@ -137,6 +137,13 @@ defmodule Barkpark.StudioChat.Recorder do
         execution_target: Map.get(opts, :execution_target, "managed"),
         execution_host_id: Map.get(opts, :execution_host_id),
         workspace_id: Map.get(opts, :workspace_id),
+        # The session-scoped Cloud sandbox binding (charter D137/D139). Loaded
+        # from the Session row so a fresh Recorder (each turn may spawn one) hands
+        # the LAST-KEPT sandbox id to the runtime — runtime/claude.ex lifts it into
+        # `session_opts` (mirroring `workspace_id`, D110) where W14-1's
+        # `cloud_build_args` reads it to `--resume` the same box. NULL/inert for a
+        # self-hosted session (the build_args there ignore the key).
+        cloud_sandbox_id: load_cloud_sandbox_id(id),
         cwd: Map.get(opts, :cwd),
         provider_session_id: Map.get(opts, :provider_session_id),
         runtime_ingress_token: runtime_ingress_token,
@@ -278,6 +285,17 @@ defmodule Barkpark.StudioChat.Recorder do
     case StudioChat.get_session(session_id) do
       %{rail_snapshot: rail} when is_map(rail) -> rail
       _ -> %{}
+    end
+  end
+
+  # The persisted Cloud sandbox binding (charter D137/D139) — the id the next
+  # one-shot :cloud turn resumes. nil when unbound (no sandbox yet, expired, or a
+  # self-hosted session). Read once at Recorder start and threaded into
+  # `runtime_opts` above.
+  defp load_cloud_sandbox_id(session_id) do
+    case StudioChat.get_session(session_id) do
+      %{cloud_sandbox_id: id} when is_binary(id) -> id
+      _ -> nil
     end
   end
 
@@ -488,6 +506,21 @@ defmodule Barkpark.StudioChat.Recorder do
       ) do
     state = background_tasks_changed(state, ev)
     broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  # The Cloud shim's session-scoped sandbox binding (charter D137). When the
+  # :cloud execution profile keeps a Vercel Sandbox alive across turns it emits
+  # ONE `{"type":"bp_sandbox","subtype":"created","sandbox_id":"…"}` frame. We
+  # persist the id onto the Session row — the durable binding the NEXT one-shot
+  # turn resumes (threaded back through `session_opts` below) — and then SWALLOW
+  # the frame entirely: it is execution control-plumbing, never conversation. No
+  # PubSub broadcast (the customer NDJSON/SSE stream stays clean) and no
+  # `append_message` (no chat_messages row). This clause MUST precede the generic
+  # `{:claude_chat_event, _ev}` catch-all below, which would otherwise rebroadcast
+  # it and leak the sandbox id into every viewer.
+  def handle_info({:claude_chat_event, %{"type" => "bp_sandbox"} = ev}, state) do
+    capture_cloud_sandbox_id(state.session_id, ev["sandbox_id"])
     {:noreply, touch(state)}
   end
 
@@ -958,6 +991,25 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp maybe_capture_event_provider_session_id(_session_id, _provider_session_id), do: :ok
+
+  # Persist the Cloud sandbox binding off a swallowed `bp_sandbox` frame (charter
+  # D137). Unlike the write-once provider session id, this SETS/OVERWRITES (a
+  # fresh sandbox after an expiry is a legitimate re-bind, D139). An absent/blank
+  # id is a no-op — never clobber the stored binding with garbage.
+  defp capture_cloud_sandbox_id(session_id, sandbox_id)
+       when is_binary(sandbox_id) and sandbox_id != "" do
+    case StudioChat.set_cloud_sandbox_id(session_id, sandbox_id) do
+      {:ok, _session} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: failed to persist cloud sandbox id: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp capture_cloud_sandbox_id(_session_id, _sandbox_id), do: :ok
 
   defp monitor_runtime(runtime_ref) do
     case Runtime.runtime_pid(runtime_ref) do
