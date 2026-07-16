@@ -150,7 +150,7 @@ func newMCPHTTPStack(t *testing.T, toolset string) (*mcpHTTPBackend, string) {
 	}
 	base := manifest.Context{Server: api.URL, Token: mcpHTTPAmbientToken, Dataset: "production"}
 
-	handler, err := newMCPHTTPHandler(newWriter(io.Discard, io.Discard), globals{}, base, m, toolset)
+	handler, err := newMCPHTTPHandler(newWriter(io.Discard, io.Discard), globals{}, base, m, toolset, nil)
 	if err != nil {
 		t.Fatalf("newMCPHTTPHandler: %v", err)
 	}
