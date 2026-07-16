@@ -1543,7 +1543,7 @@
     .image-picker-overlay { position: fixed; inset: 0; background: hsl(var(--bp-scrim-hsl) / 0.5); z-index: 50; }
     .image-picker {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 560px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
+      width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
     }
     .image-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-muted); }
@@ -1558,7 +1558,7 @@
     .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Network shares panel (scoped-sharing P6). Reuses .image-picker chrome. */
-    .shares-modal { width: 560px; max-height: 82vh; }
+    .shares-modal { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
     .shares-add-form { display: grid; gap: 10px; padding: 16px; border-bottom: 1px solid var(--border-muted); }
     .shares-field { display: grid; gap: 4px; }
     .shares-field-label { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
@@ -1585,7 +1585,7 @@
     .media-explorer-bar { display: flex; justify-content: flex-end; padding: 6px 10px; border-bottom: 1px solid var(--border-muted); flex-shrink: 0; }
 
     /* Item (per-document) share popover (P7) — Google-Docs style. */
-    .item-share-modal { width: 520px; max-height: 72vh; }
+    .item-share-modal { width: 520px; max-width: min(520px, calc(100vw - 24px)); max-height: 72vh; }
     .item-share-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
     .item-share-lead { display: flex; align-items: center; gap: 12px; }
     .item-share-lead-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); flex-shrink: 0; }
@@ -1600,7 +1600,7 @@
     .item-share-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
 
     /* Access panel (airdrop-grants slice 3) — read/revoke view of scoped grants. */
-    .access-panel { width: 560px; max-height: 82vh; }
+    .access-panel { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
     .access-panel-body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
     .access-section { display: flex; flex-direction: column; gap: 8px; }
     .access-section-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
@@ -2236,7 +2236,7 @@
       display: flex; align-items: stretch;
       background: var(--bg-elevated, var(--bg)); border: 1px solid var(--border);
       border-radius: 8px; box-shadow: var(--shadow-lg, 0 8px 24px hsl(var(--bp-shadow-hsl) / .35));
-      padding: 6px; min-width: 480px;
+      padding: 6px; min-width: min(480px, calc(100vw - 24px)); max-width: min(480px, calc(100vw - 24px));
     }
     .scope-menu-col { display: flex; flex-direction: column; min-width: 160px; max-width: 220px; padding: 2px 4px; }
     .scope-menu-col + .scope-menu-col { border-left: 1px solid var(--border); }
