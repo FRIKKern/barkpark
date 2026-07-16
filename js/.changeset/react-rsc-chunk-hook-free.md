@@ -1,0 +1,5 @@
+---
+'@barkpark/react': patch
+---
+
+Fix the `react-server` chunk so `PortableDoc` imports cleanly into a Next Server Component. With tsup `splitting: true`, `BarkparkImage` (a `'use client'` component that calls `useEffect`) was co-bundled with the hook-free renderers into the single shared chunk that `dist/server.mjs` re-exports `PortableDoc`/`renderPortableDocument` from — so that chunk's head became `import { …, useEffect } from 'react'`, and any Next Server Component importing `@barkpark/react` under the `react-server` condition dragged `useEffect` into the server graph and failed `next build` (`useEffect` does not exist there). The client surface (`Image.tsx`) is now pinned to its own tsup entry so esbuild isolates it into a separate chunk that carries the `'use client'` banner; the renderer chunk `server.mjs` re-exports stays hook-free and server-evaluable. Public API is unchanged — `BarkparkImage` is still a runtime value export from both entries. Guarded by a new `dist/server.mjs` chunk-graph regression test.
