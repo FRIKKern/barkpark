@@ -879,3 +879,52 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// TestHTTPNilFallbackHasTimeout proves the nil-HTTPClient fallback is
+// Timeout-bearing (not http.DefaultClient, whose Timeout is 0 == no
+// deadline) — a hung control-plane connection must not freeze the
+// claim/transition loop forever with no crash and no log.
+func TestHTTPNilFallbackHasTimeout(t *testing.T) {
+	e := &Executor{}
+	c := e.http()
+	if c.Timeout == 0 {
+		t.Fatal("http() with nil HTTPClient has Timeout == 0, want a non-zero deadline")
+	}
+}
+
+// TestRunOnceTimesOutAgainstHangingServer proves a hung control-plane
+// connection surfaces as a timeout error from a single RunOnce iteration
+// rather than blocking forever. It injects a client with a short timeout
+// (rather than waiting out the real 30s fallback) against a server that
+// never writes a response, so the test itself stays fast.
+func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
+	const clientTimeout = 50 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/agent/deployments/claim", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * clientTimeout) // outlast the client's timeout, then respond
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	e := &Executor{
+		ControlURL: srv.URL,
+		AgentToken: "test-token",
+		WorkerID:   "agent-1",
+		HTTPClient: &http.Client{Timeout: clientTimeout},
+		Runner:     &fakeRunner{},
+		FS:         newMapFS(),
+		Ports:      &fixedPorts{next: 7001},
+	}
+
+	start := time.Now()
+	_, err := e.RunOnce(context.Background(), State{})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("RunOnce returned nil against a hanging server, want a timeout error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("RunOnce took %s to return an error, want it to return promptly on client timeout", elapsed)
+	}
+}

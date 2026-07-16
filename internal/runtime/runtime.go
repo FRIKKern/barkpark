@@ -548,11 +548,14 @@ func (e *Executor) Run(ctx context.Context, buildState func(context.Context) (St
 	}
 }
 
+// http returns the injected client, or a Timeout-bearing fallback (30s) so a
+// hung control-plane connection can't freeze the claim/transition loop with
+// no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (e *Executor) http() *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (e *Executor) runner() CommandRunner {
