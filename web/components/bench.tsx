@@ -43,25 +43,51 @@ async function benchCell(q: string, engine: SearchEngine): Promise<Cell> {
 
 type Grid = Record<string, Partial<Record<SearchEngine, Cell>>>;
 
-export function Bench() {
-  const [grid, setGrid] = useState<Grid>({});
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<string | null>(null);
-
-  async function run() {
-    setRunning(true);
-    setGrid({});
-    const next: Grid = {};
+/** The benchmark's control flow, factored out of the click handler so it can be
+ * driven in tests without mounting the component: a failed `fetchCell` (a
+ * rejected `/api/find` fetch, a non-JSON response, …) must still reach the
+ * `finally` and re-enable the run button instead of leaving it stuck on
+ * "Running…" forever (React event-handler rejections aren't caught by error
+ * boundaries). */
+export async function runBenchmark(
+  fetchCell: (q: string, engine: SearchEngine) => Promise<Cell>,
+  setters: {
+    setRunning: (v: boolean) => void;
+    setProgress: (v: string | null) => void;
+    setGrid: (v: Grid) => void;
+    setError: (v: string | null) => void;
+  },
+): Promise<void> {
+  const { setRunning, setProgress, setGrid, setError } = setters;
+  setRunning(true);
+  setError(null);
+  setGrid({});
+  const next: Grid = {};
+  try {
     for (const q of QUERIES) {
       next[q] = {};
       for (const engine of ENGINES) {
         setProgress(`${q} · ${engine}`);
-        next[q][engine] = await benchCell(q, engine);
+        next[q][engine] = await fetchCell(q, engine);
         setGrid({ ...next, [q]: { ...next[q] } });
       }
     }
+  } catch (err) {
+    setError(err instanceof Error ? err.message : "Benchmark run failed. Check the console and try again.");
+  } finally {
     setProgress(null);
     setRunning(false);
+  }
+}
+
+export function Bench() {
+  const [grid, setGrid] = useState<Grid>({});
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    await runBenchmark(benchCell, { setRunning, setProgress, setGrid, setError });
   }
 
   // Aggregate medians per engine across all queries.
@@ -100,6 +126,12 @@ export function Bench() {
         >
           {running ? `Running… ${progress ?? ""}` : "Run benchmark"}
         </button>
+        {error ? (
+          <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+            <strong className="font-medium">Benchmark run failed.</strong>
+            <pre className="mt-2 whitespace-pre-wrap text-xs">{error}</pre>
+          </section>
+        ) : null}
       </header>
 
       <div className="overflow-x-auto">
