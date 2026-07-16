@@ -114,35 +114,28 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
   end
 
   describe "GET /media/renditions/:id/:preset" do
+    # Excluded by default (test_helper.exs) so a machine without libvips stays
+    # green via a real ExUnit skip instead of an in-test `assert true`. Opt in
+    # with `mix test --include requires_vips` — on a box that lacks `vips`,
+    # this then fails for real instead of passing vacuously.
     @tag :requires_vips
     test "serves generated thumb rendition", %{conn: conn} do
-      unless vips_available?() do
-        assert true
-      else
-        created =
-          conn
-          |> authed()
-          |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
-          |> json_response(201)
+      created =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
+        |> json_response(201)
 
-        thumb_url = created["result"]["thumbnailUrl"]
+      thumb_url = created["result"]["thumbnailUrl"]
 
-        conn =
-          build_conn()
-          |> get(thumb_url)
+      conn =
+        build_conn()
+        |> get(thumb_url)
 
-        assert conn.status == 200
-        assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
+      assert conn.status == 200
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
 
-        cleanup(created)
-      end
-    end
-  end
-
-  defp vips_available?() do
-    case System.find_executable("vips") do
-      nil -> false
-      _ -> true
+      cleanup(created)
     end
   end
 
