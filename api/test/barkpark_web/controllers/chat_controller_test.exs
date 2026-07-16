@@ -30,6 +30,11 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
 
     def cwd, do: "/tmp/codex-managed"
+
+    # A codex-style NON-:ok delivery: the double-answer race returns
+    # {:error, :unknown_approval}. chat_controller.approval/2 must swallow this
+    # (soft-match) and still flip the status + 204, never MatchError → 500.
+    def answer_approval(_ref, _request_id, _decision), do: {:error, :unknown_approval}
   end
 
   setup do
@@ -781,6 +786,92 @@ defmodule BarkparkWeb.ChatControllerTest do
                Jason.encode!(%{request_id: "r", decision: "allow"})
              )
              |> json_response(404)
+    end
+
+    # A pending needs-you row of ANY role (approval | question | plan). The
+    # controller flip (StudioChat.update_approval_status) is role-agnostic across
+    # @needs_you_roles, so a POST /approval must resolve a question/plan card exactly
+    # like a tool approval (charter D31).
+    defp pending_needs_you(sid, request_id, role) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: role,
+          source_markdown: "Needs you: #{role} #{request_id}",
+          metadata: %{
+            "request_id" => request_id,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    test "a QUESTION-role card flips pending->allowed on a delivered allow (D31)", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_needs_you(sid, "q-1", "question")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "q-1", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.role == "question"
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "a PLAN-role card flips pending->denied on a delivered deny (D31)", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_needs_you(sid, "p-1", "plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "p-1", decision: "deny"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.role == "plan"
+      assert message.metadata["approval_status"] == "denied"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "a non-:ok answer_approval (codex double-answer race) still 204s and flips — the seal is non-vacuous",
+         %{admin: a1} do
+      # DB provider is codex → FakeCodexAdapter.answer_approval/3 returns
+      # {:error, :unknown_approval}. Before the soft-match this MatchError'd → 500;
+      # the runtime ref is a live claude `cat` Recorder so the controller actually
+      # reaches answer_approval (a no-live-runtime path would 204 vacuously).
+      {:ok, session} =
+        StudioChat.create_session(%{
+          id: Ecto.UUID.generate(),
+          cwd: ClaudeChat.cwd(),
+          mode: "plan",
+          provider: "codex"
+        })
+
+      sid = session.id
+      pending_approval(sid, "req-codex")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "req-codex", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end
   end
 
