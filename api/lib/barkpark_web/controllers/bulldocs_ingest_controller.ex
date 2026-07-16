@@ -193,10 +193,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, _changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "invalid_paper", message: "could not store paper"}})
+      {:error, changeset} ->
+        invalid_paper_error(conn, changeset)
     end
   end
 
@@ -264,10 +262,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, _changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "invalid_paper", message: "could not store paper"}})
+      {:error, changeset} ->
+        invalid_paper_error(conn, changeset)
     end
   end
 
@@ -576,6 +572,29 @@ defmodule BarkparkWeb.BulldocsIngestController do
     conn
     |> put_status(env.status)
     |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Shared changeset catch-all for both ingest legs (blocks + html). code/message
+  # stay the LOCKED external contract (invalid_paper / "could not store paper" —
+  # see the render_error/2 comment above); `details` is ADDITIVE — the per-field
+  # validation errors, so a caller can see exactly what failed instead of
+  # guessing from the flat message.
+  defp invalid_paper_error(conn, changeset) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: %{
+        code: "invalid_paper",
+        message: "could not store paper",
+        details: changeset_field_errors(changeset)
+      }
+    })
+  end
+
+  defp changeset_field_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {k, v}, acc -> String.replace(acc, "%{#{k}}", to_string(v)) end)
+    end)
   end
 
   # Fold any advisory-band warnings the publish wall queued during upsert_paper

@@ -268,8 +268,8 @@ defmodule BarkparkWeb.AuthController do
       {:error, :forbidden} ->
         error(conn, 403, "forbidden", "you may not mint a token with those permissions")
 
-      {:error, %Ecto.Changeset{}} ->
-        error(conn, 422, "unprocessable", "could not mint token")
+      {:error, %Ecto.Changeset{} = cs} ->
+        error(conn, 422, "unprocessable", changeset_errors(cs))
     end
   end
 
