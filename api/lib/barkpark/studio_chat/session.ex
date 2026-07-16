@@ -58,6 +58,16 @@ defmodule Barkpark.StudioChat.Session do
     field :execution_host_id, Ecto.UUID
     field :provider_session_id, :string
 
+    # The session-scoped Cloud sandbox binding (Connectors wave 14, charter
+    # D136/D137/D139). The opaque id of the Vercel Sandbox the :cloud execution
+    # profile keeps alive across turns — the durable memory that lets a one-shot
+    # sandboxed turn RESUME the same box (interactive stdin stays impossible, so
+    # continuity rides the SESSION, not a held subprocess). Unlike write-once
+    # `provider_session_id`, it legitimately resets on sandbox expiry (D139): set,
+    # overwritten, and cleared through `StudioChat.set_cloud_sandbox_id/2`. NULL
+    # on every self-hosted / pre-migration row. NEVER a transcript blob (D136).
+    field :cloud_sandbox_id, :string
+
     field :cwd, :string
     field :mode, :string
     field :model, :string

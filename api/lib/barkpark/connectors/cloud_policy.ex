@@ -9,7 +9,7 @@ defmodule Barkpark.Connectors.CloudPolicy do
   and the model can read/edit/execute across the whole host filesystem. A
   Cloud-tenant turn MUST NOT inherit any of that. This module is the one place
   that answers "exactly what may a Cloud turn do", and
-  `BarkparkWeb.Studio.ClaudeChat.cloud_claude_args/1` emits every belt from here —
+  `BarkparkWeb.Studio.ClaudeChat.cloud_claude_args/2` emits every belt from here —
   the self-hosted argv path never touches it (stays byte-identical).
 
   ## Knob 2 — the three enforced belts (the REAL client-side confinement, D117)

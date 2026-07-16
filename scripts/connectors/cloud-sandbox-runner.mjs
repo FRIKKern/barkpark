@@ -41,9 +41,19 @@
 //      only (D110 — never Barkpark.Secrets, never the connector seal). Stream
 //      stdout NDJSON verbatim; exit with claude's code.
 //   5. Teardown (D111 — an Elixir Port has NO OS relationship to a remote microVM;
-//      nothing tears it down for free): stdin-EOF watcher AND SIGTERM/SIGINT/exit
-//      trap both `vercel sandbox remove` (REMOVE, never stop — stopped sandboxes
-//      accrue snapshot storage). `--timeout` is the guaranteed backstop.
+//      nothing tears it down for free): the SIGTERM/SIGINT/exit traps and the
+//      post-turn `finally` tear the sandbox down, VERB by mode (D137) — flag-less
+//      `vercel sandbox remove` (disposable one-shot; stopped sandboxes accrue
+//      snapshot storage) vs `--keep-sandbox` `vercel sandbox stop` (auto-snapshots
+//      so the next turn's exec auto-resumes /tmp — session continuity). `--timeout`
+//      is the guaranteed backstop, per-turn under stop-after-turn (D138).
+//
+// SESSION LIFECYCLE (D137/D138 — a multi-turn Barkpark Chat Session's `:cloud`
+// turns): turn 1 CREATES in `--keep-sandbox` mode and emits a `bp_sandbox` sideband
+// frame with the new id (the Recorder persists it as the session binding); turn N
+// passes `--sandbox-id <id> --keep-sandbox` to REUSE that sandbox (skip create,
+// exec straight in — it auto-resumes). Continuity lives in the SESSION binding +
+// the sandbox filesystem, NOT an interactive subprocess (impossible — D108).
 //
 // Mid-turn control frames (interrupt/set_permission_mode/control_response) are
 // logged to stderr and DROPPED — one turn per cloud session this increment
@@ -67,6 +77,11 @@ const TIMEOUT = process.env.CLOUD_SANDBOX_TIMEOUT || "10m"; // MANDATORY create 
 const ALLOWED_DOMAIN = process.env.CLOUD_SANDBOX_ALLOWED_DOMAIN || "api.anthropic.com";
 const NETWORK_POLICY = process.env.CLOUD_SANDBOX_NETWORK_POLICY || "deny-all";
 const CLAUDE_INSTALL = process.env.CLOUD_SANDBOX_CLAUDE_INSTALL || "@anthropic-ai/claude-code";
+// Snapshot-retention expiry for keep-mode stop-snapshots (D138). Only ever passed
+// when the pinned vercel CLI advertises `--snapshot-expiration` (probed, not
+// guessed — see snapshotRetentionFlags()); otherwise the accrual is documented and
+// swept by the backlogged reaper (connectors-cloud-sandbox-reaper).
+const SNAPSHOT_EXPIRATION = process.env.CLOUD_SANDBOX_SNAPSHOT_EXPIRATION || "30d";
 // Env-clamped concurrency (D111 item 6) — kept well under the Hobby 10-concurrent
 // ceiling; the Pro `guerrilla` scope is higher but the clamp is a safety valve.
 const MAX_CONCURRENCY = clampInt(process.env.CLOUD_SANDBOX_MAX_CONCURRENCY, 6, 1, 50);
@@ -124,16 +139,31 @@ function log(msg) {
   process.stderr.write(`[cloud-sandbox-runner] ${msg}\n`);
 }
 
-// ── argv parse: `--workspace <id> [--mcp-config-b64 <b64>] -- <claude args...>` ─
+// ── argv parse: ────────────────────────────────────────────────────────────────
+//   `--workspace <id> [--mcp-config-b64 <b64>] [--sandbox-id <id>] [--keep-sandbox] -- <claude args...>`
 //
 // `--mcp-config-b64` (connectors D127) is a SHIM-OWN flag — it MUST be parsed
 // here in the pre-`--` loop; anything after `--` is handed to claude verbatim.
 // Its value is base64(`{"mcpServers":…}`), the workspace's connector-scoped MCP
 // servers that runTurn materializes to a /tmp file IN the sandbox and points
 // claude at with `--mcp-config … --strict-mcp-config` (never a host path).
+//
+// Session-scoped sandbox lifecycle (connectors D137/D138) — two ADDITIVE pre-`--`
+// flags a multi-turn Barkpark Chat Session's `:cloud` turns carry:
+//   `--sandbox-id <id>`  — REUSE an existing session-bound sandbox: skip
+//     createSandbox(), exec straight into <id> (it auto-resumes from its
+//     stop-snapshot, /tmp intact on the persisted xfs root). Turn N.
+//   `--keep-sandbox`     — teardown STOPS the sandbox (`vercel sandbox stop`)
+//     instead of REMOVING it, so the next turn can auto-resume; and a keep-mode
+//     CREATE emits one `bp_sandbox` sideband frame carrying the new id.
+// Both are back-compat by construction: a flag-less invocation is byte-identical
+// to the pre-D137 shape (the W11/W12 proof scripts drive the shim flag-less and
+// must not notice), and unknown pre-`--` flags were already ignored below.
 function parseArgv(argv) {
   let workspace = null;
   let mcpConfigB64 = null;
+  let sandboxId = null;
+  let keepSandbox = false;
   const claudeArgs = [];
   let i = 0;
   for (; i < argv.length; i++) {
@@ -146,13 +176,17 @@ function parseArgv(argv) {
       workspace = argv[++i];
     } else if (a === "--mcp-config-b64") {
       mcpConfigB64 = argv[++i];
+    } else if (a === "--sandbox-id") {
+      sandboxId = argv[++i];
+    } else if (a === "--keep-sandbox") {
+      keepSandbox = true;
     } else {
       // Unknown pre-`--` flag — ignore rather than crash a live turn.
       log(`ignoring unrecognized shim arg: ${a}`);
     }
   }
   for (; i < argv.length; i++) claudeArgs.push(argv[i]);
-  return { workspace, mcpConfigB64, claudeArgs };
+  return { workspace, mcpConfigB64, sandboxId, keepSandbox, claudeArgs };
 }
 
 // ── POSIX single-quote a shell token (for the in-sandbox bash -lc command) ────
@@ -255,30 +289,80 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// ── Teardown: remove the sandbox exactly once (D111 — REMOVE, never stop) ──────
+// ── Teardown: tear the sandbox down exactly once ───────────────────────────────
 //
-// The removal is keyed on the SANDBOX existing, NOT on a one-shot `toreDown`
-// latch: in a one-shot turn the caller's stdin closes (EOF) the instant the first
-// frame is written — BEFORE the sandbox is created — so an EOF-triggered teardown
-// must be a NO-OP that leaves the real post-turn teardown free to remove the
-// sandbox once it exists. `removeInFlight` collapses concurrent calls onto one
-// `vercel sandbox remove`.
+// The teardown VERB is mode-dependent (D137):
+//   flag-less (default) — `vercel sandbox remove` (D111: REMOVE, never stop; a
+//     one-shot turn's sandbox is disposable, and stopped sandboxes accrue
+//     snapshot storage). Byte-identical to every pre-D137 exit path.
+//   keep mode (`--keep-sandbox`) — `vercel sandbox stop` (auto-snapshots,
+//     Persistent=true; the next turn's exec auto-resumes with /tmp intact — D134).
+//     NEVER remove: a removed sandbox cannot resume, breaking session continuity.
+//
+// It is keyed on the SANDBOX existing, NOT on a one-shot latch: in a one-shot turn
+// the caller's stdin closes (EOF) right after the first frame — but the stdin-EOF
+// handler no longer tears down once a frame is captured (the turn's `finally` owns
+// teardown; see readFirstUserFrame). `teardownInFlight` collapses concurrent calls
+// (turn-complete + a racing signal trap) onto one `vercel sandbox` invocation.
 let sandboxId = null;
-let sandboxRemoved = false;
-let removeInFlight = null;
+let keepMode = false; // set once in main() from `--keep-sandbox`
+let sandboxTornDown = false;
+let teardownInFlight = null;
 
 function teardownSandbox(reason) {
-  if (sandboxRemoved || !sandboxId) return Promise.resolve();
-  if (removeInFlight) return removeInFlight;
+  if (sandboxTornDown || !sandboxId) return Promise.resolve();
+  if (teardownInFlight) return teardownInFlight;
   const id = sandboxId;
-  log(`teardown (${reason}): vercel sandbox remove ${id}`);
-  removeInFlight = run(VERCEL_BIN, sbArgs(["sandbox", "remove", id]), { capture: true }).then(
-    () => {
-      sandboxRemoved = true;
-      removeInFlight = null;
-    },
+  const verb = keepMode ? "stop" : "remove";
+  log(`teardown (${reason}): vercel sandbox ${verb} ${id}`);
+  teardownInFlight = run(VERCEL_BIN, sbArgs(["sandbox", verb, id]), { capture: true }).then(() => {
+    sandboxTornDown = true;
+    teardownInFlight = null;
+  });
+  return teardownInFlight;
+}
+
+// ── The bp_sandbox sideband frame (D137) ──────────────────────────────────────
+//
+// On a keep-mode CREATE the shim emits EXACTLY ONE NDJSON line on stdout BEFORE
+// any claude output — the freshly-created sandbox id, so the Elixir Recorder
+// (W14-2) can persist it as the session's durable binding (D136) and thread it
+// back as `--sandbox-id` on the next turn. The Recorder pattern-matches
+// `type:"bp_sandbox"`, stores the id, and SWALLOWS the frame — it is never
+// broadcast to SSE/ChatLive nor appended as a message, so the customer NDJSON
+// stream stays clean (D112's spirit). A reuse turn (`--sandbox-id`) creates
+// nothing, so emits no frame; a flag-less turn emits none either.
+function emitSandboxFrame(id) {
+  process.stdout.write(
+    `${JSON.stringify({ type: "bp_sandbox", subtype: "created", sandbox_id: id })}\n`,
   );
-  return removeInFlight;
+}
+
+// ── Snapshot-retention flags for keep-mode create (D138) ──────────────────────
+//
+// Every keep-mode `stop` auto-snapshots (~246MB, 30d expiry); `vercel sandbox
+// remove` does NOT delete stop-snapshots and stopped sandboxes are invisible to
+// `sandbox ls`, so a long session accrues storage. Cap it at the source IF the
+// pinned vercel CLI advertises retention flags — PROBED from `sandbox create
+// --help` (a LOCAL help print, no API round-trip, no sandbox provisioned) rather
+// than guessed by version, so we never pass a flag the CLI would reject. If
+// unsupported, the accrual is documented (README) and swept by the backlogged
+// reaper (connectors-cloud-sandbox-reaper). Never called on the flag-less or
+// reuse paths — only on a keep-mode create.
+async function snapshotRetentionFlags() {
+  const res = await run(VERCEL_BIN, sbArgs(["sandbox", "create", "--help"]), { capture: true });
+  const help = `${res.out || ""}${res.err || ""}`;
+  const flags = [];
+  if (/--keep-last-snapshots\b/.test(help)) flags.push("--keep-last-snapshots", "1");
+  if (/--snapshot-expiration\b/.test(help)) flags.push("--snapshot-expiration", SNAPSHOT_EXPIRATION);
+  if (flags.length === 0) {
+    log(
+      "snapshot-retention flags unsupported by this vercel CLI — stop-snapshots accrue (~246MB, 30d); swept by connectors-cloud-sandbox-reaper",
+    );
+  } else {
+    log(`snapshot-retention flags supported, appending: ${flags.join(" ")}`);
+  }
+  return flags;
 }
 
 // `--scope` pins the Pro team on EVERY vercel invocation (D111 item 5). For
@@ -333,12 +417,22 @@ function readFirstUserFrame() {
     });
     process.stdin.on("end", () => {
       if (buf.trim()) onLine(buf);
-      // EOF is the caller-gone teardown signal (Port.close delivers NOTHING —
-      // D111). A NO-OP until a sandbox exists: in a one-shot turn stdin closes
-      // the instant the frame is written, long before create, so this must not
-      // pre-empt the turn; once a sandbox exists a mid-turn EOF aborts it.
-      teardownSandbox("stdin-eof").then(() => {
-        if (!resolved) reject(new Error("stdin closed before any user turn arrived"));
+      if (resolved) {
+        // The one-shot norm: stdin closes the instant the single user frame is
+        // written — BEFORE the turn's sandbox work finishes. Teardown is the
+        // turn's `finally` job (stop in keep mode, remove flag-less); a post-frame
+        // EOF must NOT abort the in-flight turn. Pre-D137 this was implicitly a
+        // no-op only because the CREATE path had not yet set sandboxId when EOF
+        // fired — but the reuse path (`--sandbox-id`) sets sandboxId synchronously
+        // before the exec, so the guard must be EXPLICIT, not timing-implicit
+        // (otherwise EOF would `stop` the reused sandbox mid-turn).
+        return;
+      }
+      // No user frame ever arrived — nothing to run, and no sandbox was ever
+      // created, so this teardown is a definitional no-op; it exists to satisfy
+      // the reject-on-empty-stdin contract cleanly.
+      teardownSandbox("stdin-eof-no-frame").then(() => {
+        reject(new Error("stdin closed before any user turn arrived"));
       });
     });
     process.stdin.on("error", (e) => {
@@ -411,6 +505,12 @@ async function createSandbox(workspace) {
     createArgs = ["sandbox", "create", "--runtime", RUNTIME, ...timeout, ...tags];
   }
 
+  // Keep-mode create caps the stop-snapshot accrual at the source, IF the CLI
+  // supports it (D138 — probed, never guessed; flag-less create appends nothing).
+  if (keepMode) {
+    createArgs = [...createArgs, ...(await snapshotRetentionFlags())];
+  }
+
   log(`creating sandbox (scope=${SCOPE}, snapshot=${SNAPSHOT || "none/fallback"}) …`);
   const res = await run(VERCEL_BIN, sbArgs(createArgs), { capture: true });
   if (res.code !== 0) {
@@ -420,6 +520,10 @@ async function createSandbox(workspace) {
   if (!id) throw new Error(`vercel sandbox create returned no sandbox id`);
   sandboxId = id;
   log(`sandbox created: ${id}`);
+  // Keep-mode create publishes the new id as the session's durable binding, ONE
+  // sideband NDJSON line on stdout before any claude output (D137). Flag-less
+  // create emits nothing — stdout stays byte-identical to the pre-D137 shape.
+  if (keepMode) emitSandboxFrame(id);
 
   if (!SNAPSHOT) {
     log(`fallback boot: npm i -g ${CLAUDE_INSTALL} (no snapshot configured) …`);
@@ -459,7 +563,10 @@ async function runTurn(id, claudeArgs, frame, mcpConfigB64) {
 }
 
 async function main() {
-  const { workspace, mcpConfigB64, claudeArgs } = parseArgv(process.argv.slice(2));
+  const { workspace, mcpConfigB64, sandboxId: reuseSandboxId, keepSandbox, claudeArgs } = parseArgv(
+    process.argv.slice(2),
+  );
+  keepMode = keepSandbox; // decides the teardown verb (stop vs remove) in teardownSandbox
   if (!workspace || workspace === "global") {
     log(`FATAL: missing/invalid --workspace (got ${JSON.stringify(workspace)}) — refusing to run an unattributed cloud turn`);
     process.exit(2);
@@ -488,16 +595,29 @@ async function main() {
   let exitCode = 1;
   try {
     await acquireSlot();
-    const id = await createSandbox(workspace);
+    let id;
+    if (reuseSandboxId) {
+      // Turn N: REUSE the session-bound sandbox (D137). Skip create entirely; the
+      // exec auto-resumes it from its stop-snapshot with /tmp intact (D134), so
+      // the pinned HOME and claude transcript survive. sandboxId is set HERE (not
+      // before readFirstUserFrame resolved) so the stdin-EOF handler already saw
+      // it null and stayed a no-op; teardown now targets the reused id.
+      id = reuseSandboxId;
+      sandboxId = id;
+      log(`reusing session sandbox ${id} (skipping create; auto-resumes from stop-snapshot)`);
+    } else {
+      id = await createSandbox(workspace);
+    }
     exitCode = await runTurn(id, claudeArgs, frame, mcpConfigB64);
   } catch (e) {
     log(`turn failed: ${e.message}`);
     exitCode = 1;
   } finally {
-    // REMOVE the sandbox now that the turn is done (the EOF handler was a no-op
-    // if it fired before create). `vercel sandbox exec` does not propagate the
-    // in-VM exit code, so the terminal NDJSON `result` frame (is_error) — not this
-    // exit code — is the auth-outcome source of truth the Studio side classifies.
+    // Tear the sandbox down now that the turn is done — STOP in keep mode (the
+    // next turn auto-resumes), REMOVE flag-less (D137; the stdin-EOF handler is a
+    // no-op once the frame is captured). `vercel sandbox exec` does not propagate
+    // the in-VM exit code, so the terminal NDJSON `result` frame (is_error) — not
+    // this exit code — is the auth-outcome source of truth the Studio classifies.
     await teardownSandbox("turn-complete");
     releaseSlot();
   }

@@ -643,6 +643,44 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> json_response(404)
     end
+
+    # D140 — the API path persists the caller's OWN turn as an organic role:"user"
+    # row (the LiveView composer does its own; the API path had zero append sites,
+    # leaving channel/bridge sessions with assistant-only replay history).
+    test "a send persists an organic role:\"user\" row with the submitted content (zero pre-seeding)",
+         %{admin: a1, sid: sid} do
+      # A genuinely fresh session — no manual pre-seeding (contrast :470/:503/:955).
+      assert StudioChat.list_messages(sid) == []
+      assert StudioChat.get_session(sid).message_count == 0
+
+      json_conn(a1)
+      |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "organic hello"}))
+      |> json_response(202)
+
+      user_rows = for m <- StudioChat.list_messages(sid), m.role == "user", do: m
+      assert [row] = user_rows, "exactly one organic user row (no double-write)"
+      assert row.source_markdown == "organic hello"
+      assert row.metadata["origin"] == "api"
+    end
+
+    test "turn 1 on a fresh session dispatches resume?=false — the append lands AFTER derivation",
+         %{admin: a1, sid: sid} do
+      # ensure_and_send derives `resume? = (session.message_count || 0) > 0` from the
+      # struct captured at controller entry. On a fresh session that count is 0, so
+      # turn 1 is resume?=false. The user-row append runs strictly AFTER dispatch, so
+      # it cannot retroactively flip turn 1 — but it DOES advance message_count to 1,
+      # which is exactly the resume-state a subsequent turn 2 would (correctly) read.
+      assert StudioChat.get_session(sid).message_count == 0, "precondition: fresh ⇒ resume-false"
+
+      json_conn(a1)
+      |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "turn one"}))
+      |> json_response(202)
+
+      # The append advanced the count to exactly 1 — proving it ran (post-dispatch),
+      # once, without pre-empting turn-1's zero-valued derivation.
+      assert StudioChat.get_session(sid).message_count == 1
+      assert [%{role: "user", source_markdown: "turn one"}] = StudioChat.list_messages(sid)
+    end
   end
 
   # ── interrupt (D11) ─────────────────────────────────────────────────────────
