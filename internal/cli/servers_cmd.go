@@ -81,12 +81,7 @@ func runUse(out *writer, args []string) int {
 			"dataset":   cfg.Dataset,
 		},
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(payload)
-		return exitOK
-	case "yaml":
-		out.renderYAML(toGeneric(payload))
+	if out.emitStructured(payload) {
 		return exitOK
 	}
 	out.outf("✓ now using %s [%s] — %s  (scope w=%s p=%s d=%s)",
@@ -122,12 +117,7 @@ func runUseStatus(out *writer, cfg *Config) int {
 		"active": active,
 		"known":  names,
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(payload)
-		return exitOK
-	case "yaml":
-		out.renderYAML(toGeneric(payload))
+	if out.emitStructured(payload) {
 		return exitOK
 	}
 
@@ -160,12 +150,7 @@ func useUnknown(out *writer, cfg *Config, q string) int {
 			"known":   names,
 		},
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(m)
-		return exitUsage
-	case "yaml":
-		out.renderYAML(toGeneric(m))
+	if out.emitStructured(m) {
 		return exitUsage
 	}
 	out.userErr("no known server matches %q", q)
@@ -231,12 +216,9 @@ func runServers(out *writer, args []string) int {
 			"servers": rows,
 			"active":  activeName,
 		}
-		if out.output == "yaml" {
-			out.renderYAML(toGeneric(payload))
-		} else {
-			out.renderJSON(payload)
+		if out.emitStructured(payload) {
+			return exitOK
 		}
-		return exitOK
 	}
 
 	if len(list) == 0 {
