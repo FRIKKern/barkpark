@@ -1,6 +1,6 @@
 import "server-only";
 import { Agent, fetch as keepAliveFetch } from "undici";
-import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env";
+import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env.ts";
 
 /**
  * Persistent connection pool to the Barkpark API. Without it, every upstream
@@ -67,17 +67,30 @@ export class BpUpstreamError extends Error {
   readonly status: number;
   readonly detail: string;
   readonly definitive: boolean;
-  constructor(status: number, message: string, detail = "", definitive = false) {
+  /** Machine-readable error code from the envelope's `{error:{code,message}}`
+   * shape, when the upstream body carried one — undefined for infra blips
+   * (bodyless/HTML 5xx) that never reached a structured envelope. Lets
+   * callers branch on the specific failure instead of only the HTTP status. */
+  readonly code?: string;
+  constructor(
+    status: number,
+    message: string,
+    detail = "",
+    definitive = false,
+    code?: string,
+  ) {
     super(message);
     this.name = "BpUpstreamError";
     this.status = status;
     this.detail = detail;
     this.definitive = definitive;
+    this.code = code;
   }
 }
 
-/** Pull a human message out of an API `{error: string | {message,code}}` body. */
-function errorEnvelopeMessage(body: string): string | null {
+/** Pull a human message + machine code out of an API
+ * `{error: string | {message,code}}` body. */
+function errorEnvelope(body: string): { message: string; code?: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -86,11 +99,14 @@ function errorEnvelopeMessage(body: string): string | null {
   }
   if (!parsed || typeof parsed !== "object" || !("error" in parsed)) return null;
   const e = (parsed as { error: unknown }).error;
-  if (typeof e === "string" && e.trim() !== "") return e;
+  if (typeof e === "string" && e.trim() !== "") return { message: e };
   if (e && typeof e === "object") {
     const o = e as { message?: unknown; code?: unknown };
-    if (typeof o.message === "string" && o.message.trim() !== "") return o.message;
-    if (typeof o.code === "string" && o.code.trim() !== "") return o.code;
+    const code = typeof o.code === "string" && o.code.trim() !== "" ? o.code : undefined;
+    if (typeof o.message === "string" && o.message.trim() !== "") {
+      return { message: o.message, code };
+    }
+    if (code) return { message: code, code };
   }
   return null;
 }
@@ -135,9 +151,15 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
     // DELIBERATE upstream answer (reindex_failed, 401 unauthorized) — surface its
     // real message and mark it definitive so it is NOT retried. A bodyless/HTML
     // 5xx (LB 502, restart) has no envelope → stays a retryable transient.
-    const enveloped = errorEnvelopeMessage(detail);
+    const enveloped = errorEnvelope(detail);
     if (enveloped) {
-      throw new BpUpstreamError(res.status, enveloped, detail.slice(0, 200), true);
+      throw new BpUpstreamError(
+        res.status,
+        enveloped.message,
+        detail.slice(0, 200),
+        true,
+        enveloped.code,
+      );
     }
     throw new BpUpstreamError(
       res.status,
