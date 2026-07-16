@@ -215,6 +215,40 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert payload.env[:BARKPARK_DOC_TYPE] == "paper"
     end
 
+    # search-template W2 (charter D8) — an EXPLICIT Site.template wins over the
+    # framework-derived default: a nextjs site created with template
+    # "search-starter" drives the box's Provisioner with the flagship tree, not
+    # next-starter. A nil template stays framework-derived (asserted above).
+    test "a site with an explicit template drives the box with THAT starter" do
+      bp = team_fixture() |> live_barkpark()
+      site = static_site(bp, %{template: "search-starter"})
+      assert site.template == "search-starter"
+
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.template == "search-starter"
+    end
+
+    test "an unknown template is rejected at create — never discovered on the box" do
+      bp = team_fixture() |> live_barkpark()
+
+      assert {:error, cs} =
+               Registry.create_site(bp, %{
+                 name: "evil",
+                 slug: "evil",
+                 kind: "static",
+                 framework: "astro",
+                 template: "../../etc"
+               })
+
+      assert {"must be one of: astro-starter, next-starter, search-starter", _} =
+               cs.errors[:template]
+    end
+
     # charter D37 — a nil/undecryptable read token FAILS CLOSED. The build fetches
     # over the scoped route with this token; a nil one would build UNAUTHENTICATED
     # (empty content, an empty bp-doc-id marker, a false-green live page). So the

@@ -1303,6 +1303,11 @@ type SpawnSiteCreate struct {
 	// default rather than a wire error (charter D35). The live proof passes
 	// "paper" explicitly because guerrilla has no post schema.
 	DocType string `json:"doc_type,omitempty"`
+	// Template is the shipped starter tree the box provisions (search-template
+	// W2, charter D8): astro-starter | next-starter | search-starter. Optional:
+	// empty keeps the framework-derived default (astro->astro-starter,
+	// nextjs->next-starter) — the pre-template behavior, byte-identical.
+	Template string `json:"template,omitempty"`
 }
 
 // Runtime targets — the "where does the artifact RUN" half of the site engine

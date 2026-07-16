@@ -74,6 +74,10 @@ defmodule BarkparkCloud.Registry.Site do
     field :slug, :string
     field :kind, :string, default: "container"
     field :framework, :string, default: "nextjs"
+    # search-template W2 (D8): explicit shipped-starter selection; nil = the
+    # framework-derived default (deploy relay: astro->astro-starter, nextjs->
+    # next-starter). Closed set — the slug indexes a filesystem path on the box.
+    field :template, :string
     field :domains, {:array, :string}, default: []
     field :env_encrypted, :binary
     field :scale_mode, :string, default: "always_on"
@@ -197,6 +201,7 @@ defmodule BarkparkCloud.Registry.Site do
       :slug,
       :kind,
       :framework,
+      :template,
       :domains,
       :env_encrypted,
       :scale_mode,
@@ -224,6 +229,7 @@ defmodule BarkparkCloud.Registry.Site do
     )
     |> validate_inclusion(:kind, @kinds)
     |> validate_framework_for_kind()
+    |> validate_template()
     |> validate_inclusion(:scale_mode, @scale_modes)
     |> validate_github_repo()
     |> validate_length(:github_branch, max: 255)
@@ -263,6 +269,17 @@ defmodule BarkparkCloud.Registry.Site do
           enum: frameworks_for_kind(kind)
         )
     end
+  end
+
+  # search-template W2 (D8): the template slug indexes a filesystem path on the
+  # box (templates/<slug>), so it is a CLOSED set — mirror of the box engine's
+  # DeployRequest.validate_template/1. nil = framework-derived default.
+  @known_site_templates ~w(astro-starter next-starter search-starter)
+
+  defp validate_template(changeset) do
+    validate_inclusion(changeset, :template, @known_site_templates,
+      message: "must be one of: #{Enum.join(@known_site_templates, ", ")}"
+    )
   end
 
   defp validate_github_repo(changeset) do

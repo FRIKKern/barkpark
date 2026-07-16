@@ -327,12 +327,12 @@ defmodule BarkparkCloud.Sites.Deploy do
   # slug — never an open string). Derived from `framework`: astro→astro-starter,
   # nextjs→next-starter. A framework with no shipped starter yet (nuxt/sveltekit/
   # hugo/static) carries NO template — the box then falls back to the
-  # runtime_target default, byte-identical to the pre-template payload. The
-  # Site.template column + dashboard picker that would let a site pick
-  # search-starter directly is deferred to W2 (charter D8); this wave carries the
-  # axis end-to-end on the wire.
-  defp maybe_put_template(payload, %Site{framework: framework}) do
-    case site_template(framework) do
+  # runtime_target default, byte-identical to the pre-template payload. W2
+  # (charter D8): an EXPLICIT Site.template (set at create — the dashboard
+  # picker / bp cloud site create --template) wins over the framework-derived
+  # default, which remains the nil-template fallback.
+  defp maybe_put_template(payload, %Site{template: explicit, framework: framework}) do
+    case explicit || site_template(framework) do
       nil -> payload
       template -> Map.put(payload, :template, template)
     end
