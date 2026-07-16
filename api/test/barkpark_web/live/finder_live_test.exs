@@ -39,8 +39,10 @@ defmodule BarkparkWeb.FinderLiveTest do
     assert html =~ "data-nodes="
     assert html =~ "data-edges="
 
-    # The async corpus lands and the attrs update in place.
-    html = render_async(view)
+    # The async corpus lands and the attrs update in place (generous timeout —
+    # the derivation walks every schema in the test dataset; the default 100ms
+    # flakes on a busy CI runner).
+    html = render_async(view, 5_000)
     assert html =~ "data-rev="
   end
 
