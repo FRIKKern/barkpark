@@ -99,12 +99,9 @@ defmodule Barkpark.ApiTester.Endpoints do
   # ApiTesterLive playground can render docs + form for these entries
   # like any other endpoint.
   #
-  # NOTE: clicking "Run" on a plugin entry currently fires the bare
-  # request via the existing Runner — it does NOT yet evaluate the
-  # plugin spec's `:asserts` chain. Full assert-evaluation belongs to
-  # `Barkpark.ApiTestRunner.run_one/3`; wiring that into ApiTesterLive
-  # is a TODO for a follow-up commit. The immediate user-visible fix
-  # is restoring the rich sidebar UI.
+  # NOTE: clicking "Run" on a plugin entry fires the bare request via
+  # the existing Runner, then evaluates the plugin spec's `:asserts`
+  # chain — see `ApiTesterLive.enrich_with_plugin_asserts/3`.
   defp plugin_endpoints(dataset) do
     try do
       Barkpark.Plugins.Registry.collect_api_tests(baseline: [], ctx: %{dataset: dataset})
