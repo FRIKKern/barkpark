@@ -715,6 +715,72 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def chat_thinking_block(_), do: %{"type" => "chat-thinking", "tokens" => 0}
 
+  # ═══ Chat approval / question / plan cards (charter D35 — the INTERACTIVE rows) ═
+  #
+  # approval/question/plan are the three INTERACTIVE chat rows. Unlike the inert
+  # tool/todo/thinking blocks above, their ANSWERABILITY (the Studio answer forms,
+  # the TUI focus ring + ctrl+a/ctrl+r) is driven by the message ENVELOPE
+  # (role + request_id + approval_status), NEVER by the block. The block carries
+  # only the read-time VISUAL, synthesized from the SAME metadata the Recorder
+  # persists (`persist_approval_ask`: request_id, tool_name, input, approval_status)
+  # — NO persist change, NO migration. `message_json` emits BOTH the envelope and
+  # this block, so a naive inert copy that answered off the block would render a
+  # DEAD card; the answer path stays on the message (D35).
+
+  @doc """
+  Build a `chat-approval` block from a persisted approval row's metadata
+  (`%{"tool_name","input","approval_status"}`). Read-time synthesis: the card
+  names the tool, previews the ask in one line (the Recorder's `tool_line`
+  vocabulary), and carries the terminal status so a read-only replay is honest.
+  """
+  @spec chat_approval_block(map() | any()) :: map()
+  def chat_approval_block(meta) when is_map(meta) do
+    %{
+      "type" => "chat-approval",
+      "tool_name" => chat_tool_name(Map.get(meta, "tool_name")),
+      "summary" => chat_ask_summary(Map.get(meta, "tool_name"), Map.get(meta, "input")),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_approval_block(_), do: chat_approval_block(%{})
+
+  @doc """
+  Build a `chat-question` block from an AskUserQuestion row's metadata. Each
+  question carries its prompt + option labels — the read-time visual of the
+  question card. The answer FORM stays envelope-driven (D35).
+  """
+  @spec chat_question_block(map() | any()) :: map()
+  def chat_question_block(meta) when is_map(meta) do
+    %{
+      "type" => "chat-question",
+      "questions" => chat_questions(Map.get(meta, "input")),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_question_block(_), do: chat_question_block(%{})
+
+  @doc """
+  Build a `chat-plan` block from an ExitPlanMode row's metadata. The title is the
+  plan's first heading (charter D34), the preview a clamped plain-text lede — the
+  read-only visual of the proposed plan. Approve / Keep planning stays on the
+  envelope (D35); the full plan replays in the interactive card / published Paper.
+  """
+  @spec chat_plan_block(map() | any()) :: map()
+  def chat_plan_block(meta) when is_map(meta) do
+    plan = chat_plan_markdown(Map.get(meta, "input"))
+
+    %{
+      "type" => "chat-plan",
+      "title" => chat_plan_title(plan),
+      "preview" => chat_plan_preview(plan),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_plan_block(_), do: chat_plan_block(%{})
+
   @doc """
   Render a `chat-tool-diff` block: the terminal-style `+`/`−` line diff beneath a
   tool call (dispatch on input SHAPE, never tool name — `ChatToolRenderer`). A
@@ -803,6 +869,221 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def chat_thinking_html(_), do: ""
+
+  @doc """
+  Render a `chat-approval` block: the read-only VISUAL of a permission ask — the
+  tool name, a one-line preview, and the status badge. The ANSWER affordance is
+  NEVER here (envelope-driven, D35); this is what a replay / reader shows and the
+  body the TUI card wraps with its interactive shell.
+  """
+  def chat_approval_html(block) when is_map(block) do
+    tool = Map.get(block, "tool_name", "tool")
+    summary = Map.get(block, "summary", "")
+    status = Map.get(block, "approval_status", "pending")
+    title = if status == "pending", do: "Allow #{tool}?", else: tool
+
+    ~s|<div class="bp-chat-approval text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header(title, status) <>
+      chat_card_body(summary) <>
+      ~s|</div>|
+  end
+
+  def chat_approval_html(_), do: ""
+
+  @doc """
+  Render a `chat-question` block: the read-only VISUAL of an AskUserQuestion —
+  each prompt with its option chips. The answer FORM is envelope-driven (D35).
+  An empty question set still renders an honest "no question" line, never blank.
+  """
+  def chat_question_html(block) when is_map(block) do
+    questions = block |> Map.get("questions") |> as_list()
+    status = Map.get(block, "approval_status", "pending")
+
+    body =
+      if questions == [] do
+        ~s|<div class="text-dim" style="padding-left: 12px;">⎿ no question</div>|
+      else
+        questions |> Enum.map(&chat_question_item_html/1) |> Enum.join("")
+      end
+
+    ~s|<div class="bp-chat-question text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header("Question", status) <>
+      body <>
+      ~s|</div>|
+  end
+
+  def chat_question_html(_), do: ""
+
+  @doc """
+  Render a `chat-plan` block: the read-only VISUAL of a proposed plan — the first
+  heading as a title and a clamped lede. Approve / Keep planning is envelope-driven
+  (D35); the full plan replays in the interactive card / the published Paper.
+  """
+  def chat_plan_html(block) when is_map(block) do
+    title = Map.get(block, "title", "Proposed plan")
+    preview = Map.get(block, "preview", "")
+    status = Map.get(block, "approval_status", "pending")
+
+    ~s|<div class="bp-chat-plan text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header(title, status) <>
+      chat_card_body(preview) <>
+      ~s|</div>|
+  end
+
+  def chat_plan_html(_), do: ""
+
+  # ── chat card internals (approval / question / plan visual — D35) ────────────
+
+  # The shared header row: a bold title and a right-aligned status word. The
+  # status is the honest read-only state a replay shows (the interactive answer
+  # layer lives on the envelope, not here).
+  defp chat_card_header(title, status) do
+    ~s|<div style="display: flex; gap: 6px; align-items: baseline;">| <>
+      ~s|<span style="font-weight: 600;">#{escape_html(title)}</span>| <>
+      ~s|<span class="text-dim" style="margin-left: auto; white-space: nowrap;">| <>
+      ~s|#{escape_html(chat_status_label(status))}</span></div>|
+  end
+
+  # The one-line ask/plan preview beneath the header; blank text renders nothing
+  # (the header alone stands) rather than an empty box.
+  defp chat_card_body(text) do
+    case String.trim(to_string(text)) do
+      "" ->
+        ""
+
+      trimmed ->
+        ~s|<div style="opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;">| <>
+          ~s|#{escape_html(trimmed)}</div>|
+    end
+  end
+
+  # One question row: the prompt over its option chips (labels only — the visual,
+  # not the interactive form).
+  defp chat_question_item_html(q) do
+    question = Map.get(q, "question", "")
+    options = q |> Map.get("options") |> as_list()
+
+    chips =
+      if options == [] do
+        ""
+      else
+        rendered =
+          Enum.map_join(options, "", fn opt ->
+            ~s|<span style="display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; | <>
+              ~s|border: 1px solid var(--border-muted); border-radius: 4px;">| <>
+              ~s|#{escape_html(to_string(opt))}</span>|
+          end)
+
+        ~s|<div style="margin: 2px 0 0 12px;">#{rendered}</div>|
+      end
+
+    ~s|<div style="margin-top: 4px;"><div style="overflow-wrap: anywhere;">| <>
+      ~s|#{escape_html(to_string(question))}</div>#{chips}</div>|
+  end
+
+  # The card status words — pending, or a terminal decision glyph. Reused by all
+  # three interactive cards (the block's own read-only badge; the TUI footer's
+  # interactive badge is a SEPARATE envelope-driven layer in internal/chat).
+  defp chat_status_label("pending"), do: "pending"
+  defp chat_status_label("allowed"), do: "✓ allowed"
+  defp chat_status_label("denied"), do: "⊘ denied"
+  defp chat_status_label("canceled"), do: "— canceled"
+  defp chat_status_label(other), do: to_string(other)
+
+  # The tool name for an ask, defaulting to a generic "tool" when the row carries
+  # none (a legacy/malformed frame) so the card header never reads "Allow ?".
+  defp chat_tool_name(name) when is_binary(name) and name != "", do: name
+  defp chat_tool_name(_), do: "tool"
+
+  # The approval lifecycle, folded to the known vocabulary — pending until a
+  # terminal decision (allowed | denied | canceled). Anything unrecognized reads
+  # pending (fail-open to "still awaiting you", never a fake resolution).
+  defp chat_approval_status(s) when s in ["pending", "allowed", "denied", "canceled"], do: s
+  defp chat_approval_status(_), do: "pending"
+
+  # A one-line preview of an approval ask — the tool plus a diff-shaped file path
+  # or a compact k:v preview, mirroring the Recorder's `tool_line`. Keys are
+  # sorted so the preview is deterministic across a regenerate (the fixture lock).
+  defp chat_ask_summary(name, input) when is_map(input) do
+    tool = chat_tool_name(name)
+
+    if is_binary(input["file_path"]) do
+      "#{tool} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
+        |> Enum.take(2)
+        |> Enum.map_join(" · ", fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+
+      if preview == "", do: tool, else: "#{tool} — #{preview}"
+    end
+  end
+
+  defp chat_ask_summary(name, _), do: chat_tool_name(name)
+
+  # Normalize the AskUserQuestion input into render-ready questions (prompt +
+  # option labels). Mirrors chat_live's `parse_questions`, string-keyed for JSON.
+  defp chat_questions(%{"questions" => qs}) when is_list(qs) do
+    Enum.map(qs, fn q ->
+      %{
+        "question" => to_string(Map.get(q, "question", "")),
+        "options" => chat_question_options(Map.get(q, "options"))
+      }
+    end)
+  end
+
+  defp chat_questions(_), do: []
+
+  defp chat_question_options(opts) when is_list(opts) do
+    opts
+    |> Enum.map(fn
+      %{"label" => label} -> to_string(label)
+      label when is_binary(label) -> label
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp chat_question_options(_), do: []
+
+  # The ExitPlanMode plan markdown (`%{"plan" => md}`), or "" when absent.
+  defp chat_plan_markdown(%{"plan" => plan}) when is_binary(plan), do: plan
+  defp chat_plan_markdown(_), do: ""
+
+  # The plan title: the first markdown heading's text, else "Proposed plan"
+  # (mirrors chat_live's `plan_title` without booting the paper engine).
+  defp chat_plan_title(plan) when is_binary(plan) do
+    plan
+    |> String.split("\n")
+    |> Enum.find_value("Proposed plan", fn line ->
+      case Regex.run(~r/^\s*#+\s+(\S.*?)\s*$/, line) do
+        [_, heading] -> heading
+        _ -> nil
+      end
+    end)
+  end
+
+  defp chat_plan_title(_), do: "Proposed plan"
+
+  # A clamped plain-text lede: the plan's non-heading prose, joined and clipped so
+  # the card reads compact. The clip is stored on the block so the fixture's
+  # projection text and the render agree exactly (word-safe: a hard char clip).
+  defp chat_plan_preview(plan) when is_binary(plan) do
+    plan
+    |> String.split("\n")
+    |> Enum.reject(&(String.match?(&1, ~r/^\s*#/) or String.trim(&1) == ""))
+    |> Enum.join(" ")
+    |> String.trim()
+    |> chat_clip(200)
+  end
+
+  defp chat_plan_preview(_), do: ""
+
+  defp chat_clip(text, max) do
+    if String.length(text) <= max, do: text, else: String.slice(text, 0, max) <> "…"
+  end
 
   # ── chat toolrow internals (derivations REUSED, never reinvented) ───────────
 

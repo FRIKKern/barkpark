@@ -251,3 +251,129 @@ func (chatThinkingRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 	return []string{truncateANSI(dim.Render(label), w)}
 }
+
+// ── chat-approval / chat-question / chat-plan (the INTERACTIVE cards) ──────────
+// The three interactive chat rows (charter D35), promoted to dual-surface block
+// TYPES like the inert rows above. CRITICAL: the block carries only the read-time
+// VISUAL — the tool name / question prompts / plan lede + the terminal status.
+// A card's ANSWERABILITY (the focus ring + ctrl+a/ctrl+r) is NOT here: it is
+// driven by the message ENVELOPE in internal/chat/render.go's cardView, keyed off
+// role+request_id+approval_status. This renderer is what a read-only replay shows
+// AND the body cardView wraps with its interactive shell — a naive answer control
+// here would render a DEAD card divorced from the envelope's answer state.
+
+// chatCardHeader is the shared header row for the three interactive cards: a bold
+// title and a right-side status word (pending / ✓ allowed / ⊘ denied / — canceled)
+// — the honest read-only state, mirroring Components.chat_card_header on the
+// Studio/reader surface.
+func chatCardHeader(ctx RenderCtx, w int, title, status string) string {
+	head := lipgloss.NewStyle().Bold(true).Render(sanitizeText(title))
+	badge := ctx.Theme.Dim.Render(chatStatusLabel(status))
+	return truncateANSI(head+"  "+badge, w)
+}
+
+// chatStatusLabel folds the approval lifecycle to its display word — the block's
+// own read-only badge (the TUI footer's badge is a SEPARATE envelope-driven layer
+// in internal/chat's cardResolutionBadge). Mirrors Components.chat_status_label.
+func chatStatusLabel(status string) string {
+	switch status {
+	case "allowed":
+		return "✓ allowed"
+	case "denied":
+		return "⊘ denied"
+	case "canceled":
+		return "— canceled"
+	case "pending", "":
+		return "pending"
+	default:
+		return status
+	}
+}
+
+type chatApprovalRenderer struct{}
+
+func (chatApprovalRenderer) Render(b Block, ctx RenderCtx) []string {
+	w := clampWidth(ctx.Width)
+	tool := attrStr(b.Attrs, "tool_name")
+	if tool == "" {
+		tool = "tool"
+	}
+	status := attrStr(b.Attrs, "approval_status")
+	title := tool
+	if status == "pending" || status == "" {
+		title = "Allow " + tool + "?"
+	}
+
+	out := []string{chatCardHeader(ctx, w, title, status)}
+	if summary := sanitizeText(attrStr(b.Attrs, "summary")); summary != "" {
+		for _, ln := range wrapLines(summary, w) {
+			out = append(out, ctx.Theme.Dim.Render(ln))
+		}
+	}
+	return out
+}
+
+type chatQuestionRenderer struct{}
+
+func (chatQuestionRenderer) Render(b Block, ctx RenderCtx) []string {
+	w := clampWidth(ctx.Width)
+	status := attrStr(b.Attrs, "approval_status")
+	out := []string{chatCardHeader(ctx, w, "Question", status)}
+
+	questions := attrSlice(b.Attrs, "questions")
+	if len(questions) == 0 {
+		out = append(out, ctx.Theme.Dim.Render("⎿ no question"))
+		return out
+	}
+
+	accent := lipgloss.NewStyle().Foreground(Resolve(ctx.Theme.themeID).ChromeAccent)
+	for _, q := range questions {
+		qm, ok := q.(map[string]any)
+		if !ok {
+			continue
+		}
+		if prompt := sanitizeText(attrStr(qm, "question")); prompt != "" {
+			out = append(out, wrapLines(prompt, w)...)
+		}
+		if chips := chatQuestionChips(attrSlice(qm, "options"), accent); chips != "" {
+			for _, ln := range wrapLines("  "+chips, w) {
+				out = append(out, ln)
+			}
+		}
+	}
+	return out
+}
+
+// chatQuestionChips renders the option labels as bracketed chips (the visual, not
+// the interactive selector). Bare-string options only (the Elixir builder folds
+// {label} maps to strings), so a non-string entry is skipped.
+func chatQuestionChips(options []any, style lipgloss.Style) string {
+	var labels []string
+	for _, o := range options {
+		if s, ok := o.(string); ok {
+			if s = sanitizeText(s); s != "" {
+				labels = append(labels, style.Render("["+s+"]"))
+			}
+		}
+	}
+	return strings.Join(labels, " ")
+}
+
+type chatPlanRenderer struct{}
+
+func (chatPlanRenderer) Render(b Block, ctx RenderCtx) []string {
+	w := clampWidth(ctx.Width)
+	title := attrStr(b.Attrs, "title")
+	if title == "" {
+		title = "Proposed plan"
+	}
+	status := attrStr(b.Attrs, "approval_status")
+
+	out := []string{chatCardHeader(ctx, w, title, status)}
+	if preview := sanitizeText(attrStr(b.Attrs, "preview")); preview != "" {
+		for _, ln := range wrapLines(preview, w) {
+			out = append(out, ctx.Theme.Dim.Render(ln))
+		}
+	}
+	return out
+}

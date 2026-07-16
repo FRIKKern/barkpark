@@ -49,10 +49,15 @@ var (
 )
 
 // cardRoles are the interactive card rows (charter D27/D28: approval/question/
-// plan render as bespoke cards, answerable in-canvas from the TUI). They are
-// EXCLUDED from golden parity, which is deliberately assistant reply-body
-// projection only. The engine routes one wire ask to one of these three roles by
-// its tool_name (permission_role/1) — the store IS the router.
+// plan). They stay CARDS — routed to cardView so they keep their focus ring +
+// answer footer — but their BODY is now a dual-surface PortableDoc block type
+// (chat-approval/chat-question/chat-plan, charter D35): cardBodyLines renders the
+// server's typed block through the SAME pdrender seam the reader uses, so the
+// card body reads identically in Studio and the terminal. The card's
+// ANSWERABILITY stays on the message ENVELOPE (role+request_id+approval_status),
+// NEVER the block — so the row is never a DEAD card divorced from its answer
+// state. The engine routes one wire ask to one of these three roles by its
+// tool_name (permission_role/1) — the store IS the router.
 var cardRoles = map[string]string{
 	"approval": "Approval requested",
 	"question": "Question",
@@ -271,7 +276,7 @@ func cardView(w int, msg Message, focused bool, inflight string) []string {
 		title += "  " + focusBar.Render("◀ focused")
 	}
 	out := []string{topBar + titleStyle.Render(title)}
-	for _, ln := range wrap(cardBody(msg), w-2) {
+	for _, ln := range cardBodyLines(w-2, msg) {
 		out = append(out, bar+ln)
 	}
 
@@ -404,8 +409,31 @@ func formatTokens(n int) string {
 	}
 }
 
+// cardBodyLines renders the interactive card's BODY (charter D35, Law 1). The
+// visual is now a typed PortableDoc block (chat-approval/chat-question/chat-plan)
+// the server carries on the row — decoded through the SAME Decode -> RenderDoc
+// seam the reader and the assistant reply body use, so the card body reads
+// identically in Studio and the terminal. The card's ANSWERABILITY is NOT here:
+// it stays on the envelope (cardView's footer), keyed off role+request_id+
+// approval_status. A row with no block (a mid-persist frame or a legacy row)
+// degrades to the metadata/source preview, never a blank — the same forward-
+// compat tolerance the assistant path shows.
+func cardBodyLines(w int, msg Message) []string {
+	blocks, err := pdrender.Decode([]byte(msg.Blocks))
+	if err == nil && len(blocks) > 0 {
+		doc := chatRegistry.RenderDoc(blocks, pdrender.RenderCtx{Width: w, Profile: chatProfile})
+		out := make([]string, 0, strings.Count(doc, "\n")+1)
+		for _, ln := range strings.Split(doc, "\n") {
+			out = append(out, strings.TrimRight(ln, " "))
+		}
+		return out
+	}
+	return wrap(cardBody(msg), w)
+}
+
 // cardBody extracts a display string for a card row: a well-known metadata
-// field if present, else the source markdown.
+// field if present, else the source markdown. The fallback body when a row
+// carries no typed block (cardBodyLines).
 func cardBody(msg Message) string {
 	for _, k := range []string{"prompt", "question", "summary", "plan", "text"} {
 		if v, ok := msg.Metadata[k]; ok {

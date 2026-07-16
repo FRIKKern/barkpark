@@ -902,7 +902,11 @@ defmodule BarkparkWeb.ChatController do
   TYPED chat block (`chat-tool-diff` | `chat-todo` | `chat-thinking`), built from
   the ONE shared derivation (`Components` + `ChatToolRenderer`), so the Go TUI
   half (`internal/chat`) decodes the identical shape and renders the same row
-  (charter D25 — dual-surface Law 1). Every other role carries its raw metadata
+  (charter D25 — dual-surface Law 1). The three INTERACTIVE cards (`approval`,
+  `question`, `plan`) ALSO carry a typed block (`chat-approval` | `chat-question`
+  | `chat-plan`) synthesized from their metadata (charter D35) — the read-time
+  VISUAL only, so answerability stays on the envelope. Every other role carries
+  its raw metadata
   (admin-only route, D21 — no per-row redaction). Exposed as an `@doc false`
   public seam (the ListenController convention) so the projection is unit-tested
   without a live SSE loop.
@@ -949,6 +953,20 @@ defmodule BarkparkWeb.ChatController do
       _ -> nil
     end
   end
+
+  # The three INTERACTIVE cards (charter D35): approval / question / plan project
+  # a typed block synthesized from the SAME metadata the Recorder persisted
+  # (request_id, tool_name, input, approval_status). The block is the read-time
+  # VISUAL only — `base` still carries the metadata, so answerability stays on the
+  # envelope (role + request_id + approval_status), NOT the block.
+  defp toolrow_blocks(%StudioChat.Message{role: "approval", metadata: meta}),
+    do: [Components.chat_approval_block(meta || %{})]
+
+  defp toolrow_blocks(%StudioChat.Message{role: "question", metadata: meta}),
+    do: [Components.chat_question_block(meta || %{})]
+
+  defp toolrow_blocks(%StudioChat.Message{role: "plan", metadata: meta}),
+    do: [Components.chat_plan_block(meta || %{})]
 
   defp toolrow_blocks(_), do: nil
 
