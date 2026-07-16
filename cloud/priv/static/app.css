@@ -871,6 +871,36 @@ select.form-input {
 .fleet-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .fleet-version { font-size: 12px; color: var(--dim); font-family: var(--mono); }
 
+/* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
+   while a content-auto rebuild is in flight; a settled status·trigger·when pill
+   otherwise. Tokens only (no baseline bump): --pill/--radius, --border, --dim,
+   --muted-surface/-text, --ok/--danger/--info/--warn + -soft/-strong, --dur/-ease. */
+.fresh-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: var(--pill);
+  font-size: 11px; font-weight: 500; line-height: 1.2; white-space: nowrap;
+  background: var(--muted-surface); color: var(--muted-text);
+  border: 1px solid var(--border);
+}
+.fresh-badge .fresh-dot { width: 7px; height: 7px; border-radius: var(--pill); background: var(--dim); flex: 0 0 auto; }
+.fresh-badge .fresh-meta { color: var(--muted-text); opacity: .75; }
+.fresh-badge--up { color: var(--text); }
+.fresh-badge--up .fresh-dot { background: var(--ok); }
+.fresh-badge--down { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.fresh-badge--down .fresh-dot { background: var(--danger); }
+.fresh-badge--down .fresh-meta { color: var(--danger); }
+.fresh-badge--deploy .fresh-dot { background: var(--info); }
+.fresh-badge--rebuild { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-strong); }
+.fresh-badge--rebuild .fresh-dot { background: var(--warn); }
+.fresh-badge--rebuild .fresh-meta { color: var(--warn); }
+.fresh-badge.is-rebuilding .fresh-dot { animation: fresh-pulse var(--dur-3) var(--ease) infinite; }
+.fresh-badge.is-rebuilding { animation: fresh-glow var(--dur-3) var(--ease) infinite; }
+@keyframes fresh-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.55); } }
+@keyframes fresh-glow { 0%, 100% { box-shadow: 0 0 0 0 var(--warn-soft); } 50% { box-shadow: 0 0 0 3px var(--warn-soft); } }
+@media (prefers-reduced-motion: reduce) {
+  .fresh-badge.is-rebuilding, .fresh-badge.is-rebuilding .fresh-dot { animation: none; }
+}
+
 .empty-state {
   text-align: center;
   padding: 56px 24px;

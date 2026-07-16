@@ -258,6 +258,39 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       slugs = Enum.map(json_body(conn)["sites"], & &1["slug"])
       assert slugs == ["mine"]
     end
+
+    # stw4-freshness (charter D24): each row carries the SLIM batched
+    # last_deployment embed — status/trigger/timestamps only (never console /
+    # build_log_url / content_rev) — nil-honest for a site that never deployed.
+    test "rows carry a slim last_deployment embed (nil-honest when absent)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, deployed} = Registry.create_site(bp, %{name: "Deployed", slug: "deployed"})
+      {:ok, _fresh} = Registry.create_site(bp, %{name: "Fresh", slug: "fresh"})
+
+      {:ok, _d} =
+        Registry.create_deployment(deployed, %{git_ref: "main", trigger: "content-auto"})
+
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites", nil, token)
+      assert conn.status == 200
+
+      rows = Map.new(json_body(conn)["sites"], fn r -> {r["slug"], r} end)
+
+      last = rows["deployed"]["last_deployment"]
+      assert last["status"] == "queued"
+      assert last["trigger"] == "content-auto"
+      assert last["inserted_at"]
+      assert last["updated_at"]
+      # HONESTY LAW: no build internals ride the embed.
+      refute Map.has_key?(last, "console")
+      refute Map.has_key?(last, "build_log_url")
+      refute Map.has_key?(last, "content_rev")
+
+      # A never-deployed site is nil-honest, not a fabricated pending state.
+      assert Map.get(rows["fresh"], "last_deployment") == nil
+    end
   end
 
   ## GET /v1/sites/:id — show

@@ -1852,6 +1852,45 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  The latest deployment per site id in `ids`, as a SLIM freshness map
+  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:}}`. One query via
+  Postgres `DISTINCT ON (site_id) ... ORDER BY site_id, inserted_at DESC` (the
+  `[:site_id, :inserted_at]` index already backs it — no migration) so the
+  dashboard fleet list can render an at-a-glance freshness badge — amber while a
+  content-auto rebuild is in flight, settled status/trigger/time otherwise —
+  WITHOUT an N+1 per row.
+
+  Mirrors `latest_provision_status_map/1` in shape and intent. HONESTY LAW
+  (charter D24): only `status`, `trigger`, and the two timestamps ride along —
+  NEVER `console`, `build_log_url`, `content_rev`, or any build internal. Sites
+  with no deployment are simply absent (nil-honest at the caller). Empty `ids` →
+  empty map (no query).
+  """
+  @spec latest_deployment_status_map([binary()]) :: %{
+          binary() => %{
+            status: String.t(),
+            trigger: String.t() | nil,
+            inserted_at: DateTime.t(),
+            updated_at: DateTime.t()
+          }
+        }
+  def latest_deployment_status_map([]), do: %{}
+
+  def latest_deployment_status_map(ids) when is_list(ids) do
+    from(d in Deployment,
+      where: d.site_id in ^ids,
+      order_by: [asc: d.site_id, desc: d.inserted_at, desc: d.id],
+      distinct: d.site_id,
+      select: {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at}
+    )
+    |> Repo.all()
+    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at} ->
+      {site_id,
+       %{status: status, trigger: trigger, inserted_at: inserted_at, updated_at: updated_at}}
+    end)
+  end
+
+  @doc """
   The most recent provision job for `barkpark`, or nil. Used by the retry path
   to gate re-enqueue on a genuinely FAILED last attempt (so a retry can't open a
   second concurrent provision — and a second billed box — while one is still
