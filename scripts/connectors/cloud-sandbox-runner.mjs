@@ -66,7 +66,10 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ── Config (env, all overridable; safe defaults) ──────────────────────────────
 const VERCEL_BIN = process.env.CLOUD_SANDBOX_VERCEL_BIN || "vercel";
@@ -76,7 +79,40 @@ const RUNTIME = process.env.CLOUD_SANDBOX_RUNTIME || "node24";
 const TIMEOUT = process.env.CLOUD_SANDBOX_TIMEOUT || "10m"; // MANDATORY create backstop
 const ALLOWED_DOMAIN = process.env.CLOUD_SANDBOX_ALLOWED_DOMAIN || "api.anthropic.com";
 const NETWORK_POLICY = process.env.CLOUD_SANDBOX_NETWORK_POLICY || "deny-all";
-const CLAUDE_INSTALL = process.env.CLOUD_SANDBOX_CLAUDE_INSTALL || "@anthropic-ai/claude-code";
+// ── Pinned claude CLI version (D176/D180) ─────────────────────────────────────
+//
+// The sandbox npm-installs `claude` FRESH on every fallback boot (and bakes it into
+// the production snapshot), so the RUNNING version is not guaranteed — yet knob-5's
+// unattended permission semantics were probed against a SPECIFIC version
+// (cloud_policy.ex:57). We pin that version at BOTH ends: (1) version-suffix the npm
+// install so provisioning installs exactly it, and (2) probe + compare the actual
+// in-sandbox version at the END of createSandbox so a drift (a stale snapshot, a
+// registry-served newer build) surfaces LOUDLY instead of silently invalidating the
+// observed semantics. The pin lives in `cloud-claude-pinned-version.txt` NEXT TO
+// this shim — a SEPARATE file from `scripts/claude-pinned-version.txt` (the
+// self-hosted HOST-CLI pin: different surface, different value, different proof lane).
+function readPinnedClaudeVersion() {
+  try {
+    const v = readFileSync(join(HERE, "cloud-claude-pinned-version.txt"), "utf8").trim();
+    return v || null;
+  } catch {
+    return null; // absent/unreadable ⇒ unpinned (install unversioned, skip the assert)
+  }
+}
+const PINNED_CLAUDE_VERSION = process.env.CLOUD_SANDBOX_CLAUDE_VERSION || readPinnedClaudeVersion();
+// A drift is a WARNING by default (the version is "observed, not contractual" —
+// cloud_policy.ex:57, so a benign patch bump must not abort live turns); set
+// CLOUD_SANDBOX_CLAUDE_VERSION_STRICT=1 to make it a HARD FAIL (createSandbox throws,
+// the turn never dispatches) where the operator wants version drift to fail closed.
+const VERSION_STRICT = /^(1|true|yes)$/i.test(process.env.CLOUD_SANDBOX_CLAUDE_VERSION_STRICT || "");
+// The npm package spec the fallback boot installs. Pinned to the exact version when
+// one is configured (`@anthropic-ai/claude-code@<pin>`), so the install itself is
+// reproducible; an explicit CLOUD_SANDBOX_CLAUDE_INSTALL overrides the whole spec.
+const CLAUDE_INSTALL =
+  process.env.CLOUD_SANDBOX_CLAUDE_INSTALL ||
+  (PINNED_CLAUDE_VERSION
+    ? `@anthropic-ai/claude-code@${PINNED_CLAUDE_VERSION}`
+    : "@anthropic-ai/claude-code");
 // Snapshot-retention expiry for keep-mode stop-snapshots (D138). Only ever passed
 // when the pinned vercel CLI advertises `--snapshot-expiration` (probed, not
 // guessed — see snapshotRetentionFlags()); otherwise the accrual is documented and
@@ -477,6 +513,56 @@ function inSandboxScript(claudeArgs, frameB64, mcpConfigB64) {
   return lines.join("\n");
 }
 
+// ── Assert the in-sandbox claude version matches the pin (D176/D180) ──────────
+//
+// Runs at the END of createSandbox — the convergence point BOTH provisioning paths
+// reach (snapshot: claude pre-baked; fallback: just npm-installed) — so ONE check
+// covers both. It probes `claude --version` inside the freshly-provisioned sandbox,
+// parses the semver, and compares it to PINNED_CLAUDE_VERSION. A mismatch surfaces
+// LOUDLY: a hard fail under VERSION_STRICT (createSandbox throws, the turn never
+// dispatches), otherwise an unmistakable stderr WARNING (the version is observed,
+// not contractual). It NEVER passes silently on drift.
+//
+// The probe runs via `bash -c` (NOT `-lc`) with an explicit npm-global PATH prepend:
+// `-c` keeps it off the `-lc` turn-locator every fake-vercel proof keys on, while the
+// PATH prepend still finds the fallback-installed `claude` binary.
+async function assertClaudeVersion(id) {
+  if (!PINNED_CLAUDE_VERSION) {
+    log("no pinned claude version (cloud-claude-pinned-version.txt absent/empty) — skipping version assertion");
+    return;
+  }
+  const probe = `export PATH="$(npm prefix -g 2>/dev/null)/bin:$PATH"; claude --version`;
+  // Scope goes BEFORE the `--` via scopeFlag() (NOT sbArgs — a trailing --scope after
+  // the `--` leaks into the in-sandbox command; see sbArgs()'s note). Mirrors runTurn.
+  const res = await run(
+    VERCEL_BIN,
+    ["sandbox", "exec", id, ...scopeFlag(), "--", "bash", "-c", probe],
+    { capture: true },
+  );
+  const raw = `${res.out || ""}`.trim();
+  if (res.code !== 0) {
+    // Could not run the probe at all — loud, but not a version verdict: warn and let
+    // the turn proceed (a probe failure is not itself proof of drift). STRICT still
+    // fails closed, since an unverifiable version is as unsafe as a wrong one.
+    const msg = `claude-version-probe-failed: could not run 'claude --version' in-sandbox (code ${res.code}: ${res.err.trim()}) — cannot confirm the pinned ${PINNED_CLAUDE_VERSION}`;
+    if (VERSION_STRICT) throw new Error(msg);
+    log(`WARNING: ${msg}`);
+    return;
+  }
+  const m = raw.match(/(\d+\.\d+\.\d+)/);
+  const actual = m ? m[1] : null;
+  if (actual === PINNED_CLAUDE_VERSION) {
+    log(`claude version OK: in-sandbox claude ${actual} matches the pin ${PINNED_CLAUDE_VERSION}`);
+    return;
+  }
+  const seen = actual || `<unparseable: ${JSON.stringify(raw)}>`;
+  const msg =
+    `claude-version-mismatch: in-sandbox claude ${seen} != pinned ${PINNED_CLAUDE_VERSION} — ` +
+    `knob-5 permission semantics were probed on the pin (cloud_policy.ex:57); re-verify before trusting this turn`;
+  if (VERSION_STRICT) throw new Error(msg);
+  log(`WARNING: ${msg}`);
+}
+
 async function createSandbox(workspace) {
   const tags = ["--tag", "purpose=cloud-turn", "--tag", `workspace=${workspace}`];
   const timeout = ["--timeout", TIMEOUT];
@@ -538,6 +624,10 @@ async function createSandbox(workspace) {
       throw new Error(`in-sandbox claude install failed (code ${npm.code}): ${npm.err.trim()}`);
     }
   }
+  // Convergence point (D176/D180): whether claude arrived via the snapshot or the
+  // fallback npm install, verify the RUNNING version matches the pin before the turn
+  // dispatches — a drift surfaces loudly (hard fail under STRICT, else a warning).
+  await assertClaudeVersion(id);
   return id;
 }
 
