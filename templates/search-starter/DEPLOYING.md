@@ -1,0 +1,100 @@
+<!-- doc-tier: human | canonical-for: search-starter-deploy | budget: 1400tok -->
+# Deploying search-starter
+
+From nothing to a live search engine at `/sites/<slug>/`, through Barkpark
+Cloud's own six-stage deploy engine. This is the template-specific runbook; the
+folder-wide golden path (workspace / schema / token mechanics) lives in
+[../DEPLOYING.md](../DEPLOYING.md).
+
+## TL;DR — the one command
+
+```sh
+bp cloud site create --template search-starter --barkpark <id> --kind node
+bp cloud site deploy <slug>          # streams PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE, prints the URL
+```
+
+`--kind node` is required: the finder is `force-dynamic` Next and runs as a
+long-lived Node SSR process (not static HTML). `create` picks the
+`search-starter` template dir; `deploy` health-gates the build before flipping
+the Caddy upstream. If `HEALTH` fails, nothing switches and visitors keep seeing
+the previous build.
+
+## Prerequisites (all live today)
+
+The install path is honest — no stale 404:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp login --device      # device flow; --device-start / --device-poll for headless agents
+```
+
+`install-cli.sh` installs `bp` 1.15.0 (fix #2797). You need a Barkpark instance
+id (`bp cloud barkpark ls`) and admin on it to seed the corpus.
+
+## Seed the corpus (why the graph is a constellation)
+
+The force graph is only gorgeous because the seed content is **densely
+interlinked**. The corpus is a **single content type** that references its
+siblings through:
+
+- a scalar `reference` field, and
+- an array-of-`reference` field,
+
+with values that are bare sibling `doc_id`s present in the same seed file. Both
+are edge-extracted by `/v1/graph`. A dangling reference renders a phantom node,
+so keep ids consistent.
+
+The corpus **must live in the site's Default workspace** — the flat `/v1/graph`
+route resolves the default scope and ignores a token's bound workspace, so a
+corpus seeded elsewhere renders an empty graph (while search still works).
+The graph reads `:published` docs only — publish every seeded id (publish needs
+`id` **and** `type`):
+
+```sh
+SCOPED="$BASE/w/default/p/default"
+# mutate: seed the interlinked docs (drafts)
+curl -X POST "$SCOPED/v1/data/mutate/$DS" -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' --data-binary @seed.json
+# publish each id
+curl -X POST "$SCOPED/v1/data/mutate/$DS" -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     --data '{"mutations":[{"publish":{"id":"doc-alpha","type":"note"}}]}'
+```
+
+## Mint the read tokens
+
+Live search and the graph both need a **read-only** token scoped to the site's
+public workspace. One public-read token satisfies the search channel
+(`UserSocket` connect + `SearchChannel` join) and the flat `/v1/graph` route:
+
+```sh
+curl -X POST "$SCOPED/v1/tokens" -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     --data '{"label":"public-read","permissions":"public-read"}'
+```
+
+The deploy engine wires this into `NEXT_PUBLIC_BARKPARK_WS_TOKEN`. Without both
+`NEXT_PUBLIC_BARKPARK_WS_URL` and `NEXT_PUBLIC_BARKPARK_WS_TOKEN`, live search
+degrades to server-side search (no crash — it fails soft).
+
+## The six stages, and rollback
+
+```
+PLAN    resolve the target slot + env
+BUILD   npm ci && next build → .next/standalone/  (basePath baked from BARKPARK_SITE_BASE)
+STAGE   boot the node process on a private port
+HEALTH  curl the running process for bp-* content-truth <meta> markers
+SWITCH  flip the Caddy upstream to the healthy slot
+RETIRE  drain the previous slot
+```
+
+`bp cloud site status <slug>` shows where a running deploy is;
+`bp cloud site rollback <slug>` re-points the upstream at the last-good slot in
+**sub-seconds** — no rebuild.
+
+## Serving under a sub-path
+
+`BARKPARK_SITE_BASE=/sites/<slug>/` is a **build-time** value: Next bakes it as
+`basePath`, auto-prefixing every route, `<Link>`, `router.push`, `usePathname`
+and image. That is why a multi-route finder can live under `/sites/<slug>/`
+without escaping to the domain root. The engine sets it for you.
