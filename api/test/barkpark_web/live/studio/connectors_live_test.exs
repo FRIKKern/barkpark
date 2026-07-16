@@ -971,4 +971,140 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
     assert {:ok, ^ticket} =
              ConnectTicket.sign(ws.id, "telegram", secret: @secret, nonce: n, issued_at_ms: t)
   end
+
+  # ── OAUTH LIVE REFRESH (poll) + SLACK TOKEN RELABEL (D179) ─────────────────
+  #
+  # The OAuth return is a redirect in a DIFFERENT tab: the callback lands the
+  # install, but the Studio card that launched the flow never re-reads. These two
+  # legs close that: a bounded server poll flips the card to Connected with no
+  # navigation, and once the install lands the Slack `:oauth` token is relabelled
+  # to its canonical install_key label (closing the D48 dual-label limitation).
+  describe "oauth live refresh (poll)" do
+    test "a poll tick flips the card to Connected when the callback lands the install in another tab (no re-navigation)",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      {:ok, view, html} = live(as(conn, raw), path)
+
+      # Mid-flight: the Add-to-Slack link is showing, no install yet, Not connected.
+      assert html =~ ~s(data-test-id="connector-add-to-slack-slack")
+      refute html =~ ~s(data-test-id="connector-disconnect-slack")
+
+      # The OAuth callback lands the install in ANOTHER tab / process.
+      Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ('slack', 'T_TEAM', $1, 'SEALED-CREDENTIAL-BLOB', 'SEALED-CHAT-TOKEN-BLOB', now())
+        """,
+        [ws.id]
+      )
+
+      # A poll tick re-reads installs — the card flips to Connected with NO
+      # navigation, no live_patch, no manual refresh.
+      send(view.pid, :oauth_poll_tick)
+      html = render(view)
+
+      assert html =~ "Connected"
+      assert html =~ ~s(data-test-id="connector-install-slack")
+      assert html =~ "T_TEAM"
+      assert html =~ ~s(data-test-id="connector-disconnect-slack")
+      # …and the Add-to-Slack link is gone — the flow is complete.
+      refute html =~ ~s(data-test-id="connector-add-to-slack-slack")
+    end
+
+    test "a poll tick is inert when nothing landed — the card stays honestly Not connected",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      {:ok, view, _html} = live(as(conn, raw), path)
+
+      send(view.pid, :oauth_poll_tick)
+      html = render(view)
+
+      refute html =~ ~s(data-test-id="connector-install-slack")
+      assert html =~ ~s(data-test-id="connector-add-to-slack-slack")
+    end
+
+    test "the poll is workspace-scoped: another workspace's install never surfaces here (D49 tenancy)",
+         %{conn: conn, admin_raw: raw, ws: ws} do
+      # The admin token is also an admin of a SECOND workspace, mounted separately.
+      {:ok, other} = Tenancy.create_workspace(%{slug: "conn-poll-other", name: "Other"})
+      {:ok, _proj} = Tenancy.create_project(other, %{slug: "default", name: "Default"})
+
+      {:ok, admin} = Auth.verify_token(raw)
+      {:ok, _} = TenancyAuth.create_membership(other.id, admin.id, "admin")
+
+      script_slack(other)
+
+      other_path = "/w/#{other.slug}/p/default/studio/connectors"
+      {:ok, view, _html} = live(as(conn, raw), other_path)
+
+      # An install lands for the FIRST workspace (ws), not for `other`.
+      Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ('slack', 'T_ELSEWHERE', $1, 'SEALED-CREDENTIAL-BLOB', 'SEALED-CHAT-TOKEN-BLOB', now())
+        """,
+        [ws.id]
+      )
+
+      # A poll tick on `other`'s view must never reflect ws's install.
+      send(view.pid, :oauth_poll_tick)
+      html = render(view)
+
+      refute html =~ "T_ELSEWHERE"
+      refute html =~ ~s(data-test-id="connector-install-slack")
+      assert html =~ ~s(data-test-id="connector-add-to-slack-slack")
+    end
+  end
+
+  describe "slack oauth token relabel (D179, closes the D48 limitation)" do
+    test "reload relabels a live connector:slack:oauth token to its install_key label once the install lands",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      # The callback landed a Slack install…
+      Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ('slack', 'T_TEAM', $1, 'SEALED-CREDENTIAL-BLOB', 'SEALED-CHAT-TOKEN-BLOB', now())
+        """,
+        [ws.id]
+      )
+
+      # …and a live oauth-labelled token still exists (minted before the callback
+      # knew the team_id, D62/D63).
+      {:ok, _raw, oauth_token} =
+        Auth.create_chat_token(Catalog.token_label("slack", "oauth"), "production", ws.id)
+
+      assert oauth_token.label == "connector:slack:oauth"
+
+      # Mount → handle_params → reload → reconcile relabels the oauth token.
+      {:ok, _view, _html} = live(as(conn, raw), path)
+
+      relabelled = Repo.get(ApiToken, oauth_token.id)
+      assert relabelled.label == Catalog.token_label("slack", "T_TEAM")
+      # Relabel, NOT revoke — the credential the install is using stays live.
+      assert is_nil(relabelled.revoked_at)
+      # No oauth-labelled token remains; disconnect now rides the install_key path.
+      assert live_tokens(ws, "slack", "oauth") == []
+    end
+
+    test "reconcile is a no-op when no slack install exists — the pre-callback oauth label is preserved",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      # An oauth token exists but NO install has landed yet — the pre-callback
+      # window. The token must keep its oauth label (nothing to reconcile to).
+      {:ok, _raw, oauth_token} =
+        Auth.create_chat_token(Catalog.token_label("slack", "oauth"), "production", ws.id)
+
+      {:ok, _view, _html} = live(as(conn, raw), path)
+
+      assert Repo.get(ApiToken, oauth_token.id).label == "connector:slack:oauth"
+    end
+  end
 end

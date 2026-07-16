@@ -66,6 +66,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   @dataset "production"
 
+  # How often the OAuth-return poll re-reads installs while a connect is in-flight
+  # (D179). Bounded: it only reschedules while a staged link is showing and the
+  # install has not landed, so it stops on its own once the card is Connected.
+  @oauth_poll_ms 3_000
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -97,10 +102,54 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     # so load once, on connect. Until then the cards render "Loading…", never a
     # confident "Not connected" the read might contradict.
     if connected?(socket) do
-      {:noreply, reload(socket)}
+      {:noreply, socket |> reload() |> schedule_oauth_poll()}
     else
       {:noreply, socket}
     end
+  end
+
+  # ── OAuth return poll (D179) ─────────────────────────────────────────────────
+
+  # The OAuth return is a redirect in ANOTHER tab: the public callback lands the
+  # install, but THIS view — the one that launched the flow — never re-reads, so
+  # its card sits on the Add-to-Slack link while the connection is already live. A
+  # bounded server poll closes that. It re-reads ONLY the installs (load_installs,
+  # never reload): reload re-runs prepare_oauth, and Slack's oauth entry REVOKES +
+  # re-mints its staged chat token on every build — doing that mid-flight would
+  # kill the very token the pending callback is about to join. The install read is
+  # all the card needs: once installs is non-empty the status chip flips to
+  # Connected and the add-to-slack link's `@installs == []` guard hides it.
+  @impl true
+  def handle_info(:oauth_poll_tick, socket) do
+    socket = load_installs(socket)
+    {:noreply, schedule_oauth_poll(socket)}
+  end
+
+  # Never crash on a stale message from an old timer/tab.
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # Schedule the next poll ONLY while a staged OAuth connect is genuinely
+  # in-flight — bounded by construction. Stops the moment the install lands (or if
+  # no oauth link is showing at all), so a Connected card holds no timers.
+  defp schedule_oauth_poll(socket) do
+    if connected?(socket) and oauth_pending?(socket) do
+      Process.send_after(self(), :oauth_poll_tick, @oauth_poll_ms)
+    end
+
+    socket
+  end
+
+  # True while at least one OAuth provider is showing a staged connect link
+  # (add_url) AND has no install yet — the window in which a callback in another
+  # tab can land an install this view has not read. Workspace-scoped by
+  # construction: `installs` is `Catalog.installs_by_provider(current_workspace)`,
+  # so a poll can never reflect another tenant's install.
+  defp oauth_pending?(socket) do
+    installs = socket.assigns.installs
+
+    Enum.any?(socket.assigns.oauth, fn {provider_id, entry} ->
+      not is_nil(entry.add_url) and Map.get(installs, provider_id, []) == []
+    end)
   end
 
   # ── Connect ────────────────────────────────────────────────────────────────
@@ -335,11 +384,15 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   defp revoke_install_tokens(ws_id, provider, install_key) do
     # The install's own labelled token — and, for Slack, ALSO the OAuth-minted
-    # token. The Add-to-Slack flow mints its chat token BEFORE the install key is
-    # known (the OAuth callback learns team_id only after the redirect), so it is
-    # labelled `connector:slack:oauth`, not `connector:slack:<install_key>` — a
-    # named limitation (filed backlog). Revoking both here keeps a disconnect from
-    # leaving a live workspace credential behind.
+    # `connector:slack:oauth` label as a DEFENSIVE net (D179). The Add-to-Slack
+    # flow mints its chat token BEFORE the install key is known (the OAuth callback
+    # learns team_id only after the redirect), so it starts life labelled
+    # `connector:slack:oauth`. `reconcile_slack_oauth_label/1` relabels it to
+    # `connector:slack:<install_key>` on the reload after the callback, so by
+    # disconnect time the token normally already carries the install_key label and
+    # the primary path revokes it there. The oauth label stays in this set only to
+    # catch the pre-reconcile window (a disconnect racing the very first reload) —
+    # a no-op once the relabel has run.
     install_token_labels(provider, install_key)
     |> Enum.flat_map(&Auth.live_tokens_by_label(ws_id, &1))
     |> Enum.reduce(0, fn token, acc ->
@@ -401,7 +454,34 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   defp reload(socket) do
     socket
     |> load_installs()
+    |> reconcile_slack_oauth_label()
     |> prepare_oauth()
+  end
+
+  # Close the D48 filed limitation (see `install_token_labels/2`). The Add-to-Slack
+  # flow (D62/D63) mints its chat token as `connector:slack:oauth` BEFORE the
+  # callback knows the team_id. Once an install has landed we DO know the
+  # install_key, so relabel that OAuth token to the canonical
+  # `connector:slack:<install_key>` — after this, Slack DISCONNECT revokes by the
+  # same single install_key label as every other provider. A relabel, never a
+  # revoke: the live install keeps its credential. Idempotent + workspace-scoped
+  # (`live_tokens_by_label` is ws-bound); a no-op when no oauth-labelled token
+  # remains (already reconciled) or no Slack install exists yet (pre-callback).
+  # Best-effort to the head install: a workspace holds at most one pending OAuth
+  # token, so the common single-install case is exact; the dual-label revoke in
+  # `install_token_labels/2` remains as a defensive net for the pre-reconcile
+  # window.
+  defp reconcile_slack_oauth_label(socket) do
+    with %{id: ws_id} <- socket.assigns[:current_workspace],
+         [%{install_key: key} | _] <- Map.get(socket.assigns.installs, "slack", []) do
+      canonical = Catalog.token_label("slack", key)
+
+      ws_id
+      |> Auth.live_tokens_by_label(slack_oauth_label())
+      |> Enum.each(&Auth.relabel_token(&1, canonical))
+    end
+
+    socket
   end
 
   # THE OAUTH SURFACE (D62/D102). Build the per-provider `oauth` map — one entry
