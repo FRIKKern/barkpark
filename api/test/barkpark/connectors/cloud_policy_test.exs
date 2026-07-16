@@ -102,6 +102,21 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       assert providers == ["github"]
     end
 
+    test "returns BOTH tool providers when github AND linear are installed (channel filtered)",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("linear", "team-x", ws.id)
+      insert_install("telegram", "111:aaa", ws.id)
+
+      providers =
+        ws
+        |> CloudPolicy.connector_tool_providers()
+        |> Enum.map(& &1.provider)
+
+      # installs_for_workspace orders by provider asc.
+      assert providers == ["github", "linear"]
+    end
+
     test "a workspace with only channel installs yields no tool providers", %{ws: ws} do
       insert_install("telegram", "111:aaa", ws.id)
 
@@ -115,6 +130,188 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
     test "a garbage/nil workspace inherits the fail-safe [] (never a CastError 500)" do
       assert CloudPolicy.connector_tool_providers("not-a-uuid") == []
       assert CloudPolicy.connector_tool_providers(nil) == []
+    end
+  end
+
+  # Knob 3's CONFIG half (D126/D128): the pure emission composing the policy answer
+  # (installs) with INJECTED bridge descriptors. `bridge answer ∩ local install
+  # truth`, HTTP-only, `headersHelper` STRIPPED, credential-less, fail-closed.
+  describe "cloud_mcp_servers/2 — knob 3 CONFIG emission (D126/D128)" do
+    setup do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "cloud-mcp-ws", name: "Cloud MCP WS"})
+      {:ok, ws: ws}
+    end
+
+    # Bridge descriptors as fetch_tool_descriptors/1 returns them — WITH a
+    # headersHelper the cloud emission must STRIP (dead across Firecracker, D126).
+    defp gh_descriptor,
+      do: %{
+        "provider" => "github",
+        "type" => "http",
+        "url" => "https://api.githubcopilot.com/mcp/",
+        "headersHelper" => "curl -sS http://127.0.0.1:4020/tool-headers/github"
+      }
+
+    defp linear_descriptor,
+      do: %{
+        "provider" => "linear",
+        "type" => "http",
+        "url" => "https://mcp.linear.app/mcp",
+        "headersHelper" => "curl -sS http://127.0.0.1:4020/tool-headers/linear"
+      }
+
+    test "empty descriptors short-circuit to %{} (no installs read at all)" do
+      assert CloudPolicy.cloud_mcp_servers("any-workspace", []) == %{}
+    end
+
+    test "a descriptor with no matching install is dropped (0 servers)", %{ws: ws} do
+      assert CloudPolicy.cloud_mcp_servers(ws, [gh_descriptor()]) == %{}
+    end
+
+    test "1 install — exactly that provider's HTTP server, headersHelper STRIPPED", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      assert CloudPolicy.cloud_mcp_servers(ws, [gh_descriptor(), linear_descriptor()]) ==
+               %{"github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}}
+    end
+
+    test "2 installs (github + linear) — both HTTP servers, headersHelper stripped", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("linear", "team-x", ws.id)
+
+      assert CloudPolicy.cloud_mcp_servers(ws, [gh_descriptor(), linear_descriptor()]) ==
+               %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"},
+                 "linear" => %{"type" => "http", "url" => "https://mcp.linear.app/mcp"}
+               }
+    end
+
+    test "a channel install never yields a tool server even with a matching descriptor",
+         %{ws: ws} do
+      insert_install("telegram", "111:aaa", ws.id)
+      tg = %{"provider" => "telegram", "type" => "http", "url" => "https://example.test/mcp"}
+
+      assert CloudPolicy.cloud_mcp_servers(ws, [gh_descriptor(), tg]) == %{}
+    end
+
+    test "malformed descriptors are dropped fail-closed; the one good install still emits",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      malformed = [
+        # wrong transport
+        %{"provider" => "github", "type" => "stdio", "url" => "https://x.test"},
+        # blank url
+        %{"provider" => "github", "type" => "http", "url" => ""},
+        # missing url
+        %{"provider" => "github", "type" => "http"},
+        # missing provider
+        %{"type" => "http", "url" => "https://x.test"},
+        # reserved loopback name (never shadow barkpark)
+        %{"provider" => "barkpark", "type" => "http", "url" => "https://x.test"},
+        # not a map
+        "not-a-map",
+        # the one good one
+        gh_descriptor()
+      ]
+
+      assert CloudPolicy.cloud_mcp_servers(ws, malformed) ==
+               %{"github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}}
+    end
+
+    test "a garbage/nil workspace yields %{} (fail-safe, never a CastError 500)" do
+      assert CloudPolicy.cloud_mcp_servers("not-a-uuid", [gh_descriptor()]) == %{}
+      assert CloudPolicy.cloud_mcp_servers(nil, [gh_descriptor()]) == %{}
+    end
+  end
+
+  # The D130 argv table: `ClaudeChat.cloud_build_args/2` over 0/1/2 tool installs,
+  # asserting in EVERY row that W12's FULL deny belt (--tools "" + --disallowedTools
+  # + --settings deny JSON) is still present alongside the new `--mcp-config-b64`
+  # flag. Knob 3 ADDS connector tools; it NEVER re-opens the host-tool deny belt.
+  describe "cloud_build_args argv table — belt + mcp flag over 0/1/2 installs (D130)" do
+    setup do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "cloud-argv-ws", name: "Cloud Argv WS"})
+      {:ok, ws: ws}
+    end
+
+    defp descriptors_for(providers) do
+      urls = %{
+        "github" => "https://api.githubcopilot.com/mcp/",
+        "linear" => "https://mcp.linear.app/mcp"
+      }
+
+      Enum.map(providers, fn p ->
+        %{
+          "provider" => p,
+          "type" => "http",
+          "url" => Map.fetch!(urls, p),
+          "headersHelper" => "curl http://127.0.0.1:4020/#{p}"
+        }
+      end)
+    end
+
+    defp assert_full_belt(args) do
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--tools", ""])
+
+      disallowed = args |> Enum.drop_while(&(&1 != "--disallowedTools")) |> Enum.drop(1)
+      assert disallowed == CloudPolicy.cloud_disallowed_tools()
+
+      idx = Enum.find_index(args, &(&1 == "--settings"))
+      assert Enum.at(args, idx + 1) == CloudPolicy.settings_deny_json()
+    end
+
+    defp decode_mcp_flag(args) do
+      sep = Enum.find_index(args, &(&1 == "--"))
+      idx = Enum.find_index(args, &(&1 == "--mcp-config-b64"))
+      assert is_integer(idx) and idx < sep, "--mcp-config-b64 must ride pre-`--`"
+      # The Elixir argv NEVER carries the shim-owned host-path mcp flags (D127).
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+      args |> Enum.at(idx + 1) |> Base.decode64!() |> Jason.decode!()
+    end
+
+    test "0 / 1 / 2 installs — belt intact in every row; flag present iff ≥1 server",
+         %{ws: ws} do
+      # Row 0 — no installs, no descriptors: byte-identical W12 (no flag).
+      a0 = ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: []})
+      refute "--mcp-config-b64" in a0
+      assert_full_belt(a0)
+
+      # Row 1 — github installed.
+      insert_install("github", "octocat/repo", ws.id)
+
+      a1 =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: ws.id,
+          tool_descriptors: descriptors_for(["github"])
+        })
+
+      assert decode_mcp_flag(a1) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
+               }
+             }
+
+      assert_full_belt(a1)
+
+      # Row 2 — github + linear installed.
+      insert_install("linear", "team-x", ws.id)
+
+      a2 =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: ws.id,
+          tool_descriptors: descriptors_for(["github", "linear"])
+        })
+
+      assert decode_mcp_flag(a2) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"},
+                 "linear" => %{"type" => "http", "url" => "https://mcp.linear.app/mcp"}
+               }
+             }
+
+      assert_full_belt(a2)
     end
   end
 end

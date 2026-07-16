@@ -12,11 +12,15 @@
 //
 // Invocation (the shim's OWN argv, produced by cloud_build_args/2):
 //
-//     cloud-sandbox-runner --workspace <workspace_id> -- <claude args...>
+//     cloud-sandbox-runner --workspace <workspace_id> [--mcp-config-b64 <b64>] -- <claude args...>
 //
 // Everything after `--` is the claude command line to run INSIDE the sandbox
 // (the D109 argv: --input-format/--output-format stream-json, --include-partial-
-// messages, --verbose, --permission-mode <mode>; never a bypass flag, no mcp args).
+// messages, --verbose, --permission-mode <mode>; never a bypass flag, never a
+// HOST mcp path). The optional `--mcp-config-b64` (D127) carries the workspace's
+// connector-scoped `{"mcpServers":…}` as base64: the shim decodes it to an in-VM
+// /tmp file and appends `--mcp-config <file> --strict-mcp-config` to the claude
+// exec — knob 3's tools reach the locked-down turn, host built-ins stay denied.
 //
 // Flow (D108 — interactive stdin into a sandbox is IMPOSSIBLE, so this is a
 // one-shot turn whose first user frame the shim buffers from its OWN local stdin):
@@ -71,6 +75,10 @@ const SLOT_WAIT_MS = clampInt(process.env.CLOUD_SANDBOX_SLOT_WAIT_MS, 120_000, 0
 const SANDBOX_HOME = process.env.CLOUD_SANDBOX_HOME || "/tmp/bp-cloud-home";
 const SANDBOX_CWD = process.env.CLOUD_SANDBOX_CWD || "/tmp/bp-cloud-cwd";
 const TURN_FILE = "/tmp/turn.jsonl";
+// The in-VM MCP config file the shim materializes from `--mcp-config-b64` (D127)
+// and points claude at with `--mcp-config … --strict-mcp-config`. Never a host
+// path — a host-written `--mcp-config` path hard-fails in-sandbox (D109).
+const MCP_CONFIG_FILE = "/tmp/bp-cloud-mcp.json";
 
 function clampInt(raw, dflt, lo, hi) {
   const n = Number.parseInt(raw ?? "", 10);
@@ -116,9 +124,16 @@ function log(msg) {
   process.stderr.write(`[cloud-sandbox-runner] ${msg}\n`);
 }
 
-// ── argv parse: `--workspace <id> -- <claude args...>` ────────────────────────
+// ── argv parse: `--workspace <id> [--mcp-config-b64 <b64>] -- <claude args...>` ─
+//
+// `--mcp-config-b64` (connectors D127) is a SHIM-OWN flag — it MUST be parsed
+// here in the pre-`--` loop; anything after `--` is handed to claude verbatim.
+// Its value is base64(`{"mcpServers":…}`), the workspace's connector-scoped MCP
+// servers that runTurn materializes to a /tmp file IN the sandbox and points
+// claude at with `--mcp-config … --strict-mcp-config` (never a host path).
 function parseArgv(argv) {
   let workspace = null;
+  let mcpConfigB64 = null;
   const claudeArgs = [];
   let i = 0;
   for (; i < argv.length; i++) {
@@ -129,13 +144,15 @@ function parseArgv(argv) {
     }
     if (a === "--workspace") {
       workspace = argv[++i];
+    } else if (a === "--mcp-config-b64") {
+      mcpConfigB64 = argv[++i];
     } else {
       // Unknown pre-`--` flag — ignore rather than crash a live turn.
       log(`ignoring unrecognized shim arg: ${a}`);
     }
   }
   for (; i < argv.length; i++) claudeArgs.push(argv[i]);
-  return { workspace, claudeArgs };
+  return { workspace, mcpConfigB64, claudeArgs };
 }
 
 // ── POSIX single-quote a shell token (for the in-sandbox bash -lc command) ────
@@ -331,11 +348,20 @@ function readFirstUserFrame() {
 }
 
 // ── The in-sandbox one-shot claude command (isolated HOME + clean cwd, D112) ──
-function inSandboxScript(claudeArgs, frameB64) {
-  const claudeCmd = ["claude", ...claudeArgs].map(shq).join(" ");
+//
+// When `mcpConfigB64` is present (the workspace has connector-scoped tools,
+// D127), the script also base64-decodes it to MCP_CONFIG_FILE in-VM and the
+// claude exec gains `--mcp-config <file> --strict-mcp-config` — the shim owns
+// ALL mcp argv; the Elixir builder emits none. When it is absent the script is
+// BYTE-IDENTICAL to the pre-D127 shape (no extra line, no mcp flags).
+function inSandboxScript(claudeArgs, frameB64, mcpConfigB64) {
+  const effectiveArgs = mcpConfigB64
+    ? [...claudeArgs, "--mcp-config", MCP_CONFIG_FILE, "--strict-mcp-config"]
+    : claudeArgs;
+  const claudeCmd = ["claude", ...effectiveArgs].map(shq).join(" ");
   // base64-decode the buffered frame into the turn file, then run claude reading
   // it as stdin. HOME + cwd are isolated so no operator hook frames leak.
-  return [
+  const lines = [
     `set -e`,
     // The npm GLOBAL bin holds the fallback-installed `claude`; keep it on PATH
     // even after we clamp HOME (login PATH is set before this runs, but the npm
@@ -347,8 +373,14 @@ function inSandboxScript(claudeArgs, frameB64) {
     `mkdir -p ${shq(SANDBOX_HOME)} ${shq(SANDBOX_CWD)}`,
     `cd ${shq(SANDBOX_CWD)}`,
     `printf '%s' ${shq(frameB64)} | base64 -d > ${shq(TURN_FILE)}`,
-    `exec ${claudeCmd} < ${shq(TURN_FILE)}`,
-  ].join("\n");
+  ];
+  // Materialize the connector-scoped MCP config in-VM (after the frame line,
+  // before the exec) — no credential rides it; the servers are HTTP descriptors.
+  if (mcpConfigB64) {
+    lines.push(`printf '%s' ${shq(mcpConfigB64)} | base64 -d > ${shq(MCP_CONFIG_FILE)}`);
+  }
+  lines.push(`exec ${claudeCmd} < ${shq(TURN_FILE)}`);
+  return lines.join("\n");
 }
 
 async function createSandbox(workspace) {
@@ -405,9 +437,9 @@ async function createSandbox(workspace) {
   return id;
 }
 
-async function runTurn(id, claudeArgs, frame) {
+async function runTurn(id, claudeArgs, frame, mcpConfigB64) {
   const frameB64 = Buffer.from(frame + "\n").toString("base64");
-  const script = inSandboxScript(claudeArgs, frameB64);
+  const script = inSandboxScript(claudeArgs, frameB64, mcpConfigB64);
 
   // Inject the key from the SHIM's own env ONLY (D110). A bogus key yields the
   // honest 401 `Invalid API key` result frame — the wire-level proof (D23).
@@ -427,7 +459,7 @@ async function runTurn(id, claudeArgs, frame) {
 }
 
 async function main() {
-  const { workspace, claudeArgs } = parseArgv(process.argv.slice(2));
+  const { workspace, mcpConfigB64, claudeArgs } = parseArgv(process.argv.slice(2));
   if (!workspace || workspace === "global") {
     log(`FATAL: missing/invalid --workspace (got ${JSON.stringify(workspace)}) — refusing to run an unattributed cloud turn`);
     process.exit(2);
@@ -457,7 +489,7 @@ async function main() {
   try {
     await acquireSlot();
     const id = await createSandbox(workspace);
-    exitCode = await runTurn(id, claudeArgs, frame);
+    exitCode = await runTurn(id, claudeArgs, frame, mcpConfigB64);
   } catch (e) {
     log(`turn failed: ${e.message}`);
     exitCode = 1;

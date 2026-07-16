@@ -36,14 +36,19 @@ defmodule Barkpark.Connectors.CloudPolicy do
   confinement: per the wave-12 live probe (below) the mode does not gate tools
   headless.
 
-  ## Knob 3 — the POLICY half only (D118)
+  ## Knob 3 — the POLICY answer AND the CONFIG emission (D118/D126/D128)
 
   `connector_tool_providers/1` composes `Barkpark.Connectors.Catalog.installs_for_workspace/1`
   with `Catalog.direction/1 == :tool` — the pure policy answer to "which tool
-  connectors may a Cloud turn reach". The WIRING of these into the sandbox launch
-  is owned by `task-0c8b9214b7962152` (the Go `bp mcp serve --tools <subset>`
-  flag) and `connectors-cloud-sandbox-mcp-tools` (in-sandbox mcpServers) — NOT
-  here. This module never touches the sandbox launch.
+  connectors may a Cloud turn reach". `cloud_mcp_servers/2` (W13) is the CONFIG
+  half: it composes that policy answer with the host-fetched bridge descriptors
+  into the exact `mcpServers` map the sandbox launch injects — `bridge answer ∩
+  local install truth`, HTTP-only, `headersHelper` stripped, credential-less.
+  This module OWNS the config; it still never touches the sandbox launch — the
+  WIRING of the map onto the argv (`--mcp-config-b64`) is
+  `ClaudeChat.cloud_build_args/2`'s, and the in-VM materialization is the shim's
+  (`scripts/connectors/cloud-sandbox-runner.mjs`). The Go `bp mcp serve --tools
+  <subset>` flag (`task-0c8b9214b7962152`) is the SEPARATE slice.
 
   ## Knob 5 — the unattended auto-approval policy (D120, WRITTEN, version-observed)
 
@@ -124,4 +129,70 @@ defmodule Barkpark.Connectors.CloudPolicy do
     |> Catalog.installs_for_workspace()
     |> Enum.filter(fn %{provider: provider} -> Catalog.direction(provider) == :tool end)
   end
+
+  @doc """
+  The `:cloud` `mcpServers` map — knob 3's CONFIG half (D126/D128). The pure
+  emission that composes knob 3's POLICY answer (`connector_tool_providers/1`,
+  the workspace's live tool-direction installs) with the host-fetched, INJECTED
+  bridge `descriptors`, and keeps ONLY a descriptor that clears BOTH gates:
+
+    * its provider has a live tool-direction install for `workspace` (defense in
+      depth — the emitted set is `bridge answer ∩ local install truth`, never the
+      bridge's word alone), and
+    * it is a well-formed `%{"type" => "http", "url" => <non-blank>}` descriptor
+      whose provider is a non-empty id other than the reserved `barkpark`.
+
+  A survivor emits `%{provider => %{"type" => "http", "url" => url}}`. The
+  `headersHelper` is STRIPPED (the host-loopback curl that fetches the PAT is
+  DEAD across the Firecracker boundary — D126) and NO credential ever rides this
+  map; entries ship credential-less this wave. Fail-closed: a malformed
+  descriptor, a non-http transport, a missing/blank url, the reserved name, or a
+  provider with no tool install is DROPPED (degrades the toolset, never poisons
+  it); an empty descriptor list or a garbage/nil workspace yields `%{}` WITHOUT
+  touching the installs read. `Map.put_new` mirrors `ClaudeChat.mcp_config/2` so a
+  rogue descriptor can never SHADOW an already-emitted provider.
+
+  Pure over `(workspace-installs, descriptors)` — the emission is unit-testable
+  by INJECTING descriptors, no live bridge. The WIRING of this map onto the
+  sandbox launch (`--mcp-config-b64`) lives in `ClaudeChat.cloud_build_args/2`
+  and the shim; this module only emits the config.
+  """
+  @spec cloud_mcp_servers(term(), [map()]) :: %{optional(String.t()) => map()}
+  def cloud_mcp_servers(_workspace, []), do: %{}
+
+  def cloud_mcp_servers(workspace, descriptors) when is_list(descriptors) do
+    installed =
+      workspace
+      |> connector_tool_providers()
+      |> MapSet.new(& &1.provider)
+
+    Enum.reduce(descriptors, %{}, fn descriptor, acc ->
+      case cloud_tool_server_entry(descriptor, installed) do
+        {name, entry} -> Map.put_new(acc, name, entry)
+        :skip -> acc
+      end
+    end)
+  end
+
+  def cloud_mcp_servers(_workspace, _descriptors), do: %{}
+
+  # One bridge descriptor -> one `{provider, %{"type","url"}}` entry, or `:skip`.
+  # Fail-closed (the `mcp_config/2` fold idiom, with `headersHelper` STRIPPED): the
+  # provider must be a non-empty, non-`barkpark` id that ALSO has a tool-direction
+  # install in `installed`; the transport must be `http`; the url a non-blank
+  # binary. Anything else is dropped.
+  defp cloud_tool_server_entry(
+         %{"provider" => provider, "type" => "http", "url" => url},
+         installed
+       )
+       when is_binary(provider) and provider != "" and provider != "barkpark" and
+              is_binary(url) and url != "" do
+    if MapSet.member?(installed, provider) do
+      {provider, %{"type" => "http", "url" => url}}
+    else
+      :skip
+    end
+  end
+
+  defp cloud_tool_server_entry(_descriptor, _installed), do: :skip
 end

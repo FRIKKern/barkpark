@@ -133,8 +133,17 @@ contract — only the executable changes.
 ### `cloud-sandbox-runner.mjs`
 
 The **shim** the `:cloud` profile spawns (dependency-free Node over the `vercel`
-CLI — not the SDK this increment). Invoked `--workspace <id> -- <claude args…>`:
+CLI — not the SDK this increment). Invoked
+`--workspace <id> [--mcp-config-b64 <b64>] -- <claude args…>`:
 
+0. Parses `--mcp-config-b64` (D127, knob 3's CONFIG half) — a SHIM-OWN flag
+   `cloud_build_args/2` emits ONLY when the workspace has ≥1 connected tool
+   connector (GitHub/Linear) whose descriptor survives
+   `CloudPolicy.cloud_mcp_servers/2`. Its value is base64(`{"mcpServers":…}`), the
+   workspace's connector-scoped HTTP MCP servers (`{type:http,url}`, credential-less,
+   `headersHelper` stripped). With 0 tool connectors the flag is absent and the
+   argv is byte-identical to W12. The Elixir argv NEVER carries `--mcp-config`,
+   `--strict-mcp-config`, or a host path — those are shim-owned (step 4).
 1. Buffers the FIRST `{"type":"user",…}` frame from its own stdin (interactive
    stdin INTO a sandbox is impossible — D108; the shim's own local stdin works).
 2. `vercel sandbox create` — mandatory `--timeout`, `--scope guerrilla` (Pro team;
@@ -145,10 +154,17 @@ CLI — not the SDK this increment). Invoked `--workspace <id> -- <claude args�
    `npm i -g @anthropic-ai/claude-code`, which needs the npm registry, so the
    egress lock rides the snapshot, not this path (the Firecracker no-host-access
    boundary is intrinsic to every sandbox regardless).
-3. Injects the frame base64-embedded to `/tmp/turn.jsonl`.
+3. Injects the frame base64-embedded to `/tmp/turn.jsonl`, and — when
+   `--mcp-config-b64` was present — decodes it to `/tmp/bp-cloud-mcp.json` IN the
+   sandbox (never a host path).
 4. One-shot `claude <claude args> < /tmp/turn.jsonl` with an isolated HOME + clean
    cwd (D112 — a dirty HOME/cwd leaks SessionStart hook frames into the customer
-   NDJSON). `ANTHROPIC_API_KEY` is injected from the SHIM's OWN env only (never
+   NDJSON). When an MCP config was materialized, the exec gains `--mcp-config
+   /tmp/bp-cloud-mcp.json --strict-mcp-config` (knob 3's tools reach the turn;
+   `--strict-mcp-config` means ONLY these servers, no host merge). The W12 deny
+   belt is untouched — `--tools ""` + `--disallowedTools` still strip every host
+   built-in (Bash/Edit/Write/…), so knob 3 adds connector tools WITHOUT re-opening
+   host reach. `ANTHROPIC_API_KEY` is injected from the SHIM's OWN env only (never
    `Barkpark.Secrets`, never the connector seal — D110). stdout NDJSON streams
    verbatim; diagnostics go to stderr.
 5. Teardown (an Elixir Port has NO OS relationship to a remote microVM — D111):
