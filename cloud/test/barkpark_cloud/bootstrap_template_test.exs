@@ -134,6 +134,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert body["known_templates"] == [
                "blog-starter",
                "place-directory",
+               "search-starter",
                "website-starter"
              ]
 
@@ -328,9 +329,15 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
   ## Catalog mirror
 
   test "known_templates/0 mirrors the Go worker's embedded catalog (sorted)" do
-    # The Go side locks the same list in TestCatalogCarriesTheThreeTemplates
+    # The Go side locks the same list in TestCatalogCarriesTheShippedTemplates
     # (internal/provisioner/catalog) — change BOTH together.
-    assert Registry.known_templates() == ["blog-starter", "place-directory", "website-starter"]
+    assert Registry.known_templates() == [
+             "blog-starter",
+             "place-directory",
+             "search-starter",
+             "website-starter"
+           ]
+
     assert Registry.known_template?("place-directory")
     refute Registry.known_template?("wordpress")
     refute Registry.known_template?(nil)
