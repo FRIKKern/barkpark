@@ -159,18 +159,27 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def sandbox_runner, do: Keyword.get(config(), :sandbox_runner, @default_sandbox_runner)
 
   @doc ~S"""
-  The Cloud-profile argv (connectors D109) — the shim's OWN argv. Structure:
+  The Cloud-profile argv (connectors D109/D127) — the shim's OWN argv. Structure:
 
-      ["--workspace", <workspace_id>, "--" | <claude args>]
+      ["--workspace", <workspace_id>, ("--mcp-config-b64", <b64>)?, "--" | <claude args>]
 
   The shim buffers the first user frame from its stdin, creates an isolated
   sandbox tagged with the workspace, and runs `claude <claude args> < turn.jsonl`
   inside it. The claude argv KEEPS `--input-format/--output-format stream-json`,
   `--include-partial-messages`, `--verbose`, `--permission-mode <mode>`; it DROPS
-  `--permission-prompt-tool stdio` (no channel answers asks one-shot) and ALL mcp
-  args (a host-written `--mcp-config` path hard-fails in-sandbox with zero
-  output). It **structurally never** emits `--allow-dangerously-skip-permissions`
-  — bypass is unreachable from this builder (a down-payment on D24 knob 1).
+  `--permission-prompt-tool stdio` (no channel answers asks one-shot) and ALL
+  HOST mcp args (a host-written `--mcp-config` PATH hard-fails in-sandbox with
+  zero output). It **structurally never** emits
+  `--allow-dangerously-skip-permissions` — bypass is unreachable from this
+  builder (a down-payment on D24 knob 1).
+
+  Knob 3's CONFIG wiring (D126/D127) rides a SHIM-OWN flag: when the workspace
+  has ≥1 tool-direction install whose bridge descriptor survives
+  `CloudPolicy.cloud_mcp_servers/2`, this builder emits ONE `--mcp-config-b64
+  <base64(mcpServers json)>` pair BEFORE the `--` separator (0 installs ⇒ the
+  argv is byte-identical to W12). The Elixir argv itself NEVER carries
+  `--mcp-config`/`--strict-mcp-config`/a host path — the shim decodes the b64 to
+  an in-VM /tmp file and appends those to the claude exec.
 
   The D24 permission reversal (D116/D117) rides here: the mode is CLAMPED through
   `Barkpark.Connectors.CloudPolicy` (bypass/unknown → `"plan"`) and the argv
@@ -186,7 +195,36 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec cloud_build_args(String.t(), map()) :: [String.t()]
   def cloud_build_args(mode, session_opts \\ %{}) do
     workspace_id = cloud_workspace_id!(session_opts)
-    ["--workspace", workspace_id, "--"] ++ cloud_claude_args(mode)
+
+    ["--workspace", workspace_id] ++
+      cloud_mcp_config_args(session_opts) ++
+      ["--"] ++
+      cloud_claude_args(mode)
+  end
+
+  # The shim-own `--mcp-config-b64 <b64>` flag (knob 3's CONFIG wiring, D127) —
+  # emitted BEFORE the `--` separator so the SHIM (never claude) owns it, and ONLY
+  # when the workspace has ≥1 tool-direction install whose host-fetched bridge
+  # descriptor survives `CloudPolicy.cloud_mcp_servers/2`'s filter. With 0
+  # surviving servers the argv is BYTE-IDENTICAL to W12 (no flag at all). The b64
+  # payload is the full `%{"mcpServers" => …}` document; the shim decodes it to a
+  # /tmp file IN-VM and appends `--mcp-config <path> --strict-mcp-config` to the
+  # claude exec — so the Elixir argv NEVER carries `--mcp-config`,
+  # `--strict-mcp-config`, or a host path (those are shim-owned). Descriptors are
+  # host-fetched into `session_opts[:tool_descriptors]` (fail-soft to []) by the
+  # Session; CloudPolicy cross-checks them against the workspace's live installs.
+  defp cloud_mcp_config_args(session_opts) do
+    workspace = Map.get(session_opts, :workspace_id)
+    descriptors = Map.get(session_opts, :tool_descriptors, [])
+
+    case CloudPolicy.cloud_mcp_servers(workspace, descriptors) do
+      servers when map_size(servers) > 0 ->
+        json = Jason.encode!(%{"mcpServers" => servers})
+        ["--mcp-config-b64", Base.encode64(json)]
+
+      _ ->
+        []
+    end
   end
 
   # The claude argv that runs INSIDE the sandbox (D109/D116/D117). Never derived
@@ -997,6 +1035,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             session_opts
         end
 
+      # For a :cloud turn, fetch this workspace's tool-connector descriptors
+      # HOST-side (the SAME fail-soft bridge idiom as setup_mcp) and thread them
+      # into session_opts so `cloud_build_args/2` can emit the scoped
+      # `--mcp-config-b64` (knob 3's CONFIG half, D126/D127). Self-hosted turns
+      # are untouched — their descriptors ride the per-session mcp-config FILE
+      # instead. No bridge / no workspace ⇒ [] ⇒ argv byte-identical to W12.
+      session_opts = maybe_thread_cloud_tool_descriptors(session_opts)
+
       {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
 
       case System.find_executable(exe) do
@@ -1356,6 +1402,23 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     defp tool_descriptors_for(_), do: []
+
+    # Thread the workspace's tool-connector descriptors into session_opts for a
+    # :cloud turn only (knob 3 CONFIG half, D126/D127) — the SAME host-side,
+    # fail-soft `tool_descriptors_for/1` fetch the self-hosted mcp-config uses,
+    # keyed on the cloud turn's session-opts workspace_id (D110 guarantees it is
+    # present). `cloud_build_args/2` reads `:tool_descriptors` and CloudPolicy
+    # cross-checks them against the workspace's live installs. A self-hosted turn
+    # is returned untouched (its descriptors ride the mcp-config file); a cloud
+    # turn with no bridge/workspace gets `[]` ⇒ argv byte-identical to W12.
+    defp maybe_thread_cloud_tool_descriptors(session_opts) do
+      if ClaudeChat.execution_profile() == :cloud do
+        descriptors = tool_descriptors_for(Map.get(session_opts, :workspace_id))
+        Map.put(session_opts, :tool_descriptors, descriptors)
+      else
+        session_opts
+      end
+    end
 
     # Serialize the mcp-config to its per-session temp file. Fail-soft to nil
     # (the MCP lane is lost, the spawn-env lane keeps the SAME token): the

@@ -894,11 +894,19 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   end
 
   describe "execution profile — cloud (connectors D108/D109/D110)" do
-    test ":cloud returns the shim runner + the D109 cloud argv (workspace principal in argv)" do
+    test ":cloud with 0 tool installs returns the shim runner + a BYTE-IDENTICAL W13 argv (D127)" do
+      # The 0-install row of the D130 argv table: no `:tool_descriptors` in
+      # session_opts ⇒ CloudPolicy emits `%{}` ⇒ NO `--mcp-config-b64` flag ⇒ the
+      # argv is byte-identical to W12. The ≥1-install rows (flag present, scoped
+      # map) live in the DB-backed "cloud mcp-config wiring" describe below and in
+      # cloud_policy_test.exs's 0/1/2-install argv table.
       put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
 
       {exe, args} = ClaudeChat.command("plan", %{workspace_id: "ws-42"})
       assert exe == "cloud-sandbox-runner"
+
+      # No connector-scoped MCP flag on the 0-install path.
+      refute "--mcp-config-b64" in args
 
       # The shim's OWN argv: `--workspace <id> --` then the claude args.
       assert Enum.take(args, 3) == ["--workspace", "ws-42", "--"]
@@ -1064,6 +1072,141 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       # The host path's only --disallowedTools is the plan-mode Workflow road-block
       # (a single token), never the cloud deny set.
       refute "Bash" in host
+    end
+  end
+
+  # The knob-3 CONFIG half at the ARGV layer (connectors D126/D127/D128/D130):
+  # with ≥1 tool-direction install, `cloud_build_args/2` emits ONE
+  # `--mcp-config-b64` pair BEFORE `--` whose decode is EXACTLY the workspace's
+  # connector HTTP servers. REAL installs (raw SQL — the bridge's writer, D54) +
+  # INJECTED bridge descriptors (no live bridge). The W12 deny belt is re-asserted
+  # intact in every row — knob 3 ADDS connector tools, never re-opens host reach.
+  describe "cloud mcp-config wiring — knob 3 CONFIG half (connectors D126/D127/D128/D130)" do
+    alias Barkpark.Connectors.CloudPolicy
+
+    setup do
+      owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: true)
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+      ws = Barkpark.TenancyFixtures.create_workspace!("cloud-mcp-argv-ws")
+      {:ok, ws: ws}
+    end
+
+    # The bridge is production's only writer; tests write raw SQL (D54).
+    defp insert_install(provider, key, ws_id) do
+      Barkpark.Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ($1, $2, $3, $4, $5, now())
+        """,
+        [provider, key, ws_id, "SEALED-CREDENTIAL-BLOB", "SEALED-CHAT-TOKEN-BLOB"]
+      )
+    end
+
+    # A bridge descriptor as fetch_tool_descriptors/1 returns it — WITH a
+    # headersHelper the cloud emission must STRIP (host-loopback curl is dead
+    # across the Firecracker boundary — D126).
+    defp tool_descriptor(provider, url) do
+      %{
+        "provider" => provider,
+        "type" => "http",
+        "url" => url,
+        "headersHelper" => "curl -sS http://127.0.0.1:4020/connectors/tool-headers/#{provider}"
+      }
+    end
+
+    # `--mcp-config-b64` rides BEFORE the `--` separator (shim-own); assert that,
+    # then decode the base64 payload to the mcpServers document.
+    defp mcp_flag_value(args) do
+      sep = Enum.find_index(args, &(&1 == "--"))
+      idx = Enum.find_index(args, &(&1 == "--mcp-config-b64"))
+      assert is_integer(idx) and idx < sep, "--mcp-config-b64 must ride pre-`--`"
+      args |> Enum.at(idx + 1) |> Base.decode64!() |> Jason.decode!()
+    end
+
+    defp assert_w12_belt_intact(args) do
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--tools", ""])
+
+      disallowed = args |> Enum.drop_while(&(&1 != "--disallowedTools")) |> Enum.drop(1)
+      assert disallowed == CloudPolicy.cloud_disallowed_tools()
+
+      settings_idx = Enum.find_index(args, &(&1 == "--settings"))
+
+      deny =
+        args |> Enum.at(settings_idx + 1) |> Jason.decode!() |> get_in(["permissions", "deny"])
+
+      assert deny == CloudPolicy.cloud_disallowed_tools()
+    end
+
+    # The Elixir argv NEVER carries the shim-owned host-path mcp flags (D127) —
+    # even when it emits the b64 config, --mcp-config/--strict-mcp-config are the
+    # shim's job in-VM.
+    defp assert_no_host_mcp_path(args) do
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+    end
+
+    test "1 tool install — exactly that provider's HTTP server, headersHelper stripped, belt intact",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      # A github descriptor (installed) AND a linear descriptor (NOT installed for
+      # this ws): only github survives the install cross-check.
+      descriptors = [
+        tool_descriptor("github", "https://api.githubcopilot.com/mcp/"),
+        tool_descriptor("linear", "https://mcp.linear.app/mcp")
+      ]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      assert mcp_flag_value(args) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
+               }
+             }
+
+      assert_w12_belt_intact(args)
+      assert_no_host_mcp_path(args)
+    end
+
+    test "2 tool installs (github + linear) — both HTTP servers, nothing else, belt intact",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("linear", "team-x", ws.id)
+
+      descriptors = [
+        tool_descriptor("github", "https://api.githubcopilot.com/mcp/"),
+        tool_descriptor("linear", "https://mcp.linear.app/mcp")
+      ]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      assert mcp_flag_value(args) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"},
+                 "linear" => %{"type" => "http", "url" => "https://mcp.linear.app/mcp"}
+               }
+             }
+
+      assert_w12_belt_intact(args)
+      assert_no_host_mcp_path(args)
+    end
+
+    test "a channel install never yields a tool server (github descriptor, telegram install)",
+         %{ws: ws} do
+      insert_install("telegram", "111:aaa", ws.id)
+
+      # A github descriptor is injected but github has NO install for this ws ⇒
+      # dropped ⇒ 0 servers ⇒ argv byte-identical to W12 (no flag).
+      descriptors = [tool_descriptor("github", "https://api.githubcopilot.com/mcp/")]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      refute "--mcp-config-b64" in args
+      assert Enum.take(args, 3) == ["--workspace", ws.id, "--"]
     end
   end
 
