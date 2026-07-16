@@ -105,6 +105,98 @@ func TestScaffyValidateDirectoryGlobsScaffyFiles(t *testing.T) {
 	}
 }
 
+// seedRepoAwareTree plants the token-free anchors the add-widget green
+// fixture (scaffyGreenFile) targets, so `validate --repo` resolves them
+// against a scratch tree. The js REPLACE anchor is {{.CountBefore}}-bearing
+// and stays token-skipped without --var.
+func seedRepoAwareTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, content string) {
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/widgets/registry.go", "package widgets\n\nfunc init() {\n\tregistry[\"heading\"] = headingWidget{}\n}\n")
+	write("web/widgets/index.css", ".bp-heading { display: block; }\n")
+	write("api/config/config.exs", "import Config\n\nconfig :barkpark, Oban,\n  crontab: [\n       {\"* * * * *\", Barkpark.Workers.Tail}\n  ]\n")
+	write("js/widgets/widgets.test.ts", "test(\"cases\", () => {\n  expect(cases).toHaveLength(42)\n})\n")
+	return root
+}
+
+// TestScaffyValidateRepoCleanReportsSkipped: --repo against a tree carrying
+// the anchors verifies the token-free ones, exits 0, and the summary names
+// the token-bearing anchor it skipped (never a vacuous green).
+func TestScaffyValidateRepoCleanReportsSkipped(t *testing.T) {
+	root := seedRepoAwareTree(t)
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "validate", "--repo", root, scaffyGreenFile)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "3 anchor(s) verified") {
+		t.Errorf("summary should report 3 verified anchors:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "1 token-bearing anchor(s) skipped") {
+		t.Errorf("summary must name the skipped token anchor:\n%s", stdout)
+	}
+}
+
+// TestScaffyValidateRepoDriftReds: a drifted anchor (config.exs missing the
+// cron tuple) reds with R-002 and exit 5.
+func TestScaffyValidateRepoDriftReds(t *testing.T) {
+	root := seedRepoAwareTree(t)
+	if err := os.WriteFile(filepath.Join(root, "api/config/config.exs"), []byte("import Config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runScaffyTest(t, globals{}, "", "validate", "--repo", root, scaffyGreenFile)
+	if code != exitValidation {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s", code, exitValidation, stdout)
+	}
+	if !strings.Contains(stdout, "R-002") {
+		t.Errorf("want R-002 anchor-not-found finding:\n%s", stdout)
+	}
+}
+
+// TestScaffyValidateRepoWithVarsChecksTokens: supplying the full --var set
+// resolves the token-bearing anchor too — nothing skipped.
+func TestScaffyValidateRepoWithVarsChecksTokens(t *testing.T) {
+	root := seedRepoAwareTree(t)
+	code, stdout, stderr := runScaffyTest(t, globals{}, "", "validate", "--repo", root, scaffyGreenFile,
+		"--var", "WidgetName=Timeline", "--var", "Ts=20260716100000", "--var", "CountBefore=42", "--var", "CountAfter=43")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "4 anchor(s) verified") {
+		t.Errorf("summary should report all 4 anchors verified:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "skipped") {
+		t.Errorf("no anchor should be skipped when vars are supplied:\n%s", stdout)
+	}
+}
+
+// TestScaffyValidateVarsWithoutRepoUsageError: --var without --repo is a
+// usage error (text-level validate takes no vars).
+func TestScaffyValidateVarsWithoutRepoUsageError(t *testing.T) {
+	code, _, stderr := runScaffyTest(t, globals{}, "", "validate", "--var", "K=V", scaffyGreenFile)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d; stderr:\n%s", code, exitUsage, stderr)
+	}
+}
+
+// TestScaffyValidateRepoBadVarsUsageError: a --var set that violates the D37
+// contract surfaces as a usage error (exit 2), like run.
+func TestScaffyValidateRepoBadVarsUsageError(t *testing.T) {
+	root := seedRepoAwareTree(t)
+	code, _, stderr := runScaffyTest(t, globals{}, "", "validate", "--repo", root, scaffyGreenFile, "--var", "Nope=x")
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d; stderr:\n%s", code, exitUsage, stderr)
+	}
+}
+
 func TestScaffyValidateMissingPathExitsFour(t *testing.T) {
 	code, _, stderr := runScaffyTest(t, globals{}, "", "validate", "no/such/path.scaffy")
 	if code != exitNotFound {
@@ -288,7 +380,7 @@ func TestScaffyHelpTexts(t *testing.T) {
 		want []string
 	}{
 		{nil, []string{"usage: bp scaffy <validate|fmt|run|remove>", "validate <path>...", "fmt [--check] <path>...", "run <command.scaffy> --var K=V...", "remove <command.scaffy> --var K=V...", "examples:", "exit codes:", "SCAFFY-DRIFT"}},
-		{[]string{"validate"}, []string{"usage: bp scaffy validate <path>...", "file:line: RULE-ID message", "exit codes:", "-o json"}},
+		{[]string{"validate"}, []string{"usage: bp scaffy validate [--repo <root>] [--var K=V...] <path>...", "file:line: RULE-ID message", "--repo <root>", "R-001 missing-file", "exit codes:", "-o json"}},
 		{[]string{"fmt"}, []string{"usage: bp scaffy fmt [--check] <path>...", "--check", "exit codes:", "fixpoint"}},
 		{[]string{"run"}, []string{"usage: bp scaffy run <command.scaffy> --var K=V...", "--var K=V", "--dry-run", "duration_ms", "examples:", "exit codes:", "5  validation findings"}},
 		{[]string{"remove"}, []string{"usage: bp scaffy remove <command.scaffy> --var K=V...", "RECEIPT REPLAY", "D36", "--dry-run", "exit codes:", "SCAFFY-DRIFT"}},

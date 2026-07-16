@@ -5,9 +5,11 @@
 //
 // Doctrine: the opposite of pdrender/mermaid.go's silent-skip — every
 // violation is reported as a Finding ("file:line: RULE-ID message")
-// with a fix hint, never skipped. validate is pure text-level (D27):
-// no repo access, no anchor-exists checks (those are W3-adjacent).
-// No engine lives here — apply/remove is Wave 3.
+// with a fix hint, never skipped. validate is text-level by default
+// (D27): no repo access. The opt-in repo-aware layer (RepoCheck, behind
+// `validate --repo`) adds the anchor-exists / occurrence-count checks D5
+// promises — reported with the R-xxx rule IDs (repocheck.go). The
+// forward/replay engine (Run/Remove) is apply.go / remove.go.
 //
 // Public API (the CLI slice builds against exactly this):
 //
@@ -15,6 +17,7 @@
 //	Lint(cmd)                   []Finding               // the lint catalog over one AST
 //	ValidateFile(filename, src) []Finding               // Parse + Lint, sorted
 //	Format(src)                 ([]byte, error)         // canonical form; Format∘Format == Format
+//	RepoCheck(path, src, opts)  (*RepoCheckResult, err) // opt-in anchor drift vs the tree (D5)
 //
 // Format canonicalizes STRUCTURE only: keyword lines are single-spaced
 // and flush-left (VARIABLE declarations two-space indented, list commas

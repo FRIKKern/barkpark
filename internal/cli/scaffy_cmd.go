@@ -89,15 +89,24 @@ func runScaffy(out *writer, g globals, args []string) int {
 	}
 }
 
-// runScaffyValidate is `bp scaffy validate <path>...`. Each path is a .scaffy
-// file or a directory (a directory validates its *.scaffy files, sorted,
-// non-recursive). Findings print compiler-style "file:line: RULE-ID message"
-// followed by an indented fix-hint line; the exit code is 5 on ANY finding
-// (D27), 0 when every file is clean.
+// runScaffyValidate is `bp scaffy validate [--repo <root>] [--var K=V...]
+// <path>...`. Each path is a .scaffy file or a directory (a directory
+// validates its *.scaffy files, sorted, non-recursive). Findings print
+// compiler-style "file:line: RULE-ID message" followed by an indented
+// fix-hint line; the exit code is 5 on ANY finding (D27), 0 when every file
+// is clean.
+//
+// --repo <root> turns on the opt-in repo-aware layer (D5): after a file
+// validates text-clean, scaffy.RepoCheck verifies every IN-op's target file
+// exists under <root> and every structural anchor resolves there — uniquely
+// where the matcher demands it. Substitution-dependent anchors ({{.tokens}})
+// are checked only when the full --var set is supplied (repeatable, like
+// run); without vars they are skipped and the count is reported — never a
+// vacuous green.
 func runScaffyValidate(out *writer, args []string) int {
-	paths, badFlag := splitScaffyArgs(args, nil)
-	if badFlag != "" {
-		return usageErrf(out, func() { printScaffyValidateHelp(out) }, "unknown validate flag %q", badFlag)
+	paths, repo, vars, uerr := parseScaffyValidateArgs(args)
+	if uerr != "" {
+		return usageErrf(out, func() { printScaffyValidateHelp(out) }, "%s", uerr)
 	}
 	if len(paths) == 0 {
 		return usageErrf(out, func() { printScaffyValidateHelp(out) }, "scaffy validate needs at least one <path>")
@@ -109,20 +118,44 @@ func runScaffyValidate(out *writer, args []string) int {
 	}
 
 	var findings []scaffy.Finding
+	skippedToken := 0
+	anchorsOK := 0
 	for _, f := range files {
 		src, rerr := os.ReadFile(f)
 		if rerr != nil {
 			return useError(out, "io", "scaffy validate: "+rerr.Error(), exitNotFound)
 		}
-		findings = append(findings, scaffy.ValidateFile(f, src)...)
+		fileFindings := scaffy.ValidateFile(f, src)
+		findings = append(findings, fileFindings...)
+		// Repo-aware checks run only on a text-clean file — anchors on a
+		// malformed AST are noise (D5). A bad --var set is a usage error.
+		if repo != "" && len(fileFindings) == 0 {
+			res, cerr := scaffy.RepoCheck(f, src, scaffy.RepoCheckOptions{RepoRoot: repo, Vars: vars})
+			if cerr != nil {
+				var varErr *scaffy.VarError
+				if errors.As(cerr, &varErr) {
+					return usageErrf(out, func() { printScaffyValidateHelp(out) }, "scaffy validate --var: %v", cerr)
+				}
+				return useError(out, "io", "scaffy validate: "+cerr.Error(), exitNotFound)
+			}
+			findings = append(findings, res.Findings...)
+			skippedToken += res.SkippedToken
+			anchorsOK += res.AnchorsOK
+		}
 	}
 
 	if out.machineOut() {
-		out.emitStructured(map[string]any{
+		env := map[string]any{
 			"ok":       len(findings) == 0,
 			"files":    len(files),
 			"findings": scaffyFindingsJSON(findings),
-		})
+		}
+		if repo != "" {
+			env["repo"] = repo
+			env["anchors_ok"] = anchorsOK
+			env["anchors_skipped_token"] = skippedToken
+		}
+		out.emitStructured(env)
 	} else {
 		for _, f := range findings {
 			out.outf("%s", f.String())
@@ -135,12 +168,79 @@ func runScaffyValidate(out *writer, args []string) int {
 		} else {
 			out.outf("%d finding(s) across %d file(s)", len(findings), len(files))
 		}
+		// The repo-aware summary line — always printed under --repo, so a
+		// clean run still names the anchors verified and the token-bearing
+		// anchors skipped for want of --var (never a silent green).
+		if repo != "" {
+			line := fmt.Sprintf("repo: %d anchor(s) verified against %s", anchorsOK, repo)
+			if skippedToken > 0 {
+				line += fmt.Sprintf(", %d token-bearing anchor(s) skipped (supply --var to check them)", skippedToken)
+			}
+			out.outf("%s", line)
+		}
 	}
 
 	if len(findings) > 0 {
 		return exitValidation
 	}
 	return exitOK
+}
+
+// parseScaffyValidateArgs parses `bp scaffy validate`'s argument shape:
+// positional paths plus the opt-in --repo <root> (or --repo=<root>) and a
+// repeatable --var K=V (or --var=K=V, split on the FIRST = so values may
+// carry =). A dangling --repo/--var, an empty var key, a missing =, a
+// duplicate var key, a second --repo, or any other flag is a usage error.
+func parseScaffyValidateArgs(args []string) (paths []string, repo string, vars map[string]string, errMsg string) {
+	vars = map[string]string{}
+	repoSet := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--repo":
+			if i+1 >= len(args) {
+				return nil, "", nil, "--repo needs a <root> argument"
+			}
+			i++
+			if repoSet {
+				return nil, "", nil, "duplicate --repo"
+			}
+			repo, repoSet = args[i], true
+		case strings.HasPrefix(a, "--repo="):
+			if repoSet {
+				return nil, "", nil, "duplicate --repo"
+			}
+			repo, repoSet = strings.TrimPrefix(a, "--repo="), true
+		case a == "--var", strings.HasPrefix(a, "--var="):
+			var kv string
+			if a == "--var" {
+				if i+1 >= len(args) {
+					return nil, "", nil, "--var needs a K=V argument"
+				}
+				i++
+				kv = args[i]
+			} else {
+				kv = strings.TrimPrefix(a, "--var=")
+			}
+			eq := strings.Index(kv, "=")
+			if eq <= 0 {
+				return nil, "", nil, fmt.Sprintf("malformed --var %q — expected K=V", kv)
+			}
+			k, v := kv[:eq], kv[eq+1:]
+			if _, dup := vars[k]; dup {
+				return nil, "", nil, fmt.Sprintf("duplicate --var %q", k)
+			}
+			vars[k] = v
+		case strings.HasPrefix(a, "-") && a != "-":
+			return nil, "", nil, fmt.Sprintf("unknown validate flag %q", a)
+		default:
+			paths = append(paths, a)
+		}
+	}
+	if len(vars) > 0 && !repoSet {
+		return nil, "", nil, "--var only applies with --repo (text-level validate takes no vars)"
+	}
+	return paths, repo, vars, ""
 }
 
 // runScaffyFmt is `bp scaffy fmt [--check] <path>...`. Without --check it
@@ -733,28 +833,46 @@ exit codes:
 }
 
 func printScaffyValidateHelp(out *writer) {
-	out.outf(`usage: bp scaffy validate <path>...
+	out.outf(`usage: bp scaffy validate [--repo <root>] [--var K=V...] <path>...
 
 Parse + lint .scaffy command files against the frozen rule catalog (E-xxx
 error / W-xxx warn / P-xxx parse — see internal/scaffy doc.go). Each path is
-a .scaffy file or a directory (validates its *.scaffy files). Pure text-level
-(D27): no repo access, no anchor checks. Every finding prints as
+a .scaffy file or a directory (validates its *.scaffy files). Text-level by
+default (D27): no repo access. Every finding prints as
 
   file:line: RULE-ID message
     hint: the likely fix
 
--o json|-o yaml emits {ok, files, findings:[{file,line,rule,message,hint}]}.
+--repo <root> adds the opt-in repo-aware layer (D5): after a file validates
+text-clean, every IN-op's target file must exist under <root> and every
+structural anchor must resolve there — uniquely for REPLACE/REMOVE. Drift is
+reported with repo rule IDs (R-001 missing-file / R-002 anchor-not-found /
+R-003 anchor-ambiguous). A closing summary always names the anchors verified
+and the token-bearing anchors skipped.
+
+flags:
+  --repo <root>  check anchors against the working tree rooted at <root>
+  --var K=V      resolve one declared VARIABLE so its {{.token}}-bearing
+                 anchors can be checked (repeatable; requires the full
+                 declared set, like run). Only valid with --repo; without
+                 it, token-bearing anchors are skipped and counted.
+
+-o json|-o yaml emits {ok, files, findings:[{file,line,rule,message,hint}]}
+(plus repo, anchors_ok, anchors_skipped_token under --repo).
 
 examples:
   bp scaffy validate scaffy/commands/
   bp scaffy validate add-plugin.scaffy add-migration.scaffy
+  bp scaffy validate --repo . scaffy/commands/          # anchor drift sweep
+  bp scaffy validate --repo . scaffy/commands/add-oban-worker.scaffy \
+      --var WorkerName=Foo --var worker_name=foo        # check token anchors
   bp scaffy validate scaffy/commands/ -o json | jq '.findings'
 
 exit codes:
   0  every file clean
   2  usage error
   4  missing path / unreadable file
-  5  one or more findings`)
+  5  one or more findings (text or repo-aware drift)`)
 }
 
 func printScaffyFmtHelp(out *writer) {
