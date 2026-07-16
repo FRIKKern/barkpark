@@ -1,0 +1,45 @@
+---
+// The landing: full-viewport corpus graph with the live-search bar floating
+// over it — the flagship experience, statically shipped. The graph corpus is
+// BAKED at build (public/graph.json via the endpoint below); search goes
+// browser-direct (WS live when configured, HTTP otherwise).
+import Base from '../layouts/Base.astro'
+import GraphIsland from '../components/GraphIsland'
+import SearchIsland from '../components/SearchIsland'
+import { allDocs, env } from '../lib/bp'
+
+const docs = await allDocs()
+const rootId = docs[0]?._id
+const base = Astro.url.pathname.endsWith('/') ? import.meta.env.BASE_URL : import.meta.env.BASE_URL
+const pub = {
+  apiUrl: env.apiUrl,
+  dataset: env.dataset,
+  workspace: env.workspace || 'default',
+  project: env.project || 'default',
+  wsToken: (process.env.BARKPARK_PUBLIC_WS_TOKEN || '').trim(),
+  wsUrl: (process.env.BARKPARK_PUBLIC_WS_URL || '').trim(),
+}
+const eyebrow = (process.env.PUBLIC_SITE_EYEBROW || 'Search').trim()
+const title = (process.env.PUBLIC_SITE_TITLE || 'Search everything.').trim()
+---
+
+<Base title={title} docId={rootId}>
+  <main class="hero">
+    <div class="graph-slot"><GraphIsland client:only="react" base={base} /></div>
+    <section class="panel">
+      <p class="eyebrow">{eyebrow}</p>
+      <h1>{title}</h1>
+      <SearchIsland client:load base={base} {...pub} />
+      <p class="count">{docs.length} documents · statically built · updated {env.contentRev}</p>
+    </section>
+  </main>
+</Base>
+
+<style>
+  .hero { position: relative; min-height: 100vh; display: grid; place-items: center; overflow: hidden; }
+  .graph-slot { position: absolute; inset: 0; opacity: .9; }
+  .panel { position: relative; text-align: center; padding: 32px; border-radius: 16px; backdrop-filter: blur(2px); }
+  .eyebrow { letter-spacing: .2em; text-transform: uppercase; font-size: 12px; opacity: .6; margin: 0 0 4px; }
+  h1 { margin: 0 0 20px; font-size: clamp(28px, 5vw, 44px); }
+  .count { margin-top: 18px; font-size: 12.5px; opacity: .55; }
+</style>

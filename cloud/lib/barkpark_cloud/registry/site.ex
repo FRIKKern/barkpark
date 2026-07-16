@@ -274,7 +274,7 @@ defmodule BarkparkCloud.Registry.Site do
   # search-template W2 (D8): the template slug indexes a filesystem path on the
   # box (templates/<slug>), so it is a CLOSED set — mirror of the box engine's
   # DeployRequest.validate_template/1. nil = framework-derived default.
-  @known_site_templates ~w(astro-starter next-starter search-starter)
+  @known_site_templates ~w(astro-search-starter astro-starter next-starter search-starter)
 
   defp validate_template(changeset) do
     validate_inclusion(changeset, :template, @known_site_templates,

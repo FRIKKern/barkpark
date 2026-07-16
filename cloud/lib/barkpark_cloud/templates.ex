@@ -37,6 +37,23 @@ defmodule BarkparkCloud.Templates do
 
   @catalog [
     %{
+      slug: "astro-search-starter",
+      title: "Search Starter (Astro)",
+      description:
+        "The flagship search site, statically generated: every document pre-rendered by the canonical PortableDoc at build, the corpus graph baked to JSON, live search browser-direct — pure static files, symlink-swap deploys.",
+      framework: "astro",
+      demo_content: true,
+      what_you_get: [
+        "Every published document pre-rendered as static HTML by the canonical @barkpark/react PortableDoc",
+        "The zero-dependency Canvas2D corpus graph, baked to graph.json at build — instant landing, no runtime token",
+        "Per-keystroke live search straight from the browser (Phoenix WebSocket, HTTP fallback)",
+        "Symlink-swap deploys: immutable releases, health-gated, instant rollback"
+      ],
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
+      repo: @repo,
+      docs: @docs
+    },
+    %{
       slug: "blog-starter",
       title: "Blog Starter",
       description:

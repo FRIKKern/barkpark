@@ -771,7 +771,7 @@ defmodule BarkparkCloud.Registry do
   # TestCatalogCarriesTheShippedTemplates locks that side to this exact list); an
   # unknown slug must be rejected HERE, at launch (a 4xx), never discovered on a
   # burned box mid-provision.
-  @known_templates ~w(blog-starter place-directory search-starter website-starter)
+  @known_templates ~w(astro-search-starter blog-starter place-directory search-starter website-starter)
 
   @doc """
   The valid content-template slugs a launch may carry (dwb-4) — sorted, mirroring

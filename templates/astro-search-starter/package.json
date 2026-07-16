@@ -1,0 +1,25 @@
+{
+  "name": "@barkpark/astro-search-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The flagship search site, Astro edition — statically generated PortableDoc pages, a baked corpus graph, and browser-direct live search over any Barkpark dataset.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.4.0",
+    "@barkpark/core": "file:./vendor/barkpark-core.tgz",
+    "@barkpark/react": "file:./vendor/barkpark-react.tgz",
+    "astro": "^7.0.0",
+    "phoenix": "^1.8.8",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

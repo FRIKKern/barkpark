@@ -106,7 +106,7 @@ cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root
 # schemas + seed per template, and TestEmbeddedCatalogMatchesRepoRoot is the
 # per-test-run drift guard.
 provisioner-catalog-sync: ## Sync deploy templates into the provisioner's go:embed catalog
-	@for t in place-directory website-starter blog-starter search-starter; do \
+	@for t in place-directory website-starter blog-starter search-starter astro-search-starter; do \
 	  mkdir -p internal/provisioner/catalog/templates/$$t/schemas; \
 	  cp templates/$$t/barkpark.template.json internal/provisioner/catalog/templates/$$t/; \
 	  cp templates/$$t/schemas/*.json internal/provisioner/catalog/templates/$$t/schemas/; \
