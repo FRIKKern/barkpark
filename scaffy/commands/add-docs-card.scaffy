@@ -69,15 +69,15 @@ owning contract/runbook or retire content, never raise the cap.
 # --------------------------------------------------------------------------
 IN "CLAUDE.md"
 ### Insert the {{.card-name}} routing row at the end of the routing table
-INSERT
+INSERT AFTER LAST
+::: meta row anchor :::
+| Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
+::: meta row anchor :::
+WITH
 ::: {{.card-name}} route row :::
 | {{.Group}} | {{.TaskPattern}} | `docs/cards/{{.card-name}}.md` |
 <!-- scaffy:add-docs-card {{.CardName}} MARK:claude-route-{{.card-name}} -->
 ::: {{.card-name}} route row :::
-BELOW LAST
-::: meta row anchor :::
-| Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
-::: meta row anchor :::
 MARK "claude-route-{{.card-name}}"
 ASLONG FILE DONT CONTAIN "MARK:claude-route-{{.card-name}}"
 
