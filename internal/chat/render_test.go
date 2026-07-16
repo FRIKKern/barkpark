@@ -2,6 +2,9 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -244,6 +247,322 @@ func TestFooterAdvertisesPendingCard(t *testing.T) {
 	if !strings.Contains(foot, "card waiting") || !strings.Contains(foot, "ctrl+a") {
 		t.Fatalf("footer must advertise a pending card's answer keys, got:\n%s", foot)
 	}
+}
+
+// ── wsc-s4: the epic-cycle session-card lines ────────────────────────────────
+
+// loadWorkflowFixture decodes one shared D3 workflow-summary fixture (the same
+// shape wsc-s1 mirrors to testdata/) into the aliased wire type. This is the
+// mechanism-A field-projection seam: decode → assert the projected fields, never
+// a byte-diff and never an extension of the pdrender D13 reply-body harness.
+func loadWorkflowFixture(t *testing.T, name string) SessionWorkflow {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	var wf SessionWorkflow
+	if err := json.Unmarshal(raw, &wf); err != nil {
+		t.Fatalf("decode fixture %s: %v", name, err)
+	}
+	return wf
+}
+
+// loadSharedSummaries decodes wsc-s1's SHARED parity fixture — the byte-mirror
+// of api/test/support/fixtures/workflow_summary/workflow_summary.json, real
+// workflow_summary/1 folds of the two committed epic-cycle captures. THE
+// mechanism-A seam: the Elixir side proves the bytes fresh; this side proves
+// they decode onto the wire struct with every rendered field intact.
+func loadSharedSummaries(t *testing.T) map[string]SessionWorkflow {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "workflow_summary.json"))
+	if err != nil {
+		t.Fatalf("read shared fixture: %v", err)
+	}
+	var m map[string]SessionWorkflow
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode shared fixture: %v", err)
+	}
+	return m
+}
+
+// validTickStates is the six-state journey vocabulary (charter D58) every wire
+// tick must speak — the render tolerates unknowns, but the parity fixtures may
+// never drift outside the truth table.
+var validTickStates = map[string]bool{
+	"done": true, "active": true, "interrupted": true,
+	"future": true, "skipped": true, "unreached": true,
+}
+
+// TestWorkflowSummaryFieldProjection is the Go↔Elixir parity proof (wsc D12,
+// mechanism-A): decoding wsc-s1's shared D3 fixtures — the REAL Elixir folds of
+// the committed epic-cycle captures — projects exactly the fields the session
+// card renders, with the wave-11 invariants intact (seven ticks, settled ≤
+// total, terminal ⇒ an honest lifecycle word). No byte-diff; the fold lives on
+// the server, this side only decodes.
+func TestWorkflowSummaryFieldProjection(t *testing.T) {
+	shared := loadSharedSummaries(t)
+
+	cases := []struct {
+		key         string
+		phase       string
+		phaseIndex  int
+		agentsDone  int
+		agentsTotal int
+		running     int
+		terminal    bool
+		outcome     string
+		tokens      int
+		ticks       []string
+	}{
+		{
+			key: "epic_cycle_progress", phase: "", phaseIndex: 0,
+			agentsDone: 29, agentsTotal: 29, running: 0,
+			terminal: true, outcome: "completed", tokens: 2137873,
+			ticks: []string{"done", "done", "done", "done", "done", "done", "done"},
+		},
+		{
+			key: "epic_cycle_interrupted", phase: "Explore", phaseIndex: 2,
+			agentsDone: 1, agentsTotal: 5, running: 4,
+			terminal: true, outcome: "interrupted", tokens: 68272,
+			ticks: []string{"done", "interrupted", "unreached", "unreached", "unreached", "unreached", "unreached"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			wf, ok := shared[tc.key]
+			if !ok {
+				t.Fatalf("shared fixture must carry %q", tc.key)
+			}
+			if wf.Label == "" {
+				t.Errorf("label must project (opaque 'slug — one-liner'), got empty")
+			}
+			if len(wf.Ticks) != 7 {
+				t.Fatalf("expected seven phase ticks, got %d: %v", len(wf.Ticks), wf.Ticks)
+			}
+			for i, s := range wf.Ticks {
+				if !validTickStates[s] {
+					t.Errorf("tick state must speak the D58 vocabulary, got %q", s)
+				}
+				if s != tc.ticks[i] {
+					t.Errorf("tick %d = %q, want %q", i, s, tc.ticks[i])
+				}
+			}
+			if wf.Phase != tc.phase || wf.PhaseIndex != tc.phaseIndex {
+				t.Errorf("phase = %q/%d, want %q/%d", wf.Phase, wf.PhaseIndex, tc.phase, tc.phaseIndex)
+			}
+			if wf.AgentsDone != tc.agentsDone || wf.AgentsTotal != tc.agentsTotal {
+				t.Errorf("agents = %d/%d, want %d/%d", wf.AgentsDone, wf.AgentsTotal, tc.agentsDone, tc.agentsTotal)
+			}
+			if wf.AgentsDone > wf.AgentsTotal {
+				t.Errorf("settled (%d) must never exceed total (%d)", wf.AgentsDone, wf.AgentsTotal)
+			}
+			if wf.Running != tc.running {
+				t.Errorf("running = %d, want %d", wf.Running, tc.running)
+			}
+			if wf.Terminal != tc.terminal {
+				t.Errorf("terminal? = %v, want %v", wf.Terminal, tc.terminal)
+			}
+			if wf.Outcome != tc.outcome {
+				t.Errorf("outcome = %q, want %q", wf.Outcome, tc.outcome)
+			}
+			if wf.Tokens != tc.tokens {
+				t.Errorf("tokens = %d, want %d", wf.Tokens, tc.tokens)
+			}
+			// timestamps are wire-read epoch ms — present here, never a string
+			if wf.StartedAt == nil || *wf.StartedAt <= 0 {
+				t.Errorf("started_at must decode as epoch ms, got %v", wf.StartedAt)
+			}
+			if wf.EndedAt != nil {
+				t.Errorf("ended_at is honestly nil until the D5 stamp, got %v", *wf.EndedAt)
+			}
+		})
+	}
+}
+
+// TestSessionSummaryDecodesWorkflow proves the compact summary rides on the
+// ChatSessionSummary list wire (nested `workflow` key, SIBLING `epic` key — the
+// exact bytes sidebar_json emits) and decodes through the alias — the fields
+// the picker reads. A plain session (no keys) decodes to nil Workflow/Epic, the
+// compile-time signal that the row renders as today.
+func TestSessionSummaryDecodesWorkflow(t *testing.T) {
+	withWF := []byte(`{"id":"s1","title":"cycle","message_count":3,
+		"workflow":{"ticks":["done","active","future"],"phase":"Survey",
+		"agents_done":5,"agents_total":17,"running":12,"terminal?":false,
+		"outcome":"live","started_at":1783633546962,"ended_at":null},
+		"epic":{"id":"task-x","title":"Epic Cycle","slices_done":2,
+		"slices_total":5,"wave_status":"wave: building 5 slices"}}`)
+	var s SessionSummary
+	if err := json.Unmarshal(withWF, &s); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if s.Workflow == nil {
+		t.Fatal("workflow summary must decode onto the list summary")
+	}
+	if s.Workflow.AgentsDone != 5 || s.Workflow.AgentsTotal != 17 {
+		t.Fatalf("counter must project, got %d/%d", s.Workflow.AgentsDone, s.Workflow.AgentsTotal)
+	}
+	if s.Workflow.Terminal || s.Workflow.Outcome != "live" {
+		t.Fatalf("lifecycle must project (terminal?/outcome), got %v/%q", s.Workflow.Terminal, s.Workflow.Outcome)
+	}
+	if s.Workflow.StartedAt == nil || *s.Workflow.StartedAt != 1783633546962 {
+		t.Fatalf("started_at must decode as epoch ms, got %v", s.Workflow.StartedAt)
+	}
+	if s.Epic == nil || s.Epic.SlicesDone != 2 || s.Epic.SlicesTotal != 5 {
+		t.Fatalf("sibling epic goal must project, got %+v", s.Epic)
+	}
+	if s.Epic.WaveStatus != "wave: building 5 slices" {
+		t.Fatalf("wave_status heartbeat must project, got %q", s.Epic.WaveStatus)
+	}
+
+	plain := []byte(`{"id":"s2","title":"chat","message_count":1}`)
+	var p SessionSummary
+	if err := json.Unmarshal(plain, &p); err != nil {
+		t.Fatalf("decode plain: %v", err)
+	}
+	if p.Workflow != nil || p.Epic != nil {
+		t.Fatal("a plain session must decode to nil workflow/epic (renders as today)")
+	}
+}
+
+// TestWorkflowCardLinesRender proves the two card lines paint from the decoded
+// summary: seven glyphs, the settled/total counter, the phase word (or the
+// terminal outcome), the token total, and the epic-goal line when present. This
+// is what makes '13/17 agents done' visible in the session list.
+func TestWorkflowCardLinesRender(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json")
+	epic := &EpicGoal{ID: "task-x", Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5,
+		WaveStatus: "wave: building 5 slices"}
+	lines := workflowCardLines(80, &wf, epic)
+	if len(lines) != 2 {
+		t.Fatalf("a workflow row with an epic goal grows two lines, got %d:\n%v", len(lines), lines)
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(out, "13/17") {
+		t.Errorf("tick line must carry the settled/total counter 13/17, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Build") {
+		t.Errorf("tick line must carry the active phase word, got:\n%s", out)
+	}
+	if !strings.Contains(out, "●") || !strings.Contains(out, "◉") || !strings.Contains(out, "○") {
+		t.Errorf("tick line must draw done/active/future glyphs, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1.5M") {
+		t.Errorf("tick line must render wire-carried tokens (1.5M), got:\n%s", out)
+	}
+	if !strings.Contains(out, "2/5 slices") {
+		t.Errorf("epic-goal line must carry the slices counter, got:\n%s", out)
+	}
+	if !strings.Contains(out, "wave: building 5 slices") {
+		t.Errorf("epic-goal line must carry the wave_status heartbeat, got:\n%s", out)
+	}
+
+	// A terminal wave settles honestly to its lifecycle word, never a stuck
+	// phase — straight off s1's shared interrupted fold.
+	interrupted := loadSharedSummaries(t)["epic_cycle_interrupted"]
+	iout := strings.Join(workflowCardLines(80, &interrupted, nil), "\n")
+	if !strings.Contains(iout, "interrupted") {
+		t.Errorf("an interrupted wave must render 'interrupted', got:\n%s", iout)
+	}
+	if !strings.Contains(iout, "✕") {
+		t.Errorf("the dead-frontier tick must render the interrupted glyph, got:\n%s", iout)
+	}
+	// No epic goal → exactly one line (no fabricated goal line).
+	if got := len(workflowCardLines(80, &interrupted, nil)); got != 1 {
+		t.Errorf("a goal-less workflow row grows exactly one line, got %d", got)
+	}
+
+	// A nil summary adds nothing — the minimalism contract.
+	if workflowCardLines(80, nil, epic) != nil {
+		t.Fatal("a nil workflow summary must add no lines (even with a stray epic)")
+	}
+}
+
+// TestPhaseTicksFallback proves the presentation-only geometry fallback: a
+// summary that carries no explicit ticks still shows an honest strip derived
+// from phase_index/phases_total (NOT a rail fold) — done before the active phase,
+// active at it, future after.
+func TestPhaseTicksFallback(t *testing.T) {
+	// phase_index is 1-based on the wire (the journey's phase index): index 2
+	// means the SECOND phase breathes.
+	wf := SessionWorkflow{PhaseIndex: 2, PhasesTotal: 5}
+	ticks := phaseTicks(&wf)
+	if len(ticks) != 5 {
+		t.Fatalf("derived ticks must honour phases_total, got %d", len(ticks))
+	}
+	want := []string{"done", "active", "future", "future", "future"}
+	for i := range want {
+		if ticks[i] != want[i] {
+			t.Fatalf("derived ticks = %v, want %v", ticks, want)
+		}
+	}
+	// A terminal wave with no ticks settles all done (never a stuck active tick).
+	term := phaseTicks(&SessionWorkflow{PhaseIndex: 3, PhasesTotal: 4, Terminal: true})
+	for i, s := range term {
+		if s != "done" {
+			t.Fatalf("terminal fallback tick %d must be done, got %q", i, s)
+		}
+	}
+}
+
+// TestPickerRowsWorkflowMultiline proves a workflow session's picker row spans
+// the two extra lines (so the list expands in height to show fleet progress),
+// while a plain session's row is UNCHANGED — byte-identical to the pre-wsc render
+// (the minimalism contract: plain chats pay zero).
+func TestPickerRowsWorkflowMultiline(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json")
+	m := Model{width: 80, sessions: []SessionSummary{
+		{ID: "plain", Title: "just a chat", MessageCount: 4},
+		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, Workflow: &wf,
+			Epic: &EpicGoal{Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5}},
+	}}
+	rows := m.pickerRows()
+	if len(rows) != 3 { // "+ new session" + two sessions
+		t.Fatalf("one navigable row per session (+ new), got %d", len(rows))
+	}
+
+	// Plain row: exactly the legacy single-line shape, no embedded newline.
+	plainRow := rows[1]
+	if strings.Contains(plainRow, "\n") {
+		t.Fatalf("a plain session row must stay single-line, got:\n%q", plainRow)
+	}
+	wantPlain := "just a chat" // the legacy %-40s title + meta; assert it is byte-for-byte the old shape
+	if !strings.HasPrefix(plainRow, wantPlain) {
+		t.Fatalf("plain row must render as today, got:\n%q", plainRow)
+	}
+	legacy := legacyPickerRow(m.sessions[0])
+	if plainRow != legacy {
+		t.Fatalf("plain row must be byte-identical to the pre-wsc render.\n got: %q\nwant: %q", plainRow, legacy)
+	}
+
+	// Workflow row: three physical lines (title + tick line + goal line), and it
+	// is still ONE navigable entry (cursor stops once).
+	wfRow := rows[2]
+	if n := strings.Count(wfRow, "\n"); n != 2 {
+		t.Fatalf("a workflow row (with goal) spans three lines, got %d newlines:\n%q", n, wfRow)
+	}
+	if !strings.Contains(wfRow, "13/17") {
+		t.Fatalf("workflow row must surface the fleet counter, got:\n%q", wfRow)
+	}
+}
+
+// legacyPickerRow reproduces the exact pre-wsc single-line row shape — the frozen
+// baseline the byte-identical proof asserts a plain (workflow-less) session still
+// renders. If pickerRows ever changed a plain row, this diverges and the test above
+// fails.
+func legacyPickerRow(s SessionSummary) string {
+	title := strings.TrimSpace(s.Title)
+	if title == "" {
+		title = "untitled session"
+	}
+	meta := fmt.Sprintf("%d msg", s.MessageCount)
+	if s.PendingApprovals > 0 {
+		meta += fmt.Sprintf(" · %d pending", s.PendingApprovals)
+	}
+	if age := relTime(s.LastActiveAt); age != "" {
+		meta += " · " + age
+	}
+	return fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
 }
 
 // TestTranscriptOrdering proves the transcript stacks settled messages, then

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,6 +78,48 @@ func runCmd(cmd tea.Cmd) tea.Msg {
 		return nil
 	}
 	return cmd()
+}
+
+// TestPickerRendersWorkflowCard proves the epic-cycle session card reaches the
+// rendered picker (wsc-s4): a session running a workflow surfaces its phase ticks
+// and settled/total counter in the launch list, so 'what is running and how far'
+// is visible at a glance — while down-arrow still stops exactly once per session
+// (the multi-line row is ONE navigable entry, not one-stop-per-sub-line).
+func TestPickerRendersWorkflowCard(t *testing.T) {
+	wf := SessionWorkflow{
+		Label:       "epic-cycle — session card",
+		Ticks:       []string{"done", "done", "done", "done", "active", "future", "future"},
+		Phase:       "building",
+		AgentsDone:  13,
+		AgentsTotal: 17,
+		Tokens:      1543000,
+	}
+	f := &fakeTransport{summaries: []SessionSummary{
+		{ID: "plain", Title: "just chatting", MessageCount: 2},
+		{ID: "cycle", Title: "wave run", MessageCount: 9, Workflow: &wf,
+			Epic: &EpicGoal{Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5}},
+	}}
+	m := newTestModel(f)
+	m.width, m.height = 80, 24
+	nm, _ := m.Update(sessionsLoadedMsg{sessions: f.summaries})
+	m = nm.(Model)
+
+	view := m.View()
+	for _, want := range []string{"13/17", "building", "Epic Cycle chat", "slices"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker must surface %q for a workflow session, got:\n%s", want, view)
+		}
+	}
+
+	// Down-arrow walks new(0) → plain(1) → cycle(2) and then clamps: one stop per
+	// session, unaffected by the workflow row's extra height.
+	for i := 0; i < 6; i++ {
+		nm, _ = m.handlePickerKey(tea.KeyMsg{Type: tea.KeyDown})
+		m = nm.(Model)
+	}
+	if m.pickCursor != len(m.sessions) {
+		t.Fatalf("cursor must clamp at one stop per session (%d), got %d", len(m.sessions), m.pickCursor)
+	}
 }
 
 // TestResumeReGetsFullAndRestoresDraft proves D14: the summary list omits the

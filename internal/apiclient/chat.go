@@ -153,6 +153,16 @@ func (m ChatMessage) Resolved() bool {
 // struct (D14). Keeping it a separate type makes "don't trust the list for
 // continuity" a compile-time fact. The counters (message_count/pending_approvals)
 // and last_active_at are what the picker renders per row.
+//
+// Workflow is the ONE addition the list wire may carry beyond the continuity
+// omission (wsc epic D10/D12): a COMPACT, server-side pre-folded epic-cycle
+// summary — NOT rail_snapshot. The list still never carries rail_snapshot (D14,
+// enforced at three layers: Ecto select / sidebar_json / this struct), because
+// the raw 29-agent rail encodes to 38KB — fails the minimalism contract. Instead
+// the server folds StudioChat.workflow_summary/1 to the tiny D3 shape and the TUI
+// renders the two session-card lines straight from it: no Go fold, no rail decode
+// on the list path. A nil Workflow is a plain session — it renders as it does
+// today.
 type ChatSessionSummary struct {
 	ID               string `json:"id"`
 	Provider         string `json:"provider,omitempty"`
@@ -166,6 +176,69 @@ type ChatSessionSummary struct {
 	LastActiveAt     string `json:"last_active_at,omitempty"`
 	InsertedAt       string `json:"inserted_at,omitempty"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
+
+	// Workflow is the compact epic-cycle summary (wsc D10/D12). Present only for
+	// a session running/settling a workflow; nil for plain chats.
+	Workflow *ChatWorkflowSummary `json:"workflow,omitempty"`
+	// Epic is the epic-goal line (wsc D9), a SIBLING of workflow on the wire —
+	// present only when the ledger resolves the session's one-hop epic chain.
+	Epic *ChatEpicGoal `json:"epic,omitempty"`
+}
+
+// ChatWorkflowSummary is the COMPACT, pre-folded epic-cycle workflow summary the
+// list wire carries per workflow row (wsc epic D3/D10/D12; the server-side
+// StudioChat.workflow_summary/1 projection over the highest-seq workflow rail
+// entry). It is DERIVED — never the raw rail_snapshot (38,308 bytes measured for
+// a 29-agent rail; the list omits that by design, D10). The TUI decodes this and
+// paints the two session-card lines directly; there is deliberately NO Go fold
+// and NO decodeRail on the list path. Honesty is wire-carried, never synthesised
+// (D15): tokens render only when Tokens > 0, elapsed is omitted on list rows, and
+// an interrupted wave carries Terminal=true with Outcome "interrupted".
+type ChatWorkflowSummary struct {
+	// Label is the workflow's "slug — one-liner" combined string. It is OPAQUE
+	// (never split on the em-dash, per the survey's naming correction).
+	Label string `json:"label,omitempty"`
+	// Ticks are the per-phase journey states in phase order — the D58 truth
+	// table's vocabulary: "done" | "active" | "interrupted" | "future" |
+	// "skipped" | "unreached". The picker renders one glyph per tick. When
+	// absent, the render falls back to PhaseIndex/PhasesTotal
+	// (presentation-only, not a rail fold).
+	Ticks []string `json:"ticks,omitempty"`
+	// Phase/PhaseIndex name the breathing (active/interrupted) phase; both are
+	// null on the wire once the cycle settles (PhaseIndex is 1-based).
+	Phase       string `json:"phase,omitempty"`
+	PhaseIndex  int    `json:"phase_index,omitempty"`
+	PhasesTotal int    `json:"phases_total,omitempty"`
+	// AgentsDone counts settled agents = done+failed (so 13/17 settles honestly,
+	// Claude-Code-style); AgentsTotal is the fleet size.
+	AgentsDone  int `json:"agents_done,omitempty"`
+	AgentsTotal int `json:"agents_total,omitempty"`
+	Running     int `json:"running,omitempty"`
+	// Terminal is true once the wave has settled (the wire key is the Elixir
+	// atom `terminal?` verbatim); Outcome is the entry lifecycle word:
+	// "live" | "completed" | "interrupted".
+	Terminal bool   `json:"terminal?,omitempty"`
+	Outcome  string `json:"outcome,omitempty"`
+	// Tokens is the settle-on-state fleet token total; 0/absent => not rendered.
+	Tokens int `json:"tokens,omitempty"`
+	// StartedAt/EndedAt are wire-carried epoch-ms figures (min agent startedAt /
+	// the entry's stamped end_time); nil on the wire when absent — never
+	// synthesised (D15).
+	StartedAt *int64 `json:"started_at,omitempty"`
+	EndedAt   *int64 `json:"ended_at,omitempty"`
+}
+
+// ChatEpicGoal is the epic-goal line's compact projection (wsc D9): the epic
+// task id/title, its slices-done/total counter, and the epic's wave_status
+// heartbeat. "PRs open" is intentionally ABSENT — it has no data source
+// anywhere in the tree (wsc D8: dropped, never synthesised — fabricating it
+// would violate the honesty north star).
+type ChatEpicGoal struct {
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	SlicesDone  int    `json:"slices_done,omitempty"`
+	SlicesTotal int    `json:"slices_total,omitempty"`
+	WaveStatus  string `json:"wave_status,omitempty"`
 }
 
 // ChatRailEntry is one task's cell of the agents-rail snapshot (charter D47):
