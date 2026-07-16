@@ -457,7 +457,7 @@ func applyInOp(cmd *Command, sub *substituter, tr *tree, index int, o *InOp) (*O
 	// Guards BEFORE anchor resolution: the implicit planted-MARK guard
 	// (a non-virtual mark the op itself plants — its presence means
 	// this exact op already ran) and every explicit ASLONG (D23/D24).
-	if o.Mark != nil && !o.Mark.Virtual && o.Verb != Remove {
+	if o.Mark != nil && !o.Mark.Virtual && o.Verb != RemoveVerb {
 		planted := "MARK:" + markName
 		if bytes.Contains(content, []byte(planted)) {
 			res.Status = OpSkipped
@@ -503,7 +503,7 @@ func applyInOp(cmd *Command, sub *substituter, tr *tree, index int, o *InOp) (*O
 		res.Status = OpInjected
 		return res, &ReceiptOp{Kind: res.Kind, Path: rel, Mark: markName, PostImage: payload, PostSHA256: sha256Hex(payload)}, nil
 
-	case Remove:
+	case RemoveVerb:
 		// The consumed-mark retraction (D25). Byte-exact, exactly-once
 		// — the same conservatism as D20.
 		n := bytes.Count(content, target)
@@ -529,7 +529,7 @@ func inOpKind(v InOpVerb) string {
 		return "insert-after-last"
 	case Replace:
 		return "replace"
-	case Remove:
+	case RemoveVerb:
 		return "remove"
 	}
 	return "?"

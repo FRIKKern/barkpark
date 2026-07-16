@@ -210,7 +210,10 @@ const (
 	InsertAfterFirst InOpVerb = iota
 	InsertAfterLast
 	Replace
-	Remove
+	// RemoveVerb is the REMOVE op verb — suffixed because the bare name
+	// belongs to the D40 seam scaffy.Remove (the receipt-replay entry
+	// point, remove.go).
+	RemoveVerb
 )
 
 func (v InOpVerb) String() string {
@@ -221,7 +224,7 @@ func (v InOpVerb) String() string {
 		return "INSERT AFTER LAST"
 	case Replace:
 		return "REPLACE"
-	case Remove:
+	case RemoveVerb:
 		return "REMOVE"
 	}
 	return "?"

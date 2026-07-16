@@ -317,7 +317,7 @@ func (l *linter) lintInOp(o *InOp, dir string, markSeen map[string]int) {
 	for _, g := range o.Guards {
 		base := payload
 		baseWord := "payload"
-		if o.Verb == Remove || !g.Dont {
+		if o.Verb == RemoveVerb || !g.Dont {
 			base = target
 			baseWord = "fenced target"
 		}
@@ -384,7 +384,7 @@ func (l *linter) lintMark(o *InOp, payload, target []byte, markSeen map[string]i
 		return
 	}
 	switch o.Verb {
-	case Remove:
+	case RemoveVerb:
 		// E-016: the consumed mark — the block being removed must carry it.
 		if !bytes.Contains(target, []byte(planted)) {
 			l.add(m.Pos.Line, RuleConsumedMark,
