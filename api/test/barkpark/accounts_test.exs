@@ -1,6 +1,6 @@
 defmodule Barkpark.AccountsTest do
   @moduledoc "Phase 1 — user accounts, sessions, email tokens, TOTP MFA."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{User, UserSession}
@@ -247,7 +247,7 @@ defmodule Barkpark.AccountsTest do
           end)
         end
 
-      results = Enum.map(tasks, &Task.await/1)
+      results = Enum.map(tasks, &Task.await(&1, :infinity))
 
       assert Enum.count(results, &match?({:ok, _}, &1)) == 1
       assert Enum.count(results, &(&1 == :error)) == 1
