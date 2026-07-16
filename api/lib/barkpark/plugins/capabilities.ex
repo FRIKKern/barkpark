@@ -813,6 +813,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "write",
         args: [arg("type", true, "string", "Document type.")],
         flags: [
+          flag("file", "file", "Document fields as a JSON object from a file or - for stdin."),
           flag(
             "set",
             "string",
@@ -835,6 +836,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "write",
         args: [arg("type", true, "string", "Document type.")],
         flags: [
+          flag("file", "file", "Document fields as a JSON object from a file or - for stdin."),
           flag(
             "set",
             "string",
