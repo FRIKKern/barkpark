@@ -1104,6 +1104,14 @@ const (
 	flagDevicePollEq = flagDevicePoll + "="
 )
 
+// loginKnownFlags / signupKnownFlags list every bare flag token each parser
+// recognizes. nextFlagValue's guard checks a would-be value against this list
+// so `bp login --password --device-start` errors instead of silently binding
+// the password to the literal "--device-start" and leaving --device-start's
+// own bool false with no error.
+var loginKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagURL, flagDevice, flagDeviceStart, flagDevicePoll}
+var signupKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagTeam, flagURL}
+
 // parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass,
 // --url, the bare boolean --device (force the browser device-link flow), and the
 // two non-interactive device-login steps --device-start (bare bool) and
@@ -1117,19 +1125,19 @@ func parseLoginArgs(args []string) (email, password, url string, device, deviceS
 		a := args[i]
 		switch {
 		case a == flagEmail || a == flagUser:
-			email, i, err = nextFlagValue(args, i)
+			email, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagEmailEq):
 			email = a[len(flagEmailEq):]
 		case strings.HasPrefix(a, flagUserEq):
 			email = a[len(flagUserEq):]
 		case a == flagPasswd || a == flagPass:
-			password, i, err = nextFlagValue(args, i)
+			password, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagPwEq):
 			password = a[len(flagPwEq):]
 		case strings.HasPrefix(a, flagPassEq):
 			password = a[len(flagPassEq):]
 		case a == flagURL:
-			url, i, err = nextFlagValue(args, i)
+			url, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
 		case a == flagDeviceStart:
@@ -1137,7 +1145,7 @@ func parseLoginArgs(args []string) (email, password, url string, device, deviceS
 			// exit without polling.
 			deviceStart = true
 		case a == flagDevicePoll:
-			devicePoll, i, err = nextFlagValue(args, i)
+			devicePoll, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagDevicePollEq):
 			devicePoll = a[len(flagDevicePollEq):]
 		case a == flagDevice:
@@ -1165,23 +1173,23 @@ func parseSignupArgs(args []string) (email, password, team, url string, err erro
 		a := args[i]
 		switch {
 		case a == flagEmail || a == flagUser:
-			email, i, err = nextFlagValue(args, i)
+			email, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagEmailEq):
 			email = a[len(flagEmailEq):]
 		case strings.HasPrefix(a, flagUserEq):
 			email = a[len(flagUserEq):]
 		case a == flagPasswd || a == flagPass:
-			password, i, err = nextFlagValue(args, i)
+			password, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagPwEq):
 			password = a[len(flagPwEq):]
 		case strings.HasPrefix(a, flagPassEq):
 			password = a[len(flagPassEq):]
 		case a == flagTeam:
-			team, i, err = nextFlagValue(args, i)
+			team, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagTeamEq):
 			team = a[len(flagTeamEq):]
 		case a == flagURL:
-			url, i, err = nextFlagValue(args, i)
+			url, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
 		default:
@@ -1302,11 +1310,28 @@ func parseSubscribeArgs(args []string) (plan string, err error) {
 // the value and the advanced index. A missing value (flag is the last token) is
 // an error naming the flag. (cloud_cmd.go-style hand parsing; named distinctly
 // from migrate_cmd.go's inline-aware flagValue, which has a different signature.)
-func nextFlagValue(args []string, i int) (string, int, error) {
+//
+// known lists the flag tokens the caller's parser recognizes (e.g.
+// loginKnownFlags). If the next token starts with "-" AND is one of those known
+// flags, it is refused as a value with the same "needs a value" error — this
+// stops a bare value-flag from silently swallowing the following flag (e.g.
+// `--password --device-start` binding the password to the literal
+// "--device-start"). Callers that pass no known flags (or values that merely
+// start with "-" but aren't in the list, e.g. a password of "-secret") are
+// unaffected — the value still passes through unchanged.
+func nextFlagValue(args []string, i int, known ...string) (string, int, error) {
 	if i+1 >= len(args) {
 		return "", i, fmt.Errorf("%s needs a value", args[i])
 	}
-	return args[i+1], i + 1, nil
+	next := args[i+1]
+	if strings.HasPrefix(next, "-") {
+		for _, k := range known {
+			if next == k {
+				return "", i, fmt.Errorf("%s needs a value", args[i])
+			}
+		}
+	}
+	return next, i + 1, nil
 }
 
 // --- help text ---------------------------------------------------------------
