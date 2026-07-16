@@ -768,10 +768,10 @@ defmodule BarkparkCloud.Registry do
 
   # dwb-4: the content-template catalog the go-live handler validates against.
   # MIRRORS the Go worker's embedded catalog (internal/provisioner/catalog —
-  # TestCatalogCarriesTheThreeTemplates locks that side to this exact list); an
+  # TestCatalogCarriesTheShippedTemplates locks that side to this exact list); an
   # unknown slug must be rejected HERE, at launch (a 4xx), never discovered on a
   # burned box mid-provision.
-  @known_templates ~w(blog-starter place-directory website-starter)
+  @known_templates ~w(blog-starter place-directory search-starter website-starter)
 
   @doc """
   The valid content-template slugs a launch may carry (dwb-4) — sorted, mirroring
