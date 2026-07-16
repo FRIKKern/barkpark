@@ -92,7 +92,7 @@ for wave_number in range(1, 21):
 
         wave_assignments.append(
             {
-                "assignment_id": f"survey-{assignment_number:03d}",
+                "assignment_id": f"W2-S{assignment_number:02d}",
                 "agent_type": "epic-surveyor",
                 "effort": "medium",
                 "wave": wave_number,
