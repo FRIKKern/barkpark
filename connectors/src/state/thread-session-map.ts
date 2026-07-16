@@ -144,3 +144,126 @@ export function createPgThreadSessionStore(pool: BridgePool): ThreadSessionStore
     },
   };
 }
+
+/**
+ * Read a thread's current binding through any `query`-capable handle (the pool
+ * for the lock-free resume path, or a checked-out client inside the mint txn).
+ */
+async function readBinding(
+  q: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }>,
+  workspaceId: string,
+  threadId: string,
+): Promise<string | null> {
+  const { rows } = await q(
+    `SELECT session_uuid
+       FROM chat_bridge.thread_session_map
+      WHERE workspace_id = $1 AND thread_id = $2`,
+    [workspaceId, threadId],
+  );
+  return (rows[0] as { session_uuid: string } | undefined)?.session_uuid ?? null;
+}
+
+/**
+ * The reserve-first, race-tight ThreadSessionMap: same interface as
+ * {@link createThreadSessionMap}, but it closes the mint-race orphan
+ * (`connectors-orphan-session-on-mint-race`).
+ *
+ * The plain {@link createPgThreadSessionStore} path mints BEFORE the insert, so
+ * two inbound events for the same brand-new thread each mint a Barkpark Session
+ * (POST /v1/chat/sessions always hands out a fresh UUID) and only one wins the
+ * `ON CONFLICT DO NOTHING`. Correctness holds — both callers converge on the
+ * winner's row — but the loser's Session is bound to nothing: a real leak of one
+ * `chat_sessions` row, only ever on a thread's FIRST message.
+ *
+ * This factory serialises the mint under a per-thread transaction-scoped advisory
+ * lock so exactly ONE racer ever calls `mint`:
+ *
+ *   1. Fast path — a lock-free read outside any transaction. The overwhelming
+ *      common case is a RESUME (thread already bound); it must never pay for a
+ *      checked-out connection or a lock.
+ *   2. On a miss, check out one pool client and BEGIN.
+ *   3. `pg_advisory_xact_lock(hashtext(workspace:thread))` — `hashtext` returns
+ *      int4, which auto-promotes to the `bigint` overload (no cast needed). The
+ *      lock is transaction-scoped: it releases at COMMIT/ROLLBACK, so the loser
+ *      blocks HERE until the winner commits, then re-reads the winner's row.
+ *   4. Re-read the binding inside the lock. If a racer already bound it, adopt
+ *      that row and report `minted: false` — never mint.
+ *   5. Still missing and holding the lock ⇒ we are the sole minter: mint, insert
+ *      (no ON CONFLICT needed — the lock guarantees exclusivity), COMMIT.
+ *
+ * Accepted costs, all first-message-only:
+ *   - `mint`'s HTTP round-trip (POST /v1/chat/sessions) runs while the advisory
+ *     lock AND one pooled connection are held. That is deliberate: releasing the
+ *     lock to mint would reopen the exact race this closes. A burst of >10 NEW
+ *     threads at once queues on `pg.Pool` (max=10) until each mint returns — a
+ *     first-contact-only backpressure, never on the hot resume path.
+ *   - `hashtext` collisions merely over-serialise two unrelated threads that hash
+ *     alike; they never bind the wrong Session, because step 4 keys the re-read on
+ *     the exact (workspace_id, thread_id).
+ *
+ * The pool's `search_path=chat_bridge` pin is a libpq startup parameter
+ * (pool.ts), so it holds for the manual BEGIN/COMMIT here exactly as it does for
+ * pooled auto-commit queries.
+ */
+export function createPgLockedThreadSessionMap(pool: BridgePool): ThreadSessionMap {
+  return {
+    async get(workspaceId, threadId) {
+      return readBinding((t, v) => pool.query(t, v), workspaceId, threadId);
+    },
+
+    async resolveOrMint(workspaceId, threadId, mint) {
+      // Fast path: a lock-free read. A resume (already bound) is the common case
+      // and must not check out a connection or take the lock.
+      const existing = await readBinding(
+        (t, v) => pool.query(t, v),
+        workspaceId,
+        threadId,
+      );
+      if (existing) return { sessionUuid: existing, minted: false };
+
+      // Miss: serialise the mint under a per-thread advisory lock so exactly one
+      // racer mints and the loser adopts the winner's row.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // hashtext($1) → int4 → auto-promotes to pg_advisory_xact_lock(bigint).
+        // Transaction-scoped: released at COMMIT/ROLLBACK below.
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+          `${workspaceId}:${threadId}`,
+        ]);
+
+        // Re-read INSIDE the lock. If we blocked behind a racer that already
+        // bound the thread, adopt its Session and do NOT mint.
+        const bound = await readBinding(
+          (t, v) => client.query(t, v),
+          workspaceId,
+          threadId,
+        );
+        if (bound) {
+          await client.query("COMMIT");
+          return { sessionUuid: bound, minted: false };
+        }
+
+        // Still missing and we hold the lock ⇒ we are the sole minter.
+        const fresh = await mint();
+        await client.query(
+          `INSERT INTO chat_bridge.thread_session_map (workspace_id, thread_id, session_uuid)
+                VALUES ($1, $2, $3)`,
+          [workspaceId, threadId, fresh],
+        );
+        await client.query("COMMIT");
+        return { sessionUuid: fresh, minted: true };
+      } catch (err) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // A ROLLBACK can itself fail if the backend died mid-txn; the original
+          // error is the one worth propagating.
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
