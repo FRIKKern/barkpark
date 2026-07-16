@@ -17,14 +17,23 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// newBridgeSession registers the bridge tools on a real mcp.Server and connects
-// a client over the SDK's in-memory transport (StdioTransport hardcodes
-// os.Stdout), returning the live client session. Cleanup is automatic.
+// newBridgeSession registers the full bridge (no noun filter — the `--tools all`
+// surface) on a real mcp.Server and connects a client over the SDK's in-memory
+// transport (StdioTransport hardcodes os.Stdout), returning the live client
+// session. Cleanup is automatic.
 func newBridgeSession(t *testing.T, g globals, ctx manifest.Context, m *manifest.Manifest) *mcp.ClientSession {
 	t.Helper()
+	return newBridgeSessionForNouns(t, g, ctx, m, nil)
+}
+
+// newBridgeSessionForNouns is newBridgeSession with an optional noun allowlist —
+// the `--tools <noun,noun>` subset surface. nil nouns = the full bridge; a
+// non-empty subset filters to those nouns (registerBridgeToolsFiltered).
+func newBridgeSessionForNouns(t *testing.T, g globals, ctx manifest.Context, m *manifest.Manifest, nouns []string) *mcp.ClientSession {
+	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "bridge-test", Version: "0"}, nil)
-	if err := registerBridgeTools(srv, g, ctx, m); err != nil {
-		t.Fatalf("registerBridgeTools: %v", err)
+	if err := registerBridgeToolsFiltered(srv, g, ctx, m, nouns); err != nil {
+		t.Fatalf("registerBridgeToolsFiltered: %v", err)
 	}
 	serverT, clientT := mcp.NewInMemoryTransports()
 	bg := context.Background()
@@ -481,6 +490,127 @@ func TestBridgeAccessParity(t *testing.T) {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("access tool %q must generate under --tools all; have %v", name, toolNames(tools))
 		}
+	}
+}
+
+// syntheticConnectorManifest builds a manifest with two connector-style nouns
+// (github, linear — each two commands) and a task noun whose two commands are
+// BOTH in bridgeShadowedIDs. The shipped fixture carries NO github/linear noun
+// (grep=0), because github/linear are Catalog connector providers, not bp
+// manifest nouns — so, exactly as accessCommands()/TestBridgeAccessParity
+// synthesize their commands, this test declares its own nouns. The task noun is
+// present so the "shadowed noun → zero" leg is exercised over a real noun whose
+// every verb the curated overlay covers.
+func syntheticConnectorManifest() *manifest.Manifest {
+	return &manifest.Manifest{
+		ManifestVersion: "1",
+		Commands: []manifest.Command{
+			{
+				ID: "github.status", Noun: "github", Verb: "status",
+				HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/github/status"},
+				Args: []manifest.Arg{{Name: "repo", Required: true, Type: "string", Summary: "owner/name"}},
+			},
+			{
+				ID: "github.sync", Noun: "github", Verb: "sync", Writes: true,
+				HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/github/sync"},
+				Args: []manifest.Arg{{Name: "repo", Required: true, Type: "string", Summary: "owner/name"}},
+			},
+			{
+				ID: "linear.issues", Noun: "linear", Verb: "issues",
+				HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/linear/issues"},
+			},
+			{
+				ID: "linear.create", Noun: "linear", Verb: "create", Writes: true,
+				HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/linear/issues"},
+				Args: []manifest.Arg{{Name: "title", Required: true, Type: "string", Summary: "issue title"}},
+			},
+			// task.* — both are in bridgeShadowedIDs, so a `--tools task` subset
+			// yields zero (the curated overlay covers them).
+			{
+				ID: "task.ready", Noun: "task", Verb: "ready",
+				HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/tasks/ready"},
+			},
+			{
+				ID: "task.close", Noun: "task", Verb: "close", Writes: true,
+				HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/tasks/:doc_id/close"},
+				Args: []manifest.Arg{{Name: "doc_id", Required: true, Type: "string", Summary: "id"}},
+			},
+		},
+	}
+}
+
+// TestBridgeNounSubset is the D129 (D24 knob-3, Go half) proof: a bridge filtered
+// to a noun subset exposes EXACTLY that subset's non-shadowed commands as
+// bp_<noun>_<verb> tools — and nothing else. It drives four legs over a real
+// in-memory MCP session against the synthetic connector manifest:
+//
+//   - full subset (github,linear) → exactly the four connector tools;
+//   - single noun (github)        → exactly the two github tools;
+//   - absent noun (nosuchnoun)    → zero tools (honest 0-install degrade);
+//   - shadowed noun (task)        → zero tools (both verbs are curated twins).
+//
+// This slice filters bp MANIFEST nouns; it is NOT the transport by which a cloud
+// claude reaches GitHub/Linear (that is the in-sandbox MCP wiring, a separate
+// slice) — the noun names here are synthetic test fixtures, not a claim otherwise.
+func TestBridgeNounSubset(t *testing.T) {
+	m := syntheticConnectorManifest()
+	ctx := manifest.Context{Server: "http://x"}
+	g := globals{}
+
+	cases := []struct {
+		name  string
+		nouns []string
+		want  []string
+	}{
+		{
+			name:  "full subset",
+			nouns: []string{"github", "linear"},
+			want:  []string{"bp_github_status", "bp_github_sync", "bp_linear_create", "bp_linear_issues"},
+		},
+		{
+			name:  "single noun",
+			nouns: []string{"github"},
+			want:  []string{"bp_github_status", "bp_github_sync"},
+		},
+		{
+			name:  "absent noun degrades to zero",
+			nouns: []string{"nosuchnoun"},
+			want:  []string{},
+		},
+		{
+			name:  "shadowed noun yields zero",
+			nouns: []string{"task"},
+			want:  []string{},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cs := newBridgeSessionForNouns(t, g, ctx, m, c.nouns)
+			tools := listAllTools(t, cs)
+			got := toolNames(tools)
+			// want is already sorted; toolNames sorts too.
+			if strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Errorf("--tools %v exposed %v, want EXACTLY %v", c.nouns, got, c.want)
+			}
+		})
+	}
+}
+
+// TestBridgeFullSurfaceUnfiltered pins that a nil noun set is the unfiltered
+// full-bridge surface (the `--tools all` semantics registerBridgeTools keeps):
+// every non-shadowed command generates, across BOTH connector nouns and the task
+// noun's non-shadowed verbs. Here the task noun's verbs ARE all shadowed, so the
+// full surface is exactly the four connector tools — proving the nil path is a
+// superset of any subset and never over-filters.
+func TestBridgeFullSurfaceUnfiltered(t *testing.T) {
+	m := syntheticConnectorManifest()
+	cs := newBridgeSessionForNouns(t, globals{}, manifest.Context{Server: "http://x"}, m, nil)
+	tools := listAllTools(t, cs)
+	got := toolNames(tools)
+	want := []string{"bp_github_status", "bp_github_sync", "bp_linear_create", "bp_linear_issues"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("unfiltered bridge exposed %v, want %v (task verbs shadowed)", got, want)
 	}
 }
 
