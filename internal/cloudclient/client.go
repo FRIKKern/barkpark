@@ -1757,21 +1757,52 @@ type CloudRouteError struct {
 func (e *CloudRouteError) Error() string { return e.Code }
 
 // routeError classifies a non-2xx response for the routes whose refusals the CLI
-// discriminates by code (usage 404, members/invitations 403/404). A 401 stays a
-// cloudError so it keeps the "unauthorized:" prefix contract; a body carrying a
-// recognisable {"error":"<code>"} becomes a *CloudRouteError; anything else
-// falls back to cloudError so nothing is ever swallowed.
+// discriminates by code (usage 404, members/invitations 403/404, autoupdate
+// 422). A 401 stays a cloudError so it keeps the "unauthorized:" prefix
+// contract; a body carrying a recognisable code — EITHER the flat
+// {"error":"<code>"} shape or the nested {"error":{"code":"<code>"}} shape
+// (self-update/autoupdate and the admin-channel routes emit the nested form;
+// any future Go method reading one of those MUST route through this decoder,
+// not a fresh string-only json.Unmarshal) — becomes a *CloudRouteError;
+// anything else falls back to cloudError so nothing is ever swallowed.
 func routeError(status int, body []byte) error {
 	if status == http.StatusUnauthorized {
 		return cloudError(status, body)
 	}
-	var env struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(body, &env) == nil && env.Error != "" {
-		return &CloudRouteError{HTTPStatus: status, Code: env.Error}
+	if code := decodeRouteErrorCode(body); code != "" {
+		return &CloudRouteError{HTTPStatus: status, Code: code}
 	}
 	return cloudError(status, body)
+}
+
+// decodeRouteErrorCode extracts the `error` code from a control-plane refusal
+// body, tolerating BOTH shapes the routes emit: the nested
+// {"error":{"code":"…"}} object (autoupdate, self-update, admin-channel) and
+// the flat {"error":"…"} string (the older/plain refusals, e.g. not_found).
+// It mirrors decodeRollbackError's try-object-then-string RawMessage pattern
+// so both decoders drift together instead of silently diverging. Returns ""
+// when neither shape carries a code (the caller then falls back to
+// cloudError).
+func decodeRouteErrorCode(body []byte) string {
+	var env struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Error) == 0 {
+		return ""
+	}
+	// Nested object shape first ({"error":{"code":…}}).
+	var obj struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(env.Error, &obj) == nil && obj.Code != "" {
+		return obj.Code
+	}
+	// Flat string shape fallback ({"error":"…"}).
+	var s string
+	if json.Unmarshal(env.Error, &s) == nil {
+		return s
+	}
+	return ""
 }
 
 // UsageMeter is one meter of the console usage envelope (charter D48 / OC2).
