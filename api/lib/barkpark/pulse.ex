@@ -60,13 +60,32 @@ defmodule Barkpark.Pulse do
   @doc "The configured channel map — `%{}` unless explicitly configured."
   def channels, do: Application.get_env(:barkpark, :pulse_channels, %{})
 
-  @doc "Fetch one channel's config (defaults merged), or `:error` if not configured."
+  @doc """
+  Fetch one channel's config (defaults merged), or `:error` if not configured
+  or misconfigured — a channel entry missing `"fields"` (or whose `"fields"`
+  isn't a non-empty map) is treated as not-configured, fail-closed, so a
+  typo'd env channel 404s instead of crashing the first POST. `rate_per_min`
+  is clamped to a positive integer, falling back to the default (10) when
+  the configured value is `<= 0` or non-integer.
+  """
   def channel(name) when is_binary(name) do
     case Map.fetch(channels(), name) do
-      {:ok, cfg} when is_map(cfg) -> {:ok, Map.merge(@defaults, cfg)}
-      _ -> :error
+      {:ok, cfg} when is_map(cfg) ->
+        merged = Map.merge(@defaults, cfg)
+
+        with fields when is_map(fields) and map_size(fields) > 0 <- Map.get(merged, "fields") do
+          {:ok, %{merged | "rate_per_min" => sane_rate(merged["rate_per_min"])}}
+        else
+          _ -> :error
+        end
+
+      _ ->
+        :error
     end
   end
+
+  defp sane_rate(rate) when is_integer(rate) and rate > 0, do: rate
+  defp sane_rate(_), do: @defaults["rate_per_min"]
 
   # ── Validation ────────────────────────────────────────────────────────
 
