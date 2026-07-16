@@ -365,21 +365,31 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local body code=000 i
+  local body code=000 i curl_rc=0 t_total=""
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
-  for i in $(seq 1 60); do            # 60 * 0.2s = 12s deadline (>=10s, D65)
+  # 20 attempts, 8s ceiling each, >=20s wall minimum (D65 raised for SSR): a
+  # force-dynamic SSR page fetches content per request, and a 2s per-attempt
+  # ceiling made EVERY probe abort mid-render — curl then reports the last
+  # COMPLETED hop, so a basePath site read as an eternal 308 (proven live:
+  # search-capstone b-…-stw1d "308 within 12s" while the slot rendered 200 in
+  # ~1s when probed without the ceiling; HEALTH burned 60x2s = 131s, and the
+  # "12s deadline" comment was a lie in node mode). The overall bound stays
+  # finite: worst case 20*(8+0.5)s = 170s, and a healthy slot passes on the
+  # first sub-second attempt.
+  for i in $(seq 1 20); do
     # -L --max-redirs 2: canonicalization is framework-owned. Next with a baked
     # basePath 308s `${basePath}/` -> `${basePath}` (proven live: search-capstone
     # b-…-stw1c HEALTH read 308 at /sites/<slug>/), while a plain static server
     # 301s bare -> slashed. Follow up to 2 loopback hops and gate on the FINAL
     # code — the marker-by-value assertion below still proves the served bytes.
-    code="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port$path" 2>/dev/null || true)"
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time 8 "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     [ "$code" = 200 ] && break
-    sleep 0.2
+    sleep 0.5
   done
   if [ "$code" != 200 ]; then
     rm -f "$body"; stop_slot "$slot"
-    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path within 12s — boot failed, live slot untouched"
+    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path after $i attempts (last: curl exit $curl_rc, ${t_total}s) — boot failed, live slot untouched"
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
