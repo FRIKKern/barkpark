@@ -355,7 +355,19 @@ defmodule Barkpark.Plugins.Capabilities do
 
   # ── Server identity ──────────────────────────────────────────────────────
 
-  defp default_server do
+  @doc """
+  The boot-time `server` envelope: `name`, `version`, `base_url`, `api_version`,
+  `min_cli`. `base_url` defaults to the frozen `:capabilities_base_url` app-env
+  scalar (set once at `runtime.exs` from `PHX_HOST`).
+
+  Public so the controller can compose a per-request override — deriving
+  `base_url` from the caller's actual request Host — and thread it back through
+  `manifest/2`'s existing `:server` option. The envelope KEYS are fixed
+  (`manifest.schema.json` is `additionalProperties: false` and the Go client
+  strict-decodes it): only the `base_url` VALUE may be swapped, never a new key.
+  """
+  @spec default_server() :: %{optional(String.t()) => String.t()}
+  def default_server do
     %{
       "name" => app_env(:capabilities_server_name, "barkpark"),
       "version" => server_version(),

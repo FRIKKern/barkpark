@@ -762,4 +762,44 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "anon manifest leaked the chat noun name"
     end
   end
+
+  describe "server.base_url derives from the caller's request Host (D4 server-side)" do
+    # A custom instance hostname and the canonical FQDN each dial the same
+    # instance behind Caddy; the manifest must echo the host the caller
+    # ACTUALLY reached, not the frozen boot-time PHX_HOST scalar — so the CLI
+    # records one instance with alias URLs, never a phantom "-2" second server.
+    @server_keys ~w(api_version base_url min_cli name version)
+
+    test "base_url reflects a custom Host + x-forwarded-proto:https", %{conn: conn} do
+      # conn.host is set directly: Plug rejects put_req_header("host", …), and
+      # the controller reads conn.host (Caddy preserves it; no x-forwarded-host).
+      manifest =
+        %{conn | host: "custom.example"}
+        |> put_req_header("x-forwarded-proto", "https")
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      server = manifest["server"]
+
+      assert server["base_url"] == "https://custom.example",
+             "base_url must derive from the request Host, got: #{inspect(server["base_url"])}"
+
+      # base_url MUST stay a URL string (run.go isProd() substring-matches it).
+      assert is_binary(server["base_url"])
+    end
+
+    test "the server envelope keeps EXACTLY its current keys — no field added", %{conn: conn} do
+      # additionalProperties:false + Go DisallowUnknownFields: a NEW server key
+      # is a whole-CLI parse outage for every older bp. VALUE-only override.
+      manifest =
+        %{conn | host: "other.example"}
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["server"] |> Map.keys() |> Enum.sort() == @server_keys,
+             "server envelope keys drifted: #{inspect(Map.keys(manifest["server"]))}"
+    end
+  end
 end
