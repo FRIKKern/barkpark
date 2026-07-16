@@ -8,6 +8,7 @@ package apiclient
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -26,19 +27,45 @@ import (
 // OnChange unset the listener idles, so a CLI that never sets it never opens
 // the stream (OnChange is the primary seam: wiring only the fallback/pulse
 // callbacks does NOT arm the listener).
-func (c *Client) StartSSE(token string) {
+//
+// ctx bounds the whole loop: a stalled connection (server accepts, never
+// writes, never errors) used to block the underlying read forever because
+// listenSSE dispatched via &http.Client{Timeout: 0} with no context — the
+// goroutine leaked for the process lifetime. ctx cancellation now unblocks
+// that read (mirroring Listen in listen.go) and the loop itself checks
+// ctx.Err() at every wait point so a cancelled caller exits promptly instead
+// of riding out a reconnect sleep. A nil ctx falls back to context.Background()
+// so an existing caller that passes nothing keeps today's behaviour.
+func (c *Client) StartSSE(ctx context.Context, token string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		if c.OnChange == nil {
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
-		err := c.listenSSE(token)
+		err := c.listenSSE(ctx, token)
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			c.pollOnce()
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
 			backoff *= 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -47,15 +74,22 @@ func (c *Client) StartSSE(token string) {
 			// A clean immediate return means the server answered 200 then EOF —
 			// it isn't really streaming. Floor every reconnect at 1s so that
 			// case can't drive a zero-delay, CPU-spinning reconnect storm.
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			backoff = time.Second
 		}
 	}
 }
 
-func (c *Client) listenSSE(token string) error {
+func (c *Client) listenSSE(ctx context.Context, token string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sseURL := c.scopedURL("/v1/data/listen/" + c.Dataset)
-	req, err := http.NewRequest("GET", sseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sseURL, nil)
 	if err != nil {
 		return err
 	}
@@ -63,6 +97,8 @@ func (c *Client) listenSSE(token string) error {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
+	// No client timeout — the stream is long-lived; ctx cancellation (via the
+	// request built above) is what ends it, exactly like Listen in listen.go.
 	sseClient := &http.Client{Timeout: 0}
 	resp, err := sseClient.Do(req)
 	if err != nil {
@@ -125,8 +161,11 @@ func (c *Client) pollOnce() {
 	// that lost membership) is NOT the document set. Hashing it yields the
 	// empty-set hash, which would clobber lastHash and fire a spurious refresh
 	// on recovery (or mask a real change). Leave lastHash untouched, exactly
-	// like the err != nil early return above.
+	// like the err != nil early return above. Drain the body (like the sibling
+	// non-2xx handling in listenSSE and Listen) so a keep-alive connection is
+	// eligible for reuse instead of being forced closed.
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return
 	}
 

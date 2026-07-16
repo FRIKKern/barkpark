@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -277,7 +278,7 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 		default:
 		}
 	}
-	go c.StartSSE("")
+	go c.StartSSE(context.Background(), "")
 
 	select {
 	case <-fired:

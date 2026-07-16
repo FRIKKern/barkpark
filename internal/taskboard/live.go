@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"context"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -330,5 +331,13 @@ func wireLive(p *tea.Program, c *apiclient.Client, token string) {
 	c.OnChange = func() { p.Send(changeMsg{live: true}) }
 	c.OnChangeFallback = func() { p.Send(changeMsg{live: false}) }
 	c.OnLivePulse = func() { p.Send(pulseMsg{}) }
-	go c.StartSSE(token)
+	// StartSSE now takes a context (mirroring Listen in listen.go): a stalled
+	// connection (server accepts, never writes) used to block the read forever
+	// with no way to unblock it. wireLive doesn't own the program's Run() call
+	// (program.go) so there is no shutdown signal to cancel against from here;
+	// context.Background() is the same nil-safe, never-canceled behaviour as
+	// before this fix, so the reconnect/happy-path here is unchanged — the real
+	// fix (a cancellable ctx actually unblocking the read) is exercised by
+	// change_test.go and by main.go's app-lifetime ctx for the desk TUI.
+	go c.StartSSE(context.Background(), token)
 }
