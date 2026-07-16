@@ -12,6 +12,30 @@ defmodule Barkpark.StudioChat.RecorderTest do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
 
+  # A managed-adapter stand-in for the threading test (charter D137/D110): it
+  # never spawns a CLI, it just reports the opts `Runtime.open` handed it back to
+  # the test process (via app-env, since it runs in the Recorder's process, not
+  # the test's). The probe pid is read from app-env so the cross-process `send`
+  # lands. Implements the full frozen Adapter contract.
+  defmodule ProbeAdapter do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(opts), do: notify({:runtime_start_opts, opts})
+    def resume(opts), do: notify({:runtime_resume_opts, opts})
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt-1"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def close(_runtime), do: :ok
+    def readiness(_opts), do: %{binary: true, authed?: true}
+    def capabilities, do: %{modes: ["plan"], models: [], efforts: []}
+
+    defp notify(message) do
+      if pid = Application.get_env(:barkpark, :cloud_sandbox_probe_pid), do: send(pid, message)
+      {:ok, :fake_runtime}
+    end
+  end
+
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -59,6 +83,65 @@ defmodule Barkpark.StudioChat.RecorderTest do
   test "session_pid/1 exposes a live session", %{recorder: recorder} do
     assert {:ok, session} = Recorder.session_pid(recorder)
     assert Process.alive?(session)
+  end
+
+  test "a bp_sandbox frame persists the binding and is SWALLOWED (charter D137)",
+       %{sid: sid, recorder: recorder} do
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+    before = length(StudioChat.list_messages(sid))
+
+    frame(
+      recorder,
+      {:claude_chat_event,
+       %{"type" => "bp_sandbox", "subtype" => "created", "sandbox_id" => "sbx-x"}}
+    )
+
+    # persisted onto the Session row — the durable binding the next turn resumes
+    assert StudioChat.get_session(sid).cloud_sandbox_id == "sbx-x"
+    # SWALLOWED: no chat_messages row appended (the customer stream stays clean)
+    assert length(StudioChat.list_messages(sid)) == before
+    # SWALLOWED: never broadcast on the session topic
+    refute_receive {:claude_chat_event, %{"type" => "bp_sandbox"}}, 200
+
+    # non-vacuous: the subscription IS live — a normal frame still broadcasts, so
+    # the refute above proves the swallow, not a dead topic.
+    frame(
+      recorder,
+      {:claude_chat_event,
+       %{
+         "type" => "assistant",
+         "message" => %{"content" => [%{"type" => "text", "text" => "hi"}]}
+       }}
+    )
+
+    assert_receive {:claude_chat_event, %{"type" => "assistant"}}
+  end
+
+  test "the persisted Cloud sandbox binding threads into the opts handed to the runtime (D110-style)" do
+    prev = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+    Application.put_env(:barkpark, :studio_chat_runtime_adapters, %{claude: ProbeAdapter})
+    Application.put_env(:barkpark, :cloud_sandbox_probe_pid, self())
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+
+      Application.delete_env(:barkpark, :cloud_sandbox_probe_pid)
+    end)
+
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"})
+    {:ok, _} = StudioChat.set_cloud_sandbox_id(id, "sbx-threaded")
+
+    {:ok, _rec} = Recorder.ensure(%{session_id: id, mode: "plan", resume: false})
+
+    # The recorder loads the binding from the Session row (NOT from ensure/1 opts)
+    # and threads it into the map Runtime.open hands the adapter — where
+    # runtime/claude.ex lifts it into ClaudeChat.command/2's session_opts (W14-1).
+    assert_receive {:runtime_start_opts, opts}, 2_000
+    assert opts.cloud_sandbox_id == "sbx-threaded"
+    refute Map.has_key?(%{session_id: id, mode: "plan", resume: false}, :cloud_sandbox_id)
   end
 
   test "an assistant frame persists text + tool rows with NO viewer attached",
@@ -1153,7 +1236,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
       # "a" vanishes from the snapshot → it completed; entries are never deleted.
       frame(
         recorder,
-        bg_frame([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}])
+        bg_frame([
+          %{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}
+        ])
       )
 
       rail = session_rail(sid)
@@ -1165,7 +1250,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
          %{sid: sid, recorder: recorder} do
       frame(
         recorder,
-        bg_frame([%{"task_id" => "a", "task_type" => "local_workflow", "description" => "long agent"}])
+        bg_frame([
+          %{"task_id" => "a", "task_type" => "local_workflow", "description" => "long agent"}
+        ])
       )
 
       # a fresh turn begins mid-run — the rail must NOT reset (unlike per-turn state)
@@ -1187,7 +1274,13 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 10}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "running",
+              "tokens" => 10
+            }
           ],
           "usage" => %{"total_tokens" => 10}
         })
@@ -1207,7 +1300,13 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 9_999}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "running",
+              "tokens" => 9_999
+            }
           ],
           "usage" => %{"total_tokens" => 9_999}
         })
@@ -1223,12 +1322,19 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "completed", "tokens" => 9_999}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "completed",
+              "tokens" => 9_999
+            }
           ]
         })
       )
 
       refute Map.has_key?(session_rail(sid), "SENTINEL")
+
       assert get_in(session_rail(sid), ["t", "workflow"]) |> Enum.at(1) |> Map.get("state") ==
                "completed"
     end
@@ -1276,7 +1382,10 @@ defmodule Barkpark.StudioChat.RecorderTest do
         ])
       )
 
-      frame(recorder, task_event("task_notification", %{"task_id" => "done", "status" => "completed"}))
+      frame(
+        recorder,
+        task_event("task_notification", %{"task_id" => "done", "status" => "completed"})
+      )
 
       StudioChat.interrupt_running_tasks(sid)
 

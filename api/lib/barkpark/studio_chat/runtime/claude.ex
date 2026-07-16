@@ -63,6 +63,12 @@ defmodule Barkpark.StudioChat.Runtime.Claude do
       |> Map.get(:session_opts, %{})
       |> Map.put(:resume, resume?)
       |> Map.put(:workspace_id, Map.get(opts, :workspace_id))
+      # The session-scoped Cloud sandbox binding (charter D137/D139), un-dropped
+      # exactly like :workspace_id above (D110). The recorder loads it from the
+      # Session row; here it reaches ClaudeChat.command/2's session_opts, where the
+      # :cloud profile's cloud_build_args (W14-1) reads it to `--resume` the same
+      # sandbox. The self-hosted build_args ignore the key — inert cargo there.
+      |> Map.put(:cloud_sandbox_id, Map.get(opts, :cloud_sandbox_id))
 
     ClaudeChat.start_session(%{
       sink: Map.fetch!(opts, :sink),
