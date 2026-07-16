@@ -329,11 +329,13 @@ export function mountInstall(
           posted = true;
           await reply(out);
         },
-        // Ack-first (D21): fires on the 202, long before the model speaks. The
-        // user-visible ack is the adapter's own typing indicator (Telegram
-        // starts one for DMs) — we deliberately do NOT post an ack message,
-        // which would break post-once-per-turn.
+        // Ack-first (D21/D170): fires on the 202, long before the model speaks.
+        // The user-visible ack is the adapter's TYPING INDICATOR, started here —
+        // a presence call, never a message post, so post-once-per-turn (D12/D26)
+        // is untouched. Fire-and-forget: the .catch is LOAD-BEARING (imessage's
+        // startTyping THROWS in local mode) — an indicator must never fail a turn.
         onAck: () => {
+          adapter.startTyping(threadId).catch(() => {});
           deps.onAck?.(event);
         },
       });

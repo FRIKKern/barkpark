@@ -69,6 +69,8 @@ func TestUsageCommandWriteBodyAndTypedFlags(t *testing.T) {
 		Writes:    true,
 		Paginated: false,
 		Flags: []manifest.Flag{
+			{Name: "file", Type: "file", Summary: "Document fields as a JSON object from a file or - for stdin."},
+			{Name: "set", Type: "string", Summary: "Field key=value (repeatable).", Repeatable: true},
 			{Name: "publish", Type: "bool", Summary: "Publish immediately."},
 			{Name: "type", Type: "string", Summary: "Document type."},
 		},
@@ -91,6 +93,63 @@ func TestUsageCommandWriteBodyAndTypedFlags(t *testing.T) {
 	if strings.Contains(out, "--publish <value>") {
 		t.Errorf("bool flag must NOT show a <value> placeholder:\n%s", out)
 	}
+}
+
+// TestUsageCommandBodyLineMatchesDeclaredFlags is the W18-5 regression for
+// bp-doc-patch-file-flag-broken: usage.go advertised
+// `--file <path>|-` for EVERY write command, but --set/--file are per-command
+// manifest flags — `bp doc patch` declares only [set], and its parser rightly
+// rejects --file with exit 2. Help must never advertise a flag the parser
+// will refuse: the body hint is composed from the flags the command declares.
+func TestUsageCommandBodyLineMatchesDeclaredFlags(t *testing.T) {
+	render := func(cmd manifest.Command) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		usageCommand(w, cmd)
+		return stderr.String()
+	}
+
+	t.Run("set-only write (doc patch) omits --file from the body line", func(t *testing.T) {
+		out := render(manifest.Command{
+			Noun: "doc", Verb: "patch", Writes: true,
+			Flags: []manifest.Flag{{Name: "set", Type: "string", Summary: "Field key=value to change (repeatable).", Repeatable: true}},
+		})
+		if !strings.Contains(out, "body: --set key=value (repeatable)") {
+			t.Errorf("set-only write should keep the --set body hint:\n%s", out)
+		}
+		if strings.Contains(out, "--file") {
+			t.Errorf("help must not advertise --file when the manifest declares no file flag:\n%s", out)
+		}
+	})
+
+	t.Run("file-only write (schema apply) omits --set from the body line", func(t *testing.T) {
+		out := render(manifest.Command{
+			Noun: "schema", Verb: "apply", Writes: true,
+			Flags: []manifest.Flag{{Name: "file", Type: "file", Summary: "Schema JSON from a file or - for stdin."}},
+		})
+		if !strings.Contains(out, "body: --file <path>|-") {
+			t.Errorf("file-only write should keep the --file body hint:\n%s", out)
+		}
+		if strings.Contains(out, "--set key=value") {
+			t.Errorf("help must not advertise --set when the manifest declares no set flag:\n%s", out)
+		}
+	})
+
+	t.Run("write with neither flag renders no body line", func(t *testing.T) {
+		out := render(manifest.Command{
+			Noun: "task", Verb: "claim", Writes: true,
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string"}},
+		})
+		if strings.Contains(out, "body:") {
+			t.Errorf("a write whose body comes from positional args must not render a body hint:\n%s", out)
+		}
+		// The write globals still apply — they ride parseGlobals, not the
+		// per-command flag list.
+		if !strings.Contains(out, "write globals:") {
+			t.Errorf("write globals line should stay:\n%s", out)
+		}
+	})
 }
 
 func TestUsageCommandNonWriteHasNoBodyOrGlobals(t *testing.T) {

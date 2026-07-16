@@ -129,10 +129,25 @@ config :barkpark, Barkpark.Vault,
 # CONNECTORS_BRIDGE_URL points at the bridge's LOOPBACK listener. The default
 # matches instance-deploy.sh's CONNECTORS_HTTP_ADDR (127.0.0.1:4020) +
 # CONNECTORS_PATH_PREFIX (/connectors); override only if those move.
+#
+# The OAuth client config for Slack + Linear is plumbed here too (connectors
+# D171): catalog.ex's slack_oauth_config/0 + linear_oauth_config/0 read
+# :slack_client_id / :slack_redirect_uri / :linear_client_id /
+# :linear_redirect_uri from THIS keyword block — without these reads those keys
+# are never written and both OAuth cards sit permanently in the honest
+# not-configured gate. These names are NOT secret-shaped (no TOKEN/SECRET/KEY
+# suffix) — client ids + redirect URIs are public. The redirect_uri values MUST
+# byte-match the bridge callback (<public>+<pathPrefix>/oauth/<provider>/callback)
+# — Linear revalidates it at token exchange. Absent ⇒ nil ⇒ not-configured gate
+# unchanged; the cards light up for free once a human registers the OAuth apps.
 connectors_env =
   [
     connect_secret: System.get_env("CONNECTORS_CONNECT_SECRET"),
-    bridge_url: System.get_env("CONNECTORS_BRIDGE_URL")
+    bridge_url: System.get_env("CONNECTORS_BRIDGE_URL"),
+    slack_client_id: System.get_env("CONNECTORS_SLACK_CLIENT_ID"),
+    slack_redirect_uri: System.get_env("CONNECTORS_SLACK_REDIRECT_URI"),
+    linear_client_id: System.get_env("CONNECTORS_LINEAR_CLIENT_ID"),
+    linear_redirect_uri: System.get_env("CONNECTORS_LINEAR_REDIRECT_URI")
   ]
   |> Enum.reject(fn {_k, v} -> is_nil(v) or String.trim(v) == "" end)
 

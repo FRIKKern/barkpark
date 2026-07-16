@@ -141,13 +141,18 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		}
 	}
 
-	// A manifest write command takes its body from --set/--file/-f, but that is
-	// carried by the generic flag machinery, not the per-command Flags list — so
-	// without this line `bp doc create -h` shows a signature with no hint of HOW
-	// to supply the document. Surface it right under the summary, before flags.
+	// A manifest write command takes its body from --set/--file/-f, but those
+	// are PER-COMMAND manifest flags, not universal machinery — `doc patch`
+	// declares only [set] and its parser rightly rejects --file. Compose the
+	// hint from the flags this command actually declares, so `bp doc create -h`
+	// still says HOW to supply the document while help never advertises a flag
+	// the parser will refuse. A write with neither flag (body from positional
+	// args, e.g. task claim) gets no body line at all.
 	if cmd.Writes {
-		out.errf("")
-		out.errf("body: --set key=value (repeatable) | --file <path>|-  (JSON from a file or stdin)")
+		if hint := writeBodyHint(cmd); hint != "" {
+			out.errf("")
+			out.errf("body: %s", hint)
+		}
 	}
 
 	if len(cmd.Flags) > 0 {
@@ -175,6 +180,27 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("")
 		out.errf("write globals: --dry-run (print the request, don't send) · --yes (skip the prod confirmation)")
 	}
+}
+
+// writeBodyHint composes the body-source hint for a write command from the
+// flags its manifest declares. Empty when the command declares neither --set
+// nor --file (its body comes from positional args).
+func writeBodyHint(cmd manifest.Command) string {
+	hasSet := false
+	for _, f := range cmd.Flags {
+		if f.Name == "set" {
+			hasSet = true
+			break
+		}
+	}
+	var parts []string
+	if hasSet {
+		parts = append(parts, "--set key=value (repeatable)")
+	}
+	if commandHasFileFlag(cmd) {
+		parts = append(parts, "--file <path>|-  (JSON from a file or stdin)")
+	}
+	return strings.Join(parts, " | ")
 }
 
 func anyArgSummary(args []manifest.Arg) bool {

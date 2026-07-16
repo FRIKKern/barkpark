@@ -684,7 +684,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Secret env vars the child must NEVER inherit: everything secret-valued that
   # config/runtime.exs reads, plus RELEASE_COOKIE (BEAM distribution) and
   # BARKPARK_TOKEN (the host's bp credential — typically ADMIN), plus the
-  # Hetzner tokens a cloud host's .env exports. Unsetting an absent var is a
+  # Hetzner tokens a cloud host's .env exports, plus BARKPARK_ADMIN_TOKEN
+  # (ApiTesterLive-reachable, charter D173) and BARKPARK_SEED_ADMIN_TOKEN
+  # (deploy-shell-only, scrubbed defensively). Unsetting an absent var is a
   # proven no-op, so the list errs wide. HOME and PATH are deliberately NOT
   # here — the merge keeps them, and claude's OAuth lives under $HOME.
   @scrubbed_env ~w(
@@ -700,11 +702,38 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     BARKPARK_INGEST_TOKEN PAPERFLOW_INGEST_TOKEN
     HETZNER_API_TOKEN HCLOUD_TOKEN
     CONNECTORS_CONNECT_SECRET
+    BARKPARK_ADMIN_TOKEN BARKPARK_SEED_ADMIN_TOKEN
   )
 
   @doc "The secret env var names scrubbed from every chat child (charter D3)."
   @spec scrubbed_env_names() :: [String.t()]
   def scrubbed_env_names, do: @scrubbed_env
+
+  # Secret-shaped env vars that are DELIBERATELY inherited (never scrubbed).
+  # This is the rationale-carrying exception to the api/lib-wide self-audit
+  # (claude_chat_test.exs — "the denylist covers every secret-shaped env read
+  # in api/lib"): a secret read that is neither scrubbed NOR listed here reds
+  # the audit, forcing a conscious scrub-or-allowlist decision.
+  #
+  # ANTHROPIC_API_KEY (charter D23): it IS the cloud path's `claude` auth
+  # mechanism. The claude CLI natively authenticates on this var, and whether
+  # cloud-sandbox-runner.mjs depends on inheriting it is UNRESOLVED Node-side —
+  # a blind scrub could break the human-gated cloud turn. NEVER blind-scrub it;
+  # the local in-process reads (studio_chat/titles.ex, tasks/judge.ex) are the
+  # server's own Anthropic identity, out of the chat child's scrub scope by
+  # design.
+  @intentional_env_passthrough ~w(
+    ANTHROPIC_API_KEY
+  )
+
+  @doc """
+  Secret-shaped env var names that are DELIBERATELY inherited by chat children
+  rather than scrubbed (charter D23). The self-audit asserts every secret read
+  in `api/lib` is either scrubbed (`scrubbed_env_names/0`) OR listed here —
+  a flat subset would fail forever on this legitimate exception.
+  """
+  @spec intentional_env_passthrough_names() :: [String.t()]
+  def intentional_env_passthrough_names, do: @intentional_env_passthrough
 
   @doc """
   The `env:` option for the chat child's `Port.open` (charter D1/D3). Injects
