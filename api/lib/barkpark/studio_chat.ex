@@ -1054,17 +1054,29 @@ defmodule Barkpark.StudioChat do
   Stamp a terminal/transition status onto a rail entry — but ONLY when the
   task_id already has one (charter D47). A lifecycle frame for a task the rail
   never listed leaves the map untouched. PURE.
+
+  The optional fourth arg is the terminal `end_time` a settled `task_updated`
+  carries (charter D5): when present it is stamped as the entry's `"end_time"`
+  so `workflow_summary/1`'s `ended_at` becomes real for a finished wave. `nil`
+  (the default, and every non-terminal transition) never adds the key.
   """
-  @spec rail_stamp_status(map(), any(), any()) :: map()
-  def rail_stamp_status(rail, tid, status)
+  @spec rail_stamp_status(map(), any(), any(), any()) :: map()
+  def rail_stamp_status(rail, tid, status, end_time \\ nil)
+
+  def rail_stamp_status(rail, tid, status, end_time)
       when is_map(rail) and is_binary(tid) and is_binary(status) do
     case Map.get(rail, tid) do
-      entry when is_map(entry) -> Map.put(rail, tid, Map.put(entry, "status", status))
-      _ -> rail
+      entry when is_map(entry) ->
+        entry = Map.put(entry, "status", status)
+        entry = if is_nil(end_time), do: entry, else: Map.put(entry, "end_time", end_time)
+        Map.put(rail, tid, entry)
+
+      _ ->
+        rail
     end
   end
 
-  def rail_stamp_status(rail, _tid, _status), do: rail
+  def rail_stamp_status(rail, _tid, _status, _end_time), do: rail
 
   # Existing entry, or a fresh one seeded "running" with the next insertion seq
   # (the cap prunes oldest-terminal by seq).
