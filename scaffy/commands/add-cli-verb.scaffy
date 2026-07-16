@@ -1,6 +1,8 @@
-COMMAND "Add a bp CLI Verb"
-DESCRIPTION "Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. Zero Go: the manifest-driven CLI grows the verb for free."
-DOMAIN "barkpark" CONCEPT "cli-verb" VARIANT "read-list"
+COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. Zero Go: the manifest-driven CLI grows the verb for free." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "plugin", "verb" CONCEPT "cli-verb" VARIANT "read-list" VARIABLES
+  VARIABLE 1 "Noun" TITLE "Plugin noun the verb hangs off" DESCRIPTION "The existing noun in the plugin's cli_commands/0 list this verb extends. Lowercase single word — the four casings coincide." EXAMPLES "ticket"
+  VARIABLE 2 "Verb" TITLE "The new verb" DESCRIPTION "The verb `bp <noun> <verb>` will answer to. Lowercase single word — the four casings coincide." EXAMPLES "stats", "waiting", "unassigned"
+  VARIABLE 3 "Summary" TITLE "One-line operator summary (manifest + --help text)" DESCRIPTION "Shown in `bp <noun> --help` and the capabilities manifest. Opaque literal, no casing transform." EXAMPLES "Operator dashboard: open / answered / closed counts, oldest-waiting age."
+  VARIABLE 4 "PathTemplate" TITLE "The HTTP route the verb calls (GET)" DESCRIPTION "The path_template the generic HTTP builder calls. Must be a route the API actually serves. Opaque literal in URL position ({{.path_template}} snake spelling)." EXAMPLES "/v1/tickets/stats"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Why this command is a ONE-LINE append (the architecture already did the work)
@@ -44,16 +46,6 @@ DOMAIN "barkpark" CONCEPT "cli-verb" VARIANT "read-list"
 # `singleObjectEnvelopeKeys` at internal/cli/table.go:96. That is a Go rendering
 # nicety only; the verb is fully functional without it.
 
-VARIABLES
-  VARIABLE 1 "Noun" TITLE "Plugin noun the verb hangs off"
-    EXAMPLES "ticket"
-  VARIABLE 2 "Verb" TITLE "The new verb"
-    EXAMPLES "stats", "waiting", "unassigned"
-  VARIABLE 3 "Summary" TITLE "One-line operator summary (manifest + --help text)"
-    EXAMPLES "Operator dashboard: open / answered / closed counts, oldest-waiting age."
-  VARIABLE 4 "PathTemplate" TITLE "The HTTP route the verb calls (GET)"
-    EXAMPLES "/v1/tickets/stats"
-
 # Token spellings-as-transforms (D3d / A1). A verb is a single lowercase word, so
 # the four canonical casings coincide — declared for grammar completeness:
 #   {{.Verb}}   → Stats     (Pascal)
@@ -71,11 +63,13 @@ VARIABLES
 #
 # A4/A5 guard: `ticket.close` survives as a substring of the replacement, so
 # idempotency rests ENTIRELY on the ASLONG guard — a payload-derived, ASCII,
-# per-verb substring of what the op writes (the new map's `id:` line). No `}}`
-# sits adjacent to a literal `}`. On a re-run with the same VARIABLEs the guard is
-# already present and the whole op is skipped (no duplicate verb). The MARK plants
-# the re-anchor + remove handle: first run anchors on the `ticket.close` structural
-# target and plants "SCAFFY CLI VERB"; every later run anchors at that mark.
+# per-verb substring of what the op writes (the new map's `id:` line — chosen over
+# the mark line because it ALSO refuses a verb that already exists by hand). No
+# `}}` sits adjacent to a literal `}`. On a re-run with the same VARIABLEs the
+# guard is already present and the whole op is skipped (no duplicate verb). The
+# payload's comment line plants the per-verb mark cli-verb-{{.noun}}-{{.verb}}:
+# first run anchors on the `ticket.close` structural target and plants it; every
+# later run (and remove) anchors at that mark.
 
 IN "api/lib/barkpark/plugins/tickets/cli.ex"
 ### Append {{.noun}}.{{.verb}} to ticket_commands/0
@@ -100,6 +94,7 @@ REPLACE
         scoped_prefix: nil
       }
 ::: target :::
+WITH
 ::: payload :::
       %{
         id: "ticket.close",
@@ -119,6 +114,7 @@ REPLACE
         default_output: "minimal",
         scoped_prefix: nil
       },
+      # scaffy:add-cli-verb {{.noun}}.{{.verb}} MARK:cli-verb-{{.noun}}-{{.verb}}
       %{
         id: "{{.noun}}.{{.verb}}",
         noun: "{{.noun}}",
@@ -138,8 +134,8 @@ REPLACE
         scoped_prefix: nil
       }
 ::: payload :::
-ASLONG "id: \"{{.noun}}.{{.verb}}\""
-MARK "SCAFFY CLI VERB"
+MARK "cli-verb-{{.noun}}-{{.verb}}"
+ASLONG FILE DONT CONTAIN "id: \"{{.noun}}.{{.verb}}\""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POSTCONDITIONS
@@ -152,4 +148,4 @@ ASSERT FILE "api/lib/barkpark/plugins/tickets/cli.ex" CONTAINS "path_template: \
 # ASSERT CMD: the plugin's own CLI-manifest test compiles the map and asserts the
 # frozen cli_command() shape. Every Elixir gate is TIER ci (A2) — never run in the
 # apply worktree, only on CI where the BEAM toolchain and DB are provisioned.
-ASSERT CMD "mix test test/barkpark/plugins/tickets/cli_test.exs" EXIT 0 TIER ci
+ASSERT CMD "cd api && mix test test/barkpark/plugins/tickets/cli_test.exs" TIER ci
