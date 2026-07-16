@@ -1479,6 +1479,95 @@ func TestParseLaunchArgsProviderIsOpaque(t *testing.T) {
 	}
 }
 
+// TestParseLoginArgsFlagShapedValueRejected: nextFlagValue used to consume
+// args[i+1] unconditionally, so `bp login --password --device-start` bound the
+// password to the literal "--device-start" and left --device-start's own bool
+// false, with NO error. Every login value-flag (--email/--password/
+// --device-poll/--url), followed immediately by any other known login flag or
+// by end-of-args, must now fail with the flag-needs-a-value error instead of
+// silently swallowing the follower. This is the fails-before-fix case.
+func TestParseLoginArgsFlagShapedValueRejected(t *testing.T) {
+	valueFlags := []string{"--email", "--password", "--device-poll", "--url"}
+	followers := append([]string{""}, loginKnownFlags...) // "" stands for end-of-args
+	for _, vf := range valueFlags {
+		for _, follower := range followers {
+			var args []string
+			if follower == "" {
+				args = []string{vf}
+			} else {
+				args = []string{vf, follower}
+			}
+			name := vf + "_then_" + follower
+			if follower == "" {
+				name = vf + "_end_of_args"
+			}
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, _, _, err := parseLoginArgs(args)
+				if err == nil {
+					t.Fatalf("parseLoginArgs(%v) = nil error, want %q needs a value", args, vf)
+				}
+				if !strings.Contains(err.Error(), vf+" needs a value") {
+					t.Fatalf("parseLoginArgs(%v) error = %q, want it to contain %q", args, err, vf+" needs a value")
+				}
+			})
+		}
+	}
+}
+
+// TestParseLoginArgsLegitValueStillParses: the guard must not reject a value
+// that merely starts with "-" but isn't a flag this parser knows.
+func TestParseLoginArgsLegitValueStillParses(t *testing.T) {
+	email, password, _, _, _, _, err := parseLoginArgs([]string{"--email", "a@b.com", "--password", "-secret"})
+	if err != nil {
+		t.Fatalf("parseLoginArgs: %v", err)
+	}
+	if email != "a@b.com" || password != "-secret" {
+		t.Fatalf("parseLoginArgs = (%q,%q), want (a@b.com,-secret)", email, password)
+	}
+}
+
+// TestParseSignupArgsFlagShapedValueRejected mirrors the login case for
+// `bp signup`'s value-flags (--email/--password/--team/--url).
+func TestParseSignupArgsFlagShapedValueRejected(t *testing.T) {
+	valueFlags := []string{"--email", "--password", "--team", "--url"}
+	followers := append([]string{""}, signupKnownFlags...)
+	for _, vf := range valueFlags {
+		for _, follower := range followers {
+			var args []string
+			if follower == "" {
+				args = []string{vf}
+			} else {
+				args = []string{vf, follower}
+			}
+			name := vf + "_then_" + follower
+			if follower == "" {
+				name = vf + "_end_of_args"
+			}
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, err := parseSignupArgs(args)
+				if err == nil {
+					t.Fatalf("parseSignupArgs(%v) = nil error, want %q needs a value", args, vf)
+				}
+				if !strings.Contains(err.Error(), vf+" needs a value") {
+					t.Fatalf("parseSignupArgs(%v) error = %q, want it to contain %q", args, err, vf+" needs a value")
+				}
+			})
+		}
+	}
+}
+
+// TestParseSignupArgsLegitValueStillParses: a dash-leading value that isn't a
+// known flag still binds normally.
+func TestParseSignupArgsLegitValueStillParses(t *testing.T) {
+	email, password, team, _, err := parseSignupArgs([]string{"--email", "a@b.com", "--team", "-acme", "--password", "-secret"})
+	if err != nil {
+		t.Fatalf("parseSignupArgs: %v", err)
+	}
+	if email != "a@b.com" || team != "-acme" || password != "-secret" {
+		t.Fatalf("parseSignupArgs = (%q,%q,%q), want (a@b.com,-acme,-secret)", email, password, team)
+	}
+}
+
 // TestAuthedCommandsRequireLogin: with NO cloud token, the authed commands fail
 // with exit 3 and tell the user to run `bp login`. They must NOT hit the network.
 func TestAuthedCommandsRequireLogin(t *testing.T) {
