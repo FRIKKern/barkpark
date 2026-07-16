@@ -548,9 +548,10 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
       })
 
     assert html =~ ~s|class="bp-gauge"|
-    # open(2) first, then closed(1)/(none)(1) label-asc
-    assert :binary.match(html, "open") < :binary.match(html, "closed")
-    assert :binary.match(html, "closed") < :binary.match(html, "(none)")
+    # open(2) first, then the count-1 buckets label-ASC: "(none)" < "closed"
+    # (byte order — '(' sorts before 'c'), mirroring gaugelist.go exactly.
+    assert :binary.match(html, "open") < :binary.match(html, "(none)")
+    assert :binary.match(html, "(none)") < :binary.match(html, "closed")
     # counts as readout digits, meter = count/maxCount
     assert html =~ ">2</span>"
     assert html =~ ~s|style="width:100%"|
