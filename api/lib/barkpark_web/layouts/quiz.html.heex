@@ -99,7 +99,7 @@
   <%!-- P2 cursor client: own QuizSocket connection, driven by the
         canvas[data-quiz-pin] each page renders. No-op without one. --%>
   <script src="/assets/quiz-cursors.js" defer></script>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: { _csrf_token: csrfToken }

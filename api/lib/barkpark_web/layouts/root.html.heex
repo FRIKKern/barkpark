@@ -15,7 +15,7 @@
         sets a single attribute. Default follows the OS until the user toggles;
         the choice then persists in localStorage. While no explicit pref is
         stored, OS scheme changes are mirrored live. --%>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     (function () {
       var KEY = "barkpark_theme";
       function osTheme() {
@@ -4974,7 +4974,7 @@
         opt OUT of the WC's self-injecting standalone stylesheet to avoid doubled
         / page-globalized rules. Embedders (web) leave this unset. Runs before the
         deferred bundle below. --%>
-  <script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
+  <script nonce={assigns[:csp_nonce]}>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
   <script src="/assets/bp-paper-editor.bundle.js" defer></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
@@ -5007,7 +5007,7 @@
         the server git-pull + rebuild + restart, so the poller treats a
         connection drop as "restarting" and reloads once the box answers again
         on a release that is no longer behind. --%>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     (function () {
       var POLL_MS = 3000;
       var MAX_MS = 8 * 60 * 1000; // give a full rebuild+restart room, then bail
@@ -5157,7 +5157,7 @@
         (charter D25). Non-defer so window.BarkparkChatComposer exists before the
         Hooks registration + LiveSocket connect below. --%>
   <script src="/assets/bp-chat-composer.js"></script>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
     // Presence identity from localStorage

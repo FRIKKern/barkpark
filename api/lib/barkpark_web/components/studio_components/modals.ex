@@ -248,7 +248,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  onclick={"if(navigator.clipboard){var u='#{link.url}';navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"}
+                  data-url={link.url}
+                  onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
                   title="Copy link"
                 >
                   Copy

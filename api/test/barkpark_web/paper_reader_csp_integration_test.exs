@@ -2,8 +2,9 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
   @moduledoc """
   End-to-end lock for the layer-2 paper-reader CSP: proves the `:paper_reader_csp`
   pipeline is actually wired onto the reader scopes (not just that the plug works
-  in isolation), and that the shared `:public_root` bucket siblings + the /email
-  sub-route are untouched.
+  in isolation), and that the reader's wasm script-src self-gates OFF the shared
+  `:public_root` bucket siblings + the /email sub-route (which ride the browser
+  CSP instead).
 
   Headless tests CANNOT execute the wasm/mermaid/asciinema paths — a real browser
   smoke still owns final sign-off (see the PR body). What this DOES prove:
@@ -11,8 +12,10 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     * the CSP header reaches a live `GET /papers/:slug` dead-render with a nonce,
     * the dead-render HTML stamps that nonce on its inline scripts and carries NO
       inline `onclick=` (the refactor that makes an enforcing script-src viable),
-    * `GET /sheets/:slug` (a 404 sibling on the same bucket) and
-      `GET /papers/:slug/email` (the excluded sub-route) get NO CSP header.
+    * `GET /sheets/:slug` and `GET /papers/:slug/email` (siblings on the same
+      `:browser` bucket) self-gate OFF the reader's wasm script-src and instead
+      ride the `:browser` BrowserCsp policy (defense-in-depth), which is safe on
+      them (email is script-less; the sheets reader's inline boot is nonced).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -55,21 +58,25 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     assert body =~ ~s|addEventListener("click", window.__bpToggleTui)|
   end
 
-  test "GET /papers/:slug/email (excluded sub-route) does NOT get the script CSP",
+  test "GET /papers/:slug/email keeps the BROWSER CSP, not the reader's (self-gate OFF)",
        %{conn: conn} do
     conn = get(conn, "/papers/#{@slug}/email")
 
-    # The email view renders (its own layout); it keeps only the Phoenix baseline
-    # security-headers CSP (base-uri/frame-ancestors) — the reader's script-src
-    # backstop is NOT applied to the sub-route.
-    refute csp_of(conn) =~ "script-src"
+    # The email byte-stream renders (its own layout, no inline scripts). PaperReaderCsp
+    # self-gates OFF the sub-route, so its wasm-reader script-src is NOT applied;
+    # the :browser BrowserCsp policy (defense-in-depth, carries 'unsafe-hashes')
+    # covers it instead — harmless on the script-less email HTML (task-0fc9d55c).
+    policy = csp_of(conn)
+    assert policy =~ "'unsafe-hashes'"
+    refute policy =~ "'unsafe-inline'"
   end
 
-  test "GET /sheets/:slug (shared-bucket sibling) does NOT get the script CSP",
+  test "GET /sheets/:slug (shared-bucket sibling) rides the BROWSER CSP, script nonced",
        %{conn: conn} do
-    # A REAL published sheet on the same `:public_root` bucket. The reader CSP
-    # must self-gate OFF it (or an enforcing script-src would break the sheets
-    # reader's own layout/CDN needs).
+    # A REAL published sheet on the same `:public_root` bucket. PaperReaderCsp
+    # self-gates OFF it (no reader wasm policy); the :browser BrowserCsp policy
+    # covers it, and the sheets reader layout's inline liveSocket boot carries the
+    # per-request nonce so the enforcing script-src does NOT dead-click it.
     {:ok, _} =
       Content.create_document(
         "sheet",
@@ -85,7 +92,11 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     conn = get(conn, "/sheets/csp-sheet-sibling")
 
     assert conn.status == 200
-    refute csp_of(conn) =~ "script-src"
+    policy = csp_of(conn)
+    assert policy =~ "'unsafe-hashes'"
+    refute policy =~ "'unsafe-inline'"
+    # the reader layout's inline liveSocket boot is nonced → not blocked.
+    assert html_response(conn, 200) =~ ~s(nonce="#{conn.assigns.csp_nonce}")
   end
 
   # Fold the header list to a single string ("" when absent) so an assertion can

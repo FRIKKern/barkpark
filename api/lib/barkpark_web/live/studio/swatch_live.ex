@@ -129,9 +129,12 @@ defmodule BarkparkWeb.Studio.SwatchLive do
           matrix shows both modes regardless of the viewer's OS/localStorage
           preference (data-theme is otherwise client-owned). Runs on the initial
           static (SSR) render the iframe loads. --%>
-    <script>
-      document.documentElement.dataset.theme = "<%= @mode %>";
-    </script>
+    <%!-- Single-line + no surrounding whitespace ON PURPOSE: this renders in the
+          LiveView body (not a conn-rendered layout) so it cannot carry a nonce.
+          Its exact textContent (mode is only "light"/"dark") is allow-listed by
+          sha256 in BarkparkWeb.CSP so the :browser script-src does not block it
+          — keep it byte-identical to CSP.swatch_theme_script/1 (task-0fc9d55c). --%>
+    <script>document.documentElement.dataset.theme="<%= @mode %>";</script>
 
     <div
       id="swatch-root"
