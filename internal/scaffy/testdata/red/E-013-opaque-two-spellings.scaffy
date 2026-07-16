@@ -1,0 +1,7 @@
+# expect: E-013 6
+DIRECTION "add"
+VARIABLE 1 "Ts" OPAQUE SHAPE "ts14" TITLE "t" DESCRIPTION "d" EXAMPLES "20260716100000"
+CREATE FILE IF ABSENT "api/priv/repo/migrations/{{.Ts}}_x.exs"
+::: migration shell :::
+# timestamp {{.ts}}
+::: migration shell :::

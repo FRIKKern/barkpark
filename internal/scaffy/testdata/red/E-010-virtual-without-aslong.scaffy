@@ -1,0 +1,14 @@
+# expect: E-010 14
+DIRECTION "add"
+VARIABLE 1 "CountBefore" OPAQUE TITLE "t" DESCRIPTION "d" EXAMPLES "42"
+VARIABLE 2 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "t2" DESCRIPTION "d2" EXAMPLES "43"
+IN "js/widgets/widgets.test.ts"
+REPLACE
+::: count anchor :::
+  expect(cases).toHaveLength({{.CountBefore}})
+::: count anchor :::
+WITH
+::: count bump :::
+  expect(cases).toHaveLength({{.CountAfter}})
+::: count bump :::
+MARK VIRTUAL "js-count-bump"

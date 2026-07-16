@@ -1,0 +1,14 @@
+# a messy   comment   keeps its exact bytes
+COMMAND    "fmt-demo"
+DESCRIPTION     "Format demo."
+DIRECTION   "add"
+
+VARIABLE 1   "WidgetName"   TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+
+CREATE FILE IF ABSENT    "internal/{{.widget_name}}.go"
+:::   widget module   :::
+package demo
+	payload   spacing   is untouchable   
+::: widget module :::
+
+   ASSERT FILE "internal/{{.widget_name}}.go"    EXISTS
