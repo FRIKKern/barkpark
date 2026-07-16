@@ -1,0 +1,28 @@
+{
+  "name": "@barkpark/next-parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wave-3 render-path-unification proof: consume the canonical @barkpark/react PortableDoc as a real Server Component in a Next.js STATIC export (output:'export', basePath:'/blog') and re-run the EXISTING DOM-shape parity harness against the 42 pd-golden fixtures — plus multipage post routes, per-route SEO, and a basePath inversion. Test-only — never published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "( [ -f ../react/dist/index.mjs ] && [ -f ../nextjs/dist/index.mjs ] || pnpm --filter @barkpark/core --filter @barkpark/react --filter @barkpark/nextjs build ) && next build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@barkpark/react": "workspace:^",
+    "@barkpark/nextjs": "workspace:^"
+  },
+  "devDependencies": {
+    "next": "16.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "happy-dom": "^20.0.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}
