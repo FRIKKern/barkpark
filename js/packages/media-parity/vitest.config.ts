@@ -13,6 +13,15 @@ import { defineConfig } from 'vitest/config'
 // it is already covered by the root turbo `test` task inputs, so a config change
 // busts the cache instead of serving a stale green.
 export default defineConfig({
+  // `hydratePortableDoc` reaches `mermaid` and `asciinema-player` through lazy
+  // `import()`s, so Vite only discovers them mid-run — on a cold `.vite` cache
+  // it re-optimizes and RELOADS the page, which aborts the in-flight test module
+  // ("Vite unexpectedly reloaded a test" → "Failed to fetch dynamically imported
+  // module"). Pre-declaring them here (vitest's own recommended fix) primes the
+  // optimizer before the first test, so a fresh CI checkout is deterministic.
+  optimizeDeps: {
+    include: ['mermaid', 'asciinema-player'],
+  },
   test: {
     name: 'media-parity',
     include: ['tests/**/*.browser.test.ts'],
