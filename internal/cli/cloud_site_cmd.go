@@ -144,7 +144,7 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter] [--deploy]"
-	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template"}, []string{"deploy"}, usage)
+	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template", "theme"}, []string{"deploy"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -202,6 +202,9 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 		// W2, D8) — e.g. the flagship search-starter on a node site. Empty keeps
 		// the framework-derived default.
 		Template: strings.TrimSpace(a.val("template")),
+		// --theme pins the palette for this site's deploys (W6) — empty keeps
+		// the template default.
+		Theme: strings.TrimSpace(a.val("theme")),
 	}
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
@@ -234,6 +237,9 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	}
 	if req.Template != "" {
 		emit("  starter: %s", hzCell(req.Template))
+	}
+	if req.Theme != "" {
+		emit("  theme:   %s", hzCell(req.Theme))
 	}
 	// A plain create can only promise the URL goes live after the first deploy; the
 	// one-motion is ABOUT to deploy, so it skips the caveat and lets the deploy stream

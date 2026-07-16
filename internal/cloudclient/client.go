@@ -1308,6 +1308,10 @@ type SpawnSiteCreate struct {
 	// empty keeps the framework-derived default (astro->astro-starter,
 	// nextjs->next-starter) — the pre-template behavior, byte-identical.
 	Template string `json:"template,omitempty"`
+	// Theme pins a shipped palette for this site's deploys (search-template W6:
+	// evergreen | ember | fjord | charple). Optional: empty keeps the template
+	// default — the relay injects BARKPARK_THEME only when set.
+	Theme string `json:"theme,omitempty"`
 }
 
 // Runtime targets — the "where does the artifact RUN" half of the site engine

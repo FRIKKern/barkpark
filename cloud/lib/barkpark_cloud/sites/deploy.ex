@@ -314,6 +314,17 @@ defmodule BarkparkCloud.Sites.Deploy do
     }
     |> maybe_put_target_port(site)
     |> maybe_put_template(site)
+    |> maybe_put_theme(site)
+  end
+
+  # search-template W6: the deploy-pinned palette rides the env ONLY when the
+  # site row pins one — nil deploys byte-identical to pre-theme payloads. The
+  # box engines already allow-list BARKPARK_THEME (BUILD_ALLOW + the API's
+  # deploy-request env allow-list, W2).
+  defp maybe_put_theme(payload, %Site{theme: nil}), do: payload
+
+  defp maybe_put_theme(payload, %Site{theme: theme}) when is_binary(theme) do
+    put_in(payload, [:env, :BARKPARK_THEME], theme)
   end
 
   # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
