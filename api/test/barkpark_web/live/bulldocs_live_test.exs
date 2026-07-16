@@ -103,6 +103,36 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ ~s(id="paper-empty")
       assert html =~ "No paper saved yet"
     end
+
+    test "renders a historical paper whose blocks exist only under content.body", %{conn: conn} do
+      slug = "2026-07-16-nested-body-reader"
+
+      blocks = [
+        %{
+          "id" => "nested-body",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Nested body blocks are visible."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      nested_only =
+        paper.content
+        |> Map.delete("blocks")
+        |> Map.delete("body_html")
+        |> Map.put("body", %{"blocks" => blocks})
+
+      paper
+      |> Ecto.Changeset.change(content: nested_only)
+      |> Barkpark.Repo.update!()
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ ~s(data-block-id="nested-body")
+      assert html =~ "Nested body blocks are visible."
+    end
   end
 
   describe "backlinks: engine-backed 'Linked mentions' section (public flat reader)" do

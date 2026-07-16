@@ -46,7 +46,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
-  alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.{Projection, Render}
 
   @impl true
   def mount(%{"slug" => slug} = params, _session, socket) do
@@ -607,7 +607,7 @@ defmodule BarkparkWeb.BulldocsLive do
   defp paper_preview(_paper, slug),
     do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
-  defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
+  defp paper_blocks(%{content: content}), do: Projection.read_blocks(content || %{})
   defp paper_blocks(_), do: nil
 
   # The paper's goal id, if any — used at mount to gate the P6.U4 Simplify
@@ -633,28 +633,29 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper)
-       when is_list(blocks) do
-    resolved = with_live_tasks(blocks, paper)
+  defp assign_block_mode(socket, paper) do
+    case paper_blocks(paper) do
+      blocks when is_list(blocks) ->
+        resolved = with_live_tasks(blocks, paper)
 
-    socket
-    |> assign(:block_mode, true)
-    |> stream(
-      :blocks,
-      to_stream_items(
-        resolved,
-        paper_article?(paper),
-        reader_resolvers(resolved, socket.assigns[:dataset], paper)
-      )
-    )
-  end
+        socket
+        |> assign(:block_mode, true)
+        |> stream(
+          :blocks,
+          to_stream_items(
+            resolved,
+            paper_article?(paper),
+            reader_resolvers(resolved, socket.assigns[:dataset], paper)
+          )
+        )
 
-  defp assign_block_mode(socket, _paper) do
-    socket
-    |> assign(:block_mode, false)
-    # Initialise an empty stream so the template can reference @streams.blocks
-    # uniformly even on the HTML-only path (it just stays empty).
-    |> stream(:blocks, [])
+      _ ->
+        socket
+        |> assign(:block_mode, false)
+        # Initialise an empty stream so the template can reference @streams.blocks
+        # uniformly even on the HTML-only path (it just stays empty).
+        |> stream(:blocks, [])
+    end
   end
 
   # D2 (ratified, wire §10): the reader's mount/refetch render resolves
