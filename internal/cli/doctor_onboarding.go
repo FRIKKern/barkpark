@@ -18,10 +18,11 @@ package cli
 //	                  (latestReleaseVersion, the same resolver `bp upgrade` uses).
 //	(c) CLOUD       — is a Cloud control-plane session present? url + team, never
 //	                  the token.
-//	(d) INSTANCE    — the target Barkpark from the cross-team fleet
-//	                  (ListAllBarkparks carries id + team per row): instance id,
-//	                  team, canonical URL + any host aliases. Falls back to the
-//	                  active saved server when the fleet can't be reached.
+//	(d) INSTANCE    — the target Barkpark's identity, LOCAL-FIRST: the stamped
+//	                  ServerEntry.InstanceID/Aliases/Team from the saved config
+//	                  (no network). Only when no stamped id exists does it reach
+//	                  for the cross-team fleet (ListAllBarkparks carries id + team
+//	                  per row) to name a legacy / not-yet-connected target.
 //	(e) AUTH        — the manifest fetch: reachable + auth_tier for the target.
 //	(f) MCP         — the curated 8-tool task catalog (registerTaskTools): names
 //	                  + count, so a client knows what it will get.
@@ -329,15 +330,28 @@ func onboardingCloudSession(cfg *Config) onbCloudSession {
 	return s
 }
 
-// onboardingInstance is (d): the target Barkpark's identity. The cross-team fleet
-// (ListAllBarkparks) is authoritative — it carries the instance id + team per row
-// — so we match the active content target against it and report id/team/url +
-// host aliases. When the fleet can't be reached (or the user is self-hosted with
-// no Cloud session), we fall back to the active saved server (url only). Returns
-// nil only when there is no active target at all.
+// onboardingInstance is (d): the target Barkpark's identity, resolved LOCAL-FIRST
+// with a fleet MERGE fallback. When the active target's saved ServerEntry carries
+// the InstanceID the connect path stamped (BP-ONB-05, wave-2 slice-1), we return
+// that local identity (Source "local") WITHOUT a cross-team fleet round-trip — the
+// offline/first-time win, and the common case once a target is connected. Only
+// when the stamped InstanceID is ABSENT (a legacy or not-yet-connected target) do
+// we reach for the authoritative cross-team fleet (ListAllBarkparks carries id +
+// team per row), matching the active content target against it. Failing both, we
+// fall back to whatever local identity we have (url + name, id-less). Returns nil
+// only when there is no active target at all.
 func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 	active := strings.TrimRight(strings.TrimSpace(ctx.Server), "/")
 
+	// Local-first: a stamped InstanceID means we already know this box's identity
+	// from the saved config — no fleet fetch, no network. This is the offline win.
+	local := localInstance(cfg, ctx)
+	if local != nil && local.ID != "" {
+		return local
+	}
+
+	// Fleet fallback: only when no stamped identity exists (legacy / pre-connect
+	// targets). The fleet is authoritative for id + team when it can be reached.
 	if cfg != nil && cfg.HasCloudToken() && onboardingListFleet != nil {
 		if fleet, err := onboardingListFleet(cfg); err == nil {
 			for _, b := range fleet {
@@ -348,10 +362,10 @@ func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 		}
 	}
 
-	if active == "" {
-		return nil
-	}
-	return &onbInstance{URL: active, Source: "active-server"}
+	// Neither a stamped id nor a fleet match: report the id-less local identity
+	// (url + saved name). localInstance covers every active!=\"\" case, so this is
+	// the last honest report before nil (which only happens when active is empty).
+	return local
 }
 
 // fleetMatchesActive reports whether a fleet row addresses the same box as the
