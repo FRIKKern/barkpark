@@ -95,7 +95,7 @@ type VariableDecl struct {
 	SuccessorPos Pos
 	Title        string
 	Description  string
-	Examples     string
+	Examples     []string // EXAMPLES "a", "b", … — a comma-separated quoted list
 }
 
 // Snippet is a named shared payload (D3(e)): SNIPPET <name> + fence.

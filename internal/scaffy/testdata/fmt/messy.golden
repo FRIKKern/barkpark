@@ -3,7 +3,7 @@ COMMAND "fmt-demo"
 DESCRIPTION "Format demo."
 DIRECTION "add"
 
-VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+  VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
 
 CREATE FILE IF ABSENT "internal/{{.widget_name}}.go"
 ::: widget module :::

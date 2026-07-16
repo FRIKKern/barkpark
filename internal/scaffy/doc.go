@@ -17,8 +17,10 @@
 //	Format(src)                 ([]byte, error)         // canonical form; Format∘Format == Format
 //
 // Format canonicalizes STRUCTURE only: keyword lines are single-spaced
-// and flush-left, fence lines are normalized — comment prose and
-// payload bytes are never rewritten (D27).
+// and flush-left (VARIABLE declarations two-space indented, list commas
+// bound to the preceding value — the corpus spellings), fence lines are
+// normalized — comment prose and payload bytes are never rewritten
+// (D27).
 //
 // # Rule catalog
 //
@@ -33,10 +35,12 @@
 //	E-005  self-consuming REPLACE (target survives as a substring of its
 //	       own payload) without BOTH a payload-derived ASLONG and a
 //	       REANCHOR (A4/D21)
-//	E-006  ASLONG guard is not a verbatim substring of the op's payload
-//	       (INSERT/REPLACE) or fenced target (REMOVE); whole-file
-//	       CREATE/DELETE guards are exempt — they check on-disk content
-//	       (D3(c)/D28)
+//	E-006  ASLONG guard is not a verbatim substring of what the op
+//	       touches: a DONT CONTAIN guard derives from the payload (text
+//	       the op writes), a positive CONTAIN guard from the fenced
+//	       target (text the op consumes — REMOVE and the un-sweep
+//	       REPLACE alike); whole-file CREATE/DELETE guards are exempt —
+//	       they check on-disk content (D3(c)/D23/D28)
 //	E-007  IN-op carries no MARK (D3(b))
 //	E-008  plain MARK's planted text MARK:<name> does not appear verbatim
 //	       in the op's own payload (VIRTUAL exempt, D24)
@@ -47,7 +51,8 @@
 //	E-011  ASLONG polarity contradicts DIRECTION: add ⇒ DONT CONTAIN,
 //	       remove ⇒ CONTAIN (D23 — declared, never inferred)
 //	E-012  guard/assert hygiene: non-ASCII text, or a }}} run (a token's
-//	       }} adjacent to a literal }) (A5)
+//	       }} adjacent to a literal }) (A5); ASSERT CMD strings are
+//	       shell text, not match text — only the }}} rule binds them
 //	E-013  OPAQUE variable referenced in more than one spelling in the
 //	       file (D22)
 //	E-014  SUCCESSOR pair: EXAMPLES value is not the named sibling's

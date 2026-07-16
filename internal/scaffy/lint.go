@@ -73,23 +73,24 @@ func (l *linter) lintShape(v *VariableDecl) {
 			`the shape catalog knows: "ts14"`)
 		return
 	}
-	val := v.Examples
-	ok := len(val) == 14
-	for _, r := range val {
-		if r < '0' || r > '9' {
-			ok = false
-			break
+	for _, val := range v.Examples {
+		ok := len(val) == 14
+		for _, r := range val {
+			if r < '0' || r > '9' {
+				ok = false
+				break
+			}
 		}
-	}
-	if ok {
-		if _, err := time.Parse("20060102150405", val); err != nil {
-			ok = false
+		if ok {
+			if _, err := time.Parse("20060102150405", val); err != nil {
+				ok = false
+			}
 		}
-	}
-	if !ok {
-		l.add(v.ShapePos.Line, RuleShape,
-			fmt.Sprintf("EXAMPLES %q does not satisfy SHAPE ts14", val),
-			"ts14 = exactly 14 ASCII digits forming a real UTC YYYYMMDDHHMMSS instant (D16)")
+		if !ok {
+			l.add(v.ShapePos.Line, RuleShape,
+				fmt.Sprintf("EXAMPLES %q does not satisfy SHAPE ts14", val),
+				"ts14 = exactly 14 ASCII digits forming a real UTC YYYYMMDDHHMMSS instant (D16)")
+		}
 	}
 }
 
@@ -100,12 +101,21 @@ func (l *linter) lintSuccessor(v *VariableDecl, byName map[string]*VariableDecl)
 			fmt.Sprintf("SUCCESSOR names undeclared variable %q", v.Successor), "")
 		return
 	}
-	before, errB := strconv.Atoi(strings.TrimSpace(sib.Examples))
-	after, errA := strconv.Atoi(strings.TrimSpace(v.Examples))
-	if errB != nil || errA != nil || after != before+1 {
+	if len(v.Examples) == 0 || len(v.Examples) != len(sib.Examples) {
 		l.add(v.SuccessorPos.Line, RuleSuccessor,
-			fmt.Sprintf("EXAMPLES %q is not %s's EXAMPLES (%q) + 1", v.Examples, sib.Name, sib.Examples),
-			"a SUCCESSOR variable's value is the named sibling + 1 (D22)")
+			fmt.Sprintf("SUCCESSOR pair %s/%s: EXAMPLES lists must pair up (%d vs %d values)",
+				v.Name, sib.Name, len(v.Examples), len(sib.Examples)),
+			"a SUCCESSOR variable's EXAMPLES pair index-wise with its sibling's (D22)")
+		return
+	}
+	for i := range v.Examples {
+		before, errB := strconv.Atoi(strings.TrimSpace(sib.Examples[i]))
+		after, errA := strconv.Atoi(strings.TrimSpace(v.Examples[i]))
+		if errB != nil || errA != nil || after != before+1 {
+			l.add(v.SuccessorPos.Line, RuleSuccessor,
+				fmt.Sprintf("EXAMPLES %q is not %s's EXAMPLES (%q) + 1", v.Examples[i], sib.Name, sib.Examples[i]),
+				"a SUCCESSOR variable's value is the named sibling + 1 (D22)")
+		}
 	}
 }
 
@@ -299,21 +309,25 @@ func (l *linter) lintInOp(o *InOp, dir string, markSeen map[string]int) {
 		l.lintMark(o, payload, target, markSeen)
 	}
 
-	// E-006: guards must be payload-derived (INSERT/REPLACE) or drawn
-	// from the fenced target (REMOVE).
-	base := payload
-	baseWord := "payload"
-	if o.Verb == Remove {
-		base = target
-		baseWord = "fenced target"
-	}
-	if len(base) > 0 {
-		for _, g := range o.Guards {
-			if !bytes.Contains(base, []byte(g.Text)) {
-				l.add(g.Pos.Line, RuleGuardNotDerived,
-					fmt.Sprintf("ASLONG text is not a verbatim substring of the op's %s", baseWord),
-					"a guard must match text the op itself writes/removes — the quote-mismatch guard is the canonical failure (D3(c))")
-			}
+	// E-006: guards derive from what the op itself touches. A DONT
+	// CONTAIN guard (add polarity) matches text the op WRITES — the
+	// payload; a positive CONTAIN guard (remove polarity, D23) matches
+	// text the op CONSUMES — the fenced target (REMOVE and the
+	// un-sweep REPLACE alike).
+	for _, g := range o.Guards {
+		base := payload
+		baseWord := "payload"
+		if o.Verb == Remove || !g.Dont {
+			base = target
+			baseWord = "fenced target"
+		}
+		if len(base) == 0 {
+			continue
+		}
+		if !bytes.Contains(base, []byte(g.Text)) {
+			l.add(g.Pos.Line, RuleGuardNotDerived,
+				fmt.Sprintf("ASLONG text is not a verbatim substring of the op's %s", baseWord),
+				"a guard must match text the op itself writes/removes — the quote-mismatch guard is the canonical failure (D3(c))")
 		}
 	}
 
@@ -414,6 +428,10 @@ func (l *linter) lintHygiene(text string, line int, what string) {
 			break
 		}
 	}
+	l.lintBraceRun(text, line, what)
+}
+
+func (l *linter) lintBraceRun(text string, line int, what string) {
 	if strings.Contains(text, "}}}") {
 		l.add(line, RuleGuardHygiene,
 			fmt.Sprintf("%s text contains a }}} run", what),
@@ -450,11 +468,15 @@ func kebabMarkName(name string) bool {
 func (l *linter) asserts() {
 	for _, a := range l.cmd.Asserts {
 		if a.Text != "" {
-			what := "assert"
 			if a.Kind == AssertCmd {
-				what = "assert command"
+				// A CMD string is shell text, not match text: A5's
+				// ASCII rule does not bind it (the corpus carries
+				// prose caveats in CMD comments) — only the }}}
+				// adjacency rule applies.
+				l.lintBraceRun(a.Text, a.Pos.Line, "assert command")
+			} else {
+				l.lintHygiene(a.Text, a.Pos.Line, "assert")
 			}
-			l.lintHygiene(a.Text, a.Pos.Line, what)
 		}
 		if a.Kind == AssertCmd && a.Tier != "" && a.Tier != "ci" {
 			l.add(a.TierPos.Line, RuleTier,

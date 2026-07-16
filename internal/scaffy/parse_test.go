@@ -201,6 +201,54 @@ func walkPositions(t *testing.T, v reflect.Value, path string) {
 	}
 }
 
+// TestParseCorpusSpellings pins the three spellings the live corpus
+// (scaffy/commands/*.scaffy, the normative source) uses that the green
+// fixtures do not: the whole header as ONE line ending in the bare
+// VARIABLES keyword, TAGS/EXAMPLES as comma-separated quoted lists, and
+// CREATE introduced by a bare WITH line before its fenced payload.
+func TestParseCorpusSpellings(t *testing.T) {
+	src := []byte(`COMMAND "Add Widget" DESCRIPTION "d." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy", "widget", "demo" CONCEPT "widget" VARIANT "starter" DIRECTION "add" VARIABLES
+  VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "Timeline", "FactBox", "Milestone"
+
+CREATE FILE IF ABSENT "internal/widgets/{{.widget_name}}.go"
+WITH
+::: {{.widget-name}} module :::
+package widgets
+::: {{.widget-name}} module :::
+`)
+	cmd, findings := Parse("corpus-spellings.scaffy", src)
+	if len(findings) != 0 {
+		t.Fatalf("unexpected parse findings: %v", findings)
+	}
+	if got := cmd.Direction(); got != "add" {
+		t.Errorf("Direction() = %q, want add (one-line header)", got)
+	}
+	if cmd.Header.Tags == nil || cmd.Header.Tags.Value != "scaffy, widget, demo" {
+		t.Errorf("TAGS list = %+v", cmd.Header.Tags)
+	}
+	if cmd.Header.Variant == nil || cmd.Header.Variant.Value != "starter" {
+		t.Errorf("VARIANT = %+v", cmd.Header.Variant)
+	}
+	if len(cmd.Variables) != 1 || len(cmd.Variables[0].Examples) != 3 || cmd.Variables[0].Examples[2] != "Milestone" {
+		t.Errorf("EXAMPLES list = %+v", cmd.Variables)
+	}
+	if len(cmd.Ops) != 1 {
+		t.Fatalf("ops = %d, want 1", len(cmd.Ops))
+	}
+	cf, ok := cmd.Ops[0].(*CreateFile)
+	if !ok || cf.Payload == nil || cf.Payload.Fenced == nil || len(cf.Payload.Fenced.Lines) != 1 {
+		t.Errorf("CREATE … WITH payload not parsed: %#v", cmd.Ops[0])
+	}
+	// The one-line header and the comma lists are fmt fixpoints.
+	out, err := Format(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(src) {
+		t.Errorf("corpus spellings are not a fmt fixpoint\n--- got ---\n%s--- want ---\n%s", out, src)
+	}
+}
+
 // TestParseFailsLoud pins the doctrine inversion: where mermaid.go
 // silently skips unparseable lines, scaffy reports them.
 func TestParseFailsLoud(t *testing.T) {

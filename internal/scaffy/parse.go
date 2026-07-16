@@ -228,32 +228,72 @@ func (p *parser) run() {
 	}
 }
 
+// parseHeader parses one header line. The corpus spells the whole
+// header as ONE line — a sequence of KEY "value" groups ending in the
+// bare VARIABLES keyword, with TAGS taking a comma-separated quoted
+// list — but each KEY "value" on its own line parses too:
+//
+//	COMMAND "…" DESCRIPTION "…" … TAGS "a", "b" … DIRECTION "add" VARIABLES
 func (p *parser) parseHeader(fs []field, ln int) {
 	p.i++
-	key := fs[0].text
-	if len(fs) != 2 || !fs[1].quoted {
-		p.add(ln, RuleMalformedStatement, fmt.Sprintf(`malformed header — expected: %s "<value>"`, key),
-			"header values are quoted strings")
-		return
-	}
-	hf := &HeaderField{Pos: Pos{ln}, Key: key, Value: fs[1].text}
-	switch key {
-	case "COMMAND":
-		p.cmd.Header.Command = hf
-	case "DESCRIPTION":
-		p.cmd.Header.Description = hf
-	case "LAST_UPDATED":
-		p.cmd.Header.LastUpdated = hf
-	case "DOMAIN":
-		p.cmd.Header.Domain = hf
-	case "TAGS":
-		p.cmd.Header.Tags = hf
-	case "CONCEPT":
-		p.cmd.Header.Concept = hf
-	case "VARIANT":
-		p.cmd.Header.Variant = hf
-	case "DIRECTION":
-		p.cmd.Header.Direction = hf
+	i := 0
+	for i < len(fs) {
+		f := fs[i]
+		if f.quoted || f.text == "," {
+			p.add(ln, RuleMalformedStatement, "header: expected a KEY before its quoted value",
+				`header fields read: KEY "value"`)
+			return
+		}
+		key := f.text
+		if key == "VARIABLES" {
+			// the header's trailing keyword — the VARIABLE declarations
+			// themselves are the source of truth.
+			if i != len(fs)-1 {
+				p.add(ln, RuleMalformedStatement, "VARIABLES must end the header line", "")
+			}
+			return
+		}
+		switch key {
+		case "COMMAND", "DESCRIPTION", "LAST_UPDATED", "DOMAIN", "TAGS", "CONCEPT", "VARIANT", "DIRECTION":
+		default:
+			p.add(ln, RuleMalformedStatement, fmt.Sprintf("unknown header key %q", key),
+				"legal keys: COMMAND, DESCRIPTION, LAST_UPDATED, DOMAIN, TAGS, CONCEPT, VARIANT, DIRECTION")
+			return
+		}
+		if i+1 >= len(fs) || !fs[i+1].quoted {
+			p.add(ln, RuleMalformedStatement, fmt.Sprintf(`malformed header — expected: %s "<value>"`, key),
+				"header values are quoted strings")
+			return
+		}
+		value := fs[i+1].text
+		i += 2
+		if key == "TAGS" {
+			vals := []string{value}
+			for i+1 < len(fs) && !fs[i].quoted && fs[i].text == "," && fs[i+1].quoted {
+				vals = append(vals, fs[i+1].text)
+				i += 2
+			}
+			value = strings.Join(vals, ", ")
+		}
+		hf := &HeaderField{Pos: Pos{ln}, Key: key, Value: value}
+		switch key {
+		case "COMMAND":
+			p.cmd.Header.Command = hf
+		case "DESCRIPTION":
+			p.cmd.Header.Description = hf
+		case "LAST_UPDATED":
+			p.cmd.Header.LastUpdated = hf
+		case "DOMAIN":
+			p.cmd.Header.Domain = hf
+		case "TAGS":
+			p.cmd.Header.Tags = hf
+		case "CONCEPT":
+			p.cmd.Header.Concept = hf
+		case "VARIANT":
+			p.cmd.Header.Variant = hf
+		case "DIRECTION":
+			p.cmd.Header.Direction = hf
+		}
 	}
 }
 
@@ -319,11 +359,16 @@ func (p *parser) parseVariable(fs []field, ln int) {
 			}
 			v.Description = val
 		case "EXAMPLES":
+			// EXAMPLES takes a comma-separated quoted list: "a", "b", …
 			val, ok := takeQuoted("EXAMPLES")
 			if !ok {
 				return
 			}
-			v.Examples = val
+			v.Examples = append(v.Examples, val)
+			for i+1 < len(fs) && !fs[i].quoted && fs[i].text == "," && fs[i+1].quoted {
+				v.Examples = append(v.Examples, fs[i+1].text)
+				i += 2
+			}
 		default:
 			p.add(ln, RuleMalformedStatement, fmt.Sprintf("unknown VARIABLE keyword %q", f.text),
 				"legal keywords: OPAQUE, SHAPE, SUCCESSOR, TITLE, DESCRIPTION, EXAMPLES")
@@ -518,9 +563,17 @@ func (p *parser) expectWith(verb InOpVerb) *Payload {
 	return &Payload{Pos: f.Pos, Fenced: f}
 }
 
-// expectPayload parses a CREATE payload: a fenced block or USE <name>.
+// expectPayload parses a CREATE payload: a fenced block or USE <name>,
+// optionally introduced by a bare WITH line (the corpus spelling:
+// CREATE FILE IF ABSENT "path" / WITH / fenced payload).
 func (p *parser) expectPayload(what string) *Payload {
 	p.skipBlank()
+	if p.i < len(p.lines) {
+		if fs, err := splitStructural(strings.TrimSpace(p.lines[p.i])); err == nil && len(fs) == 1 && !fs[0].quoted && fs[0].text == "WITH" {
+			p.i++
+			p.skipBlank()
+		}
+	}
 	if p.i >= len(p.lines) {
 		p.add(len(p.lines), RuleUnfenced, fmt.Sprintf("missing %s payload — file ends where one was expected", what),
 			"an empty fenced block spells a 0-byte file (D26)")
