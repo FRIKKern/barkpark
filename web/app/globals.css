@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* Chrome background/foreground now BRIDGE to the emitted design tokens (the
    GENERATED block below): --color-bg / --color-text carry the light values and
