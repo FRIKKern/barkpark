@@ -24,7 +24,7 @@ const PROSE_TYPES = new Set(["paragraph", "heading", "list"]);
  * `<bp-paper-editor>` each. The client child imports nothing from here, so the
  * bundle gains only the mount + the WC loader — never the renderer.
  *
- * This replaces the deleted `web/components/portable-doc.tsx` fork's
+ * This replaces the deleted `portable-doc.tsx` web fork's
  * `PaperEditorDoc`: same prose-partition contract, but the non-prose slots now
  * flow through the single canonical renderer instead of the retired fork.
  */
