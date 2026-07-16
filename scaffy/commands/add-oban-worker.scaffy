@@ -1,0 +1,73 @@
+COMMAND "Add Oban Cron Worker" DESCRIPTION "Scaffold an Oban cron worker (worker module + test) and register its crontab tuple in the static Oban.Plugins.Cron block in config/config.exs — idempotently, on the shared :default queue." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "oban", "worker", "cron" CONCEPT "oban-worker" VARIANT "cron" VARIABLES
+  VARIABLE 1 "WorkerName" TITLE "Name your worker" DESCRIPTION "PascalCase module suffix under Barkpark.Workers. Drives module name, file path (snake_case), test, and crontab entry." EXAMPLES "StaleTokenSweeper", "OrphanMediaReaper", "UsageRollup"
+  VARIABLE 2 "CronExpr" TITLE "Cron schedule" DESCRIPTION "Standard 5-field crontab expression — how often the worker ticks. Opaque literal, no casing transform." EXAMPLES "0 4 * * *", "*/15 * * * *", "@daily"
+
+# Worker module: Barkpark.Workers.{{.WorkerName}}
+# module->file mapping is snake_case (lib/barkpark/workers/tag_distribution.ex
+# == Barkpark.Workers.TagDistribution). Modeled on Barkpark.Audit.ExportWorker.
+CREATE FILE IF ABSENT "api/lib/barkpark/workers/{{.worker_name}}.ex"
+WITH
+::: {{.worker-name}} worker :::
+defmodule Barkpark.Workers.{{.WorkerName}} do
+  @moduledoc """
+  Oban cron worker — {{.WorkerName}}.
+
+  Scheduled from the static crontab in `config/config.exs`
+  (`Oban.Plugins.Cron`). Runs on the shared `:default` queue with
+  `max_attempts: 1`: a recurring tick that runs again next cycle, so a single
+  failed run should not retry-storm the queue.
+
+  Fill in `perform/1` with the work this worker owns.
+  """
+  use Oban.Worker, queue: :default, max_attempts: 1
+
+  require Logger
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: _args}) do
+    Logger.info("[{{.worker-name}}] tick")
+    :ok
+  end
+end
+::: {{.worker-name}} worker :::
+
+# Worker test — proves perform/1 returns :ok; runnable as the scoped ASSERT CMD below.
+CREATE FILE IF ABSENT "api/test/barkpark/workers/{{.worker_name}}_test.exs"
+WITH
+::: {{.worker-name}} test :::
+defmodule Barkpark.Workers.{{.WorkerName}}Test do
+  use Barkpark.DataCase, async: false
+
+  alias Barkpark.Workers.{{.WorkerName}}
+
+  test "perform/1 returns :ok" do
+    assert :ok = {{.WorkerName}}.perform(%Oban.Job{args: %{}})
+  end
+end
+::: {{.worker-name}} test :::
+
+# Register the crontab tuple. PlaygroundReaper is the LAST static cron element and
+# carries NO trailing comma; a bare INSERT below it yields two adjacent list terms
+# with no separator (Elixir syntax error). So this is a REPLACE that re-emits the
+# anchor line WITH the comma, then the mark comment, then the new tuple. Anchor is
+# the FULL tuple (unique: count 1) — bare "* * * * *" occurs 4x, bare module 2x.
+IN "api/config/config.exs"
+### Append {{.WorkerName}} to the static crontab after the PlaygroundReaper entry
+REPLACE
+::: playground-reaper anchor :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
+::: playground-reaper anchor :::
+WITH
+::: {{.worker-name}} cron :::
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
+       # scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}
+       {"{{.CronExpr}}", Barkpark.Workers.{{.WorkerName}}}
+::: {{.worker-name}} cron :::
+MARK "oban-cron-{{.worker-name}}"
+ASLONG FILE DONT CONTAIN "# scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}"
+
+# Post-conditions
+ASSERT FILE "api/lib/barkpark/workers/{{.worker_name}}.ex" CONTAINS "defmodule Barkpark.Workers.{{.WorkerName}} do"
+ASSERT FILE "api/test/barkpark/workers/{{.worker_name}}_test.exs" CONTAINS "assert :ok = {{.WorkerName}}.perform"
+ASSERT FILE "api/config/config.exs" CONTAINS "MARK:oban-cron-{{.worker-name}}"
+ASSERT CMD "cd api && mix test test/barkpark/workers/{{.worker_name}}_test.exs" TIER ci
