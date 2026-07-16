@@ -56,7 +56,7 @@ COMMAND "Add a Barkpark Plugin" DESCRIPTION "Scaffold a minimal, auto-discovered
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/plugin.json"
 WITH
-::: start of .json file :::
+::: {{.plugin_name}} manifest :::
 {
   "plugin_name": "{{.plugin_name}}",
   "version": "0.1.0",
@@ -64,7 +64,7 @@ WITH
   "capabilities": [],
   "module": "Barkpark.Plugins.{{.PluginName}}"
 }
-::: end of .json file :::
+::: {{.plugin_name}} manifest :::
 
 # ---------------------------------------------------------------------------
 # 2/5 ● Entry module — lib/barkpark/plugins/<name>.ex
@@ -76,7 +76,7 @@ WITH
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/lib/barkpark/plugins/{{.plugin_name}}.ex"
 WITH
-::: start of .ex file :::
+::: {{.plugin_name}} entry module :::
 defmodule Barkpark.Plugins.{{.PluginName}} do
   @moduledoc """
   {{.Description}}
@@ -99,7 +99,7 @@ defmodule Barkpark.Plugins.{{.PluginName}} do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/{{.plugin_name}}/plugin.json"
 end
-::: end of .ex file :::
+::: {{.plugin_name}} entry module :::
 
 # ---------------------------------------------------------------------------
 # 3/5 ● README — priv/plugins/<name>/README.md
@@ -108,7 +108,7 @@ end
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/README.md"
 WITH
-::: start of .md file :::
+::: {{.plugin_name}} readme :::
 # {{.plugin_name}}
 
 {{.Description}}
@@ -152,7 +152,7 @@ mix test test/barkpark/plugins/{{.plugin_name}}_test.exs
 - `docs/plugins/SCHEMA_V2.md` — composite, arrayOf, codelist, localizedText
 - `Barkpark.Plugin` behaviour — `lib/barkpark/plugin.ex`
 - `Barkpark.Plugins.Registry` — discovery & registration entrypoint
-::: end of .md file :::
+::: {{.plugin_name}} readme :::
 
 # ---------------------------------------------------------------------------
 # 4/5 ● Schemas dir keeper — priv/plugins/<name>/schemas/.gitkeep
@@ -161,8 +161,8 @@ mix test test/barkpark/plugins/{{.plugin_name}}_test.exs
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep"
 WITH
-::: start of keep file :::
-::: end of keep file :::
+::: {{.plugin_name}} gitkeep :::
+::: {{.plugin_name}} gitkeep :::
 
 # ---------------------------------------------------------------------------
 # 5/5 ● Manifest test — test/barkpark/plugins/<name>_test.exs
@@ -171,7 +171,7 @@ WITH
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/test/barkpark/plugins/{{.plugin_name}}_test.exs"
 WITH
-::: start of .exs file :::
+::: {{.plugin_name}} test :::
 defmodule Barkpark.Plugins.{{.PluginName}}Test do
   use ExUnit.Case, async: true
 
@@ -184,7 +184,7 @@ defmodule Barkpark.Plugins.{{.PluginName}}Test do
     assert is_list(manifest["capabilities"])
   end
 end
-::: end of .exs file :::
+::: {{.plugin_name}} test :::
 
 # ===========================================================================
 # Post-conditions — assert the five files landed with the right content.
