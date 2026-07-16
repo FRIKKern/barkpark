@@ -159,13 +159,36 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def sandbox_runner, do: Keyword.get(config(), :sandbox_runner, @default_sandbox_runner)
 
   @doc ~S"""
-  The Cloud-profile argv (connectors D109/D127) — the shim's OWN argv. Structure:
+  The Cloud-profile argv (connectors D109/D127/D137) — the shim's OWN argv.
+  Structure:
 
-      ["--workspace", <workspace_id>, ("--mcp-config-b64", <b64>)?, "--" | <claude args>]
+      ["--workspace", <workspace_id>,
+       ("--mcp-config-b64", <b64>)?,
+       ("--sandbox-id", <id>)?, "--keep-sandbox",
+       "--" | <claude args>]
 
-  The shim buffers the first user frame from its stdin, creates an isolated
-  sandbox tagged with the workspace, and runs `claude <claude args> < turn.jsonl`
-  inside it. The claude argv KEEPS `--input-format/--output-format stream-json`,
+  The shim buffers the first user frame from its stdin, creates (or, with
+  `--sandbox-id`, reuses the auto-resuming) isolated sandbox tagged with the
+  workspace, and runs `claude <claude args> < turn.jsonl` inside it.
+
+  ## Multi-turn session continuity (connectors D135/D137/D139 — W14)
+
+  A Cloud chat is a real multi-turn Barkpark Chat SESSION whose memory lives in
+  the sandbox filesystem, not a held subprocess (interactive stdin into a
+  sandbox is impossible — D108). Two additive seams carry it:
+
+    * pre-`--` (SHIM-own): `--keep-sandbox` ALWAYS (teardown STOPS, not removes —
+      the sandbox + its `/tmp` claude transcript survive to the next turn), plus
+      `--sandbox-id <id>` when `session_opts[:cloud_sandbox_id]` is a non-empty
+      binary (skip create, exec the bound sandbox).
+    * post-`--` (claude-own, at the FRONT of the segment so `--disallowedTools`
+      stays the boundary): `--resume <session_id>` when the session is BOUND to a
+      sandbox, else a fresh `--session-id <session_id>`.
+
+  D139 LAW: resume-ness derives SOLELY from the sandbox binding, NEVER from
+  `session_opts[:resume]`/a message_count — a session whose bound sandbox
+  vanished must mint a fresh `--session-id`, never `--resume` into an empty
+  filesystem. The claude argv KEEPS `--input-format/--output-format stream-json`,
   `--include-partial-messages`, `--verbose`, `--permission-mode <mode>`; it DROPS
   `--permission-prompt-tool stdio` (no channel answers asks one-shot) and ALL
   HOST mcp args (a host-written `--mcp-config` PATH hard-fails in-sandbox with
@@ -198,8 +221,39 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     ["--workspace", workspace_id] ++
       cloud_mcp_config_args(session_opts) ++
+      cloud_sandbox_args(session_opts) ++
       ["--"] ++
-      cloud_claude_args(mode)
+      cloud_claude_args(mode, session_opts)
+  end
+
+  # The shim-own sandbox-lifecycle flags (connectors D137/D138), emitted pre-`--`
+  # so the SHIM (never claude) owns them. `--keep-sandbox` ALWAYS rides a Cloud
+  # turn: teardown STOPS the sandbox (auto-snapshot) instead of REMOVING it, so
+  # the session's sandbox — and the claude transcript under its persisted /tmp
+  # HOME — survives to the next turn (the per-turn timeout, not the whole chat,
+  # bounds one running turn). When the session is already BOUND to a sandbox
+  # (`session_opts[:cloud_sandbox_id]` is a non-empty binary), ALSO emit
+  # `--sandbox-id <id>` so the shim skips create and execs straight into the
+  # auto-resuming sandbox. Order matches D141's W14-1 line: `--sandbox-id <id>
+  # --keep-sandbox`. A nil/blank binding ⇒ just `--keep-sandbox` (fresh sandbox
+  # this turn, kept for the next).
+  defp cloud_sandbox_args(session_opts) do
+    case Map.get(session_opts, :cloud_sandbox_id) do
+      id when is_binary(id) and id != "" -> ["--sandbox-id", id, "--keep-sandbox"]
+      _ -> ["--keep-sandbox"]
+    end
+  end
+
+  # Whether this Cloud session is bound to a live sandbox — the SOLE source of
+  # resume-ness (D139 LAW). Derived from the binding column, NEVER from
+  # `session_opts[:resume]`/a message_count: a session whose bound sandbox
+  # vanished (expired/removed) must NOT `--resume` into an empty filesystem, and
+  # a bound session resumes even if the transport's `resume?` boolean is inert.
+  defp cloud_sandbox_bound?(session_opts) do
+    case Map.get(session_opts, :cloud_sandbox_id) do
+      id when is_binary(id) and id != "" -> true
+      _ -> false
+    end
   end
 
   # The shim-own `--mcp-config-b64 <b64>` flag (knob 3's CONFIG wiring, D127) —
@@ -236,21 +290,47 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # (structural per-tool removal), and a `--settings` deny JSON STRING carrying the
   # SAME deny list (pinned argv-deny == settings-deny, no drift). `--disallowedTools`
   # is emitted LAST so its variadic tool list has an unambiguous argv boundary.
-  defp cloud_claude_args(mode) do
-    [
-      "--input-format",
-      "stream-json",
-      "--output-format",
-      "stream-json",
-      "--include-partial-messages",
-      "--verbose",
-      "--permission-mode",
-      CloudPolicy.cloud_permission_mode(mode),
-      "--tools",
-      "",
-      "--settings",
-      CloudPolicy.settings_deny_json()
-    ] ++ ["--disallowedTools" | CloudPolicy.cloud_disallowed_tools()]
+  # The session-identity flags (D135/D139) ride at the FRONT of this segment so
+  # `--disallowedTools` stays the final boundary — the shim passes the whole
+  # segment through to `claude` untouched.
+  defp cloud_claude_args(mode, session_opts) do
+    cloud_session_args(session_opts) ++
+      [
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--permission-mode",
+        CloudPolicy.cloud_permission_mode(mode),
+        "--tools",
+        "",
+        "--settings",
+        CloudPolicy.settings_deny_json()
+      ] ++ ["--disallowedTools" | CloudPolicy.cloud_disallowed_tools()]
+  end
+
+  # The Cloud-profile session-identity flags (connectors D135/D139) — the front
+  # of the post-`--` claude segment. `--session-id <uuid>` (mint fresh) turns 1;
+  # `--resume <uuid>` once the session is bound to a sandbox whose /tmp HOME
+  # carries the prior transcript. D139 LAW: which one is chosen derives SOLELY
+  # from the sandbox binding (`cloud_sandbox_bound?/1`), NEVER from
+  # `session_opts[:resume]` or a message_count — the self-hosted `session_args/1`
+  # keys off `:resume`, but a Cloud `--resume` into a vanished sandbox would hit
+  # an empty filesystem (`No conversation found`, D135), so the binding is the
+  # only honest signal. The uuid is the Barkpark session's public UUID
+  # (`session_opts[:session_id]`) — the SAME value the self-hosted path emits.
+  # Absent/blank session_id ⇒ neither flag (defensive; a real Cloud turn always
+  # carries one).
+  defp cloud_session_args(session_opts) do
+    case Map.get(session_opts, :session_id) do
+      id when is_binary(id) and id != "" ->
+        if cloud_sandbox_bound?(session_opts), do: ["--resume", id], else: ["--session-id", id]
+
+      _ ->
+        []
+    end
   end
 
   # Fail-closed workspace principal for a Cloud turn (D110). A concrete workspace

@@ -894,41 +894,123 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   end
 
   describe "execution profile — cloud (connectors D108/D109/D110)" do
-    test ":cloud with 0 tool installs returns the shim runner + a BYTE-IDENTICAL W13 argv (D127)" do
+    # W14 session-identity fixtures (connectors D135/D137/D139): a Barkpark session
+    # UUID and a bound sandbox id.
+    @cloud_uuid "11111111-1111-4111-8111-111111111111"
+    @cloud_sandbox "sbx_cloud_abc123"
+
+    test ":cloud 0 installs, fresh session — shim runner + W13 belt with the ALWAYS-ON --keep-sandbox and a fresh --session-id (D141 byte-identity MODULO session flags)" do
       # The 0-install row of the D130 argv table: no `:tool_descriptors` in
       # session_opts ⇒ CloudPolicy emits `%{}` ⇒ NO `--mcp-config-b64` flag ⇒ the
-      # argv is byte-identical to W12. The ≥1-install rows (flag present, scoped
-      # map) live in the DB-backed "cloud mcp-config wiring" describe below and in
-      # cloud_policy_test.exs's 0/1/2-install argv table.
+      # argv is byte-identical to W12 MODULO the W14 session-identity flags. The
+      # ≥1-install rows (flag present, scoped map) live in the DB-backed "cloud
+      # mcp-config wiring" describe below and in cloud_policy_test.exs's argv table.
       put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
 
-      {exe, args} = ClaudeChat.command("plan", %{workspace_id: "ws-42"})
+      {exe, args} = ClaudeChat.command("plan", %{workspace_id: "ws-42", session_id: @cloud_uuid})
       assert exe == "cloud-sandbox-runner"
 
       # No connector-scoped MCP flag on the 0-install path.
       refute "--mcp-config-b64" in args
 
-      # The shim's OWN argv: `--workspace <id> --` then the claude args.
-      assert Enum.take(args, 3) == ["--workspace", "ws-42", "--"]
+      # The shim's OWN pre-`--` argv: `--workspace <id>`, then the ALWAYS-ON
+      # `--keep-sandbox` (no binding ⇒ NO `--sandbox-id`), then the `--` separator.
+      assert Enum.take(args, 4) == ["--workspace", "ws-42", "--keep-sandbox", "--"]
+      refute "--sandbox-id" in args
 
-      # The full D109 base + the D116/D117 CloudPolicy belts (mode clamped, all
-      # built-ins removed, deny set, deny JSON string, disallowedTools last).
-      assert Enum.drop(args, 3) ==
-               [
-                 "--input-format",
-                 "stream-json",
-                 "--output-format",
-                 "stream-json",
-                 "--include-partial-messages",
-                 "--verbose",
-                 "--permission-mode",
-                 "plan",
-                 "--tools",
-                 "",
-                 "--settings",
-                 Barkpark.Connectors.CloudPolicy.settings_deny_json()
-               ] ++
+      # The post-`--` claude segment: the session-identity flags at the FRONT
+      # (fresh ⇒ `--session-id`, never `--resume`), then the full D109 base + the
+      # D116/D117 CloudPolicy belts (mode clamped, all built-ins removed, deny
+      # set, deny JSON string, disallowedTools last).
+      assert Enum.drop(args, 4) ==
+               ["--session-id", @cloud_uuid] ++
+                 [
+                   "--input-format",
+                   "stream-json",
+                   "--output-format",
+                   "stream-json",
+                   "--include-partial-messages",
+                   "--verbose",
+                   "--permission-mode",
+                   "plan",
+                   "--tools",
+                   "",
+                   "--settings",
+                   Barkpark.Connectors.CloudPolicy.settings_deny_json()
+                 ] ++
                  ["--disallowedTools" | Barkpark.Connectors.CloudPolicy.cloud_disallowed_tools()]
+
+      refute "--resume" in args
+    end
+
+    test ":cloud bound session — pre-`--` --sandbox-id + --keep-sandbox, post-`--` --resume (D135/D137)" do
+      args =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          cloud_sandbox_id: @cloud_sandbox
+        })
+
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      # Pre-`--`: the bound sandbox id then --keep-sandbox (D141's W14-1 order:
+      # `--sandbox-id <id> --keep-sandbox`).
+      assert Enum.take(args, sep) == [
+               "--workspace",
+               "ws-42",
+               "--sandbox-id",
+               @cloud_sandbox,
+               "--keep-sandbox"
+             ]
+
+      # Post-`--`: --resume at the FRONT of the claude segment, NEVER --session-id.
+      assert Enum.take(Enum.drop(args, sep + 1), 2) == ["--resume", @cloud_uuid]
+      refute "--session-id" in args
+
+      # The full W12/W13 belt is intact — a bound multi-turn session is STILL
+      # locked down (multi-turn never re-opens host tools).
+      assert_w12_belt_intact(args)
+    end
+
+    test "D139 LAW — resume-ness derives from the BINDING, never session_opts[:resume]/message_count" do
+      # A session_opts[:resume] flag (the self-hosted transport signal) must NOT
+      # force --resume on the cloud path when there is NO sandbox binding: a
+      # resume into a vanished sandbox would hit an empty filesystem.
+      no_binding =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          resume: true
+        })
+
+      assert Enum.chunk_every(no_binding, 2, 1) |> Enum.member?(["--session-id", @cloud_uuid])
+      refute "--resume" in no_binding
+      refute "--sandbox-id" in no_binding
+      assert_w12_belt_intact(no_binding)
+
+      # Conversely, a bound session resumes even with `resume: false` — the
+      # binding, not the transport boolean, is the sole signal.
+      bound =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          resume: false,
+          cloud_sandbox_id: @cloud_sandbox
+        })
+
+      assert Enum.chunk_every(bound, 2, 1) |> Enum.member?(["--resume", @cloud_uuid])
+      refute "--session-id" in bound
+      assert_w12_belt_intact(bound)
+    end
+
+    test ":cloud with no session_id — neither session flag, but --keep-sandbox still rides (defensive)" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-42"})
+
+      refute "--session-id" in args
+      refute "--resume" in args
+      assert "--keep-sandbox" in args
+      refute "--sandbox-id" in args
+      assert_w12_belt_intact(args)
     end
 
     test ":cloud DROPS the permission-prompt bridge and ALL mcp args (D109)" do
@@ -1206,7 +1288,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
         ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
 
       refute "--mcp-config-b64" in args
-      assert Enum.take(args, 3) == ["--workspace", ws.id, "--"]
+      # No mcp flag, no session_id ⇒ the only pre-`--` addition is the ALWAYS-ON
+      # --keep-sandbox (W14 D137). No binding ⇒ no --sandbox-id.
+      assert Enum.take(args, 4) == ["--workspace", ws.id, "--keep-sandbox", "--"]
+      refute "--sandbox-id" in args
     end
   end
 
