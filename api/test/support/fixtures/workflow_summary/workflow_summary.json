@@ -1,0 +1,48 @@
+{
+  "epic_cycle_interrupted": {
+    "label": "bp-epic-cycle — 7-phase epic cycle",
+    "running": 4,
+    "tokens": 68272,
+    "started_at": 1783633546962,
+    "phase": "Explore",
+    "outcome": "interrupted",
+    "ticks": [
+      "done",
+      "interrupted",
+      "unreached",
+      "unreached",
+      "unreached",
+      "unreached",
+      "unreached"
+    ],
+    "phase_index": 2,
+    "phases_total": 7,
+    "agents_done": 1,
+    "agents_total": 5,
+    "terminal?": true,
+    "ended_at": null
+  },
+  "epic_cycle_progress": {
+    "label": "core-auth-phases-2-5 — 7-phase epic cycle",
+    "running": 0,
+    "tokens": 2137873,
+    "started_at": 1782767557221,
+    "phase": null,
+    "outcome": "completed",
+    "ticks": [
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done"
+    ],
+    "phase_index": null,
+    "phases_total": 7,
+    "agents_done": 29,
+    "agents_total": 29,
+    "terminal?": true,
+    "ended_at": null
+  }
+}

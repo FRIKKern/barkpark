@@ -1255,6 +1255,96 @@ defmodule Barkpark.StudioChat do
 
   def workflow_journey(_), do: %{phases: [], summary: empty_journey_summary()}
 
+  @doc """
+  Card-level SUMMARY of a rail's active workflow — the pinned cross-surface D3
+  shape the session-card surfaces (S2–S5) consume. PURE, render-time.
+
+  Input is the whole `rail_snapshot` map (`task_id => entry`). Picks the
+  HIGHEST-SEQ entry that carries a `"workflow"` node list, folds it ONCE through
+  `workflow_journey/1`, and projects the journey summary into the card fields.
+  This is a THIN projection — every count, status, and lifecycle read comes from
+  `workflow_journey/1` + `workflow_node_terminal?/failed?`; there is NO second
+  truth table and NO parallel state counting here (the wire carries non-terminal
+  `progress` beyond `start`, so agent states are NEVER enumerated — the
+  terminal/failed helper sets are the only classifier). Timestamps are READ off
+  the persisted node/entry payloads, never stamped.
+
+  Returns `nil` when the rail is not a map, is empty, or has NO workflow-bearing
+  entry — a plain chat costs nothing.
+
+  Pinned shape (the `m/n` counter is `agents_done/agents_total`):
+
+      %{
+        label:        row.description — one opaque composite string (never split) | nil,
+        ticks:        [phase.status, …] in phase order (the journey spine),
+        phase:        active/interrupted phase title | nil (a completed cycle collapses),
+        phase_index:  active/interrupted phase index | nil,
+        phases_total: phase count,
+        agents_done:  settled = done + failed (failures count honestly — the "13" in 13/17),
+        agents_total: agents across all phases,
+        running:      non-terminal agents,
+        terminal?:    the entry has settled (:completed | :interrupted),
+        outcome:      :completed | :interrupted | :live (entry lifecycle),
+        tokens:       settle-on-state token floor summed from node payloads,
+        started_at:   min agent startedAt across nodes | nil (background/codex carry none),
+        ended_at:     entry "end_time" when present (S2 stamps it later) | nil
+      }
+  """
+  @spec workflow_summary(any()) :: map() | nil
+  def workflow_summary(rail) when is_map(rail) do
+    rail
+    |> Map.values()
+    |> Enum.filter(&workflow_bearing?/1)
+    |> case do
+      [] -> nil
+      entries -> entries |> Enum.max_by(&rail_seq/1) |> summarize_workflow_entry()
+    end
+  end
+
+  def workflow_summary(_), do: nil
+
+  # A rail entry is workflow-bearing when it carries a non-empty node list.
+  defp workflow_bearing?(entry) when is_map(entry), do: List.wrap(entry["workflow"]) != []
+  defp workflow_bearing?(_), do: false
+
+  # Fold ONE entry into the card shape — journey does all the truth work.
+  defp summarize_workflow_entry(entry) do
+    %{phases: phases, summary: s} = workflow_journey(entry)
+
+    %{
+      label: get_in(entry, ["row", "description"]),
+      ticks: Enum.map(phases, & &1.status),
+      phase: s.active && s.active.title,
+      phase_index: s.active && s.active.index,
+      phases_total: s.phase_total,
+      # settled counter includes failures — reuses journey's done/failed, no re-count
+      agents_done: s.done + s.failed,
+      agents_total: s.agents_total,
+      running: s.running,
+      # lifecycle is journey's own entry_status — one truth table, no fork
+      terminal?: s.entry_status in [:completed, :interrupted],
+      outcome: s.entry_status,
+      tokens: s.tokens,
+      started_at: min_started_at(entry["workflow"]),
+      ended_at: entry["end_time"]
+    }
+  end
+
+  # Earliest agent start across the tree (epoch-ms integers, read verbatim off the
+  # persisted nodes — never stamped). nil when no agent carries one.
+  defp min_started_at(nodes) when is_list(nodes) do
+    nodes
+    |> Enum.filter(&(is_map(&1) and &1["type"] == "workflow_agent"))
+    |> Enum.map(& &1["startedAt"])
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      xs -> Enum.min(xs)
+    end
+  end
+
+  defp min_started_at(_), do: nil
+
   # Entry lifecycle from the rail-entry status: "interrupted" is its own dead
   # frontier; any other terminal (completed/done/…) means the cycle finished;
   # everything else (running) is live.
