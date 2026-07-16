@@ -567,7 +567,13 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			return nil, nil, "", fmt.Errorf("read --file %q: mutation body must be a JSON object", path)
 		}
 	} else if stdinRedirected {
-		return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
+		// Recommend --file - only where the manifest actually declares the
+		// flag — `doc patch` declares [set] only, and telling its user to
+		// pass a flag the parser rejects with exit 2 is worse than no hint.
+		if commandHasFileFlag(cmd) {
+			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
+		}
+		return nil, nil, "", fmt.Errorf("piped stdin is unused and %s %s does not accept --file; remove the stdin redirect", cmd.Noun, cmd.Verb)
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
@@ -636,16 +642,46 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	return raw, nil, "application/json", nil
 }
 
-// stdinHasRedirectedInput distinguishes a pipe/file redirect from an
-// interactive terminal (and from character devices such as /dev/null). It
-// deliberately does not read or peek: --file - remains the sole stdin consumer,
-// while every other write fails before silently discarding redirected input.
+// commandHasFileFlag reports whether cmd's manifest declares the --file body
+// flag (by name or file type — the same dual test applyQuery uses to keep the
+// flag client-side). The manifest is authoritative: help text and guard
+// messages must never mention --file for a command whose parser rejects it.
+func commandHasFileFlag(cmd manifest.Command) bool {
+	for _, f := range cmd.Flags {
+		if f.Name == "file" || f.Type == "file" {
+			return true
+		}
+	}
+	return false
+}
+
+// stdinHasRedirectedInput reports whether redirected (non-terminal) stdin
+// currently carries bytes that a write would silently discard. Redirection
+// alone is not enough: CI `run:` steps, cron, and Makefile pipelines routinely
+// hand the process an EMPTY pipe, and a guard against swallowing data must not
+// hard-error when there is no data. It deliberately never reads — --file -
+// remains the sole stdin consumer — and never blocks: the byte count comes
+// from a non-blocking readiness probe (see stdinPendingBytes), so an
+// open-but-empty pipe with a live writer proceeds without the warning rather
+// than hanging. Regular-file redirects are sized via Stat. When the probe
+// cannot answer (exotic file types, or platforms without one), it falls back
+// to the historical conservative answer: redirected means guarded.
 func stdinHasRedirectedInput() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return false
 	}
-	return info.Mode()&os.ModeCharDevice == 0
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return false
+	}
+	if info.Mode().IsRegular() {
+		return info.Size() > 0
+	}
+	n, ok := stdinPendingBytes(os.Stdin)
+	if !ok {
+		return true
+	}
+	return n > 0
 }
 
 // mediaUploadFileArg returns the bound file path when cmd has a file-typed
