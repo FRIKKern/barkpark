@@ -30,7 +30,7 @@ name: elixir
 on:
   pull_request:
   push:
-    branches: [main, 'wild-bulk/api-elixir/capabilities-manifest-declare-webhook-re-7']
+    branches: [main]
 
 concurrency:
   group: elixir-${{ github.ref }}
@@ -189,12 +189,6 @@ jobs:
           git diff --exit-code docs/openapi.json \
             || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
 
-      - name: Upload regenerated openapi.json (temp, wild-bulk artifact dance)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-regenerated
-          path: docs/openapi.json
       - name: Paper-component golden-parity freshness (3 mirrors must match the emitter)
         # Same drift-gate shape as the OpenAPI check above, for the cross-surface
         # PAPER-COMPONENT parity spine (Unified Aesthetic W5.c). Regenerates the
