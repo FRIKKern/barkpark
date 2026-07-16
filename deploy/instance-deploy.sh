@@ -801,7 +801,17 @@ elif [ -z "${DATABASE_URL:-}" ]; then
 else
   NODE_DIR="$(dirname "$NODE_BIN")"
   log "refreshing barkpark-connectors (node $("$NODE_BIN" -v 2>/dev/null || echo '?') at $NODE_BIN)"
-  ln -sfn "$NODE_BIN" "$NODE_LINK"
+  # COPY, never symlink (the #3374 place_node recipe): asdf's node lives under
+  # /root, and every barkpark-site@ slot unit runs ProtectHome=yes — a symlink
+  # into /root 203/EXECs those slots on their next restart. This line was the
+  # SECOND writer of $NODE_LINK and kept silently re-breaking the fix on every
+  # instance deploy (live-caught twice on 2026-07-16: capstone crashloop x74).
+  # Copy only when content differs; atomic tmp+mv so a reader never sees a
+  # half-written binary.
+  if ! cmp -s "$NODE_BIN" "$NODE_LINK" 2>/dev/null; then
+    cp "$NODE_BIN" "$NODE_LINK.new" && chmod 755 "$NODE_LINK.new" && mv "$NODE_LINK.new" "$NODE_LINK"
+    log "placed node COPY at $NODE_LINK (ProtectHome-safe)"
+  fi
   # FULL install (not --omit=dev) ON PURPOSE: the bridge has no build step yet —
   # its entrypoint is `tsx src/index.ts`, and tsx is a devDependency. When
   # connectors/ grows a real `build` (tsc -> dist/), switch this to
