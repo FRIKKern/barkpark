@@ -5683,3 +5683,130 @@ test("siteCreateBody omits empty optionals and carries the template when picked"
   assert.ok(!("template" in auto), "empty template must be omitted (framework-derived default)");
   assert.ok(!("doc_type" in auto), "empty doc_type must be omitted (server default)");
 });
+
+// ── W4: the SSE-driven deploy stage rail (charter D15-D17) ──────────────────
+// The console's live twin of the /new timeline. These pin the PURE fold /
+// signature / status / markup helpers; the EventSource wiring + DOM mount are
+// browser-verified (the harness rule — only string-in/derivation helpers pin).
+
+test("W4 rail: the six stages are PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE (PROVISION silent)", () => {
+  assert.deepEqual([...hooks.deployRailStages], ["PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"]);
+});
+
+test("W4 deployStageRole: engine status word → display role, unknown → pending", () => {
+  assert.equal(hooks.deployStageRole("done"), "ok");
+  assert.equal(hooks.deployStageRole("failed"), "failed");
+  assert.equal(hooks.deployStageRole("running"), "active");
+  assert.equal(hooks.deployStageRole("started"), "active");
+  assert.equal(hooks.deployStageRole("skipped"), "skipped");
+  assert.equal(hooks.deployStageRole("pending"), "pending");
+  assert.equal(hooks.deployStageRole("wat"), "pending");
+  assert.equal(hooks.deployStageRole(undefined), "pending");
+});
+
+test("W4 deployRailLedgerFromConsole: folds rail entries latest-wins, ignores non-rail lines", () => {
+  const ledger = hooks.deployRailLedgerFromConsole([
+    { stage: "PLAN", status: "done", detail: "planned" },
+    { stage: "BUILD", status: "running", detail: "npm ci" },
+    { stage: "BUILD", status: "done", detail: "built" }, // latest wins
+    { stage: "NOISE", status: "done" },                  // not a rail stage → ignored
+    { line: "raw log with no stage" },                   // ignored
+    null,                                                 // tolerated
+  ]);
+  assert.equal(hooks.deployStageRole(ledger.PLAN.status), "ok");
+  assert.equal(ledger.BUILD.status, "done");
+  assert.equal(ledger.BUILD.detail, "built");
+  assert.ok(!("NOISE" in ledger));
+});
+
+test("W4 deployRailRows: empty ledger → all six pending", () => {
+  const rows = hooks.deployRailRows({});
+  assert.equal(rows.length, 6);
+  assert.ok(rows.every((r) => r.role === "pending"));
+  assert.deepEqual([...rows.map((r) => r.step)], ["PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"]);
+});
+
+test("W4 deployRailRows: a mid-flight ledger folds to done/active/pending in order", () => {
+  const rows = hooks.deployRailRows({
+    PLAN: { status: "done", detail: "" },
+    BUILD: { status: "done", detail: "" },
+    STAGE: { status: "running", detail: "staging release" },
+  });
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "active", "pending", "pending", "pending"]);
+  assert.equal(rows[2].caption, "staging release");
+});
+
+test("W4 deployRailRows: a FAILED stage marks the stages after it skipped, not pending-forever", () => {
+  const rows = hooks.deployRailRows({
+    PLAN: { status: "done" }, BUILD: { status: "done" },
+    STAGE: { status: "done" }, HEALTH: { status: "failed", detail: "probe 500" },
+  });
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "ok", "failed", "skipped", "skipped"]);
+});
+
+test("W4 deployRailSignature: stable across a no-op, moves when a role or caption changes", () => {
+  const a = hooks.deployRailRows({ PLAN: { status: "done" } });
+  const b = hooks.deployRailRows({ PLAN: { status: "done" } });
+  assert.equal(hooks.deployRailSignature(a), hooks.deployRailSignature(b));
+  const c = hooks.deployRailRows({ PLAN: { status: "done" }, BUILD: { status: "running" } });
+  assert.notEqual(hooks.deployRailSignature(a), hooks.deployRailSignature(c));
+});
+
+test("W4 deployRailStatus: starting / active / live / failed(named)", () => {
+  assert.equal(hooks.deployRailStatus(hooks.deployRailRows({})).text, "Starting…");
+  const active = hooks.deployRailStatus(hooks.deployRailRows({ PLAN: { status: "done" }, BUILD: { status: "running" } }));
+  assert.equal(active.tone, "active");
+  assert.equal(active.text, "Build…");
+  const live = hooks.deployRailStatus(hooks.deployRailRows({
+    PLAN: { status: "done" }, BUILD: { status: "done" }, STAGE: { status: "done" },
+    HEALTH: { status: "done" }, SWITCH: { status: "done" }, RETIRE: { status: "done" },
+  }));
+  assert.deepEqual({ tone: live.tone, text: live.text }, { tone: "live", text: "Live" });
+  const failed = hooks.deployRailStatus(hooks.deployRailRows({ HEALTH: { status: "failed" } }));
+  assert.equal(failed.tone, "failed");
+  assert.equal(failed.text, "Deploy failed at Health check");
+});
+
+test("W4 deployRailHtml: renders the shared step component + a copyable live URL when done", () => {
+  const doneRows = hooks.deployRailRows({
+    PLAN: { status: "done" }, BUILD: { status: "done" }, STAGE: { status: "done" },
+    HEALTH: { status: "done" }, SWITCH: { status: "done" }, RETIRE: { status: "done" },
+  });
+  const html = hooks.deployRailHtml(doneRows, { deploymentId: "d1", url: "https://acme.barkpark.cloud/sites/blog/" });
+  assert.ok(html.includes("new-steps"), "reuses the /new step component");
+  assert.ok(html.includes("data-rail-sig="), "carries the region-diff signature hook");
+  assert.ok(html.includes('data-copy="https://acme.barkpark.cloud/sites/blog/"'), "live URL is copyable");
+  // A failed rail shows the failure detail, never a dead end.
+  const failHtml = hooks.deployRailHtml(hooks.deployRailRows({ HEALTH: { status: "failed", detail: "probe 500" } }),
+    { deploymentId: "d1", failureDetail: "probe 500" });
+  assert.ok(failHtml.includes("deploy-rail-fail"));
+  assert.ok(failHtml.includes("probe 500"));
+});
+
+test("W4 railDeployment: picks the in-flight deployment, null when all terminal", () => {
+  assert.equal(hooks.railDeployment([{ id: "a", status: "live" }, { id: "b", status: "failed" }]), null);
+  const active = hooks.railDeployment([{ id: "a", status: "building" }, { id: "b", status: "live" }]);
+  assert.equal(active.id, "a");
+  assert.equal(hooks.railDeployment([]), null);
+  assert.equal(hooks.railDeployment(null), null);
+});
+
+test("W4 instanceCanDeploy: true only when the instance has a URL (deploy 422s mid-provision)", () => {
+  assert.equal(hooks.instanceCanDeploy({ url: "https://acme.barkpark.cloud" }), true);
+  assert.equal(hooks.instanceCanDeploy({ url: "" }), false);
+  assert.equal(hooks.instanceCanDeploy({}), false);
+  assert.equal(hooks.instanceCanDeploy(null), false);
+});
+
+test("W4 rail reuses the min-dwell pacer: a fresh live transition dwells, then reads done", () => {
+  // The rail runs deployRailRows through paceSteps (the same /new machinery), so
+  // a step that just finished dwells as `completing` before the check lands.
+  const ledger = {};
+  const t0 = 900000;
+  const truth = hooks.deployRailRows({ PLAN: { status: "done" } });
+  const first = hooks.paceSteps(truth, ledger, t0);
+  assert.equal(first[0].role, "active");
+  assert.equal(first[0].completing, true);
+  const after = hooks.paceSteps(truth, ledger, t0 + hooks.newStepMinDwellMs);
+  assert.equal(after[0].role, "ok");
+});

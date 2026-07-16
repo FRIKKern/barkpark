@@ -438,6 +438,16 @@ defmodule BarkparkCloud.Sites.Deploy do
 
     case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, attrs) do
       {:ok, _updated} ->
+        # site-spawner W4 (charter D15-D17): push this stage transition to the
+        # console the instant it is CAS'd, so the dashboard's live six-stage rail
+        # advances WITHOUT polling. The `deployments` tick only fires at the
+        # terminal settle/fail; this fine-grained `site.deploy.stage` event is the
+        # per-stage push — the SSE frame serializes the whole {type,payload}, and a
+        # missed/duplicated event is harmless (the rail folds the whole set each
+        # time). Only on a WON CAS: a stale epoch means we no longer own the row,
+        # so we must not narrate over the worker that does.
+        broadcast_stage(ctx, stage)
+
         Map.update(
           ctx,
           :seen,
@@ -479,6 +489,21 @@ defmodule BarkparkCloud.Sites.Deploy do
       "status" => stage.status,
       "detail" => stage.detail
     }
+  end
+
+  # The per-stage push (charter D15-D17). Coarse-by-design like every Events
+  # broadcast — the payload names WHICH deployment moved to WHICH stage, and the
+  # dashboard reads the authoritative deployment on the next fetch; the rail folds
+  # this signal in place. A nil/blank team is a no-op in Events.broadcast.
+  defp broadcast_stage(ctx, stage) do
+    BarkparkCloud.Events.broadcast(ctx.site.team_id, "site.deploy.stage", %{
+      site_id: ctx.site.id,
+      slug: ctx.site.slug,
+      deployment_id: ctx.id,
+      stage: stage.name,
+      status: stage.status,
+      detail: stage.detail
+    })
   end
 
   defp stage_line(%{name: name, status: status, detail: detail}) do
