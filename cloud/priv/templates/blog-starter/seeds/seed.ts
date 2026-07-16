@@ -4,6 +4,8 @@
  * Usage: `pnpm seed` (requires `docker compose up -d` to be running).
  */
 
+import { showcaseContent } from './showcase-content'
+
 const API = process.env.BARKPARK_API_URL ?? 'http://localhost:4000'
 const DATASET = process.env.BARKPARK_DATASET ?? 'production'
 const TOKEN = process.env.BARKPARK_TOKEN ?? 'barkpark-dev-token'
@@ -35,14 +37,14 @@ async function mutate(mutations: Mutation[]): Promise<void> {
   }
 }
 
-let blockCounter = 0
+// A single canonical PortableDocument paragraph block — the type-keyed grammar
+// `@barkpark/react`'s PortableDoc renders (NOT a Sanity `_type:'block'`). The
+// flagship post below uses the full 42-type `showcaseContent`; these keep the
+// other posts rendering real prose through the same renderer.
 function block(text: string): Record<string, unknown> {
-  blockCounter += 1
   return {
-    _type: 'block',
-    _key: `b${blockCounter}`,
-    style: 'normal',
-    children: [{ _type: 'span', _key: `s${blockCounter}`, text, marks: [] }],
+    type: 'paragraph',
+    content: [{ type: 'text', value: text }],
   }
 }
 
@@ -114,13 +116,16 @@ async function main(): Promise<void> {
       createOrReplace: {
         _id: 'post-welcome',
         _type: 'post',
-        title: 'Welcome to the Barkpark blog',
+        title: 'The full PortableDocument grammar',
         slug: { current: 'welcome' },
-        excerpt: 'First post on the starter blog.',
+        excerpt:
+          'One flagship post exercising all 42 canonical block types — headings, callouts, tables, charts, a mermaid diagram, an asciicast, and more — all rendered by @barkpark/react PortableDoc.',
         publishedAt: now(),
         author: ref('author-alice'),
         tags: [ref('tag-barkpark')],
-        content: [block('Hello world. This post was seeded via the mutate API.')],
+        // The 42-type kitchen sink: proves every block type renders through the
+        // canonical renderer and that mermaid + asciicast hydrate client-side.
+        content: showcaseContent,
       },
     },
     {
