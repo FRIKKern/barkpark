@@ -202,6 +202,12 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  # Catch-all: a list param (`?limit[]=5` -> Plug parses to `["5"]`) or any
+  # other non-scalar falls back to nil (== absent, so the context applies its
+  # default) instead of raising FunctionClauseError -> 500 (history_controller
+  # .ex:132 same idiom).
+  defp parse_limit(_), do: nil
+
   defp generate_secret do
     "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
   end
