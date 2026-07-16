@@ -165,6 +165,66 @@ defmodule Barkpark.Sites.ProvisionerTest do
     end
   end
 
+  # ── content freshness (search-template W1 live-proof fix) ─────────────────
+  #
+  # Proven live: search-capstone kept building a pre-.basepath template tree
+  # because the old marker made EVERY re-provision a no-op — a template update
+  # never reached an existing site until the src was hand-cleared on the box.
+
+  describe "content freshness" do
+    test "a TEMPLATE UPDATE re-materializes an already-provisioned src", %{template: template} do
+      assert Provisioner.provision(deploy("freshen")) == :ok
+      src = Provisioner.src_dir("freshen")
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+
+      # The shipped template changes (the .basepath scenario): a new file.
+      File.write!(Path.join(template, ".basepath"), "marker\n")
+
+      assert Provisioner.provision(deploy("freshen", build_id: "b2")) == :ok
+      assert File.read!(Path.join(src, ".basepath")) == "marker\n"
+    end
+
+    test "an UNCHANGED template stays a no-op — the build cache survives" do
+      assert Provisioner.provision(deploy("cache-keeper")) == :ok
+      src = Provisioner.src_dir("cache-keeper")
+      File.mkdir_p!(Path.join(src, "node_modules"))
+      File.write!(Path.join(src, "node_modules/.sentinel"), "cached")
+
+      assert Provisioner.provision(deploy("cache-keeper", build_id: "b2")) == :ok
+      assert File.read!(Path.join(src, "node_modules/.sentinel")) == "cached"
+    end
+
+    test "a LEGACY marker (no template=/digest= lines) re-materializes once (safe upgrade)" do
+      assert Provisioner.provision(deploy("legacy")) == :ok
+      src = Provisioner.src_dir("legacy")
+
+      # Rewrite the marker to the pre-freshness shape + plant a canary that a
+      # re-materialize must sweep.
+      File.write!(Path.join(src, ".bp-provisioned"), "provisioned-at=2026-07-01T00:00:00Z\n")
+      File.write!(Path.join(src, "stale-canary.txt"), "old tree")
+
+      assert Provisioner.provision(deploy("legacy", build_id: "b2")) == :ok
+      refute File.exists?(Path.join(src, "stale-canary.txt"))
+      assert File.read!(Path.join(src, ".bp-provisioned")) =~ "template=astro_starter"
+    end
+
+    test "a TEMPLATE SWITCH on an existing slug swaps the tree" do
+      assert Provisioner.provision(deploy("switcher", template: "next-starter", runtime_target: "node")) == :ok
+      src = Provisioner.src_dir("switcher")
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"next-stub"})
+
+      assert Provisioner.provision(
+               deploy("switcher",
+                 build_id: "b2",
+                 template: "search-starter",
+                 runtime_target: "node"
+               )
+             ) == :ok
+
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"search-stub"})
+    end
+  end
+
   # ── fail-closed ──────────────────────────────────────────────────────────
 
   describe "fail-closed" do

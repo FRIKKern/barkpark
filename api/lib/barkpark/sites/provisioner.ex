@@ -49,10 +49,13 @@ defmodule Barkpark.Sites.Provisioner do
       site-deploy.sh:789-795's STAGE idiom. A crash mid-copy dies in
       `src.partial`, never in a half-populated `src` that a later BUILD would
       mistake for a real checkout.
-    * **Marker-guarded no-op.** A `.bp-provisioned` marker is written INSIDE
-      `src` ONLY after the rename. A redeploy of the same site sees the marker
-      and returns `:ok` without touching disk — so a content-only redeploy does
-      not clobber the site's `node_modules`/`dist` build cache.
+    * **Marker-guarded no-op, CONTENT-fresh.** A `.bp-provisioned` marker is
+      written INSIDE `src` ONLY after the rename, recording the template slug +
+      a content digest of the template tree. A redeploy is a no-op ONLY while
+      both still match — so a content-only redeploy keeps the site's
+      `node_modules`/`dist` build cache, while a template UPDATE (or a template
+      switch on the same slug) re-materializes instead of serving stale source
+      forever (search-template W1 live-proof fix).
     * **Self-healing.** A `src` left WITHOUT its marker (a prior provision that
       died between rename and marker, or a hand-mangled dir) is NOT trusted —
       the next provision re-materializes it from scratch.
@@ -108,11 +111,14 @@ defmodule Barkpark.Sites.Provisioner do
         template: template
       }) do
     src = src_dir(slug)
+    template_key = resolve_template(template, runtime_target)
+    template_path = template_dir(template_key)
+    digest = template_digest(template_path)
 
-    if provisioned?(src) do
+    if provisioned_fresh?(src, template_key, digest) do
       :ok
     else
-      materialize(src, template_dir(resolve_template(template, runtime_target)))
+      materialize(src, template_path, template_key, digest)
     end
   rescue
     # A bang File op (cp_r!/mkdir_p!/rm_rf! on unwritable/absent paths) raises —
@@ -128,7 +134,7 @@ defmodule Barkpark.Sites.Provisioner do
 
   # ── materialize ───────────────────────────────────────────────────────────
 
-  defp materialize(src, template) do
+  defp materialize(src, template, template_key, digest) do
     cond do
       not File.dir?(template) ->
         {:error, {:provision_failed, {:template_not_found, template}}}
@@ -146,7 +152,7 @@ defmodule Barkpark.Sites.Provisioner do
         case File.rename(partial, src) do
           :ok ->
             # Marker LAST — a src without it is never trusted (self-healing).
-            File.write!(Path.join(src, @marker), marker_body())
+            File.write!(Path.join(src, @marker), marker_body(template_key, digest))
             :ok
 
           {:error, reason} ->
@@ -156,10 +162,77 @@ defmodule Barkpark.Sites.Provisioner do
     end
   end
 
-  defp provisioned?(src), do: File.regular?(Path.join(src, @marker))
+  # Freshness guard (search-template W1 live-proof fix): the marker records WHICH
+  # template materialized this src and a content digest of that template tree.
+  # A provision is a no-op ONLY when both still match — so a template update (or
+  # a template SWITCH on an existing slug) re-materializes instead of silently
+  # serving stale source forever (proven live: search-capstone kept building a
+  # pre-.basepath tree until the src was hand-cleared). A legacy marker without
+  # template=/digest= lines fails the match and re-materializes once — the safe
+  # upgrade path. Build caches (node_modules) survive only unchanged-template
+  # redeploys, which is exactly the boundary we want: same inputs, same cache.
+  defp provisioned_fresh?(src, template_key, digest) do
+    case File.read(Path.join(src, @marker)) do
+      {:ok, body} ->
+        fields =
+          body
+          |> String.split("\n", trim: true)
+          |> Enum.flat_map(fn line ->
+            case String.split(line, "=", parts: 2) do
+              [k, v] -> [{k, v}]
+              _ -> []
+            end
+          end)
+          |> Map.new()
 
-  defp marker_body do
-    "provisioned-at=#{DateTime.utc_now() |> DateTime.to_iso8601()}\n"
+        fields["template"] == Atom.to_string(template_key) and fields["digest"] == digest
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  # sha256 over every file's relative path + content, path-sorted — a pure
+  # function of the template tree's bytes (never mtimes, which churn per
+  # checkout). ~40MB templates hash in well under a second; the cost buys the
+  # no-op/rematerialize decision being CONTENT-true.
+  defp template_digest(template) do
+    case File.dir?(template) do
+      false ->
+        "absent"
+
+      true ->
+        template
+        |> tree_files()
+        |> Enum.sort()
+        |> Enum.reduce(:crypto.hash_init(:sha256), fn rel, acc ->
+          acc
+          |> :crypto.hash_update(rel)
+          |> :crypto.hash_update(File.read!(Path.join(template, rel)))
+        end)
+        |> :crypto.hash_final()
+        |> Base.encode16(case: :lower)
+    end
+  end
+
+  defp tree_files(root), do: tree_files(root, "")
+
+  defp tree_files(root, rel) do
+    abs = if rel == "", do: root, else: Path.join(root, rel)
+
+    Enum.flat_map(File.ls!(abs), fn name ->
+      child_rel = if rel == "", do: name, else: Path.join(rel, name)
+      child_abs = Path.join(root, child_rel)
+
+      cond do
+        File.dir?(child_abs) -> tree_files(root, child_rel)
+        true -> [child_rel]
+      end
+    end)
+  end
+
+  defp marker_body(template_key, digest) do
+    "provisioned-at=#{DateTime.utc_now() |> DateTime.to_iso8601()}\ntemplate=#{template_key}\ndigest=#{digest}\n"
   end
 
   # ── config resolution ─────────────────────────────────────────────────────
