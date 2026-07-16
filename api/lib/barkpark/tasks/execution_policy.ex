@@ -16,9 +16,6 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
 
   @type policy :: %{String.t() => term()}
 
-  @doc "The safe version-1 Task policy keys, including the required version."
-  def allowed_fields, do: @allowed_fields
-
   @doc "Validate an optional Task policy without returning its normalized form."
   @spec validate(nil | map()) :: :ok | {:error, map()}
   def validate(policy) do

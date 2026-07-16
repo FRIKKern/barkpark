@@ -133,9 +133,6 @@ defmodule BarkparkWeb.Studio.Caps do
 
   def classify(_), do: :deny
 
-  @doc "The set of events requiring at least one capability (write or admin)."
-  def privileged_events, do: @admin_events ++ @write_events ++ @read_events
-
   # ── capability derivation ───────────────────────────────────────────────────
 
   @doc """

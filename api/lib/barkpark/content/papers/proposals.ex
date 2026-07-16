@@ -63,9 +63,6 @@ defmodule Barkpark.Content.Papers.Proposals do
   # block is accepted, so a proposal cannot mutate prose even in the DRAFT.
   @insert_op_kinds ~w(append-block insert-after)
 
-  @doc "The edge kind a proposal's provenance edge carries."
-  def proposal_edge_kind, do: @edge_kind
-
   @doc """
   Apply INSERT-ONLY block `ops` to the `drafts.` twin of the paper at `slug`,
   recording provenance from `source` (`%{"doc_id" => …, "agent" => …,

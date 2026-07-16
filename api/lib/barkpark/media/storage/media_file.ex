@@ -66,9 +66,6 @@ defmodule Barkpark.Media.Storage.MediaFile do
 
   @neutralized_mime "application/octet-stream"
 
-  @doc "The content-type a neutralized (attachment-served) dangerous blob carries."
-  def neutralized_mime, do: @neutralized_mime
-
   @doc """
   True when `mime` is a browser-executable type (svg/html/xml/js). The base type
   is compared case-insensitively with any `; charset=…` parameter stripped.

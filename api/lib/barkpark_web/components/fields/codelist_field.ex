@@ -192,12 +192,6 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
     """
   end
 
-  @doc "G5 combobox cutoff: flat codelists with more than this many entries render as a <datalist>."
-  def combobox_threshold, do: @combobox_threshold
-
-  @doc "G4 tree cutoff: hierarchical codelists with more than this many raw entries render as a TreeCodelistField."
-  def tree_threshold, do: @tree_threshold
-
   @doc "The exact placeholder phrase used when the registry is empty."
   def empty_registry_phrase, do: @no_codelist_phrase
 

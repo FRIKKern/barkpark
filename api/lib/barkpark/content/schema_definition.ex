@@ -295,9 +295,6 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   @default_region_name "body"
 
-  @doc "The trailing free-content region name appended by `default_layout/1`."
-  def default_region_name, do: @default_region_name
-
   @doc """
   Synthesize a default `layout` from a schema's field order.
 
