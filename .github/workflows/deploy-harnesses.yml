@@ -52,3 +52,11 @@ jobs:
       # weakest link in the deploy path, so gate it here alongside its siblings.
       - name: Site deploy engine self-test
         run: bash deploy/site-deploy.sh --self-test
+      # The Node-engine deploy path ships its own offline proof (--self-test:
+      # fixture release dirs in a tmpdir, no npm/caddy/systemd needed) covering
+      # basePath arming, standalone runtime, rollback preflight and more. Same
+      # reasoning as its static sibling above: an untested deploy engine is the
+      # weakest link, so gate it here. The script self-gates and exits non-zero
+      # on any failure — no hardcoded total (check counts grow over time).
+      - name: Site deploy engine (Node) self-test
+        run: bash deploy/site-deploy-node.sh --self-test
