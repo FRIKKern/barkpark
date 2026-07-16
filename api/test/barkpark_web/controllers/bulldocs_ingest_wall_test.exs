@@ -251,7 +251,8 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
         %{
           "tag" => name,
           "strength" => 95 - i,
-          "rationale" => "Registered advisory-band tag ##{i} — five tags trips the 2–4 norm nudge."
+          "rationale" =>
+            "Registered advisory-band tag ##{i} — five tags trips the 2–4 norm nudge."
         }
       end)
 
