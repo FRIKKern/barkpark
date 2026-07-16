@@ -77,6 +77,21 @@ defmodule Barkpark.PortableDoc.Projection do
   end
 
   @doc """
+  Read the canonical block list from a Portable Doc content map.
+
+  A present top-level `"blocks"` list remains authoritative, including an
+  intentionally empty list. Historical projected documents that only retain
+  the free-block projection under `content["body"]["blocks"]` fall back to that
+  nested list. Any other shape has no readable block list.
+  """
+  @spec read_blocks(map()) :: [block()] | nil
+  def read_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => %{"blocks" => blocks}}) when is_list(blocks), do: blocks
+
+  def read_blocks(_content), do: nil
+
+  @doc """
   The classic value a bound block projects into `content[fieldName]`.
 
   For every field-block the editable datum is `block["value"]` and that is
