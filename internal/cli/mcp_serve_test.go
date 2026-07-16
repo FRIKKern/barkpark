@@ -597,33 +597,54 @@ func mcpContentText(res *mcp.CallToolResult) string {
 	return b.String()
 }
 
-// TestParseMCPServeArgs covers the --tools selector and --http transport parsing.
+// TestParseMCPServeArgs covers the --tools selector (tasks|all AND the D129
+// comma-noun subset) and the --http transport parsing. Validation of a noun
+// subset stays SYNTACTIC: tasks/all are reserved words, an empty comma token is
+// rejected, but a noun's EXISTENCE is never checked here (the manifest loads only
+// after parse; an absent noun degrades to zero tools, not a usage error).
 func TestParseMCPServeArgs(t *testing.T) {
 	cases := []struct {
-		in       []string
-		want     string
-		wantHTTP string
-		wantErr  bool
+		in        []string
+		want      string
+		wantNouns []string
+		wantHTTP  string
+		wantErr   bool
 	}{
-		{nil, "tasks", "", false},
-		{[]string{"--tools", "tasks"}, "tasks", "", false},
-		{[]string{"--tools", "all"}, "all", "", false},
-		{[]string{"--tools=all"}, "all", "", false},
-		{[]string{"--http", "127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
-		{[]string{"--http=127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
-		{[]string{"--tools", "all", "--http", ":4010"}, "all", ":4010", false},
-		{[]string{"--http"}, "", "", true},  // missing addr
-		{[]string{"--http="}, "", "", true}, // empty addr
-		{[]string{"--tools", "bogus"}, "", "", true},
-		{[]string{"--tools"}, "", "", true},
-		{[]string{"--nope"}, "", "", true},
-		{[]string{"stray"}, "", "", true},
+		{nil, "tasks", nil, "", false},
+		{[]string{"--tools", "tasks"}, "tasks", nil, "", false},
+		{[]string{"--tools", "all"}, "all", nil, "", false},
+		{[]string{"--tools=all"}, "all", nil, "", false},
+		{[]string{"--http", "127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
+		{[]string{"--http=127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
+		{[]string{"--tools", "all", "--http", ":4010"}, "all", nil, ":4010", false},
+		// D129 noun subsets — a single noun, a two-noun list, the inline form.
+		{[]string{"--tools", "github"}, "subset", []string{"github"}, "", false},
+		{[]string{"--tools", "github,linear"}, "subset", []string{"github", "linear"}, "", false},
+		{[]string{"--tools=github,linear"}, "subset", []string{"github", "linear"}, "", false},
+		// A subset composes with --http exactly like tasks|all.
+		{[]string{"--tools", "github,linear", "--http", ":4010"}, "subset", []string{"github", "linear"}, ":4010", false},
+		// An absent noun is NOT a parse error — it parses fine and degrades to
+		// zero tools once the manifest loads (proven in the session test).
+		{[]string{"--tools", "nosuchnoun"}, "subset", []string{"nosuchnoun"}, "", false},
+		// Reserved words may not be MIXED into a noun list.
+		{[]string{"--tools", "github,tasks"}, "", nil, "", true},
+		{[]string{"--tools", "all,github"}, "", nil, "", true},
+		// Empty comma tokens are rejected.
+		{[]string{"--tools", "github,"}, "", nil, "", true},
+		{[]string{"--tools", ",linear"}, "", nil, "", true},
+		{[]string{"--tools", "github,,linear"}, "", nil, "", true},
+		{[]string{"--http"}, "", nil, "", true},   // missing addr
+		{[]string{"--http="}, "", nil, "", true},  // empty addr
+		{[]string{"--tools="}, "", nil, "", true}, // empty --tools value
+		{[]string{"--tools"}, "", nil, "", true},
+		{[]string{"--nope"}, "", nil, "", true},
+		{[]string{"stray"}, "", nil, "", true},
 	}
 	for _, c := range cases {
-		got, gotHTTP, err := parseMCPServeArgs(c.in)
+		got, gotNouns, gotHTTP, err := parseMCPServeArgs(c.in)
 		if c.wantErr {
 			if err == nil {
-				t.Errorf("parseMCPServeArgs(%v) = %q,%q, want error", c.in, got, gotHTTP)
+				t.Errorf("parseMCPServeArgs(%v) = %q,%v,%q, want error", c.in, got, gotNouns, gotHTTP)
 			}
 			continue
 		}
@@ -633,6 +654,9 @@ func TestParseMCPServeArgs(t *testing.T) {
 		}
 		if got != c.want || gotHTTP != c.wantHTTP {
 			t.Errorf("parseMCPServeArgs(%v) = %q,%q, want %q,%q", c.in, got, gotHTTP, c.want, c.wantHTTP)
+		}
+		if strings.Join(gotNouns, ",") != strings.Join(c.wantNouns, ",") {
+			t.Errorf("parseMCPServeArgs(%v) nouns = %v, want %v", c.in, gotNouns, c.wantNouns)
 		}
 	}
 }
