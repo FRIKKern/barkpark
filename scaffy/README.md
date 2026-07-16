@@ -46,8 +46,8 @@ and it becomes the parser's test fixtures in the next wave.
 
 | Wave | Ships | State |
 |---|---|---|
-| **W1** — corpus + showcase | 7 full `.scaffy` commands, this README, the showcase paper | **this wave** |
-| **W2** — parser + validator | `bp scaffy validate` / `bp scaffy fmt` in Go: the grammar as code — strict tokens, derived-guard check, weak-guard lint, casing-consistency lint | next |
+| **W1** — corpus + showcase | 7 full `.scaffy` commands, this README, the showcase paper | shipped |
+| **W2** — parser + validator | `bp scaffy validate` / `bp scaffy fmt` in Go: the grammar as code — strict tokens, derived-guard check, weak-guard lint, casing-consistency lint. The Wave-2 rulings below are its law | **this wave** |
 | **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | planned |
 | **W4** — commands as content | a `command` document type, Studio authoring, a catalog per concept×variant, `bp add <concept>` fetching from the connected Barkpark | planned |
 
@@ -68,8 +68,10 @@ lives at `scaffy/commands/<name>.scaffy`.
 
 ## Grammar reference
 
-The grammar is **D3 hardened by D12 (amendments A1–A5)**. Every W1 command obeys all of it.
-The rules below are the human-readable contract; the corpus is the normative source.
+The grammar is **D3 hardened by D12 (amendments A1–A5) and pinned by the Wave-2 rulings
+(D20–D26)**. Every command in the corpus obeys all of it. The rules below are the
+human-readable contract; the corpus is the normative source, and `bp scaffy validate`
+(W2) is the same law as code.
 
 ### Core rules — D3(a)–(g)
 
@@ -86,6 +88,7 @@ REPLACE
 WITH
 ::: {{.worker-name}} cron :::
        {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
+       # scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}
        {"{{.CronExpr}}", Barkpark.Workers.{{.WorkerName}}}
 ::: {{.worker-name}} cron :::
 ```
@@ -93,7 +96,8 @@ WITH
 **(b) MARK on every mutating op.** Every op that mutates a file carries `MARK "NAME"`.
 On the **first** run the op anchors *structurally* (against real text in the tree) and
 plants the mark; on **later** runs it anchors *at the mark*. The mark is also the handle a
-`remove` uses. No mark ⇒ not reversible, not idempotent.
+`remove` uses. No mark ⇒ not reversible, not idempotent. (A site where no mark can
+physically be planted uses `MARK VIRTUAL` — see D24 below.)
 
 ```scaffy
 IN "internal/pdrender/pdrender.go"
@@ -214,13 +218,16 @@ WITH
 its own replacement* (as in A3 above — the old tuple is still present after the edit),
 idempotency rests **entirely** on the guard. A `REPLACE` without a payload-derived guard is
 a lint error. Anchor the ≥2nd run at the planted **MARK**, never at the now-mutated
-structural target.
+structural target — since W2 that re-anchor is first-class syntax, the `REANCHOR` clause
+(D21 below), and a self-consuming `REPLACE` without **both** a payload-derived `ASLONG`
+**and** a `REANCHOR` is an error.
 
 ```scaffy
 REPLACE … WITH …
 MARK "oban-cron-{{.worker-name}}"
+REANCHOR "oban-cron-"
 # guard = text the op itself writes (the planted mark line), never the old target
-ASLONG FILE DONT CONTAIN "MARK:oban-cron-{{.worker-name}}"
+ASLONG FILE DONT CONTAIN "# scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cron-{{.worker-name}}"
 ```
 
 **A5 — guard/assert hygiene: ASCII-only, brace-free.** Guards and asserts are ASCII-only and
@@ -241,6 +248,95 @@ the occurrence is pinned explicitly — `INSERT AFTER FIRST` / `INSERT AFTER LAS
 human (and later the engine) applies it at exactly one unambiguous site. No implicit
 "first match wins."
 
+### Wave-2 rulings — D20–D26, the validator's law
+
+Ratified on run-proofs (the matcher fork parsed against the real `config.exs`; the lint
+dry-run ran over the live corpus). `bp scaffy validate` implements exactly these rules.
+
+**D20 — the REPLACE matcher is byte-exact fenced-bytes.** The anchor matches **the exact
+bytes between its fence lines**, wherever they occur in the file, and `REPLACE` swaps
+**only those bytes** — never the enclosing line, never a widened region. The two rejected
+alternatives both fail on the real tree: whole-line matching goes clean-miss on run 2
+(sibling accretion becomes impossible), and substring-match-consume-the-whole-line
+reproduces the recorded `config.exs` SyntaxError. Engine law (W3): at apply time the
+anchor bytes must occur **exactly once** in the file — zero is a clean miss, two or more
+is an ambiguity error, never a "first match wins."
+
+**D21 — `REANCHOR "<mark-name-prefix>"`, the run-≥2 re-anchor.** Optional clause directly
+after `MARK`, on `REPLACE` only. Semantics: when any planted `MARK:<prefix>…` exists in
+the target file, the *effective anchor* is the **LAST planted mark block of that family**
+(the mark comment line + its marked payload line(s)), and `WITH` re-emits that block +
+separator + the new block; when no such mark exists (run 1), the fenced structural target
+applies. This is how a comma-list append (A3) takes a *second* sibling: the first run
+consumed the structural target into a longer line, so later runs key on the family's tail
+mark — the only safe key (a naive "last similar tuple" tail-finder grabs unrelated
+pre-existing entries). Lint: a self-consuming `REPLACE` (target survives as a substring of
+its own payload) without **both** a payload-derived `ASLONG` **and** a `REANCHOR` is an
+**error**.
+
+```scaffy
+MARK "cli-verb-{{.noun}}-{{.verb}}"   # this run's own mark (planted by the payload)
+REANCHOR "cli-verb-"                  # run ≥2: anchor at the LAST planted cli-verb-* block
+```
+
+**D22 — `VARIABLE` annotations: `OPAQUE`, `SHAPE`, `SUCCESSOR`.** Optional structural
+keywords between the variable's quoted name and `TITLE`:
+
+- `OPAQUE` — the value is **never re-cased**. References use exactly **one** token
+  spelling per file (any legal joiner-output of the declared name), and opaque tokens are
+  exempt from path-casing lints. For literals: cron expressions, routes, prose, numerics.
+- `SHAPE "ts14"` — the value must match a named shape from the validator's catalog.
+  `ts14` = exactly 14 ASCII digits forming a real UTC `YYYYMMDDHHMMSS` calendar instant
+  (the Ecto migration prefix).
+- `SUCCESSOR "<SiblingName>"` — the value is the named sibling **plus one**. The validator
+  lints the declared `EXAMPLES` pairs (Scaffy has no arithmetic — the +1 crosses as a
+  declared pair, checked, never computed).
+
+```scaffy
+VARIABLE 1 "Ts" OPAQUE SHAPE "ts14" TITLE "Migration timestamp" …
+VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" …
+```
+
+Non-opaque (transform) variables resolve through **one shared word-list** — `_`, `-` and
+case boundaries are equivalent — and the four deterministic joiners of A1. Not all four
+spellings must appear in a file, but every spelling that *does* appear must be a joiner
+output of the declared name.
+
+**D23 — direction is declared, never inferred: `DIRECTION "add" | "remove"`.** Required
+header field, directly after `VARIANT`. Polarity is textually undecidable (a correct
+remove-side un-sweep `REPLACE` looks exactly like an add to any containment heuristic), so
+the command states it. One direction-driven rule family follows: **add** ⇒ guards are
+`ASLONG FILE DONT CONTAIN` (act while the planted text is absent); **remove** ⇒ guards are
+positive `ASLONG FILE CONTAIN` (act only while the planted text is present), marks are
+**consumed** rather than planted, and postconditions may assert `ABSENT`.
+
+**D24 — `MARK VIRTUAL "name"`: the unplantable mark.** A plain `MARK "name"` **requires**
+its planted text `MARK:<name>` to appear verbatim in the op's **own payload** — the
+validator errors otherwise (this lint mechanically catches the W1 corpus's one real bug,
+an op that promised a mark its payload never wrote). Where no mark can physically survive
+(the corpus case: `docs/INDEX.md`'s brace-expansion line admits no comment syntax),
+`MARK VIRTUAL` declares a **nominal handle with zero in-file bytes** — and *requires* an
+`ASLONG` guard, because idempotency must rest somewhere. Mark uniqueness is pair-scoped:
+unique within a file; cross-file reuse of a mark name is legal only between
+`DIRECTION`-opposed commands (the add that plants it and the remove that consumes it).
+
+**D25 — the ratified spellings.** First-class grammar, defined by example in the corpus:
+
+| Spelling | Meaning |
+|---|---|
+| `REMOVE` | delete the fenced block byte-exactly, anchored at (and **consuming**) its `MARK` |
+| `DELETE FILE IF PRESENT "path"` | delete a whole file; **requires** a content-distinguishing `ASLONG` (guard on text the paired add wrote — never delete a hand-authored file that merely shares the name) |
+| `ASSERT FILE "path" EXISTS` / `ABSENT` | whole-file postconditions (the create / remove halves) |
+| positive `ASLONG FILE CONTAIN` | the guard polarity of every remove-direction op (D23) |
+| `SNIPPET` / `USE` | retained in the grammar with **zero corpus instances** — exercised by synthetic fixtures only |
+
+**D26 — payload bytes are pinned.** A payload is **exactly the lines between the fence
+lines, verbatim** — tabs, leading blanks and load-bearing blank lines included, each line
+contributing its trailing newline. Fence lines are flush-left and are **never** part of
+the payload. An empty fence (two adjacent fence lines) is zero lines ⇒ a **0-byte file**
+(the `.gitkeep` case). `CREATE` implies `mkdir -p` — intermediate directories are created,
+engine behaviour, not a lint.
+
 ## Gate tiers
 
 `ASSERT CMD` is split into two tiers (A2). A **LOCAL** gate is proven safe to run on a dev
@@ -252,7 +348,8 @@ locally (Elixir compiles the world; a partial build can wedge a dev machine).
 | **LOCAL** | `go vet ./…` | fast, no side effects |
 | **LOCAL** | `CC=/usr/bin/clang go build ./…` | `cc` is shadowed by a Claude wrapper — pin the real clang |
 | **LOCAL** | `go test -run <Named> ./…` | scoped by name, never the whole suite |
-| **LOCAL** | `npx tsc --noEmit` | JS SDK typecheck |
+| **LOCAL** | `cd js && pnpm install && pnpm build` | js workspace bootstrap — the proven precondition for the tsc + vitest gates in a fresh worktree (103 phantom errors → 0) |
+| **LOCAL** | `npx tsc --noEmit` | JS SDK typecheck — needs the pnpm bootstrap above first |
 | **LOCAL** | `npx eslint <file>` | scoped to the touched file |
 | **LOCAL** | `npx vitest run` (react pkg) | the PortableDoc fixture + count assertion |
 | **LOCAL** | `bash scripts/check-doc-budgets.sh` | 0.1s byte-gate for the doc spine |
@@ -278,11 +375,17 @@ designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
    are the new-file half — the part a plain generator could also do.
 3. **Do the INJECTs (`○`) in order.** For each mutating op, open the `IN` file, find the
    fenced structural anchor **at the pinned occurrence** (`FIRST`/`LAST`), and apply the
-   `INSERT` / `REPLACE`. The payload plants its own `MARK:<name>` comment at the site so the
-   edit is findable again (that's what a future `remove` and a re-run will key on).
-4. **Check the guards.** Before each injection, confirm the guard text (payload-derived, A3/A4)
-   isn't already present — if it is, the op is already applied; skip it. That's the
-   idempotency contract you're enforcing by hand.
+   `INSERT` / `REPLACE` — swapping **exactly the anchor bytes** (D20), never the whole line.
+   The payload plants its own `MARK:<name>` comment at the site so the edit is findable
+   again (that's what a future `remove` and a re-run will key on). If the op carries
+   `REANCHOR` and a mark of that family is already planted, anchor at the **last** planted
+   mark block instead of the structural target (D21). A `MARK VIRTUAL` op plants nothing —
+   its `ASLONG` guard is the whole handle (D24).
+4. **Check the guards.** Before each injection, confirm the guard per the command's
+   `DIRECTION` (D23): on an **add**, the `DONT CONTAIN` text must be absent — if present,
+   the op is already applied; skip it. On a **remove**, the positive `CONTAIN` text must be
+   present — if absent, there is nothing to remove; skip it. That's the idempotency
+   contract you're enforcing by hand.
 5. **Run the asserts.** Execute every `ASSERT FILE … CONTAINS` (grep) and every **LOCAL**
    `ASSERT CMD`. Defer `TIER ci` asserts to the PR. A command whose LOCAL asserts pass is
    correctly applied.

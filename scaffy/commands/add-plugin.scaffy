@@ -1,4 +1,4 @@
-COMMAND "Add a Barkpark Plugin" DESCRIPTION "Scaffold a minimal, auto-discovered Barkpark plugin — manifest, entry module (use Barkpark.Plugin), README, schemas dir, and a manifest test — with zero registry wiring. Formalizes `mix barkpark.plugin.new` as a declarative, idempotent command." LAST_UPDATED "16-07-2026-11-30-00" DOMAIN "barkpark" TAGS "plugins", "scaffold" CONCEPT "plugin" VARIANT "minimal" VARIABLES
+COMMAND "Add a Barkpark Plugin" DESCRIPTION "Scaffold a minimal, auto-discovered Barkpark plugin — manifest, entry module (use Barkpark.Plugin), README, schemas dir, and a manifest test — with zero registry wiring. Formalizes `mix barkpark.plugin.new` as a declarative, idempotent command." LAST_UPDATED "16-07-2026-11-30-00" DOMAIN "barkpark" TAGS "plugins", "scaffold" CONCEPT "plugin" VARIANT "minimal" DIRECTION "add" VARIABLES
   VARIABLE 1 "PluginName" TITLE "Name your plugin" DESCRIPTION "Plugin slug — lowercase, matches ^[a-z][a-z0-9_-]*$. Drives the manifest plugin_name, the priv/ + lib/ + test/ paths (snake), and the Barkpark.Plugins.<Pascal> module name." EXAMPLES "analytics", "reviews", "blog_engine"
   VARIABLE 2 "Description" TITLE "Describe your plugin" DESCRIPTION "One-line manifest + @moduledoc description. Plain prose, no braces." EXAMPLES "Pageview analytics for published documents.", "Reader reviews with moderation."
 
@@ -25,7 +25,11 @@ COMMAND "Add a Barkpark Plugin" DESCRIPTION "Scaffold a minimal, auto-discovered
 #   * DISCOVERY IS AUTOMATIC. `Barkpark.Plugins.Registry.Discovery` walks
 #     priv/plugins/*/plugin.json at boot (plugin_dirs_in/1, read in
 #     registry/boot_collectors.ex:140-142) and registers every manifest it
-#     finds — reached via `discover_and_register/0` (registry.ex:366). Dropping
+#     finds. The boot invocation is `Barkpark.Plugins.Registry.discover_and_register()`
+#     at schema_bootstrap.ex:62 — SchemaBootstrap is a supervised child
+#     (application.ex:192), started after the Registry GenServer and before
+#     Oban; registry.ex:366-367 is only a defdelegate to the implementation,
+#     `Discovery.discover_and_register/0` (discovery.ex:52). Dropping
 #     a plugin.json under priv/plugins/ IS the registration. The
 #     `config :barkpark, :plugins` list is NOT a registry: unset ⇒ discover
 #     everything; set ⇒ it acts only as a kill-switch / whitelist of

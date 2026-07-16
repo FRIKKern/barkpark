@@ -1,8 +1,8 @@
-COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. Zero Go: the manifest-driven CLI grows the verb for free." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "plugin", "verb" CONCEPT "cli-verb" VARIANT "read-list" VARIABLES
+COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. Zero Go: the manifest-driven CLI grows the verb for free." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "plugin", "verb" CONCEPT "cli-verb" VARIANT "read-list" DIRECTION "add" VARIABLES
   VARIABLE 1 "Noun" TITLE "Plugin noun the verb hangs off" DESCRIPTION "The existing noun in the plugin's cli_commands/0 list this verb extends. Lowercase single word — the four casings coincide." EXAMPLES "ticket"
   VARIABLE 2 "Verb" TITLE "The new verb" DESCRIPTION "The verb `bp <noun> <verb>` will answer to. Lowercase single word — the four casings coincide." EXAMPLES "stats", "waiting", "unassigned"
-  VARIABLE 3 "Summary" TITLE "One-line operator summary (manifest + --help text)" DESCRIPTION "Shown in `bp <noun> --help` and the capabilities manifest. Opaque literal, no casing transform." EXAMPLES "Operator dashboard: open / answered / closed counts, oldest-waiting age."
-  VARIABLE 4 "PathTemplate" TITLE "The HTTP route the verb calls (GET)" DESCRIPTION "The path_template the generic HTTP builder calls. Must be a route the API actually serves. Opaque literal in URL position ({{.path_template}} snake spelling)." EXAMPLES "/v1/tickets/stats"
+  VARIABLE 3 "Summary" OPAQUE TITLE "One-line operator summary (manifest + --help text)" DESCRIPTION "Shown in `bp <noun> --help` and the capabilities manifest. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Operator dashboard: open / answered / closed counts, oldest-waiting age."
+  VARIABLE 4 "PathTemplate" OPAQUE TITLE "The HTTP route the verb calls (GET)" DESCRIPTION "The path_template the generic HTTP builder calls. Must be a route the API actually serves. OPAQUE: never re-cased and exempt from path-casing lints; this file spells it {{.path_template}}." EXAMPLES "/v1/tickets/stats"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Why this command is a ONE-LINE append (the architecture already did the work)
@@ -20,10 +20,14 @@ COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <ver
 #     cli_commands/0 list entry            (this append — the ONLY edit)
 #        │  Plugins.Tickets.cli_commands/0 delegates to Tickets.CLI.commands/0
 #        ▼
-#     GET /v1/capabilities                 (CapabilitiesController folds every
-#        │                                   plugin's maps in, stamping
-#        │                                   source: "plugin:tickets" provenance
-#        │                                   from the noun)
+#     GET /v1/capabilities                 (the capabilities fold stamps every
+#        │                                   plugin map with provenance: the
+#        │                                   OWNING PLUGIN's registered name,
+#        │                                   looked up noun→plugin — here
+#        │                                   source: "plugin:tickets". The noun
+#        │                                   is the lookup KEY, never the value:
+#        │                                   capabilities.ex:200-213; doctrine
+#        │                                   plugin.ex:506-508)
 #        ▼
 #     bp <noun> <verb>                     (tree.Lookup finds the map; the
 #                                           generic HTTP builder calls
@@ -67,14 +71,20 @@ COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <ver
 # the mark line because it ALSO refuses a verb that already exists by hand). No
 # `}}` sits adjacent to a literal `}`. On a re-run with the same VARIABLEs the
 # guard is already present and the whole op is skipped (no duplicate verb). The
-# payload's comment line plants the per-verb mark cli-verb-{{.noun}}-{{.verb}}:
-# first run anchors on the `ticket.close` structural target and plants it; every
-# later run (and remove) anchors at that mark.
+# payload's comment line plants the per-verb mark cli-verb-{{.noun}}-{{.verb}}.
+#
+# REANCHOR (D21) makes the sibling-accretion path explicit: the first verb added
+# anchors on the `ticket.close` structural target and plants its mark; when any
+# planted MARK:cli-verb-… already exists in this file, a later add (a DIFFERENT
+# verb) anchors at the LAST planted mark block of that family (the mark comment
+# line + its marked map) and WITH re-emits that block + comma + the new mark
+# comment + map — the list grows at the family's tail, and the structural
+# target is never re-matched after it has been consumed.
 
 IN "api/lib/barkpark/plugins/tickets/cli.ex"
 ### Append {{.noun}}.{{.verb}} to ticket_commands/0
 REPLACE
-::: target :::
+::: ticket.close tail map :::
       %{
         id: "ticket.close",
         noun: "ticket",
@@ -93,9 +103,9 @@ REPLACE
         default_output: "minimal",
         scoped_prefix: nil
       }
-::: target :::
+::: ticket.close tail map :::
 WITH
-::: payload :::
+::: ticket.close plus {{.noun}}.{{.verb}} :::
       %{
         id: "ticket.close",
         noun: "ticket",
@@ -133,8 +143,9 @@ WITH
         default_output: "table",
         scoped_prefix: nil
       }
-::: payload :::
+::: ticket.close plus {{.noun}}.{{.verb}} :::
 MARK "cli-verb-{{.noun}}-{{.verb}}"
+REANCHOR "cli-verb-"
 ASLONG FILE DONT CONTAIN "id: \"{{.noun}}.{{.verb}}\""
 
 # ─────────────────────────────────────────────────────────────────────────────
