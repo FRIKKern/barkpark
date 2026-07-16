@@ -268,7 +268,15 @@ defmodule BarkparkWeb.ChatController do
          %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
-        :ok = Runtime.answer_approval(stored.provider, session, request_id, decision)
+        # Soft-match the delivery (D31 seal). For the claude provider answer_approval
+        # is a GenServer.cast → always :ok, but approval/2 is provider-neutral: codex
+        # returns {:error, :unknown_approval} on the double-answer race and
+        # {:error, {:app_server_exit, _}} on a dead app-server, and a RemoteRef host
+        # can leak its own {:error, _} tail. A non-:ok return means the ask is already
+        # gone upstream — that must NOT MatchError → 500 where claude cleanly 204s, so
+        # we still flip our own status and 204, mirroring the update_approval_status
+        # {:error, :not_found} → :ok idempotency just below.
+        _ = Runtime.answer_approval(stored.provider, session, request_id, decision)
 
         status =
           case decision do
