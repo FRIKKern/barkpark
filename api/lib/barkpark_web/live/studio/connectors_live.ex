@@ -186,8 +186,16 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   # ── Disconnect ─────────────────────────────────────────────────────────────
 
-  def handle_event("open_disconnect", %{"provider" => provider}, socket) do
-    case {authorize(socket), Map.get(socket.assigns.installs, provider)} do
+  def handle_event("open_disconnect", %{"provider" => provider, "install_key" => key}, socket) do
+    # Key by (provider, install_key), NEVER bare provider: a workspace can hold
+    # two installs of one provider (two Telegram bots), so the bare-provider
+    # lookup would always open the FIRST and leave the second undisconnectable.
+    install =
+      socket.assigns.installs
+      |> Map.get(provider, [])
+      |> Enum.find(&(&1.install_key == key))
+
+    case {authorize(socket), install} do
       {{:ok, _ws, _principal}, %{} = install} ->
         {:noreply, assign(socket, :disconnecting, install)}
 
@@ -614,7 +622,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           <.provider_card
             :for={provider <- @providers}
             provider={provider}
-            install={Map.get(@installs, provider.id)}
+            installs={Map.get(@installs, provider.id, [])}
             loaded?={@loaded?}
             connect_configured?={@connect_configured?}
             oauth={Map.get(@oauth, provider.id)}
@@ -632,7 +640,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           <.provider_card
             :for={provider <- @tool_providers}
             provider={provider}
-            install={Map.get(@installs, provider.id)}
+            installs={Map.get(@installs, provider.id, [])}
             loaded?={@loaded?}
             connect_configured?={@connect_configured?}
             oauth={Map.get(@oauth, provider.id)}
@@ -682,7 +690,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   end
 
   attr :provider, :map, required: true
-  attr :install, :map, default: nil
+  # EVERY install for this provider in this workspace (D161) — a list, one row per
+  # install. `[]` means none connected. A provider is never collapsed to a single
+  # install: the second one must be visible AND disconnectable.
+  attr :installs, :list, default: []
   attr :loaded?, :boolean, default: false
   attr :connect_configured?, :boolean, default: false
   # The oauth entry for THIS provider (or nil): %{add_url, gate, cta_label}.
@@ -700,9 +711,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         <span
           data-test-id={"connector-status-#{@provider.id}"}
           class="text-sm"
-          style={"border-radius: 999px; padding: .1rem .6rem; border: 1px solid var(--border); color: #{status_color(@install, @loaded?)};"}
+          style={"border-radius: 999px; padding: .1rem .6rem; border: 1px solid var(--border); color: #{status_color(@installs, @loaded?)};"}
         >
-          {status_label(@install, @loaded?)}
+          {status_label(@installs, @loaded?)}
         </span>
       </div>
 
@@ -713,15 +724,15 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       </p>
 
       <div
-        :if={@install}
+        :for={install <- @installs}
         data-test-id={"connector-install-#{@provider.id}"}
         class="text-sm"
         style="border-top: 1px solid var(--border); padding-top: 8px; color: var(--fg-muted);"
       >
         <div>
-          Install <code>{@install.install_key}</code>
+          Install <code>{install.install_key}</code>
         </div>
-        <div>Connected {connected_at(@install)}</div>
+        <div>Connected {connected_at(install)}</div>
       </div>
 
       <p
@@ -735,7 +746,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
       <p
         :if={
-          @provider.connect_mode == :oauth and @loaded? and is_nil(@install) and
+          @provider.connect_mode == :oauth and @loaded? and @installs == [] and
             not is_nil(@oauth) and not is_nil(@oauth.gate)
         }
         data-test-id={"connector-oauth-gate-#{@provider.id}"}
@@ -750,7 +761,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         KNOW that this provider is unconnected, and a Connect button offered beside
         a "Loading…" chip is the UI asserting something it has not read yet. --%>
         <button
-          :if={@provider.connectable? and @loaded? and is_nil(@install) and @connect_configured?}
+          :if={@provider.connectable? and @loaded? and @installs == [] and @connect_configured?}
           type="button"
           class="btn btn-primary"
           phx-click="open_connect"
@@ -768,7 +779,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         Studio" copy literally true. --%>
         <a
           :if={
-            @provider.connect_mode == :oauth and @loaded? and is_nil(@install) and
+            @provider.connect_mode == :oauth and @loaded? and @installs == [] and
               @connect_configured? and not is_nil(@oauth) and not is_nil(@oauth.add_url)
           }
           href={@oauth.add_url}
@@ -781,11 +792,12 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         </a>
 
         <button
-          :if={@install}
+          :for={install <- @installs}
           type="button"
           class="btn btn-destructive"
           phx-click="open_disconnect"
           phx-value-provider={@provider.id}
+          phx-value-install_key={install.install_key}
           data-test-id={"connector-disconnect-#{@provider.id}"}
         >
           Disconnect
@@ -896,10 +908,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     """
   end
 
-  defp status_label(%{}, _loaded?), do: "Connected"
-  defp status_label(nil, true), do: "Not connected"
-  defp status_label(nil, false), do: "Loading…"
+  defp status_label([_ | _], _loaded?), do: "Connected"
+  defp status_label([], true), do: "Not connected"
+  defp status_label([], false), do: "Loading…"
 
-  defp status_color(%{}, _loaded?), do: "var(--ok)"
-  defp status_color(nil, _loaded?), do: "var(--fg-muted)"
+  defp status_color([_ | _], _loaded?), do: "var(--ok)"
+  defp status_color([], _loaded?), do: "var(--fg-muted)"
 end

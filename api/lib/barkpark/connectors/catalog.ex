@@ -438,21 +438,27 @@ defmodule Barkpark.Connectors.Catalog do
   def installs_for_workspace(_), do: []
 
   @doc """
-  `installs_for_workspace/1` keyed by provider id — what the LiveView renders
-  against. A provider with no install is simply absent from the map.
+  `installs_for_workspace/1` grouped by provider id — what the LiveView renders
+  against. A provider with no install is simply absent from the map; a provider
+  with installs maps to a NON-EMPTY LIST of them.
 
-  Two installs of the SAME provider in one workspace are possible in principle
-  (two Telegram bots); the catalog is a one-card-per-provider surface, so it
-  shows the OLDEST (the first one connected) and never invents a second card.
-  This is a known, filed limitation, not an accident.
+  Two installs of the SAME provider in one workspace are possible (two Telegram
+  bots), and the catalog card now shows EVERY one — one row per install, each
+  independently disconnectable (D161). The banner-with-links alternative was
+  rejected: a hidden second install is an undisconnectable credential, which is a
+  security hole, not a cosmetic gap.
+
+  Each provider's list inherits `installs_for_workspace/1`'s ordering —
+  `order_by: [asc: provider, asc: install_key]` — so it is install_key-ALPHABETICAL,
+  NOT creation order. (The pre-D104 collapse kept the alphabetical survivor and
+  MISDESCRIBED it as "the OLDEST"; there was never a `created_at` sort. D104
+  corrected the claim; this returns the whole set, so there is no survivor at all.)
   """
-  @spec installs_by_provider(Workspace.t() | binary() | nil) :: %{String.t() => map()}
+  @spec installs_by_provider(Workspace.t() | binary() | nil) :: %{String.t() => [map()]}
   def installs_by_provider(workspace) do
     workspace
     |> installs_for_workspace()
-    |> Enum.reduce(%{}, fn install, acc ->
-      Map.put_new(acc, install.provider, install)
-    end)
+    |> Enum.group_by(& &1.provider)
   end
 
   @doc """

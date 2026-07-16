@@ -156,6 +156,40 @@ defmodule Barkpark.Connectors.InstallSchemaTest do
     end
   end
 
+  describe "installs_by_provider/1 groups EVERY install (D161)" do
+    test "two installs of the SAME provider in one workspace BOTH surface", %{ws_a: a} do
+      # Inserted OUT of alphabetical order on purpose (…002 before …001) to prove
+      # the ordering is not insertion order.
+      insert_install("telegram", "8100000002", a.id)
+      insert_install("telegram", "8100000001", a.id)
+
+      by_provider = Catalog.installs_by_provider(a)
+
+      assert %{"telegram" => installs} = by_provider
+      keys = Enum.map(installs, & &1.install_key)
+
+      # BOTH surface — the pre-D161 `Map.put_new` collapse silently dropped the
+      # second install, leaving a credential no card could disconnect.
+      assert length(installs) == 2
+      assert "8100000001" in keys
+      assert "8100000002" in keys
+
+      # install_key-ALPHABETICAL (inherited from installs_for_workspace's
+      # `order_by: [asc: provider, asc: install_key]`), NEVER creation order.
+      assert keys == ["8100000001", "8100000002"]
+    end
+
+    test "distinct providers each map to their own one-element list", %{ws_a: a} do
+      insert_install("telegram", "111:aaa", a.id)
+      insert_install("discord", "999888777", a.id)
+
+      assert %{
+               "telegram" => [%{install_key: "111:aaa"}],
+               "discord" => [%{install_key: "999888777"}]
+             } = Catalog.installs_by_provider(a)
+    end
+  end
+
   describe "no secret ever leaves the database (D38)" do
     test "the select carries NEITHER credential_ref NOR chat_token_ref", %{ws_a: a} do
       insert_install("telegram", "111:aaa", a.id,
