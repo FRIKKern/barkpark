@@ -257,6 +257,91 @@ refusing a host touch) rides the same human gate,
 `connectors-hg-live-isolated-cloud-turn`; this proof asserts the *launch contract*
 (what the shim REQUESTS/confines), never a fabricated live denial.
 
+# Wave 14 — the session-sandbox lifecycle: the Cloud Runner as a real multi-turn Barkpark Chat SESSION (D134–D143)
+
+Waves 11–13 made the `:cloud` profile a SINGLE isolated one-shot `claude -p` turn
+(interactive stdin INTO a sandbox is impossible — D108). Wave 14 makes it a
+first-class multi-turn Barkpark Chat SESSION with continuity ACROSS turns. The
+continuity mechanism (D134, run-proven live on guerrilla): create the sandbox
+ONCE, STOP it after each turn (auto-snapshots, Persistent=true), and let the NEXT
+turn's `vercel sandbox exec` auto-resume it with `/tmp` intact — `/tmp` lives on
+the persisted xfs root (`/dev/vdb`), so the pinned `HOME=/tmp/bp-cloud-home` and
+the `claude` transcript under it survive the stop/resume cycle. The sandbox stays
+one-shot per turn; the memory lives in the SESSION binding + the sandbox
+filesystem, NOT a held interactive subprocess.
+
+### The shim's session-sandbox lifecycle (this slice, D137/D138)
+
+`cloud-sandbox-runner.mjs` grew two ADDITIVE pre-`--` flags + one sideband frame +
+a mode-dependent teardown. Flag-less invocations are BYTE-IDENTICAL to the pre-D137
+shape (the W11/W12 proofs drive the shim flag-less and stay untouched; unknown
+pre-`--` flags were already ignored):
+
+- **`--sandbox-id <id>`** — REUSE the session-bound sandbox (turn N): skip
+  `createSandbox()` entirely and exec straight into `<id>`, which auto-resumes from
+  its stop-snapshot. Zero `sandbox create` invocations.
+- **`--keep-sandbox`** — the teardown VERB flips from `vercel sandbox remove` to
+  `vercel sandbox stop` (auto-snapshots so the next turn resumes; NEVER remove — a
+  removed sandbox cannot resume). Applies on the normal `finally` path AND the
+  SIGTERM/SIGINT/SIGHUP traps (best-effort stop). Flag-less teardown stays REMOVE.
+- **`bp_sandbox` sideband frame** — a keep-mode CREATE (turn 1) emits EXACTLY ONE
+  NDJSON line on stdout BEFORE any claude output:
+  `{"type":"bp_sandbox","subtype":"created","sandbox_id":"<id>"}`. The Elixir
+  Recorder (W14-2) pattern-matches `type:"bp_sandbox"`, persists the id as the
+  session's durable binding (D136), and SWALLOWS the frame — never broadcast to
+  SSE/ChatLive, never appended as a message (the customer NDJSON stays clean). A
+  reuse turn creates nothing and emits none; a flag-less create emits none.
+
+The Elixir side (W14-1) emits `--keep-sandbox` on turn 1 (create), and
+`--sandbox-id <id> --keep-sandbox` on turn N (reuse), with the claude session-
+identity flags (`--session-id` / `--resume`) after `--`.
+
+### Timeout + snapshot economics (D138)
+
+Stop-after-turn makes the existing 10m `--timeout` bound ONE turn (not the whole
+chat), and think-time between turns is free (a stopped sandbox does not bill). The
+timeout is also the crash-safety net if the shim dies before stopping. Cost caveat:
+`vercel sandbox remove` does NOT delete stop-snapshots (~246MB each, 30d expiry),
+and stopped sandboxes are INVISIBLE to `sandbox ls`, so a long keep-mode session
+accrues snapshot storage. Keep-mode create caps it at the source WHERE the pinned
+CLI supports it — the shim PROBES `vercel sandbox create --help` (a local help
+print, no API round-trip, no provisioning) for `--keep-last-snapshots` /
+`--snapshot-expiration` and appends them only if advertised; otherwise the accrual
+is documented here and swept by the backlogged reaper
+(`connectors-cloud-sandbox-reaper`). The shim never passes a flag the CLI rejects.
+
+### `w14-session-sandbox-proof.sh`
+
+The hermetic black-box lifecycle proof (D141), same fake-`vercel` technique as
+`w12-shim-confinement-proof.sh`. It drives the REAL `cloud-sandbox-runner.mjs` for
+three legs and asserts from the recorded argv + the shim's stdout:
+
+- **(a) REUSE** — `--sandbox-id <id>` ⇒ ZERO real `sandbox create` invocations, and
+  the `-lc` turn exec targets the supplied id;
+- **(b) TEARDOWN VERB** — `--keep-sandbox` ⇒ teardown invokes `sandbox stop` and
+  NEVER `sandbox remove`; flag-less ⇒ the legacy `create + exec + remove` sequence
+  with `sandbox stop` NEVER invoked (byte-preserved);
+- **(c) SIDEBAND FRAME** — a keep-mode create emits EXACTLY ONE valid
+  `bp_sandbox` `created` NDJSON line first (before any claude frame), carrying the
+  created id; a flag-less create emits none.
+
+`CLOUD_SANDBOX_SNAPSHOT` is set so create takes the snapshot path (no `npm i -g`
+exec noise). No real Vercel, no GNU `timeout` (the shim self-terminates against the
+fake). `--check` lints the shim + verifies the lifecycle markers and prints the
+plan without spawning anything.
+
+```bash
+scripts/connectors/w14-session-sandbox-proof.sh --check   # lint + lifecycle markers + plan, spawns nothing
+scripts/connectors/w14-session-sandbox-proof.sh           # hermetic black-box run (fake vercel; no real sandbox)
+```
+
+It rides CI in the same BLOCKING `shim-confinement` job as the W12 proof
+(`.github/workflows/connectors.yml`; node + bash + fake vercel, no Postgres). The
+**live multi-turn** conversation (a real key, two turns, codeword-recall across
+turns, zero orphans + snapshot cleanup) is the NEW named human gate
+`connectors-hg-live-cloud-multiturn` (D142) — this proof asserts the launch
+contract only, never a fabricated live conversation.
+
 ## Gate
 
 ```bash
@@ -268,7 +353,9 @@ bash -n scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d1
   && bash -n scripts/connectors/w11-isolated-turn-proof.sh \
   && scripts/connectors/w11-isolated-turn-proof.sh --check \
   && shellcheck -S error scripts/connectors/w12-shim-confinement-proof.sh \
-  && scripts/connectors/w12-shim-confinement-proof.sh
+  && scripts/connectors/w12-shim-confinement-proof.sh \
+  && shellcheck -S error scripts/connectors/w14-session-sandbox-proof.sh \
+  && scripts/connectors/w14-session-sandbox-proof.sh
 ```
 
 ## What Wave 11 does NOT do (filed as backlog)
