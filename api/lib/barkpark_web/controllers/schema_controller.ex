@@ -32,7 +32,7 @@ defmodule BarkparkWeb.SchemaController do
          {:ok, schema} <- Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
       conn
       |> put_status(:created)
-      |> json(render_schema(schema))
+      |> json(Content.serialize_schema_for_sdk(schema))
     end
   end
 
@@ -68,16 +68,5 @@ defmodule BarkparkWeb.SchemaController do
       v when v in [true, "true", "1"] -> true
       _ -> false
     end
-  end
-
-  defp render_schema(schema) do
-    %{
-      name: schema.name,
-      title: schema.title,
-      icon: schema.icon,
-      visibility: schema.visibility,
-      fields: schema.fields,
-      actions: schema.actions || []
-    }
   end
 end
