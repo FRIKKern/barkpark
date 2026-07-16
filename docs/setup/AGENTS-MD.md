@@ -24,7 +24,7 @@ The block is wrapped in managed markers:
 <!-- barkpark:onramp:end -->
 ```
 
-Those markers exist because a consumer's `AGENTS.md` **routinely already exists** — this repo's own root `AGENTS.md` is the proof (it holds shell-danger rules, not Barkpark teach text). The block is emitter output for *your* repo, never a Barkpark-committed asset. When `--write` lands (see below), the markers are how a re-run finds and refreshes only its own block, never your surrounding content.
+Those markers exist because a consumer's `AGENTS.md` **routinely already exists** — this repo's own root `AGENTS.md` is the proof (it holds shell-danger rules, not Barkpark teach text). The block is emitter output for *your* repo, never a Barkpark-committed asset. With `--write` (see [Merge semantics](#merge-semantics---write)), the markers are how a re-run finds and refreshes only its own block, never your surrounding content.
 
 ## One body, three framings
 
