@@ -5,9 +5,18 @@
   "description": "Declarative deploy descriptor. A deploy-button UI enumerates templates by reading these files; a server-side bootstrap job consumes one to stand up a Barkpark-backed site (workspace + schema + seed + publish + read-token + env) without an ad-hoc install.sh. See templates/MANIFEST.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifestVersion", "name", "title", "description", "framework", "schemas"],
+  "required": [
+    "manifestVersion",
+    "name",
+    "title",
+    "description",
+    "framework",
+    "schemas"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "manifestVersion": {
       "type": "string",
       "const": "1",
@@ -18,12 +27,24 @@
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
       "description": "Lowercase kebab slug — the identity a deploy UI keys and routes on."
     },
-    "title": { "type": "string", "minLength": 1, "description": "Human title shown in the deploy UI." },
-    "description": { "type": "string", "minLength": 1, "description": "One-line description of what the template produces." },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human title shown in the deploy UI."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line description of what the template produces."
+    },
     "framework": {
       "type": "string",
-      "enum": ["nextjs"],
-      "description": "The deployable app framework."
+      "enum": [
+        "nextjs",
+        "astro",
+        "phoenix"
+      ],
+      "description": "The deployable app framework. v1 shipped nextjs-only; astro (static symlink-swap target) and phoenix (papers-reader surface) joined with the search-template epic (W2)."
     },
     "repo": {
       "type": "string",
@@ -42,19 +63,32 @@
     "schemas": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "description": "Relative paths (from this manifest) to schema files, applied in order. At least one."
     },
     "seed": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "description": "Optional seed content and how to apply it.",
       "properties": {
-        "path": { "type": "string", "minLength": 1, "description": "Relative path to the seed file." },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path to the seed file."
+        },
         "format": {
           "type": "string",
-          "enum": ["mutations", "ndjson", "script"],
+          "enum": [
+            "mutations",
+            "ndjson",
+            "script"
+          ],
           "default": "mutations",
           "description": "How the seed is applied. mutations = {mutations:[…]} POST body (lands DRAFTS; needs a publish pass). ndjson = newline-delimited documents. script = an executable seed script that does its own create+publish."
         },
@@ -72,12 +106,24 @@
         {
           "if": {
             "properties": {
-              "publish": { "const": true },
-              "format": { "enum": ["mutations"] }
+              "publish": {
+                "const": true
+              },
+              "format": {
+                "enum": [
+                  "mutations"
+                ]
+              }
             },
-            "required": ["publish"]
+            "required": [
+              "publish"
+            ]
           },
-          "then": { "required": ["publishType"] }
+          "then": {
+            "required": [
+              "publishType"
+            ]
+          }
         }
       ]
     },
@@ -87,29 +133,76 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "role", "source"],
+        "required": [
+          "key",
+          "role",
+          "source"
+        ],
         "properties": {
-          "key": { "type": "string", "minLength": 1, "description": "The env var name (e.g. BARKPARK_API_URL)." },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The env var name (e.g. BARKPARK_API_URL)."
+          },
           "role": {
             "type": "string",
-            "enum": ["server", "public"],
+            "enum": [
+              "server",
+              "public"
+            ],
             "description": "server = server-only (secrets, tokens, API base — never shipped to the browser). public = safe to expose (a NEXT_PUBLIC_ value)."
           },
           "source": {
             "type": "string",
-            "enum": ["api_url", "read_token", "dataset", "workspace", "project", "webhook_secret", "literal"],
+            "enum": [
+              "api_url",
+              "read_token",
+              "dataset",
+              "workspace",
+              "project",
+              "webhook_secret",
+              "literal"
+            ],
             "description": "Where the value comes from during bootstrap. literal = baked into this manifest (see value)."
           },
-          "description": { "type": "string" },
-          "value": { "type": "string", "description": "The baked value — only for source \"literal\"." }
+          "description": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "description": "The baked value — only for source \"literal\"."
+          }
         },
         "allOf": [
           {
-            "if": { "properties": { "source": { "const": "literal" } }, "required": ["source"] },
-            "then": { "required": ["value"] }
+            "if": {
+              "properties": {
+                "source": {
+                  "const": "literal"
+                }
+              },
+              "required": [
+                "source"
+              ]
+            },
+            "then": {
+              "required": [
+                "value"
+              ]
+            }
           }
         ]
       }
+    },
+    "theme": {
+      "type": "string",
+      "enum": [
+        "evergreen",
+        "ember",
+        "fjord",
+        "charple"
+      ],
+      "description": "Optional Barkpark palette this deploy of the template ships with (design/themes/<name>.json). Omitted = the template's own default (evergreen). Surfaces as data-bp-theme at runtime."
     }
   }
 }

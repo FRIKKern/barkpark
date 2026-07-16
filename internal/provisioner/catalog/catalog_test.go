@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-// TestCatalogCarriesTheThreeTemplates locks the catalog contents: the three
+// TestCatalogCarriesTheShippedTemplates locks the catalog contents: the shipped
 // deploy templates are present, parsed, and validated — and Names() is the
 // sorted slug list the control-plane allowlist mirrors.
-func TestCatalogCarriesTheThreeTemplates(t *testing.T) {
-	want := []string{"blog-starter", "place-directory", "website-starter"}
+func TestCatalogCarriesTheShippedTemplates(t *testing.T) {
+	want := []string{"blog-starter", "place-directory", "search-starter", "website-starter"}
 	if got := Names(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Names() = %v, want %v (update the Elixir @known_templates allowlist if this changes)", got, want)
 	}
