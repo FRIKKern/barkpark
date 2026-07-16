@@ -100,6 +100,14 @@ on:
       # template-only CSS/theme PR would never run the design gate. This trigger
       # opens the frontier to templates/** so those PRs at least run doc-gates.
       - "templates/**"
+      # PortableDoc render-parity completeness guard (render-unification D8/D45).
+      # The guard greps compose.ex's dispatched block types, subtracts the 14
+      # excluded field/embed types, and reds if any in-scope type lacks a golden
+      # fixture. compose.ex + gen_pd_parity.ex ride the **/*.ex glob; the .sh
+      # itself and the golden mirror need their own triggers (a seeded/removed
+      # fixture is a .json, covered by no glob above).
+      - "scripts/pd-parity-completeness.sh"
+      - "api/test/support/fixtures/pd-parity/**"
   pull_request:
     paths:
       - "**/*.md"
@@ -193,6 +201,14 @@ on:
       # template-only CSS/theme PR would never run the design gate. This trigger
       # opens the frontier to templates/** so those PRs at least run doc-gates.
       - "templates/**"
+      # PortableDoc render-parity completeness guard (render-unification D8/D45).
+      # The guard greps compose.ex's dispatched block types, subtracts the 14
+      # excluded field/embed types, and reds if any in-scope type lacks a golden
+      # fixture. compose.ex + gen_pd_parity.ex ride the **/*.ex glob; the .sh
+      # itself and the golden mirror need their own triggers (a seeded/removed
+      # fixture is a .json, covered by no glob above).
+      - "scripts/pd-parity-completeness.sh"
+      - "api/test/support/fixtures/pd-parity/**"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -393,3 +409,15 @@ jobs:
       # future edit that silently weakens it.
       - name: Preview-env isolation gate self-test (tripwire)
         run: bash scripts/preview-env-isolation-check.sh --selftest
+
+      # PortableDoc render-parity completeness guard (render-unification D8/D45).
+      # The ONE canonical JS renderer (@barkpark/react) must render EVERY in-scope
+      # block type compose.ex dispatches. This guard greps compose.ex's clause
+      # heads + `t in [...]` guard members, subtracts the 14 excluded field/embed
+      # types (D7), and REDs if any in-scope type lacks a committed golden fixture
+      # OR if the computed count drifts from EXPECTED_COUNT — so adding a blog
+      # block to compose.ex without seeding its golden (the drift #3514 + #3670
+      # created, invisible until now) can no longer merge unnoticed. MUST run under
+      # bash (its shebang); under zsh the coverage loop word-splits vacuously.
+      - name: PortableDoc render-parity completeness (blocking)
+        run: bash scripts/pd-parity-completeness.sh

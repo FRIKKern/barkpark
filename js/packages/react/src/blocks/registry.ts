@@ -29,7 +29,7 @@ const DISPATCH: Record<string, Emit> = {
   ...taskboardEmitters,
 }
 
-/** The full set of registered block types this renderer handles (the 42 in-scope
+/** The full set of registered block types this renderer handles (the 46 in-scope
  * PortableDocument types). Used by the self-proof harness. */
 export const REGISTERED_TYPES: string[] = Object.keys(DISPATCH)
 

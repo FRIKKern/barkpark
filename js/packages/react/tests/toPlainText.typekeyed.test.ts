@@ -2,11 +2,11 @@
 // Copyright 2026 Barkpark contributors
 //
 // Type-keyed `toPlainText` — the JS-OWNED per-type plain-text contract over the
-// 42-type PortableDocument grammar (charter D35).
+// 46-type PortableDocument grammar (charter D35).
 //
 // This proof closes the `rpu-backlog-toplaintext-typekeyed` parity backlog item.
 // It reuses the FROZEN `tests/fixtures/pd-golden/*.golden.json` `.input` blocks
-// as-is (never re-authoring the 42-block array) and asserts, per type:
+// as-is (never re-authoring the 46-block array) and asserts, per type:
 //
 //   • PROSE-bearing types  → `toPlainText([input])` is non-empty AND exactly
 //     equals its JS-owned golden in `PROSE_GOLDEN`. Because every prose type has
@@ -17,7 +17,7 @@
 //     but is NOT on the allow-list FAILS — that is what distinguishes an
 //     intentional skip from a silent drop (D35's key rigor).
 //
-// The partition covers ALL 42 grammar types exactly once, so a NEW pd-golden type
+// The partition covers ALL 46 grammar types exactly once, so a NEW pd-golden type
 // (or one that silently changes shape) trips the coverage guard rather than
 // slipping through as an unexamined `''`.
 
@@ -44,9 +44,9 @@ const cases: GoldenFixture[] = existsSync(FIXTURE_DIR)
       .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as GoldenFixture)
   : []
 
-describe('toPlainText — type-keyed 42-grammar coverage', () => {
-  it('the pd-golden fixture corpus is the expected 42 types', () => {
-    expect(cases.length).toBe(42)
+describe('toPlainText — type-keyed 46-grammar coverage', () => {
+  it('the pd-golden fixture corpus is the expected 46 types', () => {
+    expect(cases.length).toBe(46)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -71,9 +71,9 @@ describe('toPlainText — type-keyed 42-grammar coverage', () => {
     }
   })
 
-  it('the partition is 18 prose + 24 textless = 42', () => {
+  it('the partition is 18 prose + 28 textless = 46', () => {
     expect(Object.keys(PROSE_GOLDEN).length).toBe(18)
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(24)
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(28)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

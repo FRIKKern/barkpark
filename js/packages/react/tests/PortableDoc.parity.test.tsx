@@ -25,8 +25,8 @@
 // land, all 42 assertions fire and any divergence reds. Part 1 guards the comparator
 // itself in the meantime, so the green is never vacuous.
 //
-// D6 CAVEAT (chat family): chat blocks (chat-thinking / chat-todo / chat-tool-diff) are
-// asserted at shape + style-attribute level. Computed COLORS depend on the theme token
+// D6 CAVEAT (chat family): chat blocks (chat-thinking / chat-todo / chat-tool-diff /
+// chat-approval / chat-question / chat-plan) are asserted at shape + style-attribute level. Computed COLORS depend on the theme token
 // values and hold only against the default theme; the DOM SHAPE (tags, classes, data-*,
 // and the literal style-attribute string, e.g. `color: var(--danger)`) is theme-
 // independent and holds unconditionally. This test asserts shape; it does not resolve
@@ -171,7 +171,14 @@ try {
   PortableDoc = undefined
 }
 
-const CHAT_TYPES = new Set(['chat-thinking', 'chat-todo', 'chat-tool-diff'])
+const CHAT_TYPES = new Set([
+  'chat-thinking',
+  'chat-todo',
+  'chat-tool-diff',
+  'chat-approval',
+  'chat-question',
+  'chat-plan',
+])
 
 interface GoldenFixture {
   type: string
@@ -182,7 +189,7 @@ interface GoldenFixture {
 
 const armed = fixtureFiles.length > 0 && typeof PortableDoc === 'function'
 
-describe('PortableDoc × Elixir golden parity (42 non-plugin types)', () => {
+describe('PortableDoc × Elixir golden parity (46 non-plugin types)', () => {
   if (!armed) {
     it.skip(
       `ARMED, awaiting upstream — ${fixtureFiles.length} golden fixture(s) present, ` +
@@ -211,6 +218,6 @@ describe('PortableDoc × Elixir golden parity (42 non-plugin types)', () => {
   }
 
   it('covers every frozen golden fixture (no silent gaps)', () => {
-    expect(fixtureFiles.length).toBeGreaterThanOrEqual(42)
+    expect(fixtureFiles.length).toBeGreaterThanOrEqual(46)
   })
 })

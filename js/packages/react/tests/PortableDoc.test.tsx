@@ -9,7 +9,7 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 // theme-vs-data contract), so their marker is the tag; every richer block
 // carries its `bp-*` wrapper class. The cross-surface byte/shape match against
 // the Elixir golden is the SEPARATE parity-proof slice; this is the JS-side
-// self-proof that all 42 render, without throwing, into the expected wrapper.
+// self-proof that all 46 render, without throwing, into the expected wrapper.
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
   { type: 'eyebrow', block: { type: 'eyebrow', text: 'KICKER' }, marker: 'bp-role-eyebrow' },
@@ -267,6 +267,37 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     marker: 'bp-chat-tool-diff',
   },
   {
+    type: 'chat-approval',
+    block: { type: 'chat-approval', tool_name: 'Bash', summary: 'rm -rf x', approval_status: 'pending' },
+    marker: 'bp-chat-approval',
+  },
+  {
+    type: 'chat-question',
+    block: {
+      type: 'chat-question',
+      questions: [{ question: 'Pick one?', options: ['A', 'B'] }],
+      approval_status: 'pending',
+    },
+    marker: 'bp-chat-question',
+  },
+  {
+    type: 'chat-plan',
+    block: { type: 'chat-plan', title: 'The plan', preview: 'Do the thing.', approval_status: 'pending' },
+    marker: 'bp-chat-plan',
+  },
+  {
+    type: 'gauge-list',
+    block: {
+      type: 'gauge-list',
+      title: 'By surface',
+      rows: [
+        { label: 'A', value: 2 },
+        { label: 'B', value: 2 },
+      ],
+    },
+    marker: 'bp-gauge',
+  },
+  {
     type: 'sheet',
     block: {
       type: 'sheet',
@@ -306,11 +337,11 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain(marker)
   })
 
-  it('covers EXACTLY the 42 in-scope types (registry ≡ authored cases)', () => {
+  it('covers EXACTLY the 46 in-scope types (registry ≡ authored cases)', () => {
     const authored = CASES.map((c) => c.type).sort()
     const registered = [...REGISTERED_TYPES].sort()
     expect(authored).toEqual(registered)
-    expect(registered).toHaveLength(42)
+    expect(registered).toHaveLength(46)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

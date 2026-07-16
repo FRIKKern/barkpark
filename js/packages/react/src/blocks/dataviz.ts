@@ -447,10 +447,112 @@ const chart: Emit = (block) => {
   )
 }
 
+/* ── gauge-list (data_viz.ex gauge_list_html) ──────────────────────────────── */
+
+interface Gauge {
+  label: string
+  prop: number
+  digit: string
+  note: string
+}
+
+// share | count, mirroring data_viz.ex gauge_mode/1: explicit "mode" wins, else
+// `rows` present without `snapshot` → share (a hand-authored share list), else count.
+function gaugeMode(block: unknown): 'share' | 'count' {
+  const m = displayString(get(block, 'mode')).toLowerCase()
+  if (m === 'count') return 'count'
+  if (m === 'share') return 'share'
+  if (isMap(block) && 'rows' in block && !('snapshot' in block)) return 'share'
+  return 'count'
+}
+
+// share_gauges/1: each row's value as a proportion of `max` (or the summed total).
+function shareGauges(block: unknown): Gauge[] {
+  const items = asArr(get(block, 'rows')).filter(isMap)
+  if (items.length === 0) return []
+  const sum = items.reduce((a, it) => a + (numeric(get(it, 'value')) ?? 0.0), 0)
+  const max = numeric(get(block, 'max'))
+  let denom = max !== null && max > 0 ? max : sum
+  if (denom <= 0) denom = 1.0
+  return items.map((it) => {
+    const prop = clamp((numeric(get(it, 'value')) ?? 0.0) / denom, 0.0, 1.0)
+    return {
+      label: displayString(get(it, 'label')),
+      prop,
+      digit: `${Math.round(prop * 100)}%`,
+      note: displayString(get(it, 'note')),
+    }
+  })
+}
+
+// A task row's bucket label (gauge_bucket_key/2): priority via its P<n> label,
+// every other field by its trimmed string; missing/empty → "(none)".
+function gaugeBucketKey(row: unknown, groupBy: string): string {
+  if (groupBy === 'priority') {
+    const p = displayString(get(row, 'priority'))
+    return p === '' ? '(none)' : 'P' + p
+  }
+  const key = displayString(get(row, groupBy))
+  return key === '' ? '(none)' : key
+}
+
+// count_gauges/1: frequency of a `snapshot` grouped by a field; the unbacked
+// "epic" groupBy signals with the 'epic' sentinel (the note the renderer shows).
+function countGauges(block: unknown): 'epic' | Gauge[] {
+  const raw = displayString(get(block, 'groupBy'))
+  const groupBy = raw === '' ? 'status' : raw
+  if (groupBy === 'epic') return 'epic'
+  const rows = asArr(get(block, 'snapshot')).filter(isMap)
+  if (rows.length === 0) return []
+  const counts = new Map<string, number>()
+  for (const r of rows) {
+    const k = gaugeBucketKey(r, groupBy)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  const maxCount = Math.max(1, ...counts.values())
+  const entries = [...counts.entries()].sort((a, b) =>
+    a[1] !== b[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
+  )
+  return entries.map(([label, count]) => ({ label, prop: count / maxCount, digit: String(count), note: '' }))
+}
+
+function gaugeRows(block: unknown): 'epic' | Gauge[] {
+  return gaugeMode(block) === 'share' ? shareGauges(block) : countGauges(block)
+}
+
+const gaugeList: Emit = (block) => {
+  if (!isMap(block)) return empty('gauge-list')
+  const title = displayString(get(block, 'title'))
+  const titleHtml = title === '' ? '' : `<div class="bp-gauge__t">${escapeHtml(title)}</div>`
+  const rows = gaugeRows(block)
+  if (rows === 'epic') {
+    return (
+      `<div class="bp-gauge">${titleHtml}` +
+      `<div class="bp-gauge__note">groupBy "epic" is unbacked here — needs the epic resolver</div></div>`
+    )
+  }
+  if (rows.length === 0) return empty('gauge-list')
+  const body = rows
+    .map((g) => {
+      const noteHtml = g.note === '' ? '' : `<span class="bp-gauge__n">${escapeHtml(g.note)}</span>`
+      return (
+        `<div class="bp-gauge__row">` +
+        `<span class="bp-gauge__l">${escapeHtml(g.label)}</span>` +
+        `<span class="bp-gauge__bar"><i style="width:${fmt(g.prop * 100)}%"></i></span>` +
+        `<span class="bp-gauge__d">${escapeHtml(g.digit)}</span>` +
+        noteHtml +
+        `</div>`
+      )
+    })
+    .join('')
+  return `<div class="bp-gauge">${titleHtml}${body}</div>`
+}
+
 export const datavizEmitters: Record<string, Emit> = {
   stat,
   stats,
   'stat-grid': stats,
   heatmap,
   chart,
+  'gauge-list': gaugeList,
 }
