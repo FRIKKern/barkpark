@@ -351,6 +351,10 @@ export interface MediaSearchResult {
   parsedQuery?: Record<string, unknown>
   /** Server-side elapsed time in ms. */
   ms?: number
+  /** Opaque id for this search event — report it back to the `/search/interaction`
+   *  route to record a click/quality signal against this specific query (null
+   *  when the server omits it). */
+  searchEventId?: string | null
 }
 
 /** One typeahead suggestion for the media search box — a prior query + its frequency. */
@@ -818,6 +822,10 @@ export interface SearchResult<T = BarkparkDocument> {
   truncation?: { truncated: boolean; scanned?: number; limit?: number; [k: string]: unknown }
   /** Server-side query latency in milliseconds. */
   ms?: number
+  /** Opaque id for this search event — report it back to the `/search/interaction`
+   *  route to record a click/quality signal against this specific query (null
+   *  when the server omits it). */
+  searchEventId?: string | null
 }
 
 /** /v1/meta response shape. */
