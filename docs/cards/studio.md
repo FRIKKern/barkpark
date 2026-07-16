@@ -15,7 +15,7 @@
 
 ## Layout
 - Chrome at `lib/barkpark_web/studio/`; panes via PubSub.
-- **Workspace Settings is SCOPED**: `SettingsLive` at `/w/:ws/p/:proj/d/:ds/studio/settings` in `:scoped_admin_studio` (flat `/studio/settings` redirects there). Writes fail-closed — the URL-bound workspace is truth; a stamped-ws mismatch REFUSES with a flash, never silently retargets.
+- **Workspace Settings is SCOPED**: `SettingsLive` at `/w/:ws/p/:proj/studio/settings` in `:scoped_admin_studio` (flat `/studio/settings` redirects there). Writes fail-closed — the URL-bound workspace is truth; a stamped-ws mismatch REFUSES with a flash, never silently retargets.
 - Styling: inline `<style>` in root.html.heex; `sheet` docs open `SheetGrid` (cap 500 rows).
 
 ## Code anchors
