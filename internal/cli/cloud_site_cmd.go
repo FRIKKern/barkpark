@@ -155,7 +155,17 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if name == "" {
 		return useError(out, "usage", "--name is required (usage: "+usage+")", exitUsage)
 	}
-	ws, proj, ds, derr := parseDatasetTriple(a.val("dataset"))
+	// --dataset COLLIDES with the global -d/--dataset: parseGlobals consumes it
+	// wherever it appears in argv (by design for every other noun), so the value
+	// never reaches this verb's own flag set — it lands in g.dataset instead.
+	// Honor both spellings: the local flag when a future parser change delivers
+	// it, else the global capture. (Live-caught: the verb was unusable end-to-end
+	// while its direct-call unit tests stayed green.)
+	rawTriple := a.val("dataset")
+	if rawTriple == "" {
+		rawTriple = g.dataset
+	}
+	ws, proj, ds, derr := parseDatasetTriple(rawTriple)
 	if derr != nil {
 		return useError(out, "usage", derr.Error(), exitUsage)
 	}
