@@ -5650,3 +5650,36 @@ test("interaction harness requires the guarded webhook action surface", () => {
     assert.equal(typeof hooks[name], "function", name + " must be test-hook exported");
   }
 });
+
+// ── search-template W2 (D8): create-site modal pure helpers ─────────────────
+
+test("siteKindFor mirrors the engine defaults (astro static, everything else node)", () => {
+  assert.equal(hooks.siteKindFor("astro"), "static");
+  assert.equal(hooks.siteKindFor("nextjs"), "node");
+});
+
+test("siteTemplateOptions offers framework-matching starters, flagship on nextjs", () => {
+  assert.deepEqual(plain(hooks.siteTemplateOptions("astro")), ["", "astro-starter"]);
+  assert.deepEqual(plain(hooks.siteTemplateOptions("nextjs")), ["", "search-starter", "next-starter"]);
+  assert.deepEqual(plain(hooks.siteTemplateOptions("hugo")), [""]);
+});
+
+test("siteCreateBody omits empty optionals and carries the template when picked", () => {
+  const full = hooks.siteCreateBody({
+    name: "my-search", framework: "nextjs", template: "search-starter",
+    workspace: "default", project: "default", dataset: "production",
+    doc_type: "entry", barkpark_id: "bp-1",
+  });
+  assert.deepEqual(plain(full), {
+    name: "my-search", framework: "nextjs", kind: "node",
+    workspace: "default", project: "default", dataset: "production",
+    barkpark_id: "bp-1", template: "search-starter", doc_type: "entry",
+  });
+  const auto = hooks.siteCreateBody({
+    name: "n", framework: "astro", template: "",
+    workspace: "w", project: "p", dataset: "d", doc_type: "", barkpark_id: "b",
+  });
+  assert.equal(auto.kind, "static");
+  assert.ok(!("template" in auto), "empty template must be omitted (framework-derived default)");
+  assert.ok(!("doc_type" in auto), "empty doc_type must be omitted (server default)");
+});
