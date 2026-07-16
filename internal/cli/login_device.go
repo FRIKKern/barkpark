@@ -125,23 +125,19 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 
 	out.errf("Waiting for you to approve in the browser…")
 	for i := 0; i < devicePollMax; i++ {
-		res, perr := client.DevicePoll(cloudCtx(), ds.DeviceCode)
+		status, perr := devicePollStep(out, cfg, client, base, ds.DeviceCode)
 		if perr != nil {
-			return classifyDevicePollError(perr)
+			return perr
 		}
-		switch res.Status {
+		switch status {
 		case cloudclient.DevicePollApproved:
-			cfg.CloudURL = base
-			cfg.CloudToken = res.Login.Token
-			cfg.CloudTeam = res.Login.TeamID
-			if serr := SaveConfig(cfg); serr != nil {
-				return fmt.Errorf("save config: %w", serr)
-			}
-			emitDeviceLoginSuccess(out, base, res.Login.TeamID)
+			// devicePollStep persisted the session and emitted the success
+			// surface — the flow is done.
 			return nil
 		case cloudclient.DevicePollSlowDown:
 			// The control plane asked us to back off — widen the interval so a
-			// too-eager loop stops tripping the poll rate-limit.
+			// too-eager loop stops tripping the poll rate-limit. Interval widening
+			// lives HERE (the interactive caller owns cadence), not in the step.
 			interval += devicePoll
 		case cloudclient.DevicePollPending:
 			// No decision yet — keep waiting.
@@ -155,6 +151,111 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 		out.errf("")
 	}
 	return &deviceAuthError{msg: "timed out waiting for browser approval — run `bp login` again, or " + deviceEmailFallback}
+}
+
+// devicePollStep performs EXACTLY ONE device-poll against the control plane and,
+// on approval, persists the session and emits the success surface. It is
+// STATELESS — the caller owns the poll cadence (interval widening, heartbeat
+// dots, the retry loop) — so BOTH the interactive runDeviceLoginFlow loop and the
+// non-interactive `bp login --device-poll` one-shot drive a single poll from one
+// body. It returns the DevicePollStatus on a non-terminal outcome (Pending /
+// SlowDown / Approved) so the caller can act on it; a transport or terminal-
+// refusal error is mapped through classifyDevicePollError (→ *deviceAuthError on a
+// refusal). On DevicePollApproved it writes CloudURL/CloudToken/CloudTeam, saves
+// config 0600 (byte-identical to the password path), and calls emitDeviceLoginSuccess
+// BEFORE returning — the success surface stays INSIDE the step so the interactive
+// caller's stored-token contract is unchanged.
+func devicePollStep(out *writer, cfg *Config, client *cloudclient.Client, base, deviceCode string) (cloudclient.DevicePollStatus, error) {
+	res, perr := client.DevicePoll(cloudCtx(), deviceCode)
+	if perr != nil {
+		return 0, classifyDevicePollError(perr)
+	}
+	if res.Status == cloudclient.DevicePollApproved {
+		cfg.CloudURL = base
+		cfg.CloudToken = res.Login.Token
+		cfg.CloudTeam = res.Login.TeamID
+		if serr := SaveConfig(cfg); serr != nil {
+			return 0, fmt.Errorf("save config: %w", serr)
+		}
+		emitDeviceLoginSuccess(out, base, res.Login.TeamID)
+	}
+	return res.Status, nil
+}
+
+// runDeviceStartStep is the non-interactive FIRST leg of the split device login
+// (`bp login --device-start`, BP-ONB-13). It mints ONE device-authorization code
+// pair via DeviceStart and emits it as a single JSON envelope — device_code,
+// user_code, verification_uri, verification_uri_complete, interval, expires_in —
+// then returns exitOK WITHOUT polling. No box, no browser open, no blocking loop:
+// a headless / agent wrapper surfaces the URL + code to the human itself and then
+// drives approval with repeated `--device-poll`, owning the whole cadence.
+func runDeviceStartStep(out *writer, base string) int {
+	client := &cloudclient.Client{BaseURL: base}
+	ds, err := client.DeviceStart(cloudCtx(), deviceClientName())
+	if err != nil {
+		return useError(out, "failed", "could not start browser login: "+err.Error(), exitGeneric)
+	}
+	emitDeviceEnvelope(out, map[string]any{
+		"device_code":               ds.DeviceCode,
+		"user_code":                 ds.UserCode,
+		"verification_uri":          ds.VerificationURI,
+		"verification_uri_complete": ds.VerificationURIComplete,
+		"interval":                  ds.Interval,
+		"expires_in":                ds.ExpiresIn,
+	})
+	return exitOK
+}
+
+// runDevicePollStep is the non-interactive SECOND leg (`bp login --device-poll
+// <device_code>`, BP-ONB-13): it drives devicePollStep EXACTLY ONCE and returns —
+// never a blocking 15-minute loop. The script owns the cadence (typically a shell
+// `until bp login --device-poll $code; do sleep 5; done`), so the exit code is the
+// contract: exitOK ONLY on approval (the loop terminates), a non-zero on pending /
+// slow_down / error (the loop keeps polling). A single JSON envelope is ALWAYS
+// emitted so a script that parses stdout has a faithful outcome:
+//
+//	approved   → devicePollStep already emitted {ok,cloud_url,team_id}; exitOK
+//	pending    → {"status":"pending"}                                 ; exitGeneric
+//	slow_down  → {"status":"slow_down"}                               ; exitGeneric
+//	error      → {"status":"error","error":<msg>}                     ; exitAuth on a
+//	             refusal (denied/expired), else exitGeneric
+func runDevicePollStep(out *writer, cfg *Config, base, deviceCode string) int {
+	client := &cloudclient.Client{BaseURL: base}
+	status, err := devicePollStep(out, cfg, client, base, deviceCode)
+	if err != nil {
+		// A terminal refusal or a transport blip — devicePollStep did NOT persist
+		// or emit success. Surface an error envelope and map the exit.
+		exit := exitGeneric
+		if asDeviceAuthError(err) {
+			exit = exitAuth
+		}
+		emitDeviceEnvelope(out, map[string]any{"status": "error", "error": err.Error()})
+		return exit
+	}
+	switch status {
+	case cloudclient.DevicePollApproved:
+		// devicePollStep already persisted the session and emitted its success
+		// envelope/line — a single clean stdout doc — so we only return the exitOK
+		// that terminates the caller's `until` loop.
+		return exitOK
+	case cloudclient.DevicePollSlowDown:
+		emitDeviceEnvelope(out, map[string]any{"status": "slow_down"})
+		return exitGeneric
+	default: // DevicePollPending
+		emitDeviceEnvelope(out, map[string]any{"status": "pending"})
+		return exitGeneric
+	}
+}
+
+// emitDeviceEnvelope writes payload as the single machine envelope the split
+// device-login steps hand a script. It honours -o json / -o yaml via emitStructured
+// and, on the human/table path, still renders JSON so the envelope is ALWAYS
+// present on stdout (these steps have no meaningful human surface — they exist to
+// be driven).
+func emitDeviceEnvelope(out *writer, payload map[string]any) {
+	if !out.emitStructured(payload) {
+		out.renderJSON(payload)
+	}
 }
 
 // emitDeviceLoginSuccess writes the SAME success surface a password login does:
