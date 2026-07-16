@@ -453,6 +453,13 @@ func Execute(args []string) int {
 		// tokens through internal/semrole + taskboard so the sheet can never drift
 		// from what the CLI/TUI actually paints. Honours NO_COLOR / a pipe.
 		return runStyle(out, g, rest[1:])
+	case "scaffy":
+		// `bp scaffy validate|fmt <path>...` — validate/format .scaffy command
+		// files against the pinned Scaffy v2 grammar (internal/scaffy). A purely-
+		// local built-in like make/style (no network, no manifest): `scaffy` is
+		// not a manifest noun, so this intercept shadows nothing. Everything
+		// after the noun (verb, --check, paths) rides in rest.
+		return runScaffy(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

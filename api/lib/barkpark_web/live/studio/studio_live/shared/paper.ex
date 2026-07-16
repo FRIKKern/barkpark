@@ -598,7 +598,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def setup_paper_view(socket, %{content: content} = paper) when is_map(content) do
-    blocks = Map.get(content, "blocks")
+    blocks = Projection.read_blocks(content)
     rev = Map.get(content, "rev") || 0
     html = Map.get(content, "body_html") || ""
     {used_by, linked, unlinked} = load_backlinks(socket, paper)
@@ -893,7 +893,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       paper ->
         content = paper.content || %{}
 
-        case Map.get(content, "blocks") do
+        case Projection.read_blocks(content) do
           blocks when is_list(blocks) ->
             socket
             |> stream(
