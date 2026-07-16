@@ -1099,3 +1099,30 @@ func TestRunCloudSiteDispatchedFromRunCloud(t *testing.T) {
 		}
 	}
 }
+
+// The global -d/--dataset stripper consumes the flag wherever it appears in
+// argv, so the create verb must honor the global capture — end-to-end through
+// parseGlobals, not a direct-call unit test (the class of green that hid this).
+func TestCloudSiteCreateDatasetSurvivesGlobalStripper(t *testing.T) {
+	g, rest, err := parseGlobals([]string{
+		"cloud", "site", "create",
+		"--name", "x", "--dataset", "ws1/proj1/ds1", "--instance", "gone",
+	})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	// The stripper eats --dataset (this is the collision under test) …
+	for _, tok := range rest {
+		if tok == "--dataset" || tok == "ws1/proj1/ds1" {
+			t.Fatalf("expected the global stripper to consume --dataset; rest = %v", rest)
+		}
+	}
+	// … and the verb-side fallback must see it via g.dataset.
+	if g.dataset != "ws1/proj1/ds1" {
+		t.Fatalf("g.dataset = %q, want the captured triple", g.dataset)
+	}
+	ws, proj, ds, derr := parseDatasetTriple(g.dataset)
+	if derr != nil || ws != "ws1" || proj != "proj1" || ds != "ds1" {
+		t.Fatalf("triple from global capture = %q %q %q (%v)", ws, proj, ds, derr)
+	}
+}
