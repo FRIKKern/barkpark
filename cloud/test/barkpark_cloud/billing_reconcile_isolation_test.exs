@@ -106,7 +106,12 @@ defmodule BarkparkCloud.BillingReconcileIsolationTest do
   defp with_forced_failure(barkpark, fun) do
     original = Application.get_env(:barkpark_cloud, Billing, [])
     Process.put(:billing_reconcile_isolation_fail_id, barkpark.id)
-    Application.put_env(:barkpark_cloud, Billing, Keyword.put(original, :registry, FailingRegistry))
+
+    Application.put_env(
+      :barkpark_cloud,
+      Billing,
+      Keyword.put(original, :registry, FailingRegistry)
+    )
 
     try do
       fun.()
