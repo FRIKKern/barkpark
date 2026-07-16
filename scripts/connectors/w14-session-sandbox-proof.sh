@@ -28,6 +28,14 @@
 #       on stdout BEFORE any claude frame, carrying the created id; a flag-less
 #       CREATE emits NONE (stdout byte-identical to pre-D137).
 #
+# Wave 15 (D147) hardens the reuse path with two additive assertions:
+#   (a′) the REUSE leg's OWN stdout carries ZERO bp_sandbox frames (reuse creates
+#        nothing, so it must mint no phantom id); and
+#   (d) CHAINED ID ROUND-TRIP — the id a keep-mode CREATE emits is harvested and fed
+#       back as the next invocation's --sandbox-id, which must then create nothing and
+#       target the harvested id. This pins the SHIM's OWN id round-trip ONLY; session
+#       identity / Recorder / chat_sessions persistence is the ExUnit capstone (D144).
+#
 # The turn exec is located by its `-lc` argv token, NEVER by capture ordering.
 # See .claude/workflows/bp-connectors-charter.md (Wave 14, D134-D143) and the wave
 # paper connectors-wave-14-2026-07-16. Sibling idiom: w12-shim-confinement-proof.sh.
@@ -261,7 +269,7 @@ run_proof() {
   # ── (a) REUSE: --sandbox-id ⇒ zero create, turn targets the supplied id. ─────
   echo "==> (a) REUSE leg: --sandbox-id $REUSE_ID --keep-sandbox ..."
   drive_shim reuse --sandbox-id "$REUSE_ID" --keep-sandbox
-  local reuse_cap="$CAP"
+  local reuse_cap="$CAP" reuse_out="$OUT"
   local creates
   creates="$(count_real_creates "$reuse_cap")"
   [ "$creates" -eq 0 ] || fail "(a) --sandbox-id still ran $creates 'sandbox create' invocation(s) — must skip create entirely"
@@ -269,7 +277,14 @@ run_proof() {
   turn_cap="$(find_turn_capture "$reuse_cap")" || fail "(a) no turn exec captured (no '-lc' token)"
   argv_has_all "$turn_cap" sandbox exec "$REUSE_ID" ||
     fail "(a) turn exec does not target the reused sandbox id $REUSE_ID"
+  # The sideband bp_sandbox frame is emitted ONLY on a real create; the reuse path
+  # creates nothing, so its OWN stdout must carry ZERO bp_sandbox frames (a leak here
+  # would mint a phantom id for a sandbox the reuse leg never created).
+  if grep -q 'bp_sandbox' "$reuse_out"; then
+    fail "(a) reuse leg emitted a bp_sandbox frame — reuse creates no sandbox, so no sideband frame may appear"
+  fi
   echo "    PASS: zero create invocations; turn exec targets $REUSE_ID."
+  echo "    PASS: reuse stdout carries NO bp_sandbox frame (reuse mints no phantom id)."
 
   # ── (b) TEARDOWN VERB: keep ⇒ stop-not-remove; flag-less ⇒ create+exec+remove. ─
   echo "==> (b) TEARDOWN VERB — keep-mode create (stop, never remove) ..."
@@ -319,6 +334,34 @@ run_proof() {
     fail "(c) flag-less create emitted a bp_sandbox frame — the sideband must be keep-mode ONLY"
   fi
   echo "    PASS: keep-mode ⇒ exactly one valid bp_sandbox frame first; flag-less ⇒ none."
+
+  # ── (d) CHAINED ID ROUND-TRIP: the id a create EMITS plugs into the next invocation. ─
+  # A keep-mode create emits a bp_sandbox frame carrying a sandbox_id; harvest that
+  # exact id (node -e JSON parse, same as leg (c)) and feed it as the next invocation's
+  # --sandbox-id. That second invocation must create NOTHING and its turn exec must
+  # target the harvested id. This proves the SHIM's OWN id round-trip only — it says
+  # NOTHING about session identity, the Recorder swallow, or chat_sessions persistence
+  # (that coverage is the ExUnit capstone connectors-w14-two-turn-stub-proof, D144).
+  echo "==> (d) CHAINED ID ROUND-TRIP — harvest a created id, feed it back as --sandbox-id ..."
+  drive_shim chainsrc --keep-sandbox
+  local chain_src_out="$OUT" src_line harvested
+  src_line="$(grep -m1 'bp_sandbox' "$chain_src_out" || true)"
+  [ -n "$src_line" ] || fail "(d) source create emitted no bp_sandbox frame to harvest an id from"
+  harvested="$(SRC_LINE="$src_line" node -e '
+    const f = JSON.parse(process.env.SRC_LINE);
+    if (f.type !== "bp_sandbox" || !f.sandbox_id) { console.error("no sandbox_id in frame:", process.env.SRC_LINE); process.exit(1); }
+    process.stdout.write(f.sandbox_id);
+  ')" || fail "(d) could not harvest sandbox_id from the emitted bp_sandbox frame"
+  [ -n "$harvested" ] || fail "(d) harvested sandbox_id is empty"
+  drive_shim chaindst --sandbox-id "$harvested" --keep-sandbox
+  local chain_dst_cap="$CAP"
+  creates="$(count_real_creates "$chain_dst_cap")"
+  [ "$creates" -eq 0 ] || fail "(d) chained invocation ran $creates real 'sandbox create' call(s) — a harvested --sandbox-id must skip create entirely"
+  local chain_turn
+  chain_turn="$(find_turn_capture "$chain_dst_cap")" || fail "(d) no turn exec captured on the chained invocation (no '-lc' token)"
+  argv_has_all "$chain_turn" sandbox exec "$harvested" ||
+    fail "(d) chained turn exec does not target the harvested id $harvested"
+  echo "    PASS: harvested id $harvested round-trips — chained invocation creates nothing, turn exec targets it."
 }
 
 main() {
