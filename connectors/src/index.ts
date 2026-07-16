@@ -63,7 +63,7 @@ import {
   type LeaseStore,
 } from "./tenant/install-lease.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
-import { createBridgeState } from "./state/state-adapter.js";
+import { createBridgeState, scopeStateAdapter } from "./state/state-adapter.js";
 import {
   createPgLockedThreadSessionMap,
   type ThreadSessionMap,
@@ -293,7 +293,11 @@ export function mountInstall(
   const chat = new Chat({
     userName: deps.config.userName,
     adapters: { [connector.id]: adapter },
-    state: deps.state,
+    // Namespaced per install (D160): the SDK keys its state on thread id
+    // ALONE, and state-pg's key_prefix is global to the bridge — without this
+    // scope, two installs sharing a raw provider thread id would share
+    // subscriptions, cache, and locks across tenants.
+    state: scopeStateAdapter(deps.state, connector.id, install.installKey),
   });
 
   const handle = async (
