@@ -1,0 +1,49 @@
+---
+// Document pages, STATICALLY generated at build — every published doc of the
+// featured type becomes real HTML here, rendered by the CANONICAL
+// @barkpark/react PortableDoc (all 42 block types, bp-* classes) through
+// Astro's React SSR. The PortableDoc-on-Astro mastery proof: same renderer,
+// same bytes-shape as Phoenix and Next — zero client JS on this page.
+import Base from '../../../layouts/Base.astro'
+import { PortableDoc } from '@barkpark/react'
+import paperCss from '@barkpark/react/paper-surface.css?url'
+import { allDocs, docBlocks, getDoc } from '../../../lib/bp'
+
+export async function getStaticPaths() {
+  const docs = await allDocs()
+  // Params must be plain strings: a doc's slug may be missing or a rich value
+  // (slug objects exist in the wild) — fall back to the _id, always a string.
+  return docs.map((doc) => ({
+    params: {
+      type: String(doc._type),
+      slug: typeof doc.slug === 'string' && doc.slug ? doc.slug : String(doc._id),
+    },
+    props: { doc },
+  }))
+}
+
+const { doc } = Astro.props
+const title = (doc.title as string) || doc._id
+// The list projection is summary-only — pull the FULL doc (blocks live there)
+// at build; every page below is still pure static HTML.
+const full = await getDoc(doc._type, doc._id)
+const blocks = docBlocks(full ?? doc)
+---
+
+<Base title={title} docId={doc._id}>
+  <link rel="stylesheet" href={paperCss} />
+  <main class="bp-paper-surface">
+    <article class="bp-paper-body">
+      <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
+      <h1>{title}</h1>
+      {blocks.length > 0 ? <PortableDoc value={blocks} /> : <p class="empty">This document has no body content.</p>}
+    </article>
+  </main>
+</Base>
+
+<style>
+  main { max-width: 760px; margin: 0 auto; padding: 48px 20px 96px; }
+  .back { display: inline-block; margin-bottom: 24px; opacity: .6; color: inherit; text-decoration: none; }
+  .back:hover { opacity: 1; }
+  .empty { opacity: .6; }
+</style>

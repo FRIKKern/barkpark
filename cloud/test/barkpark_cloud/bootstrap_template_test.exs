@@ -132,6 +132,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert body["error"] == "unknown_template"
 
       assert body["known_templates"] == [
+               "astro-search-starter",
                "blog-starter",
                "place-directory",
                "search-starter",
@@ -332,6 +333,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
     # The Go side locks the same list in TestCatalogCarriesTheShippedTemplates
     # (internal/provisioner/catalog) — change BOTH together.
     assert Registry.known_templates() == [
+             "astro-search-starter",
              "blog-starter",
              "place-directory",
              "search-starter",
