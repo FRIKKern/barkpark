@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -98,7 +99,14 @@ func runTUI() int {
 	// listener / poll fallback detects a dataset change, push a refresh msg into
 	// the program. This preserves the exact live-refresh path.
 	ds.OnChange = func() { p.Send(DataStoreRefreshMsg{}) }
-	go ds.StartSSE(ds.Token())
+	// ctx bounds StartSSE's background goroutine to this function's lifetime —
+	// a stalled SSE connection (server accepts, never writes) used to block the
+	// listener's read forever with no way to unblock it. cancel() fires when
+	// runTUI returns (right after p.Run() completes), so the goroutine's read
+	// unblocks and it exits instead of leaking past the TUI's own lifetime.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ds.StartSSE(ctx, ds.Token())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
