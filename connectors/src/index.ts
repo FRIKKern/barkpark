@@ -68,6 +68,7 @@ import {
   createPgLockedThreadSessionMap,
   type ThreadSessionMap,
 } from "./state/thread-session-map.js";
+import { createPgWhatsappWindowStore } from "./state/whatsapp-window-store.js";
 import {
   createInstallsLookup,
   deleteInstall,
@@ -267,6 +268,16 @@ export interface BridgeDeps {
   onOutcome?: (outcome: DispatchOutcome, event: InboundEvent) => void;
   /** Fired when /v1/chat accepts the turn (D21) — NOT a channel post. */
   onAck?: (event: InboundEvent) => void;
+  /**
+   * Persist the inbound timestamp under the resolved workspace + thread (D178) —
+   * the durable feed for WhatsApp's 24-hour window store. Generic: dispatch calls
+   * it after workspace resolution, before the turn, and never learns the channel.
+   */
+  recordInbound?: (
+    workspaceId: string,
+    threadId: string,
+    atMs: number,
+  ) => void | Promise<void>;
 }
 
 export interface MountedInstall {
@@ -338,6 +349,10 @@ export function mountInstall(
           adapter.startTyping(threadId).catch(() => {});
           deps.onAck?.(event);
         },
+        // Persist the window from the connector's own vendor timestamp (D178).
+        // dispatch names no channel: it reads connector.inboundTimestampMs and
+        // calls this hook after workspace resolution, before the turn.
+        ...(deps.recordInbound ? { recordInbound: deps.recordInbound } : {}),
       });
 
       deps.onOutcome?.(outcome, event);
@@ -502,6 +517,10 @@ export async function startBridge(
   // concurrent first-message can never orphan a Barkpark Session
   // (connectors-orphan-session-on-mint-race).
   const map = createPgLockedThreadSessionMap(pool);
+  // The durable WhatsApp 24-hour window (D169/D178). Fed here, on every inbound,
+  // from the connector's own vendor timestamp — so a proactive send after a
+  // restart still sees a genuinely-open window instead of restart amnesia.
+  const whatsappWindow = createPgWhatsappWindowStore(pool);
 
   // THIS replica's identity for the socket/poll ownership lease (D93). A fresh
   // per-PROCESS UUID, not the hostname: templated pods share a hostname and would
@@ -558,6 +577,11 @@ export async function startBridge(
             : ""),
       );
     },
+    // Feed the durable window on every inbound (D178). The store's own monotonic
+    // upsert makes a Meta redelivery a no-op; a throwing write is swallowed inside
+    // dispatch, never reaching the reply path.
+    recordInbound: (workspaceId, threadId, atMs) =>
+      whatsappWindow.recordInbound(workspaceId, threadId, atMs),
   };
 
   // The webhook routing table (D39). Keyed by the INSTALL row, so a provider's
