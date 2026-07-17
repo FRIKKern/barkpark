@@ -21,6 +21,8 @@ Ingest is tier `ingest` — token read from `BARKPARK_INGEST_TOKEN` (bearer fall
 
 Publish payload: `{"slug":…,"blocks":[…]}` (preferred) or `{"slug":…,"body_html":…}` (fallback cache path). Both forms require `slug`. Patch payload: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
 
+**Read-back:** no single-paper GET: `/v1/plugins/bulldocs/papers/:slug` 404s. Read via `bp doc get paper <slug>` or `bp paper view <slug>`.
+
 **Authoring standard (agents: read before publishing).** ~50 block types in three tiers (element / widget / section: heading, paragraph, callout, figure, table, stat/chart/heatmap, cards, pipeline, roadmap, section, columns, …) — owned by `api/lib/barkpark/portable_doc/tiers.ex` (`Tiers.by_tier/0`). The doctrine lives as papers on the server: `bp paper view portabledoc-doctrine` (content-first, the six rules) and `composition-doctrine-plan` (the nine principles). Publish wall (papers + tasks): non-trivial `description` + 2–4 weighted tags, each registered as a published `type:tag` doc.
 
 The paper schema uses v2 field types, so the TUI renders papers read-only — edit in Studio. Clean installs ship one paper at `/papers/welcome`.

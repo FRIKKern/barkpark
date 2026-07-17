@@ -13,13 +13,18 @@ COMMAND "Classify a PortableDoc Block Type" DESCRIPTION "Add a block type to its
 # lists into set maps, tiers.ex:88-89), so first-word placement is safe and
 # gives the op a stable, templatable anchor: the list's opener line.
 #
-# PAIRING LAW — run AFTER add-block-type (or any change that gives the type a
-# compose_block/2 clause). tiers_test.exs pins completeness in BOTH directions
+# PAIRING LAW — ALWAYS run this AFTER add-block-type (D79). Classification is
+# MANDATORY, never conditional: the moment a type gets a compose_block/2 clause
+# it is renderable, and tiers_test.exs pins completeness in BOTH directions
 # (test/barkpark/portable_doc/tiers_test.exs "completeness vs. the render
 # surface"): every renderable type must have a tier AND Tiers must not claim a
-# type the reader cannot produce. A word planted here without its compose
-# clause reds that second direction — which is why the mix gate below is
-# TIER ci: it goes green exactly when the pair has landed together.
+# type the reader cannot produce. Runtime degrades an unclassified type to
+# :element (slots.ex:98) — but CI does NOT: an unclassified renderable type reds
+# that FIRST direction, so "a leaf needs no tier" is false for the suite. Run
+# `bp scaffy run classify-block-type --var BlockName=<type> --var Tier=element`
+# for leaf blocks too — explicitly, never nothing. Conversely, a word planted
+# here without its compose clause reds the SECOND direction — which is why the
+# mix gate below is TIER ci: it goes green exactly when the pair landed together.
 #
 # ANCHOR REALITY (D5, grep-proven at authoring time):
 #   @element ~w(   tiers.ex:57 — multi-line list, opener line matches once
@@ -50,8 +55,14 @@ COMMAND "Classify a PortableDoc Block Type" DESCRIPTION "Add a block type to its
 #     ends in the template's closing byte; this template's tail is the mutated
 #     opener (ends in the block word), so the check FAILS LOUD and nothing is
 #     written (D33 tail-desync refusal — the splice's comma separator would
-#     corrupt a ~w list, so refusing is correct). Classify the second
-#     same-tier block by hand, or `bp scaffy remove` the first and re-run both.
+#     corrupt a ~w list, so refusing is correct). RECIPE (D79, proven — this is
+#     the second-same-tier answer, not a bug): classify the FIRST block into the
+#     tier with this command, then HAND-ADD the second block's word directly
+#     into the `@{{.tier}} ~w(<first> …` opener line this command already
+#     planted — a one-word edit inside the existing sigil. (Both @element and
+#     @widget are multi-line ~w( lists, so the collision is tier-independent;
+#     diff+filetree, both :widget, hit exactly this — see the wave-7 build.)
+#     Alternatively `bp scaffy remove` the first and re-run both by hand.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # The one op. Target = the chosen tier's opener line, byte-exact with its
