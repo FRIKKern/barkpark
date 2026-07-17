@@ -195,6 +195,58 @@ task_* folding in Go.
   honesty star forbid it). Criterion 1 (a REAL interrupted-run fixture) is separately capturable
   from a DISPOSABLE session and stays a genuine deliverable.
 
+- **D22 — SSE wiring is (a): re-broadcast `{:chat_workflow, sid, summary}` on the PER-SESSION
+  `Recorder.topic(session_id)`, NOT a `^id` filter on the global activity topic.** Verify PROVED
+  (a) end-to-end in a throwaway worktree: a 3-file diff (recorder.ex +9 second broadcast inside
+  the EXISTING `broadcast_workflow`, chat_controller.ex +9 one `stream_loop` clause +
+  `sse_workflow_frame/1`, recorder_test.exs +35 leak test) — recorder+studio_chat 221/0,
+  chat_controller 52/0, D45 refute (recorder_test.exs:1174) 628ms GREEN, change-only gate
+  (:1421) 489ms GREEN, and a NEW cross-session isolation test (:1524) 400ms GREEN proving
+  session B's change never reaches A's per-session subscriber while A's OWN change does.
+  Tenancy is safe BY CONSTRUCTION — the topic string embeds the session id, so no manual filter
+  can be forgotten (the D20(c) requirement is met by the topic key itself). The forwarder needs
+  NO edit (it already subscribes `Recorder.topic(id)` at chat_controller.ex:339) and
+  **studio_chat.ex is NOT touched** (D16 serialize point untouched). (b)'s only appeal — "no
+  recorder change" — buys 8 call-site signature edits and a leak guard living in an `_other`
+  fall-through; the d45-refute worry that touching `broadcast_workflow` reopens the D45 surface
+  is EMPIRICALLY nil (the classify-only-workflow-tuple diff keeps the verbatim refute green).
+  Why: minimal, precedent-conformant, tenant-safe without a hand-written pin.
+- **D23 — The `event: workflow` frame is WORKFLOW-ONLY and UNREPLAYABLE (no `id:`).** The frame
+  carries `Jason.encode!(workflow_summary)` — byte-identical to the list wire's `workflow` key,
+  decoded by the ONE existing `apiclient.ChatWorkflowSummary` parser — and NO `epic` sibling and
+  NO `id:` seq. Epic-goal is a SEPARATE `put_epic` concern on the list wire, never in the
+  broadcast tuple; Verify proved both the Go list-card path (`workflowCardLines` guards
+  `epic==nil`, render_test.go:472/477 green) and the strip path (never had an epic arg) render
+  SAFELY with nil epic — so carrying epic is a freshness nicety, never a crash risk, and is OUT
+  of scope this wave (the list card's epic line simply stays turn-boundary fresh). No `id:`
+  matches the runtime/permission/exit live-delta precedent (chat_controller.ex:471-481). Why:
+  smallest honest frame that removes the D13 lag; epic staleness is not the ceiling being lifted.
+- **D24 — The Go footprint is WIDER than one reduce.go case: a NEW State field + a new frame
+  case + collapsed-strip render edits.** Verify (V2, build/vet/test all exit 0) proved
+  `State.Workflow` (reduce.go:74) is the RAW `*Workflow` rail fold (carries `Nodes`), a
+  DIFFERENT, incompatible type from the compact summary — so the frame needs a NEW field
+  `LiveWorkflow *ChatWorkflowSummary` (grep: does not exist today) + a new `case "workflow":` in
+  `reduceFrame` (unmarshal → overwrite → return `st, nil` with NO Effect: that missing
+  turn-boundary refetch IS the lag removed) + render.go edits so `workflowStripVisible` /
+  `renderWorkflowStrip` / `workflowPanelLines` read the compact field for the COLLAPSED one-liner
+  (Label/AgentsDone/AgentsTotal/Ticks/Phase/StartedAt/EndedAt/Tokens all present). The
+  Enter-expanded `renderWorkflowDetail` iterates per-agent `Nodes` the compact summary
+  STRUCTURALLY lacks, so it CANNOT live-freshen from the frame — it stays turn-boundary fresh
+  from the raw `st.Workflow` fold. That is an ACCEPTED ceiling this wave (the visible lag is the
+  collapsed strip, not the drill-down), backlogged as `wsc-bl-workflow-sse-detail`. Why: D20's
+  compact-on-the-wire law is exactly what forces a second in-memory representation.
+- **D25 — The attempt=1 corpus test is SCOPED to `workflow_agent`-typed nodes, and "39/39
+  guerrilla" is NOT load-bearing.** Verify proved every `attempt` occurrence across the whole
+  in-tree corpus is literal `1` (837 in ndjson + 62 in testdata; only 3 ndjson + 3 testdata
+  files carry `workflow_agent` nodes at all). So the invariant test MUST iterate parsed nodes,
+  filter `type=="workflow_agent"`, assert `attempt==1`, and no-op on fixtures with none — a naive
+  file-wide "every file has attempt=1" would false-pass on the 8 non-workflow fixtures. The
+  D21 close = this in-tree test + the structural argument (`rail_put_workflow` is a bare
+  `Map.put`, no derive path); the wave-1 "39 real guerrilla entries" figure is a survey-time
+  observation, NOT a committed artifact, and must be a footnote, never the proof substrate
+  (honesty star forbids leaning on guerrilla's live corpus). A fabricated `attempt=2` is an
+  auto-reject.
+
 ## Roadmap
 
 Wave 1 (this wave — all five pre-filed, perfected at Decide):
@@ -220,10 +272,23 @@ Wave 2 (2026-07-17 — land the stranded flagship, then push past the honesty ce
    summary (D20), removes the D13 mid-turn lag ceiling. Elixir + Go. **medium**. Round 2, AFTER
    s3 merges (touches chat_controller.ex/recorder.ex on the D16 spine).
 
+Wave 2 · round 2 (2026-07-17 — s3 IS MERGED #3865, so both picks are ROUND 1 THIS RUN):
+1. **wsc-bl-real-fixtures** `wsc-bl-real-fixtures` — REAL interrupted capture (disposable
+   SIGKILL or D62 verbatim-node-replay) + scoped attempt=1 corpus test (D21/D25). Elixir/testdata.
+   **medium**. Round 1. Files: studio_chat_test.exs + a NEW ndjson only. Land FIRST (test-only).
+2. **wsc-bl-workflow-sse** `wsc-bl-workflow-sse` — wiring (a) `event: workflow` frame (D22/D23) +
+   wider Go footprint (D24). Elixir + Go. **medium**. Round 1 (disjoint files from real-fixtures).
+   Merges after real-fixtures; NEVER before Elixir Test green (touches recorder.ex/chat_controller.ex).
+
 Backlog (filed, published, NOT this wave — PARKED per D19):
 - **wsc-bl-prs-open** — real "PRs open" source for the epic-goal line. Parked: net-new
   github-PR subsystem + reverses a tested D8 decision; zero parallelism benefit vs waiting on s3.
 - **wsc-bl-busiest-child** — fleet-phase busiest-child now-line. Parked: D7 holds, no signal.
+- **wsc-bl-workflow-sse-detail** — live-freshen the Enter-expanded two-pane Phases|agents
+  DETAIL from a richer wire payload. Filed at Wave-2 round-2 Decide (D24): the compact summary
+  structurally lacks per-agent `Nodes`, so the SSE frame can only live-freshen the collapsed
+  strip; the expanded detail stays turn-boundary fresh. Needs either a richer targeted payload
+  or an on-expand refetch — deferred, not fabricated.
 - **wsc-bl-completed-line-source** — the completed-wave line "complete · grade · n/n merged"
   (design-map block 5) has no grade/merged-count data source today; honestly renders
   "complete · n/n". Same honesty class as D8. Backlogged, not fabricated.
@@ -268,3 +333,21 @@ router/pipeline file). `task-8c92a966b28eda80` closed done (6/6 criteria; #3865 
 D18 confirmed live: s3 is the API producer the merged s4/s5 Go card waited on — three-surface
 truth now complete. Stale pre-D16 charter dup #3823 CLOSED. Backlog round-2 (wsc-bl-real-fixtures,
 wsc-bl-workflow-sse) NOT built this wave — they serialize behind s3 and are a future round.
+
+### Wave 2 · round 2 (2026-07-17) — the two honesty-ceiling backlog picks BUILDING
+Wave Paper: `wsc-wave-2026-07-17-r2` (style=article). s3 (#3865) is MERGED and LIVE on guerrilla,
+so both picks are unblocked and dispatch as ROUND 1 (disjoint file sets — build in parallel).
+Decide ran two explore rounds; five verifiers PROVED the seam (no rumor survived). Decisions
+D22–D25 folded above. Two slices dispatched:
+- **wsc-bl-real-fixtures** — REAL interrupted capture from a DISPOSABLE session (SIGKILL not
+  SIGTERM — the signature is the ABSENCE of a terminal result frame; verifier reproduced it on
+  live wire bytes) OR the D62 verbatim-node-replay path, folded through fold_rail→workflow_journey
+  →workflow_summary, + a `workflow_agent`-scoped attempt=1 corpus test (D25). Test-only
+  (studio_chat_test.exs + a NEW ndjson). Baseline 157/0 green. LAND FIRST. opus.
+- **wsc-bl-workflow-sse** — wiring (a) `event: workflow` SSE frame (D22, proven 3-file/221-0),
+  workflow-only + unreplayable (D23), wider Go footprint incl render.go collapsed-strip (D24).
+  Elixir + Go. Gates on Elixir Test; merges after real-fixtures. opus.
+Known main-flakes to rerun-once (NOT real breaks): queue_test.exs:462 planner-sensitivity +
+the sandbox-ownership DBConnection cascade (media_search / history_test:15 / rate_limit:24).
+New backlog filed: **wsc-bl-workflow-sse-detail** (D24 expanded-detail ceiling). PARKED still:
+prs-open, busiest-child (honesty star holds them). Review appends the debrief.
