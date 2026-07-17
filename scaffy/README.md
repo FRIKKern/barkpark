@@ -291,6 +291,8 @@ keywords between the variable's quoted name and `TITLE`:
 - `SUCCESSOR "<SiblingName>"` — the value is the named sibling **plus one**. The validator
   lints the declared `EXAMPLES` pairs (Scaffy has no arithmetic — the +1 crosses as a
   declared pair, checked, never computed).
+- `ONEOF "a", "b", …` — constrains the value to a **closed enum set** (added Wave-5, D56 —
+  see the Wave-5 ruling below).
 
 ```scaffy
 VARIABLE 1 "Ts" OPAQUE SHAPE "ts14" TITLE "Migration timestamp" …
@@ -336,6 +338,42 @@ contributing its trailing newline. Fence lines are flush-left and are **never** 
 the payload. An empty fence (two adjacent fence lines) is zero lines ⇒ a **0-byte file**
 (the `.gitkeep` case). `CREATE` implies `mkdir -p` — intermediate directories are created,
 engine behaviour, not a lint.
+
+### Wave-5 ruling — D56, `ONEOF` enum variables
+
+Ratified this wave (charter D56): the first grammar primitive since the Wave-2 annotations.
+A `VARIABLE` may declare a **closed set of legal values** as a fourth structural annotation,
+alongside `OPAQUE` / `SHAPE` / `SUCCESSOR` (D22). Syntax is a comma-separated quoted list —
+byte-for-byte the `EXAMPLES` list shape — placed between the quoted variable name and
+`TITLE`:
+
+```scaffy
+VARIABLE 1 "Visibility" OPAQUE ONEOF "public", "private" TITLE "Visibility" DESCRIPTION "…" EXAMPLES "public"
+VARIABLE 2 "Tier" ONEOF "element", "widget", "section" TITLE "Composition tier" DESCRIPTION "…" EXAMPLES "widget"
+```
+
+Motivating command: **`add-schema-type`** — pick a visibility (`public`|`private`) and a
+composition tier (`element`|`widget`|`section`); free text there is a class of error the
+grammar can now refuse rather than a mistake caught only at review. `ONEOF` composes with
+every other annotation: `OPAQUE ONEOF` (verbatim member, path-casing exempt) and transform
+`ONEOF` (the member still resolves through the four A1 joiners — `widget` → `Widget` /
+`widget` / …) are both legal.
+
+The constraint is enforced on **both halves of the D37 split**, exactly like `SHAPE`:
+
+- **Runtime (`bp scaffy run`).** A `--var` value outside the declared set is a **usage
+  error** (`VarError`, **exit 2**) — the same class as a `SHAPE` violation. The engine owns
+  the live value; the message names the offending value and lists the legal members.
+- **Lint (`bp scaffy validate`) — new rule `E-021`.** A declared `EXAMPLES` value that is
+  **not** a member of the variable's `ONEOF` set reds at the `VARIABLE` line. This is the
+  source-text half: it catches a mis-authored fixture before it ships, mirroring how
+  `E-013`/`E-014`/`E-015` lint declared `EXAMPLES` for `SHAPE`/`SUCCESSOR`. `E-021` is an
+  append-only addition to the catalog (`internal/scaffy/doc.go`), covered by one adversarial
+  red fixture, `testdata/red/E-021-oneof-violation.scaffy`.
+
+`bp scaffy fmt` needs **zero** changes: `joinFields` is keyword-agnostic, so a canonical
+`ONEOF` line (the comma bound to the preceding member) is already a Format identity and
+survives byte-exact and idempotent — pinned by a fixpoint test.
 
 ## Gate tiers
 

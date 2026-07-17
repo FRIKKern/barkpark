@@ -301,7 +301,7 @@ func (p *parser) parseVariable(fs []field, ln int) {
 	p.i++
 	if len(fs) < 3 || fs[1].quoted || !fs[2].quoted {
 		p.add(ln, RuleMalformedStatement,
-			`malformed VARIABLE — expected: VARIABLE <n> "Name" [OPAQUE] [SHAPE "…"] [SUCCESSOR "…"] TITLE "…" DESCRIPTION "…" EXAMPLES "…"`,
+			`malformed VARIABLE — expected: VARIABLE <n> "Name" [OPAQUE] [SHAPE "…"] [SUCCESSOR "…"] [ONEOF "…", "…"] TITLE "…" DESCRIPTION "…" EXAMPLES "…"`,
 			"")
 		return
 	}
@@ -358,6 +358,19 @@ func (p *parser) parseVariable(fs []field, ln int) {
 				return
 			}
 			v.Description = val
+		case "ONEOF":
+			// ONEOF takes a comma-separated quoted enum set: "a", "b", …
+			// (D56 — cloning the EXAMPLES list loop below).
+			val, ok := takeQuoted("ONEOF")
+			if !ok {
+				return
+			}
+			v.OneOf = append(v.OneOf, val)
+			for i+1 < len(fs) && !fs[i].quoted && fs[i].text == "," && fs[i+1].quoted {
+				v.OneOf = append(v.OneOf, fs[i+1].text)
+				i += 2
+			}
+			v.OneOfPos = Pos{ln}
 		case "EXAMPLES":
 			// EXAMPLES takes a comma-separated quoted list: "a", "b", …
 			val, ok := takeQuoted("EXAMPLES")
@@ -371,7 +384,7 @@ func (p *parser) parseVariable(fs []field, ln int) {
 			}
 		default:
 			p.add(ln, RuleMalformedStatement, fmt.Sprintf("unknown VARIABLE keyword %q", f.text),
-				"legal keywords: OPAQUE, SHAPE, SUCCESSOR, TITLE, DESCRIPTION, EXAMPLES")
+				"legal keywords: OPAQUE, SHAPE, SUCCESSOR, ONEOF, TITLE, DESCRIPTION, EXAMPLES")
 			return
 		}
 	}
