@@ -1,4 +1,4 @@
-COMMAND "Ensure a bp completion noun" DESCRIPTION "Idempotently make sure a top-level noun appears in the bp CLI shell-completion set — append its quoted literal to completionNouns once, skip forever after. The ensure family: the guard keys on the hand-reproducible noun literal itself, so a human who typed the same entry first wins and scaffy stays out of the way." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "scaffold" CONCEPT "ensure-cli-noun" VARIANT "go" DIRECTION "add" VARIABLES
+COMMAND "Ensure a bp completion noun" DESCRIPTION "Idempotently make sure a top-level noun appears in both scaffy-owned copies of the bp CLI noun set — append its quoted literal once to completionNouns (shell completion) and once to usageBuiltins (the top-level usage built-ins line), skip each forever after. The ensure family: each guard keys on the hand-reproducible noun literal itself, so a human who typed the same entry first wins and scaffy stays out of the way." LAST_UPDATED "17-07-2026-13-00-00" DOMAIN "barkpark" TAGS "cli", "scaffold" CONCEPT "ensure-cli-noun" VARIANT "go" DIRECTION "add" VARIABLES
   VARIABLE 1 "Noun" TITLE "Top-level bp noun to make completable" DESCRIPTION "The `bp <noun>` this entry completes — a lowercase single word (the four canonical casings coincide), or a hyphenated verb like `go-live` in kebab. Referenced here only as {{.noun}} (kebab)." EXAMPLES "widget", "go-live", "sheet"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,27 +36,35 @@ COMMAND "Ensure a bp completion noun" DESCRIPTION "Idempotently make sure a top-
 # completionNouns entry by hand. Documented, non-issue for the common case.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WHAT THIS COMMAND DOES NOT TOUCH — the two-copy discipline
+# WHAT THIS COMMAND DOES NOT TOUCH — the three-copy discipline
 # ─────────────────────────────────────────────────────────────────────────────
-# A completable noun lives in THREE places today; this command owns exactly ONE:
+# A completable noun lives in THREE places; this command owns TWO of them:
 #
-#   • completionNouns (builtins.go)      ← THIS command appends here.
+#   • completionNouns (builtins.go)       ← op 1 appends here.
+#   • the usage built-ins line (usage.go) ← op 2 appends to usageBuiltins, the
+#                                            slice the line renders from. (The
+#                                            line was hand-maintained prose and
+#                                            drifted 27 nouns behind dispatch;
+#                                            the 2026-07-17 backfill made it a
+#                                            slice — scaffy-backlog-usage-noun-
+#                                            drift-fix, closing the W6-measured
+#                                            worst duel gap: every catalog-armed
+#                                            agent had to hand-top-up usage.go
+#                                            after the engine run.)
 #   • the `switch noun` dispatch (cli.go) ← HAND-WRITTEN, deliberately not touched.
-#   • the per-noun usage line (usage.go)  ← stuck at 19 nouns since 2026-07-03;
-#                                            EXCLUDED here, tracked in backlog
-#                                            scaffy-backlog-usage-noun-drift-fix.
 #
 # The dispatch case is left to the human because a `case "{{.noun}}":` needs a
-# real handler — code, not a scaffold. The invariant that keeps the two in sync
-# is TestCompletionNounsCoverAllDispatchedBuiltins (builtins_test.go): it asserts
-# every DISPATCHED case is present in completionNouns — a SUBSET check. So a
-# completionNouns SUPERSET is legal: this command may add the completion entry
-# BEFORE (or without) the matching dispatch case, and the test stays green. That
-# is exactly the probe that proves this command safe — plant the noun, run the
-# test, it passes even with no dispatch case behind it.
+# real handler — code, not a scaffold. The invariants that keep the three in
+# sync are TestCompletionNounsCoverAllDispatchedBuiltins (builtins_test.go) and
+# its mirror TestUsageBuiltinsCoverAllDispatchedBuiltins (usage_test.go): each
+# asserts every DISPATCHED case is present in its slice — SUBSET checks. So a
+# SUPERSET is legal in both slices: this command may add its entries BEFORE (or
+# without) the matching dispatch case, and both tests stay green. That is
+# exactly the probe that proves this command safe — plant the noun, run the
+# tests, they pass even with no dispatch case behind it.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OP — insert `"{{.noun}}",` once, right after the completionNouns opening
+# OP 1 — insert `"{{.noun}}",` once, right after the completionNouns opening
 # ─────────────────────────────────────────────────────────────────────────────
 # The array's last element `"workspace",` carries a trailing comma, so a bare
 # INSERT is comma-safe (A3) — no self-consuming REPLACE, no REANCHOR needed. The
@@ -90,15 +98,57 @@ MARK "ensure-cli-noun"
 ASLONG FILE DONT CONTAIN "\"{{.noun}}\""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — insert `"{{.noun}}",` once, right after the usageBuiltins opening
+# ─────────────────────────────────────────────────────────────────────────────
+# The W6-duel gap, closed: the usage "built-ins:" line renders from the
+# usageBuiltins slice (usage.go:20, `var usageBuiltins = []string{` — unique in
+# the file), so ensuring the noun is one more comma-safe INSERT with the exact
+# shape of op 1: every element carries a trailing comma, the anchor is the
+# array-opening line, ordering is neutral because usageBuiltinLines() SORTS at
+# render time — a new entry at the head is as valid as one at the tail.
+#
+# The mark name differs from op 1's on purpose: mark uniqueness is pair-scoped
+# (D24) — cross-file REUSE of one mark name is legal only between DIRECTION-
+# opposed commands, and these two adds live in one command, so each file gets
+# its own family name. Same plain-MARK rule as op 1: `MARK:ensure-cli-noun-usage`
+# appears verbatim in the payload.
+#
+# Same ensure-law guard, same FILE-scoped edge as op 1's builtins.go caveat:
+# usage.go carries two pre-existing single-word quoted literals, `"set"` and
+# `"bool"` (writeBodyHint / the flag-type check) — ensuring a noun literally
+# named `set` or `bool` would false-skip here. No plausible CLI noun collides;
+# if one ever does, add the usageBuiltins entry by hand. And after the
+# 2026-07-17 backfill every ALREADY-dispatched noun is present in the slice, so
+# ensuring an existing noun no-ops in both files — the contract's end state.
+IN "internal/cli/usage.go"
+### Ensure "{{.noun}}" is on the usage built-ins line
+INSERT AFTER FIRST
+::: usageBuiltins opening :::
+var usageBuiltins = []string{
+::: usageBuiltins opening :::
+WITH
+::: {{.noun}} usage noun :::
+	// scaffy:ensure-cli-noun {{.noun}} MARK:ensure-cli-noun-usage
+	"{{.noun}}",
+::: {{.noun}} usage noun :::
+MARK "ensure-cli-noun-usage"
+ASLONG FILE DONT CONTAIN "\"{{.noun}}\""
+
+# ─────────────────────────────────────────────────────────────────────────────
 # POSTCONDITIONS
 # ─────────────────────────────────────────────────────────────────────────────
-# The quoted noun is present (verbatim substring of the payload the op writes).
-# This holds whether scaffy inserted the entry this run or a prior run / a hand
-# edit already had it — the ensure contract guarantees the END STATE.
+# The quoted noun is present in BOTH scaffy-owned copies (verbatim substring of
+# the payload each op writes). This holds whether scaffy inserted the entry this
+# run or a prior run / a hand edit already had it — the ensure contract
+# guarantees the END STATE.
 ASSERT FILE "internal/cli/builtins.go" CONTAINS "\"{{.noun}}\""
+ASSERT FILE "internal/cli/usage.go" CONTAINS "\"{{.noun}}\""
 
-# Drift gate — the completion/dispatch invariant. A LOCAL Go test (A2:
-# proven-safe): adding a completionNouns entry keeps it green because the check
-# is dispatched-⊆-completionNouns; a superset never reds. Runs in the apply
-# worktree; the engine appends CC=/usr/bin/clang for cgo.
-ASSERT CMD "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+# Drift gate — the completion/dispatch AND usage/dispatch invariants in one
+# run (`-run` is a regex; the shared suffix matches both
+# TestCompletionNounsCoverAllDispatchedBuiltins and
+# TestUsageBuiltinsCoverAllDispatchedBuiltins). A LOCAL Go test (A2:
+# proven-safe): adding entries keeps both green because each check is
+# dispatched-⊆-slice; a superset never reds. Runs in the apply worktree; the
+# engine appends CC=/usr/bin/clang for cgo.
+ASSERT CMD "go test ./internal/cli/ -run CoverAllDispatchedBuiltins -count=1"

@@ -2,11 +2,98 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
+
+// TestUsageBuiltinsCoverAllDispatchedBuiltins is the drift guard for the
+// usage "built-ins:" line — the mirror of builtins_test.go's
+// TestCompletionNounsCoverAllDispatchedBuiltins, same parse, same direction:
+// every noun dispatched by the cli.go switch must appear in usageBuiltins. A
+// SUPERSET is legal (an entry may land before its dispatch case, exactly as a
+// completionNouns entry may), so scaffy's ensure-cli-noun stays green when it
+// plants the noun ahead of the hand-written handler. This test is what ended
+// the 2026-07 drift where the prose line sat 27 nouns behind the switch.
+func TestUsageBuiltinsCoverAllDispatchedBuiltins(t *testing.T) {
+	src, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatalf("read cli.go: %v", err)
+	}
+
+	caseLine := regexp.MustCompile(`(?m)^\s*case\s+("[^"]+"(?:\s*,\s*"[^"]+")*)\s*:`)
+	tokenRe := regexp.MustCompile(`"([^"]+)"`)
+
+	have := make(map[string]bool, len(usageBuiltins))
+	for _, n := range usageBuiltins {
+		have[n] = true
+	}
+
+	seen := map[string]bool{}
+	var missing []string
+	for _, m := range caseLine.FindAllStringSubmatch(string(src), -1) {
+		for _, tok := range tokenRe.FindAllStringSubmatch(m[1], -1) {
+			verb := tok[1]
+			if seen[verb] {
+				continue
+			}
+			seen[verb] = true
+			if !have[verb] {
+				missing = append(missing, verb)
+			}
+		}
+	}
+
+	// Guard against a vacuous pass: if the switch/regex ever stops matching,
+	// fail loudly rather than silently assert nothing.
+	if len(seen) == 0 {
+		t.Fatal("no dispatch `case \"…\":` lines found in cli.go — the switch " +
+			"structure or the regex changed; fix this guard before trusting it")
+	}
+
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Errorf("usageBuiltins is missing dispatched built-in noun(s) %v — add "+
+			"them to usage.go so the top-level usage names every command", missing)
+	}
+}
+
+// TestUsageBuiltinLinesSortedAndBounded pins the rendering contract of the
+// built-ins block: first line carries the "built-ins: " prefix, continuation
+// lines the two-space indent, every noun appears exactly once, the whole block
+// reads in sorted order, and no line exceeds the wrap width.
+func TestUsageBuiltinLinesSortedAndBounded(t *testing.T) {
+	lines := usageBuiltinLines()
+	if len(lines) == 0 {
+		t.Fatal("usageBuiltinLines returned no lines")
+	}
+	if !strings.HasPrefix(lines[0], "built-ins: ") {
+		t.Errorf("first line %q lacks the built-ins prefix", lines[0])
+	}
+	var joined []string
+	for i, line := range lines {
+		if len(line) > 100 {
+			t.Errorf("line %d is %d chars, past the 100-column wrap: %q", i, len(line), line)
+		}
+		body := strings.TrimPrefix(line, "built-ins: ")
+		if i > 0 {
+			if !strings.HasPrefix(line, "  ") {
+				t.Errorf("continuation line %d %q lacks the two-space indent", i, line)
+			}
+			body = strings.TrimPrefix(line, "  ")
+		}
+		joined = append(joined, strings.Split(body, " · ")...)
+	}
+	want := append([]string(nil), usageBuiltins...)
+	sort.Strings(want)
+	if strings.Join(joined, " ") != strings.Join(want, " ") {
+		t.Errorf("rendered nouns = %v; want the sorted usageBuiltins %v", joined, want)
+	}
+}
 
 func TestUsageCommandShowsArgSummaries(t *testing.T) {
 	cmd := manifest.Command{

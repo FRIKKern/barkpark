@@ -7,6 +7,60 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
+// usageBuiltins is the noun list behind the top-level "built-ins:" usage line —
+// the third copy of the CLI-native noun set (dispatch in cli.go, completion in
+// builtins.go, this line). It was a hand-maintained prose string until
+// 2026-07-17 and drifted 27 nouns behind the dispatch switch (stuck at 19 since
+// ba95b12e5, 2026-07-03); now it is a slice so (a) the drift gate
+// TestUsageBuiltinsCoverAllDispatchedBuiltins (usage_test.go) reds when a
+// dispatched noun is missing here, and (b) scaffy's ensure-cli-noun command can
+// append an entry mechanically (comma-safe INSERT after the opening line, same
+// shape as completionNouns). Order inside the slice never matters — rendering
+// sorts — so entries may accrete at the head.
+var usageBuiltins = []string{
+	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
+	"doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
+	"make", "mcp", "migrate", "onramp", "paper", "provider", "register", "scaffy", "seed", "server",
+	"servers", "setup", "signup", "sites", "style", "subscribe", "task", "tasks", "team", "teams",
+	"tinker", "uninstall", "upgrade", "use", "vercel", "version", "whoami",
+}
+
+// usageBuiltinLines renders the "built-ins:" block for usageTop: the noun set
+// sorted, greedy-wrapped so no emitted line runs past ~100 columns (46 nouns on
+// one line would wrap raggedly in any terminal).
+func usageBuiltinLines() []string {
+	nouns := append([]string(nil), usageBuiltins...)
+	sort.Strings(nouns)
+	const prefix = "built-ins: "
+	const indent = "  "
+	const width = 100
+	var lines []string
+	cur := ""
+	for _, n := range nouns {
+		if cur == "" {
+			cur = n
+			continue
+		}
+		if len(prefix)+len(cur)+len(" · ")+len(n) > width {
+			lines = append(lines, cur)
+			cur = n
+			continue
+		}
+		cur += " · " + n
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	for i := range lines {
+		if i == 0 {
+			lines[i] = prefix + lines[i]
+		} else {
+			lines[i] = indent + lines[i]
+		}
+	}
+	return lines
+}
+
 // usageTop prints the top-level usage without a manifest (the earliest error
 // path, before the tree is loaded).
 func usageTop(out *writer) {
@@ -33,7 +87,9 @@ func usageTop(out *writer) {
 	out.errf("      --limit/--offset/--all   pagination")
 	out.errf("      --manifest <path>  load the manifest from a file (offline)")
 	out.errf("")
-	out.errf("built-ins: use · servers · migrate · export · paper · tasks · vercel · tinker · seed · make · capabilities · whoami · version · upgrade · uninstall · signup · login · logout · completion")
+	for _, line := range usageBuiltinLines() {
+		out.errf("%s", line)
+	}
 	out.errf("")
 	out.errf("tasks:")
 	out.errf("  bp tasks               open the live portrait task board (glanceable pane;")
