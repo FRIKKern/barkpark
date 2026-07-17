@@ -24,9 +24,24 @@ defmodule Barkpark.Secrets do
                       refuses with `{:error, :invalid_scope}` rather than
                       guessing a tier.
 
-  The wall is SQL-only, not cryptographic (D196a): Cloak's AAD is a constant,
-  so ciphertext carries no proof of owner — tenant binding via
-  FieldCipher/DataKeys is the filed follow-up `connectors-secrets-aad-binding`.
+  ## Cryptographic tenant binding (connectors D201, option C)
+
+  The tier wall is CRYPTOGRAPHIC, not merely SQL. `SecretRecord.value` is a raw
+  `:binary` column and this context runs an explicit per-tier codec (see
+  `encode_value/2` / `decode_value/1`):
+
+    * GLOBAL rows (`workspace_id` nil) use `Barkpark.Vault` directly — exactly
+      what `EncryptedBinary` delegated to, so on-disk bytes stay byte-identical
+      and the prod `ingest_token` keeps round-tripping through a plain Cloak
+      blob.
+    * SCOPED rows store a `Barkpark.Crypto.FieldCipher` envelope keyed by the
+      per-`(workspace_id, "run-secrets")` DEK (`DataKeys`, charter D51-D54). The
+      per-workspace DEK SELECTION is the binding — a row physically MOVED to
+      another workspace is decrypted under the WRONG DEK, GCM tag mismatch,
+      `:error`. Reads branch on the ROW's own `workspace_id` and seal ANY
+      decrypt failure to the tier's opaque-absent reply (`{:error, :not_found}`
+      for `reveal`, `nil` for `get`) — the leak reaches `get/2` too, so BOTH
+      verbs are sealed. This replaces the D196a SQL-only wall.
 
   The ingest token is the first consumer: `ingest_token/0` resolves the
   effective shared secret DB-first (GLOBAL tier only, structurally
@@ -43,6 +58,13 @@ defmodule Barkpark.Secrets do
   alias Barkpark.Repo
   alias Barkpark.Secrets.{SecretRecord, SecretAudit}
   alias Barkpark.Plugins.Settings.Masking
+  alias Barkpark.Crypto.FieldCipher
+
+  # The FieldCipher AAD/DEK scope for every workspace-scoped run-secret. The
+  # per-workspace binding is the DEK SELECTION (workspace_id, @field_scope), NOT
+  # this string — it stays constant so the DEK is what walls one tenant off from
+  # another (crypto_test "per-workspace isolation").
+  @field_scope "run-secrets"
 
   @typedoc "Secret tier: instance-global or one workspace (anything else fails closed)."
   @type scope :: :global | Ecto.UUID.t()
@@ -56,9 +78,15 @@ defmodule Barkpark.Secrets do
   """
   @spec get(String.t(), scope()) :: String.t() | nil
   def get(name, scope \\ :global) when is_binary(name) do
-    case fetch(name, scope) do
-      nil -> nil
-      %SecretRecord{value: value} -> value
+    with %SecretRecord{} = record <- fetch(name, scope),
+         {:ok, value} <- decode_value(record) do
+      value
+    else
+      # Absent, or the ciphertext failed to decrypt under this row's tier (e.g.
+      # a swap-attacked scoped row) — seal to `nil`, indistinguishable from
+      # absent. The leak reaches this un-audited resolver path too, so it is
+      # sealed identically to `reveal/2`.
+      _ -> nil
     end
   end
 
@@ -76,19 +104,21 @@ defmodule Barkpark.Secrets do
     actor = Keyword.get(opts, :actor)
     scope = Keyword.get(opts, :scope, :global)
 
-    case fetch(name, scope) do
-      nil ->
-        {:error, :not_found}
+    with %SecretRecord{} = record <- fetch(name, scope),
+         {:ok, value} <- decode_value(record) do
+      # Atomic reveal: the secret is only returned once the audit row commits.
+      {:ok, ^value} =
+        Repo.transaction(fn ->
+          log_audit(name, "reveal", actor, scope)
+          value
+        end)
 
-      %SecretRecord{value: value} ->
-        # Atomic reveal: the secret is only returned once the audit row commits.
-        {:ok, ^value} =
-          Repo.transaction(fn ->
-            log_audit(name, "reveal", actor, scope)
-            value
-          end)
-
-        {:ok, value}
+      {:ok, value}
+    else
+      # Absent, or a scoped row that fails to decrypt under this scope's DEK (a
+      # relocated/swap-attacked row) — opaque `:not_found`, no audit row. The
+      # crypto denial is indistinguishable from a foreign or absent secret.
+      _ -> {:error, :not_found}
     end
   end
 
@@ -123,7 +153,7 @@ defmodule Barkpark.Secrets do
 
     attrs = %{
       name: name,
-      value: value,
+      value: encode_value(value, scope),
       updated_at: now,
       updated_by: actor,
       workspace_id: scope_workspace_id(scope)
@@ -160,8 +190,17 @@ defmodule Barkpark.Secrets do
     |> scope_secrets(scope)
     |> order_by([s], desc: s.updated_at)
     |> Repo.all()
-    |> Enum.map(fn %SecretRecord{name: name, value: value, updated_at: at} ->
-      %{name: name, value: Masking.mask(value), updated_at: at}
+    |> Enum.map(fn %SecretRecord{name: name, updated_at: at} = record ->
+      # Decode per the row's own tier, then mask. A row that fails to decrypt
+      # (e.g. relocated ciphertext) never surfaces plaintext — it masks the
+      # empty string.
+      plaintext =
+        case decode_value(record) do
+          {:ok, value} -> value
+          :error -> ""
+        end
+
+      %{name: name, value: Masking.mask(plaintext), updated_at: at}
     end)
   end
 
@@ -240,6 +279,51 @@ defmodule Barkpark.Secrets do
 
   defp scope_workspace_id(:global), do: nil
   defp scope_workspace_id(workspace_id) when is_binary(workspace_id), do: workspace_id
+
+  # ---------------------------------------------------------------------------
+  # Per-tier crypto codec (D201, option C). The Ecto column is a raw `:binary`;
+  # the tier decides the cipher:
+  #   * GLOBAL (`:global`) — `Barkpark.Vault` (Cloak) blob, byte-identical to
+  #     the old `EncryptedBinary` on-disk format (`ingest_token` unchanged).
+  #   * SCOPED (workspace binary) — a Jason-encoded `FieldCipher` envelope keyed
+  #     by the per-(workspace, "run-secrets") DEK. The workspace binding IS the
+  #     DEK selection, so a row moved to another workspace can't be decrypted.
+  # ---------------------------------------------------------------------------
+  defp encode_value(value, :global), do: Barkpark.Vault.encrypt!(value)
+
+  defp encode_value(value, workspace_id) when is_binary(workspace_id) do
+    value
+    |> FieldCipher.encrypt(@field_scope, workspace_id)
+    |> Jason.encode!()
+  end
+
+  # Decrypt a stored row by its OWN tier (branch on the row's workspace_id, never
+  # the requested scope — `fetch/2` already proved the row belongs to the scope).
+  # ANY failure (bad payload, wrong-DEK GCM mismatch from a relocated row,
+  # decode raise) collapses to `:error`, which the read verbs seal to opaque
+  # absent. Fail-closed.
+  @spec decode_value(SecretRecord.t()) :: {:ok, String.t()} | :error
+  defp decode_value(%SecretRecord{value: encoded, workspace_id: nil}) do
+    case Barkpark.Vault.decrypt(encoded) do
+      {:ok, plaintext} when is_binary(plaintext) -> {:ok, plaintext}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp decode_value(%SecretRecord{value: encoded, workspace_id: workspace_id})
+       when is_binary(workspace_id) do
+    with {:ok, envelope} <- Jason.decode(encoded),
+         {:ok, value} when is_binary(value) <-
+           FieldCipher.decrypt(envelope, @field_scope, workspace_id) do
+      {:ok, value}
+    else
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
 
   # D194: the upsert arbiter must name the tier's partial unique index — the
   # surrogate PK made bare `conflict_target: :name` a Postgrex 42P10 error.

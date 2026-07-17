@@ -1463,6 +1463,64 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # ── Scoped run-secrets — the per-WORKSPACE tier (connectors D200) ────
+      # Four DEDICATED verbs with the workspace/project slugs BAKED into
+      # path_template (the workspace.project-create precedent) — deliberately
+      # NOT the scoped_prefix mechanism: ctx.ScopedMirror is never set in any
+      # production Go path, so a flat template + scoped_prefix emits the flat
+      # URL and 404s (proven live on token.create — bp-token-create-
+      # scoped-prefix-404 / #3197; NOT fixed here, its pattern is banned).
+      # auth_tier scoped_admin = per-workspace OWNER/ADMIN role
+      # (RequireWorkspaceRole). The flat secret.* verbs above stay the
+      # instance-GLOBAL tier, untouched.
+      core_cmd(
+        "secret.scoped-ls",
+        "secret",
+        "scoped-ls",
+        "List a workspace's scoped run-secret names with masked values.",
+        "GET",
+        "/w/:workspace_slug/p/:project_slug/v1/secrets",
+        "scoped_admin",
+        default_output: "table"
+      ),
+      core_cmd(
+        "secret.scoped-get",
+        "secret",
+        "scoped-get",
+        "Reveal a workspace-scoped run-secret's unmasked value (audited).",
+        "GET",
+        "/w/:workspace_slug/p/:project_slug/v1/secrets/:name",
+        "scoped_admin",
+        args: [arg("name", true, "string", "Secret name.")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "secret.scoped-set",
+        "secret",
+        "scoped-set",
+        "Set or rotate a workspace-scoped run-secret value.",
+        "PUT",
+        "/w/:workspace_slug/p/:project_slug/v1/secrets/:name",
+        "scoped_admin",
+        args: [
+          arg("name", true, "string", "Secret name."),
+          arg("value", true, "string", "Secret value to store (encrypted at rest).")
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "secret.scoped-rm",
+        "secret",
+        "scoped-rm",
+        "Delete a workspace-scoped run-secret by name.",
+        "DELETE",
+        "/w/:workspace_slug/p/:project_slug/v1/secrets/:name",
+        "scoped_admin",
+        args: [arg("name", true, "string", "Secret name.")],
+        writes: true,
+        default_output: "minimal"
+      ),
       core_cmd(
         "share.ls",
         "share",
