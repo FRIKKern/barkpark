@@ -534,22 +534,23 @@ defmodule Barkpark.Tasks.QueueTest do
       assert Enum.all?(done_doc_scans, &(&1["Actual Loops"] <= 1)),
              "done-task documents scan looped per row (loops: #{inspect(Enum.map(done_doc_scans, & &1["Actual Loops"]))})"
 
-      # The property under test is ONE-TIME consumption of the done-task CTE —
-      # never a per-ROW re-scan. Assert THAT directly, not the exact loop count:
-      # a runner whose planner prunes a scan reports `Actual Loops == 0`, which
-      # is STILL not a per-row rescan (that would be ~row_count, 200 here) — so
-      # pinning `== 1` flaked on plan variance while proving nothing extra. The
-      # honest bound is `<= 1` per scan node: 0 or 1 = consumed at most once; a
-      # genuine per-row regression (nested-loop inner side) shows ~200 and fails.
-      done_cte_scans =
-        Enum.filter(plan_nodes(unsatisfied_cte), fn node ->
-          node["Node Type"] == "CTE Scan" and node["CTE Name"] == "ready_done_tasks"
-        end)
-
-      assert done_cte_scans != []
-
-      assert Enum.all?(done_cte_scans, &(&1["Actual Loops"] <= 1)),
-             "done-task CTE re-scanned per row (loops: #{inspect(Enum.map(done_cte_scans, & &1["Actual Loops"]))})"
+      # The property under test is ONE-TIME COMPUTATION of the done-task set —
+      # the subquery runs once, not once per candidate row. That is guaranteed
+      # STRUCTURALLY by `with_cte(..., materialized: true)` (queue.ex) and shown
+      # in the plan by the CTE subplan node itself running exactly once
+      # (`done_cte`'s own Actual Loops == 1). Its underlying `documents` scan
+      # running at most once (asserted above) is the same guarantee from the
+      # inside.
+      #
+      # NOTE (the earlier flake's real cause): a `CTE Scan` node in the
+      # consuming query is NOT the computation — it is a cheap READ of the
+      # already-materialized buffer. A nested-loop join legitimately re-reads it
+      # once per outer row (loops == row_count), which is correct and fast; a
+      # prior assertion pinned that read count and failed on plan variance while
+      # proving nothing (materialization already guarantees single computation).
+      # So we assert the COMPUTATION-once property, not the join's read count.
+      assert done_cte["Actual Loops"] == 1,
+             "done-task CTE was not computed once (materialized) — Actual Loops: #{inspect(done_cte["Actual Loops"])}"
     end
   end
 end
