@@ -84,6 +84,9 @@ api/.claude/
 # Host-side deploy state (written by deploy/instance-deploy.sh on the server)
 .instance-deploy-last
 .slots/
+# Site-deploy run-state (DeployRunner's per-run manifests/status/log + transient
+# 0600 build-env files, under the repo root so init/1 re-attaches across a restart)
+.bp-site-deploy-runs/
 
 # doc-truth generated artifacts (byproducts of the standing --code / --emit-refs runs)
 tooling/doc-truth/citation-truth-report.json
