@@ -228,7 +228,7 @@
           },
           {
             "type": "text",
-            "value": "The lived chain is two commands — add-block-type folded the parity leg in v2 — and it ran fine as a documented shell recipe. The one real bleed, the structurally refused second same-tier classify (exit 5, nothing written), is a REANCHOR limit that binds regardless of orchestration: no chain or meta-command fixes it. The honest fix — a classify-block-type redesign that appends into a planted list instead of re-anchoring the opener — is backlogged as scaffy-backlog-classify-append-redesign, with this wave as its fixture."
+            "value": "The lived chain is two commands — add-block-type folded the parity leg in v2 — and it ran fine as a documented shell recipe. The one real bleed, the structurally refused second same-tier classify (exit 5, nothing written), is a REANCHOR limit that binds regardless of orchestration: no chain or meta-command fixes it. The honest fix — a classify-block-type redesign that appends into the tier list instead of re-anchoring the opener — was backlogged as scaffy-backlog-classify-append-redesign, with this wave as its fixture, and has since shipped: the 2026-07-17 append-friendly restructure turned tiers.ex's ~w sigils into plain string lists, the op into a bare INSERT AFTER FIRST, and a second same-tier classify into an independent clean insert."
           }
         ],
         [

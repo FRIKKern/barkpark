@@ -160,16 +160,16 @@ func countCorpus(t *testing.T) census {
 func TestCorpusCensus(t *testing.T) {
 	want := census{
 		create:            17,
-		insertAfterFirst:  30, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple; +1: ensure-console-hook-zones' tests-zone plant; +3: add-console-helper's skeleton + hook entry + test group
+		insertAfterFirst:  31, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple; +1: ensure-console-hook-zones' tests-zone plant; +3: add-console-helper's skeleton + hook entry + test group; +1: classify-block-type v3's entry plant (was the self-consuming REPLACE — the tiers.ex append-friendly restructure)
 		insertAfterLast:   1,
 		insertBeforeFirst: 3,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE); +2: ensure-console-hook-zones' two app.js plants (above the escape hatch; above the IIFE tail)
 		insertBeforeLast:  0,  // grammar-legal, zero corpus instances (like SNIPPET/USE — exercised by synthetic fixtures)
-		replace:           10, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST
+		replace:           9, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST; -1: classify-block-type v3's became INSERT AFTER FIRST (same-tier refusal killed, 2026-07-17)
 		remove:            1,
 		deleteFile:        1,
 		mark:              45, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route; +3: the three console zones; +3: add-console-helper's trio
 		markVirtual:       2,
-		assertFile:        81, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail; +3: the console-zone trio; +3: add-console-helper's trio
+		assertFile:        80, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail; +3: the console-zone trio; +3: add-console-helper's trio; -1: classify v3 dropped its MARK assert (D57 postcondition shape — the entry assert alone holds on the hand-edit path)
 		assertCmd:         37, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's; +2: the console pair's LOCAL `node --test` gates
 		assertCmdTierCI:   14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's (the console pair's node gates are LOCAL, not ci)
 	}

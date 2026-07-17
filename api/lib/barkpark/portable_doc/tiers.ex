@@ -54,13 +54,44 @@ defmodule Barkpark.PortableDoc.Tiers do
   #     `pipeline` grid stays monolithic + verbatim-carried, UNTOUCHED.
   #     `notes`/`task-board`/`roadmap` stay monolithic for now.
 
-  @element ~w(
-    paragraph heading list divider code diagram image action
-    eyebrow byline ingress pullquote
-    field-string field-slug field-text field-boolean field-select field-datetime field-color
-    field-image field-reference
-    composite arrayOf codelist localizedText
-  )
+  # APPEND-FRIENDLY SHAPE (the classify-block-type v3 restructure, 2026-07-17):
+  # @element and @widget are plain string lists, ONE entry per line, house
+  # trailing commas — so `bp scaffy run classify-block-type` lands a new entry
+  # as a line INSERT directly after the `[` opener (order is non-semantic: the
+  # module folds the lists into set maps below). The old one-line `~w(` sigils
+  # could not take a second same-tier classify (a ~w list admits no comment, so
+  # no MARK could be planted — the D33/D80 refusal). @section stays a one-line
+  # `~w` deliberately: a third :section type is rare and remains a hand edit.
+  @element [
+    # prose + media + structure leaves
+    "paragraph",
+    "heading",
+    "list",
+    "divider",
+    "code",
+    "diagram",
+    "image",
+    "action",
+    # editorial atoms
+    "eyebrow",
+    "byline",
+    "ingress",
+    "pullquote",
+    # schema-bound field atoms
+    "field-string",
+    "field-slug",
+    "field-text",
+    "field-boolean",
+    "field-select",
+    "field-datetime",
+    "field-color",
+    "field-image",
+    "field-reference",
+    "composite",
+    "arrayOf",
+    "codelist",
+    "localizedText"
+  ]
 
   # `stat`/`stats`/`stat-grid`/`heatmap`/`chart` → :widget: rendered display
   # units over literal data (Render.DataViz, the browser twins of the pdrender
@@ -72,17 +103,44 @@ defmodule Barkpark.PortableDoc.Tiers do
   # slot-composable layout. `chat-approval`/`chat-question`/`chat-plan` join them
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
-  # scaffy:classify-block-type diff MARK:tier-widget-diff
-  @widget ~w(diff filetree
-    callout figure terminal table
-    task-detail task-list tasks task-board roadmap
-    notes note cards card pipeline stage
-    form questionnaire
-    stat stats stat-grid heatmap chart gauge-list
-    sheet embed asciicast status-legend
-    chat-thinking chat-todo chat-tool-diff
-    chat-approval chat-question chat-plan
-  )
+  @widget [
+    # scaffy:classify-block-type diff MARK:tier-diff--widget
+    "diff",
+    "filetree",
+    "callout",
+    "figure",
+    "terminal",
+    "table",
+    "task-detail",
+    "task-list",
+    "tasks",
+    "task-board",
+    "roadmap",
+    "notes",
+    "note",
+    "cards",
+    "card",
+    "pipeline",
+    "stage",
+    "form",
+    "questionnaire",
+    "stat",
+    "stats",
+    "stat-grid",
+    "heatmap",
+    "chart",
+    "gauge-list",
+    "sheet",
+    "embed",
+    "asciicast",
+    "status-legend",
+    "chat-thinking",
+    "chat-todo",
+    "chat-tool-diff",
+    "chat-approval",
+    "chat-question",
+    "chat-plan"
+  ]
 
   @section ~w(section columns)
 

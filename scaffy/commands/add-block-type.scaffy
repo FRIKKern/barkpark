@@ -57,8 +57,9 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #    NOT conditional: the moment Surface 3 lands, run
 #    `bp scaffy run classify-block-type --var BlockName={{.block-name}}
 #    --var Tier=<element|widget|section>` — leaf blocks pick :element EXPLICITLY,
-#    never nothing. See classify-block-type's PAIRING LAW + RE-RUN MATRIX for the
-#    same-tier second-block hand-edit case (D79).
+#    never nothing. Run it once per block, always — any number of same-tier
+#    classifies land cleanly since the tiers.ex append-friendly restructure
+#    (classify v3; the D79 one-word hand-edit recipe is RETIRED).
 #
 # 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs
 #    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`
