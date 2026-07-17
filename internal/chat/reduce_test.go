@@ -359,6 +359,34 @@ func TestExitFrameSurfacesReason(t *testing.T) {
 	}
 }
 
+// TestWorkflowFrameUpdatesLiveWorkflowNoEffect proves wsc-bl-workflow-sse: the
+// mid-turn `event: workflow` delta overwrites LiveWorkflow and asks for NO IO —
+// that MISSING turn-boundary refetch is the D13 lag removed. A malformed frame is
+// inert (forward-compat), leaving the last-known summary intact.
+func TestWorkflowFrameUpdatesLiveWorkflowNoEffect(t *testing.T) {
+	data := []byte(`{"label":"run","agents_done":1,"agents_total":3,"running":2,"terminal?":false}`)
+	st, effs := drive(State{SessionID: "s1", Phase: TurnStreaming}, t0, FrameEvent{Name: "workflow", Data: data})
+
+	if len(effs) != 0 {
+		t.Fatalf("a workflow frame does no IO (the lag removed), got %d effects", len(effs))
+	}
+	if st.LiveWorkflow == nil {
+		t.Fatal("a workflow frame must set LiveWorkflow")
+	}
+	if st.LiveWorkflow.Label != "run" || st.LiveWorkflow.AgentsDone != 1 || st.LiveWorkflow.AgentsTotal != 3 {
+		t.Fatalf("LiveWorkflow decoded wrong: %+v", st.LiveWorkflow)
+	}
+	if st.LiveWorkflow.Terminal {
+		t.Fatal("a running summary must not be Terminal")
+	}
+
+	// A malformed frame leaves the last-known summary intact (never clobbers).
+	st2, _ := drive(st, t0, FrameEvent{Name: "workflow", Data: []byte(`not json`)})
+	if st2.LiveWorkflow == nil || st2.LiveWorkflow.Label != "run" {
+		t.Fatalf("a malformed workflow frame must leave the last summary intact, got %+v", st2.LiveWorkflow)
+	}
+}
+
 // pendingCardRow builds a persisted, pending approval-family row (the shape the
 // Recorder writes via persist_approval_ask): request_id + pending status in the
 // raw metadata map.
