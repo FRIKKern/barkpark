@@ -798,14 +798,17 @@ if config_env() == :prod do
   # engine won't look. Each shipped starter has its OWN template-dir env override
   # (default: the repo's `templates/<slug>`): BARKPARK_SITE_TEMPLATE_DIR
   # (astro-starter), BARKPARK_NODE_TEMPLATE_DIR (next-starter),
-  # BARKPARK_SEARCH_TEMPLATE_DIR (search-starter). All unset ⇒ the module's
-  # defaults.
+  # BARKPARK_SEARCH_TEMPLATE_DIR (search-starter),
+  # BARKPARK_ASTRO_SEARCH_TEMPLATE_DIR (astro-search-starter). All unset ⇒ the
+  # module's defaults. New starters insert their override directly below the
+  # sites_dir line (scaffy add-site-template).
   site_provisioner_env =
     [
       sites_dir: System.get_env("BARKPARK_SITES_DIR"),
       template_dir: System.get_env("BARKPARK_SITE_TEMPLATE_DIR"),
       node_template_dir: System.get_env("BARKPARK_NODE_TEMPLATE_DIR"),
-      search_template_dir: System.get_env("BARKPARK_SEARCH_TEMPLATE_DIR")
+      search_template_dir: System.get_env("BARKPARK_SEARCH_TEMPLATE_DIR"),
+      astro_search_template_dir: System.get_env("BARKPARK_ASTRO_SEARCH_TEMPLATE_DIR")
     ]
     |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
 
