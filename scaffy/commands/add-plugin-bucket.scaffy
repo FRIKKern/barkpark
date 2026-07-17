@@ -1,0 +1,159 @@
+COMMAND "Add a Plugin Auth Bucket" DESCRIPTION "Scaffold a new plugin auth-tier in api/lib/barkpark_web/router.ex: one `pipeline :<bucket> do ... end` definition planted in the router-pipelines zone + one `scope <mount> ... plugin_routes(scope: :<bucket>)` wrapper planted in the plugin-buckets zone -- the 2-insert follow-up ensure-router-zones was built to enable (five such bucket adds since April: :public_api #1171, :github_webhook #1234, :session_token_root + :ticket_key, the scoped :token mirror). REQUIRES ensure-router-zones applied first: both anchors are the scaffy:zone mark lines that command plants, so on a tree without them every op refuses loud (exit 5, anchor not found, nothing written) and the recipe is two runs -- zones, then bucket. The pipeline body is the minimal JSON+auth starter (the :github_webhook shape); extend it in place. This command is the ROUTER leg only: the plugin's own register_routes/1 entries (auth: :<bucket>) and the JS SDK manifest-parity leg are separate work it does not touch." LAST_UPDATED "17-07-2026-18-00-00" DOMAIN "barkpark" TAGS "plugins", "scaffold" CONCEPT "plugin-bucket" VARIANT "elixir" DIRECTION "add" VARIABLES
+  VARIABLE 1 "BucketName" TITLE "Name the auth bucket" DESCRIPTION "PascalCase name of the new auth tier. Its snake spelling is the atom everywhere: `pipeline :partner_key`, `pipe_through(:partner_key)`, `plugin_routes(scope: :partner_key)` -- and the atom is what a plugin's register_routes/1 later names as `auth: :partner_key`." EXAMPLES "PartnerKey", "DeviceToken"
+  VARIABLE 2 "AuthPlug" OPAQUE TITLE "Auth plug module" DESCRIPTION "The fully-qualified plug module that gates the tier -- the ONE plug that makes this bucket a distinct auth tier (RequireTicketKey / GithubWebhookSignature / PublicCors are the live precedents). OPAQUE: a dotted module path, never re-cased, one spelling per file. An open set by design -- every new tier exists BECAUSE it has a new gate, so this cannot be a ONEOF." EXAMPLES "BarkparkWeb.Plugs.RequireTicketKey"
+  VARIABLE 3 "MountPath" OPAQUE ONEOF "/v1/plugins", "/v1" TITLE "Mount path" DESCRIPTION "Where the wrapper mounts -- a closed 2-member set, so ONEOF genuinely fits: `/v1/plugins` (slug-prefixed plugin surface -- routes land at /v1/plugins/<slug>/...) or `/v1` (root-mounted tier, the :token_root idiom -- routes land at /v1/...). These are the only two API mounts the live bucket run uses; the browser tiers (`/studio`, `/`, `/admin`) are live_session buckets with on_mount hooks -- a DIFFERENT shape this command does not produce. OPAQUE: a path literal, never re-cased." EXAMPLES "/v1/plugins"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS COMMAND EXISTS — the payoff of ensure-router-zones, collected
+# ─────────────────────────────────────────────────────────────────────────────
+# router.ex is the repo's #1 accretion file, twice ruled un-anchorable (W1,
+# W5) because its anchors were positional text in 2400 lines where route
+# order is semantics. ensure-router-zones repaired that: three planted
+# scaffy:zone comments, each stating its ordering law in words. This command
+# is the first CONSUMER of two of those zones — the "future add-plugin-bucket
+# ... anchors at these marks with plain INSERT AFTER FIRST" payoff that
+# command's own prose promises, now real:
+#
+#   op 1 → MARK:zone-router-pipelines  — the pipeline definition. The zone's
+#          law: pipeline definitions are POSITION-FREE (each compiles to a
+#          named private plug referenced by name), so landing here can never
+#          change route matching.
+#   op 2 → MARK:zone-plugin-buckets    — the scope wrapper. The zone's law:
+#          /v1/plugins-mounted wrappers are order-free among themselves
+#          (plugin paths are slug-disjoint), and a root-mounted `/v1` wrapper
+#          landing here sits BEFORE the :token_root / :session_token_root /
+#          :ticket_key run, so :ticket_key's submitter dynamic `/tickets/:id`
+#          stays the LAST root-mounted match. Correct by construction.
+#
+# What varies across the five live bucket adds is exactly the three declared
+# variables: the bucket atom, the gating plug, and the mount (/v1/plugins vs
+# /v1). Everything else — `plug(:accepts, ["json"])`, the no-alias scope, the
+# dormant-until-a-plugin-contributes contract — is invariant house shape.
+#
+# NOT THIS COMMAND: the plugin-side `register_routes/1` entries that make the
+# bucket serve anything (per-route adds auto-fold at compile time via the
+# runtime collector and never touch router.ex), and the JS SDK manifest-parity
+# tripwire (a target-repo test-infra gap, tracked separately). This is the
+# router leg alone.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRES: ensure-router-zones applied first — precondition by loud refusal
+# ─────────────────────────────────────────────────────────────────────────────
+# Both anchors below are the zone MARK LINES another command plants, and
+# commands ship UNAPPLIED — on a virgin tree these anchors do not exist. That
+# is deliberate, and the engine's own D20 conservatism IS the precondition
+# mechanism: an absent anchor refuses loud (`INSERT AFTER FIRST anchor not
+# found in "api/lib/barkpark_web/router.ex"`, exit 5, NOTHING written — runs
+# are transactional), so a mis-ordered run cannot half-apply. The recipe is
+# two runs:
+#
+#   bp scaffy run scaffy/commands/ensure-router-zones.scaffy
+#   bp scaffy run scaffy/commands/add-plugin-bucket.scaffy \
+#       --var BucketName=PartnerKey \
+#       --var AuthPlug=BarkparkWeb.Plugs.RequirePartnerKey \
+#       --var MountPath=/v1/plugins
+#
+# CROSS-COMMAND LIFO: removes are per-command receipt replays. Remove THIS
+# command first, then the zones — each replay drift-checks its own images.
+# The reverse order is NOT refused in this geometry — observed behavior at
+# the foot of this file.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 1 — the pipeline definition, planted in the router-pipelines zone
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the zone comment's mark line — byte-unique (the MARK: token exists
+# once in the tree) and never consumed (INSERT leaves it intact), so sibling
+# buckets re-anchor here forever with no REANCHOR family needed. The starter
+# body is the minimal 2-plug shape every API-tier pipeline shares (JSON
+# negotiation + the one gating plug — :github_webhook and :public_api are the
+# precedents); tiers that need more (rate limits, session fetch) extend the
+# planted block in place. Guard = the pipeline head the op itself writes
+# (payload-derived, D3(c)) — so a hand-defined pipeline of the same name
+# skips BOTH ops' compile-breaking duplicate instead of injecting one.
+IN "api/lib/barkpark_web/router.ex"
+### Define the {{.bucket_name}} pipeline in the router-pipelines zone
+INSERT AFTER FIRST
+::: router-pipelines zone mark line :::
+  # this comment only whole, on its own lines. MARK:zone-router-pipelines
+::: router-pipelines zone mark line :::
+WITH
+::: {{.bucket-name}} pipeline :::
+
+  # scaffy:add-plugin-bucket {{.BucketName}} MARK:plugin-bucket-pipeline-{{.bucket-name}}
+  pipeline :{{.bucket_name}} do
+    plug(:accepts, ["json"])
+    plug({{.AuthPlug}})
+  end
+::: {{.bucket-name}} pipeline :::
+MARK "plugin-bucket-pipeline-{{.bucket-name}}"
+ASLONG FILE DONT CONTAIN "pipeline :{{.bucket_name}} do"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — the scope wrapper, planted in the plugin-buckets zone
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the plugin-buckets zone's mark line — same never-consumed idiom.
+# An insert directly below the zone comment is ordering-safe by the zone's
+# own stated law (see WHY above). No `BarkparkWeb` scope alias: plugin route
+# specs fully-qualify their controllers — an alias would double-prefix them
+# (the house no-alias law every sibling wrapper's comment states). Guard =
+# the plugin_routes line the op itself writes: one bucket atom has exactly
+# one collector wrapper, hand-written or planted.
+IN "api/lib/barkpark_web/router.ex"
+### Mount the {{.bucket_name}} bucket wrapper in the plugin-buckets zone
+INSERT AFTER FIRST
+::: plugin-buckets zone mark line :::
+  # move this comment only whole, on its own lines. MARK:zone-plugin-buckets
+::: plugin-buckets zone mark line :::
+WITH
+::: {{.bucket-name}} wrapper :::
+
+  # scaffy:add-plugin-bucket {{.BucketName}} MARK:plugin-bucket-scope-{{.bucket-name}}
+  # Plugin-contributed routes -- `auth: :{{.bucket_name}}` tier. Gated by
+  # {{.AuthPlug}} via the :{{.bucket_name}} pipeline (defined in the
+  # router-pipelines zone above). Dormant until a plugin's register_routes/1
+  # contributes an `auth: :{{.bucket_name}}` route -- expands to nothing today,
+  # exactly like :token/:ingest/:github_webhook when first added. No
+  # BarkparkWeb scope alias: plugin route specs fully-qualify their
+  # controllers (the sibling wrappers' no-alias law).
+  scope "{{.MountPath}}" do
+    pipe_through(:{{.bucket_name}})
+
+    plugin_routes(scope: :{{.bucket_name}})
+  end
+::: {{.bucket-name}} wrapper :::
+MARK "plugin-bucket-scope-{{.bucket-name}}"
+ASLONG FILE DONT CONTAIN "plugin_routes(scope: :{{.bucket_name}})"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# Both marked blocks present and the collector wired. As with the zones
+# command there is no cheap LOCAL runtime gate for the router (every mix gate
+# compiles the world, A2) — the LOCAL close is grep-shaped and the compile
+# proof is TIER ci: the planted pipeline + wrapper are complete constructs in
+# the two zones whose ordering laws make their position safe, and `mix
+# compile` in CI reds if a plant ever landed inside a syntactic construct.
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "MARK:plugin-bucket-pipeline-{{.bucket-name}}"
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "MARK:plugin-bucket-scope-{{.bucket-name}}"
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "plugin_routes(scope: :{{.bucket_name}})"
+ASSERT CMD "cd api && mix compile" TIER ci
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OBSERVED: cross-command remove order (run-proven 2026-07-17, sha-verified)
+# ─────────────────────────────────────────────────────────────────────────────
+# LIFO (bucket remove, then zones remove) is byte-clean at both steps —
+# post-zones sha, then virgin sha, exact. The ANTI-LIFO order (zones removed
+# FIRST while this bucket is planted) is NOT drift-refused: the bucket
+# inserts BELOW the zone's recorded post-image, so the zones' bytes stay
+# contiguous and their replay inverts cleanly (exit 0), stranding the bucket
+# where the zone stood. The strand is benign BY THE ZONE IDIOM, not by an
+# engine guarantee: zone payloads are pure comments (removing them changes
+# no routing), and the bucket inherits the zone's own ordering-safe
+# position (after :require_write / after the :github_webhook wrapper, still
+# before the :token_root run). Recovery is total either way: re-running
+# ensure-router-zones replants each zone at its structural anchor — ABOVE
+# the stranded bucket, restoring the exact full-state bytes (sha-identical
+# to never having removed) — or remove this bucket (its own images are
+# intact, still byte-clean). A future cross-command consumer whose payload
+# is NOT comment-safe below its platform's image should not assume this
+# forgiveness — state your own remove-order law as this file does.
