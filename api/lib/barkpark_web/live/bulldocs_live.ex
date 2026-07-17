@@ -46,7 +46,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
-  alias Barkpark.PortableDoc.{Projection, Render}
+  alias Barkpark.PortableDoc.Render
 
   @impl true
   def mount(%{"slug" => slug} = params, _session, socket) do
@@ -71,6 +71,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:dataset, dataset)
 
     paper = fetch_paper(slug, reader_scope, dataset)
+    reader_source = Content.Papers.reader_source(paper, dataset, reader_scope)
 
     # Preview manifest (preview-contract pc-w2) — the outward social-share card.
     # Computed BEFORE the `connected?` branch so the DEAD render (crawlers +
@@ -131,7 +132,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # block render path reads it to render each block in `:article` palette.
       # Non-article papers leave it false → email default, chrome unchanged.
       |> assign(:article?, paper_article?(paper))
-      |> assign(:html, paper_html(paper))
+      |> assign(:html, source_html(reader_source))
       # P6.U2 goal-path rail: events for this paper's goal (empty when no
       # goal_id / no events → the rail is not rendered, article unchanged).
       |> assign(:rail_events, rail_events)
@@ -178,7 +179,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # selects WHICH theme, never light/dark. No setting → default → the layout
       # omits the attribute → byte-identical to before.
       |> assign(:bp_theme, reader_theme(paper, reader_scope))
-      |> assign_block_mode(paper)
+      |> assign_block_mode(paper, reader_source)
 
     {:ok, socket, layout: false}
   end
@@ -593,8 +594,8 @@ defmodule BarkparkWeb.BulldocsLive do
   defp paper_rev(nil), do: 0
   defp paper_rev(%{content: content}), do: Map.get(content || %{}, "rev") || 0
 
-  defp paper_html(nil), do: ""
-  defp paper_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+  defp source_html({:html, html}), do: html
+  defp source_html(_), do: ""
 
   # Preview manifest for the social-share head (preview-contract pc-w2). The
   # canonical url is the RELATIVE `/papers/:slug` (ShareMeta absolutizes it at
@@ -607,8 +608,8 @@ defmodule BarkparkWeb.BulldocsLive do
   defp paper_preview(_paper, slug),
     do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
-  defp paper_blocks(%{content: content}), do: Projection.read_blocks(content || %{})
-  defp paper_blocks(_), do: nil
+  defp source_blocks({:blocks, blocks}), do: blocks
+  defp source_blocks(_), do: nil
 
   # The paper's goal id, if any — used at mount to gate the P6.U4 Simplify
   # button. A blank string counts as absent (no goal to simplify against).
@@ -633,8 +634,8 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, paper) do
-    case paper_blocks(paper) do
+  defp assign_block_mode(socket, paper, reader_source) do
+    case source_blocks(reader_source) do
       blocks when is_list(blocks) ->
         resolved = with_live_tasks(blocks, paper)
 
@@ -867,7 +868,14 @@ defmodule BarkparkWeb.BulldocsLive do
       paper ->
         article? = paper_article?(paper)
 
-        case paper_blocks(paper) do
+        reader_source =
+          Content.Papers.reader_source(
+            paper,
+            socket.assigns[:dataset],
+            socket.assigns[:reader_scope]
+          )
+
+        case source_blocks(reader_source) do
           blocks when is_list(blocks) ->
             resolved = with_live_tasks(blocks, paper)
 
@@ -889,7 +897,7 @@ defmodule BarkparkWeb.BulldocsLive do
           _ ->
             # Refetched a paper that has reverted to HTML-only — fall back.
             socket
-            |> assign(:html, paper_html(paper))
+            |> assign(:html, source_html(reader_source))
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
             |> assign(:block_mode, false)

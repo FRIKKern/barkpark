@@ -15,13 +15,18 @@ defmodule BarkparkWeb.Layouts.BulldocsTuiFetchContractTest do
             __DIR__
           )
 
-  test "embedded TUI fetches Paper blocks by _id using canonical filter syntax" do
+  test "embedded TUI fetches through the current Paper capability and preserves shares" do
     source = File.read!(@layout)
 
-    assert source =~ ~s|encodeURIComponent("_id=" + slug)|,
-           "embedded TUI must query the Paper id used by /papers/:slug"
+    assert source =~ ~s|location.pathname.replace(|
+    assert source =~ ~s|+ "/source" + location.search|
+    assert source =~ "var r = await fetch(url);"
+    assert source =~ ~s|source.kind === "blocks"|
+    assert source =~ ~s|source.kind === "html"|
+    assert source =~ "new DOMParser()"
 
-    refute source =~ ~s|encodeURIComponent('slug=="' + slug + '"')|,
-           "legacy slug== lookup returns zero rows for Papers without a slug field"
+    refute source =~ "/v1/data/doc/"
+    refute source =~ ~s|accept: "application/json"|
+    refute source =~ "/v1/data/query/production/paper"
   end
 end

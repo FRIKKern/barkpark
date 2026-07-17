@@ -306,12 +306,11 @@ type UIState struct {
 	// is resolved by the ttm-s1 compose-level hit map from a Motion MouseMsg and
 	// set through setHoverTarget (the hover-changed guard IS the debounce — a
 	// Motion onto the same row is a no-op, so an all-motion stream never
-	// re-renders). Render paints the picker law from exactly this row: the
-	// hovered row wears hoverStyle's tint at full brightness and every OTHER
-	// selectable row recedes to faint (lower opacity), so the hover reads as
-	// lit up. A "" target paints nothing, so a board with no mouse is
-	// byte-identical. Cleared on any key input, so the keyboard flow is
-	// untouched.
+	// re-renders). Render restyles exactly this row in the accent foreground
+	// (hoverStyle — the chat Phases-pane selection grammar); every other row is
+	// untouched, at full brightness. A "" target paints nothing, so a board
+	// with no mouse is byte-identical. Cleared on any key input, so the
+	// keyboard flow is untouched.
 	HoverTarget string
 	// MouseReleased is the mouse-mode toggle (charter D96): false (the zero
 	// value, and the program's start state) means mouse reporting is ON — the

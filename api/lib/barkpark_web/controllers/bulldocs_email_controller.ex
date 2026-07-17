@@ -11,8 +11,10 @@ defmodule BarkparkWeb.BulldocsEmailController do
   wrapped in `Render.render_document/2`'s doctype envelope. What you see IS
   what a mail backend should send.
 
-  Public-root bucket, published papers only — the same visibility contract as
-  the reader route; a missing/unpublished slug is a plain 404.
+  It is mounted beside the public, dataset, and scoped Paper readers and shares
+  each route's visibility/capability contract; a missing/unpublished slug is a
+  plain 404. Historical body_html is sanitized before it enters the same card
+  chrome, so legacy Papers remain readable without becoming an HTML bypass.
   """
   use BarkparkWeb, :controller
 
@@ -20,27 +22,34 @@ defmodule BarkparkWeb.BulldocsEmailController do
   alias Barkpark.PortableDoc.Render
 
   # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: the body is
-  # `Render.render_document/2` output — the SAME trusted PortableDoc HTML renderer
-  # (block-typed, escaping) that the `/papers/:slug` reader serves, over the same
-  # published-only paper. `slug` selects the record; it is never interpolated into
-  # the response. No new user HTML reaches the wire that the reader wouldn't.
+  # `Render.render_document/2` output or sanitizer-filtered legacy HTML inside
+  # `Render.render_html_document/2`. `slug` selects the record; it is never
+  # interpolated into the response.
   # sobelow_skip ["XSS.SendResp"]
-  def show(conn, %{"slug" => slug}) do
-    case Content.get_public_paper(slug) do
+  def show(conn, %{"slug" => slug} = params) do
+    dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
+    scope = paper_scope(conn, params)
+
+    case fetch_paper(slug, dataset, scope) do
       nil ->
         send_resp(conn, 404, "not found")
 
       paper ->
-        blocks =
-          paper
-          |> paper_blocks()
-          |> Content.Papers.resolve_tasks_in_blocks(email_task_scope(paper))
+        opts = %{style: :email, theme: email_theme(paper)}
 
-        # Thread the paper's workspace THEME IDENTITY (ts-w4e) into the render
-        # opts. The `:theme` opt is the seam the multi-theme emission (w5) reads
-        # to select the palette; with the default (evergreen) theme it is inert,
-        # so the email golden bytes stay locked.
-        html = Render.render_document(blocks, %{style: :email, theme: email_theme(paper)})
+        html =
+          case Content.Papers.reader_source(paper, dataset, scope) do
+            {:blocks, blocks} ->
+              blocks
+              |> Content.Papers.resolve_tasks_in_blocks(email_task_scope(paper))
+              |> Render.render_document(opts)
+
+            {:html, sanitized_html} ->
+              Render.render_html_document(sanitized_html, opts)
+
+            :empty ->
+              Render.render_document([], opts)
+          end
 
         conn
         |> put_resp_content_type("text/html")
@@ -48,8 +57,13 @@ defmodule BarkparkWeb.BulldocsEmailController do
     end
   end
 
-  defp paper_blocks(%{content: %{"blocks" => blocks}}) when is_list(blocks), do: blocks
-  defp paper_blocks(_), do: []
+  defp paper_scope(conn, %{"workspace_slug" => _}),
+    do: BarkparkWeb.ScopeHelpers.scope_opts(conn)
+
+  defp paper_scope(_conn, _params), do: []
+
+  defp fetch_paper(slug, dataset, []), do: Content.get_public_paper(slug, dataset)
+  defp fetch_paper(slug, dataset, scope), do: Content.get_paper(slug, dataset, scope)
 
   # Mirrors BulldocsLive.reader_task_scope/1: the paper's own tenant, falling
   # back to the seeded Default workspace (fail-closed underneath — a nil

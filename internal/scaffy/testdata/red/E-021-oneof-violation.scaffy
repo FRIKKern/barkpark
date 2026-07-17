@@ -1,0 +1,4 @@
+# expect: E-021 3
+DIRECTION "add"
+VARIABLE 1 "Visibility" OPAQUE ONEOF "public", "private" TITLE "Visibility" DESCRIPTION "Schema visibility." EXAMPLES "internal"
+ASSERT FILE "api/priv/plugins/scaffy/schemas/thing.json" CONTAINS "{{.Visibility}}"

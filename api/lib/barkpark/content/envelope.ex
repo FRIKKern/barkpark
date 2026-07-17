@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Envelope do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SchemaDefinition}
   alias Barkpark.Crypto.FieldCipher
+  alias Barkpark.PortableDoc.Projection
 
   @reserved ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
 
@@ -51,6 +52,8 @@ defmodule Barkpark.Content.Envelope do
       (doc.content || %{})
       |> Map.drop(@reserved)
       |> Map.put("title", doc.title)
+
+    {user_fields, derived_from_body?} = promote_paper_blocks(user_fields, doc.type)
 
     Map.merge(user_fields, %{
       "_id" => doc.doc_id,
@@ -62,7 +65,26 @@ defmodule Barkpark.Content.Envelope do
       "_updatedAt" => to_iso8601(doc.updated_at)
     })
     |> redact_by_field_visibility(schema, caller_context, doc_owner_id(doc))
+    |> maybe_drop_orphaned_promotion(derived_from_body?)
   end
+
+  defp promote_paper_blocks(fields, "paper") do
+    case Projection.read_blocks(fields) do
+      blocks when is_list(blocks) ->
+        {Map.put(fields, "blocks", blocks), not is_list(fields["blocks"])}
+
+      _ ->
+        {fields, false}
+    end
+  end
+
+  defp promote_paper_blocks(fields, _type), do: {fields, false}
+
+  defp maybe_drop_orphaned_promotion(fields, true) do
+    if Map.has_key?(fields, "body"), do: fields, else: Map.delete(fields, "blocks")
+  end
+
+  defp maybe_drop_orphaned_promotion(fields, false), do: fields
 
   def render_many(docs, schema \\ nil, caller_context \\ nil),
     do: Enum.map(docs, &render(&1, schema, caller_context))

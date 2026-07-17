@@ -44,6 +44,18 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
       assert Projection.read_blocks(%{"body" => %{"blocks" => nested}}) == nested
     end
 
+    test "accepts a bare body block array" do
+      blocks = [%{"id" => "bare", "type" => "divider"}]
+      assert Projection.read_blocks(%{"body" => blocks}) == blocks
+    end
+
+    test "adapts a non-blank legacy Markdown body" do
+      assert [%{"type" => "heading", "text" => "Legacy"} | _] =
+               Projection.read_blocks(%{"body" => "# Legacy\n\nStill readable."})
+
+      assert Projection.read_blocks(%{"body" => "  \n"}) == nil
+    end
+
     test "returns nil when neither representation contains a block list" do
       assert Projection.read_blocks(%{}) == nil
       assert Projection.read_blocks(%{"blocks" => "invalid", "body" => %{}}) == nil

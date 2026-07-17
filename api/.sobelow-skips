@@ -77,3 +77,4 @@ SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:278,7F2F037
 SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:295,B3AC33
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:319,2C2D0EA
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:308,3288FF6
+XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/controllers/bulldocs_email_controller.ex:56,484AA67
