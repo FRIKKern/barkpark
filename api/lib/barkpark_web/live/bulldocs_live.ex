@@ -32,8 +32,9 @@ defmodule BarkparkWeb.BulldocsLive do
   Layout: the full-document `paper.html.heex` is the ROOT layout (set in the
   router's `:papers` live_session); `mount/3` returns `layout: false`.
 
-  Note on `raw/1`: papers are our own HTML, produced by the paper doc
-  pipeline, so injecting it unescaped is acceptable for personal-local use.
+  Note on `raw/1`: legacy HTML reaches this public/scoped reader only after the
+  paper write pipeline sanitizes it. The reader preserves those stored bytes;
+  it does not treat arbitrary caller-supplied HTML as trusted.
   """
   use BarkparkWeb, :live_view
 

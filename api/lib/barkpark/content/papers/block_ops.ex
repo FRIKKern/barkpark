@@ -15,7 +15,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   `Barkpark.Content.Papers` keeps its public API byte-identical by delegating
   these four functions here. The read-side helpers (`get_paper/3`,
   `resolve_blocks_for_edit/3`) stay in `Papers`; this module calls back to them.
-  Behavior is preserved 1:1 from the former in-module implementation.
+  The extraction preserves the former public API. HTML-only papers additionally
+  fail closed on BlockOps until an explicit revision-fenced conversion exists.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -369,7 +370,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Flow mirrors the former `Barkpark.Papers.apply_block_op/3`:
 
     1. Load the paper. Unknown slug ⇒ `{:error, :not_found}`. An HTML-only
-       paper seeds an empty block list so the first op can append into it.
+       paper is rejected before patching so opaque authored bytes cannot be
+       replaced by an implicit empty block list.
     2. Apply via `Barkpark.PortableDoc.Patch.apply_patch/2`.
     3. Render the affected block + refresh the whole `content["body_html"]`.
     4. Persist `content["blocks"]` + `content["body_html"]` + bumped
@@ -495,7 +497,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Flow:
 
     1. Load the paper (scoped). Unknown slug ⇒ `{:error, :not_found}`. An
-       HTML-only paper seeds an empty block list so the first op can append.
+       HTML-only paper is rejected before the fold, preserving its authored
+       bytes and revision without a write.
     2. Fold the ops through `Barkpark.PortableDoc.Patch.apply_patch/2`,
        collecting each op's affected block id against the intermediate state.
        Halt + return `{:error, reason}` on the first failure (the same tagged
