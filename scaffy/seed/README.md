@@ -47,8 +47,35 @@ bp doc create-or-replace tag \
 bp doc publish tag <name> --yes
 ```
 
-## Verifying byte parity
+## Re-seed after amend (the law) + `--check` audit
 
-After seeding, the served `source` must be byte-identical to the repo file:
-compare `sha256(source)` from the tokenless query with `sha256` of the local
-`.scaffy` for all seven — the seeder prints the local hashes on emission.
+**Any PR that touches `scaffy/commands/*.scaffy` must re-seed the touched
+commands** — the served `command` document's `source` is a byte copy, so an
+un-re-seeded edit silently drifts the catalog from the repo. (This happened:
+the W7 prose-amendment PR merged without re-seeding, and `add-block-type` +
+`classify-block-type` served stale for a tick.) Re-run the seed loop above for
+the edited ids, or the whole loop — it is idempotent.
+
+`--check` is the audit that catches the miss:
+
+```sh
+go run ./scaffy/seed --check
+```
+
+It derives every payload **in memory** (no `out/` writes), fetches the served
+catalog tokenless
+(`GET <server>/v1/data/query/production/command?limit=100` — `server` from
+`~/.config/barkpark/config.json` if present, else `guerrilla.barkpark.cloud`),
+and compares `sha256(source)` per command id. It prints a table
+(`id · local sha8 · served sha8 · MATCH/DRIFT/MISSING/EXTRA`) and **exits
+nonzero on any non-MATCH**:
+
+- **MATCH** — repo byte-identical to served.
+- **DRIFT** — both present, bytes differ → the command was edited without a
+  re-seed. Re-seed it.
+- **MISSING** — in the repo, never seeded → run the seed loop for it.
+- **EXTRA** — served with no local corpus file → a stale document to retire.
+
+It fails **loud** on any network error (unreachable host, non-200, bad JSON): a
+check that cannot reach the catalog exits nonzero, never a false green. Run it
+in seconds from any session, or wire it as an optional CI parity sweep.
