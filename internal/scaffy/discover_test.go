@@ -380,6 +380,102 @@ func TestDiscoverUntilPinsTheWindow(t *testing.T) {
 	}
 }
 
+// seedRecencyRepo builds a history that separates OLD churn from a RECENT
+// decomposition, so the recent column and the DECOMPOSED flag both have
+// hand-checkable answers. History, newest last (until day 2026-06-15 →
+// recent sub-window start 2026-03-17, 90d before):
+//
+//	2026-01-05  create big.ex (20 lines over 3 commits) + p1.txt  (OLD)
+//	2026-01-06  append 5 lines to big.ex                          (OLD)
+//	2026-01-07  append 5 lines to big.ex                          (OLD)
+//	2026-05-01  create calm.ex (3 lines) + p2.txt                 (RECENT)
+//	2026-05-05  append 3 lines to calm.ex                         (RECENT)
+//	2026-05-08  append 3 lines to calm.ex                         (RECENT)
+//	2026-06-15  rewrite big.ex to 2 lines (+2/-20 decomposition)  (RECENT, HEAD)
+func seedRecencyRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	discoverGit(t, root, "2026-01-05", "init", "-q", "-b", "main")
+
+	// big.ex: 10 lines at create, +5, +5 → 20 lines, all in OLD (Jan) commits.
+	big := ""
+	for i := 0; i < 10; i++ {
+		big += "old line\n"
+	}
+	discoverWrite(t, root, "lib/big.ex", big)
+	discoverWrite(t, root, "lib/p1.txt", "p1\n")
+	discoverGit(t, root, "2026-01-05", "add", ".")
+	discoverGit(t, root, "2026-01-05", "commit", "-q", "-m", "big: create (10 lines)")
+	for _, d := range []string{"2026-01-06", "2026-01-07"} {
+		for i := 0; i < 5; i++ {
+			discoverAppend(t, root, "lib/big.ex", "more")
+		}
+		discoverGit(t, root, d, "add", ".")
+		discoverGit(t, root, d, "commit", "-q", "-m", "big: +5 lines")
+	}
+
+	// calm.ex: 3 lines + two 3-line appends, all in the RECENT (May) window,
+	// pure additions → recent == total commits, never decomposed.
+	discoverWrite(t, root, "lib/calm.ex", "a\nb\nc\n")
+	discoverWrite(t, root, "lib/p2.txt", "p2\n")
+	discoverGit(t, root, "2026-05-01", "add", ".")
+	discoverGit(t, root, "2026-05-01", "commit", "-q", "-m", "calm: create (3 lines)")
+	for _, d := range []string{"2026-05-05", "2026-05-08"} {
+		for i := 0; i < 3; i++ {
+			discoverAppend(t, root, "lib/calm.ex", "x")
+		}
+		discoverGit(t, root, d, "add", ".")
+		discoverGit(t, root, d, "commit", "-q", "-m", "calm: +3 lines")
+	}
+
+	// The decomposition: big.ex gutted from 20 lines to 2 in ONE recent commit.
+	discoverWrite(t, root, "lib/big.ex", "brand new\ndelegation head\n")
+	discoverGit(t, root, "2026-06-15", "add", ".")
+	discoverGit(t, root, "2026-06-15", "commit", "-q", "-m", "big: decompose to 2-line head")
+
+	return root
+}
+
+func TestDiscoverRecencyAndDecomposition(t *testing.T) {
+	root := seedRecencyRepo(t)
+	rep, err := Discover(DiscoverOptions{Dir: root, MinSupport: 3, Top: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Recent sub-window: 90 days before the until commit's day, pin-derived.
+	if rep.Window.RecentDays != RecentWindowDays {
+		t.Errorf("recent days = %d, want %d", rep.Window.RecentDays, RecentWindowDays)
+	}
+	if rep.Window.RecentSince != "2026-03-17" {
+		t.Errorf("recent since = %s, want 2026-03-17 (90d before 2026-06-15)", rep.Window.RecentSince)
+	}
+
+	// big.ex: 4 commits total, but only the June decomposition is recent — the
+	// ranked churn is OLD. And it is DECOMPOSED: one commit deleted 20 lines,
+	// far more than half its current 2-line body.
+	big := discoverCandidate(t, rep, "lib/big.ex")
+	if big.Commits != 4 || big.RecentCommits != 1 {
+		t.Errorf("big.ex commits/recent = %d/%d, want 4/1 (churn is pre-decomposition)", big.Commits, big.RecentCommits)
+	}
+	if !big.Decomp.Detected || big.Decomp.MaxDelete != 20 || big.Decomp.CurrentLines != 2 {
+		t.Errorf("big.ex decomposition = %+v, want detected max_delete=20 current_lines=2", big.Decomp)
+	}
+
+	// calm.ex: pure recent additions — recent == total, never decomposed. This
+	// is the control that proves the flag does not fire on ordinary accretion.
+	calm := discoverCandidate(t, rep, "lib/calm.ex")
+	if calm.Commits != 3 || calm.RecentCommits != 3 {
+		t.Errorf("calm.ex commits/recent = %d/%d, want 3/3", calm.Commits, calm.RecentCommits)
+	}
+	if calm.Decomp.Detected {
+		t.Errorf("calm.ex must not be flagged decomposed: %+v", calm.Decomp)
+	}
+	if calm.Decomp.CurrentLines != 9 {
+		t.Errorf("calm.ex current lines = %d, want 9", calm.Decomp.CurrentLines)
+	}
+}
+
 func TestDiscoverNotARepo(t *testing.T) {
 	if _, err := Discover(DiscoverOptions{Dir: t.TempDir()}); err == nil ||
 		!strings.Contains(err.Error(), "not a git repository") {

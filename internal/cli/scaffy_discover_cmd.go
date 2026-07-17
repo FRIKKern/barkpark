@@ -65,19 +65,27 @@ func renderScaffyDiscover(out *writer, rep *scaffy.DiscoverReport) {
 	out.outf("window: %s → %s (%s, commit day %s), --no-merges, %d commits",
 		rep.Window.Since, rep.Window.UntilRev, short, rep.Window.UntilDay, rep.Window.Commits)
 	out.outf("        %s", rep.Window.Derivation)
+	out.outf("        recent sub-window: %s → %s (last %dd before the until day)",
+		rep.Window.RecentSince, rep.Window.UntilDay, rep.Window.RecentDays)
 	out.outf("thresholds: min-support %d, top %d · catalog: %s (%d commands)",
 		rep.MinSupport, rep.Top, rep.CatalogDir, rep.CatalogCommands)
 	out.outf("")
 
 	out.outf("accretion candidates — commits × revolving-cast partners (files existing at the until commit)")
-	out.outf("%4s %8s %9s %6s %7s %6s  %-10s %s", "#", "commits", "partners", "pure", "mostly", "mixed", "coverage", "file")
+	out.outf("  recent = commits in the last %dd · DECOMPOSED = one in-window commit deleted >50%% of the file's current lines", rep.Window.RecentDays)
+	out.outf("%4s %8s %7s %9s %6s %7s %6s  %-10s %s", "#", "commits", "recent", "partners", "pure", "mostly", "mixed", "coverage", "file")
 	for _, c := range rep.Accretion {
 		cov := strings.ToUpper(c.Coverage)
 		if len(c.CoveredBy) > 0 {
 			cov += " (" + strings.Join(c.CoveredBy, ", ") + ")"
 		}
-		out.outf("%4d %8d %9d %6d %7d %6d  %-10s %s",
-			c.Rank, c.Commits, c.Partners, c.Shape.PureAdd, c.Shape.MostlyAdd, c.Shape.Mixed, cov, c.Path)
+		file := c.Path
+		if c.Decomp.Detected {
+			// Loud, evidence-carrying: the ranked churn is mostly pre-decomposition.
+			file += fmt.Sprintf("  ⚠ DECOMPOSED (one commit −%d vs %d lines now)", c.Decomp.MaxDelete, c.Decomp.CurrentLines)
+		}
+		out.outf("%4d %8d %7d %9d %6d %7d %6d  %-10s %s",
+			c.Rank, c.Commits, c.RecentCommits, c.Partners, c.Shape.PureAdd, c.Shape.MostlyAdd, c.Shape.Mixed, cov, file)
 	}
 	if len(rep.Accretion) == 0 {
 		out.outf("  (no files reach min-support %d in the window)", rep.MinSupport)
@@ -182,8 +190,9 @@ read-only, zero tokens. Three passes over batched git-log streams:
   accretion    files with high commit count AND high unique-partner
                diversity (the revolving-cast registry signature), ranked,
                with an uncapped co-change partner count, a ≥2…≥5 support
-               histogram (-o json), and the PURE_ADD/MOSTLY_ADD/MIXED
-               commit-shape split by numstat
+               histogram (-o json), the PURE_ADD/MOSTLY_ADD/MIXED
+               commit-shape split by numstat, a RECENT column (see below),
+               and a DECOMPOSED? flag (see below)
   co-creation  same-commit basename-paired creations per suffix rule
                (foo.ex + foo_test.exs, and the .go/.ts/.tsx pairs),
                strict and loose, with the hottest directories
@@ -191,6 +200,26 @@ read-only, zero tokens. Three passes over batched git-log streams:
                (scaffy/commands/*.scaffy op targets): SERVED when a command
                already mechanizes it, PARTIAL when only an ensure-* command
                plants anchors there, UNSERVED otherwise
+
+Recency honesty (the recent column + DECOMPOSED? flag) — a 12-month aggregate
+hides files whose ranked churn is mostly PRE-decomposition history no longer
+resembling the current file. Two signals expose that divergence in the table:
+
+  recent       commits touching the file inside the last 90 days before the
+               until commit's day (a fixed span, pin-derived like the main
+               window — never wall-clock). recent << commits means the ranked
+               churn is old; the file may already have settled.
+  DECOMPOSED?  set when a SINGLE in-window commit gutted the file. Rule, exact:
+                 deletions > additions  AND  deletions > (current lines)/2
+               where "current lines" is the file's line count at the until
+               commit (one batched cat-file, deterministic). It is the honest
+               approximation of ">50% of the file's lines removed in one
+               commit" — current lines stand in for the pre-commit count, which
+               numstat deltas cannot reconstruct across a partial window. A
+               DECOMPOSED file's high rank is a GHOST: the mined churn predates
+               the split. Reported as a "⚠ DECOMPOSED (one commit −D vs L
+               lines now)" suffix on the file, and decomposition.{detected,
+               max_delete,current_lines} in -o json.
 
 Deterministic by construction: the window derives from the --until commit's
 own commit day (never wall-clock "now"), merge commits are excluded, and all
