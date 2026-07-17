@@ -1,0 +1,98 @@
+COMMAND "Add a Plugin Route" DESCRIPTION "Append one route entry to a plugin's register_routes/1 list -- the in-plugin leg add-plugin-bucket names as separate work, now real. Routes auto-fold into the host router at compile time (BarkparkWeb.Router.Plugins.plugin_routes reads Registry.collect_routes at macro-expansion and inlines one Phoenix AST node per tuple), so this ONE list entry is the whole authoring moment: no router.ex edit, ever. The entry lands at the HEAD of the list -- the house ordering law history itself states ('/tasks/prime must mount BEFORE /tasks/:doc_id or it resolves as a doc id' #2509 events precedent), which makes a new STATIC path correct by construction against any existing dynamic catchall. Controller tuples only: Method is the closed http_verb set (plugin.ex:316); :live specs (module + root_layout, a different tuple shape) are out of scope by name. Targets the six block-list plugins (tickets, quiz, pulse, tasks, bulldocs, github); sheets (rebinds locals before the list) and onixedit (one-line Routes.all() delegate) refuse loud at anchor resolution -- exit 5, nothing written." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "plugins", "scaffold" CONCEPT "plugin-route" VARIANT "elixir" DIRECTION "add" VARIABLES
+  VARIABLE 1 "Plugin" TITLE "The target plugin (block-list shape)" DESCRIPTION "Lowercase plugin name, referenced as {{.plugin}} in the target path api/lib/barkpark/plugins/{{.plugin}}.ex. Must be one of the six BLOCK-LIST plugins whose register_routes/1 opens `do` + `[` on two bare lines (tickets, quiz, pulse, tasks, bulldocs, github -- grep-proven exactly once each; see scope prose). sheets and onixedit carry different shapes and refuse loud at anchor resolution; a typo'd plugin dies earlier still as the engine's typed PathMissingError (exit 4, nothing written)." EXAMPLES "github", "tasks", "tickets"
+  VARIABLE 2 "Method" ONEOF "get", "post", "put", "delete", "patch", "options" TITLE "HTTP verb" DESCRIPTION "The tuple's leading verb atom, spelled {{.method}}. ONEOF genuinely fits: http_verb() is a CLOSED six-atom set (plugin.ex:316 -- :options exists for CORS preflights on :public_api). :live is deliberately NOT in the set -- a LiveView spec takes a module + often root_layout:, a different tuple shape this command does not produce." EXAMPLES "get", "post"
+  VARIABLE 3 "Path" OPAQUE TITLE "Route path (relative, slug-prefixed)" DESCRIPTION "The path string, relative to the bucket's mount and including the plugin slug (the house law: '/github/status' lands at /v1/plugins/github/status under :token, '/tasks/ready' at /v1/tasks/ready under :token_root). May carry :params. OPAQUE: a path literal, never re-cased, exempt from path-casing lints; this file spells it {{.path}}." EXAMPLES "/github/status", "/tickets/stats"
+  VARIABLE 4 "Controller" OPAQUE TITLE "Controller module (fully qualified)" DESCRIPTION "The fully-qualified controller module. Module atoms in route-spec DATA are safe even when the module does not exist in this worktree (the tickets cross-worktree law, tickets.ex:35-41) -- but the TIER ci compile still needs it real before merge. OPAQUE: a dotted module path, never re-cased, one spelling per file." EXAMPLES "BarkparkWeb.GithubStatusController"
+  VARIABLE 5 "ActionName" TITLE "Controller action" DESCRIPTION "PascalCase name of the controller action; its snake spelling {{.action_name}} is the action atom in the tuple, its kebab spelling {{.action-name}} suffixes the mark. Multi-word actions are house-normal (show_own, index_own -- tickets.ex)." EXAMPLES "Status", "ShowOwn", "SyncLog"
+  VARIABLE 6 "AuthBucket" TITLE "Auth bucket the route rides" DESCRIPTION "PascalCase name of the auth tier; its snake spelling {{.auth_bucket}} is the `auth:` atom. An OPEN set by design -- add-plugin-bucket mints new tiers, and an unknown value is silently dropped by the host router's route_in_scope? (the tickets cross-worktree law), so a route can name a bucket a sibling slice mounts. Live values today: token, token_root, api, ops, admin, ticket_key, session_token_root, ingest, public_api, github_webhook." EXAMPLES "Token", "TokenRoot", "TicketKey"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY HEAD-INSERT, NOT TAIL-APPEND — the survey ruling, stated honestly
+# ─────────────────────────────────────────────────────────────────────────────
+# Two idioms compete for a list append:
+#
+#   * REANCHOR comma-list append (add-cli-verb / add-schema-type): REPLACE the
+#     list's LAST element verbatim, re-emit it + comma + the new element. That
+#     needs a byte-exact tail anchor — possible only because those commands PIN
+#     their target (tickets/cli.ex; the three byte-identical minimal-template
+#     plugins). Here the target is VARIABLE and every plugin's tail element is
+#     different bytes, so a fenced tail-REPLACE is impossible by construction.
+#
+#   * Separator-safe bare INSERT (add-sdk-method / the zones): insert after a
+#     never-consumed anchor, payload carries its own separator. The ONLY
+#     byte-uniform anchor across the six block-list plugins is the function
+#     head + list opener — grep-proven exactly once per file, absent from the
+#     two other shapes:
+#
+#         def register_routes(_ctx) do
+#           [
+#
+# The head position is not a compromise — it is the house ordering LAW. Within
+# one plugin+bucket, list order IS match order (the macro inlines tuples in
+# order; Phoenix takes the first match). History's own route adds moved
+# head-ward for exactly this reason: `/tasks/prime` landed above `/tasks/:doc_id`
+# with the in-tree comment "prime must mount BEFORE /tasks/:doc_id or it
+# resolves as a doc id", and `/tasks/events` followed it citing "the prime
+# precedent" (#2509). A NEW STATIC path at the head can never be shadowed by an
+# existing dynamic catchall — correct by construction, the common case. The one
+# hazard the author owns: a new route whose path carries a DYNAMIC segment
+# matches first, so check it does not swallow an existing static sibling under
+# the same prefix (the mirror of the check a hand tail-append owes existing
+# dynamics — no regression vs hand practice). Sibling accretion: the anchor is
+# never consumed (INSERT leaves it intact), so a second run stacks its route
+# directly under the opener, ABOVE earlier plants — newest-first, deterministic,
+# no REANCHOR family needed (the add-schema-type read-pipeline precedent).
+#
+# EMPTY-LIST EDGE, cut with evidence: a plugin with no routes spells it
+# `def register_routes(_ctx), do: []` (github wave-1, #1229) — a one-liner the
+# two-line anchor refuses loud. Hand-open the block-list form first; that
+# upgrade IS the moment the plugin grows its first route. No plugin in the tree
+# spells an empty multi-line list, so the trailing comma below always has a
+# following element to separate.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP — the route tuple, planted at the head of register_routes/1
+# ─────────────────────────────────────────────────────────────────────────────
+# Guard = the tuple's method+path head, payload-derived (D3c): method+path IS
+# route identity, so a re-run skips clean AND a hand-authored duplicate route
+# refuses injection (stronger than guarding the mark line alone). The written
+# tuple is one line; if the substituted values push it past the formatter's
+# margin, `mix format` wraps it exactly as tickets.ex:265-268 shows — the
+# guard's method+path head survives any such wrap.
+IN "api/lib/barkpark/plugins/{{.plugin}}.ex"
+### Plant the {{.method}} {{.path}} route at the head of register_routes/1
+INSERT AFTER FIRST
+::: register_routes list opener :::
+  def register_routes(_ctx) do
+    [
+::: register_routes list opener :::
+WITH
+::: {{.plugin}} {{.method}} route tuple :::
+      # scaffy:add-plugin-route {{.plugin}} {{.method}} {{.path}} MARK:plugin-route-{{.plugin}}-{{.method}}-{{.action-name}}
+      {:{{.method}}, "{{.path}}", {{.Controller}}, :{{.action_name}}, auth: :{{.auth_bucket}}},
+::: {{.plugin}} {{.method}} route tuple :::
+MARK "plugin-route-{{.plugin}}-{{.method}}-{{.action-name}}"
+ASLONG FILE DONT CONTAIN "{:{{.method}}, \"{{.path}}\""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# Both grep-shaped closes are verbatim substrings the op writes (A4,
+# guard-consistent with the ASLONG). The compile proof is TIER ci (A2: every
+# mix gate compiles the world; Elixir suites are not local-safe).
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "MARK:plugin-route-{{.plugin}}-{{.method}}-{{.action-name}}"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "{{.Controller}}, :{{.action_name}}, auth: :{{.auth_bucket}}"
+ASSERT CMD "cd api && mix compile" TIER ci
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OBSERVED: the dev-loop recompile gotcha (not a command step — a footgun map)
+# ─────────────────────────────────────────────────────────────────────────────
+# Mix cannot see the router's dependency on register_routes/1 (the plugin
+# module is reached dynamically through the Registry), so after this op a plain
+# `mix compile` recompiles the plugin but NOT the router — the manifest shows
+# the change while the route 404s. Force it in dev:
+#
+#     rm _build/dev/lib/barkpark/ebin/Elixir.BarkparkWeb.Router.beam && mix compile
+#
+# (router/plugins.ex:100-116 states the law; CI and `make rebuild` compile from
+# clean and never hit it.)
