@@ -4774,6 +4774,23 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Update a site's OPERATOR-MUTABLE settings — the narrow set that is safe to
+  change between deploys: `theme` (the deploy-pinned palette; takes effect on
+  the next build) and `doc_type` (the content type the build features). Name,
+  slug, kind, framework and template stay immutable here — they index
+  infrastructure (routes, port pairs, materialized source trees).
+
+  search-template W8: theme pinning on live sites previously required psql on
+  the CP db — an operator gap, not perfection.
+  """
+  @spec update_site_settings(Site.t(), map()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def update_site_settings(%Site{} = site, attrs) when is_map(attrs) do
+    site
+    |> Site.settings_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
   Repoint a Site's live deployment pointer — the static ROLLBACK's flip (charter
   D5). The box has already repointed its `current` symlink; this makes the control
   plane's view agree immediately, so `bp cloud site status` never reports the

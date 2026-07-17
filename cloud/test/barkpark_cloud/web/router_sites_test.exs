@@ -1119,4 +1119,52 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert d["git_ref"] == "main"
     end
   end
+
+  describe "PATCH /v1/sites/:id (operator settings, search-template W8)" do
+    test "updates theme + doc_type; infrastructural fields stay immutable" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      tok = login_token(user)
+
+      conn =
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{theme: "ember", doc_type: "paper", slug: "evil"},
+          tok
+        )
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["site"]["theme"] == "ember"
+      assert body["note"] =~ "next deploy"
+
+      reloaded = Registry.get_site(site.id)
+      assert reloaded.theme == "ember"
+      assert reloaded.doc_type == "paper"
+      # slug ignored — not in the mutable set
+      assert reloaded.slug == site.slug
+    end
+
+    test "an unknown theme is a 422 invalid_settings" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{theme: "vaporwave"}, login_token(user))
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid_settings"
+    end
+
+    test "an empty body is an honest 422 naming the mutable fields" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{}, login_token(user))
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "nothing_to_update"
+    end
+  end
 end

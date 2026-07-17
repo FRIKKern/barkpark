@@ -4816,6 +4816,41 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # PATCH /v1/sites/:id {theme?, doc_type?} → 200 {site}. The operator-settings
+  # update (search-template W8): ONLY the between-deploys-safe fields — theme
+  # (deploy-pinned palette, next build) and doc_type (featured content type).
+  # Everything infrastructural (name/slug/kind/framework/template/ports) stays
+  # immutable. Changes take effect on the NEXT deploy; the response says so.
+  patch "/v1/sites/:id" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      attrs =
+        conn.body_params
+        |> Map.take(["theme", "doc_type"])
+        |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
+
+      if attrs == %{} do
+        json(conn, 422, %{
+          error: "nothing_to_update",
+          detail: "mutable fields: theme (palette), doc_type (featured content type)"
+        })
+      else
+        case Registry.update_site_settings(site, attrs) do
+          {:ok, updated} ->
+            push_event(updated.team_id, "sites")
+            bp = Registry.get_barkpark(updated.barkpark_id)
+
+            json(conn, 200, %{
+              site: site_json(updated, bp),
+              note: "settings apply on the next deploy"
+            })
+
+          {:error, cs} ->
+            json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
+        end
+      end
+    end)
+  end
+
   # POST /v1/sites/:id/deploy {git_ref?, artifact_url?} → 201 {deployment}.
   # Enqueues a Deployment with status:"queued"; the off-box builder (P2) polls
   # for queued rows and walks them through building → pushing → live.
@@ -8360,6 +8395,9 @@ defmodule BarkparkCloud.Web.Router do
       slug: s.slug,
       kind: s.kind,
       framework: s.framework,
+      # search-template W2/W6/W8: the starter + palette this site deploys with.
+      template: s.template,
+      theme: s.theme,
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
