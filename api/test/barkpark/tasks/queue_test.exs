@@ -523,20 +523,33 @@ defmodule Barkpark.Tasks.QueueTest do
       assert done_cte
       assert unsatisfied_cte
 
-      assert Enum.any?(plan_nodes(done_cte), fn node ->
-               node["Relation Name"] == "documents" and node["Actual Loops"] == 1
-             end)
+      # The done-task CTE reads `documents` — assert it does so at most once (not
+      # per-row), same plan-agnostic bound as the CTE-scan check below rather
+      # than pinning `== 1` (a pruned/materialized plan reports 0 and flaked).
+      done_doc_scans =
+        Enum.filter(plan_nodes(done_cte), &(&1["Relation Name"] == "documents"))
+
+      assert done_doc_scans != []
+
+      assert Enum.all?(done_doc_scans, &(&1["Actual Loops"] <= 1)),
+             "done-task documents scan looped per row (loops: #{inspect(Enum.map(done_doc_scans, & &1["Actual Loops"]))})"
 
       # The property under test is ONE-TIME consumption of the done-task CTE —
-      # never a per-row re-scan. Assert that behavior directly instead of
-      # pinning the planner's join algorithm (environment-sensitive).
+      # never a per-ROW re-scan. Assert THAT directly, not the exact loop count:
+      # a runner whose planner prunes a scan reports `Actual Loops == 0`, which
+      # is STILL not a per-row rescan (that would be ~row_count, 200 here) — so
+      # pinning `== 1` flaked on plan variance while proving nothing extra. The
+      # honest bound is `<= 1` per scan node: 0 or 1 = consumed at most once; a
+      # genuine per-row regression (nested-loop inner side) shows ~200 and fails.
       done_cte_scans =
         Enum.filter(plan_nodes(unsatisfied_cte), fn node ->
           node["Node Type"] == "CTE Scan" and node["CTE Name"] == "ready_done_tasks"
         end)
 
       assert done_cte_scans != []
-      assert Enum.all?(done_cte_scans, &(&1["Actual Loops"] == 1))
+
+      assert Enum.all?(done_cte_scans, &(&1["Actual Loops"] <= 1)),
+             "done-task CTE re-scanned per row (loops: #{inspect(Enum.map(done_cte_scans, & &1["Actual Loops"]))})"
     end
   end
 end
