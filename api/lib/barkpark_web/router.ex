@@ -2205,6 +2205,21 @@ defmodule BarkparkWeb.Router do
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
   end
 
+  # Scoped run-secrets (admin) — the per-workspace tier of the encrypted
+  # store (connectors D197/D199). Same SecretController as the flat
+  # /v1/secrets route; the controller keys the tier off the ROUTE
+  # (path_params carries :workspace_slug here) and threads the resolved
+  # workspace id — a workspace admin manages ONLY their workspace's scoped
+  # secrets, never the global tier.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    get("/v1/secrets", SecretController, :index)
+    get("/v1/secrets/:name", SecretController, :show)
+    put("/v1/secrets/:name", SecretController, :update)
+    delete("/v1/secrets/:name", SecretController, :delete)
+  end
+
   # Scoped v1 media — admin search ops.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
