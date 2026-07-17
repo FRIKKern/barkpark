@@ -438,6 +438,20 @@ if [ "$MODE" = selftest ]; then
 #!/usr/bin/env bash
 echo "npm $*" >> ./.npm-calls
 [ "${1:-}" = ci ] && exit 0
+# Slow-build fixture (the re-attach case): emit a couple of RAW output lines the
+# durable log must capture, record THIS process's own pid (correct here — a real
+# subprocess, not a backgrounded function, so $$ is us), then exec into a long
+# sleep so the build is still in flight when the caller kills the top-level engine.
+if [ -f ./.slow-build ]; then
+  echo "building the site (slow-build fixture)"
+  echo "compiling modules..."
+  echo $$ > ./.slow-build-pid
+  # Stay in flight until the caller removes the sentinel — leak-proof, no reliance
+  # on a signal reaching this (soon orphaned) process. Hard cap ~30s so a botched
+  # test can never wedge CI.
+  n=0; while [ -f ./.slow-build ] && [ "$n" -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
+  exit 0
+fi
 if [ -f ./.fail-build ]; then
   echo "npm ERR! code ELIFECYCLE" >&2
   echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
@@ -592,6 +606,49 @@ FAKENPM
     rc="$(BARKPARK_SITE_RETAIN=1 e2e_deploy e5)"
     check "retain=1 deploy exit 0"             [ "$rc" = 0 ]
     check "RETIRE names a real removal"        grep -qE '^BPSTAGE name=RETIRE status=ok build_id=e5 detail="removed [1-9]' "$E2E/out.log"
+
+    echo "[selftest] e2e: an ORPHANED build survives a mid-build kill (durable file contract)"
+    # The re-attach contract: DeployRunner names a persistent status fold + a raw
+    # build log; emit() appends every BPSTAGE line to the fold, and BUILD tees the
+    # child's RAW stdout/stderr to the log. When barkpark.service restarts, the BEAM
+    # parent dies but the build (in the outer transient unit) keeps running. Model
+    # it: run the engine in the BACKGROUND with the two files set, wait until the
+    # build is mid-flight, then kill ONLY the top-level engine pid — captured via
+    # the caller's $! (never $$ inside a backgrounded function, which is the parent
+    # shell's pid on bash 3.2). Assert the on-disk fold is a truthful PARTIAL and
+    # the raw log survived, readable with zero live process.
+    R_STATUS="$E2E/reattach.status"; R_LOG="$E2E/reattach.rawlog"
+    rm -f "$R_STATUS" "$R_LOG" "$SRC/.slow-build-pid"
+    : > "$SRC/.slow-build"
+    env PATH="$FAKEBIN:$PATH" \
+      SITE_SLUG=reattach BUILD_ID=re1 CONTENT_REV=rev-1 SITE_SRC="$SRC" \
+      BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+      BARKPARK_SITE_DEPLOY_LOCK="$E2E/reattach.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+      BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_STATUS_FILE="$R_STATUS" BARKPARK_SITE_LOG_FILE="$R_LOG" \
+      bash "$SELF" > "$E2E/reattach.out" 2>&1 &
+    R_ENGINE_PID=$!
+    # Wait until the slow build is in flight (npm run build wrote its pid file).
+    for _i in $(seq 1 100); do [ -f "$SRC/.slow-build-pid" ] && break; sleep 0.1; done
+    # Kill ONLY the top-level engine (SIGKILL, not the process group) — the build
+    # pipeline orphans and keeps running, exactly as under a service restart.
+    kill -9 "$R_ENGINE_PID" 2>/dev/null || true
+    wait "$R_ENGINE_PID" 2>/dev/null || true
+    # Signal the orphaned build to exit (leak-proof — the reparented loop notices
+    # the sentinel is gone within 0.1s), best-effort kill its pid too, then let the
+    # now-EOF'd tee flush the raw log to disk before we assert on it.
+    rm -f "$SRC/.slow-build"
+    [ -f "$SRC/.slow-build-pid" ] && kill -9 "$(cat "$SRC/.slow-build-pid")" 2>/dev/null
+    for _i in $(seq 1 50); do [ -s "$R_LOG" ] && break; sleep 0.1; done
+    rm -f "$SRC/.slow-build-pid"
+    check "reattach: status fold recorded BUILD started (durable, survived the kill)" \
+      grep -q '^BPSTAGE name=BUILD status=started' "$R_STATUS"
+    check "reattach: the fold is a truthful PARTIAL (no SWITCH stage reached)" \
+      sh -c "! grep -q '^BPSTAGE name=SWITCH' '$R_STATUS'"
+    check "reattach: raw build log persisted (NOT deleted), readable with no live process" \
+      test -s "$R_LOG"
+    check "reattach: the log carries RAW child output, not BPSTAGE lines" \
+      sh -c "grep -q 'building the site' '$R_LOG' && ! grep -q '^BPSTAGE' '$R_LOG'"
   fi
 
   echo ""
@@ -700,9 +757,16 @@ else
 fi
 
 # ---- BUILD -----------------------------------------------------------------
-# Serialized (flock, above) + capped (systemd-run scope) + env-SCRUBBED.  Only
-# the BUILD_ALLOW vars reach npm/Vite; ambient BARKPARK_TOKEN cannot shadow the
-# per-site token (D7).  cwd is inherited into the scrubbed child, so we cd first.
+# Serialized (flock, above).  Resource-capped + env-scrubbed OUTSIDE this script
+# now: DeployRunner launches the whole engine inside an outer transient systemd
+# unit that carries MemoryMax/CPUQuota (slice stw6-deployrunner-reattach), and it
+# hands the engine an ALREADY-SCRUBBED environment (the D7 BUILD_ALLOW contract,
+# minus the ambient-shadow the caller strips).  So the build no longer self-caps
+# with an inner `systemd-run --scope`, and it NO LONGER rebuilds its env from
+# scratch with `env -i VAR=value` — that put BARKPARK_TOKEN=<secret> on the argv,
+# a ps/proc leak proven live.  The build simply INHERITS the script's environment
+# (cwd + the exported BARKPARK_* build vars below); NO secret rides any child
+# argv.  cwd is inherited into the child, so we cd first.
 
 # The most useful line of a failed build, for the BUILD failed stage line.  The
 # real reason (`FATAL: 401 Unauthorized … the site read token is invalid`) used
@@ -728,50 +792,52 @@ if [ "$SKIP_BUILD" = 0 ]; then
     log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
 
-  # Build the scrubbed env allow-list.  BUILD_ID + base path + content rev are
-  # exported under their BARKPARK_ build-var names so the adapter can bake the
-  # bp-build-id / bp-content-rev markers HEALTH asserts on.
+  # BUILD_ID + base path + content rev are EXPORTED under their BARKPARK_ build-var
+  # names (inherited by the child, never on its argv) so the adapter can bake the
+  # bp-build-id / bp-content-rev markers HEALTH asserts on.  The rest of the D7
+  # BUILD_ALLOW set already rides the script's (caller-scrubbed) environment and is
+  # inherited the same way — no `env -i VAR=value` reconstruction, so no secret
+  # leaks onto a process argv.
   export BARKPARK_BUILD_ID="$BUILD_ID"
   export BARKPARK_SITE_BASE="/sites/$SITE_SLUG/"
   [ -n "${CONTENT_REV:-}" ] && export BARKPARK_CONTENT_REV="$CONTENT_REV"
-  scrub=(env -i "PATH=$PATH" "HOME=${HOME:-/root}" NODE_ENV=production CI=1)
-  for v in "${BUILD_ALLOW[@]}"; do
-    [ -n "${!v:-}" ] && scrub+=("$v=${!v}")
-  done
 
-  log "BUILD: npm ci && npm run build in $SITE_SRC (scrubbed env, capped)"
+  log "BUILD: npm ci && npm run build in $SITE_SRC (inherited scrubbed env)"
   cd "$SITE_SRC" || {
     DETAIL="cannot cd into $SITE_SRC — the dir exists but is not enterable; check its permissions/ownership (ls -ld) and that no symlink on the path is broken"
     log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 10
   }
-  # systemd-run --scope caps memory+cpu and inherits cwd; env -i inside scrubs.
-  # On a non-systemd box (dev) run the scrubbed env directly — capping is
-  # best-effort, the scrub is not.
-  if command -v systemd-run >/dev/null 2>&1 && [ "${BARKPARK_SITE_NO_CAP:-0}" != 1 ]; then
-    cap=(systemd-run --scope --quiet --collect -p MemoryMax=1500M -p CPUQuota=150%)
-  else
-    log "BUILD: systemd-run unavailable (or capping disabled) — running uncapped, still scrubbed"
-    # `command` is a no-op prefix, NOT an empty array: expanding an empty array
-    # under `set -u` is an "unbound variable" fatal on bash 3.2 (stock macOS),
-    # which is exactly the shell the self-test drives this path with.
-    cap=(command)
+  # No inner resource cap: the OUTER transient unit DeployRunner launches carries
+  # MemoryMax/CPUQuota now (slice stw6-deployrunner-reattach).  BARKPARK_SITE_NO_CAP
+  # is retained as a documented dev/selftest knob — the inner `systemd-run --scope`
+  # cap is gone, so it is a no-op today, logged for clarity.
+  if [ "${BARKPARK_SITE_NO_CAP:-0}" = 1 ]; then
+    log "BUILD: BARKPARK_SITE_NO_CAP set — no inner cap (the outer transient unit caps in prod)"
   fi
-  # The build's stdout AND stderr are merged onto OUR stdout (and tee'd to a log
-  # we mine for the failure reason) ON PURPOSE: the machine stage lines and the
-  # real explanation must reach the same stream, or a stdout-only caller can
-  # report a failure it cannot explain.  PIPESTATUS, never $?, is the build's own
-  # exit code — tee always succeeds.
-  BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/site-build.XXXXXX")"
-  "${cap[@]}" "${scrub[@]}" bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
+  # The build's stdout AND stderr are merged onto OUR stdout AND tee'd to a
+  # PERSISTENT log the caller (DeployRunner) names via BARKPARK_SITE_LOG_FILE, so
+  # an orphaned build's RAW output survives its parent (reason_tail reads the last
+  # non-BPSTAGE lines from it on re-attach).  Only BPSTAGE lines go to the status
+  # fold; this file is raw child output ONLY.  When the caller names no file we
+  # fall back to a mktemp (dev/selftest standalone) and delete it as before.  We
+  # NEVER delete a caller-named log.  PIPESTATUS, never $?, is the build's own exit
+  # code — tee always succeeds.
+  if [ -n "${BARKPARK_SITE_LOG_FILE:-}" ]; then
+    BUILD_LOG="$BARKPARK_SITE_LOG_FILE"; BUILD_LOG_KEEP=1
+    mkdir -p "$(dirname "$BUILD_LOG")" 2>/dev/null || true
+  else
+    BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/site-build.XXXXXX")"; BUILD_LOG_KEEP=0
+  fi
+  NODE_ENV=production CI=1 bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
   build_rc="${PIPESTATUS[0]}"
   if [ "$build_rc" -ne 0 ]; then
     reason="$(build_failure_reason "$BUILD_LOG")"
-    rm -f "$BUILD_LOG"
+    [ "$BUILD_LOG_KEEP" = 1 ] || rm -f "$BUILD_LOG"
     log "BUILD failed (exit $build_rc) for '$SITE_SLUG' build $BUILD_ID — live release untouched: $reason"
     emit BUILD failed "$reason"
     exit 12
   fi
-  rm -f "$BUILD_LOG"
+  [ "$BUILD_LOG_KEEP" = 1 ] || rm -f "$BUILD_LOG"
   emit BUILD ok "npm ci && npm run build"
 
   # ---- STAGE — copy ONLY dist/ (D8) ---------------------------------------
