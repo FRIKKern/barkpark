@@ -203,7 +203,9 @@ export const showcaseContent: Block[] = [
     "type": "diagram"
   },
   {
-    "text": "Parity starter text",
+    "diff": "diff --git a/lib/render/compose.ex b/lib/render/compose.ex\nindex 3f9c2d1..8a41b7e 100644\n--- a/lib/render/compose.ex\n+++ b/lib/render/compose.ex\n@@ -1,4 +1,5 @@\n defmodule Render.Compose do\n-  def compose(block), do: starter(block)\n+  def compose(block), do: grown(block)\n+  defp grown(block), do: block\n end",
+    "file": "lib/render/compose.ex",
+    "lang": "elixir",
     "type": "diff"
   },
   {
@@ -227,7 +229,8 @@ export const showcaseContent: Block[] = [
     "type": "figure"
   },
   {
-    "text": "Parity starter text",
+    "legend": "● created · ○ injected · ✕ removed",
+    "text": "api/lib/barkpark/portable_doc/render/\n├── components.ex ● diff_html/1 + filetree_html/1\n├── compose.ex ○ grew the diff + filetree clauses\n└── starter_stub.ex ✕ removed",
     "type": "filetree"
   },
   {

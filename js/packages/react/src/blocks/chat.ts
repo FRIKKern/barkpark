@@ -18,13 +18,13 @@ type Emit = (block: Block) => string
 const MAX_DIFF_LINES = 2000
 const MAX_DIFF_CELLS = 4_000_000
 
-interface DiffLine {
+export interface DiffLine {
   op: string
   text: string
 }
 
 // split on "\n", drop a single trailing empty line; nil/"" → [].
-function splitLines(s: unknown): string[] {
+export function splitLines(s: unknown): string[] {
   if (typeof s !== 'string' || s === '') return []
   const arr = s.split('\n')
   if (arr.length > 0 && arr[arr.length - 1] === '') arr.pop()
@@ -122,9 +122,9 @@ function chatDiffLineMaps(input: unknown): DiffLine[] {
 
 /* ── chat-tool-diff ────────────────────────────────────────────────────────── */
 
-const CHAT_DIFF_BUDGET = 20
+export const CHAT_DIFF_BUDGET = 20
 
-function rowStyle(op: string): string {
+export function rowStyle(op: string): string {
   switch (op) {
     case '+':
       return 'color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;'
@@ -137,7 +137,7 @@ function rowStyle(op: string): string {
   }
 }
 
-function rowPrefix(op: string): string {
+export function rowPrefix(op: string): string {
   switch (op) {
     case '+':
       return '+ '
@@ -150,7 +150,7 @@ function rowPrefix(op: string): string {
   }
 }
 
-function diffRowsHtml(lines: DiffLine[]): string {
+export function diffRowsHtml(lines: DiffLine[]): string {
   return lines
     .map((l) => `<div style="${rowStyle(l.op)}">${rowPrefix(l.op)}${escapeHtml(l.text)}</div>`)
     .join('')
