@@ -297,6 +297,17 @@ defmodule BarkparkCloud.Registry.Site do
     )
   end
 
+  @doc """
+  The operator-settings changeset (search-template W8): ONLY the fields safe to
+  change between deploys. Same closed-set validations as create.
+  """
+  def settings_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:theme, :doc_type])
+    |> validate_theme()
+    |> validate_length(:doc_type, min: 1, max: 100)
+  end
+
   defp validate_github_repo(changeset) do
     case get_change(changeset, :github_repo) do
       nil ->
