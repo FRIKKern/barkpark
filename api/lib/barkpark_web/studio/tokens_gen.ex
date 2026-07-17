@@ -37,7 +37,13 @@ defmodule BarkparkWeb.Studio.TokensGen do
   # NOT a CSS role. partial_outage is an out-of-model tone between warn-amber
   # (degraded) and danger-red (major_outage): the severity distinction must
   # survive, so it is NOT recolored onto --warn/--danger.
-  def status_health, do: %{operational: "#16a34a", degraded: "#d97706", partial_outage: "#ea580c", major_outage: "#dc2626"}
+  def status_health,
+    do: %{
+      operational: "#16a34a",
+      degraded: "#d97706",
+      partial_outage: "#ea580c",
+      major_outage: "#dc2626"
+    }
 
   # Neutral gray fallback for an unrecognised / missing status.
   def status_health_unknown, do: "#6b7280"
