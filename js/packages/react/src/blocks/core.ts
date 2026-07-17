@@ -22,6 +22,7 @@ import {
   STATUS_ROLES,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
+import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
 
 type Emit = (block: Block) => string
 
@@ -45,15 +46,131 @@ const heading: Emit = (b) => {
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
-// scaffy:add-block-type Filetree MARK:js-emitter-filetree
-// Mirrors compose_block(filetree): starter emit — `text` escaped into
-// the bp-filetree wrapper, byte-identical to the Elixir _raw clause.
-const filetree: Emit = (b) => `<div class="bp-filetree">${escapeHtml(str(b.text))}</div>`
+/* ── code-story blocks: diff + filetree (components.ex, W7 D75–D78) ────────── */
+//
+// The verbatim-text front-end over the SHARED chat diff-row back-end (D76):
+// rows render through chat.ts diffRowsHtml/rowStyle/rowPrefix and fold at the
+// same CHAT_DIFF_BUDGET. Byte-identical to Components.diff_html/1 +
+// filetree_html/1.
+
+// Order matters: '+++ '/'--- ' match before the bare '+'/'-' ops (D77: git file
+// headers never count as +/- rows; each '+++' transition becomes a bold path
+// sub-header; '@@' hunk headers stay verbatim dim context rows).
+function diffLineRow(line: string): DiffLine[] {
+  if (line.startsWith('+++ ')) {
+    const path = line.slice(4)
+    return [{ op: 'file', text: path.startsWith('b/') ? path.slice(2) : path }]
+  }
+  if (line.startsWith('--- ')) return []
+  if (line.startsWith('diff --git ')) return []
+  if (line.startsWith('index ')) return []
+  if (line.startsWith('@@')) return [{ op: '', text: line }]
+  if (line.startsWith('+')) return [{ op: '+', text: line.slice(1) }]
+  if (line.startsWith('-')) return [{ op: '-', text: line.slice(1) }]
+  if (line.startsWith(' ')) return [{ op: '', text: line.slice(1) }]
+  return [{ op: '', text: line }]
+}
+
+// Shared rows via diffRowsHtml; only the diff-only bold path sub-header is
+// emitted here (twin of components.ex diff_section_rows_html/1).
+function diffSectionRowsHtml(rows: DiffLine[]): string {
+  return rows
+    .map((row) =>
+      row.op === 'file'
+        ? `<div style="font-weight: 600; margin: 4px 0 1px; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(row.text)}</div>`
+        : diffRowsHtml([row]),
+    )
+    .join('')
+}
 
 // scaffy:add-block-type Diff MARK:js-emitter-diff
-// Mirrors compose_block(diff): starter emit — `text` escaped into
-// the bp-diff wrapper, byte-identical to the Elixir _raw clause.
-const diff: Emit = (b) => `<div class="bp-diff">${escapeHtml(str(b.text))}</div>`
+// Mirrors compose_block(diff) → Components.diff_html/1 (W7 grow): the verbatim
+// unified-diff `diff` attr parsed at render time (D75), optional file/lang
+// metadata leading the +N −M tally, details-fold past CHAT_DIFF_BUDGET rows.
+const diff: Emit = (b) => {
+  const rows = splitLines(str(b.diff)).flatMap(diffLineRow)
+  const added = rows.filter((r) => r.op === '+').length
+  const removed = rows.filter((r) => r.op === '-').length
+  const head = rows.slice(0, CHAT_DIFF_BUDGET)
+  const rest = rows.slice(CHAT_DIFF_BUDGET)
+
+  const file = str(b.file)
+  const lang = str(b.lang)
+  const lead = [
+    file === '' ? '' : `<span style="font-weight: 600;">${escapeHtml(file)}</span>`,
+    lang === '' ? '' : escapeHtml(lang),
+  ]
+    .filter((p) => p !== '')
+    .join(' · ')
+  const leadHtml = lead === '' ? '' : `${lead} · `
+
+  const counts =
+    `<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">` +
+    leadHtml +
+    `<span style="color: var(--ok);">+${added}</span> ` +
+    `<span style="color: var(--danger);">−${removed}</span></div>`
+
+  let body: string
+  if (rows.length > CHAT_DIFF_BUDGET) {
+    const overflow = rows.length - CHAT_DIFF_BUDGET
+    body =
+      `<details><summary style="cursor: pointer; list-style: none;">` +
+      diffSectionRowsHtml(head) +
+      `<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +${overflow} more lines</div>` +
+      `</summary>${diffSectionRowsHtml(rest)}</details>`
+  } else {
+    body = diffSectionRowsHtml(head)
+  }
+
+  return (
+    `<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    counts +
+    body +
+    `</div>`
+  )
+}
+
+// The D78 annotation markers with their evergreen token colors (glyph is the
+// semantic carrier; the legend row disambiguates locally).
+const FILETREE_MARKERS: Array<[string, string]> = [
+  [' ● ', 'var(--ok)'],
+  [' ○ ', 'var(--fg-dim)'],
+  [' ✕ ', 'var(--danger)'],
+]
+
+function filetreeRowHtml(line: string): string {
+  let hit: { idx: number; glyph: string; color: string } | null = null
+  for (const [glyph, color] of FILETREE_MARKERS) {
+    const idx = line.indexOf(glyph)
+    if (idx !== -1 && (hit === null || idx < hit.idx)) hit = { idx, glyph, color }
+  }
+  if (hit === null) return `<div style="white-space: pre;">${escapeHtml(line)}</div>`
+  const path = line.slice(0, hit.idx)
+  const note = hit.glyph + line.slice(hit.idx + hit.glyph.length)
+  return (
+    `<div style="white-space: pre;">${escapeHtml(path)}` +
+    `<span class="bp-filetree-note" style="color: ${hit.color};">${escapeHtml(note)}</span></div>`
+  )
+}
+
+// scaffy:add-block-type Filetree MARK:js-emitter-filetree
+// Mirrors compose_block(filetree) → Components.filetree_html/1 (W7 grow):
+// verbatim tree lines (white-space: pre), trailing ` ● `/` ○ `/` ✕ `
+// annotation spans, optional dim `legend` row (D78).
+const filetree: Emit = (b) => {
+  const rows = splitLines(str(b.text)).map(filetreeRowHtml).join('')
+  const legend = str(b.legend)
+  const legendHtml =
+    legend === ''
+      ? ''
+      : `<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">${escapeHtml(legend)}</div>`
+  return (
+    `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    rows +
+    legendHtml +
+    `</div>`
+  )
+}
 
 const byline: Emit = (b) => {
   const items = b.items

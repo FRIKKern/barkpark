@@ -213,9 +213,11 @@ function blockText(b: Block): string {
       return joinBlocks([str(b.title), proseContent(b)])
     case 'code':
       return str(b.value)
-    // ── code-story blocks (starter parity: the `text` attr the scaffold wraps;
-    //    grow slices refine to the diff body / tree lines) ───────────────────
+    // ── code-story blocks (W7 grow: `diff` carries the verbatim unified-diff
+    //    text in its `diff` attr (D75); `filetree` keeps the tree lines in
+    //    `text` (D78) — both read as authored text, the `code` precedent) ─────
     case 'diff':
+      return str(b.diff)
     case 'filetree':
       return str(b.text)
     // ── annotation rows ───────────────────────────────────────────────────

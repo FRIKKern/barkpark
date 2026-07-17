@@ -48,9 +48,24 @@ export const PROSE_GOLDEN: Record<string, string> = {
   columns: 'Left column body.\n\nRight column body.',
   section: 'Alpha cell\n\nBeta cell',
   terminal: 'Inside the frame.',
-  // code-story blocks (starter parity: the `text` attr the scaffold wraps)
-  diff: 'Parity starter text',
-  filetree: 'Parity starter text',
+  // code-story blocks (W7 grow: diff reads its verbatim `diff` attr (D75),
+  // filetree its verbatim `text` tree lines (D78) — the `code` precedent)
+  diff:
+    'diff --git a/lib/render/compose.ex b/lib/render/compose.ex\n' +
+    'index 3f9c2d1..8a41b7e 100644\n' +
+    '--- a/lib/render/compose.ex\n' +
+    '+++ b/lib/render/compose.ex\n' +
+    '@@ -1,4 +1,5 @@\n' +
+    ' defmodule Render.Compose do\n' +
+    '-  def compose(block), do: starter(block)\n' +
+    '+  def compose(block), do: grown(block)\n' +
+    '+  defp grown(block), do: block\n' +
+    ' end',
+  filetree:
+    'api/lib/barkpark/portable_doc/render/\n' +
+    '├── components.ex ● diff_html/1 + filetree_html/1\n' +
+    '├── compose.ex ○ grew the diff + filetree clauses\n' +
+    '└── starter_stub.ex ✕ removed',
 }
 
 /**

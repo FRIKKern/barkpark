@@ -1187,39 +1187,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   # scaffy:add-block-type Filetree MARK:ex-compose-filetree
-  # Starter compose for `filetree`: the block's `text` attr escaped into
-  # its bp-filetree wrapper through the `_raw` pre-rendered-HTML hatch
-  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
-  # clauses use). Every style gets the same div for now; replace with a real
-  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
-  # as the block grows semantics. `text` goes through the tolerant stringish/1
-  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
-  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # `filetree` (W7 grow, charter D78): verbatim tree lines with annotation
+  # spans + the optional legend row — Components.filetree_html/1 through the
+  # `_raw` pre-rendered-HTML hatch. Style-invariant single clause like
+  # chat-tool-diff (inline-token mono rendering reads identically in email).
   def compose_block(%{"type" => "filetree"} = b, _style) do
-    text = stringish(Map.get(b, "text", ""))
-
-    %{
-      "kind" => "_raw",
-      "html" => ~s(<div class="bp-filetree">) <> Util.escape_html(text) <> ~s(</div>)
-    }
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b)}
   end
 
   # scaffy:add-block-type Diff MARK:ex-compose-diff
-  # Starter compose for `diff`: the block's `text` attr escaped into
-  # its bp-diff wrapper through the `_raw` pre-rendered-HTML hatch
-  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
-  # clauses use). Every style gets the same div for now; replace with a real
-  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
-  # as the block grows semantics. `text` goes through the tolerant stringish/1
-  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
-  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # `diff` (W7 grow, charter D75/D77): the verbatim unified-diff text parsed at
+  # render time into the SHARED chat diff-row vocabulary (D76) —
+  # Components.diff_html/1 through the `_raw` pre-rendered-HTML hatch.
+  # Style-invariant single clause like chat-tool-diff (inline-token mono
+  # rendering reads identically in email).
   def compose_block(%{"type" => "diff"} = b, _style) do
-    text = stringish(Map.get(b, "text", ""))
-
-    %{
-      "kind" => "_raw",
-      "html" => ~s(<div class="bp-diff">) <> Util.escape_html(text) <> ~s(</div>)
-    }
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.diff_html(b)}
   end
 
   def compose_block(%{"type" => "gauge-list"} = b, :article) do

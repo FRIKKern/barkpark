@@ -822,6 +822,189 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def chat_tool_diff_html(_), do: ""
 
+  # ═══ Code-story blocks — `diff` + `filetree` (charter W7, D75–D78/D85) ════════
+  #
+  # The two authored code-story blocks born in W7. Unlike chat-tool-diff (which
+  # DERIVES lines from a tool-call input via TextDiff), `diff` carries ONE
+  # verbatim unified-diff text field parsed at render time on every surface
+  # (D75) — the front-end differs, the ROW back-end is SHARED (D76): the rows
+  # render through the same private chat_diff_rows_html/chat_row_style/
+  # chat_prefix vocabulary and fold at the same @chat_diff_budget. Style-invariant
+  # single clauses like chat-tool-diff — the inline-token mono rendering reads
+  # identically in email.
+
+  @doc """
+  Render a `diff` block: a verbatim unified diff (`diff` attr) parsed into the
+  shared chat diff-row vocabulary (D76). Per D77: `@@` hunk headers render as dim
+  context rows VERBATIM (their `-l,s +l,s` numbers are load-bearing); `diff
+  --git`/`index`/`---` header lines never count as +/- rows; each `+++`
+  transition emits a bold path sub-header (multi-file diffs get one per file
+  section). Optional `file`/`lang` metadata lead the +N −M tally row. Over
+  `@chat_diff_budget` rows the tail folds behind a `<details>` (same fold as
+  chat-tool-diff).
+  """
+  def diff_html(block) when is_map(block) do
+    rows = block |> Map.get("diff", "") |> stringish() |> diff_rows()
+    added = Enum.count(rows, &(&1["op"] == "+"))
+    removed = Enum.count(rows, &(&1["op"] == "-"))
+    {head, rest} = Enum.split(rows, @chat_diff_budget)
+
+    file = stringish(Map.get(block, "file", ""))
+    lang = stringish(Map.get(block, "lang", ""))
+
+    lead =
+      [
+        if(file == "",
+          do: "",
+          else: ~s|<span style="font-weight: 600;">#{escape_html(file)}</span>|
+        ),
+        if(lang == "", do: "", else: escape_html(lang))
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join(" · ")
+
+    lead_html = if lead == "", do: "", else: lead <> " · "
+
+    counts =
+      ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
+        lead_html <>
+        ~s|<span style="color: var(--ok);">+#{added}</span> | <>
+        ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
+
+    body =
+      if length(rows) > @chat_diff_budget do
+        overflow = length(rows) - @chat_diff_budget
+
+        ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
+          diff_section_rows_html(head) <>
+          ~s|<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
+          ~s|</summary>#{diff_section_rows_html(rest)}</details>|
+      else
+        diff_section_rows_html(head)
+      end
+
+    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+      counts <> body <> ~s|</div>|
+  end
+
+  def diff_html(_), do: ""
+
+  @doc """
+  Render a `filetree` block: verbatim tree lines (`text` attr — box glyphs +
+  indentation preserved via `white-space: pre`), each line's trailing annotation
+  split on the first ` ● `/` ○ `/` ✕ ` marker into a colored annotation span
+  (D78). An optional `legend` string attr renders a dim legend row beneath the
+  tree — the block self-describes its glyphs. Degrades to plain preformatted
+  text when no marker matches.
+  """
+  def filetree_html(block) when is_map(block) do
+    rows =
+      block
+      |> Map.get("text", "")
+      |> stringish()
+      |> split_verbatim_lines()
+      |> Enum.map_join("", &filetree_row_html/1)
+
+    legend = stringish(Map.get(block, "legend", ""))
+
+    legend_html =
+      if legend == "",
+        do: "",
+        else:
+          ~s|<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">#{escape_html(legend)}</div>|
+
+    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+      rows <> legend_html <> ~s|</div>|
+  end
+
+  def filetree_html(_), do: ""
+
+  # ── diff/filetree private parse helpers (the verbatim-text front-end, D76) ────
+
+  # Verbatim text → display rows. Row maps share the chat vocabulary
+  # (%{"op","text"} with op in "+"/"-"/""), plus the diff-only "file" op the
+  # bold path sub-header renders (D77). Never a second diff engine — this is a
+  # line CLASSIFIER over author-provided text, not a diff derivation.
+  defp diff_rows(text) do
+    text
+    |> split_verbatim_lines()
+    |> Enum.flat_map(&diff_line_row/1)
+  end
+
+  # Order matters: "+++ "/"--- " match before the bare "+"/"-" ops.
+  defp diff_line_row("+++ " <> path), do: [%{"op" => "file", "text" => strip_b_prefix(path)}]
+  defp diff_line_row("--- " <> _), do: []
+  defp diff_line_row("diff --git " <> _), do: []
+  defp diff_line_row("index " <> _), do: []
+  defp diff_line_row("@@" <> _ = line), do: [%{"op" => "", "text" => line}]
+  defp diff_line_row("+" <> rest), do: [%{"op" => "+", "text" => rest}]
+  defp diff_line_row("-" <> rest), do: [%{"op" => "-", "text" => rest}]
+  defp diff_line_row(" " <> rest), do: [%{"op" => "", "text" => rest}]
+  defp diff_line_row(line), do: [%{"op" => "", "text" => line}]
+
+  defp strip_b_prefix("b/" <> rest), do: rest
+  defp strip_b_prefix(path), do: path
+
+  # Rows render through the SHARED chat row back-end (D76); only the diff-only
+  # bold path sub-header is emitted here.
+  defp diff_section_rows_html(rows) do
+    Enum.map_join(rows, "", fn
+      %{"op" => "file", "text" => path} ->
+        ~s|<div style="font-weight: 600; margin: 4px 0 1px; white-space: pre-wrap; overflow-wrap: anywhere;">#{escape_html(path)}</div>|
+
+      row ->
+        chat_diff_rows_html([row])
+    end)
+  end
+
+  # split on "\n", drop a single trailing empty line; "" → [] — the same
+  # semantics as chat.ts splitLines, so both surfaces see identical line lists.
+  defp split_verbatim_lines(""), do: []
+
+  defp split_verbatim_lines(text) do
+    lines = String.split(text, "\n")
+    if List.last(lines) == "", do: Enum.drop(lines, -1), else: lines
+  end
+
+  # The D78 annotation markers with their evergreen token colors. The glyph is
+  # the semantic carrier; color is never load-bearing (the legend row
+  # disambiguates locally).
+  @filetree_markers [{" ● ", "var(--ok)"}, {" ○ ", "var(--fg-dim)"}, {" ✕ ", "var(--danger)"}]
+
+  defp filetree_row_html(line) do
+    case split_filetree_note(line) do
+      {path, nil} ->
+        ~s|<div style="white-space: pre;">#{escape_html(path)}</div>|
+
+      {path, {glyph, note, color}} ->
+        ~s|<div style="white-space: pre;">#{escape_html(path)}| <>
+          ~s|<span class="bp-filetree-note" style="color: #{color};">#{escape_html(glyph <> note)}</span></div>|
+    end
+  end
+
+  # First marker occurrence (scanning left-to-right across all three) splits the
+  # line into the verbatim path part and the annotation (glyph + trailing text).
+  defp split_filetree_note(line) do
+    @filetree_markers
+    |> Enum.flat_map(fn {glyph, color} ->
+      case :binary.match(line, glyph) do
+        :nomatch -> []
+        {idx, _len} -> [{idx, glyph, color}]
+      end
+    end)
+    |> Enum.sort()
+    |> case do
+      [] ->
+        {line, nil}
+
+      [{idx, glyph, color} | _] ->
+        path = binary_part(line, 0, idx)
+        rest_start = idx + byte_size(glyph)
+        rest = binary_part(line, rest_start, byte_size(line) - rest_start)
+        {path, {glyph, rest, color}}
+    end
+  end
+
   @doc """
   Render a `chat-todo` block: the living checklist card (charter D39) — one
   ☐/◐/☒ row per item with an honest `N/M done` progress read. An empty list

@@ -13,9 +13,26 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
   // scaffy:add-block-type Filetree MARK:js-case-filetree
-  { type: 'filetree', block: { type: 'filetree', text: 'Starter' }, marker: 'bp-filetree' },
+  {
+    type: 'filetree',
+    block: {
+      type: 'filetree',
+      text: 'lib/\n├── components.ex ● diff_html/1\n└── stub.ex ✕ removed',
+      legend: '● created · ✕ removed',
+    },
+    marker: 'bp-filetree',
+  },
   // scaffy:add-block-type Diff MARK:js-case-diff
-  { type: 'diff', block: { type: 'diff', text: 'Starter' }, marker: 'bp-diff' },
+  {
+    type: 'diff',
+    block: {
+      type: 'diff',
+      file: 'lib/render/compose.ex',
+      lang: 'elixir',
+      diff: '--- a/lib/a.ex\n+++ b/lib/a.ex\n@@ -1,2 +1,2 @@\n context\n-old line\n+new line',
+    },
+    marker: 'bp-diff',
+  },
   { type: 'eyebrow', block: { type: 'eyebrow', text: 'KICKER' }, marker: 'bp-role-eyebrow' },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] }, marker: 'bp-role-byline' },
   {

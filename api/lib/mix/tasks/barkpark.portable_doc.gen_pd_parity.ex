@@ -80,9 +80,38 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
     # scaffy:add-block-type Filetree MARK:parity-input-filetree
-    "filetree" => %{"type" => "filetree", "text" => "Parity starter text"},
+    # W7 grow (D78): verbatim box-glyph tree lines exercising ALL THREE
+    # annotation markers (● / ○ / ✕) plus the optional legend row.
+    "filetree" => %{
+      "type" => "filetree",
+      "text" =>
+        "api/lib/barkpark/portable_doc/render/\n" <>
+          "├── components.ex ● diff_html/1 + filetree_html/1\n" <>
+          "├── compose.ex ○ grew the diff + filetree clauses\n" <>
+          "└── starter_stub.ex ✕ removed",
+      "legend" => "● created · ○ injected · ✕ removed"
+    },
     # scaffy:add-block-type Diff MARK:parity-input-diff
-    "diff" => %{"type" => "diff", "text" => "Parity starter text"},
+    # W7 grow (D75/D77): a small REAL unified diff — git file headers (dropped
+    # from counting; the `+++` transition emits the bold path sub-header), one
+    # verbatim `@@` hunk header, context + removed + added rows, and the
+    # optional file/lang metadata leading the tally row.
+    "diff" => %{
+      "type" => "diff",
+      "file" => "lib/render/compose.ex",
+      "lang" => "elixir",
+      "diff" =>
+        "diff --git a/lib/render/compose.ex b/lib/render/compose.ex\n" <>
+          "index 3f9c2d1..8a41b7e 100644\n" <>
+          "--- a/lib/render/compose.ex\n" <>
+          "+++ b/lib/render/compose.ex\n" <>
+          "@@ -1,4 +1,5 @@\n" <>
+          " defmodule Render.Compose do\n" <>
+          "-  def compose(block), do: starter(block)\n" <>
+          "+  def compose(block), do: grown(block)\n" <>
+          "+  defp grown(block), do: block\n" <>
+          " end"
+    },
     # ── prose / typographic roles ──────────────────────────────────────────────
     "heading" => %{"type" => "heading", "level" => 2, "text" => "The render path"},
     "eyebrow" => %{"type" => "eyebrow", "text" => "Dispatches"},
