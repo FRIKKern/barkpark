@@ -98,14 +98,52 @@ defmodule BarkparkWeb.SiteDeployController do
   @doc """
   The run status for one slug (`?slug=<slug>`). A slug that has never deployed
   reports `state: "idle"` — an honest empty state, not a 404.
+
+  `build_id` is a first-class match key (charter D34). BoxRelay already sends
+  the build_id it is polling for; when it is present AND non-empty AND does not
+  match the run currently served for that slug (which includes the idle case,
+  where the run's build_id is `nil`), this responds **404**. The control plane
+  treats 404 as keep-waiting, so a superseded run — or one that has not started
+  yet — times out honestly instead of silently adopting another same-slug run's
+  stages and its eventual success. An empty (`""`, rollback await-flip) or
+  absent (legacy caller) build_id falls back to slug-only match — backward
+  compatible. The decision is `resolve_status_match/2`, a pure function.
   """
   def status(conn, params) do
     case DeployRequest.validate_slug(Map.get(params, "slug")) do
       {:ok, slug} ->
-        json(conn, render_status(DeployRunner.status(slug)))
+        status = DeployRunner.status(slug)
+        requested_build_id = Map.get(params, "build_id")
+
+        case resolve_status_match(status, requested_build_id) do
+          :serve -> json(conn, render_status(status))
+          :not_found -> build_id_mismatch(conn, slug, requested_build_id)
+        end
 
       {:error, code, message} ->
         bad_request(conn, code, message)
+    end
+  end
+
+  @doc """
+  Decide whether a served status matches the polled `build_id` — pure, so it is
+  unit-testable with no GenServer or filesystem. `:serve` means the slug-only or
+  build_id-matched run is the one the caller wants; `:not_found` means the caller
+  is polling for a build that this slug is not currently serving.
+
+    * absent (`nil`) or empty (`""`) requested build_id → `:serve` (slug-only,
+      backward compatible: legacy callers and rollback await-flip)
+    * non-empty and equal to the run's build_id → `:serve`
+    * non-empty and different (including idle, where the run build_id is `nil`)
+      → `:not_found`
+  """
+  @spec resolve_status_match(map(), String.t() | nil) :: :serve | :not_found
+  def resolve_status_match(status_payload, requested_build_id) do
+    case requested_build_id do
+      nil -> :serve
+      "" -> :serve
+      id when is_binary(id) -> if id == status_payload.build_id, do: :serve, else: :not_found
+      _ -> :serve
     end
   end
 
@@ -126,6 +164,22 @@ defmodule BarkparkWeb.SiteDeployController do
     conn
     |> put_status(:bad_request)
     |> json(%{error: %{code: code, message: message}})
+  end
+
+  # The polled build_id is not the run this slug is currently serving — it was
+  # superseded by a newer same-slug build, or has not started yet. 404 (not 200)
+  # so the control plane keeps waiting instead of adopting the wrong run's stages.
+  defp build_id_mismatch(conn, slug, build_id) do
+    conn
+    |> put_status(:not_found)
+    |> json(%{
+      error: %{
+        code: "build_id_mismatch",
+        message:
+          "no run for site '#{slug}' matches build_id '#{build_id}' — " <>
+            "it was superseded by a newer build or has not started yet"
+      }
+    })
   end
 
   # Whitelist-render: the runner's status map, JSON-shaped (atoms → strings,
