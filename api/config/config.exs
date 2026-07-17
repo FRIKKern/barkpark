@@ -352,11 +352,20 @@ config :barkpark, Barkpark.SelfUpdate.Runner,
 # a box auto-deploys itself on every merge). `cd: nil` resolves to the repo root
 # at runtime — the BEAM's cwd is api/, so the parent is /opt/barkpark, where
 # `bash deploy/site-deploy.sh` resolves.
+# `runner_mode: :auto` resolves to the systemd transient-unit path (an in-flight
+# build survives a barkpark.service restart; the runner re-attaches on boot) when
+# `systemd-run` is on the box, else the in-process Port fallback (dev/macOS/CI).
+# `run_state_dir` (default `<repo>/.bp-site-deploy-runs`) MUST survive a BEAM
+# restart — it is how init/1 finds units to re-attach.
 config :barkpark, Barkpark.Sites.DeployRunner,
   enabled: false,
+  runner_mode: :auto,
   command: {"bash", ["deploy/site-deploy.sh"]},
   rollback_command: {"bash", ["deploy/site-deploy.sh", "--rollback"]},
   cd: nil,
+  run_state_dir: nil,
+  memory_max: "1500M",
+  cpu_quota: "150%",
   max_log_lines: 500,
   run_deadline_ms: 1_800_000
 
