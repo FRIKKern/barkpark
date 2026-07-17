@@ -1177,6 +1177,63 @@ defmodule Barkpark.StudioChatTest do
       refute StudioChat.rail_signature(base) == StudioChat.rail_signature(row_added)
     end
 
+    # wsc-ad D26 (LOAD-BEARING): the per-agent detail fields the drill-down renders
+    # MUST ride the signature — else a detail-only frame (a new tool line, a settled
+    # result) yields an EQUAL term, the change-only guard swallows it, and the live
+    # pane FREEZES + the frame is never persisted. Before this slice the strip kept
+    # only [type,title,label,phaseIndex,model,state]; a lastToolName/resultPreview/
+    # attempt/promptPreview change was INVISIBLE to the signature. This proves each
+    # of those now MOVES it — while lastProgressAt/tokens (heartbeat churn) still do
+    # NOT (the accepted D13 ceiling: the NOW age refreshes only on a real change).
+    test "rail_signature reflects per-agent DETAIL deltas (wsc-ad D26) but still ignores heartbeat churn" do
+      base = %{
+        "t" => %{
+          "row" => %{"task_type" => "local_workflow", "description" => "run"},
+          "status" => "running",
+          "workflow" => [
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "a1",
+              "label" => "explorer",
+              "state" => "start",
+              "lastToolName" => "Read",
+              "lastToolSummary" => "reading auth.ex",
+              "attempt" => 1,
+              "promptPreview" => "You are the explorer…",
+              "tokens" => 10,
+              "lastProgressAt" => 1000
+            }
+          ]
+        }
+      }
+
+      detail_delta = fn key, value ->
+        put_in(base, ["t", "workflow", Access.at(0), key], value)
+      end
+
+      # each detail field the drill-down renders MOVES the signature
+      for {key, value} <- [
+            {"lastToolName", "StructuredOutput"},
+            {"lastToolSummary", "wrote the finding"},
+            {"resultPreview", "the leak was in query_controller"},
+            {"attempt", 2},
+            {"promptPreview", "You are the explorer, now revised…"}
+          ] do
+        refute StudioChat.rail_signature(base) ==
+                 StudioChat.rail_signature(detail_delta.(key, value)),
+               "a #{key} delta did NOT move rail_signature — the live pane would freeze (D26)"
+      end
+
+      # …but a pure heartbeat tick (progress time / token churn) still does NOT —
+      # the change-only guard is intact, so the hot loop stays render-on-change.
+      heartbeat =
+        base
+        |> put_in(["t", "workflow", Access.at(0), "lastProgressAt"], 9_999_999)
+        |> put_in(["t", "workflow", Access.at(0), "tokens"], 500_000)
+
+      assert StudioChat.rail_signature(base) == StudioChat.rail_signature(heartbeat)
+    end
+
     test "rail_apply_background upserts live rows and completes the vanished" do
       rail =
         StudioChat.rail_apply_background(%{}, %{
@@ -2259,6 +2316,192 @@ defmodule Barkpark.StudioChatTest do
       # the 13/17-style settled counter survives the round-trip
       assert committed["epic_cycle_progress"]["agents_done"] == 29
       assert committed["epic_cycle_interrupted"]["agents_done"] == 1
+    end
+  end
+
+  # ── workflow_agent_detail/1 — the per-agent drill-down projection (wsc-ad) ───
+  #
+  # The pure fold the Studio rail's expandable agent rows AND the TUI sibling both
+  # read. Unit-proven against the real fixtures, then mirrored byte-identical to an
+  # api + a Go mirror (Mechanism A), regenerated with REGEN_WORKFLOW_AGENT_DETAIL=1.
+
+  defp detail_of(fixture), do: fixture |> load_ndjson() |> fold_rail() |> StudioChat.workflow_agent_detail()
+
+  describe "workflow_agent_node_detail/1 (wsc-ad D27/D28)" do
+    test "a node with NO detail-signal field yields %{} (the no-affordance gate)" do
+      # a thin node (no brief/tool/result/attempt) — the rail shows no drill-down
+      assert StudioChat.workflow_agent_node_detail(%{
+               "type" => "workflow_agent",
+               "agentId" => "x",
+               "label" => "agent",
+               "state" => "start",
+               "startedAt" => 1000
+             }) == %{}
+
+      assert StudioChat.workflow_agent_node_detail(%{}) == %{}
+      assert StudioChat.workflow_agent_node_detail(nil) == %{}
+      assert StudioChat.workflow_agent_node_detail("nope") == %{}
+    end
+
+    test "a node with detail passes wire fields VERBATIM, omits absent, derives terminal/failed" do
+      detail =
+        StudioChat.workflow_agent_node_detail(%{
+          "type" => "workflow_agent",
+          "agentId" => "a1",
+          "label" => "explore:auth",
+          "state" => "error",
+          "promptPreview" => "You are the explorer…",
+          "lastToolName" => "StructuredOutput",
+          "lastToolSummary" => "found the leak",
+          "resultPreview" => ~s({"finding":"leak in query_controller"}),
+          "attempt" => 1,
+          "startedAt" => 100,
+          "lastProgressAt" => 200,
+          "durationMs" => 100,
+          # tokens is NOT a detail key — it must be dropped
+          "tokens" => 4200
+        })
+
+      # wire fields verbatim + raw epoch-ms timestamps
+      assert detail["promptPreview"] == "You are the explorer…"
+      assert detail["lastToolName"] == "StructuredOutput"
+      assert detail["resultPreview"] == ~s({"finding":"leak in query_controller"})
+      assert detail["startedAt"] == 100
+      assert detail["lastProgressAt"] == 200
+      assert detail["durationMs"] == 100
+      # tokens is not part of the detail shape
+      refute Map.has_key?(detail, "tokens")
+      # terminal/failed DERIVED from the shared helper sets — error is a failure
+      assert detail["terminal"] == true
+      assert detail["failed"] == true
+    end
+
+    test "resultPreview passes through UNCAPPED (each surface caps at render)" do
+      long = String.duplicate("x", 900)
+
+      detail =
+        StudioChat.workflow_agent_node_detail(%{
+          "type" => "workflow_agent",
+          "agentId" => "a1",
+          "state" => "done",
+          "resultPreview" => long
+        })
+
+      assert detail["resultPreview"] == long
+      assert detail["terminal"] == true
+      assert detail["failed"] == false
+    end
+  end
+
+  describe "workflow_agent_detail/1 (wsc-ad D28 — rail → list)" do
+    test "[] for empty / no-workflow / non-map rails" do
+      assert StudioChat.workflow_agent_detail(%{}) == []
+      assert StudioChat.workflow_agent_detail(%{"t" => %{"status" => "running"}}) == []
+      assert StudioChat.workflow_agent_detail(%{"t" => %{"workflow" => []}}) == []
+      assert StudioChat.workflow_agent_detail(nil) == []
+      assert StudioChat.workflow_agent_detail("nope") == []
+    end
+
+    test "the completed run projects one detail map per agent (29), all terminal" do
+      detail = detail_of("epic_cycle_progress.ndjson")
+      assert length(detail) == 29
+      assert Enum.all?(detail, & &1["terminal"])
+      assert Enum.all?(detail, &is_binary(&1["agentId"]))
+      # a real completed agent carries the brief, a settled result, and timing
+      first = hd(detail)
+      assert is_binary(first["promptPreview"])
+      assert is_binary(first["resultPreview"])
+      assert is_integer(first["startedAt"])
+    end
+
+    test "the interrupted run keeps its 5 agents; the live explorers are non-terminal" do
+      detail = detail_of("epic_cycle_interrupted.ndjson")
+      assert length(detail) == 5
+      # 1 settled strategist + 4 live explorers (the interrupted frontier)
+      assert Enum.count(detail, & &1["terminal"]) == 1
+      assert Enum.count(detail, &(not &1["terminal"])) == 4
+      # the live ones carry a NOW tool line but never a durationMs/resultPreview
+      live = Enum.filter(detail, &(not &1["terminal"]))
+      assert Enum.all?(live, &is_binary(&1["lastToolName"]))
+      refute Enum.any?(live, &Map.has_key?(&1, "durationMs"))
+    end
+
+    test "the highest-seq workflow-bearing entry wins, detail-less nodes drop out" do
+      rail = %{
+        "a" => %{
+          "seq" => 2,
+          "workflow" => [
+            %{"type" => "workflow_agent", "agentId" => "old", "state" => "done", "resultPreview" => "old"}
+          ]
+        },
+        "b" => %{
+          "seq" => 9,
+          "workflow" => [
+            # a detail-less agent — dropped from the list
+            %{"type" => "workflow_agent", "agentId" => "thin", "state" => "start"},
+            %{"type" => "workflow_agent", "agentId" => "rich", "state" => "start", "lastToolName" => "Read"},
+            # a non-agent node is ignored
+            %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"}
+          ]
+        }
+      }
+
+      detail = StudioChat.workflow_agent_detail(rail)
+      assert Enum.map(detail, & &1["agentId"]) == ["rich"]
+    end
+  end
+
+  # ── Shared parity fixture (Mechanism A) — workflow_agent_detail ──────────────
+  #
+  # workflow_agent_detail/1 output for both committed fixtures, byte-identical to an
+  # api mirror and a Go mirror so the TUI sibling reads the SAME per-agent shapes.
+  # Regenerate with REGEN_WORKFLOW_AGENT_DETAIL=1, then re-run to prove freshness.
+  @detail_api_path Path.expand(
+                     "../support/fixtures/workflow_summary/workflow_agent_detail.json",
+                     __DIR__
+                   )
+  @detail_go_path Path.expand(
+                    "../../../internal/chat/testdata/workflow_agent_detail.json",
+                    __DIR__
+                  )
+
+  defp fresh_details do
+    %{
+      "epic_cycle_progress" => detail_of("epic_cycle_progress.ndjson"),
+      "epic_cycle_interrupted" => detail_of("epic_cycle_interrupted.ndjson")
+    }
+  end
+
+  defp normalized_fresh_details, do: fresh_details() |> Jason.encode!() |> Jason.decode!()
+
+  describe "workflow_agent_detail parity fixtures (Mechanism A)" do
+    test "the committed api mirror equals a fresh fold" do
+      if System.get_env("REGEN_WORKFLOW_AGENT_DETAIL") do
+        json = Jason.encode!(fresh_details(), pretty: true) <> "\n"
+        File.write!(@detail_api_path, json)
+        File.write!(@detail_go_path, json)
+      end
+
+      assert File.read!(@detail_api_path) |> Jason.decode!() == normalized_fresh_details(),
+             "workflow_agent_detail.json is stale — re-run with REGEN_WORKFLOW_AGENT_DETAIL=1."
+    end
+
+    test "the api and Go mirrors are byte-identical" do
+      assert File.read!(@detail_api_path) == File.read!(@detail_go_path),
+             "the Go mirror drifted — re-run with REGEN_WORKFLOW_AGENT_DETAIL=1."
+    end
+
+    test "the fixture carries the completed and interrupted agent rosters" do
+      committed = File.read!(@detail_api_path) |> Jason.decode!()
+      assert length(committed["epic_cycle_progress"]) == 29
+      assert length(committed["epic_cycle_interrupted"]) == 5
+      # every committed detail map carries a derived terminal flag and an agentId
+      all = committed["epic_cycle_progress"] ++ committed["epic_cycle_interrupted"]
+      assert Enum.all?(all, &Map.has_key?(&1, "terminal"))
+      assert Enum.all?(all, &is_binary(&1["agentId"]))
+      # honest attempt==1 across the real capture (no fabricated retry — D29 keeps
+      # attempt>1 to the synthetic render node, never this verbatim-from-real fold)
+      assert Enum.all?(all, &(&1["attempt"] == 1))
     end
   end
 

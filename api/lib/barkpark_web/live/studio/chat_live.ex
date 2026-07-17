@@ -190,6 +190,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
          rail: %{},
          rail_sig: [],
          rail_expanded: %{},
+         # Per-tab agent drill-down override (wsc-ad): agentId => bool, default
+         # CLOSED, a manual toggle wins. Never broadcast, reset on session load
+         # (rail_expanded precedent).
+         agent_detail_expanded: %{},
          mode: List.first(Runtime.capabilities(enabled_provider).modes) || "default",
          provider: enabled_provider,
          execution_target: "managed",
@@ -806,6 +810,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
+  end
+
+  # Expand/collapse ONE rail agent's per-agent detail (wsc-ad) — keyed by the
+  # node's agentId, default CLOSED, a manual toggle is the per-tab override that
+  # wins. Never broadcast (a co-viewer's collapse is their own). A stale id (the
+  # session switched under an in-flight click) is a harmless no-op flip.
+  def handle_event("rail-agent-toggle", %{"id" => id}, socket) do
+    current = agent_detail_open?(socket.assigns.agent_detail_expanded, id)
+
+    {:noreply,
+     assign(socket,
+       agent_detail_expanded: Map.put(socket.assigns.agent_detail_expanded, id, not current)
+     )}
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -3352,7 +3369,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
               row expands (per-tab) into its phase→agent tree with breathing state
               glyphs, models, and token counts. Hydrated from `rail_snapshot` on
               reopen; a dead "running" entry reads "interrupted", never a spinner. --%>
-        <.agents_rail :if={map_size(@rail) > 0} rail={@rail} rail_expanded={@rail_expanded} />
+        <.agents_rail
+          :if={map_size(@rail) > 0}
+          rail={@rail}
+          rail_expanded={@rail_expanded}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
       </div>
     </div>
@@ -3462,6 +3484,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # history); no dedup. All chrome via emitted tokens.
   attr :rail, :map, required: true
   attr :rail_expanded, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp agents_rail(assigns) do
     ~H"""
@@ -3478,6 +3501,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         :for={entry <- rail_rows(@rail)}
         entry={entry}
         open={rail_open?(@rail_expanded, entry)}
+        agent_detail_expanded={@agent_detail_expanded}
       />
     </div>
     """
@@ -3491,6 +3515,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # simple one-line render.
   attr :entry, :map, required: true
   attr :open, :boolean, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_entry(assigns) do
     journey = StudioChat.workflow_journey(assigns.entry)
@@ -3544,7 +3569,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             cycle defaults collapsed to the one summary line above; the per-tab
             toggle overrides both ways, charter D61). --%>
       <div :if={@open and @workflow?} style="padding-left: 16px; margin-top: 2px;">
-        <.rail_phase :for={phase <- @journey.phases} phase={phase} entry={@entry} />
+        <.rail_phase
+          :for={phase <- @journey.phases}
+          phase={phase}
+          entry={@entry}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
     </div>
     """
@@ -3554,6 +3584,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (or interrupted-frontier) phase heads its nested agent rows.
   attr :phase, :map, required: true
   attr :entry, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_phase(assigns) do
     ~H"""
@@ -3586,7 +3617,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
         :if={@phase.status in [:active, :interrupted]}
         style="padding-left: 16px; margin-top: 1px;"
       >
-        <.rail_agent :for={node <- @phase.agents} node={node} entry={@entry} />
+        <.rail_agent
+          :for={node <- @phase.agents}
+          node={node}
+          entry={@entry}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
     </div>
     """
@@ -3597,39 +3633,152 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (interrupted) entry's non-terminal agents never spin (no fake spinners law).
   attr :node, :map, required: true
   attr :entry, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_agent(assigns) do
+    detail = StudioChat.workflow_agent_node_detail(assigns.node)
+    agent_id = assigns.node["agentId"]
+    # The affordance is gated on DETAIL, never origin (wsc-ad D27): a node with no
+    # brief/tool/result/attempt (or no id to key the toggle) simply carries no
+    # drill-down — a background/codex row stays one quiet line.
+    has_detail? = detail != %{} and is_binary(agent_id)
+
+    assigns =
+      assign(assigns,
+        detail: detail,
+        agent_id: agent_id,
+        has_detail?: has_detail?,
+        detail_open?: has_detail? and agent_detail_open?(assigns.agent_detail_expanded, agent_id)
+      )
+
     ~H"""
-    <div
-      data-rail-node="workflow_agent"
-      class="text-xs"
-      style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
-    >
-      <span
-        aria-hidden="true"
-        class={rail_node_running?(@entry, @node) && "bp-chat-agent-run"}
-        title={@node["error"]}
-        style={"flex: none; color: #{rail_agent_color(@entry, @node)};"}
+    <div data-rail-node="workflow_agent">
+      <div
+        class="text-xs"
+        style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
       >
-        <%= rail_agent_glyph(@node) %>
-      </span>
-      <span style="min-width: 0; flex: 1;">
-        <%= case StudioChat.workflow_label_parts(@node["label"]) do %>
-          <% {:pair, kind, rest} -> %>
-            <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
-          <% {:bare, label} -> %>
-            <span><%= label || "agent" %></span>
-        <% end %>
-        <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-          <%= StudioChat.model_family(@node["model"]) %>
+        <span
+          aria-hidden="true"
+          class={rail_node_running?(@entry, @node) && "bp-chat-agent-run"}
+          title={@node["error"]}
+          style={"flex: none; color: #{rail_agent_color(@entry, @node)};"}
+        >
+          <%= rail_agent_glyph(@node) %>
         </span>
-        <span :if={rail_node_tokens(@node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-          · <%= StudioChat.format_tokens(rail_node_tokens(@node)) %> tok
+        <span style="min-width: 0; flex: 1;">
+          <%= case StudioChat.workflow_label_parts(@node["label"]) do %>
+            <% {:pair, kind, rest} -> %>
+              <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
+            <% {:bare, label} -> %>
+              <span><%= label || "agent" %></span>
+          <% end %>
+          <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            <%= StudioChat.model_family(@node["model"]) %>
+          </span>
+          <span :if={rail_node_tokens(@node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            · <%= StudioChat.format_tokens(rail_node_tokens(@node)) %> tok
+          </span>
         </span>
-      </span>
+        <button
+          :if={@has_detail?}
+          type="button"
+          class="btn text-xs"
+          phx-click="rail-agent-toggle"
+          phx-value-id={@agent_id}
+          aria-expanded={to_string(@detail_open?)}
+          style="flex: none; padding: 0 6px; opacity: 0.7;"
+        >
+          <%= if @detail_open?, do: "hide", else: "detail" %>
+        </button>
+      </div>
+
+      <.rail_agent_detail :if={@detail_open?} detail={@detail} />
     </div>
     """
   end
+
+  # The expanded per-agent detail (wsc-ad): ABOUT — the brief; NOW — the live tool
+  # line + progress age while the agent is non-terminal; DONE — the settled result
+  # (capped) once terminal; and an attempt>1 retry chip. Every field is read
+  # VERBATIM off the normalized detail map — absent fields simply do not render.
+  # HONESTY: thinking text never rides the wire (encrypted signature only), so
+  # NOTHING here is labeled "thinking" — the brief + tool line + result ARE the
+  # honest window into what the agent is about.
+  attr :detail, :map, required: true
+
+  defp rail_agent_detail(assigns) do
+    ~H"""
+    <div
+      class="text-xs"
+      style="padding: 1px 0 4px 20px; display: flex; flex-direction: column; gap: 3px;"
+    >
+      <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
+        <span
+          class="text-xs"
+          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn);"
+        >
+          attempt <%= @detail["attempt"] %>
+        </span>
+      </div>
+
+      <div
+        :if={@detail["promptPreview"]}
+        class="text-dim"
+        style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
+      >
+        <span style="font-weight: 600; opacity: 0.7;">about</span>
+        <%= @detail["promptPreview"] %>
+      </div>
+
+      <div
+        :if={not @detail["terminal"] and (@detail["lastToolName"] || @detail["lastToolSummary"])}
+        style="overflow-wrap: anywhere;"
+      >
+        <span aria-hidden="true">▸</span>
+        <span :if={@detail["lastToolName"]} style="font-weight: 600;"><%= @detail["lastToolName"] %></span>
+        <span :if={@detail["lastToolSummary"]} class="text-dim" style="opacity: 0.85;">
+          · <%= @detail["lastToolSummary"] %>
+        </span>
+        <span
+          :if={agent_progress_age(@detail["lastProgressAt"])}
+          class="text-dim"
+          style="opacity: 0.6;"
+        >
+          · <%= agent_progress_age(@detail["lastProgressAt"]) %>
+        </span>
+      </div>
+
+      <div
+        :if={@detail["terminal"] and @detail["resultPreview"]}
+        class="text-dim"
+        style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
+      >
+        <span style="font-weight: 600; opacity: 0.7;">done</span>
+        <%= agent_result_preview(@detail["resultPreview"]) %>
+      </div>
+    </div>
+    """
+  end
+
+  # Cap the settled result at 300 opaque chars (wsc-ad) — it is NOT re-parsed and
+  # NOT run through `summary_preview` (that is for a different, JSON-aware path);
+  # it is verbatim text with an ellipsis when clipped.
+  defp agent_result_preview(text) when is_binary(text) do
+    if String.length(text) > 300, do: String.slice(text, 0, 300) <> "…", else: text
+  end
+
+  defp agent_result_preview(_), do: nil
+
+  # Coarse age of the last progress tick (epoch-ms), for the live NOW line only.
+  # A wall-clock read — deliberately confined to non-terminal agent rows, which
+  # never appear in any byte-locked/determinism-guarded region (the golden folds a
+  # COMPLETED run, whose phases collapse their agents). Reuses `age_words/1`.
+  defp agent_progress_age(ms) when is_integer(ms) do
+    diff = System.system_time(:millisecond) - ms
+    if diff >= 0, do: age_words(div(diff, 1000)), else: nil
+  end
+
+  defp agent_progress_age(_), do: nil
 
   # A dedicated shimmering placeholder per forming component — the reader sees
   # WHAT is coming (a chart, a diagram, a table…) instead of raw source noise.
@@ -4143,6 +4292,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       rail: session.rail_snapshot || %{},
       rail_sig: StudioChat.rail_signature(session.rail_snapshot || %{}),
       rail_expanded: %{},
+      # Per-agent drill-down overrides reset on reopen (wsc-ad, rail_expanded
+      # precedent): a replayed rail starts every agent detail collapsed.
+      agent_detail_expanded: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -4255,6 +4407,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       rail: %{},
       rail_sig: [],
       rail_expanded: %{},
+      agent_detail_expanded: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -5850,6 +6003,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       :error -> entry["status"] != "completed"
     end
   end
+
+  # The effective expand state of ONE rail agent's detail (wsc-ad): default
+  # CLOSED, the per-tab override (keyed by agentId) wins. Unlike rail rows there
+  # is no status-aware default — the drill-down is always opt-in, so a busy rail
+  # never buries the fleet under exploded detail.
+  defp agent_detail_open?(overrides, agent_id), do: Map.get(overrides, agent_id, false)
 
   # A sub-agent is running only while its task_status says so — a terminal (or
   # interrupted, D45) block shows its report, never a spinner.

@@ -886,11 +886,34 @@ defmodule Barkpark.StudioChat do
   # ticks every frame. `phaseIndex` rides the signature (charter D57) so the
   # newly-rendered phase-journey grouping re-signs on a regrouping while a token
   # tick still does not; a phase flip re-renders, a token tick never does.
+  #
+  # AGENT-DETAIL (wsc-ad, D26 — LOAD-BEARING): the per-agent drill-down renders
+  # `lastToolName`/`lastToolSummary`/`resultPreview`/`attempt`/`promptPreview` off
+  # the persisted node, so those fields MUST ride the signature — else a
+  # detail-only frame (a new tool line, a settled result) yields an EQUAL term,
+  # the change-only guard swallows it, the live pane FREEZES, and the frame is
+  # never persisted. `lastProgressAt`/`tokens`/`durationMs` are DELIBERATELY
+  # excluded: they tick on every heartbeat and would defeat the guard — the NOW
+  # age refreshes only when a tool/summary/state/attempt change re-signs (the
+  # accepted D13 ceiling).
   defp strip_workflow(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_workflow_node/1)
   defp strip_workflow(_), do: nil
 
   defp strip_workflow_node(node) when is_map(node),
-    do: Map.take(node, ["type", "title", "label", "phaseIndex", "model", "state"])
+    do:
+      Map.take(node, [
+        "type",
+        "title",
+        "label",
+        "phaseIndex",
+        "model",
+        "state",
+        "lastToolName",
+        "lastToolSummary",
+        "resultPreview",
+        "attempt",
+        "promptPreview"
+      ])
 
   defp strip_workflow_node(other), do: other
 
@@ -1321,6 +1344,77 @@ defmodule Barkpark.StudioChat do
   end
 
   def workflow_summary(_), do: nil
+
+  # The wire fields that MAKE a workflow_agent node worth expanding (wsc-ad D27):
+  # the agent's brief, its live tool line, its settled result, its retry counter.
+  # A node carrying NONE of these (a background/codex rail node, a thin phase
+  # marker) yields no detail and thus no expand affordance — the gate is CONTENT,
+  # never origin (D27: every committed rail fixture is origin=background yet
+  # carries full detail).
+  @agent_detail_signal_keys ~w(promptPreview lastToolName lastToolSummary resultPreview attempt)
+
+  # The keys the normalized detail map carries, in the shared cross-surface shape
+  # the TUI sibling consumes. Absent keys are OMITTED by `Map.take`. Timestamps
+  # (`startedAt`/`lastProgressAt`/`durationMs`) pass through as RAW epoch-ms — each
+  # surface formats its own age (D28).
+  @agent_detail_keys ~w(agentId label state promptPreview lastToolName lastToolSummary
+                        resultPreview attempt startedAt lastProgressAt durationMs)
+
+  @doc """
+  Per-agent DETAIL of ONE workflow_agent node (wsc-ad D27/D28) — pure, total.
+
+  Returns the normalized detail map when the node carries at least one
+  detail-signal field (`promptPreview`/`lastToolName`/`lastToolSummary`/
+  `resultPreview`/`attempt`), else `%{}` — the empty map IS the "no affordance"
+  gate the rail render reads (a detail-less node never expands). `terminal`/
+  `failed` are DERIVED from the shared `workflow_node_terminal?/failed?` sets so
+  the NOW/DONE split reads one truth table; every other field passes through
+  VERBATIM (`resultPreview` uncapped — each surface caps at render), absent
+  fields omitted, `startedAt`/`lastProgressAt`/`durationMs` raw epoch-ms.
+  """
+  @spec workflow_agent_node_detail(any()) :: map()
+  def workflow_agent_node_detail(node) when is_map(node) do
+    if Map.take(node, @agent_detail_signal_keys) == %{} do
+      %{}
+    else
+      node
+      |> Map.take(@agent_detail_keys)
+      |> Map.put("terminal", workflow_node_terminal?(node))
+      |> Map.put("failed", workflow_node_failed?(node))
+    end
+  end
+
+  def workflow_agent_node_detail(_), do: %{}
+
+  @doc """
+  Per-agent DETAIL list for a rail_snapshot (wsc-ad D28) — pure, total. Picks the
+  HIGHEST-SEQ workflow-bearing entry (same selector as `workflow_summary/1`),
+  folds each of its `workflow_agent` nodes through `workflow_agent_node_detail/1`,
+  and drops the detail-less ones. Returns `[]` when the rail is not a map, is
+  empty, or has no workflow-bearing entry. This is the SHARED shape mirrored
+  byte-identical to the Go testdata so the TUI sibling reads identical truth.
+  """
+  @spec workflow_agent_detail(any()) :: [map()]
+  def workflow_agent_detail(rail) when is_map(rail) do
+    rail
+    |> Map.values()
+    |> Enum.filter(&workflow_bearing?/1)
+    |> case do
+      [] ->
+        []
+
+      entries ->
+        entries
+        |> Enum.max_by(&rail_seq/1)
+        |> Map.get("workflow")
+        |> List.wrap()
+        |> Enum.filter(&(is_map(&1) and &1["type"] == "workflow_agent"))
+        |> Enum.map(&workflow_agent_node_detail/1)
+        |> Enum.reject(&(&1 == %{}))
+    end
+  end
+
+  def workflow_agent_detail(_), do: []
 
   # A rail entry is workflow-bearing when it carries a non-empty node list.
   defp workflow_bearing?(entry) when is_map(entry), do: List.wrap(entry["workflow"]) != []
