@@ -48,6 +48,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Structure
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @placement_labels [
     {"main", "Main structure"},
@@ -86,6 +87,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       if connected?(socket) do
         socket
         |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
+        |> assign(
+          :execution_profile,
+          workspace_execution_profile(socket.assigns[:current_workspace])
+        )
         |> assign_plugin_rows()
       else
         socket
@@ -117,6 +122,11 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # Empty defaults for the dead render — the connected `handle_params`
       # loads the real theme + plugin rows once, on connect (see there).
       bp_theme: nil,
+      # Per-workspace chat execution profile (connectors W23-2/D207). Seeded
+      # `nil` for the dead render; `handle_params` projects the persisted
+      # `settings["chat"]["execution_profile"]` once on connect. `nil`/anything
+      # other than `"cloud"` reads as the self-hosted default in the switch.
+      execution_profile: nil,
       plugin_rows: []
     )
   end
@@ -294,6 +304,29 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end)
   end
 
+  # ── Per-workspace chat execution profile (connectors W23-2, D207/D211) ──
+  #
+  # Flip THIS workspace's chat turns between the self-hosted runner (default)
+  # and the cloud sandbox. State persists into `workspaces.settings["chat"]
+  # ["execution_profile"]` via the D205 Tenancy pair (merged, so the theme and
+  # plugin keys are preserved); `ClaudeChat.Session.init/1` resolves it once per
+  # spawn, fail-safe to `:self_hosted`.
+  #
+  # SECURITY (D211): the execution profile is routing-security-relevant — it
+  # routes a tenant's turns into a sandbox that shares ONE flat instance key —
+  # so the coarse mount gate (a GLOBAL-permission admin check that does NOT
+  # enforce admin OF THE TARGET workspace; see live_auth.ex) is NOT sufficient.
+  # This handler RE-GATES per write on `TenancyAuth.workspace_admin?/2` (the
+  # ConnectorsLive precedent), fail-closed: a principal who merely passes the
+  # mount gate but is not an owner/admin of the bound workspace is REFUSED with
+  # NOTHING written. `guard_bound_ws/3` still runs first (the stale-scope belt);
+  # the re-gate is the per-target-workspace authority check it does not do.
+  def handle_event("toggle_execution_profile", %{"ws" => _} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      do_toggle_execution_profile(socket)
+    end)
+  end
+
   # ── Fail-closed scope-write guard (ssp-w3, charter D17) ─────────────────
   #
   # Every workspace-scoped WRITE (theme / plugin toggle / placement) stamps the
@@ -372,6 +405,63 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
+  # Execution-profile write, invoked inside `guard_bound_ws/3`. Composes the
+  # per-write `workspace_admin?/2` re-gate (D211) with a server-derived next
+  # value: the toggle NEVER trusts a client-supplied profile string — it reads
+  # the current persisted value and flips it (cloud → self_hosted, anything else
+  # → cloud), then guards the derived value against the known set before writing
+  # BY ID through `set_workspace_chat_settings/2` (never the struct, D210).
+  defp do_toggle_execution_profile(socket) do
+    ws = socket.assigns[:current_workspace]
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not (is_map(ws) and not is_nil(principal) and
+               TenancyAuth.workspace_admin?(principal, ws.id)) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "You need to be an owner or admin of this workspace to change its execution profile."
+         )}
+
+      true ->
+        chat = Tenancy.workspace_chat_settings(ws)
+        next = if chat["execution_profile"] == "cloud", do: "self_hosted", else: "cloud"
+
+        if next in ~w(cloud self_hosted) do
+          merged = Map.put(chat, "execution_profile", next)
+
+          case Tenancy.set_workspace_chat_settings(ws.id, merged) do
+            {:ok, updated} ->
+              {:noreply,
+               socket
+               |> assign(:current_workspace, updated)
+               |> assign(:execution_profile, next)
+               |> put_flash(:info, execution_profile_flash(next))}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
+          end
+        else
+          {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
+        end
+    end
+  end
+
+  # Raw persisted profile string for a workspace (`"cloud" | "self_hosted" |
+  # nil`). Reused by the connected `handle_params` projection and the switch's
+  # `checked` test; guards a nil workspace to `nil` (self-hosted default).
+  defp workspace_execution_profile(ws) do
+    Tenancy.workspace_chat_settings(ws)["execution_profile"]
+  end
+
+  defp execution_profile_flash("cloud"),
+    do: "Chat turns for this workspace now run in the cloud sandbox."
+
+  defp execution_profile_flash("self_hosted"),
+    do: "Chat turns for this workspace now run on the self-hosted runner."
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -406,6 +496,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <% end %>
 
       {render_theme_section(assigns)}
+
+      {render_execution_profile_section(assigns)}
 
       {render_plugins_section(assigns)}
 
@@ -496,6 +588,54 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <% else %>
         <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
           No workspace in scope to theme.
+        </p>
+      <% end %>
+    </.bp_card>
+    """
+  end
+
+  # ── Chat execution profile (connectors W23-2, D207/D209) ────────────────
+  #
+  # One `.bp_switch` clone of the plugin-enablement toggle: OFF = self-hosted
+  # runner (the fail-safe default), ON = cloud sandbox. It rides the plugin
+  # toggle's `phx-click` idiom (a discrete event carrying `phx-value-ws`), NOT
+  # the theme `phx-change` form — the handler derives the next value server-side
+  # and re-gates the write on `workspace_admin?/2`. `checked` is true ONLY for a
+  # persisted `"cloud"`, so a nil / unset / malformed value renders as
+  # self-hosted, mirroring the resolver's fail-safe.
+  defp render_execution_profile_section(assigns) do
+    ~H"""
+    <.bp_card aria-labelledby="execution-profile-heading">
+      <.bp_section_header id="execution-profile-heading" title="Chat execution profile" />
+
+      <%= if @current_workspace do %>
+        <div
+          data-test-id="execution-profile-control"
+          data-execution-profile={@execution_profile || "self_hosted"}
+          style="display:flex; flex-wrap:wrap; align-items:center; gap:.75rem;"
+        >
+          <div style="flex:1 1 16rem; min-width:14rem;">
+            <p style="margin:0; color:var(--fg-muted);">
+              Where <strong>{@current_workspace.name}</strong>'s Studio chat turns run.
+              <strong>Self-hosted</strong> uses this instance's runner;
+              <strong>Cloud</strong> routes each turn into an isolated cloud sandbox.
+              Only an owner or admin of this workspace can change it, and a flip
+              takes effect on the workspace's next chat turn.
+            </p>
+          </div>
+
+          <.bp_switch
+            checked={@execution_profile == "cloud"}
+            on_label="Cloud"
+            off_label="Self-hosted"
+            phx-click="toggle_execution_profile"
+            phx-value-ws={@current_workspace.id}
+            aria-label="Run this workspace's chat turns in the cloud sandbox"
+          />
+        </div>
+      <% else %>
+        <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
+          No workspace in scope to configure.
         </p>
       <% end %>
     </.bp_card>
