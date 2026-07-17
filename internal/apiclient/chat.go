@@ -472,6 +472,10 @@ func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 //   - event:chat    — a live raw claude stream-json delta, NO id (unreplayable
 //     by design, D5).
 //   - event:permission — a pending approval ask.
+//   - event:workflow — a live COMPACT workflow-summary delta (ChatWorkflowSummary,
+//     wsc-bl-workflow-sse), NO id (unreplayable, like chat/permission/exit); it
+//     refreshes the collapsed workflow strip mid-turn without a rail refetch.
+//     Workflow-only — no epic sibling; a Terminal summary drops the strip.
 //   - event:exit    — the session process ended, carrying a PUBLIC
 //     {status, reason} only (raw process error output is an internal detail the
 //     transport deliberately withholds); the client forwards the frame verbatim
