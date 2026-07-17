@@ -5460,6 +5460,22 @@
       mountDeployRail(box, site, bp, deployments);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
+      var themeSel = $("#site-theme-select");
+      if (themeSel) themeSel.addEventListener("change", function () {
+        var val = themeSel.value;
+        themeSel.disabled = true;
+        api("PATCH", "/v1/sites/" + encodeURIComponent(site.id), siteThemePatchBody(val)).then(function (r) {
+          themeSel.disabled = false;
+          if (r.ok) {
+            site.theme = val;
+            toast("Theme set to " + (val || "template default") + " — applies on the next deploy");
+          } else {
+            themeSel.value = site.theme || "";
+            var msg = (r.data && (r.data.error || r.data.detail)) || ("update failed (" + r.status + ")");
+            toast("Couldn't set theme: " + String(msg));
+          }
+        });
+      });
     });
   }
 
@@ -5487,6 +5503,28 @@
         if (body && !panel.classList.contains("is-collapsed")) body.scrollTop = body.scrollHeight;
       })(panels[i]);
     }
+  }
+
+  // ── Site theme edit (search-template W8) ──────────────────────────────────
+  // The console twin of `bp cloud site settings --theme`: a rail-row select that
+  // PATCHes /v1/sites/:id and settles on the next deploy. Pure helpers node-pinned.
+
+  var SITE_THEMES = ["evergreen", "ember", "fjord", "charple"];
+
+  // Pure: the <select> options for the theme picker, current value selected.
+  function siteThemeOptionsHtml(current) {
+    return ['<option value="">Template default</option>']
+      .concat(SITE_THEMES.map(function (t) {
+        return '<option value="' + esc(t) + '"' + (t === current ? " selected" : "") + ">" +
+          esc(t.charAt(0).toUpperCase() + t.slice(1)) + "</option>";
+      }))
+      .join("");
+  }
+
+  // Pure: the PATCH body from a chosen theme value ("" clears the pin → template
+  // default; the server treats an empty string as a valid clear).
+  function siteThemePatchBody(value) {
+    return { theme: value || "" };
   }
 
   function siteDetailHtml(site, bp, deployments, domain, previews) {
@@ -5541,6 +5579,10 @@
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
           railRow("Framework", site.framework || "—") +
+          // W8: the deploy-pinned palette, editable inline — applies next deploy.
+          railRowHtml("Theme",
+            '<select class="rail-select" id="site-theme-select" aria-label="Deploy theme">' +
+              siteThemeOptionsHtml(site.theme || "") + "</select>") +
           railRowHtml("Repository", repo) +
           railRowHtml("Auto-deploy", badge(auto ? "On" : "Manual", auto ? "online" : "unknown")) +
           railRowHtml("Previews", badge(previewsFlag, previewsFlag === "On" ? "online" : "unknown")) +
@@ -11754,6 +11796,8 @@
       // search-template W2 (D8): create-site modal pure helpers.
       siteKindFor: siteKindFor, siteTemplateOptions: siteTemplateOptions,
       siteCreateBody: siteCreateBody,
+      // search-template W8: site theme-edit pure helpers.
+      siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,

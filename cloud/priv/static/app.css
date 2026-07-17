@@ -3201,3 +3201,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .deploys-rollback-note a { color: var(--info); text-decoration: none; }
 .deploys-rollback-note a:hover { text-decoration: underline; }
+/* search-template W8: the inline theme picker in the site-detail rail — a compact
+   select that reuses the token palette; all colours resolve through var(--…). */
+.rail-select {
+  font: inherit; font-size: 13px; padding: 3px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  max-width: 60%; cursor: pointer;
+}
+.rail-select:hover { border-color: var(--ring); }
+.rail-select:disabled { opacity: 0.6; cursor: progress; }
