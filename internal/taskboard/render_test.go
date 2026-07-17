@@ -585,14 +585,14 @@ func firstSelectableTask(b Board, st UIState) (ref string, selIdx int) {
 	return "", -1
 }
 
-// TestHoverPaintedInFrame proves the picker law in the STYLED frame (a forced
-// truecolor profile, since the runner's default drops ANSI): a live hover
-// changes the frame, the hovered row wears the background tint at FULL
-// brightness (never faint), every OTHER selectable row recedes to faint (SGR 2
-// — "lower opacity"), and the change is styling ONLY — the ansi-stripped text
-// is unchanged apart from the hovered row's trailing pad. The cursor is parked
-// on the hovered row so it is guaranteed inside the viewport window; both
-// renders share that cursor, so the selection marker is identical.
+// TestHoverPaintedInFrame proves the hover highlight in the STYLED frame (a
+// forced truecolor profile, since the runner's default drops ANSI): a live
+// hover changes the frame, EXACTLY the hovered row re-renders in the accent
+// foreground (the chat Phases-pane selection grammar — no background bar), every
+// OTHER line is byte-identical (siblings never recede), and the change is
+// styling ONLY — the ansi-stripped text is unchanged. The cursor is parked on
+// the hovered row so it is guaranteed inside the viewport window; both renders
+// share that cursor, so the selection marker is identical.
 func TestHoverPaintedInFrame(t *testing.T) {
 	oldp := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -634,53 +634,35 @@ func TestHoverPaintedInFrame(t *testing.T) {
 		return rendered[:i]
 	}
 	hoverOpen := probeOpen(hoverStyle)
-	faintOpen := probeOpen(faintStyle)
 
-	hoveredLines, faintedLines := 0, 0
+	hoveredLines := 0
 	for i := range wl {
-		// Styling only: the visible text (trailing pad stripped) is equal.
-		if strings.TrimRight(ansi.Strip(wl[i]), " ") != strings.TrimRight(ansi.Strip(ol[i]), " ") {
+		// Styling only: the visible text is equal.
+		if ansi.Strip(wl[i]) != ansi.Strip(ol[i]) {
 			t.Errorf("line %d: hover changed the VISIBLE text (must be styling only)\n got: %q\nwant: %q",
 				i, ansi.Strip(wl[i]), ansi.Strip(ol[i]))
 		}
 		if wl[i] == ol[i] {
 			continue
 		}
-		switch {
-		case strings.Contains(wl[i], hoverOpen):
-			hoveredLines++
-			if strings.Contains(wl[i], faintOpen) {
-				t.Errorf("line %d: the hovered row is FAINT — it must light up at full brightness", i)
-			}
-		case strings.Contains(wl[i], faintOpen):
-			faintedLines++
-		default:
-			t.Errorf("line %d changed without the hover tint or the faint recede:\n%q", i, wl[i])
+		if !strings.Contains(wl[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle (siblings must stay untouched):\n%q", i, wl[i])
+			continue
 		}
+		hoveredLines++
 	}
 	if hoveredLines != 1 {
-		t.Errorf("hover tinted %d lines, want exactly 1 (only the hovered row wears the background)", hoveredLines)
-	}
-	if faintedLines == 0 {
-		t.Errorf("no sibling row receded to faint — the picker law (siblings at lower opacity) is not painting")
+		t.Errorf("hover restyled %d lines, want exactly 1 (only the hovered row wears the accent)", hoveredLines)
 	}
 
-	// D17 remains intact: hover is a Background, the flash is Foreground-only —
-	// they are DISTINCT styles. hoverStyle must carry a background and no
-	// foreground so it can compose over a row's lifecycle hues without recolour;
-	// faintStyle is an ATTRIBUTE only — no background, no foreground — so the
-	// recede can never recolor state.
-	if hoverStyle.GetBackground() == (lipgloss.NoColor{}) {
-		t.Errorf("hoverStyle has no background — it is the board's first background paint")
+	// The hover is a FOREGROUND restyle (the chat Phases-pane grammar), never a
+	// background bar: hoverStyle must carry the accent foreground and no
+	// background, so the highlight reads as accent text, not an inverted row.
+	if hoverStyle.GetForeground() == (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle has no foreground — the accent highlight would be invisible")
 	}
-	if hoverStyle.GetForeground() != (lipgloss.NoColor{}) {
-		t.Errorf("hoverStyle set a foreground — hover must tint the background only, never recolour text")
-	}
-	if !faintStyle.GetFaint() {
-		t.Errorf("faintStyle lost its faint attribute — the recede would be invisible")
-	}
-	if faintStyle.GetForeground() != (lipgloss.NoColor{}) || faintStyle.GetBackground() != (lipgloss.NoColor{}) {
-		t.Errorf("faintStyle carries a color — the recede must be the faint ATTRIBUTE only (color = state)")
+	if hoverStyle.GetBackground() != (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle set a background — hover is a foreground restyle, never a background bar")
 	}
 }
 
