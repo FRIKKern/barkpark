@@ -241,7 +241,7 @@ func TestWorkflowAgentDetailWidthDiscipline(t *testing.T) {
 			wf := &Workflow{Status: "running", Nodes: []WorkflowNode{
 				{Type: "workflow_phase", Index: 1, Title: "Phase"}, a,
 			}}
-			for _, ln := range renderWorkflowAgentDetail(tc.width, journeyOf(wf), now, 0, 0) {
+			for _, ln := range renderWorkflowAgentDetail(tc.width, journeyOf(wf), now, 0, 0, true) {
 				if w := lipgloss.Width(ln); w > tc.width {
 					t.Fatalf("pane line overruns width %d (got %d): %q", tc.width, w, ln)
 				}
@@ -266,7 +266,7 @@ func renderAgentDetailFor(a WorkflowNode, entryStatus string, now time.Time) str
 		a,
 	}}
 	j := journeyOf(wf)
-	return strings.Join(renderWorkflowAgentDetail(80, j, now, 0, 0), "\n")
+	return strings.Join(renderWorkflowAgentDetail(80, j, now, 0, 0, true), "\n")
 }
 
 func ptrI64(v int64) *int64 { return &v }
