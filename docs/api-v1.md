@@ -3,13 +3,13 @@
 
 ## 1. Overview
 
-Frozen `/v1` contract: breaking changes require `/v2`; additive changes stay in v1.
+Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
-A **Workspace** is the token-bound tenant containing **Projects**, **Datasets**, and **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
+A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias.** Legacy unprefixed `/v1/*` content routes resolve to `Default`/`Default`; scoped paths are canonical.
+**Flat alias.** Unprefixed `/v1/*` content routes resolve to `Default`/`Default`; scoped paths canonical.
 
 ## 2. Base URL & Authentication
 
@@ -17,11 +17,11 @@ A **Workspace** is the token-bound tenant containing **Projects**, **Datasets**,
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all permissions, `Default`). CORS uses the schema `cors_origins` plus configured defaults and Barkpark Cloud origins.
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all permissions, `Default`). CORS: schema `cors_origins` + configured defaults + Barkpark Cloud origins.
 
-**Tenancy.** Path workspace/project are authoritative and must match the token: unknown workspace → `404`, non-member → `403`. Binding and write gates: `docs/auth.md`.
+**Tenancy.** Path workspace/project are authoritative and must match the token: unknown workspace → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
-Markers: **[public]** = no token (restricted by schema visibility) · **[token]** = any valid token · **[admin]** = admin.
+Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any valid token · **[admin]** = admin.
 
 **Discovery.** An **OpenAPI 3.1** descriptor of `/v1` is at `GET /openapi.json` (public, manifest-generated).
 
@@ -47,7 +47,7 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 | `_rev` | string | 32-char hex, changes on every write |
 | `_draft` | boolean | `true` if `_id` starts with `drafts.` |
 | `_publishedId` | string | Id with `drafts.` prefix stripped |
-| `_createdAt` | string | ISO 8601 UTC, `Z` suffix (e.g. `2026-04-12T09:11:20Z`) |
+| `_createdAt` | string | ISO 8601 UTC, `Z` suffix |
 | `_updatedAt` | string | ISO 8601 UTC, `Z` suffix |
 
 All other keys come from stored document content plus `title`. User fields cannot shadow reserved keys (dropped on write).
@@ -78,7 +78,7 @@ Fetch a single document by id. 404 if not found or if the schema's `visibility` 
 
 ### 5a. Reference Expansion
 
-`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string).
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's refs and missing targets stay raw (expanded = map, raw = string).
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
@@ -90,9 +90,9 @@ Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,acti
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Apply a batch of mutations atomically (one DB transaction — any failure rolls back the batch). Body: `{ "mutations": [ <mutation>, ... ] }`.
+Apply a batch of mutations atomically (one DB transaction — any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
 
-**Write gate.** Requires the `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
+**Write gate.** Requires `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
 
 ### Mutation kinds
 
@@ -104,7 +104,7 @@ Apply a batch of mutations atomically (one DB transaction — any failure rolls 
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` fields into the existing document. `ifRevisionID` = optimistic concurrency (mismatch → `412`). Result operation is `"update"`. Also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set`; `ifMatch` aliases `ifRevisionID`; a 1-mutation batch inherits `If-Match`. Server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the existing doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`). Result operation `"update"`. Also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set`; `ifMatch` aliases `ifRevisionID`; a 1-mutation batch inherits `If-Match`. Server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
 The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
@@ -113,7 +113,7 @@ The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type"
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish success may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); the bulldocs paper-ingest 200 carries the same key, omitted when empty.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); bulldocs paper-ingest 200 carries the same key, omitted when empty.
 
 Failures use the §9 error envelope.
 
@@ -125,7 +125,9 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 **Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, use as `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (string\|null — rev *before*, same in live and replay, `null` on `create`), `result` (envelope), `syncTags` (outer-`syncTags` format). **Keepalive:** `: keepalive` frame every 30 s when idle.
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (string\|null — rev *before*, same live and replay, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a compact live workflow summary (unreplayable, NO `id:`) refreshing the TUI strip mid-turn.
 
 ## 8. Schema endpoints [admin]
 

@@ -649,6 +649,41 @@ func TestWorkflowStripOmitsAbsentFigures(t *testing.T) {
 	}
 }
 
+// TestWorkflowStripPrefersLiveSummary proves wsc-bl-workflow-sse's visible win:
+// a compact live summary (the mid-turn SSE `event: workflow` delta) drives the
+// collapsed strip, OVERRIDING a staler rail fold; a Terminal summary drops the
+// strip even while the rail fold still reads live.
+func TestWorkflowStripPrefersLiveSummary(t *testing.T) {
+	// A rail fold that alone would render "0/1" with a stale label, plus a fresher
+	// live summary carrying "3/4" — the strip must show the LIVE figures.
+	stale := &Workflow{Status: "running", Label: "stale label", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		{Type: "workflow_agent", Label: "a", PhaseIndex: 1, State: "start"},
+	}}
+	live := &SessionWorkflow{Label: "live label", AgentsDone: 3, AgentsTotal: 4}
+	m := Model{width: 80, height: 24, screen: screenChat, st: State{Workflow: stale, LiveWorkflow: live}}
+	m.now = time.Now
+
+	panel := m.workflowPanelLines()
+	if len(panel) != 1 {
+		t.Fatalf("a live non-terminal summary renders exactly the strip, got %d lines", len(panel))
+	}
+	strip := panel[0]
+	if !strings.Contains(strip, "live label") || !strings.Contains(strip, "3/4 agents done") {
+		t.Fatalf("the strip must read the LIVE summary mid-turn, got:\n%s", strip)
+	}
+	if strings.Contains(strip, "stale label") {
+		t.Fatalf("the staler rail fold must not drive the strip, got:\n%s", strip)
+	}
+
+	// A Terminal live summary drops the strip even though the rail fold still
+	// reads live (D23 — the settled wave gives the transcript its rows back).
+	m.st.LiveWorkflow = &SessionWorkflow{Label: "done", AgentsDone: 4, AgentsTotal: 4, Terminal: true}
+	if got := m.workflowPanelLines(); got != nil {
+		t.Fatalf("a Terminal summary must drop the strip, got:\n%v", got)
+	}
+}
+
 // TestWorkflowDetailTwoPane: the expanded panel shows phases left (glyph +
 // title + settled/total, selection marked) and the selected phase's agents
 // right (pair-grammar label, model family, tokens, elapsed) — plus the honest
