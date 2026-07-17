@@ -54,7 +54,10 @@ export async function allDocs(): Promise<DocRow[]> {
 
 /** The graph corpus, baked at build into a static JSON the island fetches. */
 export async function graphCorpus(): Promise<unknown> {
-  const res = await fetch(`${env.apiUrl}/v1/graph?dataset=${encodeURIComponent(env.dataset)}`, {
+  // /v1/graph is a FLAT route — derive the bare origin (the managed path may
+  // hand us a SCOPED apiUrl, and scoped+flat 404s; same live-caught class as
+  // the Next edition's graph.ts).
+  const res = await fetch(`${new URL(env.apiUrl).origin}/v1/graph?dataset=${encodeURIComponent(env.dataset)}`, {
     headers: env.token ? { authorization: `Bearer ${env.token}` } : {},
   })
   if (!res.ok) throw new Error(`graph corpus fetch failed: ${res.status}`)
