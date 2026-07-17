@@ -1,6 +1,6 @@
 # Block Wishlist 100 — epic charter
 
-Epic task: `pd-block-wishlist-epic` · Wave 1 Paper: `block-wishlist-wave-2026-07-17`
+Epic task: `pd-block-wishlist-epic` · Wave 1 Papers: `block-wishlist-wave-2026-07-17` (exploration record) → `block-wishlist-wave-2026-07-18` (current — resumption verify + decide; the epic task's `wave_paper` stamps the current one)
 
 ## Vision
 
@@ -21,18 +21,37 @@ One definitive, published **"Block Wishlist 100"** Paper — dogfooding Portable
 - **D11 — This wave ships papers + three surgical code fixes.** (1) Reader parity: bulldocs_live.ex `reader_resolvers/3` drops :ref_resolver/:codelist_resolver → raw slugs leak on the public reader (live-proven). (2) 77 broken prod blocks: alias-normalize the 5 list-variant type strings → `list`, and birth a real `blockquote` block (8 live `quote` uses = genuine demand; there is nothing to alias `quote` onto). (3) Four stale in-code comments that misled three separate scouts get corrected. *Why: live prod breakage + near-trivial fixes; everything else block-shaped waits for the ranked backlog.*
 - **D12 — Deliverables are Barkpark-native.** Both Papers are style=article, published on guerrilla, linked to the epic task and the wave Paper; S-tier candidates filed as bp tasks by the review slice. Papers are written by ONE builder each (no concurrent Paper writers).
 
+### Resumption addendum (2026-07-18 verify round — D1–D12 all re-probed and HELD; these extend, none re-litigate)
+
+- **D13 — The 07-17 run never died; adopt, never re-dispatch.** The "dead prior run / 24h silent" premise was a clock misread — the whole arc (task filing 22:56Z, builder claims 23:04–23:07Z, DONE/gate-green pulses 23:23–23:35Z) happened inside one hour of 07-17 UTC evening. Four builders hold LIVE claims (wishlist-paper 4/5 DONE — paper published, 100 candidates live-verified; reader-resolver 4/5 gate 35/0 green; broken-blocks code-written Go-gate green; stale-comment committed 02e265bf0 awaiting merge). *Why: task claim CAS is the mutex — a second dispatch on a claimed task burns a builder and risks a paper double-writer; adopt in-flight work, merge it, close it.*
+- **D14 — Broken-block census frozen at 77; the COALESCE query is the only citable form.** Papers store blocks at `content->'blocks'` OR `content->'body'->'blocks'`; a naive single-path SQL query lands on 51 by silently skipping 29 body.blocks-only docs. Canonical: `coalesce(content->'blocks', content->'body'->'blocks')` over type=paper status=published → 77 (bulleted-list 27, bullet_list 22, bulleted_list 15, quote 8, numbered_list 3, bulletList 2), triple-confirmed (API walk + top-level SQL + recursive SQL). *Why: the fix task's "77→0" criterion must not be re-derived with an undercounting query and declared victory at 51.*
+- **D15 — Charter-reconciliation chore STRUCK.** The "stranded" commit 035655399 was superseded by PR #4031 (fe4bb3cdc), byte-identical, merged to origin/main. *Why: verified empty diff between the two; running the stash/reset steward recipe now would be pure risk (18 pre-existing stashes) against zero benefit.*
+- **D16 — Blockquote birth REQUIRES tiers.ex `@element` entries for `blockquote` + `quote`.** The tiers completeness test reds without them; snake_case list aliases are INVISIBLE to that invariant (extractor regex has no underscore) so they neither need nor can trip a tier entry. *Why: probe-proven — the exact red (`["blockquote","quote"] have no tier`) then green after the entry.*
+- **D17 — Reader fix form: `Map.merge(Labels.render_opts(dataset, scope))` inside `reader_resolvers/3`; walk.ex:166 is out of scope.** walk.ex emits "Unsupported block" for unknown Pd-node KINDS post-compose — a different layer; list/blockquote misses are TYPE-level and route through compose.ex's catch-all only. *Why: compile+green proven; keeps the fix single-function and covers both call sites.*
+- **D18 — Surface counts run-frozen: React 48→49, Elixir parity 48→49, Go registry 66 (open, no count var).** scaffy add-block-type's own EXAMPLES (46→47) are two generations stale — builders read the live pins (`toHaveLength(N)`, `EXPECTED_COUNT=N`), never the corpus examples. *Why: the exact transcription-drift failure D1 exists to prevent.*
+- **D19 — The Usefulness Review dispatches NOW (round 1 of the resumption run).** Its true input is the PUBLISHED wishlist Paper — live-verified 2026-07-17T23:40Z: 100 unique candidates B001–B100, zero real Unsupported-block renders (the one string match is prose about the emitter). Gating on the wishlist branch's git merge would gate on provenance, not input. Claim-CAS prevents a double-writer if the original run also dispatches its round 2. *Why: the review is the unbuilt half of the user's wish and its dependency is satisfied in fact.*
+- **D20 — Paper authoring path (live-proven end-to-end).** Birth via `POST /v1/plugins/bulldocs/papers` (description ≥20 chars + 1–12 registered distinct-strength weighted tags — `wishlist` is NOT registered; use `portabledoc`/`block`/`docs`); the publish wall gates ONLY birth/re-upsert, never `/ops`; batch-append via `POST …/papers/:slug/ops` with integer `ifRev` threaded every call (current rev = top-level `rev` field, NOT `_rev`; 412 = re-read rev and retry). The public reader NEVER 404s (soft 200 fallback shell for any slug) — prove paper existence via data query, never HTTP status.
+- **D21 — Live dataviz showcase constraints.** Web chart renderer caps series at 4 (Enum.take(4), deliberate D4-of-render-unification) in discovery order — use `groupBy=priority` for flagship charts (least-skewed, ~7% honest drop) and `groupBy=[status,priority]` heatmaps (uncapped, 24/30 cells) for full distributions; count aggregates are k-anon-exempt and render fully anonymous.
+- **D22 — Candidate-pool rulings are binding on the Review's dedup check.** `chat-approval`/`chat-question`/`chat-plan` are EXISTING registered types (tiers.ex, shipped #3514/#3742) — any wishlist entry re-proposing them is a dedup failure to flag, not an S-tier candidate. Per-kind TUI mermaid renderers are parity work under ONE block, never candidates. horizontal-bars is legitimate only as a distinct labeled ranking-bars/leaderboard block — "chart but sideways" double-counts `chart`.
+
 ## Roadmap
 
-| # | Slice | Size | Wave |
-|---|---|---|---|
-| 1 | `pbw-w1-wishlist-100-paper` — author + publish the Block Wishlist 100 Paper (100 deduped candidates, full feasibility notes, showcases existing blocks) | large | 1 (round 1) |
-| 2 | `pbw-w1-reader-resolver-fix` — public reader wires ref/codelist resolvers; raw-id leak fixed | small | 1 (round 1) |
-| 3 | `pbw-w1-broken-blocks-fix` — list-variant alias map (3 surfaces) + blockquote block birth + quote alias; 77 prod placeholders → 0 | medium | 1 (round 1) |
-| 4 | `pbw-w1-stale-comment-truth` — registry.ts "46" + run-convert.js picker comments corrected to code truth | small | 1 (round 1) |
-| 5 | `pbw-w1-usefulness-review-paper` — the Review: categorize all 100, rank S/A/B/C by the D5 rubric, file S-tier bp tasks | large | 1 (round 2, after slice 1) |
-| 6 | S-tier build wave(s): static/scaffy-path candidates first | — | 2+ |
-| 7 | Aggregate-resolver alignment (`tr-agg-resolver-wave`, pre-existing open task) unblocks gauge/dashboard + live-data S-tier candidates | — | 2+ |
-| 8 | `pbw-backlog-plugin-block-seam` — block-registration seam so plugins can own block types | — | future |
-| 9 | `pbw-backlog-scaffy-deep-recipes` — scaffy coverage for Studio 4-way lockstep, SDK builders, hydration wiring | — | future |
+| # | Slice | Size | Wave | Status (2026-07-18 resumption) |
+|---|---|---|---|---|
+| 1 | `pbw-w1-wishlist-100-paper` — author + publish the Block Wishlist 100 Paper (100 deduped candidates, full feasibility notes, showcases existing blocks) | large | 1 (round 1) | IN FLIGHT 4/5 — paper PUBLISHED (100 candidates live-verified); payload on `loop-epic/block-wishlist-100-paper-published-100-n-0`; lead merge+close remain |
+| 2 | `pbw-w1-reader-resolver-fix` — public reader wires ref/codelist resolvers; raw-id leak fixed | small | 1 (round 1) | IN FLIGHT 4/5 — gate 35/0 green, committing on `loop-epic/public-reader-resolves-field-reference-t-1` |
+| 3 | `pbw-w1-broken-blocks-fix` — list-variant alias map (3 surfaces) + blockquote block birth + quote alias; 77 prod placeholders → 0 | medium | 1 (round 1) | IN FLIGHT — code written, Go gate green, Elixir gates running (respect D14 count + D16 tiers entries) |
+| 4 | `pbw-w1-stale-comment-truth` — registry.ts "46" + run-convert.js picker comments corrected to code truth | small | 1 (round 1) | DONE-UNMERGED 2/3 — commit 02e265bf0 on `loop-epic/run-convert-js-stale-picker-comments-cor-3`; lead merges, never rebuild |
+| 5 | `pbw-w1-usefulness-review-paper` — the Review: categorize all 100, rank S/A/B/C by the D5 rubric, file S-tier bp tasks | large | 1 (round 1 of resumption, per D19) | DISPATCHING — sole fresh builder this run (fable) |
+| 6 | S-tier build wave(s): static/scaffy-path candidates first | — | 2+ | gated on slice 5's ranked backlog |
+| 7 | Aggregate-resolver alignment (`tr-agg-resolver-wave`, pre-existing open task) unblocks gauge/dashboard + live-data S-tier candidates | — | 2+ | open, unclaimed (re-verified) |
+| 8 | `pbw-backlog-plugin-block-seam` — block-registration seam so plugins can own block types | — | future | filed |
+| 9 | `pbw-backlog-scaffy-deep-recipes` — scaffy coverage for Studio 4-way lockstep, SDK builders, hydration wiring | — | future | filed |
+| 10 | `pbw-backlog-unsupported-grep-trap` — census/grep-trap guard (filed by digest) | — | future | filed |
+| 11 | `pbw-backlog-bp-doc-ls-fields-rowdrop` — `bp doc ls --fields` silently DROPS docs missing a projected field (296 vs 297 reproduced); fix to emit nulls | small | future | filed 07-18 |
+| 12 | `pbw-backlog-pdrender-grep-hang` — TestNoInlineDivideFormulaOutsideSolver shells an UNSCOPED repo-root grep; 600s hang under checkout contention; scope it to internal/pdrender | small | future | filed 07-18 |
+| — | ~~charter-reconciliation chore~~ | — | — | STRUCK per D15 (already merged as #4031) |
 
 ## Wave log
+
+- **2026-07-18 (wave 1 resumption — verify + decide).** 8-probe verify fleet re-proved D1–D12 and produced D13–D22. Headline: the "dead prior run" was a clock misread — its 4 builders are alive and 3 of 4 slices are done/near-done; census arbitrated to 77 (storage-path COALESCE query canonical); charter found already merged (#4031, reconciliation struck); paper-ops authoring path live-proven on a scratch slug (birth wall, /ops batch + ifRev CAS 412, reader soft-200 gotcha); wishlist Paper live-verified with 100 candidates at 23:40Z. Decide dispatched exactly ONE fresh slice — `pbw-w1-usefulness-review-paper` (fable) — adopted the 4 in-flight claims untouched, and filed 2 new tooling-defect backlog tasks. Wave Paper: `block-wishlist-wave-2026-07-18`.

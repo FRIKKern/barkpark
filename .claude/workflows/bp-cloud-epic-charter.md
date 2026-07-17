@@ -413,6 +413,22 @@ HEAD. The Decide finalizations, each following the evidence over the direction's
   `workflow_agent` node always carries `promptPreview`+`attempt` together, so the Go `agentHasDetail`
   predicate keys on the 4 `*string` pointers and an attempt-only-no-prompt node does not occur.
 
+### Wave 4 — the COCKPIT round (2026-07-18). Decisions D40–D46 (execution map + needs-you + steer paper; every load-bearing choice PROVEN by running against the 820-value real resultPreview corpus, the live guerrilla wire, and probe-red byte-locks)
+
+- **D40 — Snippet extraction is truncation-tolerant BARKPARK-vocab key-regex; codex SNIPPET_KEYS are NOT ported (proven on all 820 real captures).** 0/820 real resultPreview values parse as JSON — 817 truncate at exactly 401 chars ending `…` (upstream cap; recorder.ex applies none), and the codex extractor renders literal brace-noise on 813/820 (its parse-first path throws on 820/820). Its vocabulary (headline/verdict/recommendation/…) occurs ZERO times in real data; Barkpark's agents write `direction/summary/title/test_summary/evidence/notes`. Algorithm (`agentSnippet(resultPreview string) string`, render.go): (1) TrimSpace; empty → "". (2) DEFENSIVE whole-parse (json.Unmarshal → map) → first present key — exercised by ZERO real fixtures, so a SYNTHETIC untruncated-object fixture is MANDATED (D29/D37 precedent). (3) truncation-tolerant key-regex, KEYS in priority order `direction, summary, title, test_summary, evidence, notes` — pattern `"<k>"\s*:\s*"((?:\\.|[^"\\])*)` (RE2-safe; captures to end-of-string when the closing quote was clipped); unescape `\n \t \" \\ \/`, DROP a dangling trailing backslash. (4) bare-prose fallback (payload not starting `{`): strip leading md markers, first line, first sentence — first-sentence extraction applies ONLY here. (5) clean: newlines/tabs → space, collapse whitespace, strip trailing `…`/`...`. (6) all fail → "" (render NOTHING) — NEVER brace-noise. Key-extracted values go FULL to render's existing width truncate (D31) — the summary/title IS the headline. Truncation trigger is WELL-FORMEDNESS (ellipsis), never length. This is RENDER-side interpretation, explicitly distinct from D28's FOLD-side never-re-parse law (the fold still passes verbatim). Snippets paint ONLY under SETTLED agents, as a dimmed second line. Proof run: 813 regex / 7 prose-fallback / 0 empty / 0 brace-noise on 820.
+
+- **D41 — The stall badge is HONESTY-GATED: `no progress since <clock>`, never `stalled <age>`; needs-you outranks; NO crashed/stopped state EVER.** Code-confirmed: `lastProgressAt` is deliberately excluded from the persistence signature (studio_chat.ex:895-898) and the TUI's copy refreshes only at the 4 FetchTailEffect sites — staleness is unbounded in principle (frozen across one long tool call), so a naive `now−lastProgressAt>90s` verdict would FABRICATE stalls. The badge (non-terminal agents only, warn token) reads `no progress since <HH:MM>` — a phrasing that stays TRUE under any client-side staleness; show it when age > 90s. Precedence: a pending answerable card suppresses every stall badge — WAITING is never stalled (the studied fleetStatus law: stalled is computed only when no question is pending). bp has NO pid/liveness signal — never render `crashed`/`stopped`/`dead`.
+
+- **D42 — Refetch-on-expand: ONE-SHOT FetchTailEffect on the collapse→expand EDGE; no polling; RESOLVES wsc-bl-workflow-sse-detail.** Wired surgically in keys.go's expand branch via the designated single dispatch site (`m.execEffect(FetchTailEffect{SinceSeq: m.st.LastSeq})`) — lands in the same idempotent reduceTailFetched merge path; edge-gated by `!m.wfExpanded` so it cannot re-fire. Cost accepted eyes-open: one measured 38,308-byte full-session GET per discrete user action (the D20 no-raw-rail law targets ROUTINE/broadcast paths; a user-action GET is the same risk class as the accepted turn-boundary refetch). The "slow cadence while expanded" idea is REJECTED — it reopens the polling question D13 settled. This decision ANSWERS backlog `wsc-bl-workflow-sse-detail`'s design question (on-expand refetch, not a richer wire frame) — that task closes with a pointer here.
+
+- **D43 — The terminal result box ships on RAIL TRUTH + the cached picker epic; NO new wire this wave (the refetch lever was PROVEN unable to freshen the grade line).** Proven three ways (live wire + controller + Go types): `epic`/wave_status rides ONLY the sessions-LIST wire (`sidebar_json` + `put_epic`); `full_session_json` structurally has no `:epic` key, Go `ChatSession`/`State` have no Epic field — so FetchTailEffect can NEVER carry a grade line. Worse: live guerrilla shows 0/4 workflow sessions with an epic key, because `epic_goal` resolves via the session's OWN worker holding a parented in_progress slice — the watched launcher session holds none (the same D32 join gap). Box content = `EntryStatus` verbatim (`completed`/`interrupted`) + settled/total + tokens + FIRST-CLASS failed surfacing (`✕ N failed` whenever `j.Failed > 0` — today j.Failed renders NOWHERE at summary level; a "completed" entry can carry failed agents) + the grade line ONLY from the cached picker Epic (`m.sessions` lookup by `st.SessionID`, ~10-15 lines, render-only) when `WaveStatus` contains the `complete — grade` substring (validated safe against 3 real ledger strings; 0 false positives on non-complete strings). An interrupted wave is NEVER dressed up with a stray resultPreview. Widening `session_json` with epic + making `epic_goal` resolve for launcher sessions goes to backlog `wsc-bl-epic-on-session-json`, sequenced BEHIND the steer paper's join design (D46) — shipping the wire first would be a null field, the D32 dead-affordance trap.
+
+- **D44 — D35 amended: ONE `visibleAgents(phase)` projection pins running agents; the cap STAYS `workflowDetailMaxAgents=8`; the codex `16` is a full-screen constant and is NOT ported.** The agent cursor clamps to the PAINTED (visible) list, not a raw `min()` against the phase length. A new pure projection `visibleAgents(phase)` pins every running agent (wire order) and backfills with settled agents up to the cap, returning the painted nodes, their row→agent index map, and a SETTLED-only overflow count. ALL THREE current consumers — the row-list painter (render.go:746), the third-level detail slice (render.go:498), and the Up/Down cursor clamp (keys.go:257) — read this one projection, so paint == addressable == cursor range BY CONSTRUCTION (probe proved today's bug: running agents at wire index 9 and 17 in an 18-agent phase are silently folded into `+10 more`, cursor-unreachable, detail-pane nil). The detail pane indexes `visible[wfAgent]` through the index map, NEVER `phase.Agents[wfAgent]` directly — missing this makes the detail level address the WRONG agent while the row list looks correct; a test asserts detail-pane-agent == painted-row-agent on a >8 mixed phase. Edge rule (running > 8): pin the first 8 running in wire order; the overflow suffix then reads `… +N more (M running)` so hidden live agents are never silent. Transcript budget stays 8. A SYNTHETIC >8-agent mixed fixture is MANDATORY — no real fixture exceeds 5 agents/phase, so the collision is invisible to the existing suite.
+
+- **D45 — needs-you: the pill REPLACES the tick-line status word (needs-you > working, the strip_kind law); Enter-jump rides a single-accumulator offset walk; ZERO new data wire.** Data is already complete on both surfaces: `answerable()` covers approval+question+plan on the open session (fresh mid-turn via the permission-frame refetch), and `pending_approvals` is the deliberately role-WIDENED counter on the list wire. Paint: the collapsed strip flips `⏸ needs you — approval pending` (warn token) and the tick-line status word `working` is REPLACED in place — never a fourth line, never side-by-side (ports Studio's `session_pill`/`strip_kind` single-badge precedence: pending ask beats running turn). Enter-jump: a needs-you branch AHEAD of the expand branch in handleWorkflowKey (composer Enter still sends; expanded-panel Enter still drills). Offset: refactor `transcriptLines` into ONE shared accumulator that optionally captures the start line of the target RequestID's block (`transcriptLines()` stays a thin wrapper — no forked walk to drift); `m.scroll` is set Home-style, clamped to `[0, maxScrollTop]`; the jump targets `m.focusedCard()` (cardCursor untouched) and sets `m.focus = focusComposer` after, mirroring the Esc-pop, so arrows scroll again immediately. Also close the pre-existing `answerFocused` asymmetry (it never resets m.focus) under the same criterion. NAMING FIX: the idle-geometry byte-lock is charter **D11** (render_test.go:737 tags it so) — earlier prose calling it "the D14 byte-lock" collided with the chat-tui charter's D14 focus law; use D11.
+
+- **D46 — Steer is a PAPER this wave (design-first HELD against the code-first rival); its ratified fact-base.** Claude-lane builders are bound to sessions by NOTHING — a hard architectural fact, not an unused feature: Task-tool subagents claim under `epic-builder-<slug>` worker strings; the ONE persisted binding (`epic_assignment_runtime_attempts`) is DB-CHECK-constrained `provider='codex'` AND `execution_target='managed'` (CycleFleet is the Cloud MANAGED fleet product, a separate system — structurally unusable for the claude lane); the hand_tasks fold is exact-worker `==` at both its live and hydrate paths. The taxonomy MUST split by lane: the claude adapter steers mode/model ONLY (closed enum — safe/proven); codex's ONLY steer verb is live TEXT INJECTION into a running turn (`turn/steer` — a materially different risk row, never folded into the same "safe" bucket); same-PID mid-turn queue (`send_turn`) is safe/proven. Claude-lane fleet steering can only be ASYNC task-layer mutation (note/patch the builder's claimed task — no PID is reachable from another session). D32 cost-split CORRECTION for the paper: the `parent_id` WHERE-fragment filter is CHEAP (shipped precedent: `epic_slice_counts/1`); the REAL unproven cost is the slug-join across the two divergent emitter label shapes + degrade-on-ambiguity. Race/cancel are OUT (engine limit). Deliverable: a published Paper + 1-3 follow-up slice specs (including whether `wsc-bl-epic-on-session-json`'s launcher-epic resolution rides the join design), or a documented no-go.
+
 ## Roadmap
 
 Wave 1 (this wave — all five pre-filed, perfected at Decide):
@@ -455,7 +471,23 @@ Wave 3 (2026-07-17 — the AGENT-DETAIL round; D26–D34; GUI round 1, TUI round
    Esc/left back), additive `wfAgent`+`wfAgentDetail` (D30), Go `WorkflowNode` +6 fields, field
    projection parity. Go. **large**. Round 2, `after:[wsc-ad-gui]` (needs the fixture on main). opus.
 
+Wave 4 (2026-07-18 — the COCKPIT round; D40–D46; all three round 1):
+1. **wsc-map-inline** `task-85306c724906c02d` — execution map: settled-row snippets (D40 extractor),
+   stall badge (D41), refetch-on-expand (D42), terminal result box (D43), visibleAgents projection
+   (D44). Go/internal/chat. **large**. Round 1. fable.
+2. **wsc-needs-you** `task-8596bfb8188aa880` — needs-you pill + strip flip + Enter-jump-to-card
+   (D45). Go/internal/chat. **medium**. Round 1 (function-level disjoint from map-inline; same
+   files render.go/keys.go — lead merges map-inline FIRST, needs-you rebases). opus.
+3. **wsc-steer-design** `task-b399a1068ea742f6` — the steer decision PAPER (D46 fact-base). No
+   code. **medium**. Round 1. fable.
+
 Backlog (filed, published, NOT this wave — PARKED per D19):
+- **wsc-bl-epic-on-session-json** — widen `full_session_json` with `epic` (reuse `put_epic`) + Go
+  `ChatSession.Epic` + State hydration, AND make `epic_goal` resolve for the watched LAUNCHER
+  session (today it resolves via the session's own worker holding a parented slice — launcher
+  holds none, so 0/4 live workflow sessions carry epic). Filed at Wave-4 Decide (D43): shipping
+  the wire first would carry a null field (the D32 dead-affordance trap); sequenced BEHIND the
+  D46 steer paper's join design.
 - **wsc-bl-agent-task-join** — the claimed-build-task INTERMINGLE (agent row ⇄ its bp task become one
   row: pulse now-line + criteria count + `?task=` deep-link). Filed at Wave-3 Decide (D32): descoped
   from wsc-ad-gui/tui because the existing hand-task fold is exact-worker-scoped and cannot see the
@@ -469,11 +501,9 @@ Backlog (filed, published, NOT this wave — PARKED per D19):
 - **wsc-bl-prs-open** — real "PRs open" source for the epic-goal line. Parked: net-new
   github-PR subsystem + reverses a tested D8 decision; zero parallelism benefit vs waiting on s3.
 - **wsc-bl-busiest-child** — fleet-phase busiest-child now-line. Parked: D7 holds, no signal.
-- **wsc-bl-workflow-sse-detail** — live-freshen the Enter-expanded two-pane Phases|agents
-  DETAIL from a richer wire payload. Filed at Wave-2 round-2 Decide (D24): the compact summary
-  structurally lacks per-agent `Nodes`, so the SSE frame can only live-freshen the collapsed
-  strip; the expanded detail stays turn-boundary fresh. Needs either a richer targeted payload
-  or an on-expand refetch — deferred, not fabricated.
+- **wsc-bl-workflow-sse-detail** — **RESOLVED at Wave-4 Decide (D42)**: the design question is
+  answered as on-expand refetch (one-shot FetchTailEffect on the collapse→expand edge), built
+  inside wsc-map-inline; no richer wire frame. Task closes with a pointer to D42.
 - **wsc-bl-completed-line-source** — the completed-wave line "complete · grade · n/n merged"
   (design-map block 5) has no grade/merged-count data source today; honestly renders
   "complete · n/n". Same honesty class as D8. Backlogged, not fabricated.
@@ -589,3 +619,34 @@ break). Backlog carried unchanged. Review appends the debrief.
 **Outcome (steward close-out 2026-07-17):** wsc-ad-tui → **#3979 MERGED**. bp chat's workflow panel gains a THIRD focus level (Enter → per-agent detail: about=promptPreview / ▸now=lastTool+age / done=resultPreview + attempt>1 chip; Up/Down cycle agents; Esc/left pops back; composer keeps every key). 6 pointer fields on Go `WorkflowNode` (decode-only, Mechanism A — wire already carries them); terminal/failed Go-DERIVED from State; additive `wfAgent`/`wfAgentDetail` (never a depth int); composer-safety proven (no KeyRunes claim); field-projection parity 0-mismatch on all 34 fixture nodes + a SYNTHETIC thin-node test for the D27 no-affordance honesty star. The cycle's Review recovered a mid-pipeline StructuredOutput failure via resumeFromRunId (20 agents, grade A). Steward cherry-picked the 2 Go commits clean onto current origin/main (base stale); the reviewer's own charter-outcome commit conflicted with origin's D35-D39 and was skipped — THIS entry reconciles it. go-tests + Elixir green (Go-only), Sobelow n/a, task closed done.
 
 **The AGENT-DETAIL round is COMPLETE across BOTH surfaces (Studio #3959 + bp chat #3979).** The Wave Session Card epic is at DESIGNED COMPLETION — every merged surface drills from the workflow card into per-agent detail, honest and quiet. All remaining backlog is deferred-by-design: `wsc-bl-agent-task-join` (D32 intermingle), `wsc-bl-agent-detail-fixture-gaps`, `wsc-bl-workflow-sse-detail` (D24 ceiling); PARKED by the honesty star: `wsc-bl-prs-open`, `wsc-bl-busiest-child`.
+
+### Wave 4 (2026-07-18) — the COCKPIT round: execution map + needs-you + steer paper (D40–D46)
+Wave Paper: `wsc-wave-2026-07-18` (style=article). The user's wish (learn from the studied
+scasella/claude-dynamic-workflows-codex clone) becomes bp chat's cockpit wave: inline result
+snippets on the execution map, honest stall visibility, a needs-you state that jumps to the gate,
+and the steer design paper. A 14-surveyor survey + 6-verifier PROVE round ran; every flagship
+choice was settled by RUNNING, and two attacks on the direction LANDED and were absorbed:
+- Snippet extraction: 0/820 real resultPreview values parse as JSON; the codex extractor renders
+  brace-noise on 813/820 — "headline-first" was MISCALIBRATED. D40's truncation-tolerant
+  Barkpark-vocab extractor was prototyped and run: 813 regex / 7 prose / 0 empty / 0 brace-noise.
+- The result-box freshness lever was REFUTED live: `epic` rides only the LIST wire; the single
+  GET has no epic key and 0/4 live workflow sessions carry epic at all (launcher worker holds no
+  parented slice). D43 narrows the box to rail truth + cached picker epic; wire widening filed as
+  `wsc-bl-epic-on-session-json` behind the D46 join design.
+- The collapse probe proved TODAY's bug (running agents at wire index ≥9 silently folded and
+  cursor-unreachable) and sized both fixes: D44 ships the pin-running `visibleAgents` projection
+  at cap 8; the codex `16` is not ported.
+- Both byte-locks proven fail-before by probe edits going RED then reverted (geometry lock =
+  charter D11; the "D14 byte-lock" label was a mislabel — fixed in D45).
+Three slices dispatched (all round 1):
+- **wsc-map-inline** `task-85306c724906c02d` — Go, **large**, round 1, fable. D40-D44. Gate:
+  `cd internal/chat && CC=/usr/bin/clang go vet ./... && CC=/usr/bin/clang go test ./...`.
+- **wsc-needs-you** `task-8596bfb8188aa880` — Go, **medium**, round 1, opus. D45. Same gate.
+  Function-level disjoint from map-inline but SAME FILES (render.go/keys.go) — lead merges
+  map-inline first; needs-you rebases before merge.
+- **wsc-steer-design** `task-b399a1068ea742f6` — design paper, **medium**, round 1, fable. D46.
+  Gate: paper published + linked to the task.
+Dispatch freshness: origin/main green (04893e486); all three slices unclaimed; the epic claim is
+LAPSED (epoch 12, steward-adtui-fin) — RE-CLAIM before any PR opens or pr-task-gate fails.
+Backlog: `wsc-bl-workflow-sse-detail` CLOSED (resolved by D42); NEW `wsc-bl-epic-on-session-json`.
+Review appends the debrief.
