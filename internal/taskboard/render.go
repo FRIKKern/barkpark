@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ChromeInfo carries the header's repo⇄server identity. Render's signature is
@@ -438,69 +440,20 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
-// ── Hover paint (the board's first background state) ─────────────────────────
+// ── Hover paint (pointer-hover row highlight) ────────────────────────────────
 
-// hoverSentinel is a byte pair that never occurs in a rendered spine line (a NUL
-// is never emitted), used to probe hoverStyle's live open/close SGR sequences so
-// the exact bytes match the resolved color profile + theme (AdaptiveColor binds
-// at render time, not here).
-const hoverSentinel = "\x00\x00"
-
-// hoverPaint fills one selectable spine row with the subtle hover Background
-// (charter D94/D95). It is the board's FIRST paint that spans a whole row instead
-// of a single glyph, so it must survive the row's OWN embedded resets: a
-// lipgloss Foreground segment ends in \x1b[0m, which also clears the background,
-// so a naive Background().Render leaves the tint painting only the first segment.
-// The fix re-establishes the background open sequence after every inner reset,
-// then wraps the padded row.
+// hoverPaint restyles one selectable spine row as the pointer-hover highlight,
+// on the chat TUI's Phases-pane selection grammar: the row's own lifecycle /
+// priority hues are stripped and the whole line re-renders in the bold accent
+// foreground (hoverStyle) — no background bar, no pad, and sibling rows keep
+// full brightness. Styling only: the ansi-stripped text is byte-identical.
 //
-// RECTANGULARITY (alignment=rectangularity): board rows are ragged today (TaskRow
-// pads only the meta path), so the tint would be a torn right edge. padTo(width)
-// squares the hovered row to a full rectangle FIRST — the ONLY row that pads, and
-// the pad is pure trailing spaces, so the ansi-stripped text is unchanged apart
-// from that trailing run (TrimRight equality holds).
-//
-// HONEST DEGRADE: under a profile with no color (Ascii/NoColor — a terminal that
-// can't tint, or the test runner's default) hoverStyle renders no SGR, so open is
-// empty and the row is returned UNTOUCHED — no pad, no tint. A board without
-// mouse reporting loses nothing.
-func hoverPaint(line string, width int) string {
-	probe := hoverStyle.Render(hoverSentinel)
-	i := strings.Index(probe, hoverSentinel)
-	if i < 0 {
-		return line // profile mangled the sentinel — never paint (paranoia)
-	}
-	open, closeSeq := probe[:i], probe[i+len(hoverSentinel):]
-	if open == "" {
-		return line // no background in this profile — honest no-op
-	}
-	padded := padTo(line, width)
-	// Re-arm the background after each of the row's own foreground resets so the
-	// tint is continuous, then open before the first cell and close after the pad.
-	body := strings.ReplaceAll(padded, "\x1b[0m", "\x1b[0m"+open)
-	return open + body + closeSeq
-}
-
-// faintPaint recedes one selectable spine row to "lower opacity" (the terminal's
-// faint attribute) while a pointer hover is live on ANOTHER row — the picker law
-// flattenSpine enforces: siblings dim, the hovered row lights up. Same survival
-// mechanics as hoverPaint (a lipgloss segment's \x1b[0m reset would clear the
-// attribute, so it is re-armed after every inner reset) and the same honest
-// degrade: under a profile that renders no SGR the row is returned untouched.
-// Unlike hoverPaint it never pads — faint is not a background, so a ragged right
-// edge stays ragged and the ansi-stripped text is byte-identical.
-func faintPaint(line string) string {
-	probe := faintStyle.Render(hoverSentinel)
-	i := strings.Index(probe, hoverSentinel)
-	if i < 0 {
-		return line // profile mangled the sentinel — never paint (paranoia)
-	}
-	open, closeSeq := probe[:i], probe[i+len(hoverSentinel):]
-	if open == "" {
-		return line // no SGR in this profile — honest no-op
-	}
-	body := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+open)
-	return open + body + closeSeq
+// HONEST DEGRADE: under a profile with no color (Ascii — a terminal that can't
+// style, or the test runner's default) neither the row nor hoverStyle emits any
+// SGR, so the restyle is the identity. A board without mouse reporting loses
+// nothing.
+func hoverPaint(line string) string {
+	return hoverStyle.Render(ansi.Strip(line))
 }
 
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
@@ -542,34 +495,16 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		return selected, idx
 	}
 	rows := spineRows(b, st)
-	// hoverLive: the pointer target resolves to a SELECTABLE spine row (charter
-	// D94/D95 — a non-selectable Ref, e.g. a dead-epic tombstone, never hovers).
-	// Only then does the picker law engage: the hovered row wears the tint at
-	// full brightness and every OTHER selectable row recedes to faint, so the
-	// hover reads as "lit up". With no live target paint() is the identity and
-	// the frame is byte-identical (goldens, the no-mouse board, keyboard flow).
-	hoverLive := false
-	if st.HoverTarget != "" {
-		for _, sr := range rows {
-			if sr.Selectable && sr.Ref == st.HoverTarget {
-				hoverLive = true
-				break
-			}
-		}
-	}
 	for _, sr := range rows {
-		// The hovered selectable row wears the hover tint; while a hover is live,
-		// its selectable siblings faint (lower opacity). Separators / phase bands /
-		// dead-epic lines (Selectable:false, or an empty Ref) never tint AND never
-		// faint — they are already dim display chrome. Only the ONE hovered row
-		// pads to a full rectangle.
-		hovered := hoverLive && sr.Selectable && sr.Ref == st.HoverTarget
+		// The hovered SELECTABLE row restyles to the accent foreground (charter
+		// D94/D95 — a non-selectable Ref, e.g. a dead-epic tombstone, never
+		// hovers); every other row is untouched, at full brightness. With no live
+		// target paint() is the identity and the frame is byte-identical
+		// (goldens, the no-mouse board, keyboard flow).
+		hovered := st.HoverTarget != "" && sr.Selectable && sr.Ref == st.HoverTarget
 		paint := func(s string) string {
 			if hovered {
-				return hoverPaint(s, width)
-			}
-			if hoverLive && sr.Selectable {
-				return faintPaint(s)
+				return hoverPaint(s)
 			}
 			return s
 		}

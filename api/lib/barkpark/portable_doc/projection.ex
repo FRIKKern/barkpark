@@ -51,7 +51,7 @@ defmodule Barkpark.PortableDoc.Projection do
   """
 
   alias Barkpark.Preview
-  alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.{FromMarkdown, Render}
 
   @typedoc "A portable-doc block — a string-keyed map."
   @type block :: %{required(String.t()) => term()}
@@ -88,6 +88,12 @@ defmodule Barkpark.PortableDoc.Projection do
   def read_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
 
   def read_blocks(%{"body" => %{"blocks" => blocks}}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => blocks}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => markdown}) when is_binary(markdown) do
+    if String.trim(markdown) == "", do: nil, else: FromMarkdown.blocks(markdown)
+  end
 
   def read_blocks(_content), do: nil
 
