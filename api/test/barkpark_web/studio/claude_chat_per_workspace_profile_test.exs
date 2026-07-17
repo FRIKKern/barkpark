@@ -242,11 +242,15 @@ defmodule BarkparkWeb.Studio.ClaudeChatPerWorkspaceProfileTest do
 
       decoded = args |> Enum.at(idx + 1) |> Base.decode64!() |> Jason.decode!()
 
-      assert decoded == %{
-               "mcpServers" => %{
-                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
-               }
+      assert decoded["mcpServers"] == %{
+               "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
              }
+
+      # W25 (D213): a cloud turn with >=1 surviving tool server also carries the
+      # bpConnectorTicket the in-VM shim exchanges (host-side, D71 loopback) for
+      # the connector's finished Authorization header — the credential itself
+      # never transits Elixir or argv, only this non-secret ticket does.
+      assert is_binary(decoded["bpConnectorTicket"]) and decoded["bpConnectorTicket"] != ""
     end
   end
 
