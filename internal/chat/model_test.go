@@ -506,6 +506,163 @@ func TestWorkflowKeyRunesAlwaysCompose(t *testing.T) {
 	if got.focus != focusComposer {
 		t.Fatal("typing must snap focus back to the composer")
 	}
+
+	// The same law holds at the THIRD level (wsc-ad D30/D35): typing inside the
+	// open agent-detail pane composes, snaps focus home, collapses BOTH levels,
+	// and never moves the agent cursor — so the next Enter sends, not drills.
+	m = wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 5
+	m.wfAgentDetail = true
+	m.wfAgent = 2
+
+	nm, _ = m.handleChatKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	got = nm.(Model)
+	if got.input != "z" {
+		t.Fatalf("KeyRunes at the detail depth must compose, input=%q", got.input)
+	}
+	if got.wfAgent != 2 {
+		t.Fatalf("typing must never move the agent cursor, got %d", got.wfAgent)
+	}
+	if got.wfAgentDetail || got.focus != focusComposer {
+		t.Fatalf("typing at the detail depth must snap home + collapse, detail=%v focus=%v",
+			got.wfAgentDetail, got.focus)
+	}
+}
+
+// TestWorkflowEnterDrillsAgentDetail is the D30/D35 Enter-then-arrow grammar for
+// the third level: at depth-1 Enter drills into the selected phase's agent 0
+// (that phase's agents all carry a signal in the live fixture); ↑/↓ then cycle
+// the AGENT cursor clamped; esc pops one level back to the phase; a second esc
+// returns to the composer. The depth-1 phase byte-lock is untouched — the phase
+// selection only moves at depth-1, and a phase change resets the agent cursor.
+func TestWorkflowEnterDrillsAgentDetail(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+
+	// Enter opens the phase detail on the active phase (position 5).
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if !got.wfExpanded || got.wfPhase != 5 || got.wfAgentDetail {
+		t.Fatalf("first Enter must open the phase detail only, expanded=%v phase=%d detail=%v",
+			got.wfExpanded, got.wfPhase, got.wfAgentDetail)
+	}
+
+	// Second Enter drills into agent 0 of the active phase (it has a signal).
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got = nm.(Model)
+	if !got.wfAgentDetail || got.wfAgent != 0 {
+		t.Fatalf("second Enter must drill into agent 0, detail=%v agent=%d",
+			got.wfAgentDetail, got.wfAgent)
+	}
+
+	// ↓ cycles the AGENT cursor (the active phase at position 5 has 5 agents; the
+	// cursor clamps at index 4, itself below the 8-agent paint cap).
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	got = nm.(Model)
+	if got.wfAgent != 1 {
+		t.Fatalf("KeyDown must select the next agent, got %d", got.wfAgent)
+	}
+	if got.wfPhase != 5 {
+		t.Fatalf("the phase must NOT move at the agent level, got %d", got.wfPhase)
+	}
+	// clamp at the last agent (5 agents → max index 4)
+	for i := 0; i < 8; i++ {
+		nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+		got = nm.(Model)
+	}
+	if got.wfAgent != 4 {
+		t.Fatalf("KeyDown must clamp at the last agent (index 4), got %d", got.wfAgent)
+	}
+	// ↑ moves back
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	got = nm.(Model)
+	if got.wfAgent != 3 {
+		t.Fatalf("KeyUp must select the previous agent, got %d", got.wfAgent)
+	}
+
+	// esc pops ONE level: back to the phase detail (still expanded).
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got = nm.(Model)
+	if got.wfAgentDetail || !got.wfExpanded || got.focus != focusWorkflow {
+		t.Fatalf("esc must pop to the phase detail, detail=%v expanded=%v focus=%v",
+			got.wfAgentDetail, got.wfExpanded, got.focus)
+	}
+
+	// a phase change resets the agent cursor.
+	got.wfAgentDetail = true
+	got.wfAgent = 2
+	got.wfAgentDetail = false // back at the phase level to move the phase
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	got = nm.(Model)
+	if got.wfPhase != 4 || got.wfAgent != 0 {
+		t.Fatalf("a phase change must reset the agent cursor, phase=%d agent=%d",
+			got.wfPhase, got.wfAgent)
+	}
+
+	// second esc returns to the composer.
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got = nm.(Model)
+	if got.wfExpanded || got.focus != focusComposer {
+		t.Fatalf("second esc must return to the composer, expanded=%v focus=%v",
+			got.wfExpanded, got.focus)
+	}
+	if got.st.Phase == TurnInterrupting {
+		t.Fatal("esc inside the panel must never interrupt the turn")
+	}
+}
+
+// TestWorkflowLeftPopsAgentDetail: left pops the agent level like esc, but at
+// shallower levels left is NOT the panel's key — it falls through to the composer
+// (handled=false) so it never steals a key it has no verb for.
+func TestWorkflowLeftPopsAgentDetail(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 5
+	m.wfAgentDetail = true
+	m.wfAgent = 1
+
+	_, _, handled := m.handleWorkflowKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if !handled {
+		t.Fatal("left inside the agent detail must be owned by the panel")
+	}
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyLeft})
+	got := nm.(Model)
+	if got.wfAgentDetail || !got.wfExpanded {
+		t.Fatalf("left must pop the agent detail to the phase level, detail=%v expanded=%v",
+			got.wfAgentDetail, got.wfExpanded)
+	}
+
+	// at the phase level, left is unowned — it must NOT be claimed by the panel.
+	if _, _, h := got.handleWorkflowKey(tea.KeyMsg{Type: tea.KeyLeft}); h {
+		t.Fatal("left at the phase level must fall through, not be owned")
+	}
+}
+
+// TestWorkflowEnterNoOpWithoutSignal: Enter at depth-1 on a phase whose agent 0
+// carries NO detail signal is an honest no-op — the level never opens an empty
+// pane (D27 structural gate).
+func TestWorkflowEnterNoOpWithoutSignal(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	// strip the signal fields off the active phase's agents so agentHasDetail is false
+	for i := range m.st.Workflow.Nodes {
+		n := &m.st.Workflow.Nodes[i]
+		if n.Type == "workflow_agent" {
+			n.PromptPreview, n.LastToolName, n.LastToolSummary, n.ResultPreview = nil, nil, nil, nil
+			n.Attempt = 0
+		}
+	}
+	j := journeyOf(m.st.Workflow)
+	m.wfPhase = j.Active
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if got.wfAgentDetail {
+		t.Fatal("Enter on a signal-less phase must be an honest no-op (no affordance)")
+	}
 }
 
 // TestWorkflowFocusDropsWhenStripVanishes: a run that settles on a

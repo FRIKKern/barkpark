@@ -460,9 +460,134 @@ func (m Model) workflowPanelLines() []string {
 	// because a summary-only strip can be up before the rail has hydrated.
 	if m.wfExpanded && m.st.Workflow != nil {
 		wf := m.st.Workflow
-		lines = append(lines, renderWorkflowDetail(m.width, wf, journeyOf(wf), m.now(), m.wfPhase)...)
+		j := journeyOf(wf)
+		lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase)...)
+		// The THIRD focus level (wave session-card charter D30/D39): the selected
+		// agent's detail pane, appended INSIDE this one function so bodyHeight
+		// self-corrects and the frame height stays fixed — mirroring the shipped
+		// Studio pane (#3959). Additive under wfAgentDetail: an idle or a
+		// phase-only panel is byte-identical to before this level existed.
+		if m.wfAgentDetail {
+			lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent)...)
+		}
 	}
 	return lines
+}
+
+// renderWorkflowAgentDetail is the third focus level (wave session-card charter
+// D39): the SELECTED agent's expanded detail, a byte-for-honesty mirror of the
+// shipped Studio pane (#3959). A header row (state glyph / label / model family /
+// tokens / elapsed, via workflowAgentLine) tops it; below, indented:
+//
+//	· an attempt>1 retry chip FIRST;
+//	· the lowercase 'about' brief (promptPreview, wrapped);
+//	· then — MUTUALLY EXCLUSIVE — the live '▸' NOW line (bare glyph, no label:
+//	  lastToolName · lastToolSummary · progress-age) while the agent runs, OR the
+//	  lowercase 'done' result (resultPreview, capped at 300) once terminal.
+//
+// terminal/failed DERIVE from State (never a wire bool). HONESTY (D27): thinking
+// never rides the wire, so NOTHING is labeled 'thinking' — the brief, the tool
+// line, and the result ARE the honest window; every absent field is omitted, not
+// fabricated. nil when the selection resolves to no agent (a detail-less phase),
+// so the pane never paints an empty gutter.
+func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selPhase, selAgent int) []string {
+	if selPhase < 0 || selPhase >= len(j.Phases) {
+		return nil
+	}
+	agents := j.Phases[selPhase].Agents
+	if len(agents) > workflowDetailMaxAgents {
+		agents = agents[:workflowDetailMaxAgents] // never index past what the pane paints
+	}
+	if selAgent < 0 || selAgent >= len(agents) {
+		return nil
+	}
+	a := agents[selAgent]
+
+	w := width - 2
+	if w < 8 {
+		w = 8
+	}
+	indent := "  "
+
+	// Header row: the selected agent's own line (glyph/label/model/tokens/elapsed).
+	out := []string{workflowAgentLine(width, a, j.EntryStatus, now)}
+
+	// attempt>1 retry chip FIRST.
+	if a.Attempt > 1 {
+		out = append(out, indent+badgeStyle.Render(fmt.Sprintf("attempt %d", a.Attempt)))
+	}
+
+	// 'about' — the brief, wrapped (omit when absent/blank).
+	if a.PromptPreview != nil {
+		out = append(out, labeledWrap(indent, "about", *a.PromptPreview, w)...)
+	}
+
+	// NOW / DONE are mutually exclusive, keyed on the DERIVED terminal state.
+	if workflowStateTerminal(a.State) {
+		// DONE — the settled result, capped at 300 (verbatim, not re-parsed).
+		if a.ResultPreview != nil {
+			out = append(out, labeledWrap(indent, "done", truncate(strings.TrimSpace(*a.ResultPreview), 300), w)...)
+		}
+	} else if a.LastToolName != nil || a.LastToolSummary != nil {
+		// NOW — the live tool line: a bare '▸' (no label), the tool name, its
+		// one-line summary, and the coarse progress age — each only when carried.
+		name := derefString(a.LastToolName)
+		summary := derefString(a.LastToolSummary)
+		age := ""
+		if a.LastProgressAt != nil {
+			age = formatElapsed(now.Sub(time.UnixMilli(*a.LastProgressAt)))
+		}
+		line := "▸"
+		if name != "" {
+			line += " " + titleStyle.Render(name)
+		}
+		if summary != "" {
+			budget := w - lipgloss.Width("▸ "+name) - lipgloss.Width(" · "+age) - 4
+			if budget < 8 {
+				budget = 8
+			}
+			line += " " + dimStyle.Render("· "+truncate(summary, budget))
+		}
+		if age != "" {
+			line += " " + dimStyle.Render("· "+age)
+		}
+		out = append(out, indent+line)
+	}
+	return out
+}
+
+// labeledWrap emits a dim-labeled, wrapped text block indented under the agent
+// header — 'about <brief>' / 'done <result>'. The label dims; continuation lines
+// align under the indent. nil when the text is blank, so an absent field is
+// omitted (never a bare label with nothing after it).
+func labeledWrap(indent, label, text string, w int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	inner := w - lipgloss.Width(indent)
+	if inner < 8 {
+		inner = 8
+	}
+	body := wrap(text, inner)
+	if len(body) == 0 {
+		return nil
+	}
+	body[0] = dimStyle.Render(label) + " " + body[0]
+	out := make([]string, 0, len(body))
+	for _, ln := range body {
+		out = append(out, indent+ln)
+	}
+	return out
+}
+
+// derefString reads a *string as "" when nil — an absent field is empty, never a
+// panic.
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // renderWorkflowStrip is the collapsed one-liner: '○ <label>' left; the
@@ -1039,8 +1164,10 @@ func (m Model) chatFooter() string {
 		if m.focus == focusWorkflow {
 			// the panel owns the arrows — the hints say so honestly (esc here
 			// collapses; it never interrupts from inside the panel)
-			if m.wfExpanded {
-				hints = "↑/↓ select phase · esc back · ctrl+c quit"
+			if m.wfAgentDetail {
+				hints = "↑/↓ agent · esc/← back · ctrl+c quit"
+			} else if m.wfExpanded {
+				hints = "↑/↓ select phase · enter agent · esc back · ctrl+c quit"
 			} else {
 				hints = "enter details · ↑ composer · ctrl+c quit"
 			}

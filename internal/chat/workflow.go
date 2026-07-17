@@ -74,6 +74,33 @@ type WorkflowNode struct {
 	StartedAt  *int64 `json:"startedAt"`  // epoch ms
 	DurationMs *int64 `json:"durationMs"` // stamped once terminal
 	Tokens     *int   `json:"tokens"`     // settle-on-state figure
+
+	// Agent-detail projection (wave session-card charter D36): the SAME fields
+	// StudioChat.workflow_agent_node_detail/1 keeps (@agent_detail_keys), decoded
+	// here so the below-composer panel's third focus level reads Go↔Elixir
+	// byte-identical truth off the shared workflow_agent_detail.json fixture.
+	// Terminal/failed are NEVER a wire bool — they DERIVE from State through
+	// workflowStateTerminal/workflowStateFailed (the one truth table), so no
+	// Terminal/Failed/AgentId struct field exists to drift from the sets.
+	// Previews are POINTERS: absent on the wire stays absent here, so the pane
+	// omits honestly instead of painting an empty label (charter D27).
+	Attempt         int     `json:"attempt"`         // retry number; chip renders only when >1
+	PromptPreview   *string `json:"promptPreview"`   // the brief ('about')
+	LastToolName    *string `json:"lastToolName"`    // live NOW line: tool name
+	LastToolSummary *string `json:"lastToolSummary"` // live NOW line: one-line summary
+	ResultPreview   *string `json:"resultPreview"`   // terminal DONE line (capped at render)
+	LastProgressAt  *int64  `json:"lastProgressAt"`  // epoch ms of the last progress tick
+}
+
+// agentHasDetail mirrors StudioChat's @agent_detail_signal_keys gate (charter
+// D27): a node carries an expandable detail iff it has at least one signal field
+// — promptPreview / lastToolName / lastToolSummary / resultPreview / attempt. A
+// detail-less node (a background/codex row, a thin mid-persist frame) has NO
+// affordance: Enter no-ops on it. This is the structural gate the panel reads
+// before it drills, so a row with nothing to show never opens an empty pane.
+func agentHasDetail(n WorkflowNode) bool {
+	return n.PromptPreview != nil || n.LastToolName != nil ||
+		n.LastToolSummary != nil || n.ResultPreview != nil || n.Attempt > 0
 }
 
 // Workflow is the open session's workflow-bearing rail entry, decoded from the

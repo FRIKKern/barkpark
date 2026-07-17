@@ -87,6 +87,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.focus == focusWorkflow && !m.workflowStripVisible() {
 		m.focus = focusComposer
 		m.wfExpanded = false
+		m.wfAgentDetail = false
 	}
 	if m.focus == focusWorkflow {
 		if nm, cmd, handled := m.handleWorkflowKey(msg); handled {
@@ -94,11 +95,13 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Any key the panel does not own falls through to the composer grammar —
 		// and a TYPING key snaps focus home first, so composing always wins over
-		// panel selection (the D14 KeyRunes law).
+		// panel selection (the D14 KeyRunes law). Snapping home collapses BOTH
+		// open levels (phase detail and agent detail) so the next Enter sends.
 		switch msg.Type {
 		case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace:
 			m.focus = focusComposer
 			m.wfExpanded = false
+			m.wfAgentDetail = false
 		}
 	}
 	switch msg.Type {
@@ -166,13 +169,18 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleWorkflowKey is the workflow panel's own grammar while it holds focus
-// (wave session-card charter D14) — view-only navigation, no stop/pause:
+// (wave session-card charter D14/D30/D35) — view-only navigation, no stop/pause,
+// three focus levels reached Enter-THEN-arrow so each level's arrow keys own one
+// axis (the s5 phase byte-lock is preserved: depth-1 Up/Down still moves wfPhase):
 //
-//	collapsed strip:  enter expands the two-pane detail · ↑/esc back to composer
-//	expanded detail:  ↑/↓ select a phase · esc collapses back to the composer
+//	collapsed strip:  enter expands the two-pane phase detail · ↑/esc back to composer
+//	phase detail:     ↑/↓ select a phase · enter drills into the selected agent ·
+//	                  esc collapses back to the composer
+//	agent detail:     ↑/↓ select an agent (clamped) · esc/left pops back to the phase
 //
 // handled=false lets every unowned key (typing, ctrl+b, tab, …) fall through to
 // the composer grammar, so the panel never steals a key it has no verb for.
+// It NEVER adds a tea.KeyRunes case — composing always wins (the D14 law).
 func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyEnter:
@@ -188,27 +196,77 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			} else {
 				m.wfPhase = 0
 			}
+			m.wfAgent = 0
+			return m, nil, true
+		}
+		if !m.wfAgentDetail {
+			// Drill from the phase into the selected agent — landing on agent 0, but
+			// ONLY when that agent carries a detail signal (D27/D35). A detail-less
+			// row (or an agentless phase) is an honest no-op: the level never opens
+			// an empty pane.
+			j := journeyOf(m.st.Workflow)
+			if m.wfPhase >= 0 && m.wfPhase < len(j.Phases) {
+				agents := j.Phases[m.wfPhase].Agents
+				if len(agents) > 0 && agentHasDetail(agents[0]) {
+					m.wfAgent = 0
+					m.wfAgentDetail = true
+				}
+			}
 		}
 		return m, nil, true
 	case tea.KeyEsc:
-		// Esc collapses back to the composer (charter D14) — it NEVER interrupts
-		// the turn from inside the panel (the composer owns that verb).
+		// Esc pops ONE level (D38): from the agent detail back to the phase detail,
+		// then from the phase detail back to the composer. It NEVER interrupts the
+		// turn from inside the panel (the composer owns that verb).
+		if m.wfAgentDetail {
+			m.wfAgentDetail = false
+			return m, nil, true
+		}
 		m.wfExpanded = false
 		m.focus = focusComposer
 		return m, nil, true
+	case tea.KeyLeft:
+		// Left is the agent-detail pop twin of Esc (D35); at any shallower level it
+		// is not the panel's key — fall through so the composer sees it.
+		if m.wfAgentDetail {
+			m.wfAgentDetail = false
+			return m, nil, true
+		}
+		return m, nil, false
 	case tea.KeyUp:
+		if m.wfAgentDetail {
+			if m.wfAgent > 0 {
+				m.wfAgent--
+			}
+			return m, nil, true
+		}
 		if m.wfExpanded {
 			if m.wfPhase > 0 {
 				m.wfPhase--
+				m.wfAgent = 0 // a phase change resets the agent cursor (D38)
 			}
 			return m, nil, true
 		}
 		m.focus = focusComposer // arrow-up returns from the strip
 		return m, nil, true
 	case tea.KeyDown:
+		if m.wfAgentDetail {
+			j := journeyOf(m.st.Workflow)
+			if m.wfPhase >= 0 && m.wfPhase < len(j.Phases) {
+				n := len(j.Phases[m.wfPhase].Agents)
+				if n > workflowDetailMaxAgents {
+					n = workflowDetailMaxAgents // the pane caps at the same 8 it paints
+				}
+				if m.wfAgent < n-1 {
+					m.wfAgent++
+				}
+			}
+			return m, nil, true
+		}
 		if m.wfExpanded {
 			if n := len(journeyOf(m.st.Workflow).Phases); m.wfPhase < n-1 {
 				m.wfPhase++
+				m.wfAgent = 0 // a phase change resets the agent cursor (D38)
 			}
 		}
 		return m, nil, true
