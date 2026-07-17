@@ -332,11 +332,35 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     case CloudPolicy.cloud_mcp_servers(workspace, descriptors) do
       servers when map_size(servers) > 0 ->
-        json = Jason.encode!(%{"mcpServers" => servers})
+        # W25-E (D214/D217): fold the SAME per-turn tool-session ticket (threaded
+        # beside the descriptors, minted ONCE in `tool_descriptors_for/1`) into the
+        # payload as a TOP-LEVEL `bpConnectorTicket` — the wire contract the shim
+        # (W25-N) reads IN-VM to fetch+decrypt+embed the connector credential
+        # (D38 held: Elixir passes the SEALED-ref fetch-authorization, never
+        # plaintext). It rides ONLY when ≥1 server survived (the flag itself does),
+        # so a 0-server turn is byte-identical to W12 regardless of the ticket. The
+        # key name is the wire contract — NEVER rename.
+        json = Jason.encode!(cloud_mcp_payload(servers, session_opts))
         ["--mcp-config-b64", Base.encode64(json)]
 
       _ ->
         []
+    end
+  end
+
+  # The b64 mcp document: always `mcpServers`; adds `bpConnectorTicket` when the
+  # turn threaded a non-empty tool-session ticket (a :cloud turn with ≥1 install
+  # always does — see `maybe_thread_cloud_tool_descriptors/1`). A blank/absent
+  # ticket omits the key rather than emit `null`, keeping the payload well-formed.
+  defp cloud_mcp_payload(servers, session_opts) do
+    base = %{"mcpServers" => servers}
+
+    case Map.get(session_opts, :tool_session_ticket) do
+      ticket when is_binary(ticket) and ticket != "" ->
+        Map.put(base, "bpConnectorTicket", ticket)
+
+      _ ->
+        base
     end
   end
 
@@ -1516,8 +1540,11 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           # workspace the loopback bp token authorizes — so tool scope and chat
           # scope agree by construction, not by hope. Fail-soft: an instance with
           # no connect seam (or an unreachable bridge) simply gets no tool
-          # servers, exactly as before this wave.
-          descriptors = tool_descriptors_for(token.workspace_id)
+          # servers, exactly as before this wave. The self-hosted mcp-config file
+          # embeds each descriptor's own ticket-authenticated headersHelper, so the
+          # surfaced tool-session ticket is unused on this path (it rides the
+          # :cloud b64 payload only — W25-E).
+          {_tool_ticket, descriptors} = tool_descriptors_for(token.workspace_id)
 
           %{
             mint: :minted,
@@ -1558,6 +1585,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # ONLY a `{:ok, list}` yields tool servers. D38 holds: the bridge returns
     # NON-SECRET descriptors; the subprocess fetches the PAT via `headersHelper`;
     # Elixir never decrypts and never holds plaintext.
+    #
+    # Returns `{ticket, descriptors}`: the SAME workspace-scoped tool-session
+    # ticket that authorized the descriptor fetch is surfaced so a :cloud turn can
+    # thread it into the b64 mcp payload as `bpConnectorTicket` (W25-E, D214/D217)
+    # — the shim reads it IN-VM to fetch+decrypt the connector credential. It is
+    # minted EXACTLY ONCE here (never a second mint downstream); the self-hosted
+    # mcp-config path ignores it (its descriptors carry a self-fetching
+    # headersHelper). Any failure path returns `{nil, []}` — no ticket, no servers.
     defp tool_descriptors_for(workspace_id) when is_binary(workspace_id) do
       alias Barkpark.Connectors
       alias Barkpark.Connectors.ConnectTicket
@@ -1567,9 +1602,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
            true <- Code.ensure_loaded?(bridge),
            true <- function_exported?(bridge, :fetch_tool_descriptors, 1),
            {:ok, descriptors} when is_list(descriptors) <- bridge.fetch_tool_descriptors(ticket) do
-        descriptors
+        {ticket, descriptors}
       else
-        _ -> []
+        _ -> {nil, []}
       end
     rescue
       e ->
@@ -1577,10 +1612,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           "claude chat: tool-descriptor fetch crashed (#{inspect(e)}) — no tool servers"
         )
 
-        []
+        {nil, []}
     end
 
-    defp tool_descriptors_for(_), do: []
+    defp tool_descriptors_for(_), do: {nil, []}
 
     # Thread the workspace's tool-connector descriptors into session_opts for a
     # :cloud turn only (knob 3 CONFIG half, D126/D127) — the SAME host-side,
@@ -1595,8 +1630,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # cloud-profiled workspace's tool descriptors.
     defp maybe_thread_cloud_tool_descriptors(session_opts) do
       if ClaudeChat.execution_profile(session_opts) == :cloud do
-        descriptors = tool_descriptors_for(Map.get(session_opts, :workspace_id))
-        Map.put(session_opts, :tool_descriptors, descriptors)
+        # ONE `tool_descriptors_for/1` call ⇒ ONE mint: store the descriptors AND
+        # the SAME tool-session ticket that authorized their fetch. `cloud_build_args/2`
+        # emits the ticket as `bpConnectorTicket` in the b64 payload beside
+        # `mcpServers` (W25-E, D214/D217) — the shim reads it IN-VM to fetch+decrypt
+        # the connector credential. A turn with no bridge/workspace gets
+        # `{nil, []}` ⇒ no descriptors, no ticket ⇒ argv byte-identical to W12.
+        {ticket, descriptors} = tool_descriptors_for(Map.get(session_opts, :workspace_id))
+
+        session_opts
+        |> Map.put(:tool_descriptors, descriptors)
+        |> Map.put(:tool_session_ticket, ticket)
       else
         session_opts
       end

@@ -278,10 +278,26 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       args |> Enum.at(idx + 1) |> Base.decode64!() |> Jason.decode!()
     end
 
-    test "0 / 1 / 2 installs — belt intact in every row; flag present iff ≥1 server",
+    # W25-E (D214/D217): when the servers map is non-empty the b64 payload carries
+    # the SAME per-turn tool-session ticket (threaded into session_opts beside the
+    # descriptors) as a TOP-LEVEL `bpConnectorTicket` key beside `mcpServers` — the
+    # wire contract the in-sandbox shim (W25-N) reads to fetch+decrypt+embed the
+    # connector credential in-VM. 0-server rows stay byte-identical W12: no flag,
+    # and — even with a ticket in session_opts — no key (the ticket alone NEVER
+    # forces the flag; the flag rides SOLELY on ≥1 surviving server).
+    @tool_ticket "w25-e-tool-session-ticket-fixture"
+
+    test "0 / 1 / 2 installs — belt intact in every row; flag present iff ≥1 server; bpConnectorTicket rides with ≥1 server",
          %{ws: ws} do
-      # Row 0 — no installs, no descriptors: byte-identical W12 (no flag).
-      a0 = ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: []})
+      # Row 0 — no installs, no descriptors: byte-identical W12 (no flag). Even a
+      # ticket threaded into session_opts must NOT force the flag or the key.
+      a0 =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: ws.id,
+          tool_descriptors: [],
+          tool_session_ticket: @tool_ticket
+        })
+
       refute "--mcp-config-b64" in a0
       assert_full_belt(a0)
 
@@ -291,13 +307,15 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       a1 =
         ClaudeChat.cloud_build_args("plan", %{
           workspace_id: ws.id,
-          tool_descriptors: descriptors_for(["github"])
+          tool_descriptors: descriptors_for(["github"]),
+          tool_session_ticket: @tool_ticket
         })
 
       assert decode_mcp_flag(a1) == %{
                "mcpServers" => %{
                  "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
-               }
+               },
+               "bpConnectorTicket" => @tool_ticket
              }
 
       assert_full_belt(a1)
@@ -308,14 +326,16 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       a2 =
         ClaudeChat.cloud_build_args("plan", %{
           workspace_id: ws.id,
-          tool_descriptors: descriptors_for(["github", "linear"])
+          tool_descriptors: descriptors_for(["github", "linear"]),
+          tool_session_ticket: @tool_ticket
         })
 
       assert decode_mcp_flag(a2) == %{
                "mcpServers" => %{
                  "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"},
                  "linear" => %{"type" => "http", "url" => "https://mcp.linear.app/mcp"}
-               }
+               },
+               "bpConnectorTicket" => @tool_ticket
              }
 
       assert_full_belt(a2)
