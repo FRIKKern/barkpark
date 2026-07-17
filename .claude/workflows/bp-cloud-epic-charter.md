@@ -567,7 +567,7 @@ Review appends the debrief.
 - **wsc-ad-tui → NOT built this run.** It is round 2 `after:[wsc-ad-gui]` (needs the GUI fixture on main, D34) and the Review phase errored on a session limit before round 2 dispatched. The GUI fixture is now on main, so wsc-ad-tui is a clean follow-up round (Go TUI third focus level; consumes the same dual-mirror `workflow_agent_detail.json`).
 Backlog carried: `wsc-bl-agent-task-join` (D32 intermingle), `wsc-bl-agent-detail-fixture-gaps`, `wsc-bl-workflow-sse-detail`; PARKED: prs-open, busiest-child.
 
-### Wave 3 · round 2 (2026-07-17) — the ad-tui FINISH round DISPATCHED (single slice)
+### Wave 3 · round 2 (2026-07-17) — the ad-tui FINISH round: wsc-ad-tui MERGED (#3979) — EPIC COMPLETE
 Wave Paper: `wsc-wave-2026-07-17-ad-tui` (style=article). Finishes the stranded wsc-ad-tui (Review
 died on a session limit last round; the GUI dependency is now MERGED). ONE slice this wave. Two
 explore rounds + a 12-report survey digest + a 3-verifier PROVE round ran; every load-bearing claim
@@ -584,3 +584,8 @@ Builder cuts off origin/main (advances fast — foreign scaffy/connectors/site-s
 the `-r` branch (cherry-pick the slice commit) before PR. If repo-wide go-tests red, `gh run rerun
 <run> --failed` FIRST (recurring sandbox flakes + foreign scaffy corpus-count drift — not this slice's
 break). Backlog carried unchanged. Review appends the debrief.
+
+
+**Outcome (steward close-out 2026-07-17):** wsc-ad-tui → **#3979 MERGED**. bp chat's workflow panel gains a THIRD focus level (Enter → per-agent detail: about=promptPreview / ▸now=lastTool+age / done=resultPreview + attempt>1 chip; Up/Down cycle agents; Esc/left pops back; composer keeps every key). 6 pointer fields on Go `WorkflowNode` (decode-only, Mechanism A — wire already carries them); terminal/failed Go-DERIVED from State; additive `wfAgent`/`wfAgentDetail` (never a depth int); composer-safety proven (no KeyRunes claim); field-projection parity 0-mismatch on all 34 fixture nodes + a SYNTHETIC thin-node test for the D27 no-affordance honesty star. The cycle's Review recovered a mid-pipeline StructuredOutput failure via resumeFromRunId (20 agents, grade A). Steward cherry-picked the 2 Go commits clean onto current origin/main (base stale); the reviewer's own charter-outcome commit conflicted with origin's D35-D39 and was skipped — THIS entry reconciles it. go-tests + Elixir green (Go-only), Sobelow n/a, task closed done.
+
+**The AGENT-DETAIL round is COMPLETE across BOTH surfaces (Studio #3959 + bp chat #3979).** The Wave Session Card epic is at DESIGNED COMPLETION — every merged surface drills from the workflow card into per-agent detail, honest and quiet. All remaining backlog is deferred-by-design: `wsc-bl-agent-task-join` (D32 intermingle), `wsc-bl-agent-detail-fixture-gaps`, `wsc-bl-workflow-sse-detail` (D24 ceiling); PARKED by the honesty star: `wsc-bl-prs-open`, `wsc-bl-busiest-child`.
