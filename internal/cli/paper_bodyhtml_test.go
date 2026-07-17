@@ -1,8 +1,13 @@
 package cli
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // htmlToPlainText renders a paper's body_html into a legible plain-text dump:
@@ -42,6 +47,16 @@ func TestHTMLToPlainText(t *testing.T) {
 			want: "Barkpark's controls & evidence — ready.",
 		},
 		{
+			name: "entities decode exactly once",
+			in:   "<p>A &amp;amp; B &amp; C</p>",
+			want: "A &amp; B & C",
+		},
+		{
+			name: "code and pre entities remain literal",
+			in:   "<p>A &amp; B</p><pre>&amp;lt;tag&amp;gt;</pre><p><code>&amp;amp;</code></p>",
+			want: "A & B\n&amp;lt;tag&amp;gt;\n&amp;amp;",
+		},
+		{
 			name: "list items each get a line",
 			in:   "<ul><li>one</li><li>two</li></ul>",
 			want: "one\ntwo",
@@ -59,6 +74,53 @@ func TestHTMLToPlainText(t *testing.T) {
 				t.Errorf("htmlToPlainText(%q)\n got: %q\nwant: %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunPaperViewWrapsLegacyHTMLAtExplicitWidth(t *testing.T) {
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"_id":"legacy-width","_type":"paper","body_html":"<h1>Legacy &amp;amp; width</h1><p>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</p>"}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	out := newWriter(&stdout, &stderr)
+	code := runPaperView(out, globals{}, []string{srv.URL + "/papers/legacy-width", "--width", "20", "--profile", "none"})
+	if code != exitOK {
+		t.Fatalf("runPaperView exit = %d, stderr=%q", code, stderr.String())
+	}
+	got := strings.TrimSuffix(stdout.String(), "\n")
+	for i, line := range strings.Split(got, "\n") {
+		if width := ansi.StringWidth(line); width > 20 {
+			t.Errorf("line %d width %d > 20: %q", i, width, line)
+		}
+	}
+	if !strings.Contains(got, "Legacy &amp; width") {
+		t.Errorf("legacy semantic entity did not decode exactly once: %q (requests=%v, stderr=%q)", got, requests, stderr.String())
+	}
+	if !strings.Contains(got, "alpha") || !strings.Contains(got, "lambda") {
+		t.Errorf("legacy wrapping lost authored tokens: %q", got)
+	}
+}
+
+func TestWrapPaperPlainTextResolvedWidths(t *testing.T) {
+	text := htmlToPlainText(`<h1>Width boundary</h1><p>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</p>`)
+	for _, width := range []int{20, 40, 80} {
+		got := wrapPaperPlainText(text, width)
+		for i, line := range strings.Split(got, "\n") {
+			if gotWidth := ansi.StringWidth(line); gotWidth > width {
+				t.Errorf("width %d line %d = %d columns: %q", width, i, gotWidth, line)
+			}
+		}
+		if !strings.Contains(got, "Width boundary") || !strings.Contains(got, "alpha") || !strings.Contains(got, "lambda") {
+			t.Errorf("width %d lost authored tokens: %q", width, got)
+		}
+		if !strings.HasPrefix(got, "Width boundary\n") {
+			t.Errorf("width %d lost heading/paragraph boundary: %q", width, got)
+		}
 	}
 }
 

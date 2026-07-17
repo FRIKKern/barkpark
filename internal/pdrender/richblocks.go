@@ -288,7 +288,7 @@ func (fr figureRenderer) caption(n int, caption string, ctx RenderCtx, width int
 type actionRenderer struct{}
 
 func (actionRenderer) Render(b Block, ctx RenderCtx) []string {
-	label := sanitizeText(attrStr(b.Attrs, "label"))
+	label := sanitizeDisplayText(attrStr(b.Attrs, "label"))
 	href := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "href")))
 	priority := attrStr(b.Attrs, "priority")
 

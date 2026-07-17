@@ -48,6 +48,16 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
 
+  defmodule NotFound do
+    @moduledoc "Raised when a canonical Paper identity is missing or unpublished."
+    defexception [:message, plug_status: 404]
+  end
+
+  defmodule InvalidSource do
+    @moduledoc "Raised when a Paper exists but has no unambiguous semantic reader source."
+    defexception [:message, plug_status: 422]
+  end
+
   @impl true
   def mount(%{"slug" => slug} = params, _session, socket) do
     # Optional dataset path param (present only on /d/:dataset/papers/:slug).
@@ -70,8 +80,19 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:reader_scope, reader_scope)
       |> assign(:dataset, dataset)
 
-    paper = fetch_paper(slug, reader_scope, dataset)
-    reader_source = Content.Papers.reader_source(paper, dataset, reader_scope)
+    paper =
+      fetch_paper(slug, reader_scope, dataset) ||
+        raise NotFound, message: "no published paper #{inspect(slug)}"
+
+    reader_source =
+      case Content.Papers.reader_source(paper, dataset, reader_scope) do
+        {:error, reason} ->
+          raise InvalidSource,
+            message: "paper #{inspect(slug)} has invalid reader source: #{reason}"
+
+        source ->
+          source
+      end
 
     # Preview manifest (preview-contract pc-w2) — the outward social-share card.
     # Computed BEFORE the `connected?` branch so the DEAD render (crawlers +

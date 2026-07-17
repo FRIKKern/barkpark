@@ -20,6 +20,7 @@ defmodule BarkparkWeb.BulldocsEmailController do
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.Render
+  alias BarkparkWeb.BulldocsEmailHTML
 
   # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: the body is
   # `Render.render_document/2` output or sanitizer-filtered legacy HTML inside
@@ -36,24 +37,49 @@ defmodule BarkparkWeb.BulldocsEmailController do
 
       paper ->
         opts = %{style: :email, theme: email_theme(paper)}
+        title = email_title(paper, slug)
+        trusted_paper_uri = trusted_paper_uri(conn)
 
-        html =
-          case Content.Papers.reader_source(paper, dataset, scope) do
-            {:blocks, blocks} ->
-              blocks
-              |> Content.Papers.resolve_tasks_in_blocks(email_task_scope(paper))
-              |> Render.render_document(opts)
+        case Content.Papers.reader_source(paper, dataset, scope) do
+          {:error, reason} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => %{"code" => to_string(reason)}})
 
-            {:html, sanitized_html} ->
-              Render.render_html_document(sanitized_html, opts)
+          source ->
+            html =
+              case source do
+                {:blocks, blocks} ->
+                  resolved_blocks =
+                    Content.Papers.resolve_tasks_in_blocks(blocks, email_task_scope(paper))
+                    |> BulldocsEmailHTML.prepare_blocks(trusted_paper_uri)
 
-            :empty ->
-              Render.render_document([], opts)
-          end
+                  blocks_with_name =
+                    if BulldocsEmailHTML.authored_heading?(resolved_blocks) do
+                      resolved_blocks
+                    else
+                      [%{"type" => "heading", "level" => 1, "text" => title} | resolved_blocks]
+                    end
 
-        conn
-        |> put_resp_content_type("text/html")
-        |> send_resp(200, html)
+                  Render.render_document(blocks_with_name, opts)
+
+                {:html, sanitized_html} ->
+                  named_html =
+                    if BulldocsEmailHTML.legacy_heading?(sanitized_html) do
+                      sanitized_html
+                    else
+                      BulldocsEmailHTML.fallback_heading(title, opts) <> sanitized_html
+                    end
+
+                  Render.render_html_document(named_html, opts)
+              end
+
+            html = BulldocsEmailHTML.finalize(html, title, trusted_paper_uri)
+
+            conn
+            |> put_resp_content_type("text/html")
+            |> send_resp(200, html)
+        end
     end
   end
 
@@ -64,6 +90,23 @@ defmodule BarkparkWeb.BulldocsEmailController do
 
   defp fetch_paper(slug, dataset, []), do: Content.get_public_paper(slug, dataset)
   defp fetch_paper(slug, dataset, scope), do: Content.get_paper(slug, dataset, scope)
+
+  defp email_title(%{title: title}, slug) when is_binary(title) do
+    case String.trim(title) do
+      "" -> slug
+      title -> title
+    end
+  end
+
+  defp email_title(_paper, slug), do: slug
+
+  # Resolve relative links against the canonical reader location while taking
+  # the origin only from Endpoint configuration, never the request Host header.
+  # Keeping the scoped request path preserves /w/:ws/p/:project isolation.
+  defp trusted_paper_uri(conn) do
+    reader_path = String.replace_suffix(conn.request_path, "/email", "")
+    URI.parse(BarkparkWeb.Endpoint.url() <> reader_path)
+  end
 
   # Mirrors BulldocsLive.reader_task_scope/1: the paper's own tenant, falling
   # back to the seeded Default workspace (fail-closed underneath — a nil

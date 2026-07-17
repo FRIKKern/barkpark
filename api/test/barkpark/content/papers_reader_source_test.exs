@@ -4,6 +4,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
+  alias Barkpark.Content.Document
 
   test "anonymous reader schema is selected from the Paper tenant and redacted caches stay closed" do
     dataset = "reader-scope-#{System.unique_integer([:positive])}"
@@ -40,20 +41,29 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
         project_id: default_project.id
       )
 
-    blocks = [%{"id" => "secret", "type" => "heading", "text" => "Tenant secret"}]
+    blocks = [%{"id" => "secret", "type" => "paragraph", "text" => "Tenant secret"}]
+
+    body_html =
+      Barkpark.PortableDoc.Render.render_blocks(
+        blocks,
+        Barkpark.Content.Labels.paper_render_opts(dataset, nil,
+          workspace_id: default_ws.id,
+          project_id: default_project.id
+        )
+      )
 
     paper = %{
       seed
       | type: "paper",
         content: %{
           "body" => %{"blocks" => blocks},
-          "body_html" => "<h1>Tenant secret cached</h1>"
+          "body_html" => body_html
         }
     }
 
     # The foreign public schema must not override the Paper tenant's private
     # schema, and the derived HTML cache must not reopen the redacted prose.
-    assert :empty = Content.Papers.reader_source(paper, dataset, [])
+    assert {:error, :redacted_source} = Content.Papers.reader_source(paper, dataset, [])
 
     {:ok, _} =
       Content.upsert_schema(public_blocks, dataset,
@@ -62,5 +72,85 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
       )
 
     assert {:blocks, ^blocks} = Content.Papers.reader_source(paper, dataset, [])
+  end
+
+  test "semantic source authority rejects empty, malformed, and unknown-unlabeled blocks" do
+    for blocks <- [[], [%{"text" => "missing type"}], [%{"type" => "future-widget"}]] do
+      paper = %Document{
+        doc_id: "invalid",
+        dataset: "test",
+        type: "paper",
+        title: "Invalid",
+        content: %{"blocks" => blocks}
+      }
+
+      assert {:error, _reason} = Content.Papers.reader_source(paper, "test", [])
+    end
+
+    labeled = [%{"type" => "future-widget", "aria-label" => "Accessible future content"}]
+
+    paper = %Document{
+      doc_id: "future",
+      dataset: "test",
+      type: "paper",
+      title: "Future",
+      content: %{"blocks" => labeled}
+    }
+
+    assert {:blocks, ^labeled} = Content.Papers.reader_source(paper, "test", [])
+  end
+
+  test "HTML-only source is returned byte-for-byte and conflicting mixed provenance fails" do
+    html = "<h1>Exact &amp; authored</h1>\n<p>two spaces  stay</p>"
+
+    legacy = %Document{
+      doc_id: "legacy",
+      dataset: "test",
+      type: "paper",
+      title: "Legacy",
+      content: %{"body_html" => html}
+    }
+
+    assert {:html, ^html} = Content.Papers.reader_source(legacy, "test", [])
+
+    blocks = [
+      %{
+        "id" => "body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Blocks"}]
+      }
+    ]
+
+    mixed = %Document{
+      doc_id: "mixed",
+      dataset: "test",
+      type: "paper",
+      title: "Mixed",
+      content: %{"blocks" => blocks, "body_html" => "<p>Different richer HTML</p>"}
+    }
+
+    assert {:error, :ambiguous_source} = Content.Papers.reader_source(mixed, "test", [])
+  end
+
+  test "first BlockOp against HTML-only source fails closed without changing bytes or revision" do
+    slug = "html-blockop-fence-#{System.unique_integer([:positive])}"
+    html = "<h1>Immutable</h1>\n<p>Authored &amp; byte-significant.</p>"
+
+    {:ok, before} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: "test", body_html: html})
+      )
+
+    op = %{
+      "op" => "append-block",
+      "block" => %{"id" => "new", "type" => "paragraph", "text" => "destructive"}
+    }
+
+    assert {:error, {:halted, message}} = Content.apply_paper_block_op(slug, op, "test")
+    assert message =~ "HTML-only papers are read-only"
+    assert Content.get_paper(slug, "test") == before
+
+    assert {:error, {:halted, _}} = Content.apply_paper_block_ops(slug, [op], "test")
+    assert Content.get_paper(slug, "test") == before
   end
 end

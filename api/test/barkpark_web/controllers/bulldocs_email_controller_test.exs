@@ -10,6 +10,8 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  alias Barkpark.{Content, Repo}
+
   # Set in config/test.exs.
   @token "barkpark-test-ingest-token"
 
@@ -46,29 +48,31 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     :ok
   end
 
-  defp ingest!(conn, slug) do
-    body = %{
-      "slug" => slug,
-      "title" => "Email view fixture",
-      "tags" => @wall_tags,
-      "description" => @wall_description,
-      "blocks" => [
-        %{"type" => "heading", "level" => 1, "text" => "The full deck, mailed"},
-        %{
-          "type" => "paragraph",
-          "content" => [%{"type" => "text", "value" => "Every component, inline-styled."}]
-        },
-        %{
-          "type" => "callout",
-          "tone" => "success",
-          "content" => [%{"type" => "text", "value" => "The gate is green."}]
-        },
-        %{
-          "type" => "task-list",
-          "snapshot" => [%{"title" => "ship the email view", "status" => "done"}]
-        }
-      ]
-    }
+  defp ingest!(conn, slug, overrides \\ %{}) do
+    body =
+      %{
+        "slug" => slug,
+        "title" => "Email view fixture",
+        "tags" => @wall_tags,
+        "description" => @wall_description,
+        "blocks" => [
+          %{"type" => "heading", "level" => 1, "text" => "The full deck, mailed"},
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Every component, inline-styled."}]
+          },
+          %{
+            "type" => "callout",
+            "tone" => "success",
+            "content" => [%{"type" => "text", "value" => "The gate is green."}]
+          },
+          %{
+            "type" => "task-list",
+            "snapshot" => [%{"title" => "ship the email view", "status" => "done"}]
+          }
+        ]
+      }
+      |> Map.merge(overrides)
 
     conn
     |> put_req_header("content-type", "application/json")
@@ -105,6 +109,34 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     assert response(conn, 404)
   end
 
+  test "conflicting canonical sources fail closed instead of mailing either version", %{
+    conn: conn
+  } do
+    slug = "email-ambiguous-source-#{System.unique_integer([:positive])}"
+
+    blocks = [
+      %{
+        "id" => "body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Canonical blocks"}]
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+      )
+
+    paper
+    |> Ecto.Changeset.change(content: Map.put(paper.content, "body_html", "<p>conflict</p>"))
+    |> Repo.update!()
+
+    assert %{"error" => %{"code" => "ambiguous_source"}} =
+             conn
+             |> get("/papers/#{slug}/email")
+             |> json_response(422)
+  end
+
   test "legacy body_html is sanitized and mailed instead of a blank shell", %{conn: conn} do
     slug = "legacy-html-email"
 
@@ -113,12 +145,14 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
         Barkpark.LabelFixtures.paper_attrs(%{
           "slug" => slug,
           "dataset" => @dataset,
-          "body_html" => "<h1>Legacy is readable</h1><script>alert('no')</script>"
+          "body_html" =>
+            "<h1>Legacy is readable</h1><a href=\"./next\">Next</a><script>alert('no')</script>"
         })
       )
 
     html = conn |> get("/papers/#{slug}/email") |> response(200)
     assert html =~ "Legacy is readable"
+    assert html =~ ~s(href="#{BarkparkWeb.Endpoint.url()}/papers/next")
     refute html =~ "<script"
     refute html =~ "alert('no')"
 
@@ -132,5 +166,88 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     assert source["kind"] == "html"
     assert source["html"] =~ "Legacy is readable"
     refute source["html"] =~ "<script"
+  end
+
+  test "email-only link policy absolutizes internal links and strips unsafe schemes", %{
+    conn: conn
+  } do
+    blocks = [
+      %{"type" => "heading", "level" => 2, "text" => "Links"},
+      %{
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "link", "href" => "./related", "children" => ["related"]},
+          %{"type" => "link", "href" => "/papers/rooted", "children" => ["rooted"]},
+          %{"type" => "link", "href" => "#details", "children" => ["fragment"]},
+          %{
+            "type" => "link",
+            "href" => "https://example.com/x?a=1&b=2",
+            "children" => ["absolute"]
+          },
+          %{"type" => "link", "href" => "javascript:alert(1)", "children" => ["unsafe"]}
+        ]
+      }
+    ]
+
+    ingest!(conn, "email-link-policy", %{"blocks" => blocks})
+    html = build_conn() |> get("/papers/email-link-policy/email") |> response(200)
+    origin = BarkparkWeb.Endpoint.url()
+
+    assert html =~ ~s(href="#{origin}/papers/related")
+    assert html =~ ~s(href="#{origin}/papers/rooted")
+    assert html =~ ~s(href="#details")
+    assert html =~ ~s(href="https://example.com/x?a=1&amp;b=2")
+    refute html =~ "javascript:"
+    assert html =~ ~r/<a style="[^"]+">unsafe<\/a>/
+  end
+
+  test "one fallback h1 names headingless email content", %{} do
+    {:ok, _paper} =
+      Barkpark.Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "email-accessible-name",
+          "dataset" => @dataset,
+          "blocks" => [%{"type" => "paragraph", "content" => ["Body only"]}]
+        })
+      )
+
+    html = build_conn() |> get("/papers/email-accessible-name/email") |> response(200)
+
+    assert html =~ "<title>email-accessible-name</title>"
+    assert length(Regex.scan(~r/<h1(?:\s|>)/i, html)) == 1
+    assert html =~ ">email-accessible-name</h1>"
+  end
+
+  test "authored heading suppresses fallback h1 and supplies an escaped title", %{conn: conn} do
+    ingest!(conn, "email-authored-heading", %{
+      "blocks" => [
+        %{"type" => "heading", "level" => 2, "text" => ~s(Quarterly <&> "Report")},
+        %{"type" => "paragraph", "content" => ["Body."]}
+      ]
+    })
+
+    html = build_conn() |> get("/papers/email-authored-heading/email") |> response(200)
+
+    assert html =~ "<title>Quarterly &lt;&amp;&gt; &quot;Report&quot;</title>"
+    assert html =~ "<h2"
+    refute html =~ ~r/<h1(?:\s|>)/i
+  end
+
+  test "email finalizer resolves against its explicit trusted scoped reader URI", %{} do
+    html =
+      ~s(<!doctype html><html><head><meta charset="utf-8"></head><body><a href="./sibling">Sibling</a><a href="//evil.example/x">Unsafe</a></body></html>)
+
+    trusted_reader = URI.parse("https://trusted.example/w/acme/p/docs/papers/current")
+
+    rendered =
+      BarkparkWeb.BulldocsEmailHTML.finalize(html, ~s(Name <&> "safe"), trusted_reader)
+
+    assert rendered =~ "<title>Name &lt;&amp;&gt; &quot;safe&quot;</title>"
+
+    assert rendered =~
+             ~s(href="https://trusted.example/w/acme/p/docs/papers/sibling")
+
+    refute rendered =~ "evil.example"
+    assert rendered =~ "<a>Unsafe</a>"
   end
 end
