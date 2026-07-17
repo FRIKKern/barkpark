@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 16
+const corpusFileCount = 17
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -154,16 +154,16 @@ func countCorpus(t *testing.T) census {
 func TestCorpusCensus(t *testing.T) {
 	want := census{
 		create:           17,
-		insertAfterFirst: 20, // +2 2026-07-17: ensure-root-layout-zones' two zone plants
+		insertAfterFirst: 23, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three
 		insertAfterLast:  1,
 		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             33, // +2: zone-script-assets + zone-live-hooks
+		mark:             36, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones
 		markVirtual:      2,
-		assertFile:       67, // +2: the two zone-declaration postconditions
-		assertCmd:        32, // +1: cd api && mix compile (TIER ci)
-		assertCmdTierCI:  11, // +1: same — the corpus's HEEx compile proof
+		assertFile:       70, // +2: the two zone-declaration postconditions; +3: the router trio
+		assertCmd:        33, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs
+		assertCmdTierCI:  12, // +2: same — the corpus's HEEx + router compile proofs
 	}
 	got := countCorpus(t)
 	if got != want {

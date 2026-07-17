@@ -54,10 +54,10 @@ and it becomes the parser's test fixtures in the next wave.
 
 ## The command corpus
 
-Sixteen commands, each covering a thing Barkpark development actually repeats — the
-Wave-5 additions (and add-sdk-method / ensure-root-layout-zones after them) were
-frequency-mined from twelve months of git history, so every entry answers a proven
-repetition. Every command lives at `scaffy/commands/<name>.scaffy`.
+Seventeen commands, each covering a thing Barkpark development actually repeats — the
+Wave-5 additions (and add-sdk-method / ensure-root-layout-zones / ensure-router-zones
+after them) were frequency-mined from twelve months of git history, so every entry
+answers a proven repetition. Every command lives at `scaffy/commands/<name>.scaffy`.
 
 | Command | What it does |
 |---|---|
@@ -77,6 +77,7 @@ repetition. Every command lives at `scaffy/commands/<name>.scaffy`.
 | **classify-block-type** | Closes add-block-type's manual step: adds a block type to its composition-doctrine tier word list in `tiers.ex` via one self-consuming REPLACE of the `@{{.Tier}} ~w(` opener. `Tier` is the corpus's first `ONEOF` (`element`\|`widget`\|`section`). |
 | **add-sdk-method** | Lands a new `@barkpark/core` client method end-to-end — the six-file layer-parity chore measured at 34 commits/12 months: a starter module in the house transport idiom, `Result`/`Options` types + the `BarkparkClient` signature, the `createClient` wiring, both `index.ts` barrel exports, an msw test pair, and the corpus's **first scaffolded changeset**. All six injections are bare `INSERT AFTER FIRST` against never-consumed anchors (house trailing-comma style makes every site separator-safe) — no REANCHOR families. |
 | **ensure-root-layout-zones** | Plants the two named `scaffy:zone` marker comments in `root.html.heex` — the repo's #2 accretion file, which W1/W7 ruled un-anchorable. Zero variables: a one-time reversible plant of a head anchor at each genuinely append-shaped neighborhood (new script assets after `{@inner_content}`, new LiveView hooks after `let Hooks = {};`), so later appends land at a named mark. The other two streams are cut with evidence in the command prose: theme blocks are emitter-owned (`design/emit.mjs` generated region) and feature CSS placement is contextual by design (the W1 CSS-leg cut, re-affirmed). |
+| **ensure-router-zones** | Same repair, router spelling: plants three `scaffy:zone` comments in `router.ex` — the #1 unserved accretion file (175 commits/12 months, 68% PURE_ADD), twice ruled un-anchorable because route order is semantics. Each zone sits where an append is ordering-safe **by construction** and its comment states the contract it guards in words (pipeline definitions are position-free; new plugin auth-buckets land before the dynamic-tailed `:ticket_key` run; scoped mirrors are order-neutral at the tail given a novel `/v1/<noun>` suffix). The flat-core `/v1` stream is cut with evidence: those adds are neighbor-bound (in-scope appends, "sibling routes below" prose, noun-local static-before-dynamic pins no generic zone can encode). |
 
 ### The ensure law (D57)
 
