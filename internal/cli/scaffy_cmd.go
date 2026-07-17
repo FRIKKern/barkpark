@@ -2,16 +2,18 @@ package cli
 
 // scaffy_cmd.go is `bp scaffy` — the CLI surface over internal/scaffy, the one
 // implementation of the pinned Scaffy v2 grammar (charter D27/D31/D33–D43).
-// The four local verbs:
+// The five local verbs:
 //
 //	bp scaffy validate <path>...             parse + lint, compiler-style findings
 //	bp scaffy fmt [--check] <path>...        canonical structural form, in place
 //	bp scaffy run <cmd.scaffy> --var K=V...  validate, then apply to the cwd tree
 //	bp scaffy remove <cmd.scaffy> --var ...  receipt replay, drift-refused (D36)
+//	bp scaffy discover [--since ...]         deterministic git-mining pass (leap 1)
 //
 // The two remote verbs — `pull` and `ls --remote` (W4, D48–D50) — and the
-// pulled-command consent gate live ENTIRELY in scaffy_remote_cmd.go; this
-// file only dispatches to them.
+// pulled-command consent gate live ENTIRELY in scaffy_remote_cmd.go; the
+// discover verb lives in scaffy_discover_cmd.go (engine: internal/scaffy
+// discover.go); this file only dispatches to them.
 //
 // PURE LOCAL like make/style: no network, no auth, no manifest — this file
 // never touches the server. All grammar + engine work lives in internal/scaffy
@@ -80,6 +82,14 @@ func runScaffy(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runScaffyRemove(out, g, args[1:])
+	case "discover":
+		// The git-mining pass lives in scaffy_discover_cmd.go (engine in
+		// internal/scaffy/discover.go) — dispatch ONLY, like the remote verbs.
+		if g.help {
+			printScaffyDiscoverHelp(out)
+			return exitOK
+		}
+		return runScaffyDiscover(out, args[1:])
 	case "pull":
 		// Remote verbs live in scaffy_remote_cmd.go (W4, D48) — this file stays
 		// pure-local, so these cases are dispatch ONLY.
@@ -101,7 +111,7 @@ func runScaffy(out *writer, g globals, args []string) int {
 		}
 		// A bare `bp scaffy` with no verb is incomplete usage (the `bp <noun>`
 		// convention in Execute's manifest path); usageErrf keeps -o json parity.
-		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, remove, pull, or ls")
+		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, remove, discover, pull, or ls")
 	default:
 		return usageErrf(out, func() { printScaffyHelp(out) }, "unknown command %q %q", "scaffy", verb)
 	}
@@ -745,7 +755,7 @@ func scaffyFindingsJSON(findings []scaffy.Finding) []any {
 }
 
 func printScaffyHelp(out *writer) {
-	out.outf(`usage: bp scaffy <validate|fmt|run|remove> [flags] <path>...
+	out.outf(`usage: bp scaffy <validate|fmt|run|remove|discover> [flags] <path>...
 
 Validate, format, apply and retract .scaffy command files (the pinned Scaffy
 v2 grammar + engine, internal/scaffy). Pure local: no server, no auth, no
@@ -770,6 +780,14 @@ commands:
                             command + exact vars, in reverse, drift-refused
                             per op. DIRECTION "remove" commands run FORWARD
                             (bp scaffy run) — never through remove (D36).
+  discover [--since <date|duration>] [--until <rev>] [--min-support N] [--top N]
+                            mine git history for Scaffy candidates: ranked
+                            accretion files (commits × co-change partners ×
+                            add-shape split) and co-creation pairs, each
+                            cross-referenced against the served catalog
+                            (SERVED / PARTIAL / UNSERVED). Deterministic —
+                            the window pins to the until commit's day, never
+                            wall-clock. Read-only; frequency evidence only.
   pull <concept>[/<variant>]
                             fetch a command document from the connected
                             server: validate-first, byte-identical write +
@@ -787,6 +805,7 @@ examples:
       --var ColumnType=:utc_datetime_usec        # scaffold + receipt
   bp scaffy run add-oban-worker.scaffy --var ... --dry-run   # preview only
   bp scaffy remove scaffy/commands/add-migration.scaffy --var ...  # retract
+  bp scaffy discover --top 40                     # mine accretion candidates
 
 exit codes:
   0  clean — applied / removed / no-op / no findings / already canonical

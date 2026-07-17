@@ -5,7 +5,12 @@
 accretion-frequency numbers. It replaces the W5 hand-mined figures that were
 computed agent-side with a drifting window and a capped node script that can no
 longer be re-run. **This script's output is canon.** It is also the executable
-prototype for `bp scaffy discover` (leap 1, spec below).
+prototype for `bp scaffy discover` (leap 1, spec below) — the Go verb now
+EXISTS (`internal/scaffy/discover.go` + `internal/cli/scaffy_discover_cmd.go`)
+and is the living, whole-repo successor; this script stays pinned as the
+papers' reference oracle (`bp scaffy discover --until 591fdcd53` reproduces
+its stage-2 figures exactly: router 174 commits / 1280 partners /
+378·164·78·53 support, co-creation 236 strict / 304 loose).
 
 Read-only git. Deterministic (window pinned to a commit, not wall-clock). No
 dependencies beyond `bash` + `git` + `awk`. Runs the full repo in **~1.8s** on an
