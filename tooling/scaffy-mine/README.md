@@ -61,7 +61,8 @@ the mis-grep value beside it so the trap is visible, never load-bearing.
 
 ## `bp scaffy discover` — the Go-pass spec (leap 1, backlogged)
 
-W5 mined patterns **by hand, agent-side**, at ~56–80k tokens per command. This
+W5 mined patterns **by hand, agent-side** — a real (if unmetered) token spend per
+pattern; per charter D69(a) no token figure for that work is citable as data. This
 bash prototype proves the same mining is a deterministic, **zero-token** pass. The
 ascension: promote it to a first-class `bp scaffy discover` subcommand in Go so
 the catalog's own justification is a build artifact, not an agent transcript.
