@@ -21,6 +21,10 @@
 // connector-scoped `{"mcpServers":…}` as base64: the shim decodes it to an in-VM
 // /tmp file and appends `--mcp-config <file> --strict-mcp-config` to the claude
 // exec — knob 3's tools reach the locked-down turn, host built-ins stay denied.
+// When the payload carries a top-level `bpConnectorTicket` (Wave 25, D213-D216),
+// the shim first fetches each entry's FINISHED auth headers from the bridge's
+// loopback tool-headers route and delivers the credential-bearing config via
+// `vercel sandbox copy` instead of the argv embed — see resolveMcpConfig().
 //
 // Flow (D108 — interactive stdin into a sandbox is IMPOSSIBLE, so this is a
 // one-shot turn whose first user frame the shim buffers from its OWN local stdin):
@@ -64,6 +68,7 @@
 // is created by importing this file; creation happens only on a real turn.
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -130,6 +135,22 @@ const TURN_FILE = "/tmp/turn.jsonl";
 // and points claude at with `--mcp-config … --strict-mcp-config`. Never a host
 // path — a host-written `--mcp-config` path hard-fails in-sandbox (D109).
 const MCP_CONFIG_FILE = "/tmp/bp-cloud-mcp.json";
+// ── The connector-credential fetch (Wave 25, D213-D216) ───────────────────────
+//
+// D126 made the MCP descriptors CREDENTIAL-LESS; W25 finishes them HOST-SIDE:
+// when the decoded `--mcp-config-b64` payload carries a top-level
+// `bpConnectorTicket` (the Elixir wire contract — exact key, never renamed), the
+// shim POSTs `{"ticket":…}` per `mcpServers` entry to the bridge's EXISTING D71
+// loopback route (`…/connect/tool-headers/<provider>` — provider in the PATH,
+// ticket in the BODY) and merges the FINISHED header object verbatim into that
+// entry's `headers`. The shim NEVER sees `credential_ref` and never re-derives a
+// bearer — `bearerFromCredentialRef` (connectors/src/http/connect.ts) stays the
+// sole W9 dual-shape owner. Any fetch failure/refusal aborts the turn BEFORE any
+// vercel invocation with the FIXED string below: stderr tails broadcast verbatim
+// to ChatLive, so no response/config/credential bytes may ride Error.message.
+const BRIDGE_URL = process.env.CLOUD_SANDBOX_BRIDGE_URL || "http://127.0.0.1:4020/connectors";
+const ERR_CREDENTIAL_FETCH =
+  "connector credential fetch refused — cloud turn aborted before any sandbox dispatch";
 
 function clampInt(raw, dflt, lo, hi) {
   const n = Number.parseInt(raw ?? "", 10);
@@ -477,15 +498,125 @@ function readFirstUserFrame() {
   });
 }
 
+// ── Resolve the MCP config: fetch finished tool headers, pick the transport ───
+//
+// (Wave 25, D213-D216.) Decides between the TWO delivery modes from the decoded
+// `--mcp-config-b64` payload — BEFORE any vercel invocation, in the per-turn
+// path (so it fires on BOTH the create and the reuse branch; gating it inside
+// createSandbox() is the FORBIDDEN shape — a reused sandbox would run on a stale
+// credential):
+//
+//   `{ mode: "embed", b64 }` — NO top-level `bpConnectorTicket` (or the payload
+//     is not JSON): the ORIGINAL b64 rides today's in-VM printf|base64 embed,
+//     byte-identical to the pre-W25 shape. Credential-less, so argv is safe.
+//   `{ mode: "copy", json }` — the payload carries `bpConnectorTicket`: each
+//     `mcpServers` entry's finished headers are fetched from the D71 route and
+//     merged verbatim; the ticket is STRIPPED; the now-credential-BEARING config
+//     must never ride argv (a b64 embed provably leaks it to ps/logs), so it is
+//     delivered via `vercel sandbox copy` of a 0600 host tmpfile (D215).
+//
+// Throws ONLY the fixed ERR_CREDENTIAL_FETCH string — never response, config,
+// or credential bytes (stderr reaches ChatLive verbatim).
+async function resolveMcpConfig(mcpConfigB64) {
+  if (!mcpConfigB64) return null;
+  let config;
+  try {
+    config = JSON.parse(Buffer.from(mcpConfigB64, "base64").toString("utf8"));
+  } catch {
+    // Not JSON — a legacy/opaque payload: today's embed path, byte-identical.
+    return { mode: "embed", b64: mcpConfigB64 };
+  }
+  if (
+    typeof config !== "object" ||
+    config === null ||
+    Array.isArray(config) ||
+    typeof config.bpConnectorTicket !== "string" ||
+    config.bpConnectorTicket === ""
+  ) {
+    return { mode: "embed", b64: mcpConfigB64 };
+  }
+  const ticket = config.bpConnectorTicket;
+  // Strip the ticket UNCONDITIONALLY: nothing but real headers reaches the
+  // sandbox (claude transmits every headers-map key to the MCP endpoint).
+  delete config.bpConnectorTicket;
+  const servers =
+    typeof config.mcpServers === "object" && config.mcpServers !== null
+      ? config.mcpServers
+      : {};
+  const base = BRIDGE_URL.replace(/\/+$/, "");
+  for (const [provider, entry] of Object.entries(servers)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    let headers;
+    try {
+      // The EXISTING D71 route: provider in the PATH, ticket in the BODY. The
+      // reply is the FINISHED header object (e.g. {"Authorization":"Bearer …"})
+      // — the bridge owns decryption/refresh; the shim merges bytes verbatim.
+      const res = await fetch(`${base}/connect/tool-headers/${provider}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticket }),
+      });
+      if (!res.ok) throw new Error("refused");
+      headers = await res.json();
+    } catch {
+      // Fail closed with the FIXED string — a cross-workspace ticket, a dead
+      // bridge, and a malformed reply are all the same refusal to the caller.
+      throw new Error(ERR_CREDENTIAL_FETCH);
+    }
+    if (typeof headers !== "object" || headers === null || Array.isArray(headers)) {
+      throw new Error(ERR_CREDENTIAL_FETCH);
+    }
+    entry.headers = { ...(entry.headers ?? {}), ...headers };
+  }
+  return { mode: "copy", json: JSON.stringify(config) };
+}
+
+// ── Deliver the credential-bearing config via sandbox-copy (D215) ─────────────
+//
+// stdin into `vercel sandbox exec` is DEAD (proven three ways) and an argv-b64
+// embed provably leaks the credential in base64 form — so the config is written
+// to a 0600 host tmpfile, copied into the sandbox over the API body (only the
+// PATH is argv), and the tmpfile is unlinked in a finally. Same confinement
+// pattern as the ANTHROPIC key (D121/D122): the secret crosses in a channel ps
+// and logs never see.
+async function copyMcpConfigIntoSandbox(id, json) {
+  const tmpfile = join(
+    tmpdir(),
+    `bp-cloud-mcp-${process.pid}-${randomBytes(6).toString("hex")}.json`,
+  );
+  writeFileSync(tmpfile, json, { mode: 0o600, flag: "wx" });
+  try {
+    const res = await run(
+      VERCEL_BIN,
+      sbArgs(["sandbox", "copy", tmpfile, `${id}:${MCP_CONFIG_FILE}`]),
+      { capture: true },
+    );
+    if (res.code !== 0) {
+      // Fixed shape, no vercel stderr: the copy carried credential-bearing
+      // content, so nothing from this failure may leak into ChatLive.
+      throw new Error(`vercel sandbox copy failed (code ${res.code}) — cloud turn aborted`);
+    }
+  } finally {
+    try {
+      unlinkSync(tmpfile);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 // ── The in-sandbox one-shot claude command (isolated HOME + clean cwd, D112) ──
 //
-// When `mcpConfigB64` is present (the workspace has connector-scoped tools,
-// D127), the script also base64-decodes it to MCP_CONFIG_FILE in-VM and the
+// When `mcp` is present (the workspace has connector-scoped tools, D127) the
 // claude exec gains `--mcp-config <file> --strict-mcp-config` — the shim owns
-// ALL mcp argv; the Elixir builder emits none. When it is absent the script is
-// BYTE-IDENTICAL to the pre-D127 shape (no extra line, no mcp flags).
-function inSandboxScript(claudeArgs, frameB64, mcpConfigB64) {
-  const effectiveArgs = mcpConfigB64
+// ALL mcp argv; the Elixir builder emits none. HOW the config file gets there
+// depends on the mode (W25/D215): `embed` base64-embeds it in this script
+// (credential-less payloads only — byte-identical to the pre-W25 shape); `copy`
+// SKIPS the embed line because `vercel sandbox copy` already materialized the
+// credential-BEARING config at MCP_CONFIG_FILE before this script runs. When
+// `mcp` is absent the script is BYTE-IDENTICAL to the pre-D127 shape.
+function inSandboxScript(claudeArgs, frameB64, mcp) {
+  const effectiveArgs = mcp
     ? [...claudeArgs, "--mcp-config", MCP_CONFIG_FILE, "--strict-mcp-config"]
     : claudeArgs;
   const claudeCmd = ["claude", ...effectiveArgs].map(shq).join(" ");
@@ -505,9 +636,11 @@ function inSandboxScript(claudeArgs, frameB64, mcpConfigB64) {
     `printf '%s' ${shq(frameB64)} | base64 -d > ${shq(TURN_FILE)}`,
   ];
   // Materialize the connector-scoped MCP config in-VM (after the frame line,
-  // before the exec) — no credential rides it; the servers are HTTP descriptors.
-  if (mcpConfigB64) {
-    lines.push(`printf '%s' ${shq(mcpConfigB64)} | base64 -d > ${shq(MCP_CONFIG_FILE)}`);
+  // before the exec) — EMBED mode only: no credential rides it; the servers are
+  // HTTP descriptors. Copy mode NEVER embeds — the credential-bearing config
+  // was already sandbox-copied to MCP_CONFIG_FILE (argv must never carry it).
+  if (mcp && mcp.mode === "embed") {
+    lines.push(`printf '%s' ${shq(mcp.b64)} | base64 -d > ${shq(MCP_CONFIG_FILE)}`);
   }
   lines.push(`exec ${claudeCmd} < ${shq(TURN_FILE)}`);
   return lines.join("\n");
@@ -631,9 +764,9 @@ async function createSandbox(workspace) {
   return id;
 }
 
-async function runTurn(id, claudeArgs, frame, mcpConfigB64) {
+async function runTurn(id, claudeArgs, frame, mcp) {
   const frameB64 = Buffer.from(frame + "\n").toString("base64");
-  const script = inSandboxScript(claudeArgs, frameB64, mcpConfigB64);
+  const script = inSandboxScript(claudeArgs, frameB64, mcp);
 
   // Inject the key from the SHIM's own env ONLY (D110). A bogus key yields the
   // honest 401 `Invalid API key` result frame — the wire-level proof (D23).
@@ -672,6 +805,22 @@ async function main() {
     });
   }
 
+  // ── ORDERING LAW (W25/D214): parse → fetch+merge → create/reuse → copy →
+  // exec. The credential fetch runs HERE — in the per-turn path, BEFORE any
+  // vercel invocation and before a concurrency slot is held — so a refusal
+  // (cross-workspace ticket, dead bridge, malformed reply) aborts the turn with
+  // ZERO sandbox side effects, and BOTH the create and the reuse branch get a
+  // fresh per-turn credential. Never gate this inside createSandbox().
+  let mcp = null;
+  try {
+    mcp = await resolveMcpConfig(mcpConfigB64);
+  } catch (e) {
+    // e.message is the FIXED refusal string only — safe for the verbatim
+    // ChatLive stderr tail.
+    log(`FATAL: ${e.message}`);
+    process.exit(1);
+  }
+
   let frame;
   try {
     frame = await readFirstUserFrame();
@@ -698,7 +847,13 @@ async function main() {
     } else {
       id = await createSandbox(workspace);
     }
-    exitCode = await runTurn(id, claudeArgs, frame, mcpConfigB64);
+    // Copy mode delivers the credential-BEARING config over the API body
+    // (0600 tmpfile → in-VM MCP_CONFIG_FILE, D215) before the exec; embed mode
+    // stays inside the in-VM script, byte-identical to the pre-W25 shape.
+    if (mcp && mcp.mode === "copy") {
+      await copyMcpConfigIntoSandbox(id, mcp.json);
+    }
+    exitCode = await runTurn(id, claudeArgs, frame, mcp);
   } catch (e) {
     log(`turn failed: ${e.message}`);
     exitCode = 1;
