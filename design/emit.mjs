@@ -1384,7 +1384,18 @@ function studioTokensGen() {
     "  # NOT a CSS role. partial_outage is an out-of-model tone between warn-amber",
     "  # (degraded) and danger-red (major_outage): the severity distinction must",
     "  # survive, so it is NOT recolored onto --warn/--danger.",
-    `  def status_health, do: %{operational: "${sh.operational}", degraded: "${sh.degraded}", partial_outage: "${sh.partial_outage}", major_outage: "${sh.major_outage}"}`,
+    // Emitted in the mix-format-STABLE multi-line shape: the one-line
+    // `def status_health, do: %{…}` exceeds the 98-col default and mix format
+    // wraps it, so a one-line emission made the drift gate and the Format gate
+    // permanently disagree (only one could pass). Emit the wrapped form both
+    // agree on.
+    "  def status_health,",
+    "    do: %{",
+    `      operational: "${sh.operational}",`,
+    `      degraded: "${sh.degraded}",`,
+    `      partial_outage: "${sh.partial_outage}",`,
+    `      major_outage: "${sh.major_outage}"`,
+    "    }",
     "",
     "  # Neutral gray fallback for an unrecognised / missing status.",
     `  def status_health_unknown, do: "${sh.unknown}"`,

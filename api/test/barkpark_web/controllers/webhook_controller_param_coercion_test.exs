@@ -22,7 +22,9 @@ defmodule BarkparkWeb.WebhookControllerParamCoercionTest do
   alias Barkpark.Auth
 
   setup do
-    {:ok, token} = Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    {:ok, token} =
+      Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+
     %{token: token}
   end
 
