@@ -41,6 +41,7 @@ import {
   type ConnectorRegistry,
 } from "../src/connector/registry.js";
 import { createGithubConnector } from "../src/connectors/github.js";
+import { createLinearConnector } from "../src/connectors/linear.js";
 import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
 import { startBridge, type Bridge } from "../src/index.js";
@@ -135,6 +136,9 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       bridge = undefined;
       await pool.query("DELETE FROM chat_bridge.connector_installs");
     });
+
+    /** A Linear org id — the install key an OAuth connect would have written. */
+    const LINEAR_ORG = "12345678-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
     function configFor(): BridgeConfig {
       return {
@@ -390,6 +394,77 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       expect(JSON.parse(stdout)).toEqual({
         Authorization: `Bearer ${GOOD_PAT}`,
       });
+    });
+
+    // ── W25 REAL-BRIDGE LINEAR LEG (charter D213-D216) ────────────────────────
+    // The cloud shim (scripts/connectors/cloud-sandbox-runner.mjs) now POSTs the
+    // turn's tool ticket to THIS route and merges the finished header into the
+    // in-sandbox MCP config. tool-descriptors.test.ts previously pinned only the
+    // bare-PAT (GitHub) shape; these two pin the OAUTH-BUNDLE shape the shim's
+    // fetch will meet for Linear — through the REAL route, real Postgres, and a
+    // registry WITHOUT refresh deps, so the byte-for-byte bundle read-path (D89)
+    // is what serves the Bearer.
+
+    it("TOOL-HEADERS opens a Linear OAUTH BUNDLE to Bearer <access_token> via the real route (W25)", async () => {
+      const registry = createConnectorRegistry();
+      // NO refresh deps on purpose: without OAuth client credentials the
+      // connector carries no refreshCredential hook, so the route serves the
+      // STORED bundle byte-for-byte — access_token out, nothing exchanged.
+      registry.register(createLinearConnector());
+      const h = await boot(registry);
+
+      // The bundle shape an OAuth connect seals (linear-token-refresh.test.ts):
+      // {access_token, refresh_token, expires_at}. Seeded via upsertInstall —
+      // the same one-seal write path the callback uses. expires_at is in the
+      // PAST to prove the no-refresh-deps path serves the stored token as-is.
+      await upsertInstall(pool, cipher, {
+        provider: "linear",
+        installKey: LINEAR_ORG,
+        workspaceId: WS_A,
+        credentialRef: JSON.stringify({
+          access_token: "at_w25_linear",
+          refresh_token: "rt_w25_linear",
+          expires_at: Date.now() - 1_000,
+        }),
+      });
+
+      const response = await h.post("/connectors/connect/tool-headers/linear", {
+        ticket: toolTicket(WS_A),
+      });
+      expect(response.status).toBe(200);
+      // The bundle is reduced to its access_token — NEVER the whole JSON, and
+      // never the refresh_token. This is the exact object the cloud shim merges
+      // into the in-sandbox MCP config entry's headers.
+      expect(await response.json()).toEqual({
+        Authorization: "Bearer at_w25_linear",
+      });
+    });
+
+    it("a cross-workspace ticket CANNOT open the Linear bundle — the opaque 404 (W25)", async () => {
+      const registry = createConnectorRegistry();
+      registry.register(createLinearConnector());
+      const h = await boot(registry);
+
+      await upsertInstall(pool, cipher, {
+        provider: "linear",
+        installKey: LINEAR_ORG,
+        workspaceId: WS_A,
+        credentialRef: JSON.stringify({
+          access_token: "at_w25_linear",
+          refresh_token: "rt_w25_linear",
+          expires_at: Date.now() - 1_000,
+        }),
+      });
+
+      // WS_B holds a VALID tool ticket — for B. The lookup keyed on B's
+      // workspace finds no linear install: the opaque 404, byte-identical to an
+      // unknown route. This is the server half of the shim's fail-closed leg —
+      // a sandbox for workspace B can never fetch A's credential.
+      const response = await h.post("/connectors/connect/tool-headers/linear", {
+        ticket: toolTicket(WS_B),
+      });
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe('{"error":"not_found"}');
     });
 
     // ── CROSS-TENANT + LOOPBACK BOUNDARY ──────────────────────────────────────
