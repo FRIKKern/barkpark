@@ -16,9 +16,15 @@ this rig runs only what is registered there.
 | arm | what it is | cap |
 |-----|-----------|-----|
 | `C`  | the raw engine, **no agent**: `bp scaffy run <cmd> --var … -o json` | $0 (no LLM) |
-| `A`  | agent armed with the catalog, **not** told to reach for it first | $1.50 |
-| `Ap` | A-prime: agent **instructed catalog-first** (measures the L2 doctrine, D71) | $1.50 |
-| `B`  | bare agent **hand-editing**, no scaffy | $3.00 |
+| `A`  | agent armed with the catalog, **instructed catalog-first** | $1.50 |
+| `Ap` | A-prime: scaffy present on disk but **not mentioned in the brief** — the doctrine-gap arm (does the agent reach for the catalog unprompted? L2, D71) | $1.50 |
+| `B`  | bare agent **hand-editing**, told not to use scaffy | $3.00 |
+
+The letters follow the **published prereg paper** (`scaffy-duels-prereg`) — its rep
+counts and predictions reference exactly these semantics. Every agent brief is the
+chore's registered `brief` from `matrix.json` (the CONCRETE task, including the
+registered var values, so all arms attempt the *same chore instance*) plus the arm
+doctrine sentence above.
 
 Boundary cells (`boundary--*`) run at the $3.00 cap; they have **no arm C** — the
 ExecRunner-deadline chore is a judgement edit no scaffy command expresses (that is the
@@ -58,7 +64,22 @@ Green/red is decided by the **parsed assert statuses** in the run's `-o json` en
 the process exit code** (exit 5 conflates a validation error with an assert failure).
 `deferred` asserts are TIER-ci gates the engine does not run locally; the harness
 **force-runs** them in the warmed tree (`chores.<chore>.tier_ci_force`) and folds their
-return codes into `gates_green`.
+return codes into `gates_green`. An **empty assert list is never green** — an engine
+refusal (bad `--var`, exit 2) produces no asserts, and silence must not score as
+success.
+
+**Agent arms are never green by trust**: the harness re-runs the chore's registered
+mechanical gates itself (`chores.<chore>.agent_gate`, plus any `tier_ci_force`) after
+the agent finishes, and `gates_green` requires at least one such check to have run and
+all of them to pass. `validate_results.py` rejects an LLM-arm cell that claims green
+with zero recorded checks. The boundary chore's judgment legs (the new test is
+functionally equivalent to the fix commit's two subtests; the `CommandRunner` signature
+is byte-unchanged) are scored by the run-duels reviewer on top of the mechanical gate.
+
+The flagship's `RESOLVE_AT_RUN` sentinels (`CountBefore`/`CountAfter`,
+`ParityCountBefore`/`ParityCountAfter`) are resolved by `run-cell.sh` from the cell
+tree at run time (`toHaveLength(N)` in `js/packages/react/tests/PortableDoc.test.tsx`;
+`EXPECTED_COUNT=` in `scripts/pd-parity-completeness.sh`) — fail-loud if unresolvable.
 
 ## Consistency + reversibility (D68)
 
@@ -90,6 +111,10 @@ whose run records overlap.
 
 The chore's own local `ASSERT CMD` (for `add-error-shape`, the same scoped `mix test`)
 runs *inside* `bp scaffy run` against that warm `_build`.
+
+Warm time is **excluded** from the measured wall-clock: `duration_ms` starts after the
+warm + boundary staging finish (a cell measures WORK, not cold-build noise); the warm
+cost is recorded separately as `warm_ms`.
 
 ## Files
 

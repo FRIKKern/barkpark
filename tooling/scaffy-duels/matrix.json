@@ -16,9 +16,9 @@
   },
   "caps_usd": { "A": 1.5, "Ap": 1.5, "B": 3.0, "C": 0.0, "boundary": 3.0 },
   "arms": {
-    "A": "agent armed with `bp scaffy run` + the local catalog, NOT told to reach for it first",
-    "Ap": "A-prime: same agent, INSTRUCTED catalog-first (measures the L2 doctrine, D71)",
-    "B": "bare agent hand-editing the tree, no scaffy",
+    "A": "agent armed with `bp scaffy run` + the local catalog, INSTRUCTED catalog-first (charter D65 / prereg block 'What a duel is')",
+    "Ap": "A-prime: scaffy present on disk but NOT mentioned in the brief — the doctrine-gap arm feeding leap L2 (does the agent reach for the catalog unprompted?)",
+    "B": "bare agent hand-editing the tree, told NOT to use scaffy",
     "C": "raw engine alone, no agent: `bp scaffy run <cmd> --var ... -o json`"
   },
   "chores": {
@@ -30,16 +30,20 @@
         "Message": "duel probe error",
         "Status": "418"
       },
+      "brief": "Add a new API error code `duel_probe` to the Barkpark error registry (api/lib/barkpark/content/errors.ex): HTTP status 418, message \"duel probe error\", hint \"Retry the duel probe once the transient condition clears.\" Wire it exactly the way existing error codes are wired, including the hint entry. Then make this green: cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
       "needs_elixir_warm": true,
       "tier_ci_force": [],
-      "local_gate_note": "Its ASSERT CMD (errors_test.exs + error_code_coverage_test.exs) is LOCAL (no TIER ci) — the engine executes it during `run`, so gates-green needs a warmed _build."
+      "agent_gate": ["cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs"],
+      "local_gate_note": "Its ASSERT CMD (errors_test.exs + error_code_coverage_test.exs) is LOCAL (no TIER ci) — the engine executes it during `run`, so gates-green needs a warmed _build. Agent arms are scored by the harness re-running the same gate (agent_gate) — never by trust."
     },
     "ensure-cli-noun": {
       "command": "scaffy/commands/ensure-cli-noun.scaffy",
       "vars": { "Noun": "duelnoun" },
+      "brief": "Ensure the bp CLI noun `duelnoun` is present in the CLI's hand-maintained noun lists in internal/cli (the shell-completion noun list and the usage noun list — the copies that drift). Add it wherever an existing noun like `mcp` appears in those lists; do not add a dispatch case. Then make this green: CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
       "needs_elixir_warm": false,
       "tier_ci_force": [],
-      "local_gate_note": "Go gate: TestCompletionNounsCoverAllDispatchedBuiltins. Chosen over add-cli-verb (whose only gate is TIER-ci Elixir = vacuous green, D65)."
+      "agent_gate": ["CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"],
+      "local_gate_note": "Go gate: TestCompletionNounsCoverAllDispatchedBuiltins. Chosen over add-cli-verb (whose only gate is TIER-ci Elixir = vacuous green, D65). Agent arms re-gated via agent_gate."
     },
     "add-oban-worker": {
       "command": "scaffy/commands/add-oban-worker.scaffy",
@@ -47,19 +51,23 @@
         { "WorkerName": "DuelSmokeReaper", "CronExpr": "0 4 * * *" },
         { "WorkerName": "DuelSmokeSweeper", "CronExpr": "0 5 * * *" }
       ],
+      "brief": "Add two Oban cron workers to the Barkpark API, mirroring how existing workers are laid out: Barkpark.Workers.DuelSmokeReaper on cron \"0 4 * * *\" and Barkpark.Workers.DuelSmokeSweeper on cron \"0 5 * * *\". Each is a minimal :default-queue worker whose perform/1 returns :ok, with its own test under test/barkpark/workers/, and each registered in the Oban.Plugins.Cron crontab block in api/config/config.exs. Then make this green: cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
       "needs_elixir_warm": true,
       "tier_ci_force": ["cd api && CC=/usr/bin/clang mix test test/barkpark/workers"],
+      "agent_gate": [],
       "runs_per_cell": 2,
-      "local_gate_note": "×2-per-cell: two var sets exercise REANCHOR forward accretion. Its mix test is TIER ci (deferred by the engine) — the harness FORCE-RUNS it in the warmed tree and records the result (D67)."
+      "local_gate_note": "×2-per-cell: two var sets exercise REANCHOR forward accretion. Its mix test is TIER ci (deferred by the engine) — the harness FORCE-RUNS it in the warmed tree and records the result (D67); the same force-run scores agent arms, so agent_gate is empty here."
     },
     "boundary": {
       "command": null,
       "setup": "tooling/scaffy-duels/boundary-setup.sh",
       "vars": {},
+      "brief": "internal/agent's ExecRunner.Run can hang forever when the command it executes is stuck. Bound it with an internal deadline so a stuck command times out cleanly while the fast path stays unchanged, WITHOUT changing the CommandRunner interface signature or its call sites. Add a regression test covering both behaviors (stuck-command-times-out AND fast-path-unchanged). Then make these green: CC=/usr/bin/clang go vet ./internal/agent/... and CC=/usr/bin/clang go test ./internal/agent/... -count=1",
       "needs_elixir_warm": false,
       "tier_ci_force": [],
+      "agent_gate": ["CC=/usr/bin/clang go vet ./internal/agent/...", "CC=/usr/bin/clang go test ./internal/agent/... -count=1"],
       "expressible": false,
-      "local_gate_note": "The 'where scaffy loses' cell: a novel one-off judgement edit (ExecRunner deadline). NO scaffy command expresses it (arm C = no expression). Gate: go vet + go test ./internal/agent/... + reviewer checks the arm's new test covers stuck-command-times-out AND fast-path-unchanged AND CommandRunner signature untouched. Cells are EXPECTED to vary across reps (D68)."
+      "local_gate_note": "The 'where scaffy loses' cell: a novel one-off judgement edit (ExecRunner deadline). NO scaffy command expresses it (arm C = no expression). Mechanical gate = agent_gate; the D67 bar's judgment legs (new test functionally equivalent to TestExecRunnerDeadline's two subtests, CommandRunner signature byte-unchanged) are scored by the run-duels reviewer. Cells are EXPECTED to vary across reps (D68)."
     },
     "flagship": {
       "command": "scaffy/commands/add-block-type.scaffy",
@@ -70,9 +78,11 @@
         "ParityCountBefore": "RESOLVE_AT_RUN",
         "ParityCountAfter": "RESOLVE_AT_RUN"
       },
+      "brief": "Add a new PortableDoc block type `duelmark` across the wired surfaces of this repo: a Go renderer + DefaultRegistry entry in internal/pdrender, the JS emitter + registry + test fixture + registry-count bump in js/packages/react, and the Elixir compose clause + parity census bumps (scripts/pd-parity-completeness.sh + the golden parity test). Then make the touched surfaces' own tests green.",
       "needs_elixir_warm": true,
       "tier_ci_force": [],
-      "local_gate_note": "A-vs-C only (1 rep). CountBefore/CountAfter + ParityCountBefore/ParityCountAfter are OPAQUE+SUCCESSOR count bumps the runner MUST resolve from the live tree at run time (JS CASES length + pd-parity EXPECTED_COUNT). Heaviest chore; measures the ceiling of the token gap."
+      "agent_gate": ["CC=/usr/bin/clang go test ./internal/pdrender/ -count=1"],
+      "local_gate_note": "A-vs-C only (1 rep). CountBefore/CountAfter + ParityCountBefore/ParityCountAfter are OPAQUE+SUCCESSOR count bumps run-cell.sh resolves from the cell tree at run time (toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx; EXPECTED_COUNT= in scripts/pd-parity-completeness.sh). agent_gate covers only the Go leg mechanically — the run-duels slice scores the JS/parity legs from the command's own assert list. Heaviest chore; measures the ceiling of the token gap."
     }
   },
   "cells": [

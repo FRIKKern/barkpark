@@ -1,4 +1,5 @@
-# ephemeral duel run artifacts — written by run-cell.sh / the run-duels slice
-*.json
-RUNLOG.jsonl
-!.gitkeep
+# Smoke-cell artifacts are ephemeral (the rig's own end-to-end check).
+# REGISTERED cell results + RUNLOG.jsonl are COMMITTED by the run-duels slice —
+# they are the benchmark's data of record (the flagship paper cites them and
+# validate_results.py gates on them). Do not widen this ignore.
+*--smoke*.json

@@ -3,13 +3,14 @@
 #
 # Run ONE duel cell serially and write results/<chore>--<arm>--<rep>.json.
 #
-# Arms (D65):
+# Arms (D65 / the published prereg — the paper's letters are the law):
 #   C   — the raw engine, no agent: `bp scaffy run <cmd> --var ... -o json`. Scored
 #         end-to-end here (run -> parse assert statuses -> force TIER-ci gates ->
 #         sha256(git diff) -> remove -> git diff --exit-code). Meter = 0 (no LLM).
-#   A   — agent armed with the catalog, NOT told to reach for it first.
-#   Ap  — A-prime: agent INSTRUCTED catalog-first (measures the L2 doctrine, D71).
-#   B   — bare agent hand-editing, no scaffy.
+#   A   — agent armed with the catalog, INSTRUCTED catalog-first.
+#   Ap  — A-prime: scaffy present on disk but NOT mentioned in the brief — the
+#         doctrine-gap arm (does the agent reach for the catalog unprompted? L2/D71).
+#   B   — bare agent hand-editing, told NOT to use scaffy.
 # A/Ap/B spawn the pinned claude CLI (see spawn_agent). The smoke path is arm C only;
 # the agent path is wired + documented but not exercised by the harness gate.
 #
@@ -43,9 +44,8 @@ print(cap)
 PY
 )"
 
-START_TS="$(date +%s)"
-
-# --- warm the cell worktree ---------------------------------------------------
+# --- warm the cell worktree (NOT part of the measured wall-clock) --------------
+WARM_START="$(date +%s)"
 WARM_ARGS=()
 [[ "$NEEDS_WARM" == "true" || "$NEEDS_WARM" == "True" ]] && WARM_ARGS+=(--with-elixir)
 WT="$("${SCAFFY_DUELS_DIR}/warm-worktree.sh" "$CELL" "${WARM_ARGS[@]}" | tail -n1)"
@@ -55,6 +55,11 @@ WT="$("${SCAFFY_DUELS_DIR}/warm-worktree.sh" "$CELL" "${WARM_ARGS[@]}" | tail -n
 if [[ "$CHORE" == "boundary" ]]; then
   "${SCAFFY_DUELS_DIR}/boundary-setup.sh" "$WT"
 fi
+
+# The measured window starts AFTER warm + staging: a cell measures WORK, not
+# cold-build noise (D67). warm_ms is recorded separately for transparency.
+START_TS="$(date +%s)"
+WARM_MS="$(( (START_TS - WARM_START) * 1000 ))"
 
 # --- helpers ------------------------------------------------------------------
 
@@ -73,13 +78,59 @@ PY
   )
 }
 
-# Force-run the TIER-ci gate list for a chore in the warmed tree, record rc.
-# Prints a JSON array of {cmd, rc} to stdout.
-_force_tier_ci() {
-  python3 - "$SCAFFY_DUELS_MATRIX" "$CHORE" "$WT" <<'PY'
+# Resolve RESOLVE_AT_RUN sentinels from the CELL TREE (flagship count bumps):
+# CountBefore <- toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx,
+# ParityCountBefore <- EXPECTED_COUNT= in scripts/pd-parity-completeness.sh,
+# each *After = its Before + 1 (OPAQUE+SUCCESSOR pairs). Fails LOUD if a sentinel
+# survives unresolved — a sentinel passed verbatim would exit-2 the engine and
+# must never score.
+_resolve_vars() { # $1 = vars json object -> resolved json on stdout
+  python3 - "$1" "$WT" <<'PY'
+import json,re,sys
+vars,wt=json.loads(sys.argv[1]),sys.argv[2]
+def grab(path,pat):
+    m=re.search(pat,open(f"{wt}/{path}").read())
+    if not m: sys.exit(f"resolve: no match for {pat!r} in {path}")
+    return int(m.group(1))
+if any(v=="RESOLVE_AT_RUN" for v in vars.values()):
+    n=grab("js/packages/react/tests/PortableDoc.test.tsx",r"toHaveLength\((\d+)\)")
+    p=grab("scripts/pd-parity-completeness.sh",r"EXPECTED_COUNT=(\d+)")
+    fill={"CountBefore":n,"CountAfter":n+1,"ParityCountBefore":p,"ParityCountAfter":p+1}
+    for k,v in vars.items():
+        if v=="RESOLVE_AT_RUN":
+            if k not in fill: sys.exit(f"resolve: no rule for sentinel var {k}")
+            vars[k]=str(fill[k])
+print(json.dumps(vars))
+PY
+}
+
+# Remove LIFO with the same var set(s) (D36), used by arm C and by A/Ap reversal.
+# Handles both single-vars chores and var_sequence chores (e.g. add-oban-worker).
+_remove_lifo() { # $1 = remove-envelope path
+  local seq n i vars
+  seq="$(matrix_get "chores.${CHORE}.var_sequence" 2>/dev/null || echo "null")"
+  if [[ "$seq" != "null" ]]; then
+    n="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$seq")"
+    for ((i=n-1;i>=0;i--)); do
+      _load_var_flags "$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])[int(sys.argv[2])]))' "$seq" "$i")"
+      ( cd "$WT" && bp scaffy remove "$COMMAND" "${VF[@]}" -o json ) > "$1" 2>/dev/null || true
+    done
+  else
+    vars="$(_resolve_vars "$(matrix_get "chores.${CHORE}.vars")")"
+    _load_var_flags "$vars"
+    ( cd "$WT" && bp scaffy remove "$COMMAND" "${VF[@]}" -o json ) > "$1" 2>/dev/null || true
+  fi
+}
+
+# Run a registered command list (matrix.json chores.<chore>.<list>) in the warmed
+# tree via `sh -c` (D38), record rc per command. Prints a JSON array of {cmd, rc}.
+# Used for tier_ci_force (deferred TIER-ci asserts) AND agent_gate (the mechanical
+# correctness bar for agent arms — an agent cell is never green by trust).
+_run_gate_list() { # $1 = list key, e.g. tier_ci_force | agent_gate
+  python3 - "$SCAFFY_DUELS_MATRIX" "$CHORE" "$WT" "$1" <<'PY'
 import json,subprocess,sys,os
-d=json.load(open(sys.argv[1])); chore,wt=sys.argv[2],sys.argv[3]
-cmds=d["chores"][chore].get("tier_ci_force",[]) or []
+d=json.load(open(sys.argv[1])); chore,wt,key=sys.argv[2],sys.argv[3],sys.argv[4]
+cmds=d["chores"][chore].get(key,[]) or []
 res=[]
 env=dict(os.environ); env["CC"]="/usr/bin/clang"
 for c in cmds:
@@ -88,30 +139,36 @@ for c in cmds:
 print(json.dumps(res))
 PY
 }
+_force_tier_ci() { _run_gate_list tier_ci_force; }
 
 # --- arm C: the engine alone --------------------------------------------------
 run_arm_c() {
-  local run_json remove_json diff_sha forced reversible
+  local diff_sha forced reversible
   cd "$WT"
 
   # Ops may run once (single vars) or twice (var_sequence, e.g. add-oban-worker REANCHOR).
   local seq
   seq="$(matrix_get "chores.${CHORE}.var_sequence" 2>/dev/null || echo "null")"
 
-  run_json="${SCAFFY_DUELS_RESULTS}/${CELL}.run.json"
+  # EVERY run's envelope is kept and scored — a red run 1 must never hide behind
+  # a green run 2 (distrust vacuous green).
+  RUN_JSONS=()
   if [[ "$seq" != "null" ]]; then
-    # ×2-per-cell: apply each var set, keep the LAST run envelope as the scored one.
-    local n i
+    local n i rj
     n="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$seq")"
     for ((i=0;i<n;i++)); do
+      rj="${SCAFFY_DUELS_RESULTS}/${CELL}.run.$((i+1)).json"
       _load_var_flags "$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])[int(sys.argv[2])]))' "$seq" "$i")"
-      bp scaffy run "$COMMAND" "${VF[@]}" -o json > "$run_json" || true
+      bp scaffy run "$COMMAND" "${VF[@]}" -o json > "$rj" || true
+      RUN_JSONS+=("$rj")
     done
   else
-    local vars
-    vars="$(matrix_get "chores.${CHORE}.vars")"
+    local vars rj
+    rj="${SCAFFY_DUELS_RESULTS}/${CELL}.run.json"
+    vars="$(_resolve_vars "$(matrix_get "chores.${CHORE}.vars")")"
     _load_var_flags "$vars"
-    bp scaffy run "$COMMAND" "${VF[@]}" -o json > "$run_json" || true
+    bp scaffy run "$COMMAND" "${VF[@]}" -o json > "$rj" || true
+    RUN_JSONS+=("$rj")
   fi
 
   # Force-run TIER-ci gates (deferred asserts) in the warmed tree.
@@ -120,50 +177,42 @@ run_arm_c() {
   # sha256 of the working diff (consistency floor, D68).
   diff_sha="$(git -C "$WT" --no-pager diff | sha256_stdin)"
 
-  # Reverse: remove with the SAME vars, then require a byte-clean tree.
-  remove_json="${SCAFFY_DUELS_RESULTS}/${CELL}.remove.json"
-  if [[ "$seq" != "null" ]]; then
-    local n i
-    n="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$seq")"
-    # LIFO: remove in reverse order (D36).
-    for ((i=n-1;i>=0;i--)); do
-      _load_var_flags "$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])[int(sys.argv[2])]))' "$seq" "$i")"
-      bp scaffy remove "$COMMAND" "${VF[@]}" -o json > "$remove_json" || true
-    done
-  else
-    local vars
-    vars="$(matrix_get "chores.${CHORE}.vars")"
-    _load_var_flags "$vars"
-    bp scaffy remove "$COMMAND" "${VF[@]}" -o json > "$remove_json" || true
-  fi
+  # Reverse: remove with the SAME vars LIFO (D36), then require a byte-clean tree.
+  _remove_lifo "${SCAFFY_DUELS_RESULTS}/${CELL}.remove.json"
   if git -C "$WT" --no-pager diff --exit-code >/dev/null 2>&1; then reversible=true; else reversible=false; fi
 
   # Assemble the scored result (assert statuses drive gates_green, NOT exit codes).
   END_TS="$(date +%s)"
   python3 - \
-    "$run_json" "$forced" "$diff_sha" "$reversible" "$CELL" "$CHORE" "$ARM" "$REP" \
-    "$CAP" "$WT" "$START_TS" "$END_TS" \
+    "$forced" "$diff_sha" "$reversible" "$CELL" "$CHORE" "$ARM" "$REP" \
+    "$CAP" "$WT" "$START_TS" "$END_TS" "$WARM_MS" "${RUN_JSONS[@]}" \
     > "${SCAFFY_DUELS_RESULTS}/${CELL}.json" <<'PY'
 import json,sys
-run=json.load(open(sys.argv[1]))
-forced=json.loads(sys.argv[2])
-diff_sha,reversible=sys.argv[3],sys.argv[4]=="true"
-cell,chore,arm,rep=sys.argv[5:9]
-cap=float(sys.argv[9]); wt=sys.argv[10]
-start,end=int(sys.argv[11]),int(sys.argv[12])
-asserts=run.get("asserts",[])
+forced=json.loads(sys.argv[1])
+diff_sha,reversible=sys.argv[2],sys.argv[3]=="true"
+cell,chore,arm,rep=sys.argv[4:8]
+cap=float(sys.argv[8]); wt=sys.argv[9]
+start,end=int(sys.argv[10]),int(sys.argv[11]); warm_ms=int(sys.argv[12])
+asserts=[]
+for path in sys.argv[13:]:
+    try: run=json.load(open(path))
+    except Exception: run={}
+    asserts.extend(run.get("asserts",[]) or [])
 any_fail=any(a.get("status")=="fail" for a in asserts)
 forced_red=any(f.get("rc",1)!=0 for f in forced)
-gates_green = (not any_fail) and (not forced_red)
+# An empty assert list can NEVER be green: an engine refusal (e.g. a bad --var,
+# exit 2) yields no asserts, and silence must not score as success.
+gates_green = bool(asserts) and (not any_fail) and (not forced_red)
 out={
   "cell":cell,"chore":chore,"arm":arm,"rep":rep,"cap_usd":cap,
-  "worktree":wt,"duration_ms":(end-start)*1000,
+  "worktree":wt,"duration_ms":(end-start)*1000,"warm_ms":warm_ms,
   "meter":{"total_cost_usd":0.0,"usage":None,"source":"engine"},
   "score":{
     "gates_green":gates_green,
     "asserts":[{"kind":a.get("kind"),"tier":a.get("tier"),"status":a.get("status"),
                 "text":(a.get("text") or a.get("path") or "")[:120]} for a in asserts],
     "tier_ci_forced":forced,
+    "agent_gate":[],
     "diff_sha256":diff_sha,
     "reversible":reversible,
   },
@@ -188,51 +237,64 @@ spawn_agent() {
       --max-budget-usd "$CAP" ) > "$agent_json" || true
 
   # Meter straight from the claude JSON envelope (D66) — never a JSONL re-sum.
-  local forced diff_sha reversible
+  # Correctness: the harness re-runs the chore's registered mechanical gates
+  # (agent_gate + tier_ci_force) itself — an agent cell is NEVER green by trust.
+  local forced agent_gate diff_sha reversible
   forced="$(_force_tier_ci)"
+  agent_gate="$(_run_gate_list agent_gate)"
   diff_sha="$(git -C "$WT" --no-pager diff | sha256_stdin)"
   reversible=false
   if [[ "$ARM" != "B" && "$COMMAND" != "null" ]]; then
-    local vars
-    vars="$(matrix_get "chores.${CHORE}.vars")"
-    _load_var_flags "$vars"
-    ( cd "$WT" && bp scaffy remove "$COMMAND" "${VF[@]}" -o json ) >/dev/null 2>&1 || true
+    # A/Ap reversal: receipt replay with the registered vars (LIFO for sequences).
+    # An agent that hand-edited instead of running scaffy leaves no receipt —
+    # remove exits 4 and the dirty diff scores reversible=false, honestly.
+    _remove_lifo "${SCAFFY_DUELS_RESULTS}/${CELL}.remove.json"
     git -C "$WT" --no-pager diff --exit-code >/dev/null 2>&1 && reversible=true
   fi
   END_TS="$(date +%s)"
-  python3 - "$agent_json" "$forced" "$diff_sha" "$reversible" "$CELL" "$CHORE" "$ARM" \
-    "$REP" "$CAP" "$WT" "$START_TS" "$END_TS" \
+  python3 - "$agent_json" "$forced" "$agent_gate" "$diff_sha" "$reversible" "$CELL" \
+    "$CHORE" "$ARM" "$REP" "$CAP" "$WT" "$START_TS" "$END_TS" "$WARM_MS" \
     > "${SCAFFY_DUELS_RESULTS}/${CELL}.json" <<'PY'
 import json,sys
 try: agent=json.load(open(sys.argv[1]))
 except Exception: agent={}
-forced=json.loads(sys.argv[2]); diff_sha,reversible=sys.argv[3],sys.argv[4]=="true"
-cell,chore,arm,rep=sys.argv[5:9]; cap=float(sys.argv[9]); wt=sys.argv[10]
-start,end=int(sys.argv[11]),int(sys.argv[12])
+forced=json.loads(sys.argv[2]); gate=json.loads(sys.argv[3])
+diff_sha,reversible=sys.argv[4],sys.argv[5]=="true"
+cell,chore,arm,rep=sys.argv[6:10]; cap=float(sys.argv[10]); wt=sys.argv[11]
+start,end=int(sys.argv[12]),int(sys.argv[13]); warm_ms=int(sys.argv[14])
 cost=agent.get("total_cost_usd", agent.get("cost_usd"))
 usage=agent.get("usage")
-forced_red=any(f.get("rc",1)!=0 for f in forced)
+checks=forced+gate
+red=any(c.get("rc",1)!=0 for c in checks)
+# No mechanical check at all can NEVER be green — every registered chore carries
+# a non-empty tier_ci_force or agent_gate list (distrust vacuous green).
+gates_green=bool(checks) and (not red)
 out={
  "cell":cell,"chore":chore,"arm":arm,"rep":rep,"cap_usd":cap,"worktree":wt,
- "duration_ms":(end-start)*1000,
+ "duration_ms":(end-start)*1000,"warm_ms":warm_ms,
  "meter":{"total_cost_usd":cost,"usage":usage,"source":"claude-cli-json"},
- "score":{"gates_green":(not forced_red),"asserts":[],"tier_ci_forced":forced,
-          "diff_sha256":diff_sha,"reversible":reversible},
+ "score":{"gates_green":gates_green,"asserts":[],"tier_ci_forced":forced,
+          "agent_gate":gate,"diff_sha256":diff_sha,"reversible":reversible},
 }
 print(json.dumps(out,indent=2))
 PY
 }
 
+# The brief = the chore's registered task statement (matrix.json chores.<chore>.brief
+# — states the CONCRETE task incl. the registered var values, so every arm attempts
+# the SAME chore instance) + the arm doctrine. Letters per the published prereg:
+# A instructed catalog-first; Ap scaffy UNMENTIONED (doctrine gap); B no scaffy.
 _agent_brief() {
   local base doctrine
-  base="Complete this Barkpark chore: ${CHORE}. Make the repo's own gates green. Work only in this checkout."
+  base="$(matrix_get "chores.${CHORE}.brief")"
+  [[ -n "$base" && "$base" != "null" ]] || die "chore ${CHORE} has no registered brief in matrix.json"
   case "$ARM" in
-    Ap) doctrine=" FIRST check the local Scaffy catalog (scaffy/commands/) and prefer \`bp scaffy run\` if a command fits — reach for the catalog before hand-editing." ;;
-    A)  doctrine=" The Scaffy catalog is available at scaffy/commands/ if you want it." ;;
+    A)  doctrine=" FIRST check the local Scaffy catalog (scaffy/commands/) and prefer \`bp scaffy run\` if a command fits — reach for the catalog before hand-editing." ;;
+    Ap) doctrine="" ;;
     B)  doctrine=" Hand-edit the files directly. Do NOT use scaffy." ;;
     *)  doctrine="" ;;
   esac
-  printf '%s%s' "$base" "$doctrine"
+  printf '%s Work only in this checkout.%s' "$base" "$doctrine"
 }
 
 # --- dispatch -----------------------------------------------------------------
@@ -266,5 +328,8 @@ if s['asserts']:
 if s['tier_ci_forced']:
     for f in s['tier_ci_forced']:
         print(f"    tier-ci rc={f['rc']}  {f['cmd']}")
+if s.get('agent_gate'):
+    for f in s['agent_gate']:
+        print(f"    agent-gate rc={f['rc']}  {f['cmd']}")
 print()
 PY

@@ -88,6 +88,12 @@ def validate_cell_file(path, expected_cap, cross_check_cap, errs):
             _fail(errs, f"{cell}: score.{k} wrong type")
     if isinstance(score.get("diff_sha256"), str) and not score["diff_sha256"]:
         _fail(errs, f"{cell}: score.diff_sha256 empty")
+    # An LLM-arm cell is never green by trust: a mechanical check (agent_gate or a
+    # force-run TIER-ci gate) must have actually run (distrust-vacuous-green).
+    if arm in LLM_ARMS and score.get("gates_green") is True:
+        checks = (score.get("agent_gate") or []) + (score.get("tier_ci_forced") or [])
+        if not checks:
+            _fail(errs, f"{cell}: gates_green with ZERO mechanical checks recorded (vacuous green)")
 
 
 def check_serial(runlog_path, expected_ids, errs):
@@ -141,12 +147,13 @@ def validate_dir(results_dir, matrix_path, cells_arg):
 # self-test: prove RED on broken fixtures, GREEN on a complete one.
 # ---------------------------------------------------------------------------
 def _complete_cell(cid, arm, cap, cost, usage):
+    gate = [] if arm == "C" else [{"cmd": "true", "rc": 0}]
     return {
         "cell": cid, "chore": cid.split("--")[0], "arm": arm, "rep": cid.split("--")[-1],
         "cap_usd": cap, "worktree": "/tmp/x", "duration_ms": 1000,
         "meter": {"total_cost_usd": cost, "usage": usage, "source": "x"},
         "score": {"gates_green": True, "asserts": [], "tier_ci_forced": [],
-                  "diff_sha256": "abc123", "reversible": True},
+                  "agent_gate": gate, "diff_sha256": "abc123", "reversible": True},
     }
 
 
@@ -200,6 +207,13 @@ def self_test(matrix_path):
             obj["meter"]["usage"] = None
         return obj
     cases.append(("null-llm-meter", null_llm_meter, True))
+
+    def vacuous_green(cid, obj):
+        if obj["arm"] in LLM_ARMS:
+            obj["score"]["agent_gate"] = []
+            obj["score"]["tier_ci_forced"] = []
+        return obj
+    cases.append(("vacuous-green", vacuous_green, True))
 
     ok = True
     for name, mutate, expect_red in cases:
