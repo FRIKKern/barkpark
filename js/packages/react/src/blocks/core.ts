@@ -46,6 +46,19 @@ const heading: Emit = (b) => {
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
+// scaffy:add-block-type Blockquote MARK:js-emitter-blockquote
+// Mirrors compose_block(blockquote) + walk.ex blockquote/3 (:article): a
+// semantic `<blockquote class="bp-blockquote">` wrapping a `<p>` body, with an
+// optional `<cite>` attribution. Body reads a `content` inline array (else a
+// bare `text`) exactly like pullquote/paragraph, so the inner is shape-equal to
+// the Elixir article golden the parity harness compares against.
+const blockquote: Emit = (b) => {
+  const inner = renderInlines(paragraphInline(b))
+  const rawCite = str(b.cite) || str(b.attribution)
+  const cite = rawCite ? `<cite class="bp-blockquote__cite">${escapeHtml(rawCite)}</cite>` : ''
+  return `<blockquote class="bp-blockquote"><p>${inner}</p>${cite}</blockquote>`
+}
+
 /* ── code-story blocks: diff + filetree (components.ex, W7 D75–D78) ────────── */
 //
 // The verbatim-text front-end over the SHARED chat diff-row back-end (D76):
@@ -190,9 +203,30 @@ const pullquote: Emit = (b) =>
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
   const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(item)}</span></li>`).join('')
+  const inner = items.map((item) => `<li><span>${renderInlines(normalizeListItem(item))}</span></li>`).join('')
   return `<${tag}>${inner}</${tag}>`
 }
+
+// Decode a list item persisted as a JSON-encoded inline array (the drifted
+// `bullet_list` authoring shape, aliased onto `list` below) into that array;
+// otherwise return it verbatim so plain-text items stay plain text. Mirrors
+// compose.ex normalize_list_item/1 + pdrender itemNodes.
+function normalizeListItem(item: unknown): unknown {
+  if (typeof item !== 'string') return item
+  const trimmed = item.trim()
+  if (!trimmed.startsWith('[')) return item
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (Array.isArray(parsed) && parsed.length > 0 && isMap(parsed[0])) return parsed
+  } catch {
+    // not JSON — keep the plain string
+  }
+  return item
+}
+
+// `numbered_list` authoring-drift alias → an ORDERED list (mirrors compose.ex,
+// which maps numbered_list → list with ordered:true).
+const numberedList: Emit = (b) => list({ ...b, ordered: true } as Block)
 
 /* callout (walk.ex callout/3, article) */
 
@@ -832,6 +866,15 @@ export const coreEmitters: Record<string, Emit> = {
   paragraph,
   pullquote,
   list,
+  // authoring-drift aliases → list / blockquote (the JS twins of compose.ex's
+  // alias choke point; agents hand-typed these TipTap/snake/kebab spellings via
+  // raw mutate, leaving 77 live prod blocks unrenderable). No data migration.
+  bulletList: list,
+  bullet_list: list,
+  'bulleted-list': list,
+  bulleted_list: list,
+  numbered_list: numberedList,
+  quote: blockquote,
   callout,
   code,
   divider,
@@ -852,6 +895,8 @@ export const coreEmitters: Record<string, Emit> = {
   stage,
   'task-detail': taskDetailEmit,
   roadmap,
+  // scaffy:add-block-type Blockquote MARK:js-map-blockquote
+  'blockquote': blockquote,
   // scaffy:add-block-type Filetree MARK:js-map-filetree
   'filetree': filetree,
   // scaffy:add-block-type Diff MARK:js-map-diff

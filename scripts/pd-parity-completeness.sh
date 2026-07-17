@@ -21,7 +21,8 @@ COMPOSE="$ROOT/api/lib/barkpark/portable_doc/render/compose.ex"
 FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type Diff MARK:parity-count-script-diff
 # scaffy:add-block-type Filetree MARK:parity-count-script-filetree
-EXPECTED_COUNT=48
+# scaffy:add-block-type Blockquote MARK:parity-count-script-blockquote
+EXPECTED_COUNT=49
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2

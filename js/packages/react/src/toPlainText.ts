@@ -207,6 +207,9 @@ function blockText(b: Block): string {
     case 'ingress':
     case 'pullquote':
       return proseContent(b)
+    // Blockquote is prose: the quoted body plus its optional attribution.
+    case 'blockquote':
+      return joinBlocks([proseContent(b), str(b.cite) || str(b.attribution)])
     case 'list':
       return listText(b)
     case 'callout':

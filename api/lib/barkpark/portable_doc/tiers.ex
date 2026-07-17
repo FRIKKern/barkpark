@@ -63,6 +63,8 @@ defmodule Barkpark.PortableDoc.Tiers do
   # no MARK could be planted — the D33/D80 refusal). @section stays a one-line
   # `~w` deliberately: a third :section type is rare and remains a hand edit.
   @element [
+    # scaffy:classify-block-type blockquote MARK:tier-blockquote--element
+    "blockquote",
     # prose + media + structure leaves
     "paragraph",
     "heading",

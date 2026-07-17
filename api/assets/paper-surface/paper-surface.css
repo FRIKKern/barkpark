@@ -208,6 +208,21 @@ html[data-theme="dark"] .bp-paper-body {
   line-height: 1.5; font-size: 1.2rem;
 }
 
+/* Blockquote — a semantic attributed quotation (distinct from the styled
+   editorial pullquote above). A muted, italic passage behind a left rule, with
+   an optional `<cite>` attribution rendered as a non-italic muted line. */
+.bp-paper-surface .bp-blockquote {
+  margin: 1.4rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
+  border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft);
+  font-style: italic;
+}
+.bp-paper-surface .bp-blockquote > p { margin: 0; }
+.bp-paper-surface .bp-blockquote__cite {
+  display: block; margin-top: 0.4rem; font-style: normal;
+  font-size: 0.9rem; color: var(--paper-ink-soft);
+}
+.bp-paper-surface .bp-blockquote__cite::before { content: "\2014\00a0"; }
+
 /* Callout TONES. `bp-callout` is the card; `bp-callout--<tone>` resolves the
    tone token pair (light + dark, defined above). */
 .bp-paper-surface .bp-callout { padding: 16px; border-left: 4px solid transparent; }

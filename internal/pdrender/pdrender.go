@@ -247,12 +247,26 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Blockquote MARK:go-registry-blockquote
+	r.blocks["blockquote"] = blockquoteRenderer{ir: ir}
 	// scaffy:add-block-type Filetree MARK:go-registry-filetree
 	r.blocks["filetree"] = filetreeRenderer{}
 	// scaffy:add-block-type Diff MARK:go-registry-diff
 	r.blocks["diff"] = diffRenderer{}
 	r.blocks["paragraph"] = paragraphRenderer{ir: ir}
-	r.blocks["list"] = listRenderer{ir: ir}
+	lr := listRenderer{ir: ir}
+	r.blocks["list"] = lr
+	// Authoring-drift aliases → list (mirrors compose.ex's alias choke point):
+	// agents hand-typed TipTap-internal / snake / kebab spellings via raw mutate,
+	// leaving 77 live prod blocks unrenderable. The unordered spellings reuse the
+	// list renderer as-is; `numbered_list` forces ordered:true; `quote` maps to
+	// blockquote. No stored-data migration — the alias fixes prod content on read.
+	r.blocks["bulletList"] = lr
+	r.blocks["bullet_list"] = lr
+	r.blocks["bulleted-list"] = lr
+	r.blocks["bulleted_list"] = lr
+	r.blocks["numbered_list"] = orderedListRenderer{lr: lr}
+	r.blocks["quote"] = blockquoteRenderer{ir: ir}
 	r.blocks["callout"] = calloutRenderer{ir: ir}
 	r.blocks["divider"] = dividerRenderer{}
 	// section recurses through the registry, so it holds a back-reference.

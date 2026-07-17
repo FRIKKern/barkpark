@@ -33,6 +33,7 @@ export const PROSE_GOLDEN: Record<string, string> = {
   paragraph: 'A body paragraph with bold emphasis inside it.',
   ingress: 'A lead paragraph that opens the article.',
   pullquote: 'The best interface is no interface.',
+  blockquote: 'The best way to predict the future is to invent it.\n\nAlan Kay',
   list: 'First point\nSecond point',
   callout: 'Heads up\n\nThis is a warning callout body.',
   code: 'def hello do\n  :world\nend',

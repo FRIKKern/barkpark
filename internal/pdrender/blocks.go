@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -112,18 +113,62 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 	return out
 }
 
+// orderedListRenderer forces ordered:true, then defers to the list renderer.
+// It backs the `numbered_list` authoring-drift alias (mirrors compose.ex, which
+// maps numbered_list → list with ordered:true). The Attrs map is COPIED before
+// the flag is set so the caller's block is never mutated.
+type orderedListRenderer struct{ lr listRenderer }
+
+func (o orderedListRenderer) Render(b Block, ctx RenderCtx) []string {
+	attrs := make(map[string]any, len(b.Attrs)+1)
+	for k, v := range b.Attrs {
+		attrs[k] = v
+	}
+	attrs["ordered"] = true
+	b.Attrs = attrs
+	return o.lr.Render(b, ctx)
+}
+
 // itemNodes normalizes a list item to a []any of inline nodes. The wire shape
 // for an item is an array of inline nodes; a bare string/number item is
-// tolerated and wrapped (mirrors compose_inline_children's scalar clauses).
+// tolerated and wrapped (mirrors compose_inline_children's scalar clauses). A
+// STRING item that parses as a JSON array of inline-node objects is decoded to
+// that array — the drifted list variants (bullet_list especially) persisted
+// their items as JSON-encoded strings, which would otherwise render as literal
+// JSON. Mirrors compose.ex's normalize_list_item/1.
 func itemNodes(item any) []any {
 	switch v := item.(type) {
 	case []any:
 		return v
 	case nil:
 		return nil
+	case string:
+		if nodes, ok := decodeInlineJSON(v); ok {
+			return nodes
+		}
+		return []any{v}
 	default:
 		return []any{v}
 	}
+}
+
+// decodeInlineJSON decodes a string that holds a JSON array whose first element
+// is an object (an inline-node array), returning (nodes, true). Any other
+// string — plain text, a JSON scalar, a non-object array — yields (nil, false)
+// so the caller keeps it verbatim.
+func decodeInlineJSON(s string) ([]any, bool) {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "[") {
+		return nil, false
+	}
+	var arr []any
+	if err := json.Unmarshal([]byte(trimmed), &arr); err != nil || len(arr) == 0 {
+		return nil, false
+	}
+	if _, ok := arr[0].(map[string]any); !ok {
+		return nil, false
+	}
+	return arr, true
 }
 
 // ── callout ───────────────────────────────────────────────────────────────────
