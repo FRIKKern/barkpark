@@ -19,6 +19,7 @@ import { Finder } from '../finder/finder'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
+import type { UpstreamSearchJson } from '../finder/lib/find-shape'
 import type { FindResponse, SearchEngine, PopularQuery } from '../finder/lib/find'
 import { DOC_TYPES } from '../finder/lib/find'
 import { DATASET } from '../finder/lib/config'
@@ -219,6 +220,32 @@ interface SeedState {
   initialSeed: PrefixSeed | null
 }
 
+// The build bakes `initialData` as the RAW browse upstream JSON (`documents`,
+// `count`, …) — the exact payload `handleFind` receives over HTTP — NOT an
+// already-shaped FindResponse. The finder reads `initialData.hits`, so the
+// island MUST run the same `shapeFindResponse` mapping the live route uses
+// (browse, engine=indx — the engine the seed was baked with). Without this the
+// first-paint browse landing renders EMPTY (raw JSON has no `.hits`) and the
+// finder skips its refetch on the matching seed key.
+interface RawSeed {
+  initialData: UpstreamSearchJson | null
+  initialSeed: PrefixSeed | null
+}
+
+function shapeSeed(raw: RawSeed | null): SeedState {
+  if (!raw) return { initialData: null, initialSeed: null }
+  const initialData = raw.initialData
+    ? shapeFindResponse(raw.initialData, {
+        engine: 'indx',
+        engineUsed: 'indx',
+        browse: true,
+        cache: false,
+        upstreamMs: null,
+      })
+    : null
+  return { initialData, initialSeed: raw.initialSeed ?? null }
+}
+
 export default function FinderIsland() {
   // The 0ms head-start seed + first-paint browse are baked into a static
   // `search-seed.json` by the seed slice; fetch it at runtime and degrade
@@ -230,13 +257,8 @@ export default function FinderIsland() {
     let alive = true
     fetch(`${base}search-seed.json`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: SeedState | null) => {
-        if (alive && j) {
-          setSeed({
-            initialData: j.initialData ?? null,
-            initialSeed: j.initialSeed ?? null,
-          })
-        }
+      .then((j: RawSeed | null) => {
+        if (alive && j) setSeed(shapeSeed(j))
       })
       .catch(() => {
         /* absent seed is fine — the finder fetches its own browse on mount */
