@@ -9,7 +9,7 @@ export const meta = {
     { title: 'Digest', detail: '1 Fable, ~10 min: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick Sonnet or Opus and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies', model: 'fable' },
     { title: 'Verify', detail: 'Fable-chosen fleet of Sonnet/Opus verifiers: targeted deep answers with coverage accounting; claims that need proof get tests/gates actually RUN, output quoted' },
     { title: 'Decide', detail: '1 Fable, whatever time it needs: finalize choices, update Paper + charter, cut the wave (≤8 slices, builder model per slice), file + publish + PERFECT a bp task per slice (each linked to the Paper), seed the backlog', model: 'fable' },
-    { title: 'Build', detail: 'Fable or Opus builders per slice complexity, worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit' },
+    { title: 'Build', detail: 'Fable or Opus builders per slice complexity, worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit. Round-1 slices only — round ≥2 slices are deferred to the lead (sequenced-rounds law)' },
     { title: 'Review', detail: '1 Fable, whatever time it needs: review every green slice + the ledger, FIX issues in place, re-gate, Cody-grade verdict, append wave log, CLOSE the wave Paper as the debrief, hand off', model: 'fable' },
   ],
 }
@@ -214,7 +214,7 @@ const PLAN_SCHEMA = {
       description: 'this wave of build slices, ≤8, integration-ordered',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['title', 'task_id', 'surface', 'files', 'instructions', 'gate', 'size', 'builder_model'],
+        required: ['title', 'task_id', 'surface', 'files', 'instructions', 'gate', 'size', 'builder_model', 'round'],
         properties: {
           title: { type: 'string' },
           task_id: { type: 'string', description: 'slug of the PUBLISHED bp task for this slice — you created or verified it' },
@@ -224,6 +224,8 @@ const PLAN_SCHEMA = {
           gate: { type: 'string', description: 'exact shell command(s) that prove it' },
           size: { type: 'string', enum: ['small', 'medium', 'large'] },
           builder_model: { type: 'string', enum: ['opus', 'fable'], description: 'opus for well-specified slices; fable for the genuinely hard ones — subtle design, cross-surface coupling, high blast radius' },
+          round: { type: 'integer', minimum: 1, description: 'dispatch round. 1 = dependency-free, builds THIS run. ≥2 = depends on a lower-round slice being MERGED first — the run does NOT build it; it is returned as a deferral the lead dispatches after merging its deps (sequenced-rounds law: a slice never dispatches beside its unmerged dependency)' },
+          after: { type: 'array', items: { type: 'string' }, description: 'for round ≥2: the same-wave task_ids that must MERGE before this slice dispatches (put the same fact in the task brief as an "AFTER <task_id> merges" line)' },
         },
       },
     },
@@ -419,7 +421,7 @@ Your job:
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
-6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). Per slice pick builder_model: 'opus' for well-specified work; 'fable' for the genuinely hard slices — subtle design judgment, cross-surface coupling, high blast radius. ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
+6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model: 'opus' for well-specified work; 'fable' for the genuinely hard slices — subtle design judgment, cross-surface coupling, high blast radius. ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
 7. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE the builders fly:
    - Verification results: per assignment what was proven/refuted (quote the decisive proof lines), plus the verifiers' coverage — including not-founds.
    - Decisions: each with its one-line why (mirror the charter, don't fork it — the charter is the epic's memory, the Paper is this wave's story).
@@ -442,10 +444,21 @@ if (wave.length === 0) {
 
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
 
+// ── Sequenced-rounds law (charter D43/D53, proven 7-for-7 as manual rounds):
+// only round-1 (dependency-free) slices build in this run. round ≥2 slices are
+// DEFERRED — returned to the lead, who merges round 1 and dispatches them as
+// sequential rounds. Dispatching a slice beside its unmerged dependency burns
+// a builder to produce a BLOCKED report (it happened three waves running).
+const buildNow = wave.filter((w) => (w.round || 1) === 1)
+const deferred = wave.filter((w) => (w.round || 1) > 1)
+if (deferred.length > 0) {
+  log(`Sequenced rounds: building ${buildNow.length} round-1 slice(s) now; DEFERRING ${deferred.length} (${deferred.map((w) => `${w.task_id} r${w.round} after ${(w.after || []).join('+') || '?'}`).join('; ')}) — the lead dispatches them after round 1 merges`)
+}
+
 // ── Phase 6: Build — Fable/Opus builders per slice complexity, task-first ──
 phase('Build')
 const built = (await parallel(
-  wave.map((item, i) => () =>
+  buildNow.map((item, i) => () =>
     agent(
       `You are BUILDING one slice of a Barkpark epic inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders).
 
@@ -499,7 +512,9 @@ NOT-GREEN SLICES (audit their ledger state only — the task must honestly refle
 ${JSON.stringify(built.filter((b) => !greenBuilt.includes(b)).map((b) => ({ task_id: b.task_id, ok: b.ok, summary: b.summary })), null, 2)}
 
 WAVE INSTRUCTIONS (what each slice was supposed to be):
-${JSON.stringify(wave.map((w) => ({ title: w.title, task_id: w.task_id, instructions: w.instructions, gate: w.gate })), null, 2)}
+${JSON.stringify(wave.map((w) => ({ title: w.title, task_id: w.task_id, round: w.round || 1, instructions: w.instructions, gate: w.gate })), null, 2)}
+
+DEFERRED SLICES (round ≥2 — NOT built this run BY DESIGN, the sequenced-rounds law; do not grade their absence as a failure): ${deferred.length === 0 ? 'none' : deferred.map((w) => `${w.task_id} (round ${w.round}, after ${(w.after || []).join('+')})`).join('; ')}. Your next_wave handoff MUST spell out the dispatch order: merge round 1, then each deferred slice as its deps merge.
 
 For EACH green slice, in integration order:
 1. \`git checkout -b <branch>-r <branch>\` in your worktree; study the full diff vs its merge-base with origin/main. Chase the builder's own doubts first.
@@ -540,6 +555,14 @@ return {
   backlog_filed: architect.backlog_filed,
   wave: wave.length,
   built: green.length,
+  deferred_slices: deferred.map((w) => ({
+    task_id: w.task_id,
+    round: w.round,
+    after: w.after || [],
+    builder_model: w.builder_model,
+    gate: w.gate,
+    note: 'NOT built this run (sequenced-rounds law) — dispatch after its `after` deps merge; the task brief carries the full instructions',
+  })),
   green_branches: green.map((r) => ({
     task_id: r.task_id,
     branch: r.reviewed && r.reviewed.final_branch ? r.reviewed.final_branch : r.branch,
