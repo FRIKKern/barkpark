@@ -54,9 +54,10 @@ and it becomes the parser's test fixtures in the next wave.
 
 ## The command corpus
 
-Fourteen commands, each covering a thing Barkpark development actually repeats — the
-Wave-5 additions were frequency-mined from twelve months of git history, so every entry
-answers a proven repetition. Every command lives at `scaffy/commands/<name>.scaffy`.
+Fifteen commands, each covering a thing Barkpark development actually repeats — the
+Wave-5 additions (and add-sdk-method after them) were frequency-mined from twelve months
+of git history, so every entry answers a proven repetition. Every command lives at
+`scaffy/commands/<name>.scaffy`.
 
 | Command | What it does |
 |---|---|
@@ -74,6 +75,7 @@ answers a proven repetition. Every command lives at `scaffy/commands/<name>.scaf
 | **add-backfill-task** | All-CREATE: a safe-by-default one-shot backfill `Mix.Task` (8+ live tasks share the idiom byte-for-byte) — a bare run is a DRY RUN that writes nothing, `--apply` mutates — plus a paired pure-helper test that never boots the app. |
 | **add-schema-type** | A plugin-declared document type in the MINIMAL-template shape (the byte-identical 6-key `SchemaDefinition` wrap scaffy/bulldocs/sheets share): one schema JSON created + two `register_schemas/1` injections. `Visibility` is a `ONEOF` enum — `public`\|`private`, anything else refused at substitution time. |
 | **classify-block-type** | Closes add-block-type's manual step: adds a block type to its composition-doctrine tier word list in `tiers.ex` via one self-consuming REPLACE of the `@{{.Tier}} ~w(` opener. `Tier` is the corpus's first `ONEOF` (`element`\|`widget`\|`section`). |
+| **add-sdk-method** | Lands a new `@barkpark/core` client method end-to-end — the six-file layer-parity chore measured at 34 commits/12 months: a starter module in the house transport idiom, `Result`/`Options` types + the `BarkparkClient` signature, the `createClient` wiring, both `index.ts` barrel exports, an msw test pair, and the corpus's **first scaffolded changeset**. All six injections are bare `INSERT AFTER FIRST` against never-consumed anchors (house trailing-comma style makes every site separator-safe) — no REANCHOR families. |
 
 ### The ensure law (D57)
 

@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 14
+const corpusFileCount = 15
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -46,7 +46,7 @@ func corpusFiles(t *testing.T) []string {
 	return paths
 }
 
-// TestCorpusFileCount: exactly 14 .scaffy files, asserted before anything
+// TestCorpusFileCount: exactly 15 .scaffy files, asserted before anything
 // else touches their bytes.
 func TestCorpusFileCount(t *testing.T) {
 	corpusFiles(t)
@@ -153,16 +153,16 @@ func countCorpus(t *testing.T) census {
 // classifies one differently — fails here with a field-by-field diff.
 func TestCorpusCensus(t *testing.T) {
 	want := census{
-		create:           14,
-		insertAfterFirst: 12, // +1 2026-07-17: ensure-cli-noun op 2 (usageBuiltins)
+		create:           17, // +3 2026-07-17: add-sdk-method (module, test, changeset)
+		insertAfterFirst: 18, // +6: add-sdk-method's six fixed-anchor injections
 		insertAfterLast:  1,
 		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             25, // +1: op 2's MARK "ensure-cli-noun-usage"
+		mark:             31, // +6: one per add-sdk-method injection
 		markVirtual:      2,
-		assertFile:       56, // +1: op 2's usage.go CONTAINS postcondition
-		assertCmd:        28,
+		assertFile:       65, // +9: add-sdk-method marks + created-file postconditions
+		assertCmd:        31, // +3: pnpm build, scoped vitest, tsc --noEmit (all LOCAL)
 		assertCmdTierCI:  10,
 	}
 	got := countCorpus(t)
