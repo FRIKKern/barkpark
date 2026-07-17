@@ -134,14 +134,20 @@ defmodule BarkparkWeb.ChangesetDetailControllersTest do
       hash = ApiToken.hash_token("dup-" <> Ecto.UUID.generate())
 
       assert {:ok, _first} =
-               %ApiToken{} |> ApiToken.changeset(%{token_hash: hash, name: "first"}) |> Repo.insert()
+               %ApiToken{}
+               |> ApiToken.changeset(%{token_hash: hash, name: "first"})
+               |> Repo.insert()
 
       assert {:error, %Ecto.Changeset{} = cs} =
-               %ApiToken{} |> ApiToken.changeset(%{token_hash: hash, name: "second"}) |> Repo.insert()
+               %ApiToken{}
+               |> ApiToken.changeset(%{token_hash: hash, name: "second"})
+               |> Repo.insert()
 
       details =
         Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-          Enum.reduce(opts, msg, fn {k, v}, acc -> String.replace(acc, "%{#{k}}", to_string(v)) end)
+          Enum.reduce(opts, msg, fn {k, v}, acc ->
+            String.replace(acc, "%{#{k}}", to_string(v))
+          end)
         end)
 
       assert %{token_hash: [_ | _]} = details
