@@ -64,6 +64,75 @@ export async function graphCorpus(): Promise<unknown> {
   return res.json()
 }
 
+/** One indexable document — the minimum the finder row + prefix index need.
+ * Mirrors `templates/search-starter/lib/prefix-seed.ts` SeedDoc so the finder
+ * island can build its in-browser prefix index from this static asset. */
+export interface SeedDoc {
+  id: string
+  title: string
+  slug: string
+  type: string
+}
+
+/** What the build bakes into `dist/search-seed.json` for the finder island's
+ * first paint. `initialData` is the raw browse `/v1/data/search` FindResponse
+ * (the same payload a per-keystroke browse yields — `documents`, `count`,
+ * `highlights`, …); `initialSeed` is the ranked corpus the island turns into
+ * an in-browser prefix index. Both degrade gracefully if the island can't
+ * fetch the asset — this is a head-start, never the authoritative search. */
+export interface BrowseSeed {
+  initialData: unknown
+  initialSeed: SeedDoc[]
+}
+
+/**
+ * The finder's first-paint browse landing + prefix seed, baked at build into a
+ * static JSON the island fetches (the static-site edition of the Next finder's
+ * `force-dynamic` layout seed). A static Astro host has no per-request SSR, so
+ * this is the one place the ranked browse gets computed.
+ *
+ * `initialSeed` comes from `allDocs()` (`.order('_updatedAt:desc')`) — D40
+ * proved ranked-browse order (`engine=indx q=' '`) is byte-identical to
+ * `_updatedAt:desc` listing order (concordance 1.0000), so one listing call is
+ * the source, no engine dependency. `initialData` is a build-time
+ * flat-anonymous browse search so the island paints the exact browse hits with
+ * engine relevance/highlights on first frame.
+ */
+export async function browseSeed(): Promise<BrowseSeed> {
+  const docs = await allDocs()
+  const initialSeed: SeedDoc[] = docs.map((d) => ({
+    id: d._id,
+    title: (d.title || '') as string,
+    slug: (d.slug || '') as string,
+    type: d._type,
+  }))
+
+  // The browse FindResponse. `/v1/data/search/:dataset` is a FLAT route — same
+  // origin-derivation as graphCorpus (a scoped apiUrl + flat route 404s). A
+  // missing/failed browse must NOT fail the build: the island falls back to the
+  // seed's prefix index and its own live fetch. Empty q (' ') = ranked browse.
+  const params = new URLSearchParams({
+    q: ' ',
+    engine: 'indx',
+    types: env.docType,
+    perspective: 'published',
+    limit: '100',
+  })
+  const url = `${new URL(env.apiUrl).origin}/v1/data/search/${encodeURIComponent(env.dataset)}?${params}`
+  let initialData: unknown = null
+  try {
+    const res = await fetch(url, {
+      headers: env.token ? { authorization: `Bearer ${env.token}` } : {},
+    })
+    if (res.ok) initialData = await res.json()
+    else console.warn(`browse seed search returned ${res.status}; shipping seed-only landing`)
+  } catch (err) {
+    console.warn(`browse seed search failed (${(err as Error).message}); shipping seed-only landing`)
+  }
+
+  return { initialData, initialSeed }
+}
+
 /** Full document read — the LIST projection is summary-only (no blocks). */
 export async function getDoc(type: string, id: string): Promise<DocRow | null> {
   const doc = await bp().doc(type, id)
