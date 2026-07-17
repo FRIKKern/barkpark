@@ -261,6 +261,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # Live sidebar overlay (wave 5): session_id → %{state, line}, fed by
          # every Recorder's activity broadcasts. Renders over the stored row.
          activity: %{},
+         # Wave-session-card (wsc charter D8-D11): `workflow` is the LIVE
+         # compact-summary overlay (session_id → D3 summary, fed by
+         # {:chat_workflow} pings, D4); `workflow_summaries` is the COLD half
+         # folded from the stored rail_snapshot at refresh_sessions (D7);
+         # `epic_goals` carries the epic-goal line per workflow row (D9).
+         # A sidebar of plain chats keeps all three empty — zero cost.
+         workflow: %{},
+         workflow_summaries: %{},
+         epic_goals: %{},
          # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
          # session's provider-scoped worker id currently holds, keyed by
          # published doc id — fed live off the dataset's task-document
@@ -1793,6 +1802,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     if String.starts_with?(id, "drafts.") do
       {:noreply, socket}
     else
+      # SIBLING step (wsc charter D9): a mutation of a held hand-task's PARENT
+      # is the epic heartbeat (a wave_status patch, a slice closing under it) —
+      # re-read the epic-goal lines. Purely additive: the claim.worker fold
+      # below is untouched, and no new PubSub topic exists (this is the same
+      # dataset document stream the Doing strip already rides).
+      socket =
+        if Enum.any?(socket.assigns.hand_tasks, fn {_tid, row} -> row.parent_id == id end),
+          do: refresh_epic_goals(socket),
+          else: socket
+
       worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
       content = (msg.doc && msg.doc.content) || %{}
       claim = content["claim"] || %{}
@@ -1854,6 +1873,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # the fresh stored summary/status. Activity events are change-only, so this
     # stays cheap.
     {:noreply, socket |> assign(activity: overlay) |> refresh_sessions()}
+  end
+
+  # A Recorder's workflow-summary ping (wsc charter D4): the compact D3 summary,
+  # broadcast change-only on rail-signature flips. Overlay ONLY — the
+  # {:chat_activity} clause above is untouched (D45's law stands) and the stored
+  # rail_snapshot keeps the durable truth for cold mounts (D7). A summary for a
+  # row without an epic-goal line yet also fetches it once — nil is cached, so
+  # an epic-less workflow never re-queries the ledger per frame.
+  def handle_info({:chat_workflow, sid, summary}, socket) when is_map(summary) do
+    socket = assign(socket, workflow: Map.put(socket.assigns.workflow, sid, summary))
+
+    socket =
+      if Map.has_key?(socket.assigns.epic_goals, sid) do
+        socket
+      else
+        case Enum.find(socket.assigns.sessions, &(&1.id == sid)) do
+          nil ->
+            socket
+
+          s ->
+            assign(socket,
+              epic_goals:
+                Map.put(socket.assigns.epic_goals, sid, StudioChat.epic_goal(s.provider, s.id))
+            )
+        end
+      end
+
+    {:noreply, socket}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -2572,6 +2619,47 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                   >
                     <%= s.summary %>
+                  </div>
+                  <%!-- Wave-session-card (wsc charter D8-D11): two lines that
+                        exist ONLY while the session's rail carries a workflow —
+                        a plain chat's row renders byte-identically to before.
+                        Live truth is the {:chat_workflow} overlay (D4); cold
+                        truth is the compact summary folded from rail_snapshot
+                        at refresh_sessions (D7). --%>
+                  <% ws = @workflow[s.id] || @workflow_summaries[s.id] %>
+                  <div
+                    :if={ws}
+                    class="text-xs"
+                    style="margin-top: 3px; display: flex; align-items: center; gap: 6px; min-width: 0;"
+                    data-test-id={"chat-workflow-#{s.id}"}
+                  >
+                    <span
+                      :if={ws.ticks != []}
+                      aria-hidden="true"
+                      style="display: inline-flex; gap: 3px; flex: none;"
+                    >
+                      <span
+                        :for={tick <- ws.ticks}
+                        class={workflow_tick_class(tick)}
+                        style={workflow_tick_style(tick)}
+                      >
+                      </span>
+                    </span>
+                    <span
+                      style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);"
+                      data-test-id={"chat-workflow-line-#{s.id}"}
+                    >
+                      <%= workflow_card_line(ws) %>
+                    </span>
+                  </div>
+                  <% eg = ws && @epic_goals[s.id] %>
+                  <div
+                    :if={eg}
+                    class="text-xs text-dim"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    data-test-id={"chat-epic-#{s.id}"}
+                  >
+                    ↳ <%= eg.title %> · <%= eg.slices_done %>/<%= eg.slices_total %> slices<%= if eg.wave_status, do: " · #{eg.wave_status}" %>
                   </div>
                 </.link>
 
@@ -4170,6 +4258,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
     sessions =
       StudioChat.list_sessions([archived: socket.assigns[:show_archived] == true], :global)
 
+    # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
+    # folds to the compact D3 summary HERE, and the snapshot itself never
+    # rides an assign (stripped below). Plain sessions (nil summary) pay zero.
+    workflow_summaries =
+      for s <- sessions, summary = StudioChat.workflow_summary(s.rail_snapshot), into: %{} do
+        {s.id, summary}
+      end
+
+    # The epic-goal line (wsc charter D9): computed ONLY for workflow rows —
+    # a sidebar of plain chats never queries the ledger.
+    epic_goals =
+      for s <- sessions, Map.has_key?(workflow_summaries, s.id), into: %{} do
+        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+      end
+
+    sessions = Enum.map(sessions, &%{&1 | rail_snapshot: nil})
+
     # The needs-you strip's store-truth half (wave 12): the pending ask ROLES of
     # every listed session whose denormalised counter says the agent needs the
     # human — one grouped query, only for the rows that can carry a needs-you
@@ -4179,8 +4284,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     assign(socket,
       sessions: sessions,
+      workflow_summaries: workflow_summaries,
+      epic_goals: epic_goals,
       pending_ask_roles: StudioChat.pending_ask_roles(pending_ids)
     )
+  end
+
+  # Re-read the epic-goal lines for every workflow row (cold ∪ live overlay) —
+  # the sibling document_changed step (wsc charter D9) lands here when the epic
+  # parent's heartbeat moves.
+  defp refresh_epic_goals(socket) do
+    ids =
+      MapSet.union(
+        MapSet.new(Map.keys(socket.assigns.workflow_summaries)),
+        MapSet.new(Map.keys(socket.assigns.workflow))
+      )
+
+    goals =
+      for s <- socket.assigns.sessions, MapSet.member?(ids, s.id), into: %{} do
+        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+      end
+
+    assign(socket, epic_goals: goals)
   end
 
   # A row-level archive/delete. Always refresh the sidebar; when the mutated row
@@ -4792,12 +4917,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title: title || content["title"] || "untitled task",
       now: get_in(content, ["claim", "now"]),
       met: Enum.count(criteria, fn c -> is_map(c) and c["met"] == true end),
-      total: length(criteria)
+      total: length(criteria),
+      # The one-hop epic pointer (wsc charter D9): both feeding paths (ledger
+      # hydrate + document broadcast) already hold the full content, so this
+      # is a pure projection — it keys the sibling document_changed step.
+      parent_id: content["parent_id"]
     }
   end
 
   defp hand_task_row(title, _content),
-    do: %{title: title || "untitled task", now: nil, met: 0, total: 0}
+    do: %{title: title || "untitled task", now: nil, met: 0, total: 0, parent_id: nil}
 
   # A ready-queue Document as a lean picker row.
   defp hand_ready_row(doc) do
@@ -6129,6 +6258,54 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # warn-toned "needs you" pill even mid-turn.
   # The live overlay wins over the stored row (wave 5): a Recorder that says
   # "working" right now beats a store status that flips only on frame writes.
+  # ── wave-session-card lines (wsc charter D8/D11) ──────────────────────────
+  # One tick per D3 `ticks` status, straight off the journey truth table (D1 —
+  # never re-derived positionally): done settles evergreen (--life-done), the
+  # active phase breathes on the EXISTING bp-skel-pulse keyframes
+  # (bp-chat-live-dot), an interrupted frontier reads --life-blocked and never
+  # breathes (no fake spinners law), and future/skipped/unreached are a dim
+  # border-token outline — a skipped Perfect phase stays honestly un-filled
+  # instead of faking 7/7. All colors are emitted tokens (charter D60).
+
+  defp workflow_tick_class(:active), do: "bp-chat-live-dot"
+  defp workflow_tick_class(_tick), do: nil
+
+  defp workflow_tick_style(tick) do
+    base = "width: 5px; height: 5px; border-radius: 50%; flex: none;"
+
+    case tick do
+      :done ->
+        base <> " background: var(--life-done);"
+
+      :active ->
+        base <> " background: var(--life-in_progress);"
+
+      :interrupted ->
+        base <> " background: var(--life-blocked);"
+
+      _future_skipped_unreached ->
+        base <>
+          " background: transparent; border: 1px solid var(--border-muted); box-sizing: border-box;"
+    end
+  end
+
+  # The phase word + settled/total agent counter (D2: settled = done + failed,
+  # the Claude-Code 13/17). A terminal wave settles to "complete · n/n"; an
+  # interrupted one names its dead frontier honestly; a live one wears the
+  # active phase word. Nothing here is invented — every number is the D3
+  # summary's (`outcome` is the journey's entry lifecycle).
+  defp workflow_card_line(%{outcome: :completed} = ws),
+    do: "complete · #{ws.agents_done}/#{ws.agents_total}"
+
+  defp workflow_card_line(%{outcome: :interrupted} = ws) do
+    where = if ws.phase, do: "interrupted in #{ws.phase}", else: "interrupted"
+    "#{where} · #{ws.agents_done}/#{ws.agents_total}"
+  end
+
+  defp workflow_card_line(ws) do
+    "#{ws.phase || "starting"} · #{ws.agents_done}/#{ws.agents_total} agents"
+  end
+
   defp session_pill(_s, %{state: :working}), do: {"badge-chat-working", "working"}
   defp session_pill(_s, %{state: :needs_you}), do: {"badge-chat-approval", "needs you"}
   defp session_pill(_s, %{state: :offline}), do: {"badge-chat-offline", "offline"}

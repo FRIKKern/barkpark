@@ -46,9 +46,22 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
   @golden_path Path.expand("chat_render_golden.html", __DIR__)
   @external_resource @golden_path
 
+  # The wsc-wave sidebar byte-lock (charter D11) — a SECOND scoped region, the
+  # SIDEBAR this time, pinned by its own golden. Same characterisation doctrine
+  # as above; regenerate with GOLDEN_REGEN=1 in the same diff, justify in review.
+  @sidebar_golden_path Path.expand("chat_sidebar_golden.html", __DIR__)
+  @external_resource @sidebar_golden_path
+
   # Fixed session id ⇒ the new-session UUID path never fires; the id itself is a
   # constant in the region, so it stays byte-stable.
   @session_id "00000000-0000-4000-8000-0000000c0de0"
+
+  # Sidebar-golden fixtures: one plain chat + one workflow (epic-cycle) session,
+  # fixed ids and PINNED last_active_at ordering (newest first is the workflow
+  # row). The wall-clock age labels these produce are sliced out (D11 — the
+  # session_stamp text is the sidebar's only clock read).
+  @plain_session_id "00000000-0000-4000-8000-0000000c0de1"
+  @workflow_session_id "00000000-0000-4000-8000-0000000c0de2"
 
   defmodule NullTitleAdapter do
     def post(_url, _body, _headers), do: {:error, :disabled_in_tests}
@@ -165,6 +178,164 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
       # the assistant markdown was RENDERED, never echoed as source
       refute String.contains?(golden, "## Needs-you inbox")
     end
+  end
+
+  describe "sidebar-scoped byte-lock (wsc charter D11)" do
+    test "the sidebar region (stamps sliced) renders byte-identical to the pinned golden",
+         %{conn: conn} do
+      seed_sidebar_sessions!()
+      region = mount_sidebar_region(conn)
+
+      if System.get_env("GOLDEN_REGEN") == "1" do
+        File.write!(@sidebar_golden_path, region)
+      end
+
+      golden = File.read!(@sidebar_golden_path)
+
+      assert region == golden, """
+      The scoped SIDEBAR region diverged from the pinned golden.
+
+      This is the wsc-wave minimalism lock (charter D11): the two workflow lines
+      exist ONLY on workflow rows, and every plain row's bytes are frozen. A diff
+      here means a sidebar render change leaked in.
+
+      If the change is intentional, regenerate the golden in this SAME diff:
+
+          GOLDEN_REGEN=1 mix test #{Path.relative_to_cwd(__ENV__.file)}
+
+      and justify it in review.
+
+      golden bytes:  #{byte_size(golden)}
+      region bytes:  #{byte_size(region)}
+      first diff at: #{first_diff_index(region, golden)}
+      """
+    end
+
+    test "the sidebar region is byte-identical across two independent mounts (determinism guard)",
+         %{conn: conn} do
+      seed_sidebar_sessions!()
+      assert mount_sidebar_region(conn) == mount_sidebar_region(conn)
+    end
+
+    test "the golden covers both card lines AND a plain row (guards a cleared fixture)" do
+      golden = File.read!(@sidebar_golden_path)
+
+      for needle <- [
+            # both rows are in the region
+            ~s(data-test-id="chat-session-row"),
+            "/studio/chat/#{@plain_session_id}",
+            "/studio/chat/#{@workflow_session_id}",
+            # line (a): ticks + settled counter on the workflow row only
+            ~s(data-test-id="chat-workflow-#{@workflow_session_id}"),
+            "complete · 29/29",
+            "var(--life-done)",
+            # line (b): the epic-goal line — title · slices · wave_status
+            ~s(data-test-id="chat-epic-#{@workflow_session_id}"),
+            "Wave Session Card",
+            "1/3 slices",
+            "wave: building 5 slices",
+            # the wall clock is sliced, never frozen-in
+            "<!--stamp-->"
+          ] do
+        assert String.contains?(golden, needle),
+               "sidebar golden is missing coverage for: #{inspect(needle)}"
+      end
+
+      # the plain row carries NEITHER card line (D11 minimalism)…
+      refute String.contains?(golden, "chat-workflow-#{@plain_session_id}")
+      refute String.contains?(golden, "chat-epic-#{@plain_session_id}")
+      # …and "PRs open" has no data source (D8) — never rendered
+      refute String.contains?(golden, "PRs open")
+    end
+  end
+
+  # Two sessions: a plain chat and a settled epic-cycle workflow session whose
+  # worker holds a slice under a published epic (the epic-goal line's ledger
+  # chain). last_active_at is PINNED so row order never flaps.
+  defp seed_sidebar_sessions!() do
+    {:ok, _} = StudioChat.create_session(%{id: @plain_session_id, cwd: "/tmp", mode: "plan"})
+
+    {:ok, _} =
+      StudioChat.create_session(%{id: @workflow_session_id, cwd: "/tmp", mode: "plan"})
+
+    rail = fold_epic(load_ndjson("epic_cycle_progress.ndjson"))
+    {:ok, _} = StudioChat.set_rail_snapshot(@workflow_session_id, rail)
+
+    pin_last_active!(@plain_session_id, ~U[2026-01-01 00:00:00.000000Z])
+    pin_last_active!(@workflow_session_id, ~U[2026-01-02 00:00:00.000000Z])
+
+    worker = BarkparkWeb.Studio.ClaudeChat.worker_id(@workflow_session_id)
+
+    insert_ledger_task!("task-wsc-golden-epic", "Wave Session Card", %{
+      "lifecycle_status" => "in_progress",
+      "wave_status" => "wave: building 5 slices"
+    })
+
+    insert_ledger_task!("task-wsc-golden-held", "Slice s3", %{
+      "lifecycle_status" => "in_progress",
+      "parent_id" => "task-wsc-golden-epic",
+      "claim" => %{"worker" => worker}
+    })
+
+    insert_ledger_task!("task-wsc-golden-s1", "Slice s1", %{
+      "lifecycle_status" => "done",
+      "parent_id" => "task-wsc-golden-epic"
+    })
+
+    insert_ledger_task!("task-wsc-golden-s2", "Slice s2", %{
+      "lifecycle_status" => "open",
+      "parent_id" => "task-wsc-golden-epic"
+    })
+
+    :ok
+  end
+
+  defp pin_last_active!(sid, at) do
+    StudioChat.get_session(sid)
+    |> Ecto.Changeset.change(last_active_at: at, last_visited_at: at)
+    |> Barkpark.Repo.update!()
+  end
+
+  defp insert_ledger_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  # Mount the LIST route (no open session — no spawn, no transcript) and return
+  # the scoped sidebar region: everything inside the 280px <aside>, with the
+  # session_stamp wall-clock TEXT sliced to a comment (the sidebar's only clock
+  # read — charter D11 names it the one legitimate slice).
+  defp mount_sidebar_region(conn) do
+    {:ok, view, _html} = live(conn, "/studio/chat")
+
+    view
+    |> render()
+    |> scope_sidebar()
+    |> slice_stamps()
+  end
+
+  defp scope_sidebar(html) do
+    html
+    |> String.split(~s(<aside style="width: 280px))
+    |> Enum.at(1, "")
+    |> String.split("</aside>")
+    |> List.first()
+  end
+
+  # Both stamp spans (session row + needs-you strip row) share the exact
+  # `margin-left: auto` style head — replace ONLY their text content.
+  defp slice_stamps(html) do
+    Regex.replace(
+      ~r/(<span class="text-xs text-dim" style="margin-left: auto;(?: flex: none;)?">)[^<]*(<\/span>)/,
+      html,
+      "\\1<!--stamp-->\\2"
+    )
   end
 
   # Seed ONE replayable session from the frozen fixtures: a persisted transcript

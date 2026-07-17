@@ -55,8 +55,10 @@ defmodule Barkpark.StudioChat do
   """
   import Ecto.Query, warn: false
 
+  alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{Message, Session}
+  alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
   @summary_max 140
@@ -203,7 +205,12 @@ defmodule Barkpark.StudioChat do
       last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
-      updated_at: s.updated_at
+      updated_at: s.updated_at,
+      # Select-widen is SERVER-SIDE only (wsc charter D7): the snapshot is
+      # folded to the compact `workflow_summary/1` before any assign or JSON —
+      # the raw rail never leaves the app layer on a list path (the D14
+      # sidebar-wire law holds; DB→app on localhost is cheap).
+      rail_snapshot: s.rail_snapshot
     })
     |> Repo.all()
   end
@@ -1437,6 +1444,83 @@ defmodule Barkpark.StudioChat do
       tokens: 0
     }
   end
+
+  @doc """
+  The epic-goal line for a chat session's worker (wsc charter D9): resolve the
+  session's provider-scoped worker id, find a bp task it currently HOLDS that
+  carries a `parent_id`, hop that ONE parent to the epic, and read
+  `title · slices done/total · wave_status` off the published ledger. Returns
+  `nil` whenever any hop is missing (no claim, an orphan slice, a vanished
+  parent) — the card renders nothing rather than inventing. "PRs open" is
+  deliberately ABSENT (D8 — no data source exists anywhere). Rides existing
+  plumbing only: plain Repo reads, zero new PubSub topics.
+
+  `slices_done` counts terminal children (`done` + `cancelled` — the
+  compactor's terminal set): a cancelled slice no longer blocks the wave, so
+  the line converges to n/n instead of sticking forever short.
+  """
+  @spec epic_goal(String.t() | nil, String.t()) :: map() | nil
+  def epic_goal(provider, session_id) do
+    with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
+         parent_id when is_binary(parent_id) <- held_task_parent_id(worker),
+         %Document{} = epic <- published_task_doc(parent_id) do
+      {done, total} = epic_slice_counts(parent_id)
+      content = epic.content || %{}
+
+      %{
+        id: parent_id,
+        title: epic.title || content["title"] || parent_id,
+        slices_done: done,
+        slices_total: total,
+        wave_status: string_presence(content["wave_status"])
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  # The newest published in_progress claim this worker holds that carries a
+  # parent hop. Draft twins never count (the claim lives on the published row).
+  defp held_task_parent_id(worker) do
+    from(d in Document,
+      where: d.type == "task",
+      where: not like(d.doc_id, "drafts.%"),
+      where: fragment("?->'claim'->>'worker'", d.content) == ^worker,
+      where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
+      where: fragment("(?->>'parent_id') IS NOT NULL", d.content),
+      order_by: [desc: d.updated_at],
+      limit: 1,
+      select: fragment("?->>'parent_id'", d.content)
+    )
+    |> Repo.one()
+  end
+
+  defp published_task_doc(doc_id) do
+    from(d in Document,
+      where: d.type == "task" and d.doc_id == ^doc_id,
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp epic_slice_counts(parent_id) do
+    rows =
+      from(d in Document,
+        where: d.type == "task",
+        where: not like(d.doc_id, "drafts.%"),
+        where: fragment("?->>'parent_id'", d.content) == ^parent_id,
+        group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
+        select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
+      )
+      |> Repo.all()
+
+    total = rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    done = for {s, n} <- rows, s in ["done", "cancelled"], reduce: 0, do: (acc -> acc + n)
+    {done, total}
+  end
+
+  defp string_presence(s) when is_binary(s) and s != "", do: s
+  defp string_presence(_), do: nil
 
   @doc """
   Split a workflow-agent label into its two rendered parts (charter D59) — a
