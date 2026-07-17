@@ -32,21 +32,34 @@
 log() { echo "[${BP_LOG_TAG:-site-deploy} $(date -u +%H:%M:%S)] $*"; }
 
 # ---------------------------------------------------------------------------
-# emit — the machine stage protocol (D25). ONE line per stage boundary on STDOUT,
-# next to (never instead of) the human prose, so an orchestrator renders honest
-# stages by regexing `^BPSTAGE `. detail= is free text (quotes normalised to
-# spaces, one line, clipped to 240 chars) — it carries the REASON on a failed line
-# so a stdout-only caller can always say WHY. build_id rides the line from the
-# BUILD_ID global (empty is legal — a PLAN that has not resolved one yet).
+# emit — the machine stage protocol (D25). ONE line per stage boundary, next to
+# (never instead of) the human prose, so an orchestrator renders honest stages by
+# regexing `^BPSTAGE `. detail= is free text (quotes normalised to spaces, one
+# line, clipped to 240 chars) — it carries the REASON on a failed line so a
+# stdout-only caller can always say WHY. build_id rides the line from the BUILD_ID
+# global (empty is legal — a PLAN that has not resolved one yet).
+#
+# DUAL SINK (durable status fold). The line always goes to STDOUT. When the caller
+# (DeployRunner) names a persistent BARKPARK_SITE_STATUS_FILE, every stage line is
+# ALSO appended to it — so a build ORPHANED by a barkpark.service restart (its BEAM
+# parent dies, but the outer transient unit + the build survive) leaves a truthful
+# partial fold on disk that the control plane re-attaches to on the next boot.
+# Unset => stdout-only, byte-for-byte the old behaviour (dev/selftest standalone).
+# Append-only + best-effort (a status-file write can never fail the deploy); the
+# caller owns the file's lifetime (names it fresh per run, reads it on re-attach).
 # ---------------------------------------------------------------------------
 emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|failed> [detail…]
   local name="$1" status="$2"; shift 2
-  local detail="$*"
+  local detail="$*" line
   if [ -n "$detail" ]; then
     detail="$(printf '%s' "$detail" | tr '\n\r\t"' '   '"'" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//' | cut -c1-240)"
-    printf 'BPSTAGE name=%s status=%s build_id=%s detail="%s"\n' "$name" "$status" "${BUILD_ID:-}" "$detail"
+    printf -v line 'BPSTAGE name=%s status=%s build_id=%s detail="%s"' "$name" "$status" "${BUILD_ID:-}" "$detail"
   else
-    printf 'BPSTAGE name=%s status=%s build_id=%s\n' "$name" "$status" "${BUILD_ID:-}"
+    printf -v line 'BPSTAGE name=%s status=%s build_id=%s' "$name" "$status" "${BUILD_ID:-}"
+  fi
+  printf '%s\n' "$line"
+  if [ -n "${BARKPARK_SITE_STATUS_FILE:-}" ]; then
+    printf '%s\n' "$line" >> "$BARKPARK_SITE_STATUS_FILE" 2>/dev/null || true
   fi
 }
 
@@ -97,13 +110,21 @@ meta_value() { # <html-file> <marker-name>
 }
 
 # ---------------------------------------------------------------------------
-# BUILD_ALLOW — the ONLY env vars a build may see (Vite process.env-precedence
-# scrub, D7). BUILD_ID + base path + content rev are exported under their
-# BARKPARK_ build-var names so the adapter can bake the bp-build-id / bp-content-
-# rev markers HEALTH asserts on. An ambient BARKPARK_TOKEN must NEVER reach npm —
-# it would shadow the per-site token (a live-proven failure mode).
+# BUILD_ALLOW — the DOCUMENTED allow-list of env vars a build may see (Vite
+# process.env-precedence contract, D7). It is the canonical set the Elixir
+# DeployRequest + the Go `bp cloud site preflight` env-contract check mirror.
+#
+# The engines NO LONGER reconstruct the build env from this array with
+# `env -i VAR=value` — that put BARKPARK_TOKEN=<secret> on a child argv (a ps/proc
+# leak, proven live). The build now INHERITS the script's environment, which
+# DeployRunner scrubs to exactly this contract before launching the engine (the
+# ambient-BARKPARK_TOKEN shadow is the caller's to strip; preflight warns on it).
+# BUILD_ID + base path + content rev are still exported by each engine right
+# before the build so the adapter can bake the bp-build-id / bp-content-rev
+# markers HEALTH asserts on. Kept here as the single machine-readable source of
+# truth for the allow-list contract even though shell no longer loops over it.
 # ---------------------------------------------------------------------------
-# shellcheck disable=SC2034  # consumed by the sourcing engines (site-deploy*.sh), not here
+# shellcheck disable=SC2034  # the canonical allow-list contract; mirrored by Elixir/Go, not looped over in shell
 BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
              BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE \
              BARKPARK_DOC_TYPE BARKPARK_THEME)
