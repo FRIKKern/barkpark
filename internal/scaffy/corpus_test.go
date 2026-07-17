@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 19
+const corpusFileCount = 21
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -46,7 +46,7 @@ func corpusFiles(t *testing.T) []string {
 	return paths
 }
 
-// TestCorpusFileCount: exactly 16 .scaffy files, asserted before anything
+// TestCorpusFileCount: exactly corpusFileCount .scaffy files, asserted before anything
 // else touches their bytes.
 func TestCorpusFileCount(t *testing.T) {
 	corpusFiles(t)
@@ -160,18 +160,18 @@ func countCorpus(t *testing.T) census {
 func TestCorpusCensus(t *testing.T) {
 	want := census{
 		create:            17,
-		insertAfterFirst:  26, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple
+		insertAfterFirst:  30, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple; +1: ensure-console-hook-zones' tests-zone plant; +3: add-console-helper's skeleton + hook entry + test group
 		insertAfterLast:   1,
-		insertBeforeFirst: 1,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE)
+		insertBeforeFirst: 3,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE); +2: ensure-console-hook-zones' two app.js plants (above the escape hatch; above the IIFE tail)
 		insertBeforeLast:  0,  // grammar-legal, zero corpus instances (like SNIPPET/USE — exercised by synthetic fixtures)
 		replace:           10, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST
 		remove:            1,
 		deleteFile:        1,
-		mark:              39, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route
+		mark:              45, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route; +3: the three console zones; +3: add-console-helper's trio
 		markVirtual:       2,
-		assertFile:        75, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail
-		assertCmd:         35, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
-		assertCmdTierCI:   14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
+		assertFile:        81, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail; +3: the console-zone trio; +3: add-console-helper's trio
+		assertCmd:         37, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's; +2: the console pair's LOCAL `node --test` gates
+		assertCmdTierCI:   14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's (the console pair's node gates are LOCAL, not ci)
 	}
 	got := countCorpus(t)
 	if got != want {
