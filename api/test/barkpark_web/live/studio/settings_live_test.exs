@@ -744,4 +744,135 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       content: %{}
     })
   end
+
+  # ── Chat execution profile toggle (connectors W23-2, D207/D211) ─────────
+  #
+  # The write surface for the per-workspace chat execution profile. The point
+  # of this slice is the PER-WRITE `workspace_admin?/2` re-gate: D207 proved the
+  # mount gate is a GLOBAL-permission admin check that does NOT enforce admin OF
+  # THE TARGET workspace, so a read-member holding the flat global admin perm
+  # mounts the panel — and must still be REFUSED the write. These tests never
+  # name a case after "admin of the target workspace" being enforced at mount
+  # (D207 naming ban) and never re-clone the vacuous forged-ws SCOPE tests (those
+  # are caught by `guard_bound_ws/3` before the re-gate ever runs).
+  describe "chat execution profile toggle (W23-2)" do
+    setup do
+      # Two tokens, BOTH holding the flat global admin permission so BOTH clear
+      # the coarse mount gate. The per-write re-gate is the ONLY thing that
+      # separates them at the target workspace.
+      {:ok, admin_tok} =
+        Auth.create_token("ep-admin-raw", "ep admin", "production", ["read", "write", "admin"])
+
+      {:ok, outsider_tok} =
+        Auth.create_token(
+          "ep-outsider-raw",
+          "ep outsider",
+          "production",
+          ["read", "write", "admin"]
+        )
+
+      {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "ep-ws", name: "Exec Profile WS"})
+      {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "EPP"})
+
+      # admin_tok is an ADMIN of the target ws; outsider_tok is only a MEMBER —
+      # read access lets it mount (LiveScope), but it is NOT a workspace admin.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, outsider_tok.id)
+
+      {:ok, ws: ws, proj: proj}
+    end
+
+    defp ep_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    test "renders the execution-profile control, defaulting to self-hosted when unset", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, _view, html} = live(conn, ep_settings_url(ws, proj))
+
+      assert html =~ "Chat execution profile"
+      assert html =~ ~s(data-test-id="execution-profile-control")
+      # Unset persisted value → the switch reads self-hosted (the resolver's
+      # fail-safe default), never cloud.
+      assert html =~ ~s(data-execution-profile="self_hosted")
+    end
+
+    test "REFUSED: a mount-gate-passing read-member (not an owner/admin of the workspace) cannot flip the profile — nothing is written",
+         %{conn: conn, ws: ws, proj: proj} do
+      # The outsider holds the flat global admin perm (mount gate passes) and is
+      # a read-member of the target (LiveScope resolves), and fires the toggle
+      # with the CORRECT bound ws id — so `guard_bound_ws/3` PASSES too. The only
+      # thing standing between it and the write is the per-write re-gate; remove
+      # the re-gate and this test writes "cloud" and the unchanged-assertion reds.
+      conn = init_test_session(conn, %{"api_token" => "ep-outsider-raw"})
+      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
+
+      html = render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
+
+      assert html =~ "owner or admin of this workspace"
+
+      assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id)) ==
+               %{},
+             "a non-admin toggle must not persist any chat settings"
+    end
+
+    test "happy path: an owner/admin of the workspace flips to cloud, it persists, and theme + plugin keys survive the merge",
+         %{conn: conn, ws: ws, proj: proj} do
+      # Seed unrelated settings keys FIRST so the merge-in-place chat write is
+      # proven non-clobbering.
+      {:ok, _} = Barkpark.Tenancy.set_workspace_theme(ws.id, "evergreen")
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "onixedit" => %{"enabled" => false}
+        })
+
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
+
+      html = render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
+      assert html =~ "cloud sandbox"
+
+      ws_after = Barkpark.Tenancy.get_workspace_by_id(ws.id)
+      assert Barkpark.Tenancy.workspace_chat_settings(ws_after)["execution_profile"] == "cloud"
+      # Merge-in-place preserved the sibling settings namespaces.
+      assert Barkpark.Tenancy.workspace_theme(ws_after) == "evergreen"
+      assert Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(ws_after), "onixedit")
+
+      # The toggle is a server-derived flip: a second click round-trips back to
+      # self-hosted, never trusting a client-supplied value.
+      {:ok, view2, _html} = live(conn, ep_settings_url(ws, proj))
+      render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+
+      assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
+               "execution_profile"
+             ] == "self_hosted"
+    end
+
+    test "a garbage persisted profile never propagates — a flip yields a known-good value", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      # Corrupt the stored value directly, then toggle. The handler derives the
+      # next value from `current == "cloud"` (false for garbage) → "cloud", a
+      # known-good value guarded against `~w(cloud self_hosted)` before the write.
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_chat_settings(ws.id, %{"execution_profile" => "banana"})
+
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
+      render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
+
+      profile =
+        Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
+          "execution_profile"
+        ]
+
+      assert profile in ~w(cloud self_hosted)
+      assert profile == "cloud"
+    end
+  end
 end
