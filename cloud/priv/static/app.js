@@ -8235,8 +8235,16 @@
   // reports done. Pending rows surface the same numbers as a "~30s" hint, so
   // the user knows the plan's shape up front.
   var SERVER_STEP_EXPECTED_MS = {
+    // Provision (instance) steps.
     create: 15000, freshen: 300000, secure: 45000, configure: 35000,
-    content: 20000, verify: 15000, ready: 10000
+    content: 20000, verify: 15000, ready: 10000,
+    // Deploy (site) stages — the shared ring/ETA now fills on the deploy rail
+    // too (stw5 backlog). Estimates from live guerrilla deploys: BUILD is the
+    // long pole (npm ci + next build / astro build), the rest are seconds. The
+    // ring's overdue-crawl (stepRingProgress) keeps a slow build reading
+    // "still working", never "stuck", so a conservative estimate is safe.
+    PLAN: 3000, BUILD: 120000, STAGE: 8000,
+    HEALTH: 18000, SWITCH: 3000, RETIRE: 4000
   };
 
   // 0..1 ring fill for an active step: linear to 90% across the estimate, then
@@ -11830,6 +11838,7 @@
       // set, and the between-steps `next` marker.
       serverStepExpectedMs: SERVER_STEP_EXPECTED_MS, serverStepOptional: SERVER_STEP_OPTIONAL,
       stepRingProgress: stepRingProgress, markNextStep: markNextStep,
+      SERVER_STEP_EXPECTED_MS: SERVER_STEP_EXPECTED_MS,
       // Presentation pacing (min-dwell): pure display shim + the resume seed.
       paceSteps: paceSteps, seedPaceLedger: seedPaceLedger,
       newStepMinDwellMs: NEW_STEP_MIN_DWELL_MS,

@@ -6091,3 +6091,25 @@ test("siteThemePatchBody sends the chosen theme; empty clears the pin", () => {
   assert.deepEqual(plain(hooks.siteThemePatchBody("")), { theme: "" });
   assert.deepEqual(plain(hooks.siteThemePatchBody(undefined)), { theme: "" });
 });
+
+// ── stw5 backlog: the deploy rail's active stage gets an ETA/ring too ────────
+
+test("SERVER_STEP_EXPECTED_MS covers every deploy stage so the ring fills on deploys", () => {
+  const map = hooks.SERVER_STEP_EXPECTED_MS;
+  for (const stage of ["PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"]) {
+    assert.equal(typeof map[stage], "number", stage + " must have an ETA estimate");
+    assert.ok(map[stage] > 0, stage + " estimate must be positive");
+  }
+  // BUILD is the long pole — its estimate dwarfs the second-scale stages so the
+  // ring paces sensibly (a full build never reads "done but stuck").
+  assert.ok(map.BUILD > map.SWITCH * 10);
+});
+
+test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the estimate)", () => {
+  const build = hooks.SERVER_STEP_EXPECTED_MS.BUILD;
+  // 30s into a ~120s BUILD → partway up the linear ramp, not 0.
+  const p = hooks.stepRingProgress(30000, build);
+  assert.ok(p > 0.1 && p < 0.9, "mid-build ring should be partway filled, got " + p);
+  // Without an estimate (the pre-fix state) it was flat 0.
+  assert.equal(hooks.stepRingProgress(30000, undefined), 0);
+});
