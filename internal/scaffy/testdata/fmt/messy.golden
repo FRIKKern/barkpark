@@ -12,3 +12,14 @@ package demo
 ::: widget module :::
 
 ASSERT FILE "internal/{{.widget_name}}.go" EXISTS
+
+IN "internal/{{.widget_name}}.go"
+INSERT BEFORE FIRST
+::: pinned head :::
+package demo
+::: pinned head :::
+WITH
+::: note above :::
+// note MARK:note-above
+::: note above :::
+MARK "note-above"

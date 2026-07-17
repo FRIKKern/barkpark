@@ -13,8 +13,8 @@ package scaffy
 // One matcher, shared — NOT forked. The target bytes are produced by the
 // SAME path apply.go's applyInOp uses: sub.fencedBytes for a resolvable
 // anchor, the verbatim Fenced.Bytes for a token-free one; the occurrence
-// policy mirrors applyInOp exactly — INSERT AFTER FIRST/LAST pin a
-// repeated anchor (at-least-once suffices), REPLACE and REMOVE are
+// policy mirrors applyInOp exactly — INSERT AFTER|BEFORE FIRST/LAST pin
+// a repeated anchor (at-least-once suffices), REPLACE and REMOVE are
 // byte-exact exactly-once (D20). On a clean tree no mark family is
 // planted, so a REANCHOR REPLACE is checked at its run-1 structural
 // target — precisely the "FIRST-run target must exist today" D5 asks for.

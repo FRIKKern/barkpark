@@ -219,6 +219,13 @@ const (
 	// belongs to the D40 seam scaffy.Remove (the receipt-replay entry
 	// point, remove.go).
 	RemoveVerb
+	// InsertBeforeFirst/Last splice the payload directly BEFORE the
+	// pinned anchor occurrence (ratified from the D55 deferral — the
+	// prepend-above-a-surviving-head idiom; add-canonical-marker is the
+	// motivating fixture). Same fencing, MARK and guard laws as AFTER;
+	// REANCHOR stays REPLACE-only (P-005).
+	InsertBeforeFirst
+	InsertBeforeLast
 )
 
 func (v InOpVerb) String() string {
@@ -227,6 +234,10 @@ func (v InOpVerb) String() string {
 		return "INSERT AFTER FIRST"
 	case InsertAfterLast:
 		return "INSERT AFTER LAST"
+	case InsertBeforeFirst:
+		return "INSERT BEFORE FIRST"
+	case InsertBeforeLast:
+		return "INSERT BEFORE LAST"
 	case Replace:
 		return "REPLACE"
 	case RemoveVerb:
@@ -235,9 +246,9 @@ func (v InOpVerb) String() string {
 	return "?"
 }
 
-// InOp is one op inside an IN "path" scope: INSERT AFTER FIRST|LAST,
-// REPLACE (+ optional REANCHOR) or REMOVE. Target and Payload are
-// always fenced (D3(a)); Payload is nil for REMOVE.
+// InOp is one op inside an IN "path" scope: INSERT AFTER|BEFORE
+// FIRST|LAST, REPLACE (+ optional REANCHOR) or REMOVE. Target and
+// Payload are always fenced (D3(a)); Payload is nil for REMOVE.
 type InOp struct {
 	Pos      Pos // the verb line
 	InPos    Pos // the IN line
