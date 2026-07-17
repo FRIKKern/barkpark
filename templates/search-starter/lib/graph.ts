@@ -148,9 +148,13 @@ function computeRootId(nodes: GraphNode[], edges: GraphEdge[]): string | null {
 async function rawCorpusGraph(): Promise<CorpusGraph> {
   // The corpus endpoint is mounted FLAT (`/v1/graph`, [:api, :require_token]) —
   // tenancy comes from the bearer's default scope, not a `/w/p/` path prefix
-  // (the scoped path 404s). bp-fetch bakes in the bearer + resilience (timeout,
-  // restart-window retry, res.ok guard, defensive JSON parse).
-  const url = `${API_URL}/v1/graph?dataset=${encodeURIComponent(DATASET)}`;
+  // (the scoped path 404s). The managed deploy path injects a SCOPED
+  // BARKPARK_API_URL (`<origin>/w/:ws/p/:proj` — correct for every content
+  // read), so derive the BARE ORIGIN here for this one flat call — live-caught:
+  // the scoped+flat concatenation 404'd, the corpus came back empty, and the
+  // HEALTH gate honestly refused the deploy (empty bp-doc-id).
+  const origin = new URL(API_URL).origin;
+  const url = `${origin}/v1/graph?dataset=${encodeURIComponent(DATASET)}`;
 
   let json: UpstreamGraph;
   try {
