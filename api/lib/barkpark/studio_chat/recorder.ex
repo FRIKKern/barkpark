@@ -1285,9 +1285,25 @@ defmodule Barkpark.StudioChat.Recorder do
         :ok
 
       summary ->
+        # Studio's global sidebar (many session cards on one page) keys off the
+        # activity topic — kept verbatim.
         Phoenix.PubSub.broadcast(
           Barkpark.PubSub,
           activity_topic(),
+          {:chat_workflow, session_id, summary}
+        )
+
+        # AND the per-session stream (wsc-bl-workflow-sse, charter D22): the SSE
+        # forwarder subscribes ONLY to topic(session_id); this SECOND broadcast of
+        # the SAME tuple is what lets `bp chat`'s collapsed workflow strip refresh
+        # MID-TURN (the D13 lag ceiling) instead of waiting for the turn-boundary
+        # rail refetch. It rides commit_rail's EXISTING change-only signature gate
+        # (no second gate — token-only ticks still collapse to zero). Tenancy is
+        # safe BY CONSTRUCTION: topic(session_id) embeds the sid, so a subscriber
+        # can only ever be on its own session's topic — no ^id filter needed.
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic(session_id),
           {:chat_workflow, session_id, summary}
         )
     end

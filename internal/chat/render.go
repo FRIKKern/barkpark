@@ -424,6 +424,13 @@ func formatTokens(n int) string {
 // strip and gives the transcript its rows back; plain chats never had it, so
 // idle frames are byte-identical to the pre-panel geometry.
 func (m Model) workflowStripVisible() bool {
+	// The live SSE summary (wsc-bl-workflow-sse) is the freshest signal: present +
+	// not Terminal ⇒ the strip stays up and refreshes mid-turn. It supersedes the
+	// rail fold because a summary can arrive before the first turn-boundary refetch
+	// hydrates st.Workflow.
+	if lw := m.st.LiveWorkflow; lw != nil {
+		return !lw.Terminal
+	}
 	return m.st.Workflow != nil && entryLifecycle(m.st.Workflow.Status) == "live"
 }
 
@@ -435,11 +442,25 @@ func (m Model) workflowPanelLines() []string {
 	if !m.workflowStripVisible() {
 		return nil
 	}
-	wf := m.st.Workflow
-	j := journeyOf(wf)
-	lines := []string{renderWorkflowStrip(m.width, wf, j, m.now(), m.focus == focusWorkflow)}
-	if m.wfExpanded {
-		lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase)...)
+	focused := m.focus == focusWorkflow
+	// The collapsed strip prefers the live compact summary (wsc-bl-workflow-sse):
+	// its counters/elapsed advance mid-turn off the SSE `event: workflow` delta,
+	// no rail refetch. Fall back to the rail fold when no summary has arrived yet
+	// (resume, or a pre-SSE server).
+	var strip string
+	if lw := m.st.LiveWorkflow; lw != nil {
+		strip = renderWorkflowStripSummary(m.width, lw, m.now(), focused)
+	} else {
+		strip = renderWorkflowStrip(m.width, m.st.Workflow, journeyOf(m.st.Workflow), m.now(), focused)
+	}
+	lines := []string{strip}
+	// The Enter-expanded detail iterates per-agent Nodes the compact summary
+	// LACKS, so it stays sourced from the raw rail fold — turn-boundary fresh (the
+	// accepted ceiling, backlogged wsc-bl-workflow-sse-detail). Guard on Workflow
+	// because a summary-only strip can be up before the rail has hydrated.
+	if m.wfExpanded && m.st.Workflow != nil {
+		wf := m.st.Workflow
+		lines = append(lines, renderWorkflowDetail(m.width, wf, journeyOf(wf), m.now(), m.wfPhase)...)
 	}
 	return lines
 }
@@ -458,13 +479,35 @@ func renderWorkflowStrip(width int, wf *Workflow, j WorkflowJourney, now time.Ti
 	if j.HasTokens {
 		right += " · ↓" + formatTokens(j.Tokens)
 	}
+	return workflowStripLine(width, wf.Label, right, focused)
+}
 
+// renderWorkflowStripSummary paints the collapsed strip from the COMPACT live
+// summary (wsc-bl-workflow-sse) — the mid-turn SSE `event: workflow` delta, so
+// the counters and elapsed advance WITHIN a turn without a rail refetch (the D13
+// lag removed). Same layout and honesty rules as the rail-fold strip: settled =
+// AgentsDone (done+failed, wire-carried), elapsed omitted when the wire has no
+// StartedAt, tokens only when > 0 (never synthesised, D15).
+func renderWorkflowStripSummary(width int, wf *SessionWorkflow, now time.Time, focused bool) string {
+	right := fmt.Sprintf("%d/%d agents done", wf.AgentsDone, wf.AgentsTotal)
+	if el, ok := summaryElapsed(wf, now); ok {
+		right += " · " + formatElapsed(el)
+	}
+	if wf.Tokens > 0 {
+		right += " · ↓" + formatTokens(wf.Tokens)
+	}
+	return workflowStripLine(width, wf.Label, right, focused)
+}
+
+// workflowStripLine lays out the collapsed one-liner: a focus-aware glyph +
+// truncated label on the left, the dim counter cluster right-aligned. The label
+// yields columns first so the counters always keep their right-edge seat. Shared
+// by the live-summary path and the rail-fold fallback so the two can never drift.
+func workflowStripLine(width int, label, right string, focused bool) string {
 	glyph := badgeStyle.Render("○")
-	label := wf.Label
 	if focused {
 		glyph = focusBar.Render("❯")
 	}
-	// truncate the label so the counters always keep their right-edge seat
 	maxLabel := width - lipgloss.Width(right) - 5
 	if maxLabel < 8 {
 		maxLabel = 8
@@ -479,6 +522,23 @@ func renderWorkflowStrip(width int, wf *Workflow, j WorkflowJourney, now time.Ti
 		pad = 2
 	}
 	return left + strings.Repeat(" ", pad) + dimStyle.Render(right)
+}
+
+// summaryElapsed is workflowElapsed's compact-summary twin (wsc-bl-workflow-sse):
+// live = now − StartedAt; terminal = EndedAt − StartedAt. false when a figure is
+// absent from the wire — the strip omits elapsed, never synthesizes it (D15).
+func summaryElapsed(wf *SessionWorkflow, now time.Time) (time.Duration, bool) {
+	if wf == nil || wf.StartedAt == nil {
+		return 0, false
+	}
+	start := time.UnixMilli(*wf.StartedAt)
+	if !wf.Terminal {
+		return now.Sub(start), true
+	}
+	if wf.EndedAt != nil {
+		return time.UnixMilli(*wf.EndedAt).Sub(start), true
+	}
+	return 0, false
 }
 
 // workflowDetailMaxAgents caps the agents pane so a 20-surveyor Explore phase

@@ -73,6 +73,17 @@ type State struct {
 	// ceiling). nil for plain chats — the below-composer panel then costs zero.
 	Workflow *Workflow
 
+	// LiveWorkflow is the COMPACT workflow summary pushed MID-TURN over the SSE
+	// `event: workflow` frame (wsc-bl-workflow-sse) — the same
+	// apiclient.ChatWorkflowSummary the list wire carries, NOT the raw *Workflow
+	// rail fold (which has per-agent Nodes this lacks). The collapsed strip prefers
+	// it so its counters/elapsed advance WITHIN a turn without a rail refetch —
+	// that missing refetch IS the D13 lag removed. nil until the first workflow
+	// frame; a Terminal summary drops the strip. The Enter-expanded detail still
+	// reads Workflow (it needs the Nodes) — turn-boundary fresh, the accepted
+	// ceiling (backlogged wsc-bl-workflow-sse-detail).
+	LiveWorkflow *SessionWorkflow
+
 	// AnswerInFlight maps a card's request_id → the decision ("allow"/"deny")
 	// POSTed but not yet confirmed by a refetch — the immediate-feedback layer:
 	// the card reads "answering: allow…" until the server-resolved row lands and
@@ -282,6 +293,17 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return st, nil
 	case "chat":
 		return reduceClaudeFrame(st, ev.Data)
+	case "workflow":
+		// Live workflow delta (wsc-bl-workflow-sse): the COMPACT summary pushed
+		// mid-turn so the collapsed strip refreshes without a turn-boundary
+		// refetch. Overwrite LiveWorkflow; NO Effect — that MISSING refetch is the
+		// D13 lag removed. A malformed frame is inert (forward-compat, same
+		// tolerance the exit/message paths show), leaving the last-known summary.
+		var wf SessionWorkflow
+		if err := json.Unmarshal(ev.Data, &wf); err == nil {
+			st.LiveWorkflow = &wf
+		}
+		return st, nil
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the
 		// answerable card renders from replay truth (request_id + pending status

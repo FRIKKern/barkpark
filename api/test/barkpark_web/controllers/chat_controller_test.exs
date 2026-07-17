@@ -1118,6 +1118,31 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert data == %{"type" => "assistant", "text" => "hi"}
     end
 
+    test "workflow frame is the compact summary JSON with NO id (live delta, D23)" do
+      # The COMPACT workflow_summary map, byte-identical to the list wire; a live
+      # delta like chat/permission/exit — unreplayable, so NO `id:` seq.
+      summary = %{label: "run", agents_done: 1, agents_total: 3, running: 2, terminal?: false}
+      frame = ChatController.sse_workflow_frame(summary)
+      assert String.starts_with?(frame, "event: workflow\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      assert data == %{
+               "label" => "run",
+               "agents_done" => 1,
+               "agents_total" => 3,
+               "running" => 2,
+               "terminal?" => false
+             }
+    end
+
     test "permission + keepalive frames" do
       pframe = ChatController.sse_permission_frame(%{request_id: "r"})
       assert String.starts_with?(pframe, "event: permission\ndata: ")
