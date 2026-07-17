@@ -1,0 +1,38 @@
+# Block Wishlist 100 — epic charter
+
+Epic task: `pd-block-wishlist-epic` · Wave 1 Paper: `block-wishlist-wave-2026-07-17`
+
+## Vision
+
+One definitive, published **"Block Wishlist 100"** Paper — dogfooding PortableDoc itself — listing 100 NEW block candidates deduped against the 62 canonical types that exist today, each with a name, one-line pitch, data-shape sketch (Attrs-contract style), and an honest per-surface feasibility note (View / Edit / TUI / React / Email). Followed by the **Review** Paper that categorizes every candidate and ranks by USEFULNESS as the primary criterion in explicit S/A/B/C tiers, so the S-tier reads as a ready-to-build backlog for future waves — every S-tier block filed as a bp task. The ranking is demand-grounded and feasibility-honest, not a taste exercise; the wishlist Paper itself showcases strong existing blocks so the artifact demonstrates the product. Live prod breakage discovered en route (77 "Unsupported block" placeholders; reader resolver parity bug) gets fixed in the same wave — near-free fixes don't wait.
+
+## Decisions
+
+- **D1 — Baseline is 62, per-surface truth is script-derived.** tiers.ex's 62 canonical types (25 element + 35 widget + 2 section, test-enforced) is the dedup baseline; TUI registers 62 + `dashboard` (PdSheet map key is dispatch-dead), React DISPATCH = 48 (its "46" comment is stale), Edit canvas = 48. *Why: two independent script extractions + a 10/10 test run proved these counts; the direction's "~50" and the digest's "React 46 / TUI 63" were transcription drift.*
+- **D2 — React and Edit feasibility are graded independently, never inferred.** The two missing-14 sets overlap ONLY on the 4 v2 nested types (composite/arrayOf/codelist/localizedText); 10 of 14 items diverge on each side. *Why: proven by set-diff; "React ✗ ⇒ Edit ✗" would be wrong 10/14 times.*
+- **D3 — Edit column uses the E0–E4 grading key.** E0 opaque carry · E1 read-only reference atom · E2 server-painted no island · E3 server-paint + JSON/query island · E4 true in-canvas (a=control-atom, b=WYSIWYG body, c=no-data leaf). New data-viz/graph candidates default **E3** — a JSON textarea is not WYSIWYG, so "Edit ✓" for a new chart overstates reach. *Why: run-convert.js blockToNode is the real classifier; the parity-matrix HTML grades typography, not editability.*
+- **D4 — Email column: all 62 present, badges distinguish real render vs degrade.** diagram (raw source), asciicast (link), chart (text summary) get a "degrade" badge; heatmap/gauge-list/stat/stats are REAL email renders and must not be lumped with them. *Why: 62/62 probe through the production email path proved presence; per-type output proved the quality split.*
+- **D5 — Usefulness rubric (defined here, BEFORE ranking; primary criterion per the wish).** Score each candidate 1–5 on four axes: (a) demand evidence (ledger usage, broken-type drift, duplicated bespoke code, competitor pull), (b) frequency-of-use plausibility in real docs, (c) unlock-power (what it makes possible), (d) cross-surface reach (honest, per D2–D4). Usefulness = weighted sum (demand 35%, frequency 25%, unlock 25%, reach 15%). **Build cost is a tiebreak only**, and the tiebreak reads the cost tier, never the word "interactive."
+- **D6 — Cost tiers (calibrated on two real datapoints).** STATIC: scaffy-startable, ~9–14 files/block (diff+filetree pair: 28 files, +1632 lines total, 3 PRs) — cheap when it reuses an existing rendering vocabulary. RUNTIME (I1): dual hydration implementations (client.ts + Phoenix hook) + real-browser test — asciicast cost 30–40 files. BACKEND-WRITE (I2): I1 + new API route + resolver + security surface. STUDIO-EDIT: canvas editability ≈ 514 lines/8 files per block, separate from birth.
+- **D7 — Interactive category splits by I-tier.** I0 zero-JS (native `<details>`, CSS-only — shipping precedent: collapsible callout) is static-cheap; I1 hydrated-stateless; I2 backend-write. The "React island pattern" premise is dead — the real pattern is a framework-free DOM scan duplicated in client.ts and the Phoenix PaperMermaid hook. Media-only hydration was never a ratified prohibition, just the extent of what exists. *Why: charter D5/D17 of render-unification + code read proved it.*
+- **D8 — Categories = family × code-tier matrix.** Families: data-viz & charts · diagrams & technical · live-data/task-ops · editorial & structure · interactive & disclosure · media · geo/map · dev/code · fields & schema · navigation/meta. Code tier stays the 3-tier tiers.ex taxonomy (element/widget/section); nearly all candidates land :widget. Layout is doctrine-aspirational, not a code tier.
+- **D9 — Dedup verdicts are binding.** STRUCK: linear gauge (stat max-bar + 1-row gauge-list cover it), toned callout (5 tones shipped), "mermaid support" (browser is a full pass-through). REPLACED: radial gauge/dial is the new candidate; per-kind TUI mermaid renderers + a math/equation block are the wishable diagram items. REPRICED: expandable container = cheap variant of callout's proven `<details>` pattern. Tabs cites TUI dashboard's `{label,blocks}` shape as prior art.
+- **D10 — Live-chart showcases use COUNT-based task aggregates only.** k-anon (k=5) gates only sum/avg/min/max; count is exempt, so status/label/parent count charts render fully on real data. gauge/dashboard stay excluded until `tr-agg-resolver-wave` lands. Non-task data blocks are flagged "blocked on new resolver plumbing"; plugin-domain blocks flagged "needs block-registration seam" (no seam exists — backlogged).
+- **D11 — This wave ships papers + three surgical code fixes.** (1) Reader parity: bulldocs_live.ex `reader_resolvers/3` drops :ref_resolver/:codelist_resolver → raw slugs leak on the public reader (live-proven). (2) 77 broken prod blocks: alias-normalize the 5 list-variant type strings → `list`, and birth a real `blockquote` block (8 live `quote` uses = genuine demand; there is nothing to alias `quote` onto). (3) Four stale in-code comments that misled three separate scouts get corrected. *Why: live prod breakage + near-trivial fixes; everything else block-shaped waits for the ranked backlog.*
+- **D12 — Deliverables are Barkpark-native.** Both Papers are style=article, published on guerrilla, linked to the epic task and the wave Paper; S-tier candidates filed as bp tasks by the review slice. Papers are written by ONE builder each (no concurrent Paper writers).
+
+## Roadmap
+
+| # | Slice | Size | Wave |
+|---|---|---|---|
+| 1 | `pbw-w1-wishlist-100-paper` — author + publish the Block Wishlist 100 Paper (100 deduped candidates, full feasibility notes, showcases existing blocks) | large | 1 (round 1) |
+| 2 | `pbw-w1-reader-resolver-fix` — public reader wires ref/codelist resolvers; raw-id leak fixed | small | 1 (round 1) |
+| 3 | `pbw-w1-broken-blocks-fix` — list-variant alias map (3 surfaces) + blockquote block birth + quote alias; 77 prod placeholders → 0 | medium | 1 (round 1) |
+| 4 | `pbw-w1-stale-comment-truth` — registry.ts "46" + run-convert.js picker comments corrected to code truth | small | 1 (round 1) |
+| 5 | `pbw-w1-usefulness-review-paper` — the Review: categorize all 100, rank S/A/B/C by the D5 rubric, file S-tier bp tasks | large | 1 (round 2, after slice 1) |
+| 6 | S-tier build wave(s): static/scaffy-path candidates first | — | 2+ |
+| 7 | Aggregate-resolver alignment (`tr-agg-resolver-wave`, pre-existing open task) unblocks gauge/dashboard + live-data S-tier candidates | — | 2+ |
+| 8 | `pbw-backlog-plugin-block-seam` — block-registration seam so plugins can own block types | — | future |
+| 9 | `pbw-backlog-scaffy-deep-recipes` — scaffy coverage for Studio 4-way lockstep, SDK builders, hydration wiring | — | future |
+
+## Wave log
