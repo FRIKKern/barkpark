@@ -443,6 +443,87 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert {:ok, :failed} = Deploy.run(d.id)
       assert Repo.get(Deployment, d.id).failure_reason =~ "did not finish in time"
     end
+
+    # stw6 (charter D-restart-grace) — THE grenade this slice defuses. On busy
+    # days an api/** merge auto-deploys the box and the post-merge restart bounces
+    # `barkpark.service` mid-build, so a poll or two comes back {:error, _} (the box
+    # is briefly unreachable) BEFORE the surviving on-box build finishes. The loop
+    # used to fail the row on the FIRST such blip — and a failed row is
+    # unresurrectable, so the build could never settle live. With the restart-grace,
+    # a bounded run of unreachable polls is tolerated: the box comes back, the walk
+    # completes, and the row settles LIVE.
+    test "a restart-shaped error gap followed by a real success settles the row live" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Test grace budget is 3; two unreachable polls (< grace) then the box is
+      # back and walks all the way to succeeded.
+      FakeBoxRelay.program(
+        polls: [
+          {:error, :instance_error},
+          {:error, :instance_error},
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert final.stage == "RETIRE"
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # The other side of the same coin: a GENUINELY dead box (never reachable again)
+    # must still fail honestly — the grace is bounded, not infinite. grace+1
+    # consecutive unreachable polls exhaust the budget and the row fails with the
+    # box's own unreachable reason, exactly as it did before the grace existed.
+    test "a box that stays unreachable past the grace budget still fails honestly" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Every poll is unreachable and the last reply repeats, so the loop only ever
+      # sees {:error, _} — grace (3) is spent, the 4th error fails the row.
+      FakeBoxRelay.program(polls: [{:error, :instance_error}])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      # The honest unreachable reason — NOT a "did not finish in time" build-budget
+      # timeout: the build budget (`left`) was never spent on the blips.
+      assert final.failure_reason =~ "unreachable"
+      assert final.failure_reason =~ bp.slug
+      # The live pointer never moved — a dead box ships nothing.
+      assert is_nil(Repo.get(Site, site.id).current_deployment_id)
+    end
+
+    # The grace budget is SEPARATE from the build budget AND resets on every poll
+    # that reaches the box. Two bursts of 2 errors (4 total > grace 3) would exhaust
+    # a shared/non-resetting budget — but a single good poll BETWEEN them refreshes
+    # the grace, so the deploy survives both restarts and settles live.
+    test "a reachable poll between two error bursts refreshes the grace budget" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          {:error, :instance_error},
+          {:error, :instance_error},
+          # A reachable, still-running poll — this is what resets grace to full.
+          FakeBoxRelay.walk(~w(PLAN BUILD)),
+          {:error, :instance_error},
+          {:error, :instance_error},
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
   end
 
   describe "rollback/2 — the sub-second symlink flip (charter D5)" do
