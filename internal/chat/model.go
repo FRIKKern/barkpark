@@ -70,9 +70,17 @@ type Model struct {
 	// wfExpanded is the Enter-opened two-pane detail; wfPhase is the selected
 	// phase POSITION in the journey's Phases slice. KeyRunes always compose —
 	// typing never moves panel selection (it snaps focus back to the composer).
-	focus      focusZone
-	wfExpanded bool
-	wfPhase    int
+	//
+	// wfAgentDetail is the THIRD focus level (wave session-card charter D30):
+	// Enter on a phase drills into the SELECTED agent's detail pane; wfAgent is
+	// that agent's index within the phase (clamped to workflowDetailMaxAgents).
+	// It is a bool + an index, NOT a depth int — the byte-locked s5 phase tests
+	// key off wfExpanded/wfPhase verbatim, so the agent level rides additively.
+	focus         focusZone
+	wfExpanded    bool
+	wfPhase       int
+	wfAgentDetail bool
+	wfAgent       int
 
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
 	mode         string
@@ -266,6 +274,8 @@ func (m Model) openSession(s Session) Model {
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfPhase = 0
+	m.wfAgentDetail = false
+	m.wfAgent = 0
 	m.pickErr = ""
 	return m
 }
@@ -312,6 +322,8 @@ func (m Model) leaveSession() (Model, tea.Cmd) {
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfPhase = 0
+	m.wfAgentDetail = false
+	m.wfAgent = 0
 	return m, tea.Batch(patch, m.loadSessionsCmd())
 }
 
