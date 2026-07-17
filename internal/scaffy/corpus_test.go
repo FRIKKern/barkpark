@@ -154,14 +154,14 @@ func countCorpus(t *testing.T) census {
 func TestCorpusCensus(t *testing.T) {
 	want := census{
 		create:           14,
-		insertAfterFirst: 11,
+		insertAfterFirst: 12, // +1 2026-07-17: ensure-cli-noun op 2 (usageBuiltins)
 		insertAfterLast:  1,
 		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             24,
+		mark:             25, // +1: op 2's MARK "ensure-cli-noun-usage"
 		markVirtual:      2,
-		assertFile:       55,
+		assertFile:       56, // +1: op 2's usage.go CONTAINS postcondition
 		assertCmd:        28,
 		assertCmdTierCI:  10,
 	}
