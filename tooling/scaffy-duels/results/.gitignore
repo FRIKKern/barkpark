@@ -1,0 +1,4 @@
+# ephemeral duel run artifacts — written by run-cell.sh / the run-duels slice
+*.json
+RUNLOG.jsonl
+!.gitkeep
