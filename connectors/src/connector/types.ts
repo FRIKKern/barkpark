@@ -465,6 +465,19 @@ export interface Connector<TPayload = unknown> {
     ctx: TenantContext,
   ): Promise<WorkspaceId | null>;
   /**
+   * The inbound message's own timestamp, in epoch ms — the moment the human spoke,
+   * NOT when the bridge processed it. Generic by design: the core loop reads it to
+   * feed durable, channel-specific policy state (WhatsApp's 24-hour customer-service
+   * window) without naming a channel — the connector alone knows how to dig the
+   * vendor timestamp out of its own payload.
+   *
+   * Returns `null` when the payload carries no readable timestamp (a status-only
+   * callback, a shape we cannot parse); the core loop falls back to `Date.now()`
+   * rather than skip the write. Absent on every connector whose policy state does
+   * not care when the inbound landed.
+   */
+  inboundTimestampMs?(payload: TPayload): number | null;
+  /**
    * Start the inbound transport for a mounted adapter — Telegram's getUpdates
    * poll loop, and in P3 Discord's gateway socket. Webhook-driven connectors
    * (Slack, Teams) leave it undefined: the transport IS the HTTP request.
