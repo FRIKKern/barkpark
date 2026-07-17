@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 7
+const corpusFileCount = 12
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -46,7 +46,7 @@ func corpusFiles(t *testing.T) []string {
 	return paths
 }
 
-// TestCorpusFileCount: exactly 7 .scaffy files, asserted before anything
+// TestCorpusFileCount: exactly 12 .scaffy files, asserted before anything
 // else touches their bytes.
 func TestCorpusFileCount(t *testing.T) {
 	corpusFiles(t)
