@@ -19,12 +19,11 @@ import { Finder } from '../finder/finder'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
-import type { UpstreamSearchJson } from '../finder/lib/find-shape'
 import type { FindResponse, SearchEngine, PopularQuery } from '../finder/lib/find'
 import { DOC_TYPES } from '../finder/lib/find'
 import { DATASET } from '../finder/lib/config'
-import { buildPrefixSeed } from '../finder/lib/prefix-seed'
-import type { PrefixSeed, SeedDoc } from '../finder/lib/prefix-seed'
+import { shapeSeed } from '../lib/shape-seed'
+import type { SeedState, RawSeed } from '../lib/shape-seed'
 
 // Barkpark API ORIGIN — the flat/anonymous search routes live at the bare
 // origin (a SCOPED apiUrl 404s the flat route, same class the graph handles).
@@ -216,50 +215,9 @@ function installInterceptor(): void {
 
 installInterceptor()
 
-interface SeedState {
-  initialData: FindResponse | null
-  initialSeed: PrefixSeed | null
-}
-
-// The build bakes `initialData` as the RAW browse upstream JSON (`documents`,
-// `count`, …) — the exact payload `handleFind` receives over HTTP — NOT an
-// already-shaped FindResponse. The finder reads `initialData.hits`, so the
-// island MUST run the same `shapeFindResponse` mapping the live route uses
-// (browse, engine=indx — the engine the seed was baked with). Without this the
-// first-paint browse landing renders EMPTY (raw JSON has no `.hits`) and the
-// finder skips its refetch on the matching seed key.
-// The build (`src/lib/bp.ts` → `browseSeed`) bakes `initialSeed` as the RANKED
-// CORPUS — a flat `SeedDoc[]` — NOT an already-built `PrefixSeed`. The island is
-// what "turns [that] ranked corpus into an in-browser prefix index" (per the
-// baker's own contract), so `shapeSeed` MUST run `buildPrefixSeed` here. Passing
-// the raw array straight through made `lookupPrefix` read `seed.index[key]` on
-// an Array (no `.index`) → `Cannot read properties of undefined` on the first
-// 1–2 char keystroke, which unmounted the whole island ("everything disappears").
-interface RawSeed {
-  initialData: UpstreamSearchJson | null
-  initialSeed: SeedDoc[] | null
-}
-
-function shapeSeed(raw: RawSeed | null): SeedState {
-  if (!raw) return { initialData: null, initialSeed: null }
-  const initialData = raw.initialData
-    ? shapeFindResponse(raw.initialData, {
-        engine: 'indx',
-        engineUsed: 'indx',
-        browse: true,
-        cache: false,
-        upstreamMs: null,
-      })
-    : null
-  return {
-    initialData,
-    // Build the in-browser prefix index from the ranked corpus the build baked.
-    initialSeed:
-      raw.initialSeed && raw.initialSeed.length > 0
-        ? buildPrefixSeed(raw.initialSeed)
-        : null,
-  }
-}
+// `shapeSeed` + its `RawSeed`/`SeedState` types moved to `../lib/shape-seed` —
+// a React-free module unit-tested by `shape-seed.test.ts` so the seed-shape
+// contract (baked `SeedDoc[]` → built `PrefixSeed`) can't silently regress.
 
 export default function FinderIsland() {
   // The 0ms head-start seed + first-paint browse are baked into a static

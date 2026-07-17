@@ -1,0 +1,41 @@
+name: astro-search-finder-test
+
+# Render-contract gate for the astro-search flagship finder. The vendored finder
+# is byte-identity-gated (astro-finder-drift.yml), but the Astro GLUE that feeds
+# it — `FinderIsland` + `shape-seed` — had NO gate, and a shape mismatch there
+# shipped the "everything disappears on keystroke" bug green (the parity harness
+# only compares query results, never renders/exercises the seam). This job runs
+# the React-free `node --test` contract specs that assert the baked `SeedDoc[]`
+# seed becomes a real `PrefixSeed` and `lookupPrefix` never throws — the exact
+# regression, caught at the seam. Dep-free: no `npm ci`, no browser.
+#
+# Gates a PR only once registered as a required check in branch protection
+# (a human GitHub step); until then it still reds the PR page on failure.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "templates/astro-search-starter/src/**"
+      - ".github/workflows/astro-search-finder-test.yml"
+  pull_request:
+    paths:
+      - "templates/astro-search-starter/src/**"
+      - ".github/workflows/astro-search-finder-test.yml"
+
+concurrency:
+  group: astro-search-finder-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  finder-contract:
+    name: Finder seed-shape contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run the finder contract tests
+        working-directory: templates/astro-search-starter
+        run: node --test 'src/**/*.test.ts'

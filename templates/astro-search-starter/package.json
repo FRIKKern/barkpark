@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The flagship search site, Astro edition — statically generated PortableDoc pages, a baked corpus graph, and browser-direct live search over any Barkpark dataset.",
+  "description": "The flagship search site, Astro edition \u2014 statically generated PortableDoc pages, a baked corpus graph, and browser-direct live search over any Barkpark dataset.",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@astrojs/react": "^4.4.0",
