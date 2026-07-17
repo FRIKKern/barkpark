@@ -434,7 +434,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	epic := &EpicGoal{ID: "task-x", Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5,
 		WaveStatus: "wave: building 5 slices"}
-	lines := workflowCardLines(80, &wf, epic)
+	lines := workflowCardLines(80, &wf, epic, 0)
 	if len(lines) != 2 {
 		t.Fatalf("a workflow row with an epic goal grows two lines, got %d:\n%v", len(lines), lines)
 	}
@@ -461,7 +461,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	// A terminal wave settles honestly to its lifecycle word, never a stuck
 	// phase — straight off s1's shared interrupted fold.
 	interrupted := loadSharedSummaries(t)["epic_cycle_interrupted"]
-	iout := strings.Join(workflowCardLines(80, &interrupted, nil), "\n")
+	iout := strings.Join(workflowCardLines(80, &interrupted, nil, 0), "\n")
 	if !strings.Contains(iout, "interrupted") {
 		t.Errorf("an interrupted wave must render 'interrupted', got:\n%s", iout)
 	}
@@ -469,13 +469,78 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 		t.Errorf("the dead-frontier tick must render the interrupted glyph, got:\n%s", iout)
 	}
 	// No epic goal → exactly one line (no fabricated goal line).
-	if got := len(workflowCardLines(80, &interrupted, nil)); got != 1 {
+	if got := len(workflowCardLines(80, &interrupted, nil, 0)); got != 1 {
 		t.Errorf("a goal-less workflow row grows exactly one line, got %d", got)
 	}
 
 	// A nil summary adds nothing — the minimalism contract.
-	if workflowCardLines(80, nil, epic) != nil {
+	if workflowCardLines(80, nil, epic, 0) != nil {
 		t.Fatal("a nil workflow summary must add no lines (even with a stray epic)")
+	}
+}
+
+// TestWorkflowTickLineNeedsYouPill is criterion 2: on a live workflow row the
+// needs-you pill REPLACES the status word when PendingApprovals>0 (needs-you >
+// working, single-badge — one word slot, never a new line, never side-by-side);
+// a terminal wave is never needs-you (its lifecycle word wins even with pending);
+// and a plain workflow row (pending=0) is unchanged.
+func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json") // live, phase word "Build"
+
+	pill := workflowTickLine(80, &wf, 2)
+	if !strings.Contains(pill, "needs you") || !strings.Contains(pill, "⏸") {
+		t.Fatalf("a live workflow with a pending gate must show the needs-you pill, got:\n%q", pill)
+	}
+	if strings.Contains(pill, "\n") {
+		t.Fatalf("the needs-you pill must never add a line (single-badge law), got:\n%q", pill)
+	}
+	if strings.Contains(pill, "Build") {
+		t.Fatalf("needs-you > working — the pill must REPLACE the live status word, got:\n%q", pill)
+	}
+	// the fleet counter still rides alongside (the pill only swaps the word slot).
+	if !strings.Contains(pill, "13/17") {
+		t.Fatalf("the pill must not eat the settled/total counter, got:\n%q", pill)
+	}
+
+	// pending=0 → the ordinary status word, no pill.
+	plain := workflowTickLine(80, &wf, 0)
+	if strings.Contains(plain, "needs you") {
+		t.Fatalf("no pending gate must show no pill, got:\n%q", plain)
+	}
+	if !strings.Contains(plain, "Build") {
+		t.Fatalf("without a gate the live phase word must render, got:\n%q", plain)
+	}
+
+	// a terminal wave is never needs-you even with a stale pending count.
+	term := loadSharedSummaries(t)["epic_cycle_interrupted"]
+	tline := workflowTickLine(80, &term, 3)
+	if strings.Contains(tline, "needs you") {
+		t.Fatalf("a terminal wave must never show needs-you, got:\n%q", tline)
+	}
+	if !strings.Contains(tline, "interrupted") {
+		t.Fatalf("a terminal wave keeps its lifecycle word, got:\n%q", tline)
+	}
+}
+
+// TestPickerRowSurfacesNeedsYou proves the pill flows through the picker row: a
+// workflow session with pending approvals shows the needs-you pill on its tick
+// line, while a plain (workflow-less) row stays byte-identical to the legacy
+// render regardless of its pending count.
+func TestPickerRowSurfacesNeedsYou(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json")
+	m := Model{width: 80, sessions: []SessionSummary{
+		{ID: "plain", Title: "just a chat", MessageCount: 4, PendingApprovals: 1},
+		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, PendingApprovals: 2, Workflow: &wf},
+	}}
+	rows := m.pickerRows()
+	if !strings.Contains(rows[2], "needs you") {
+		t.Fatalf("a workflow row with pending approvals must surface the pill, got:\n%q", rows[2])
+	}
+	// a plain row never grows a tick line — byte-identical to legacy even with a
+	// pending count (the pill is a WORKFLOW-row affordance only).
+	if rows[1] != legacyPickerRow(m.sessions[0]) {
+		t.Fatalf("a plain row must stay byte-identical to legacy, got:\n%q\nwant:\n%q",
+			rows[1], legacyPickerRow(m.sessions[0]))
 	}
 }
 

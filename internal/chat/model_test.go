@@ -785,3 +785,155 @@ func TestWorkflowCursorReachesPinnedRunning(t *testing.T) {
 		t.Fatalf("the landed cursor must name the pinned running agent at wire 17, got:\n%s", pane)
 	}
 }
+
+// ── the needs-you cockpit (wsc-needs-you) ────────────────────────────────────
+
+// liveApprovalCard is a live, answerable approval card row (request_id + pending).
+func liveApprovalCard(seq int, rid string) Message {
+	return Message{
+		Seq: seq, Role: "approval", SourceMarkdown: "run rm -rf?",
+		Metadata: map[string]any{"request_id": rid, "approval_status": "pending"},
+	}
+}
+
+// needsYouState is a live workflow whose session is ALSO blocked on a pending
+// answerable card — the needs-you cockpit state.
+func needsYouState(t *testing.T) State {
+	t.Helper()
+	st := liveWorkflowState(t)
+	st.Messages = []Message{liveApprovalCard(4, "req-42")}
+	st.LastSeq = 4
+	return st
+}
+
+// TestNeedsYouStateBothWays is the state-machine proof BOTH directions
+// (criterion 0): a live workflow + a pending card flips the collapsed strip AND
+// the expanded panel to the needs-you banner; answering the card (its
+// approval_status leaving "pending") clears the state and the strip returns to
+// its ordinary counter cluster. Truth from state the TUI already tracks — zero
+// new wire.
+func TestNeedsYouStateBothWays(t *testing.T) {
+	m := wfTestModel(t, needsYouState(t))
+	if !m.needsYou() {
+		t.Fatal("a live workflow blocked on a pending card must be needs-you")
+	}
+	strip := strings.Join(m.workflowPanelLines(), "\n")
+	if !strings.Contains(strip, "needs you") || !strings.Contains(strip, "⏸") {
+		t.Fatalf("the collapsed strip must flip to the needs-you banner, got:\n%s", strip)
+	}
+	if strings.Contains(strip, "agents done") {
+		t.Fatalf("the needs-you strip must REPLACE the counter cluster (single state), got:\n%s", strip)
+	}
+
+	// the expanded panel carries the SAME banner above the phase panes.
+	me := wfTestModel(t, needsYouState(t))
+	me.focus = focusWorkflow
+	me.wfExpanded = true
+	expanded := me.workflowPanelLines()
+	joined := strings.Join(expanded, "\n")
+	if !strings.Contains(joined, needsYouBanner) {
+		t.Fatalf("the expanded panel must render the needs-you banner, got:\n%s", joined)
+	}
+
+	// clears on answer: the card leaving "pending" empties the answer ring, so
+	// needs-you drops and the strip returns to the ordinary counters.
+	ma := wfTestModel(t, needsYouState(t))
+	ma.st.Messages[0].Metadata["approval_status"] = "allow"
+	if ma.needsYou() {
+		t.Fatal("an answered card must clear the needs-you state")
+	}
+	cleared := strings.Join(ma.workflowPanelLines(), "\n")
+	if strings.Contains(cleared, "needs you") {
+		t.Fatalf("a cleared strip must drop the needs-you banner, got:\n%s", cleared)
+	}
+	if !strings.Contains(cleared, "agents done") {
+		t.Fatalf("a cleared strip must return to the agents-done counter, got:\n%s", cleared)
+	}
+}
+
+// TestNeedsYouEnterJumps is criterion 1: Enter from the focused workflow strip in
+// the needs-you state jumps the viewport (Home-style pinned scroll, clamped) to
+// the focused pending card via the ONE shared transcript accumulator, then
+// returns focus to the composer and collapses the panel — so the composer's Enter
+// sends next. It also proves answerFocused now resets focus (the closed
+// asymmetry) and that a plain composer Enter still sends.
+func TestNeedsYouEnterJumps(t *testing.T) {
+	// Card sits MID-transcript (10 rows before, 30 after) so the jump is a genuine
+	// pinned-top ABOVE the bottom — not merely clamped to follow.
+	st := liveWorkflowState(t)
+	msgs := make([]Message, 0, 41)
+	for i := 1; i <= 10; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: "scrollable line"})
+	}
+	msgs = append(msgs, liveApprovalCard(11, "req-42"))
+	for i := 12; i <= 41; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: "scrollable line"})
+	}
+	st.Messages = msgs
+	st.LastSeq = 41
+	m := wfTestModel(t, st)
+	m.focus = focusWorkflow
+
+	// the shared accumulator locates the card's block start (no forked walk).
+	_, start := m.transcriptBuild(m.width, "req-42")
+	if start <= 0 {
+		t.Fatal("the accumulator must locate the mid-transcript card's block start")
+	}
+	maxTop := m.maxScrollTop()
+	want := start
+	if want > maxTop {
+		want = maxTop
+	}
+	if want >= maxTop {
+		t.Fatalf("test setup: the card must pin ABOVE the bottom (start=%d maxTop=%d)", start, maxTop)
+	}
+
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if got.scroll != want {
+		t.Fatalf("needs-you Enter must pin scroll Home-style to the card (clamped), got %d want %d", got.scroll, want)
+	}
+	if got.scroll < 0 {
+		t.Fatal("needs-you Enter must leave follow mode (a pinned top, not -1)")
+	}
+	if got.focus != focusComposer {
+		t.Fatalf("needs-you Enter must return focus to the composer, got %v", got.focus)
+	}
+	if got.wfExpanded || got.wfAgentDetail {
+		t.Fatal("needs-you Enter must not open the panel detail")
+	}
+
+	// composer Enter still SENDS (clears the draft) once focus is back home.
+	got.input = "hello"
+	ns, _ := got.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if ns.(Model).input != "" {
+		t.Fatal("composer Enter after the jump must send (clearing the draft), not expand")
+	}
+
+	// answerFocused resets focus too — the closed asymmetry.
+	ma := wfTestModel(t, needsYouState(t))
+	ma.focus = focusWorkflow
+	nm2, _ := ma.answerFocused("allow")
+	if nm2.(Model).focus != focusComposer {
+		t.Fatal("answering a card must return focus to the composer (asymmetry closed)")
+	}
+}
+
+// TestNeedsYouEnterAheadOfExpand proves the needs-you branch sits AHEAD of the
+// expand branch: with a pending gate present, Enter jumps rather than expanding
+// the two-pane detail (the pending gate is the more urgent verb).
+func TestNeedsYouEnterAheadOfExpand(t *testing.T) {
+	m := wfTestModel(t, needsYouState(t))
+	m.focus = focusWorkflow
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if nm.(Model).wfExpanded {
+		t.Fatal("needs-you Enter must jump, never expand the detail")
+	}
+	// without the gate, the same key expands as before (the ordinary grammar).
+	m2 := wfTestModel(t, liveWorkflowState(t))
+	m2.focus = focusWorkflow
+	nm2, _ := m2.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !nm2.(Model).wfExpanded {
+		t.Fatal("without a pending gate, Enter must still expand the detail")
+	}
+}
