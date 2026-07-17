@@ -251,9 +251,20 @@ Five slices filed and built; the merge train landed PARTIALLY and the log was ne
 - Ledger drift: s1/s2/s5 sat merged-but-open with lapsed claims; the stale duplicate charter PR
   **#3823** (pre-D16, would revert D16) was closed as superseded-by-#3826 at Wave-2 Decide.
 
-### Wave 2 (2026-07-17) — plan (building)
+### Wave 2 (2026-07-17) — s3 LANDED (#3865); backlog deferred to round 2
 Decide reconciled with reality (both the lead note AND the ledger were wrong: s3 is built, not
 unbuilt). This wave lands the stranded s3 (Path B salvage, verified 500/0 + byte-identical
 golden on today's main) and pulls the two highest-value honesty-ceiling backlog items
 (real-fixtures round-2, workflow-sse round-2 — both after s3 merges). Decisions D17–D21 folded
 above. Wave Paper: `wsc-wave-2026-07-17`. Review will append the debrief.
+
+
+**Outcome (steward close-out 2026-07-17):** wsc-s3 LANDED — **#3865 MERGED** to origin/main.
+The reviewed salvage tree (852e21b44) was based on a stale main (5518decd8); origin had advanced
+past site-spawner W6 (deploy_runner.ex), so a naive merge would have reverted W6. Steward
+cherry-picked the clean 8-file/1055-line s3 commit onto current origin/main (`wsc-s3-land`),
+Elixir Test green, Sobelow verified stale-baseline noise (router.ex CSRF only — s3 touches no
+router/pipeline file). `task-8c92a966b28eda80` closed done (6/6 criteria; #3865 evidence).
+D18 confirmed live: s3 is the API producer the merged s4/s5 Go card waited on — three-surface
+truth now complete. Stale pre-D16 charter dup #3823 CLOSED. Backlog round-2 (wsc-bl-real-fixtures,
+wsc-bl-workflow-sse) NOT built this wave — they serialize behind s3 and are a future round.
