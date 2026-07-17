@@ -1,0 +1,278 @@
+{
+  "asserts": [
+    {
+      "index": 0,
+      "kind": "file-contains",
+      "line": 378,
+      "path": "internal/pdrender/duelmark.go",
+      "status": "pass",
+      "text": "func (duelmarkRenderer) Render(b Block, ctx RenderCtx) []string"
+    },
+    {
+      "index": 1,
+      "kind": "file-contains",
+      "line": 379,
+      "path": "internal/pdrender/duelmark_test.go",
+      "status": "pass",
+      "text": "func TestDuelmarkRenderer(t *testing.T)"
+    },
+    {
+      "index": 2,
+      "kind": "file-contains",
+      "line": 380,
+      "path": "internal/pdrender/pdrender.go",
+      "status": "pass",
+      "text": "MARK:go-registry-duelmark"
+    },
+    {
+      "index": 3,
+      "kind": "file-contains",
+      "line": 381,
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "pass",
+      "text": "MARK:js-emitter-duelmark"
+    },
+    {
+      "index": 4,
+      "kind": "file-contains",
+      "line": 382,
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "pass",
+      "text": "MARK:js-map-duelmark"
+    },
+    {
+      "index": 5,
+      "kind": "file-contains",
+      "line": 383,
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "pass",
+      "text": "MARK:js-case-duelmark"
+    },
+    {
+      "index": 6,
+      "kind": "file-contains",
+      "line": 384,
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "pass",
+      "text": "toHaveLength(47)"
+    },
+    {
+      "index": 7,
+      "kind": "file-contains",
+      "line": 385,
+      "path": "api/lib/barkpark/portable_doc/render/compose.ex",
+      "status": "pass",
+      "text": "MARK:ex-compose-duelmark"
+    },
+    {
+      "index": 8,
+      "kind": "file-contains",
+      "line": 386,
+      "path": "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+      "status": "pass",
+      "text": "MARK:parity-input-duelmark"
+    },
+    {
+      "index": 9,
+      "kind": "file-contains",
+      "line": 387,
+      "path": "scripts/pd-parity-completeness.sh",
+      "status": "pass",
+      "text": "EXPECTED_COUNT=47"
+    },
+    {
+      "index": 10,
+      "kind": "file-contains",
+      "line": 388,
+      "path": "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs",
+      "status": "pass",
+      "text": "== 47"
+    },
+    {
+      "index": 11,
+      "kind": "cmd",
+      "line": 395,
+      "status": "pass",
+      "text": "go vet ./internal/pdrender/..."
+    },
+    {
+      "index": 12,
+      "kind": "cmd",
+      "line": 396,
+      "status": "pass",
+      "text": "CC=/usr/bin/clang go build ./internal/pdrender/"
+    },
+    {
+      "index": 13,
+      "kind": "cmd",
+      "line": 397,
+      "status": "pass",
+      "text": "go test ./internal/pdrender/ -run TestDuelmarkRenderer -count=1"
+    },
+    {
+      "index": 14,
+      "kind": "cmd",
+      "line": 403,
+      "status": "pass",
+      "text": "cd js && pnpm install && pnpm build"
+    },
+    {
+      "index": 15,
+      "kind": "cmd",
+      "line": 404,
+      "status": "pass",
+      "text": "cd js/packages/react && npx tsc --noEmit"
+    },
+    {
+      "index": 16,
+      "kind": "cmd",
+      "line": 405,
+      "status": "pass",
+      "text": "cd js/packages/react && npx vitest run"
+    },
+    {
+      "detail": "TIER ci — deferred to the PR, never run locally (D38)",
+      "index": 17,
+      "kind": "cmd",
+      "line": 406,
+      "status": "deferred",
+      "text": "cd api && mix test test/barkpark/portable_doc/render_test.exs",
+      "tier": "ci"
+    },
+    {
+      "index": 18,
+      "kind": "cmd",
+      "line": 414,
+      "status": "pass",
+      "text": "cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity"
+    },
+    {
+      "index": 19,
+      "kind": "file-exists",
+      "line": 415,
+      "path": "api/test/support/fixtures/pd-parity/duelmark.golden.json",
+      "status": "pass"
+    },
+    {
+      "index": 20,
+      "kind": "file-exists",
+      "line": 416,
+      "path": "js/packages/react/tests/fixtures/pd-golden/duelmark.golden.json",
+      "status": "pass"
+    },
+    {
+      "index": 21,
+      "kind": "cmd",
+      "line": 417,
+      "status": "pass",
+      "text": "bash scripts/pd-parity-completeness.sh"
+    },
+    {
+      "index": 22,
+      "kind": "cmd",
+      "line": 418,
+      "status": "pass",
+      "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs"
+    }
+  ],
+  "command": "Add PortableDoc Block Type",
+  "direction": "add",
+  "duration_ms": 27982,
+  "ok": true,
+  "ops": [
+    {
+      "index": 0,
+      "kind": "create",
+      "line": 102,
+      "path": "internal/pdrender/duelmark.go",
+      "status": "created"
+    },
+    {
+      "index": 1,
+      "kind": "create",
+      "line": 128,
+      "path": "internal/pdrender/duelmark_test.go",
+      "status": "created"
+    },
+    {
+      "index": 2,
+      "kind": "insert-after-first",
+      "line": 170,
+      "mark": "go-registry-duelmark",
+      "path": "internal/pdrender/pdrender.go",
+      "status": "injected"
+    },
+    {
+      "index": 3,
+      "kind": "insert-after-first",
+      "line": 188,
+      "mark": "js-emitter-duelmark",
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "injected"
+    },
+    {
+      "index": 4,
+      "kind": "insert-after-first",
+      "line": 211,
+      "mark": "js-map-duelmark",
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "injected"
+    },
+    {
+      "index": 5,
+      "kind": "insert-after-first",
+      "line": 229,
+      "mark": "js-case-duelmark",
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "injected"
+    },
+    {
+      "index": 6,
+      "kind": "replace",
+      "line": 249,
+      "mark": "js-count-duelmark",
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "injected"
+    },
+    {
+      "index": 7,
+      "kind": "insert-after-first",
+      "line": 274,
+      "mark": "ex-compose-duelmark",
+      "path": "api/lib/barkpark/portable_doc/render/compose.ex",
+      "status": "injected"
+    },
+    {
+      "index": 8,
+      "kind": "insert-after-first",
+      "line": 324,
+      "mark": "parity-input-duelmark",
+      "path": "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+      "status": "injected"
+    },
+    {
+      "index": 9,
+      "kind": "replace",
+      "line": 344,
+      "mark": "parity-count-script-duelmark",
+      "path": "scripts/pd-parity-completeness.sh",
+      "status": "injected"
+    },
+    {
+      "index": 10,
+      "kind": "replace",
+      "line": 362,
+      "mark": "parity-count-test-duelmark",
+      "path": "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs",
+      "status": "injected"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-flagship--C--1/.scaffy/receipts/block-type--duelmark--d0a2dcc34e7d.json",
+  "vars": {
+    "BlockName": "duelmark",
+    "CountAfter": "47",
+    "CountBefore": "46",
+    "ParityCountAfter": "47",
+    "ParityCountBefore": "46"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "cell": "add-error-shape--B--3",
+  "chore": "add-error-shape",
+  "arm": "B",
+  "rep": "3",
+  "cap_usd": 3.0,
+  "worktree": "/private/tmp/scaffy-duel-add-error-shape--B--3",
+  "duration_ms": 55000,
+  "warm_ms": 91000,
+  "meter": {
+    "total_cost_usd": 0.5540250000000001,
+    "usage": {
+      "input_tokens": 16,
+      "cache_creation_input_tokens": 59184,
+      "cache_read_input_tokens": 556860,
+      "output_tokens": 2121,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 59184,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 115,
+          "cache_read_input_tokens": 82403,
+          "cache_creation_input_tokens": 544,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 544
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "source": "claude-cli-json"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [],
+    "tier_ci_forced": [],
+    "agent_gate": [
+      {
+        "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+        "rc": 0
+      }
+    ],
+    "diff_sha256": "a0530fb9bb61143295dfb4527e4e1abc27ab6831aaa9bab236ae4e0201a5c9c6",
+    "reversible": false
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "asserts": null,
+  "command": "Add Oban Cron Worker",
+  "direction": "add",
+  "duration_ms": 0,
+  "ok": true,
+  "ops": [
+    {
+      "index": 2,
+      "kind": "replace",
+      "line": 0,
+      "mark": "oban-cron-duel-smoke-reaper",
+      "path": "api/config/config.exs",
+      "status": "restored"
+    },
+    {
+      "index": 1,
+      "kind": "create",
+      "line": 0,
+      "path": "api/test/barkpark/workers/duel_smoke_reaper_test.exs",
+      "status": "deleted"
+    },
+    {
+      "index": 0,
+      "kind": "create",
+      "line": 0,
+      "path": "api/lib/barkpark/workers/duel_smoke_reaper.ex",
+      "status": "deleted"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-add-oban-worker--C--2/.scaffy/receipts/oban-worker--duel-smoke-reaper--d52ee49a7e32.json",
+  "vars": {
+    "CronExpr": "0 4 * * *",
+    "WorkerName": "DuelSmokeReaper"
+  }
+}

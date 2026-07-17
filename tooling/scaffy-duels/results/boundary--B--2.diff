@@ -1,0 +1,108 @@
+diff --git a/internal/agent/report.go b/internal/agent/report.go
+index 1583cf539..d216728a9 100644
+--- a/internal/agent/report.go
++++ b/internal/agent/report.go
+@@ -8,9 +8,11 @@
+ package agent
+ 
+ import (
++	"context"
+ 	"crypto/tls"
+ 	"crypto/x509"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"net/http"
+ 	"os/exec"
+@@ -100,9 +102,25 @@ type CommandRunner interface {
+ // ExecRunner is the production CommandRunner: it runs the argv via os/exec.
+ type ExecRunner struct{}
+ 
+-// Run executes name+args and returns combined stdout+stderr.
++// execRunnerTimeout bounds every ExecRunner.Run call so a stuck approved
++// command (e.g. a wedged `make rebuild`) can never hang the agent forever. It
++// is a var, not a const, so tests can lower it to exercise the timeout path
++// without a real 5-minute wait.
++var execRunnerTimeout = 5 * time.Minute
++
++// Run executes name+args under an internal deadline and returns combined
++// stdout+stderr. The CommandRunner signature and every call site are
++// unchanged — the deadline lives entirely inside Run: a command that outlives
++// execRunnerTimeout is killed and reported as a timeout error instead of
++// blocking the caller indefinitely; a command that finishes normally behaves
++// exactly as a bare exec.Command would.
+ func (ExecRunner) Run(name string, args ...string) (string, error) {
+-	out, err := exec.Command(name, args...).CombinedOutput()
++	ctx, cancel := context.WithTimeout(context.Background(), execRunnerTimeout)
++	defer cancel()
++	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
++	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
++		return string(out), fmt.Errorf("timed out after %s: %s %s", execRunnerTimeout, name, strings.Join(args, " "))
++	}
+ 	return string(out), err
+ }
+ 
+diff --git a/internal/agent/report_test.go b/internal/agent/report_test.go
+index 4650674b7..e28cbc818 100644
+--- a/internal/agent/report_test.go
++++ b/internal/agent/report_test.go
+@@ -7,6 +7,7 @@ import (
+ 	"net/http/httptest"
+ 	"strings"
+ 	"testing"
++	"time"
+ 
+ 	"github.com/FRIKKern/barkpark/internal/cli/setup"
+ )
+@@ -364,6 +365,51 @@ func TestReportJSONFieldNames(t *testing.T) {
+ 	}
+ }
+ 
++// TestExecRunnerRun covers both ExecRunner.Run behaviors: a stuck command is
++// killed by the internal deadline and reported as a timeout instead of
++// hanging forever, while a fast command's happy-path output is unaffected.
++func TestExecRunnerRun(t *testing.T) {
++	orig := execRunnerTimeout
++	defer func() { execRunnerTimeout = orig }()
++
++	t.Run("stuck command times out", func(t *testing.T) {
++		execRunnerTimeout = 50 * time.Millisecond
++
++		done := make(chan struct{})
++		var out string
++		var err error
++		go func() {
++			out, err = ExecRunner{}.Run("sleep", "5")
++			close(done)
++		}()
++
++		select {
++		case <-done:
++		case <-time.After(3 * time.Second):
++			t.Fatal("ExecRunner.Run did not return after the deadline elapsed — it hung")
++		}
++
++		if err == nil {
++			t.Fatalf("err = nil, out = %q, want a timeout error", out)
++		}
++		if !strings.Contains(err.Error(), "timed out after") {
++			t.Errorf("err = %q, want it to mention the timeout", err.Error())
++		}
++	})
++
++	t.Run("fast command happy path unchanged", func(t *testing.T) {
++		execRunnerTimeout = 5 * time.Second
++
++		out, err := ExecRunner{}.Run("echo", "hello")
++		if err != nil {
++			t.Fatalf("err = %v, want nil for a fast command", err)
++		}
++		if strings.TrimSpace(out) != "hello" {
++			t.Errorf("out = %q, want %q", strings.TrimSpace(out), "hello")
++		}
++	})
++}
++
+ // TestGatherReportBackupProbeError surfaces a backup probe error honestly.
+ func TestGatherReportBackupProbeError(t *testing.T) {
+ 	r := gatherReport(ReportConfig{
