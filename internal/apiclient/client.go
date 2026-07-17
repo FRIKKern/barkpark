@@ -782,11 +782,12 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 // GET /v1/data/doc/:dataset/paper/:slug
 func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error) {
 	endpoint := c.scopedURL("/v1/data/doc/" + url.PathEscape(dataset) + "/paper/" + url.PathEscape(slug))
+	params := url.Values{}
+	params.Set("resolve", "tasks")
 	if perspective != "" {
-		params := url.Values{}
 		params.Set("perspective", perspective)
-		endpoint += "?" + params.Encode()
 	}
+	endpoint += "?" + params.Encode()
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {

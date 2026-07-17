@@ -29,9 +29,7 @@ defmodule Barkpark.Content.Papers do
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, SchemaDefinition}
   alias Barkpark.Content.Papers.BlockOps
-  alias Barkpark.PortableDoc.BodyWalk
-  alias Barkpark.PortableDoc.Render
-  alias Barkpark.PortableDoc.Synthesis
+  alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -45,6 +43,51 @@ defmodule Barkpark.Content.Papers do
 
   @doc "The document type discriminator for papers."
   def paper_type, do: @paper_type
+
+  @doc "Return one visibility-safe canonical source for any historical Paper shape."
+  def reader_source(paper, dataset, scope_opts \\ [])
+
+  def reader_source(%Document{} = paper, dataset, scope_opts) do
+    scope_opts = reader_schema_scope(paper, scope_opts || [])
+    had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
+
+    schema =
+      case Content.get_schema(@paper_type, dataset, scope_opts) do
+        {:ok, value} -> value
+        value when is_struct(value, SchemaDefinition) -> value
+        _ -> nil
+      end
+
+    envelope = Envelope.render(paper, schema, CallerContext.anonymous())
+
+    # Envelope promotes every historical block shape to the canonical top-level
+    # key *before* redaction. Read only that destination: falling back through a
+    # redacted legacy `body` here would bypass a private `blocks` field.
+    case Map.get(envelope, "blocks") do
+      blocks when is_list(blocks) ->
+        {:blocks, blocks}
+
+      _ when had_structured_source? ->
+        # A structured source existed but disappeared at the Envelope boundary,
+        # so visibility redaction removed it. `body_html` is a derived cache of
+        # that same prose; falling through would disclose what was just hidden.
+        :empty
+
+      _ ->
+        case envelope["body_html"] do
+          html when is_binary(html) and html != "" -> {:html, HtmlSanitizer.sanitize(html)}
+          _ -> :empty
+        end
+    end
+  end
+
+  def reader_source(_, _dataset, _scope_opts), do: :empty
+
+  defp reader_schema_scope(paper, scope_opts) do
+    scope_opts
+    |> Keyword.put_new(:workspace_id, paper.workspace_id)
+    |> Keyword.put_new(:project_id, paper.project_id)
+  end
 
   @doc """
   Per-doc PubSub topic for a paper, SCOPED to the owning workspace:

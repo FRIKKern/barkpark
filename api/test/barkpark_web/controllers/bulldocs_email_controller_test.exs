@@ -22,9 +22,21 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   # description. Distinct strengths, unique max, rationales ≥20 chars.
   @wall_tag_names ~w(email-proof-deck email-proof-inline email-proof-snapshot)
   @wall_tags [
-    %{"tag" => "email-proof-deck", "strength" => 89, "rationale" => "Primary label: the full-deck email-view fixture paper."},
-    %{"tag" => "email-proof-inline", "strength" => 54, "rationale" => "Secondary label: inline-styled email render coverage."},
-    %{"tag" => "email-proof-snapshot", "strength" => 23, "rationale" => "Tertiary label: pinned task-snapshot email fixture."}
+    %{
+      "tag" => "email-proof-deck",
+      "strength" => 89,
+      "rationale" => "Primary label: the full-deck email-view fixture paper."
+    },
+    %{
+      "tag" => "email-proof-inline",
+      "strength" => 54,
+      "rationale" => "Secondary label: inline-styled email render coverage."
+    },
+    %{
+      "tag" => "email-proof-snapshot",
+      "strength" => 23,
+      "rationale" => "Tertiary label: pinned task-snapshot email fixture."
+    }
   ]
   @wall_description "Email-view fixture paper: full block deck mailed through the wall."
 
@@ -91,5 +103,34 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   test "unknown slug is a plain 404", %{conn: conn} do
     conn = get(conn, "/papers/definitely-not-a-paper/email")
     assert response(conn, 404)
+  end
+
+  test "legacy body_html is sanitized and mailed instead of a blank shell", %{conn: conn} do
+    slug = "legacy-html-email"
+
+    {:ok, _paper} =
+      Barkpark.Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "dataset" => @dataset,
+          "body_html" => "<h1>Legacy is readable</h1><script>alert('no')</script>"
+        })
+      )
+
+    html = conn |> get("/papers/#{slug}/email") |> response(200)
+    assert html =~ "Legacy is readable"
+    refute html =~ "<script"
+    refute html =~ "alert('no')"
+
+    source =
+      conn
+      |> put_req_header("accept", "*/*")
+      |> get("/papers/#{slug}/source")
+      |> json_response(200)
+      |> get_in(["source"])
+
+    assert source["kind"] == "html"
+    assert source["html"] =~ "Legacy is readable"
+    refute source["html"] =~ "<script"
   end
 end
