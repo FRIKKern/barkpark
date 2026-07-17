@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 18
+const corpusFileCount = 19
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -154,16 +154,16 @@ func countCorpus(t *testing.T) census {
 func TestCorpusCensus(t *testing.T) {
 	want := census{
 		create:           17,
-		insertAfterFirst: 25, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper
+		insertAfterFirst: 26, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple
 		insertAfterLast:  1,
 		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             38, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks
+		mark:             39, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route
 		markVirtual:      2,
-		assertFile:       73, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line
-		assertCmd:        34, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's
-		assertCmdTierCI:  13, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's
+		assertFile:       75, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail
+		assertCmd:        35, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
+		assertCmdTierCI:  14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
 	}
 	got := countCorpus(t)
 	if got != want {
