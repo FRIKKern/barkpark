@@ -29,6 +29,14 @@
 // Usage:
 //
 //	go run ./scaffy/seed [--commands scaffy/commands] [--out scaffy/seed/out]
+//	go run ./scaffy/seed --check [--commands scaffy/commands]
+//
+// --check is the drift tripwire (README §"Re-seed after amend"): it derives
+// every payload in memory (NO out/ writes), fetches the served catalog
+// tokenless, compares sha256(source) per command id, prints a table, and
+// exits nonzero on ANY non-MATCH. A command file edited without a re-seed is
+// exactly the drift class this catches. It fails LOUD on any network error —
+// a check that cannot check must never exit 0.
 package main
 
 import (
@@ -36,13 +44,21 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/scaffy"
 )
+
+// defaultServer is the served catalog host when no config.json server field
+// is present. --check reads the PUBLISHED perspective tokenless, so no
+// credential is ever needed for the audit.
+const defaultServer = "https://guerrilla.barkpark.cloud"
 
 // payload is one flat `command` document body for
 // `bp doc create-or-replace command --file <payload>` — the CLI wraps it
@@ -57,6 +73,11 @@ type payload struct {
 	Direction   string        `json:"direction"`
 	Tags        []weightedTag `json:"tags"`
 	Source      string        `json:"source"`
+
+	// File is the source .scaffy path this payload derived from. It is NOT
+	// part of the document body (json:"-") — only used for audit lines and
+	// the --check drift table.
+	File string `json:"-"`
 }
 
 // weightedTag is one entry of the weighted-tags composite the publish wall
@@ -71,7 +92,16 @@ type weightedTag struct {
 func main() {
 	commandsDir := flag.String("commands", "scaffy/commands", "directory of .scaffy corpus files")
 	outDir := flag.String("out", "scaffy/seed/out", "directory to write one <_id>.json payload per command (derived; never committed)")
+	check := flag.Bool("check", false, "audit mode: derive in memory (no out/ writes), fetch the served catalog tokenless, compare sha256(source) per command id, print a table, exit nonzero on any drift")
 	flag.Parse()
+
+	if *check {
+		if err := runCheck(*commandsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "seed --check: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(*commandsDir, *outDir); err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)
@@ -80,53 +110,16 @@ func main() {
 }
 
 func run(commandsDir, outDir string) error {
-	files, err := filepath.Glob(filepath.Join(commandsDir, "*.scaffy"))
+	payloads, err := deriveAll(commandsDir)
 	if err != nil {
 		return err
-	}
-	if len(files) == 0 {
-		return fmt.Errorf("no .scaffy files under %s", commandsDir)
-	}
-	sort.Strings(files)
-
-	// Validate the ENTIRE corpus before emitting anything: a single finding
-	// anywhere refuses the whole run, so a partial seed can never happen.
-	invalid := false
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-		if findings := scaffy.ValidateFile(f, src); len(findings) > 0 {
-			invalid = true
-			for _, fd := range findings {
-				fmt.Fprintf(os.Stderr, "%s\n", fd)
-			}
-		}
-	}
-	if invalid {
-		return fmt.Errorf("validation findings — refusing to seed")
 	}
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
 
-	seen := map[string]string{} // _id -> source file (D46 uniqueness tripwire)
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-		p, err := derive(f, src)
-		if err != nil {
-			return err
-		}
-		if prev, dup := seen[p.ID]; dup {
-			return fmt.Errorf("%s: derived _id %q collides with %s — D46 ids must be unique", f, p.ID, prev)
-		}
-		seen[p.ID] = f
-
+	for _, p := range payloads {
 		out := filepath.Join(outDir, p.ID+".json")
 		body, err := json.MarshalIndent(p, "", "  ")
 		if err != nil {
@@ -136,10 +129,61 @@ func run(commandsDir, outDir string) error {
 			return err
 		}
 		fmt.Printf("ok  %-42s tags=%d  sha256(source)=%x  <- %s\n",
-			p.ID, len(p.Tags), sha256.Sum256(src), f)
+			p.ID, len(p.Tags), sha256.Sum256([]byte(p.Source)), p.File)
 	}
-	fmt.Printf("emitted %d payloads to %s\n", len(files), outDir)
+	fmt.Printf("emitted %d payloads to %s\n", len(payloads), outDir)
 	return nil
+}
+
+// deriveAll runs the whole-corpus pipeline both `run` (emit) and `runCheck`
+// (audit) share: glob → validate the ENTIRE corpus (a single finding anywhere
+// refuses the run, so no partial/inconsistent set is ever produced) → derive →
+// D46 uniqueness dedup. Payloads come back in sorted-filename order.
+func deriveAll(commandsDir string) ([]*payload, error) {
+	files, err := filepath.Glob(filepath.Join(commandsDir, "*.scaffy"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no .scaffy files under %s", commandsDir)
+	}
+	sort.Strings(files)
+
+	invalid := false
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		if findings := scaffy.ValidateFile(f, src); len(findings) > 0 {
+			invalid = true
+			for _, fd := range findings {
+				fmt.Fprintf(os.Stderr, "%s\n", fd)
+			}
+		}
+	}
+	if invalid {
+		return nil, fmt.Errorf("validation findings — refusing to seed")
+	}
+
+	seen := map[string]string{} // _id -> source file (D46 uniqueness tripwire)
+	payloads := make([]*payload, 0, len(files))
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		p, err := derive(f, src)
+		if err != nil {
+			return nil, err
+		}
+		if prev, dup := seen[p.ID]; dup {
+			return nil, fmt.Errorf("%s: derived _id %q collides with %s — D46 ids must be unique", f, p.ID, prev)
+		}
+		seen[p.ID] = f
+		payloads = append(payloads, p)
+	}
+	return payloads, nil
 }
 
 // derive maps one validated .scaffy source to its document payload. Every
@@ -205,6 +249,7 @@ func derive(file string, src []byte) (*payload, error) {
 		Direction:   direction,
 		Tags:        tags,
 		Source:      string(src),
+		File:        file,
 	}, nil
 }
 
@@ -247,6 +292,172 @@ func weightedTags(file, raw string) ([]weightedTag, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: TAGS produced no entries", file)
+	}
+	return out, nil
+}
+
+// runCheck is the drift tripwire. It derives every payload in memory (no out/
+// writes), fetches the served catalog tokenless, compares sha256(source) per
+// command id, prints a table, and returns a non-nil error (→ exit 1) on ANY
+// non-MATCH. Network failures also return an error: a check that cannot check
+// must never report clean.
+func runCheck(commandsDir string) error {
+	payloads, err := deriveAll(commandsDir)
+	if err != nil {
+		return err
+	}
+
+	server := serverURL()
+	served, err := fetchServed(server)
+	if err != nil {
+		// Fail LOUD — an unreachable catalog is not "no drift".
+		return fmt.Errorf("fetch served catalog from %s: %w", server, err)
+	}
+
+	drifted := printCheckTable(os.Stdout, server, payloads, served)
+	if drifted > 0 {
+		return fmt.Errorf("%d command(s) drifted from the served catalog — re-seed the touched commands (see scaffy/seed/README.md)", drifted)
+	}
+	return nil
+}
+
+// row is one line of the --check comparison table.
+type row struct {
+	id        string
+	localSHA  string // "" when the command has no local corpus file (EXTRA)
+	servedSHA string // "" when the command is not served (MISSING)
+	status    string // MATCH | DRIFT | MISSING | EXTRA
+}
+
+// printCheckTable renders the comparison over the union of local and served
+// command ids (sorted) and returns the count of non-MATCH rows.
+func printCheckTable(w io.Writer, server string, payloads []*payload, served map[string]string) int {
+	local := make(map[string]string, len(payloads))
+	for _, p := range payloads {
+		local[p.ID] = fmt.Sprintf("%x", sha256.Sum256([]byte(p.Source)))
+	}
+
+	ids := make([]string, 0, len(local)+len(served))
+	seen := map[string]bool{}
+	for id := range local {
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	for id := range served {
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	sort.Strings(ids)
+
+	rows := make([]row, 0, len(ids))
+	nonMatch := 0
+	for _, id := range ids {
+		ls, hasLocal := local[id]
+		ss, hasServed := served[id]
+		var status string
+		switch {
+		case hasLocal && hasServed && ls == ss:
+			status = "MATCH"
+		case hasLocal && hasServed:
+			status = "DRIFT"
+		case hasLocal && !hasServed:
+			status = "MISSING" // in the repo, not served — never seeded
+		default:
+			status = "EXTRA" // served, no local corpus file backs it
+		}
+		if status != "MATCH" {
+			nonMatch++
+		}
+		rows = append(rows, row{id: id, localSHA: sha8(ls), servedSHA: sha8(ss), status: status})
+	}
+
+	fmt.Fprintf(w, "scaffy catalog drift check — %s (%d local, %d served)\n\n", server, len(local), len(served))
+	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", "ID", "LOCAL", "SERVED", "STATUS")
+	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", strings.Repeat("-", 44), "--------", "--------", "------")
+	for _, r := range rows {
+		fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", r.id, r.localSHA, r.servedSHA, r.status)
+	}
+	fmt.Fprintln(w)
+	if nonMatch == 0 {
+		fmt.Fprintf(w, "%d/%d MATCH — catalog in sync\n", len(rows), len(rows))
+	} else {
+		fmt.Fprintf(w, "%d/%d MATCH, %d DRIFT/MISSING/EXTRA\n", len(rows)-nonMatch, len(rows), nonMatch)
+	}
+	return nonMatch
+}
+
+// sha8 shortens a hex digest to the first 8 chars for the table, rendering a
+// missing side as a dash.
+func sha8(h string) string {
+	if h == "" {
+		return "-"
+	}
+	if len(h) < 8 {
+		return h
+	}
+	return h[:8]
+}
+
+// serverURL resolves the catalog host: the `server` field of
+// ${XDG_CONFIG_HOME:-~/.config}/barkpark/config.json when present and
+// non-empty, else defaultServer. A missing or malformed config is not fatal —
+// the audit falls back to the default host.
+func serverURL() string {
+	var path string
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		path = filepath.Join(xdg, "barkpark", "config.json")
+	} else if home, err := os.UserHomeDir(); err == nil {
+		path = filepath.Join(home, ".config", "barkpark", "config.json")
+	}
+	if path != "" {
+		if raw, err := os.ReadFile(path); err == nil {
+			var cfg struct {
+				Server string `json:"server"`
+			}
+			if json.Unmarshal(raw, &cfg) == nil && strings.TrimSpace(cfg.Server) != "" {
+				return strings.TrimRight(strings.TrimSpace(cfg.Server), "/")
+			}
+		}
+	}
+	return defaultServer
+}
+
+// fetchServed pulls the PUBLISHED command catalog tokenless and returns a map
+// of _id → sha256(source) hex. Every failure path — transport, non-200,
+// unreadable body, malformed JSON — is an error so the check fails loud.
+func fetchServed(server string) (map[string]string, error) {
+	url := server + "/v1/data/query/production/command?limit=100"
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Result struct {
+			Documents []struct {
+				ID     string `json:"_id"`
+				Source string `json:"source"`
+			} `json:"documents"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, fmt.Errorf("decode query envelope: %w", err)
+	}
+	out := make(map[string]string, len(env.Result.Documents))
+	for _, d := range env.Result.Documents {
+		out[d.ID] = fmt.Sprintf("%x", sha256.Sum256([]byte(d.Source)))
 	}
 	return out, nil
 }
