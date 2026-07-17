@@ -290,6 +290,11 @@ export function createWhatsappConnector(
       return resolver(event, ctx);
     },
 
+    // The core loop reads this to feed the durable 24-hour window store (D178).
+    // Pure wiring: the parsing + unix-seconds→ms conversion already live in the
+    // unit-tested whatsappInboundTimestampMs; nothing new is parsed here.
+    inboundTimestampMs: whatsappInboundTimestampMs,
+
     // No `listen`: the transport IS the HTTP request (chat.webhooks.whatsapp).
 
     webhook: {

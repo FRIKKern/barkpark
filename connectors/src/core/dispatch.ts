@@ -87,6 +87,19 @@ export interface DispatchDeps {
   reply(text: string): Promise<void>;
   /** Ack hook (D21) — fired on 202, NOT a channel post. */
   onAck?: () => void | Promise<void>;
+  /**
+   * Persist the moment this inbound arrived, keyed on the RESOLVED workspace and
+   * thread (D178). Generic like {@link onAck}: dispatch never names a channel —
+   * the connector supplies the vendor timestamp via `inboundTimestampMs`, this
+   * hook writes it wherever the channel's policy state lives (WhatsApp's durable
+   * 24-hour window). Optional: connectors with no timestamp-driven policy leave it
+   * unset and no write happens.
+   */
+  recordInbound?(
+    workspaceId: string,
+    threadId: string,
+    atMs: number,
+  ): void | Promise<void>;
   /** Seam for tests. Defaults to the real turn loop. */
   runTurnImpl?: RunTurnResultHook;
   timeoutMs?: number;
@@ -194,6 +207,34 @@ export async function dispatchInbound(
   const workspaceId =
     typeof resolved === "string" && resolved.trim() !== "" ? resolved : null;
   if (!workspaceId) return { status: "dropped_no_tenant" };
+
+  // 1b. The window opened the moment the user spoke — so persist it HERE, keyed on
+  //     the RESOLVED workspace, BEFORE the credential/session/turn steps. A turn
+  //     that later drops (no_install / no_chat_token / empty_reply) or throws must
+  //     not lose the fact that the human reached out. A null vendor timestamp falls
+  //     back to Date.now() — never skip the write (a skip reads as window-CLOSED and
+  //     defeats the store; now() is monotonically safe under the GREATEST upsert).
+  //     Meta REDELIVERS a webhook it thinks failed, so the same inbound may record
+  //     twice; the store's monotonic upsert makes that a no-op, never a regression.
+  //     AWAITED in a try/catch that SWALLOWS (D188): a throwing store must never
+  //     propagate into handle()'s failure-notice path and suppress the reply —
+  //     persistence infrastructure never takes down the reply path. Awaited, not
+  //     fire-and-forget, so the write is deterministically complete (not racing a
+  //     test's drain) by the time dispatch resolves.
+  try {
+    await deps.recordInbound?.(
+      workspaceId,
+      event.threadId,
+      connector.inboundTimestampMs?.(event.payload) ?? Date.now(),
+    );
+  } catch (err) {
+    console.warn(
+      `[bridge] recordInbound failed for ${event.provider} workspace=${workspaceId} ` +
+        `thread=${event.threadId} — the window was not persisted, but the reply path ` +
+        `is untouched (D188):`,
+      err,
+    );
+  }
 
   // 2. Which credential? The install the connector ACTUALLY routed on — same
   //    (provider, install_key) row, so the token cannot drift from the routing.
