@@ -140,6 +140,61 @@ task_* folding in Go.
   claim-first in worktrees off origin/main; live proofs use disposable sessions only — never
   guerrilla's live chat corpus.
 
+- **D17 — Wave 2: s3 is SALVAGED, never rebuilt.** wsc-s3 was fully BUILT and REVIEWED locally
+  on `loop-epic/wsc-s3-...-2-r` (commit `7280968a0`, review gate 500/0) but never pushed — the
+  lead's "no PR, no branch → unbuilt" was false. The landing mechanism is **Path B
+  (extract-and-reapply)**: `git diff fda0d1b93 7280968a0 > /tmp/s3.patch` (the s3-only delta =
+  8 files, 1055 ins / 4 del) then `git apply --3way` onto fresh origin/main → single clean
+  commit. VERIFIED on today's advanced origin/main (d38434b53): patch applies with ZERO
+  conflicts, `mix compile --warnings-as-errors` EXIT=0, the four targeted files pass **500/0**,
+  and the D11 sidebar golden renders **byte-identical** (no GOLDEN_REGEN needed). The reviewed
+  tree IS the spec — a blind rebuild is an auto-reject. Path A (`rebase --onto`) is a fallback;
+  Path B is preferred (no buggy intermediate commit). The "changed in both" conflict fear is
+  real ONLY for a naive full-branch `git merge` (which re-carries the already-merged s1/s2) — no
+  salvage path does that. PR body must say "amends D14".
+- **D18 — s3 is the API PRODUCER the merged Go card waits on.** LATENT GAP confirmed: the
+  merged s4/s5 Go decoder (internal/apiclient/chat.go:182/184) declares
+  `Workflow *ChatWorkflowSummary` + `Epic *ChatEpicGoal` (both `omitempty`), but origin/main's
+  `sidebar_json/1` (chat_controller.ex:904) emits NEITHER — so the merged bp-chat card feature
+  is inert dead code today (not a crash: nil → plain path). s3's `sidebar_json` widening is
+  exactly the producer that de-inerts it; landing s3 completes the three-surface truth. This
+  raises s3's stakes: it is not just the LiveView sidebar, it is the cross-surface wire producer.
+  Fixture parity is byte-identical across the Elixir and Go mirrors and the literal atom key
+  `terminal?` decodes correctly on both sides (go test green).
+- **D19 — Wave-2 backlog ranking (honesty-star order).** Two picks pulled this wave:
+  **wsc-bl-real-fixtures** (highest value, lowest risk — mostly testdata; hardens all five
+  merged surfaces against prod-shaped data per D62) and **wsc-bl-workflow-sse** (removes the D13
+  mid-turn lag ceiling). Both serialize behind s3 (real-fixtures collides on
+  studio_chat_test.exs + wants s3's producer landed; workflow-sse touches the D16 .ex spine).
+  **wsc-bl-prs-open stays PARKED** — verifier proved it gets ZERO parallelism benefit over
+  waiting for s3 (same-file collision on the epic-goal fold queues it behind s3 anyway) while
+  additionally requiring a net-new external-data subsystem AND a REVERSAL of a tested, ratified
+  honesty decision (s3's tests assert "PRs open" absent everywhere; two merged Go files encode
+  the D8 exclusion). Shipping it means reopening D8 first. **wsc-bl-busiest-child stays PARKED**
+  — D7 re-confirmed: `grep busiest` = 0, task_index carries no recency field, session-level
+  recency is wrong-granularity, per-node tokens are deliberately-suppressed noise. Inventing a
+  rank violates the honesty star.
+- **D20 — SSE wire carries the COMPACT summary, not the raw rail.** wsc-bl-workflow-sse
+  subscribes the SSE forwarder to the workflow tuple and emits `workflow_summary/1`'s compact
+  map as a new `event: workflow` frame — so Go decodes it with the EXISTING
+  `ChatWorkflowSummary` struct (one parser across list + SSE), riding the D14 no-raw-rail law
+  (the raw 29-agent rail measured 38,308 bytes). The raw rail is what FORKS (a second Go parser
+  + a duplicated fold). THREE tripwires: (a) D45 — never route `task_*` frames into
+  `publish_activity`/`{:chat_activity}` (reds recorder_test.exs); (b) change-only — inherit
+  `commit_rail`'s rail-signature gate, never push from inside `task_progress`; (c) the activity
+  topic is GLOBAL and NOT tenant-scoped — an SSE forwarder MUST filter `{:chat_workflow, sid, _}`
+  to the connection's own session (a tenancy requirement, not cosmetics). The producer already
+  fires into the void on main; the bridge needs a SUBSCRIBER, not a new producer.
+- **D21 — attempt>1 closes by DOCUMENTED PROOF, never a synthetic capture.** `attempt` is
+  external Claude-Code-CLI Task-tool telemetry, forwarded through the rail verbatim
+  (`rail_put_workflow` is a bare `Map.put`, no field logic); barkpark has ZERO write/derive path
+  and NO repo mechanism (workflow runner or Studio UI) to force a retry. All 39 real guerrilla
+  rail entries and every committed fixture show `attempt=1`. So wsc-bl-real-fixtures criterion 2
+  ("Real attempt>1 capture OR documented proof the wire never emits retries") closes via the
+  documented-proof branch (this trace + the 39/39 check), never a fabricated `attempt=2` (D62 +
+  honesty star forbid it). Criterion 1 (a REAL interrupted-run fixture) is separately capturable
+  from a DISPOSABLE session and stays a genuine deliverable.
+
 ## Roadmap
 
 Wave 1 (this wave — all five pre-filed, perfected at Decide):
@@ -154,11 +209,51 @@ Wave 1 (this wave — all five pre-filed, perfected at Decide):
 5. **wsc-s5** `task-a0e41d82867633dc` — below-composer workflow panel: strip → focus → expand
    → collapse (D13–D15). Go. **large**. After s4 lands (file overlap), else after s1.
 
-Backlog (filed, published, NOT this wave):
-- **wsc-bl-prs-open** — real "PRs open" source for the epic-goal line (github-plugin PR state).
-- **wsc-bl-busiest-child** — fleet-phase busiest-child now-line (needs a principled signal).
-- **wsc-bl-workflow-sse** — live workflow frame over /v1/chat SSE (mid-turn TUI freshness).
-- **wsc-bl-real-fixtures** — capture REAL interrupted + attempt>1 wire fixtures (studio-chat
-  D62 provenance; both shapes are synthetic-only today).
+Wave 2 (2026-07-17 — land the stranded flagship, then push past the honesty ceilings):
+1. **wsc-s3** `task-8c92a966b28eda80` — SALVAGE + land (Path B, D17). Studio sidebar two lines
+   + compact wire (D10) + epic-goal (D9) + sidebar golden (D11). Elixir. **large**. Round 1
+   (builds this run). Also the API producer the merged Go card waits on (D18).
+2. **wsc-bl-real-fixtures** `wsc-bl-real-fixtures` — REAL interrupted fixture from a disposable
+   session + documented-proof close of attempt>1 (D21). Elixir/testdata. **medium**. Round 2,
+   AFTER s3 merges (collides on studio_chat_test.exs; hardens s3's landed producer).
+3. **wsc-bl-workflow-sse** `wsc-bl-workflow-sse` — live workflow SSE frame carrying the COMPACT
+   summary (D20), removes the D13 mid-turn lag ceiling. Elixir + Go. **medium**. Round 2, AFTER
+   s3 merges (touches chat_controller.ex/recorder.ex on the D16 spine).
+
+Backlog (filed, published, NOT this wave — PARKED per D19):
+- **wsc-bl-prs-open** — real "PRs open" source for the epic-goal line. Parked: net-new
+  github-PR subsystem + reverses a tested D8 decision; zero parallelism benefit vs waiting on s3.
+- **wsc-bl-busiest-child** — fleet-phase busiest-child now-line. Parked: D7 holds, no signal.
+- **wsc-bl-completed-line-source** — the completed-wave line "complete · grade · n/n merged"
+  (design-map block 5) has no grade/merged-count data source today; honestly renders
+  "complete · n/n". Same honesty class as D8. Backlogged, not fabricated.
+- **wsc-bl-mock-fidelity** — cosmetic mock-fidelity gaps (epic-goal glyph `⌖` vs shipped `↳`;
+  settled/total counter not in `tabular-nums`; Go renders raw "completed" vs Studio "complete").
+  Deferred; s3 lands as the reviewed spec verbatim.
 
 ## Wave log
+
+### Wave 1 (2026-07-16) — close-out (debt paid at Wave 2 Decide; Review never ran)
+Five slices filed and built; the merge train landed PARTIALLY and the log was never written.
+- **wsc-s1** `task-e24d433d072ee8c0` → **#3836 MERGED** — `workflow_summary/1` pure D3 fold +
+  shared parity fixtures (Go+Elixir mirrors byte-identical).
+- **wsc-s2** `task-a232a271f4007966` → **#3838 MERGED** — Recorder `{:chat_workflow}` change-only
+  broadcast (D6) + `end_time` rail stamp (D5). Producer fires on `activity_topic()`.
+- **wsc-s4** `task-8059027150fc6680` → **#3837 MERGED** (ledger `done`) — bp chat session-list
+  decodes the compact `workflow` + sibling `epic` wire fields.
+- **wsc-s5** `task-a0e41d82867633dc` → **#3839 MERGED** — below-composer workflow panel.
+- **wsc-s3** `task-8c92a966b28eda80` → **BUILT + REVIEWED, NEVER PUSHED** (`7280968a0`, gate
+  500/0). The stranded flagship. Its absence left the merged s4/s5 Go card inert (D18). Wave 2
+  lands it. The first build `bfa771898` had a real bug (diverged `%{state,…}` reading `endTime`
+  + a `{:chat_workflow}` overlay that KeyError'd on s2's D3 broadcast); the reviewer's `-2-r`
+  branch fixed it to one canonical `workflow_summary/1` ticks-based render. That reviewed tree
+  is the salvage spec.
+- Ledger drift: s1/s2/s5 sat merged-but-open with lapsed claims; the stale duplicate charter PR
+  **#3823** (pre-D16, would revert D16) was closed as superseded-by-#3826 at Wave-2 Decide.
+
+### Wave 2 (2026-07-17) — plan (building)
+Decide reconciled with reality (both the lead note AND the ledger were wrong: s3 is built, not
+unbuilt). This wave lands the stranded s3 (Path B salvage, verified 500/0 + byte-identical
+golden on today's main) and pulls the two highest-value honesty-ceiling backlog items
+(real-fixtures round-2, workflow-sse round-2 — both after s3 merges). Decisions D17–D21 folded
+above. Wave Paper: `wsc-wave-2026-07-17`. Review will append the debrief.
