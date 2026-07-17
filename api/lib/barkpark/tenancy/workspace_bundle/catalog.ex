@@ -10,7 +10,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (32 today; the three
+    * **E1** — every table carrying a `workspace_id` column (34 today; the three
       epic-cycle ledgers `cycle_waves` / `epic_assignments` /
       `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
       generic `WHERE workspace_id = $ws` path, the three
@@ -24,7 +24,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
       `sync_push_doc_revs` / `sync_push_conflicts`) gained a nullable
       `workspace_id` attribution column (Wave 5 Slice B, charter D55) — so a
       shared-slug row travels via the `workspace_id` path instead of a bare,
-      project-ambiguous `scope`/`dataset`).
+      project-ambiguous `scope`/`dataset`), and the run-secrets store
+      `secrets` / `secrets_audit` gained a nullable `workspace_id` FK (Connectors
+      W21, charter D191/D192): a workspace's scoped secret rides the generic
+      `WHERE workspace_id = $ws` export + FK cascade, while an
+      instance-global secret (`workspace_id IS NULL`, e.g. `ingest_token`) is
+      never matched by any workspace scan — the two-tier tenant wall.
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
       that do NOT themselves carry `workspace_id` (12: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
@@ -146,7 +151,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_connections schema_migrations
-    scim_groups scim_tokens secrets secrets_audit social_identities
+    scim_groups scim_tokens social_identities
     social_providers status_incidents user_email_tokens user_sessions users
     webauthn_credentials
   )

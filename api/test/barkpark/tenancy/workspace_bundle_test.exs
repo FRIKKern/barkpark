@@ -17,10 +17,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 32 workspace_id tables including registered chat-host execution state" do
+    test "E1 = the 34 workspace_id tables including registered chat-host execution state" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 32
+      assert length(e1) == 34
       assert "roles" in e1
+      # The run-secrets store gained a nullable workspace_id FK (Connectors W21,
+      # charter D191/D192): a workspace's scoped secret rides the generic E1
+      # WHERE workspace_id=$ws export + FK cascade; a global secret (NULL) stays.
+      assert "secrets" in e1
+      assert "secrets_audit" in e1
       assert "registered_chat_hosts" in e1
       assert "chat_execution_leases" in e1
       assert "chat_execution_events" in e1
