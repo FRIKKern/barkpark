@@ -79,6 +79,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
+    # scaffy:add-block-type Filetree MARK:parity-input-filetree
+    "filetree" => %{"type" => "filetree", "text" => "Parity starter text"},
+    # scaffy:add-block-type Diff MARK:parity-input-diff
+    "diff" => %{"type" => "diff", "text" => "Parity starter text"},
     # ── prose / typographic roles ──────────────────────────────────────────────
     "heading" => %{"type" => "heading", "level" => 2, "text" => "The render path"},
     "eyebrow" => %{"type" => "eyebrow", "text" => "Dispatches"},

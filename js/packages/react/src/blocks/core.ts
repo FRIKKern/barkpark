@@ -45,6 +45,16 @@ const heading: Emit = (b) => {
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
+// scaffy:add-block-type Filetree MARK:js-emitter-filetree
+// Mirrors compose_block(filetree): starter emit — `text` escaped into
+// the bp-filetree wrapper, byte-identical to the Elixir _raw clause.
+const filetree: Emit = (b) => `<div class="bp-filetree">${escapeHtml(str(b.text))}</div>`
+
+// scaffy:add-block-type Diff MARK:js-emitter-diff
+// Mirrors compose_block(diff): starter emit — `text` escaped into
+// the bp-diff wrapper, byte-identical to the Elixir _raw clause.
+const diff: Emit = (b) => `<div class="bp-diff">${escapeHtml(str(b.text))}</div>`
+
 const byline: Emit = (b) => {
   const items = b.items
   const text = Array.isArray(items) ? items.map((i) => str(i)).join(' · ') : str(b.text)
@@ -725,6 +735,10 @@ export const coreEmitters: Record<string, Emit> = {
   stage,
   'task-detail': taskDetailEmit,
   roadmap,
+  // scaffy:add-block-type Filetree MARK:js-map-filetree
+  'filetree': filetree,
+  // scaffy:add-block-type Diff MARK:js-map-diff
+  'diff': diff,
 }
 
 // shared task-row meta helpers (reused by taskboard.ts)

@@ -1186,6 +1186,42 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # scaffy:add-block-type Filetree MARK:ex-compose-filetree
+  # Starter compose for `filetree`: the block's `text` attr escaped into
+  # its bp-filetree wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  def compose_block(%{"type" => "filetree"} = b, _style) do
+    text = stringish(Map.get(b, "text", ""))
+
+    %{
+      "kind" => "_raw",
+      "html" => ~s(<div class="bp-filetree">) <> Util.escape_html(text) <> ~s(</div>)
+    }
+  end
+
+  # scaffy:add-block-type Diff MARK:ex-compose-diff
+  # Starter compose for `diff`: the block's `text` attr escaped into
+  # its bp-diff wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  def compose_block(%{"type" => "diff"} = b, _style) do
+    text = stringish(Map.get(b, "text", ""))
+
+    %{
+      "kind" => "_raw",
+      "html" => ~s(<div class="bp-diff">) <> Util.escape_html(text) <> ~s(</div>)
+    }
+  end
+
   def compose_block(%{"type" => "gauge-list"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_html(b)}
   end

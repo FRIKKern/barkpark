@@ -12,6 +12,10 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 // self-proof that all 46 render, without throwing, into the expected wrapper.
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
+  // scaffy:add-block-type Filetree MARK:js-case-filetree
+  { type: 'filetree', block: { type: 'filetree', text: 'Starter' }, marker: 'bp-filetree' },
+  // scaffy:add-block-type Diff MARK:js-case-diff
+  { type: 'diff', block: { type: 'diff', text: 'Starter' }, marker: 'bp-diff' },
   { type: 'eyebrow', block: { type: 'eyebrow', text: 'KICKER' }, marker: 'bp-role-eyebrow' },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] }, marker: 'bp-role-byline' },
   {
@@ -341,7 +345,9 @@ describe('PortableDoc — the type-keyed renderer', () => {
     const authored = CASES.map((c) => c.type).sort()
     const registered = [...REGISTERED_TYPES].sort()
     expect(authored).toEqual(registered)
-    expect(registered).toHaveLength(46)
+    // scaffy:add-block-type Diff MARK:js-count-diff
+    // scaffy:add-block-type Filetree MARK:js-count-filetree
+    expect(registered).toHaveLength(48)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

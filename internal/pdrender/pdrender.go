@@ -247,6 +247,10 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Filetree MARK:go-registry-filetree
+	r.blocks["filetree"] = filetreeRenderer{}
+	// scaffy:add-block-type Diff MARK:go-registry-diff
+	r.blocks["diff"] = diffRenderer{}
 	r.blocks["paragraph"] = paragraphRenderer{ir: ir}
 	r.blocks["list"] = listRenderer{ir: ir}
 	r.blocks["callout"] = calloutRenderer{ir: ir}

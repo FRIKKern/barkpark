@@ -213,6 +213,11 @@ function blockText(b: Block): string {
       return joinBlocks([str(b.title), proseContent(b)])
     case 'code':
       return str(b.value)
+    // ── code-story blocks (starter parity: the `text` attr the scaffold wraps;
+    //    grow slices refine to the diff body / tree lines) ───────────────────
+    case 'diff':
+    case 'filetree':
+      return str(b.text)
     // ── annotation rows ───────────────────────────────────────────────────
     case 'note':
       return noteText(b)

@@ -72,7 +72,8 @@ defmodule Barkpark.PortableDoc.Tiers do
   # slot-composable layout. `chat-approval`/`chat-question`/`chat-plan` join them
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
-  @widget ~w(
+  # scaffy:classify-block-type diff MARK:tier-widget-diff
+  @widget ~w(diff filetree
     callout figure terminal table
     task-detail task-list tasks task-board roadmap
     notes note cards card pipeline stage
