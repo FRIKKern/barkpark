@@ -11,6 +11,10 @@ defmodule BarkparkCloud.Web.Router do
       METHOD  PATH                 AUTH      PURPOSE
       GET     /up                  —         control-plane liveness (200 db up | 503 db down)
       GET     /health              —         alias of /up
+      GET     /                    —         SPA shell (dashboard) at the bare root (HTML, not JSON)
+      GET     /dashboard           —         SPA shell — deep-link/refresh lands the HTML
+      GET     /new                 —         deploy-button landing (?template=<slug>) → SPA shell
+      GET     /activate            —         bp-login device-approve page → SPA shell
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
       POST    /v1/auth/device/start   —      {client_name} → {device_code, user_code, verification_uri, ...}
@@ -28,10 +32,16 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
       POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
       POST    /v1/auth/verify-email        —     {token} → confirm the account (single-use)
+      POST    /v1/auth/register    —         create an account {email,password} → session
+      POST    /v1/auth/request-reset       —  request a password-reset email (always 200)
+      POST    /v1/auth/reset       —         {token,password} → reset password (single-use)
       POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
       POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
       POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
       GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled}, team{id,name,slug}}
+      GET     /v1/onboarding       user      the team's onboarding checklist state
+      POST    /v1/onboarding       admin     advance/dismiss an onboarding step
+      GET     /v1/archives         user      the team's archived (torn-down) instances, restorable
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
@@ -49,6 +59,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
       GET     /v1/barkparks/:id/usage/history user  usage-meter series over the trailing 14d of samples, for sparklines (team-scoped)
+      GET     /v1/usage/summary    user      cross-instance usage-meter rollup for the team
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
@@ -56,9 +67,30 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
+      POST    /v1/barkparks/:id/verify user  run the post-provision health verification
+      POST    /v1/barkparks/:id/self-update admin  trigger an in-place self-update on the box
+      POST    /v1/barkparks/:id/rollback admin  roll the box back to the previous release
+      POST    /v1/barkparks/:id/domain admin  attach a custom domain (enqueue DNS/TLS)
+      POST    /v1/barkparks/:id/vercel-deploy admin  wire a Vercel deploy for the instance's site
+      GET     /v1/barkparks/:id/api/webhooks user  proxy → the instance's own webhooks list (admin token stays server-side)
+      POST    /v1/barkparks/:id/api/webhooks user  proxy → create a webhook on the instance
+      GET     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → show one instance webhook
+      PUT     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → update one instance webhook
+      DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → delete one instance webhook
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
+      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
+      GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
+      POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
+      POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
+      PATCH   /v1/admin/barkparks/:id/channel admin  set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      DELETE  /v1/providers/:kind  admin     disconnect a cloud provider
+      GET     /v1/providers/:kind/catalog user  a provider's allowlisted action catalog
+      GET     /v1/providers/:kind/overview user  a provider's server-side estate snapshot
+      GET     /v1/providers/capabilities user  per-provider capability matrix (SPA gating)
       GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
       GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
@@ -71,12 +103,25 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  user update transport / per-event toggles / SMTP secrets
+      PUT     /v1/notifications/channels admin  update per-channel transport settings
+      PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      user send a rate-limited test email
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
       DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
+      GET     /v1/teams/:id/members user     list a team's members (member+)
+      POST    /v1/teams/:id/invitations admin  invite a member {email,role?} → {invitation, accept_url}
+      GET     /v1/teams/:id/invitations admin  list a team's live invitations
+      DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
+      PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
+      DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
+      POST    /v1/invitations/accept user    accept an invitation (join the team)
       POST    /v1/billing/checkout user      open a hosted Checkout Session → {checkout_url}
       POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
+      POST    /v1/billing/portal   owner     open the Stripe billing portal → {portal_url}
+      POST    /v1/billing/cancel   owner     cancel the active subscription (period-end)
+      POST    /v1/resurrect        user      restore a torn-down instance from an object-storage bundle
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
       POST    /v1/go-live          user      gate on active subscription + create a provisioning Barkpark
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
@@ -85,12 +130,32 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/provision-jobs/:id/step    worker  step transition {step,status,detail?}; progress updates live caption in place → SSE (dwb-14/dwb-19)
       POST    /v1/internal/provision-jobs/:id/console worker  append a live console line {line} (capped, append-only) → SSE (dwb-16)
       POST    /v1/internal/provision-jobs/:id/release worker  claimed→pending on graceful shutdown, no attempt consumed (dwb-15)
+      POST    /v1/internal/deprovision-jobs/claim worker  claim oldest pending deprovision job
+      POST    /v1/internal/deprovision-jobs/:id/succeed worker  mark a deprovision done
+      POST    /v1/internal/deprovision-jobs/:id/fail worker  mark a deprovision failed {error}
+      POST    /v1/internal/attach-domain-jobs/claim worker  claim oldest pending attach-domain job
+      POST    /v1/internal/attach-domain-jobs/:id/succeed worker  mark an attach-domain done
+      POST    /v1/internal/attach-domain-jobs/:id/fail worker  mark an attach-domain failed {error}
+      POST    /v1/internal/resurrect-jobs/claim worker  claim oldest pending resurrect job
+      GET     /v1/internal/barkparks worker  list registry rows for the provisioner
+      POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
+      POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
+      POST    /v1/internal/warm-servers worker  register a warm-pool server
+      POST    /v1/internal/warm-servers/claim worker  claim a warm server for a provision
+      POST    /v1/internal/warm-servers/claim-retire worker  claim a warm server to retire
+      POST    /v1/internal/warm-servers/claim-refresh worker  claim a warm server to refresh
+      POST    /v1/internal/warm-servers/:name/refreshed worker  mark a warm server refreshed
+      GET     /v1/internal/warm-servers/count worker  the warm-pool depth
+      DELETE  /v1/internal/warm-servers/:name worker  drop a warm server
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
+      PATCH   /v1/sites/:id        user      update a site's settings (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
+      GET     /v1/sites/:id/deployments/:dep_id user  one deployment (read ability)
+      POST    /v1/sites/:id/rollback user    roll a site back to a prior deployment (write ability)
       POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
@@ -100,6 +165,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
+      POST    /v1/sites/webhooks/content-publish/:site_id —*  content-publish webhook → ISR revalidate (signed)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
       POST    /v1/builder/claim    worker    atomic next-queued deployment claim
       POST    /v1/builder/deployments/:id/transition worker fenced status update
@@ -110,12 +176,20 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
       *       (anything else)      —         404 JSON
 
-  Every response is JSON. Errors are `{"error": "<reason>"}`. The agent routes
-  authenticate with an AGENT token (`Registry.verify_agent_token`); the user
-  routes with a USER session token (`Accounts.verify_user_session_token`); the
-  internal `/v1/internal/*` routes with the shared WORKER token (`require_worker`
-  — Bearer WORKER_TOKEN, never a user/agent token) — all via
-  `BarkparkCloud.Web.Auth`.
+  Every `/v1/*` response is JSON; errors are `{"error": "<reason>"}`. The bare-path
+  routes (`/`, `/dashboard`, `/new`, `/activate`) instead serve the SPA HTML shell.
+  The AUTH column: `—` public · `user` a USER session token · `admin`/`owner` that
+  session plus a team-admin/owner role · `agent` an AGENT token · `worker` the shared
+  WORKER token · `—*` a signature-verified webhook. The agent routes authenticate
+  with an AGENT token (`Registry.verify_agent_token`); the user routes with a USER
+  session token (`Accounts.verify_user_session_token`); the internal `/v1/internal/*`
+  routes with the shared WORKER token (`require_worker` — Bearer WORKER_TOKEN, never a
+  user/agent token) — all via `BarkparkCloud.Web.Auth`.
+
+  This table is a hand-maintained mirror of the `Plug.Router` match clauses below.
+  It does not drift silently: `router_moduledoc_table_test.exs` parses both the match
+  macros and this table from the source and fails CI on any mismatch — add the row
+  here (or drop the stale one) when you change a route.
   """
   use Plug.Router
   require Logger
