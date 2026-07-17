@@ -463,6 +463,76 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_plugin_settings(_workspace_or_id, _plugins), do: {:error, :not_found}
 
+  # ── Workspace chat settings (connectors D205 — per-workspace execution profile) ──
+  #
+  # The per-workspace CHAT preferences live in the same `settings` jsonb bag as
+  # `theme` and `plugins`, under the `"chat"` key. These two accessors mirror
+  # `workspace_plugin_settings/1` / `set_workspace_plugin_settings/2` exactly:
+  # read guards a nil/legacy row to the empty map; write merges into `settings`
+  # so the theme, plugin overrides, and any other preference are preserved.
+  # Interpreting `"execution_profile"` (`"cloud" | "self_hosted"`; anything else
+  # counts as unset → the global config → :self_hosted, fail-safe) is
+  # `BarkparkWeb.Studio.ClaudeChat`'s job — this module only persists and reads
+  # back the raw map.
+
+  @doc """
+  Read a workspace's raw chat-settings map from its `settings` bag.
+
+  Returns `settings["chat"]` when it is a map, else `%{}`. Guards a `nil`
+  workspace and a workspace whose `settings` is nil/not-a-map (a legacy row) →
+  `%{}`. The map shape is `%{"execution_profile" => "cloud" | "self_hosted"}`;
+  interpreting it against the global execution-profile config is
+  `BarkparkWeb.Studio.ClaudeChat`'s job.
+  """
+  @spec workspace_chat_settings(Workspace.t() | nil) :: map()
+  def workspace_chat_settings(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["chat"] do
+      chat when is_map(chat) -> chat
+      _ -> %{}
+    end
+  end
+
+  def workspace_chat_settings(_), do: %{}
+
+  @doc """
+  Persist a workspace's chat-settings map into its `settings` bag.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Merges into the
+  existing `settings` map under the `"chat"` key so the theme and unrelated
+  preferences are preserved. A non-map `chat` value returns
+  `{:error, :invalid_chat_settings}` without touching the DB; a missing
+  workspace returns `{:error, :not_found}`.
+  """
+  @spec set_workspace_chat_settings(Workspace.t() | binary(), map()) ::
+          {:ok, Workspace.t()}
+          | {:error, :invalid_chat_settings | :not_found | Ecto.Changeset.t()}
+  def set_workspace_chat_settings(workspace_or_id, chat) when is_map(chat) do
+    do_set_workspace_chat_settings(workspace_or_id, chat)
+  end
+
+  def set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :invalid_chat_settings}
+
+  defp do_set_workspace_chat_settings(%Workspace{} = workspace, chat) do
+    settings = Map.put(workspace.settings || %{}, "chat", chat)
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  defp do_set_workspace_chat_settings(id, chat) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_workspace_chat_settings(workspace, chat)
+    end
+  end
+
+  defp do_set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :not_found}
+
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil

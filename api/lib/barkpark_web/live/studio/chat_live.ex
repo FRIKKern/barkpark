@@ -3782,6 +3782,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # running; a spawn error stays honest — the composer never lies about a
   # session that isn't there.
   defp spawn_session(socket, store_id, resume?) do
+    # The turn's workspace identity is the SESSION's persisted
+    # owner_workspace_id (connectors D206 — mirror chat_controller.ex's
+    # `session.owner_workspace_id`), NEVER the ambient current_workspace
+    # assign: on the flat /studio/chat route StudioChrome pins that assign to
+    # the seeded Default workspace, so a genuinely-:global session would
+    # silently inherit the Default workspace's execution profile (D205).
+    store_session = StudioChat.get_session(store_id, :global)
+
     with {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: store_id,
@@ -3789,8 +3797,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
              provider_session_id: socket.assigns[:provider_session_id],
              execution_target: socket.assigns.execution_target,
              execution_host_id: socket.assigns.execution_host_id,
-             workspace_id:
-               socket.assigns[:current_workspace] && socket.assigns.current_workspace.id,
+             workspace_id: store_session && store_session.owner_workspace_id,
              cwd: Runtime.cwd(socket.assigns.provider),
              mode: socket.assigns.mode,
              resume: resume?,
