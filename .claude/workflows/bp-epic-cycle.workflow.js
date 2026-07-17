@@ -4,7 +4,7 @@ export const meta = {
   whenToUse:
     'Run one wave of a Barkpark epic. INVOKE: Workflow({name: "bp-epic-cycle", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Sonnets survey (coverage-accounted) → 1 Fable digests + designs the verify fleet → Sonnet/Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Fable/Opus builders claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
   phases: [
-    { title: 'Strategize', detail: '1 Fable, ~5 min: bold direction + 5-20 broad survey questions, OPENS the wave strategy Paper — think hard, read little', model: 'fable' },
+    { title: 'Strategize', detail: '1 Fable, whatever time it needs — the highest-leverage thinking in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper', model: 'fable' },
     { title: 'Survey', detail: '5-20 Sonnet surveyors, read-only, ~5 min each: wide cheap sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'sonnet' },
     { title: 'Digest', detail: '1 Fable, ~10 min: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick Sonnet or Opus and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies', model: 'fable' },
     { title: 'Verify', detail: 'Fable-chosen fleet of Sonnet/Opus verifiers: targeted deep answers with coverage accounting; claims that need proof get tests/gates actually RUN, output quoted' },
@@ -77,9 +77,10 @@ const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system,
 
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'paper_id', 'paper_created', 'survey'],
+  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
+    direction_debate: { type: 'string', description: 'the rival directions you seriously developed and argued against each other, why the winner won, and the sharpest attack on the winner you found (with how the wave absorbs it) — a direction that never faced a rival is usually the first idea, not the best one' },
     paper_id: { type: 'string', description: 'slug of the PUBLISHED wave strategy Paper you created (style=article)' },
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
     survey: {
@@ -280,22 +281,28 @@ const REVIEW_SCHEMA = {
   },
 }
 
-// ── Phase 1: Strategize — one Fable mind, ~5 minutes, direction + wide net ──
+// ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
 phase('Strategize')
 const strategist = await agent(
-  `You are the STRATEGIST of a Barkpark epic wave — one Fable mind setting bold direction FAST. Budget: ~5 minutes of thinking, minimal reading. Risk is welcome here; two whole exploration rounds of rigor come after you.
+  `You are the STRATEGIST of a Barkpark epic wave — one Fable mind whose direction sets the CEILING for everything downstream. Take whatever time this needs: surveyors, verifiers, and builders can execute a great direction well, but nothing after you can rescue a mediocre one. Two exploration rounds of rigor follow, so you never need to PROVE claims — but read as much as sharpens your judgment. Bold is still the mandate; unhurried bold, not hedged.
 
 ${USER_WISH_BLOCK}
 
 ${CHARTER_EXISTS
-    ? `The epic charter exists at ${CHARTER_PATH} — read it, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''}. Reconcile with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
-    : `This is the FOUNDING wave — no charter yet. Skim just enough to strategize honestly (a \`bp search\` for prior papers/tasks on this topic, a fast look at the obvious surface dirs) — verification is the fleets' job, not yours.`}
+    ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
+    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search\` for prior papers/tasks on this topic, then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess.`}
 
-Your job:
+WORK THE PROBLEM PROPERLY, in whatever order serves you:
+- GROUND: read until further reading stops changing your mind — the charter/ledger/prior papers above, the real code of the surfaces involved, adjacent systems that constrain the design. Depth is your call; a clock is not.
+- DELIBERATE: develop at least two genuinely different candidate directions for this wave and argue them against each other — what the finished experience looks/feels like under each, what each risks, what each forecloses for later waves. Then COMMIT to one. A direction that never faced a serious rival is usually the first idea, not the best one.
+- STRESS-TEST: attack the winner before shipping it. What would make it wrong? Which assumption, if false, kills it? Each such assumption becomes a survey question below — ammunition for the fleets, not a reason to hedge the direction.
+
+Your output:
 1. direction — the bold strategic direction for this wave: what the finished experience looks/feels like, the key choices you lean toward (tentatively; Decide finalizes after two explore rounds), what to prioritize.
-2. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
-3. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
-4. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
+2. direction_debate — the rivals you weighed, why the winner won, the sharpest attack on it and how the wave absorbs it.
+3. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
+4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
+5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
@@ -337,6 +344,9 @@ ${USER_WISH_BLOCK}
 
 STRATEGIC DIRECTION (yours, from Strategize):
 ${strategist.direction}
+
+DIRECTION DEBATE (the rivals you weighed and the sharpest attack on the winner — survey evidence that lands on an attack line matters MORE than evidence that merely decorates the direction):
+${strategist.direction_debate}
 
 SURVEY REPORTS (wide but shallow — trust file:line evidence over prose; treat unanchored claims as rumors):
 ${JSON.stringify(surveys, null, 2)}
@@ -403,6 +413,9 @@ ${USER_WISH_BLOCK}
 
 STRATEGIC DIRECTION (from Strategize):
 ${strategist.direction}
+
+DIRECTION DEBATE (from Strategize — the rivals weighed and the sharpest attack on the winner; if exploration proved an attack line RIGHT, switching to a rival direction is a legitimate decision, not a failure):
+${strategist.direction_debate}
 
 DIGEST SYNTHESIS (from Digest):
 ${aim.synthesis}
@@ -544,6 +557,7 @@ const green = greenBuilt.map((b) => ({ ...b, reviewed: reviewedByTask[b.task_id]
 
 return {
   direction: strategist.direction,
+  direction_debate: strategist.direction_debate,
   wave_paper: WAVE_PAPER,
   surveys: surveys.length,
   synthesis: aim.synthesis,
