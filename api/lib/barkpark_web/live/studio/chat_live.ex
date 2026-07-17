@@ -3715,7 +3715,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
         <span
           class="text-xs"
-          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warning-soft, rgba(200,140,0,0.16)); color: var(--warning, #b8860b);"
+          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn);"
         >
           attempt <%= @detail["attempt"] %>
         </span>
