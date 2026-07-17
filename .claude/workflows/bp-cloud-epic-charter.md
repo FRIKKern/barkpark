@@ -349,6 +349,70 @@ task_* folding in Go.
   main is diverged +4/−14 — the epic-cycle-charter-commit trap; steward reconciles). Both opus (Fable
   exhausted this wave).
 
+### Wave 3 · round 2 — the ad-tui DECIDE finalizations (2026-07-17). Decisions D35–D39 (dep MERGED, 3 verifiers PROVED the seam by RUNNING; ad-tui is now round 1 of THIS run)
+
+`wsc-ad-gui` is MERGED (#3959) — `workflow_agent_detail/1` (studio_chat.ex:1398) + the byte-identical
+dual-mirror `workflow_agent_detail.json` (both 40714 bytes, `cmp` IDENTICAL) are ON MAIN. The D34
+fixture dependency is satisfied, so wsc-ad-tui reclassifies from round 2 to **round 1 — it builds this
+run**. Three verifiers PROVED the mechanism (not asserted): baseline gate GREEN (`go vet` zero output +
+`go test` ok on first run, single package so api-suite flakes cannot appear here), the decode+derive
+parity PASSED on all 34 fixture nodes with the 6 additive fields, and the seam blueprint re-anchored at
+HEAD. The Decide finalizations, each following the evidence over the direction's prose:
+
+- **D35 — the agent cursor is Enter-THEN-arrow, never arrow-then-Enter (T1, byte-lock forces it).**
+  Depth-1 `Up/Down` is byte-locked to `wfPhase` (TestWorkflowEnterExpandsEscCollapses, model_test.go:446:
+  Enter lands wfPhase=5, Down→6 clamps, Up→5). So the agent cursor CANNOT arrow at depth-1. Grammar:
+  at depth-1 (`wfExpanded && !wfAgentDetail`), **Enter** drills to agent detail — land `wfAgent = 0`
+  and set `wfAgentDetail = true` ONLY if the landed agent carries detail (a signal field present),
+  else an honest no-op (D27 structural gate). Inside detail (`wfAgentDetail`), **Up/Down** cycle
+  `wfAgent` clamped to `min(len(phase.Agents), workflowDetailMaxAgents=8)` (the cursor must agree with
+  the truncated painted list, render.go:546); **Esc OR left** pops ONE level (`wfAgentDetail→false`,
+  staying expanded+focused). `KeyLeft/KeyRight` are BOTH fully unclaimed in the package (grep exit 1) →
+  free to bind. Landing on index 0 (not "the breathing agent") is the safe default: `WorkflowPhase`
+  carries no per-agent active marker, and in a real epic-cycle every `workflow_agent` node carries
+  `promptPreview` so agent 0 always has detail.
+- **D36 — Go DERIVES `terminal`/`failed` from `State`; the struct freezes at exactly 6 new fields
+  (T2, empirically proven).** The fixture materializes `terminal`/`failed`/`agentId`, but at RUNTIME
+  the rail wire carries NO terminal/failed (they are fold-DERIVED). Go derives them via
+  `workflowStateTerminal` (workflow.go:51) + `workflowStateFailed` (workflow.go:56) — both already
+  exist and mirror the Elixir `@workflow_node_terminal`/`@workflow_node_failed` sets. Adding
+  `Terminal *bool`/`Failed *bool` would DISHONESTLY trust a wire bool the design forbids; adding
+  `AgentId` is unneeded because the cursor is POSITIONAL (`wfAgent` indexes `phase.Agents`). Proven:
+  a verifier added the 6 fields, decoded the shared fixture, and derive(State)==materialized
+  terminal/failed with **0 mismatches across all 34 nodes** (30 terminal / 4 live / 0 failed), plus an
+  independent python cross-check. The 6 fields are `Attempt int` + `PromptPreview/LastToolName/
+  LastToolSummary/ResultPreview *string` + `LastProgressAt *int64` (camelCase tags) — frozen; no 7th.
+- **D37 — the synthetic-honesty Go unit test is a MANDATE, because the shared fixture is VACUOUS for
+  three honesty stars (T3).** Every one of the 34 fixture nodes is detail-bearing AND `attempt==1` AND
+  `failed==false`, so a parity test on it passes the D27 no-affordance star, the `attempt>1` chip, and
+  the positive `failed`-derive VACUOUSLY. The builder MUST author a Go unit test on hand-built nodes
+  (mirror studio_chat_test.exs:2331/2441): (a) a thin node with NO signal fields → `agentHasDetail`
+  false → Enter no-ops (no affordance); (b) an `attempt=3` node → the `attempt 3` chip renders; (c) a
+  `state=failed` node → Go derives `terminal==true` AND `failed==true`. A verifier already proved the
+  shape compiles+passes (TestWorkflowAgentDetailSyntheticThinNode). This is a filed acceptance
+  criterion, not advice.
+- **D38 — the reset-seam list is FIVE seams for `wfAgentDetail` and phase-change for `wfAgent`; the
+  direction's 3-seam list was incomplete (T4).** `wfAgentDetail` resets to false at: openSession
+  (model.go:267), leaveSession (model.go:313), the vanished-strip guard (keys.go:89), the
+  **typing-snapback** (keys.go:101 — the composer-safety seam the direction OMITTED: a printable key
+  must dismiss the pane and snap home), and Esc's two-level pop. `wfAgent` resets to 0 at openSession,
+  leaveSession, AND on **every phase change** (keys.go:202 `wfPhase--` / keys.go:211 `wfPhase++`) — a
+  new nesting level with no wfExpanded precedent, because a stale cursor would index past the new
+  phase's agent list.
+- **D39 — presentation mirrors the SHIPPED GUI code (#3959), not the commit-message prose.** The
+  rendered order is `chip → about → now → done` with the **attempt chip FIRST** (gated `attempt>1`),
+  labels are **lowercase** `about`/`done`, and NOW is a **bare `▸` glyph with NO label** (uppercase
+  ABOUT/NOW/DONE in prose is drift). NOW (`not terminal` + tool line) and DONE (`terminal` +
+  resultPreview) are MUTUALLY EXCLUSIVE. Body: `about` = promptPreview wrapped; `▸` + lastToolName +
+  `· ` lastToolSummary + `· ` age (`formatElapsed(now − UnixMilli(*lastProgressAt))`, D31) while live;
+  `done` = resultPreview capped via `truncate` (D31 N=300). A selected-agent HEADER row via the
+  existing `workflowAgentLine` carries glyph/label/model-family/tokens/elapsed — so model/tokens
+  appear via the reused row (consistent with the list it drilled from), NOT as extra pane chips. Every
+  field individually omitted when its pointer is nil — nothing labeled "thinking" (the wire carries
+  none), nothing fabricated. **attempt-int invariant:** `Attempt` stays plain `int` (D30) — a
+  `workflow_agent` node always carries `promptPreview`+`attempt` together, so the Go `agentHasDetail`
+  predicate keys on the 4 `*string` pointers and an attempt-only-no-prompt node does not occur.
+
 ## Roadmap
 
 Wave 1 (this wave — all five pre-filed, perfected at Decide):
@@ -502,3 +566,21 @@ Review appends the debrief.
 - **wsc-ad-gui → #3959 MERGED.** The Studio rail per-agent drill-down: `workflow_agent_detail/1` pure fold + the D26 rail signature-strip extension (retains lastToolName/lastToolSummary/resultPreview/attempt/promptPreview — without it a detail-only frame yields an equal signature and the pane freezes) + chat_live.ex expand UI (structural affordance gate, D27) + dual-mirror Go+Elixir testdata. Built off a stale base; steward cherry-picked clean onto current origin/main. One steward fix: the attempt chip used non-existent `--warning`/`--warning-soft` tokens with rgba/hex literal fallbacks (tripped the Studio literal-color gate) → canonical `--warn-soft`/`--warn`. Elixir + go-tests green, Sobelow verified baseline noise (no router/pipeline). Task closed done.
 - **wsc-ad-tui → NOT built this run.** It is round 2 `after:[wsc-ad-gui]` (needs the GUI fixture on main, D34) and the Review phase errored on a session limit before round 2 dispatched. The GUI fixture is now on main, so wsc-ad-tui is a clean follow-up round (Go TUI third focus level; consumes the same dual-mirror `workflow_agent_detail.json`).
 Backlog carried: `wsc-bl-agent-task-join` (D32 intermingle), `wsc-bl-agent-detail-fixture-gaps`, `wsc-bl-workflow-sse-detail`; PARKED: prs-open, busiest-child.
+
+### Wave 3 · round 2 (2026-07-17) — the ad-tui FINISH round DISPATCHED (single slice)
+Wave Paper: `wsc-wave-2026-07-17-ad-tui` (style=article). Finishes the stranded wsc-ad-tui (Review
+died on a session limit last round; the GUI dependency is now MERGED). ONE slice this wave. Two
+explore rounds + a 12-report survey digest + a 3-verifier PROVE round ran; every load-bearing claim
+proven by RUNNING: the Go baseline gate is GREEN (vet zero output + `go test` ok first run, single
+package), the decode+derive parity PASSED 0-mismatch on all 34 fixture nodes with the 6 additive
+fields, and the seam blueprint re-anchored at HEAD (`KeyLeft/KeyRight` unclaimed, byte-lock tests all
+pass). Decisions D35–D39 folded above (Enter-then-arrow grammar, Go-derives-terminal/failed at 6
+frozen fields, synthetic-honesty test MANDATE, 5-seam reset list, presentation mirrors GUI code).
+- **wsc-ad-tui** `task-3be0030a7769861d` — Go/bp chat, **large**, **round 1** (dep MERGED), opus.
+  Third focus level on the s5 panel: Enter→agent detail (chip→about→▸now/done), Esc/left back; additive
+  `wfAgent`+`wfAgentDetail`; Go `WorkflowNode` +6 fields; field-projection parity + synthetic-honesty
+  unit test. Gate: `cd internal/chat && CC=clang go vet ./... && CC=clang go test ./...`.
+Builder cuts off origin/main (advances fast — foreign scaffy/connectors/site-spawner); steward rebases
+the `-r` branch (cherry-pick the slice commit) before PR. If repo-wide go-tests red, `gh run rerun
+<run> --failed` FIRST (recurring sandbox flakes + foreign scaffy corpus-count drift — not this slice's
+break). Backlog carried unchanged. Review appends the debrief.
