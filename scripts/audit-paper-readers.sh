@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Exact live-corpus smoke audit for every published Paper and every reader edge.
+# Emits one JSON summary and exits non-zero if any Paper fails.
+set -uo pipefail
+
+server="${BP_AUDIT_SERVER:-guerrilla}"
+base="${BP_AUDIT_BASE_URL:-https://guerrilla.barkpark.cloud}"
+workspace="${BP_AUDIT_WORKSPACE:-default}"
+project="${BP_AUDIT_PROJECT:-default}"
+dataset="${BP_AUDIT_DATASET:-production}"
+bp_bin="${BP_AUDIT_BIN:-bp}"
+
+for required in jq curl "$bp_bin"; do
+  command -v "$required" >/dev/null || {
+    jq -n --arg tool "$required" '{ok:false,error:"missing required command",tool:$tool}'
+    exit 2
+  }
+done
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/bp-paper-audit.XXXXXX")"
+trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
+inventory="$tmp/inventory.json"
+results="$tmp/results.jsonl"
+touch "$results"
+
+if ! "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
+  search query '*' --type paper --perspective published --all -o json >"$inventory"; then
+  jq -n --arg server "$server" '{ok:false,error:"paper inventory query failed",server:$server}'
+  exit 2
+fi
+
+if ! jq -e '
+  .documents | type == "array" and length > 0 and
+  all(.[]; (._id | type == "string" and length > 0))
+' "$inventory" >/dev/null 2>&1; then
+  jq -n --arg server "$server" '{ok:false,error:"paper inventory must be a non-empty documents array with string ids",server:$server}'
+  exit 2
+fi
+
+inventory_count="$(jq '.documents | length' "$inventory")"
+if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
+  if ! [[ "$BP_AUDIT_EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || ((inventory_count != BP_AUDIT_EXPECTED_COUNT)); then
+    jq -n \
+      --argjson inventory "$inventory_count" \
+      --arg expected "$BP_AUDIT_EXPECTED_COUNT" \
+      '{ok:false,error:"paper inventory count did not match expected count",inventory:$inventory,expected:$expected}'
+    exit 2
+  fi
+fi
+
+jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
+  encoded="$(jq -rn --arg value "$id" '$value|@uri')"
+  encoded_ws="$(jq -rn --arg value "$workspace" '$value|@uri')"
+  encoded_project="$(jq -rn --arg value "$project" '$value|@uri')"
+  encoded_dataset="$(jq -rn --arg value "$dataset" '$value|@uri')"
+  if [[ "$workspace" == "default" && "$project" == "default" && "$dataset" == "production" ]]; then
+    public_url="$base/papers/$encoded"
+  elif [[ "$workspace" == "default" && "$project" == "default" ]]; then
+    public_url="$base/d/$encoded_dataset/papers/$encoded"
+  else
+    public_url="$base/w/$encoded_ws/p/$encoded_project/papers/$encoded"
+  fi
+
+  gui_code="$(curl -L -sS -o "$tmp/gui" -w '%{http_code}' "$public_url")"
+  email_code="$(curl -L -sS -o "$tmp/email" -w '%{http_code}' "$public_url/email")"
+  source_code="$(curl -L -sS -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source")"
+
+  source_ok=false
+  source_kind="unavailable"
+  if [[ "$source_code" == "200" ]]; then
+    source_kind="$(jq -r '.source.kind // "invalid"' "$tmp/source" 2>/dev/null || printf invalid)"
+    if [[ "$source_kind" == "blocks" ]]; then
+      jq -e '.source.blocks | type == "array"' "$tmp/source" >/dev/null 2>&1 && source_ok=true
+    elif [[ "$source_kind" == "html" ]]; then
+      jq -e '.source.html | type == "string" and length > 0' "$tmp/source" >/dev/null 2>&1 && source_ok=true
+    fi
+  fi
+
+  cli_ok=false
+  "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
+    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && cli_ok=true
+
+  email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
+  ok=false
+  if [[ "$gui_code" == "200" && "$email_code" == "200" && "$source_ok" == true && "$cli_ok" == true ]]; then
+    ok=true
+  fi
+
+  jq -nc \
+    --arg id "$id" \
+    --arg source_kind "$source_kind" \
+    --argjson gui_code "$gui_code" \
+    --argjson email_code "$email_code" \
+    --argjson source_code "$source_code" \
+    --argjson email_bytes "$email_bytes" \
+    --argjson source_ok "$source_ok" \
+    --argjson cli_ok "$cli_ok" \
+    --argjson ok "$ok" \
+    '{id:$id,ok:$ok,gui:{status:$gui_code},email:{status:$email_code,bytes:$email_bytes},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok}}' \
+    >>"$results"
+done
+
+jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" '
+  {
+    ok: (length == $inventory and all(.[]; .ok)),
+    server: $server,
+    base_url: $base,
+    inventory: $inventory,
+    audited: length,
+    passed: map(select(.ok)) | length,
+    failed: map(select(.ok | not)) | length,
+    failures: map(select(.ok | not))
+  }
+' "$results"
+
+jq -s --argjson inventory "$inventory_count" -e \
+  'length == $inventory and all(.[]; .ok)' "$results" >/dev/null
