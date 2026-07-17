@@ -249,6 +249,94 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
     end
   end
 
+  # ── per-agent drill-down affordance (wsc-ad) ────────────────────────────────
+  #
+  # The affordance attaches to agent ROWS, which render only under the active /
+  # interrupted frontier phase — so the COMPLETED epic_cycle_progress golden above
+  # (7 done phases, agents collapsed) shows NONE of it and stays byte-identical.
+  # These tests seed a LIVE run instead so the rows (and their expand) are on
+  # screen, then drive the toggle and assert the ABOUT / NOW markup — honest to the
+  # wire, never a labeled thinking block.
+  @drill_session_id "00000000-0000-4000-8000-0000000c0de3"
+  @synth_session_id "00000000-0000-4000-8000-0000000c0de4"
+
+  describe "rail agent drill-down affordance (wsc-ad D27/D29)" do
+    test "a live run's agent row expands to its brief + live tool line, never 'thinking'",
+         %{conn: conn} do
+      # the interrupted fixture folded (NOT teardown-flipped) is a LIVE run: the
+      # Explore frontier phase breathes with 4 non-terminal explorers whose rows
+      # carry full detail.
+      rail = fold_epic(load_ndjson("epic_cycle_interrupted.ndjson"))
+      {:ok, _} = StudioChat.create_session(%{id: @drill_session_id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(@drill_session_id, rail)
+
+      # a non-terminal (active-phase) agent — the one actually rendered on screen
+      agent = Enum.find(StudioChat.workflow_agent_detail(rail), &(not &1["terminal"]))
+      assert is_binary(agent["agentId"])
+      assert is_binary(agent["lastToolName"])
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{@drill_session_id}")
+      before = render(view)
+
+      # the row shows the affordance but NOT the tool detail until expanded
+      assert before =~ ~s(phx-click="rail-agent-toggle")
+      assert before =~ ~s(phx-value-id="#{agent["agentId"]}")
+      refute before =~ agent["lastToolName"]
+
+      # drive the toggle for that specific agent
+      after_html = render_click(view, "rail-agent-toggle", %{"id" => agent["agentId"]})
+
+      # ABOUT (the brief) + NOW (the live '▸' tool line) are now on screen
+      assert after_html =~ "about"
+      assert after_html =~ "▸"
+      assert after_html =~ agent["lastToolName"]
+      # HONESTY: thinking text never rides the wire — nothing is labeled thinking
+      refute after_html =~ "thinking"
+
+      # collapse again — the detail folds away (default CLOSED, toggle wins)
+      folded = render_click(view, "rail-agent-toggle", %{"id" => agent["agentId"]})
+      refute folded =~ agent["lastToolName"]
+    end
+
+    test "attempt>1 renders a retry chip (D29 — explicitly synthetic node)", %{conn: conn} do
+      # attempt>1 exists on NO real capture (rail_put_workflow is a bare Map.put,
+      # barkpark forces no retry), so the chip is proven by a synthetic node — never
+      # folded into the verbatim-from-real fixture.
+      rail = %{
+        "synth" => %{
+          "seq" => 1,
+          "status" => "running",
+          "row" => %{"task_type" => "local_workflow", "description" => "synthetic wave"},
+          "workflow" => [
+            %{"type" => "workflow_phase", "index" => 1, "title" => "Build"},
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "agentId" => "synth-agent-1",
+              "label" => "builder:retry",
+              "state" => "start",
+              "attempt" => 2,
+              "promptPreview" => "You are the builder, retried…",
+              "lastToolName" => "Edit",
+              "lastToolSummary" => "re-applying the patch"
+            }
+          ]
+        }
+      }
+
+      {:ok, _} = StudioChat.create_session(%{id: @synth_session_id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(@synth_session_id, rail)
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{@synth_session_id}")
+      # the chip only shows once expanded
+      refute render(view) =~ "attempt 2"
+
+      expanded = render_click(view, "rail-agent-toggle", %{"id" => "synth-agent-1"})
+      assert expanded =~ "attempt 2"
+      assert expanded =~ "You are the builder, retried"
+    end
+  end
+
   # Two sessions: a plain chat and a settled epic-cycle workflow session whose
   # worker holds a slice under a published epic (the epic-goal line's ledger
   # chain). last_active_at is PINNED so row order never flaps.
