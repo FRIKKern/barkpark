@@ -44,6 +44,7 @@ defmodule BarkparkWeb.BulldocsLive do
   import Phoenix.HTML, only: [raw: 1]
 
   alias Barkpark.Content
+  alias Barkpark.Content.Labels
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
@@ -660,15 +661,26 @@ defmodule BarkparkWeb.BulldocsLive do
   end
 
   # D2 (ratified, wire §10): the reader's mount/refetch render resolves
-  # wikilinks/task chips AND inline valuerefs FRESH per page load, as the
-  # ANONYMOUS principal over PUBLISHED rows only — per-page-load freshness with
-  # no live push, and nothing here can outrank what an unauthenticated caller
-  # may see (`resolve_values_in_blocks` defaults `:caller_context` to the
-  # anonymous `%CallerContext{}`; `published_only: true` is the D5 gate).
+  # wikilinks/task chips, inline valuerefs, `field-reference` titles AND
+  # `codelist` labels FRESH per page load, as the ANONYMOUS principal over
+  # PUBLISHED rows only — per-page-load freshness with no live push, and
+  # nothing here can outrank what an unauthenticated caller may see
+  # (`resolve_values_in_blocks` defaults `:caller_context` to the anonymous
+  # `%CallerContext{}`; `published_only: true` is the D5 gate).
   # Resolution is tenant-scoped to the paper's own workspace/project; a legacy
   # NULL-workspace row normalizes to the seeded Default workspace (the same
   # rule the PubSub topic applies) — and with NO seeded Default there is no
   # public tenant, so nothing resolves (fail closed, never a global read).
+  #
+  # `Labels.render_opts/2` supplies the `:ref_resolver`/`:codelist_resolver`
+  # closures the pure renderer reads (Render.resolve_ref_title/resolve_code_label)
+  # so a `field-reference` block shows the referenced doc's TITLE and a
+  # `codelist` block its human LABEL — matching Studio and the body_html cache
+  # instead of leaking the raw slug/code. The SAME tenant scope + published_only
+  # gate flows through: `reference_title` drops the `drafts.` twin under
+  # published_only (a draft-only target degrades to the raw id, never leaking a
+  # draft title), and `codelist_label` is a global (plugin, list_id) registry
+  # lookup carrying no per-tenant user data, so it is safe to resolve here.
   defp reader_resolvers(blocks, dataset, paper) do
     workspace_id =
       (paper && paper.workspace_id) ||
@@ -690,6 +702,7 @@ defmodule BarkparkWeb.BulldocsLive do
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
         values: Content.resolve_values_in_blocks(blocks, dataset, scope)
       }
+      |> Map.merge(Labels.render_opts(dataset, scope))
     end
   end
 
