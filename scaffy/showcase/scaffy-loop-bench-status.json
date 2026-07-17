@@ -577,6 +577,200 @@
       "title": "In flight + next",
       "tone": "info",
       "type": "callout"
+    },
+    {
+      "id": "sls-x01",
+      "type": "divider"
+    },
+    {
+      "id": "sls-x02",
+      "type": "heading",
+      "level": 2,
+      "text": "Addendum \u2014 the advanced-component duel (kpi-grid)"
+    },
+    {
+      "id": "sls-x03",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Same frozen spec, same model, parallel isolated worktrees: an advanced block type (delta semantics, column clamp, width-aware degrade) built WITH Scaffy (scaffold+classify then grow) vs WITHOUT (bare hands, scaffy forbidden). Both arms required to prove WORKING: all gates green plus verbatim rendered output on TUI and web for the same fixture."
+        }
+      ]
+    },
+    {
+      "id": "sls-x04",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "measure"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "with Scaffy"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bare hands"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "\u0394"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "wall-clock"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "566 s"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "706 s"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221220%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "tokens"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "122,672"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "154,053"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221220.4%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "tool calls"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "55"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "80"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221231%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "gates"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all green (263 vitest, 49/49 parity)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all green (263 vitest, 49/49 parity)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tie"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "rendered proof"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI + HTML, delta classes \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI + HTML, delta classes \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "both WORK"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sls-x05",
+      "type": "callout",
+      "tone": "success",
+      "title": "The crossover law, confirmed at the hard end",
+      "content": [
+        {
+          "type": "text",
+          "value": "An advanced component is mostly judgment work; Scaffy's win concentrates in the mechanical fraction \u2014 the 8-site registration web (registry, dispatch, CASES, count pins, typekeyed partition, golden mirrors, completeness, tier) which the bare arm hunted by hand. That fraction \u224820% of the job, and Scaffy saved almost exactly that: \u221220% time, \u221220% tokens, correctness equal \u2014 with determinism and amortization the single run can't show. The duel also surfaced the SIXTH count-sync site (toPlainText typekeyed pins), banked on the flagship's amendment task."
+        }
+      ]
     }
   ],
   "description": "Bench-status of the Scaffy perfecting loop: catalog 14\u219221 with author-or-cut evidence, the 32-cell duel scoreboard visualized, the frontier fully ruled (ghosts flagged by discover's new signal-honesty), the grammar grown twice by need, and the catalog-first doctrine wired into every layer down to the epic-cycle builder prompts. Native chart/heatmap/diagram blocks throughout.",
