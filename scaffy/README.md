@@ -54,9 +54,10 @@ and it becomes the parser's test fixtures in the next wave.
 
 ## The command corpus
 
-Nineteen commands, each covering a thing Barkpark development actually repeats — the
+Twenty-one commands, each covering a thing Barkpark development actually repeats — the
 Wave-5 additions (and add-sdk-method / ensure-root-layout-zones / ensure-router-zones /
-add-plugin-bucket / add-plugin-route after them) were frequency-mined from twelve months of git history, so
+add-plugin-bucket / add-plugin-route / ensure-console-hook-zones / add-console-helper
+after them) were frequency-mined from twelve months of git history, so
 every entry answers a proven repetition. Every command lives at
 `scaffy/commands/<name>.scaffy`.
 
@@ -80,6 +81,8 @@ every entry answers a proven repetition. Every command lives at
 | **ensure-root-layout-zones** | Plants the two named `scaffy:zone` marker comments in `root.html.heex` — the repo's #2 accretion file, which W1/W7 ruled un-anchorable. Zero variables: a one-time reversible plant of a head anchor at each genuinely append-shaped neighborhood (new script assets after `{@inner_content}`, new LiveView hooks after `let Hooks = {};`), so later appends land at a named mark. The other two streams are cut with evidence in the command prose: theme blocks are emitter-owned (`design/emit.mjs` generated region) and feature CSS placement is contextual by design (the W1 CSS-leg cut, re-affirmed). |
 | **ensure-router-zones** | Same repair, router spelling: plants three `scaffy:zone` comments in `router.ex` — the #1 unserved accretion file (175 commits/12 months, 68% PURE_ADD), twice ruled un-anchorable because route order is semantics. Each zone sits where an append is ordering-safe **by construction** and its comment states the contract it guards in words (pipeline definitions are position-free; new plugin auth-buckets land before the dynamic-tailed `:ticket_key` run; scoped mirrors are order-neutral at the tail given a novel `/v1/<noun>` suffix). The flat-core `/v1` stream is cut with evidence: those adds are neighbor-bound (in-scope appends, "sibling routes below" prose, noun-local static-before-dynamic pins no generic zone can encode). |
 | **add-plugin-bucket** | The zones' first consumer: a new plugin auth-tier as 2 `INSERT AFTER FIRST` ops anchored at the router zones' mark lines — the `pipeline :<bucket>` definition in the router-pipelines zone + the `scope <mount> … plugin_routes(scope: :<bucket>)` wrapper in the plugin-buckets zone (5 such bucket adds since April). Requires ensure-router-zones applied first, **by loud refusal**: the anchors don't exist on a virgin tree, so the engine's D20 conservatism refuses (exit 5, nothing written) and the command's prose carries the 2-run recipe — run-proven that recipe + refusal beats a composition primitive. `MountPath` is a `ONEOF` (`/v1/plugins`\|`/v1`); the auth plug is deliberately open. Router leg only — the plugin's `register_routes/1` entries are add-plugin-route's job; the JS manifest-parity tripwire is separate (non-scaffy) work. |
+| **ensure-console-hook-zones** | The cloud-console repair: plants three `scaffy:zone` comments across the Cloud console SPA pair — app.js (#7 discover hotspot, 81 commits/60 MOSTLY_ADD) + its co-accreting node harness `__app.test.mjs` (55/82 commits ride together). One zone per mechanically append-shaped seam: new pure-helper declarations (IIFE scope + eval-tail hook call make position semantics-free), new `__bpTestHook` export entries (order-free keys, house trailing commas), new test groups (node:test registration order is semantics-free). The console vein's other legs are cut with evidence in the command prose: the cloud router is a 9968-line `Plug.Router` of bespoke inline handler bodies with noun-local ordering pins (the flat-core ruling, re-affirmed), registry.ex is an Ecto context accreting bespoke `@doc + def` business functions, and app.css is emitter-owned at the head (design/emit.mjs GENERATED tokens) + contextual-by-section in the hand region. Includes the corpus's second and third `INSERT BEFORE FIRST`. |
+| **add-console-helper** | The zones' consumer: one node-pinned pure helper across the pair in a single run — the `function` skeleton in the console-helpers zone, its export entry in the console-hook-map zone, its starter test group in the console-tests zone. Requires ensure-console-hook-zones first **by loud refusal** (the add-plugin-bucket recipe: absent anchors exit 5, nothing written). The starter is an identity passthrough with a test pinning exactly that, deliberately: growing the body reds the starter test and forces the test group to grow in the same change. Closes on the pair's own CI-enforced gate run LOCAL: `node --test cloud/priv/static/__app.test.mjs` (438+ tests, ~250 ms, zero deps — console-harness.yml runs the same suite on PRs). |
 | **add-plugin-route** | The in-plugin leg: one route tuple planted at the **head** of a plugin's `register_routes/1` list — the route auto-folds into the host router at compile time via the runtime collector, so this single list entry is the whole authoring moment (no `router.ex` edit, ever). Targets the six block-list plugins (tickets, quiz, pulse, tasks, bulldocs, github) through a **variable** `IN` path; sheets/onixedit refuse loud at anchor resolution. Head-insert is the house ordering law, not a compromise: history's own adds moved head-ward (`/tasks/prime` "must mount BEFORE `/tasks/:doc_id`"), so a new static path can never be shadowed by an existing dynamic catchall. `Method` is a `ONEOF` over the closed `http_verb` set (`:live` is a different tuple shape, out of scope by name); `AuthBucket` is open by design — add-plugin-bucket mints new tiers, and the host router silently drops unknown buckets until their wrapper lands. Guard = the tuple's method+path head, so a hand-authored duplicate route refuses injection. |
 
 ### The ensure law (D57)
@@ -429,10 +432,11 @@ planted). As a plain `INSERT BEFORE FIRST` the op is not self-consuming, carries
 
 `bp scaffy fmt` again needs **zero** changes (keyword-agnostic `joinFields`, pinned by the
 fmt golden); an unpinned `INSERT BEFORE` is P-002
-(`testdata/red/P-002-insert-before-unpinned.scaffy`). Corpus census: 1 `INSERT BEFORE
-FIRST` (the canonical-marker plant), `REPLACE` 11→10; `INSERT BEFORE LAST` is grammar-legal
-with zero corpus instances, exercised by synthetic fixtures (the `SNIPPET`/`USE`
-precedent).
+(`testdata/red/P-002-insert-before-unpinned.scaffy`). Corpus census at ratification: 1
+`INSERT BEFORE FIRST` (the canonical-marker plant), `REPLACE` 11→10 (now 3 — the
+ensure-console-hook-zones plants above app.js's escape hatch and IIFE tail joined it,
+2026-07-17); `INSERT BEFORE LAST` is grammar-legal with zero corpus instances, exercised
+by synthetic fixtures (the `SNIPPET`/`USE` precedent).
 
 ## Gate tiers
 
