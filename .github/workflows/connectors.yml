@@ -87,6 +87,18 @@ jobs:
           shellcheck -S error scripts/connectors/w14-session-sandbox-proof.sh
           bash scripts/connectors/w14-session-sandbox-proof.sh
 
+      # The Wave-25 credential config-embed proof (D213-D216): the shim fetches
+      # FINISHED tool headers host-side from the bridge's D71 loopback route and
+      # delivers the credential-bearing MCP config via `vercel sandbox copy` of a
+      # 0600 tmpfile — never argv/env. Same fake-vercel technique plus a stub
+      # loopback bridge (node http.createServer); no real Vercel, no real
+      # credential. Asserts the (a)-(g) confinement set incl. the cross-workspace
+      # fail-closed refusal and create→reuse per-turn freshness.
+      - name: Credential config-embed proof (W25, D213-D216)
+        run: |
+          shellcheck -S error scripts/connectors/w25-credential-embed-proof.sh
+          bash scripts/connectors/w25-credential-embed-proof.sh
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest
