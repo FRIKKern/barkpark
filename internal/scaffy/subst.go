@@ -69,6 +69,11 @@ func newSubstituter(cmd *Command, vars map[string]string) (*substituter, error) 
 				return nil, err
 			}
 		}
+		if len(v.OneOf) > 0 {
+			if err := checkOneOf(v, value); err != nil {
+				return nil, err
+			}
+		}
 		if v.Successor != "" {
 			if err := checkSuccessor(v, vars); err != nil {
 				return nil, err
@@ -130,6 +135,20 @@ func checkShape(v *VariableDecl, value string) error {
 		return varErrorf("--var %s: %q does not satisfy SHAPE ts14 — exactly 14 ASCII digits forming a real UTC YYYYMMDDHHMMSS instant (D22)", v.Name, value)
 	}
 	return nil
+}
+
+// checkOneOf enforces the D56 ONEOF constraint at run time: the supplied
+// value must be a member of the declared set (mirroring checkShape — the
+// lint reds declared EXAMPLES, the engine owns the live --var value). A
+// non-member is a VarError, mapped to exit 2 like a SHAPE violation.
+func checkOneOf(v *VariableDecl, value string) error {
+	for _, m := range v.OneOf {
+		if value == m {
+			return nil
+		}
+	}
+	members := `"` + strings.Join(v.OneOf, `", "`) + `"`
+	return varErrorf("--var %s: %q is not one of ONEOF %s (D56)", v.Name, value, members)
 }
 
 // checkSuccessor enforces the D37 SUCCESSOR law: the caller supplies

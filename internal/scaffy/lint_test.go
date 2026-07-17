@@ -129,6 +129,42 @@ func TestLegacyBugClasses(t *testing.T) {
 	}
 }
 
+// TestLintOneOfExamplesOutsideSet: a declared EXAMPLES value outside the
+// ONEOF set reds as E-021 at the VARIABLE line (D56).
+func TestLintOneOfExamplesOutsideSet(t *testing.T) {
+	src := []byte(`DIRECTION "add"
+VARIABLE 1 "Visibility" ONEOF "public", "private" TITLE "t" DESCRIPTION "d" EXAMPLES "public", "internal"
+ASSERT FILE "x/y.json" CONTAINS "{{.Visibility}}"
+`)
+	findings := ValidateFile("t.scaffy", src)
+	got := 0
+	for _, f := range findings {
+		if f.Rule == RuleOneOf {
+			got++
+			if f.Line != 2 {
+				t.Errorf("E-021 at line %d, want 2", f.Line)
+			}
+		}
+	}
+	if got != 1 {
+		t.Errorf("want exactly one E-021, got %d; findings:\n%s", got, renderFindings(findings))
+	}
+}
+
+// TestLintOneOfAllMembersClean: EXAMPLES wholly inside the ONEOF set
+// yields no E-021.
+func TestLintOneOfAllMembersClean(t *testing.T) {
+	src := []byte(`DIRECTION "add"
+VARIABLE 1 "Tier" ONEOF "element", "widget", "section" TITLE "t" DESCRIPTION "d" EXAMPLES "element", "section"
+ASSERT FILE "x/y.ex" CONTAINS "@{{.Tier}} list"
+`)
+	for _, f := range ValidateFile("t.scaffy", src) {
+		if f.Rule == RuleOneOf {
+			t.Errorf("unexpected E-021 on all-member EXAMPLES: %s", f)
+		}
+	}
+}
+
 // TestValidateFileSortsFindings: findings come back ordered by line.
 func TestValidateFileSortsFindings(t *testing.T) {
 	src := []byte("ASLONG FILE CONTAIN \"x\"\nFROBNICATE\n")
