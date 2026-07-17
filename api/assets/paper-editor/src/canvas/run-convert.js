@@ -269,11 +269,15 @@ const CANVAS_FIELD_NODE_NAME = "bpField";
 // value ops, and it DOES participate in STRUCTURAL ops (insert/remove/move by bpId)
 // like any block — so it no longer SPLITS a run.
 //
-// EXPLICITLY OUT (still boundaries): field-image / field-reference (the deferred
-// picker fields). After S3.6 sheet/embed are canvas-eligible, so the ONLY remaining
-// run splitters are those two pickers (and any composite/object/arrayOf/codelist/
-// localizedText). Keep aligned with embed-node.js:BP_SHEET_NODE_NAME /
-// BP_EMBED_NODE_NAME and paper_canvas.ex:@canvas_readonly_atom_types.
+// EXPLICITLY OUT (still boundaries): composite / object / arrayOf / codelist /
+// localizedText (the nested-structure kinds). field-image / field-reference are
+// NO LONGER out — they ride CANVAS_PICKER_FIELD_TYPES (∈ CANVAS_FIELD_TYPES), so
+// blockToNode dispatches them to the editable fieldBlockToNode and field-node.js
+// mounts bp-media-picker / bp-reference-picker as canvas-editable control-atoms.
+// After S3.6 sheet/embed are canvas-eligible too, so the ONLY remaining run
+// splitters are those nested-structure kinds. Keep aligned with
+// embed-node.js:BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME and
+// paper_canvas.ex:@canvas_readonly_atom_types.
 const CANVAS_READONLY_ATOM_TYPES = new Set(["sheet", "embed"]);
 
 // The TipTap NODE name for a read-only atom block differs from its bpType: for sheet
@@ -504,8 +508,10 @@ function isCanvasAttrAtomNode(nodeType) {
   );
 }
 
-// True when a portable-doc BLOCK type is one of the 7 native field-* control-atoms
-// (S3.5). field-image / field-reference are EXCLUDED (pickers stay boundaries).
+// True when a portable-doc BLOCK type is a canvas field-* control-atom — the 7
+// native field-* types PLUS the 2 picker types (field-image / field-reference).
+// CANVAS_FIELD_TYPES is native ∪ picker, so this returns TRUE for the pickers too:
+// they are canvas-editable, dispatched to fieldBlockToNode (NOT boundaries).
 function isCanvasFieldType(type) {
   return CANVAS_FIELD_TYPES.has(type);
 }
@@ -711,13 +717,16 @@ function blockToNode(block) {
     }
 
     if (isCanvasFieldType(bpType)) {
-      // A canvas CONTROL-ATOM node (S3.5: the 7 native field-* types): an atom node
-      // whose VALUE rides in an attr and is edited by a NATIVE control. ALL 7 types
+      // A canvas CONTROL-ATOM node (S3.5): the 7 native field-* types PLUS the 2
+      // picker types (field-image / field-reference). An atom node whose VALUE rides
+      // in an attr, edited by a NATIVE control (the 7) or by a picker WC —
+      // bp-media-picker / bp-reference-picker (field-node.js) — for the pickers. ALL
       // project to the SAME `bpField` node, discriminated by the bpType attr. The
       // node carries the FULL config (label/options/rows/fieldName) so the round-trip
       // is byte-identical — UNLIKE code/diagram, a field block has config keys the
-      // canvas must not lose. field-image/field-reference are NOT in this set; they
-      // fall through to bpOpaque below (pickers stay boundaries).
+      // canvas must not lose. field-image/field-reference ARE in this set
+      // (CANVAS_PICKER_FIELD_TYPES): they dispatch here to fieldBlockToNode and mount
+      // an editable picker — they are NOT boundaries, do NOT fall through to bpOpaque.
       return fieldBlockToNode(block, bpId, bpType);
     }
 
