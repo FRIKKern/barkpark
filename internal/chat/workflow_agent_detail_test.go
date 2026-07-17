@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // rawAgentDetailNode is the FULL wire shape of one agent node in the shared
@@ -213,6 +214,43 @@ func TestWorkflowAgentDetailPresentation(t *testing.T) {
 		t.Fatalf("a non-terminal node must omit the 'done' line, got:\n%s", pane)
 	}
 }
+
+// TestWorkflowAgentDetailWidthDiscipline: a long brief/result never overruns the
+// pane width — the labeled 'about'/'done' block reserves its label width on the
+// first line (house discipline, mirroring workflowAgentLine's budget), so the
+// terminal never wraps a tail ugly.
+func TestWorkflowAgentDetailWidthDiscipline(t *testing.T) {
+	now := time.UnixMilli(1783633800000)
+	longPrompt := strings.Repeat("survey the resolver and its callers exhaustively ", 12)
+	longResult := strings.Repeat("shipped the fold plus its parity and honesty tests ", 12)
+
+	for _, tc := range []struct {
+		name  string
+		width int
+		node  WorkflowNode
+	}{
+		{"live-brief", 80, WorkflowNode{State: "progress", Attempt: 2, PromptPreview: &longPrompt,
+			LastToolName: strPtr("Grep"), LastToolSummary: &longPrompt, LastProgressAt: ptrI64(1783633740000)}},
+		{"done-result", 80, WorkflowNode{State: "done", PromptPreview: &longPrompt, ResultPreview: &longResult}},
+		{"narrow", 40, WorkflowNode{State: "done", PromptPreview: &longPrompt, ResultPreview: &longResult}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.node
+			a.Type = "workflow_agent"
+			a.PhaseIndex = 1
+			wf := &Workflow{Status: "running", Nodes: []WorkflowNode{
+				{Type: "workflow_phase", Index: 1, Title: "Phase"}, a,
+			}}
+			for _, ln := range renderWorkflowAgentDetail(tc.width, journeyOf(wf), now, 0, 0) {
+				if w := lipgloss.Width(ln); w > tc.width {
+					t.Fatalf("pane line overruns width %d (got %d): %q", tc.width, w, ln)
+				}
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }
 
 // renderAgentDetailFor wraps one agent in a single-phase journey and paints its
 // detail pane — the render harness for the presentation + chip assertions.

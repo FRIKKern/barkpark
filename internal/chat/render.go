@@ -569,7 +569,15 @@ func labeledWrap(indent, label, text string, w int) []string {
 	if inner < 8 {
 		inner = 8
 	}
-	body := wrap(text, inner)
+	// The label prefixes the FIRST line, so reserve its width up front — otherwise
+	// body[0]+label overruns the pane width by label+1 columns and the terminal
+	// wraps the tail ugly (house discipline: workflowAgentLine budgets its label
+	// the same way so glyph/meta/elapsed keep their seats).
+	first := inner - lipgloss.Width(label) - 1
+	if first < 8 {
+		first = 8
+	}
+	body := wrapFirst(text, first, inner)
 	if len(body) == 0 {
 		return nil
 	}
@@ -1275,6 +1283,52 @@ func wrap(s string, w int) []string {
 			case line == "":
 				line = word
 			case lipgloss.Width(line)+1+lipgloss.Width(word) <= w:
+				line += " " + word
+			default:
+				out = append(out, line)
+				line = word
+			}
+		}
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// wrapFirst is wrap with a narrower FIRST output line (firstW) and full-width
+// continuation lines (restW) — for a labeled block whose label eats the head of
+// line 0, so no physical line ever overruns the pane. Identical word/newline
+// grammar to wrap otherwise.
+func wrapFirst(s string, firstW, restW int) []string {
+	if firstW < 1 {
+		firstW = 1
+	}
+	if restW < 1 {
+		restW = 1
+	}
+	s = strings.TrimRight(s, " ")
+	if s == "" {
+		return nil
+	}
+	widthOf := func(i int) int {
+		if i == 0 {
+			return firstW
+		}
+		return restW
+	}
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		if para == "" {
+			out = append(out, "")
+			continue
+		}
+		var line string
+		for _, word := range strings.Fields(para) {
+			switch {
+			case line == "":
+				line = word
+			case lipgloss.Width(line)+1+lipgloss.Width(word) <= widthOf(len(out)):
 				line += " " + word
 			default:
 				out = append(out, line)
