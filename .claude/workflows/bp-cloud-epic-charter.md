@@ -478,7 +478,7 @@ prs-open, busiest-child (honesty star holds them). Review appends the debrief.
 - **wsc-bl-real-fixtures → #3909 MERGED** — REAL SIGKILL-interrupted ndjson + `workflow_agent`-scoped attempt==1 proof; test-only (Elixir + prod-compile green, no Go gate, Sobelow test-only noise). Task closed done.
 - **wsc-bl-workflow-sse → #3910 MERGED** — the `event: workflow` SSE frame + per-session `Recorder.topic` re-broadcast + Go `LiveWorkflow` state/reduce/render. Its `.go` change exposed a LATENT foreign scaffy Go-gate drift on main (`corpusFileCount=7` vs 12 files) — fixed by foreign #3912 (7→12); steward then rebased #3910's sse commit clean onto the fixed main, go-vet + Elixir green, Sobelow verified baseline noise (touches recorder/chat_controller, NO router/pipeline). Task closed done.
 Wave-2 round-2 COMPLETE — all five surfaces now honest on prod-shaped interrupted data + bp chat's strip updates mid-turn. Remaining backlog: **wsc-bl-workflow-sse-detail** (D24 expanded-detail ceiling) + the newly-filed agent-detail slices **wsc-ad-gui / wsc-ad-tui** (see-what-subagents-are-doing); PARKED by honesty-star: prs-open, busiest-child.
-### Wave 3 (2026-07-17) — the AGENT-DETAIL round BUILDING
+### Wave 3 (2026-07-17) — AGENT-DETAIL round: wsc-ad-gui MERGED (#3959); wsc-ad-tui deferred
 Wave Paper: `wsc-wave-2026-07-17-ad` (style=article). Drills the workflow card one level to per-agent
 detail. Two explore rounds + a 15-report survey digest + a 7-verifier PROVE round ran; decisions
 D26–D34 folded above. Every load-bearing claim was proven by RUNNING (not reading): V1 reproduced the
@@ -496,3 +496,9 @@ can't see subagent claims; shipping it half-wired is a dead affordance). New bac
 `wsc-bl-agent-task-join`, `wsc-bl-agent-detail-fixture-gaps`. Known main-flakes to rerun-once (NOT
 breaks): queue_test.exs:462 + the sandbox-ownership cascade (media_search / history_test / rate_limit).
 Review appends the debrief.
+
+
+**Outcome (steward close-out 2026-07-17 — Review DIED on a session limit, so this is the steward debrief):**
+- **wsc-ad-gui → #3959 MERGED.** The Studio rail per-agent drill-down: `workflow_agent_detail/1` pure fold + the D26 rail signature-strip extension (retains lastToolName/lastToolSummary/resultPreview/attempt/promptPreview — without it a detail-only frame yields an equal signature and the pane freezes) + chat_live.ex expand UI (structural affordance gate, D27) + dual-mirror Go+Elixir testdata. Built off a stale base; steward cherry-picked clean onto current origin/main. One steward fix: the attempt chip used non-existent `--warning`/`--warning-soft` tokens with rgba/hex literal fallbacks (tripped the Studio literal-color gate) → canonical `--warn-soft`/`--warn`. Elixir + go-tests green, Sobelow verified baseline noise (no router/pipeline). Task closed done.
+- **wsc-ad-tui → NOT built this run.** It is round 2 `after:[wsc-ad-gui]` (needs the GUI fixture on main, D34) and the Review phase errored on a session limit before round 2 dispatched. The GUI fixture is now on main, so wsc-ad-tui is a clean follow-up round (Go TUI third focus level; consumes the same dual-mirror `workflow_agent_detail.json`).
+Backlog carried: `wsc-bl-agent-task-join` (D32 intermingle), `wsc-bl-agent-detail-fixture-gaps`, `wsc-bl-workflow-sse-detail`; PARKED: prs-open, busiest-child.
