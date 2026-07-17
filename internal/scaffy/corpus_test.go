@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 21
+const corpusFileCount = 22
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -86,13 +86,13 @@ type census struct {
 	insertBeforeFirst int // INSERT BEFORE FIRST
 	insertBeforeLast  int // INSERT BEFORE LAST
 	replace           int // REPLACE
-	remove           int // REMOVE
-	deleteFile       int // DELETE FILE IF PRESENT
-	mark             int // ops carrying a MARK
-	markVirtual      int //   of which MARK VIRTUAL
-	assertFile       int // ASSERT FILE CONTAINS/DONT CONTAIN/EXISTS/ABSENT
-	assertCmd        int // ASSERT CMD
-	assertCmdTierCI  int //   of which TIER ci
+	remove            int // REMOVE
+	deleteFile        int // DELETE FILE IF PRESENT
+	mark              int // ops carrying a MARK
+	markVirtual       int //   of which MARK VIRTUAL
+	assertFile        int // ASSERT FILE CONTAINS/DONT CONTAIN/EXISTS/ABSENT
+	assertCmd         int // ASSERT CMD
+	assertCmdTierCI   int //   of which TIER ci
 }
 
 // countCorpus parses each corpus file and folds its AST into the tally.
@@ -159,19 +159,19 @@ func countCorpus(t *testing.T) census {
 // classifies one differently — fails here with a field-by-field diff.
 func TestCorpusCensus(t *testing.T) {
 	want := census{
-		create:            17,
-		insertAfterFirst:  31, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple; +1: ensure-console-hook-zones' tests-zone plant; +3: add-console-helper's skeleton + hook entry + test group; +1: classify-block-type v3's entry plant (was the self-consuming REPLACE — the tiers.ex append-friendly restructure)
+		create:            30, // +13 2026-07-18 add-site-template: the full Astro starter tree (manifest, schema, seed, app skeleton)
+		insertAfterFirst:  40, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple; +1: ensure-console-hook-zones' tests-zone plant; +3: add-console-helper's skeleton + hook entry + test group; +1: classify-block-type v3's entry plant (was the self-consuming REPLACE — the tiers.ex append-friendly restructure); +9 add-site-template: 2 allowlists + display catalog + 2 lock literals + provisioner row + runtime override + Go want + MANIFEST.md
 		insertAfterLast:   1,
-		insertBeforeFirst: 3,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE); +2: ensure-console-hook-zones' two app.js plants (above the escape hatch; above the IIFE tail)
+		insertBeforeFirst: 4,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE); +2: ensure-console-hook-zones' two app.js plants (above the escape hatch; above the IIFE tail); +1 add-site-template: the DeployRequest clause before the catch-all
 		insertBeforeLast:  0,  // grammar-legal, zero corpus instances (like SNIPPET/USE — exercised by synthetic fixtures)
-		replace:           9, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST; -1: classify-block-type v3's became INSERT AFTER FIRST (same-tier refusal killed, 2026-07-17)
+		replace:           12, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST; -1: classify-block-type v3's became INSERT AFTER FIRST (same-tier refusal killed, 2026-07-17); +3 add-site-template: the three string-literal enumerations (DeployRequest message, sites_deploy_test pin, CLI usage)
 		remove:            1,
 		deleteFile:        1,
-		mark:              45, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route; +3: the three console zones; +3: add-console-helper's trio
-		markVirtual:       2,
-		assertFile:        80, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail; +3: the console-zone trio; +3: add-console-helper's trio; -1: classify v3 dropped its MARK assert (D57 postcondition shape — the entry assert alone holds on the hand-edit path)
-		assertCmd:         37, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's; +2: the console pair's LOCAL `node --test` gates
-		assertCmdTierCI:   14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's (the console pair's node gates are LOCAL, not ci)
+		mark:              58,  // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route; +3: the three console zones; +3: add-console-helper's trio; +13 add-site-template: 10 planted + 3 virtual
+		markVirtual:       5,   // +3 add-site-template: string-literal REPLACEs (no comment survives in a string)
+		assertFile:        107, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail; +3: the console-zone trio; +3: add-console-helper's trio; -1: classify v3 dropped its MARK assert (D57 postcondition shape — the entry assert alone holds on the hand-edit path); +27 add-site-template: per-family-member postconditions
+		assertCmd:         42,  // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's; +2: the console pair's LOCAL `node --test` gates; +5 add-site-template: sync + Go lock + vet LOCAL, two Elixir gates ci
+		assertCmdTierCI:   16,  // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's (the console pair's node gates are LOCAL, not ci); +2 add-site-template: the cloud + api mix gates
 	}
 	got := countCorpus(t)
 	if got != want {

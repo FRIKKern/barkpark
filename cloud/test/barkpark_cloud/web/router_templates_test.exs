@@ -50,9 +50,11 @@ defmodule BarkparkCloud.Web.RouterTemplatesTest do
     refute body =~ ~s("secret")
   end
 
-  test "LOCK: catalog slugs mirror Registry.known_templates/0 (sorted)" do
+  test "LOCK: catalog slugs mirror Registry.known_templates/0" do
+    # The mirror equality IS the drift lock. Declaration order is display
+    # order (new templates insert at the head — scaffy add-site-template),
+    # so sortedness is deliberately NOT pinned.
     assert Templates.slugs() == Registry.known_templates()
-    assert Templates.slugs() == Enum.sort(Templates.slugs())
   end
 
   test "Templates.get/1 resolves a known slug and rejects an unknown one" do

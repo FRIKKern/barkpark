@@ -102,11 +102,16 @@ cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root
 
 # The deploy templates (templates/<name>/) are go:embedded into the provisioner
 # (internal/provisioner/catalog/templates/) for the dwb-4 content bootstrap.
-# The canonical files stay at the repo root; sync re-copies the manifest +
-# schemas + seed per template, and TestEmbeddedCatalogMatchesRepoRoot is the
-# per-test-run drift guard.
-provisioner-catalog-sync: ## Sync deploy templates into the provisioner's go:embed catalog
-	@for t in place-directory website-starter blog-starter search-starter astro-search-starter; do \
+# The canonical files stay at the repo root; sync MIRRORS the manifest +
+# schemas + seed of every templates/<name>/ that carries a
+# barkpark.template.json (the list is derived, never hand-maintained — a new
+# template is picked up by its manifest alone, and a removed one is pruned by
+# the rm -rf), and TestEmbeddedCatalogMatchesRepoRoot is the per-test-run
+# drift guard in both directions.
+provisioner-catalog-sync: ## Mirror deploy templates into the provisioner's go:embed catalog
+	@rm -rf internal/provisioner/catalog/templates
+	@for m in templates/*/barkpark.template.json; do \
+	  t=$$(basename $$(dirname $$m)); \
 	  mkdir -p internal/provisioner/catalog/templates/$$t/schemas; \
 	  cp templates/$$t/barkpark.template.json internal/provisioner/catalog/templates/$$t/; \
 	  cp templates/$$t/schemas/*.json internal/provisioner/catalog/templates/$$t/schemas/; \

@@ -279,7 +279,15 @@ defmodule BarkparkCloud.Registry.Site do
   # search-template W2 (D8): the template slug indexes a filesystem path on the
   # box (templates/<slug>), so it is a CLOSED set — mirror of the box engine's
   # DeployRequest.validate_template/1. nil = framework-derived default.
-  @known_site_templates ~w(astro-search-starter astro-starter next-starter search-starter)
+  # One slug per line: new templates insert at the head (scaffy
+  # add-site-template); the validation message enumerates in this order.
+  @known_site_templates [
+    # new deployable site-template slugs land here (head of list)
+    "astro-search-starter",
+    "astro-starter",
+    "next-starter",
+    "search-starter"
+  ]
 
   # The shipped palettes (design/themes/<name>.json) — mirror of the manifest
   # schema's theme enum and the template loader's knownThemes.

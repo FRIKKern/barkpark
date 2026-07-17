@@ -145,7 +145,7 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // Astro/static are the defaults; --instance has no default because there is no
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter] [--deploy]"
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter|astro-search-starter] [--deploy]"
 	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type", "template", "theme"}, []string{"deploy"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
