@@ -6073,3 +6073,21 @@ test("stw4 freshnessBadge: is-rebuilding class + escaped, no content_rev leak", 
   const sneaky = hooks.freshnessBadge({ last_deployment: { status: "live", trigger: "manual", updated_at: new Date().toISOString(), content_rev: "deadbeef" } });
   assert.ok(!sneaky.includes("deadbeef"), "content_rev never reaches the badge");
 });
+
+// ── search-template W8: site theme-edit pure helpers ────────────────────────
+
+test("siteThemeOptionsHtml lists the four palettes + a template-default, current selected", () => {
+  const html = hooks.siteThemeOptionsHtml("ember");
+  assert.match(html, /Template default/);
+  for (const t of ["evergreen", "ember", "fjord", "charple"]) {
+    assert.match(html, new RegExp(`value="${t}"`));
+  }
+  // the current value carries the selected attribute
+  assert.match(html, /value="ember" selected/);
+});
+
+test("siteThemePatchBody sends the chosen theme; empty clears the pin", () => {
+  assert.deepEqual(plain(hooks.siteThemePatchBody("charple")), { theme: "charple" });
+  assert.deepEqual(plain(hooks.siteThemePatchBody("")), { theme: "" });
+  assert.deepEqual(plain(hooks.siteThemePatchBody(undefined)), { theme: "" });
+});
