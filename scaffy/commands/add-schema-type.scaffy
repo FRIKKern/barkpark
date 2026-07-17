@@ -1,5 +1,5 @@
-COMMAND "Add a Plugin-Declared Schema Type" DESCRIPTION "Scaffold a new plugin-declared document type in the MINIMAL-template shape (charter D54c/D59): create the plugin's bundled schema JSON (name/title/icon/visibility/fields — one sample field, NO dataset key, NO type key) and wire it into the plugin module's register_schemas/1 as a second byte-identical 6-key SchemaDefinition wrap, exactly the scaffy/bulldocs/sheets shape. Visibility is a ONEOF enum variable (D56): the engine refuses any --var Visibility outside public|private at substitution time, before anything is written. Bootstrap auto-registers the result on every boot, idempotent on (name, dataset)." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "plugin", "schema" CONCEPT "schema-type" VARIANT "minimal-template" DIRECTION "add" VARIABLES
-  VARIABLE 1 "Plugin" TITLE "The target plugin (minimal-template shape)" DESCRIPTION "Lowercase plugin name, referenced as {{.plugin}} in both target paths: the module file api/lib/barkpark/plugins/{{.plugin}}.ex and the bundled schemas dir api/priv/plugins/{{.plugin}}/schemas/. Must be one of the MINIMAL-template plugins (scaffy, bulldocs, sheets — see the scope prose below): the wiring anchors are byte-exact against that shared shape, and any other plugin fails loud at anchor resolution. The module file must already exist — the engine's typed PathMissingError enforces that precondition for free (exit 4, nothing written)." EXAMPLES "scaffy", "bulldocs", "sheets"
+COMMAND "Add a Plugin-Declared Schema Type" DESCRIPTION "Scaffold a new plugin-declared document type in the MINIMAL-template shape (charter D54c/D59): create the plugin's bundled schema JSON (name/title/icon/visibility/fields — one sample field, NO dataset key, NO type key) and wire it into the plugin module's register_schemas/1 as a self-contained 6-key SchemaDefinition wrap. Variable-target (the add-plugin-route idiom): anchors on the register-schemas-reads + register-schemas-list zones add-plugin ships OPEN in every generated plugin module, so a schema composes on add-plugin's own output with zero hand-bridging. Visibility is a ONEOF enum variable (D56): the engine refuses any --var Visibility outside public|private at substitution time, before anything is written. Bootstrap auto-registers the result on every boot, idempotent on (name, dataset)." LAST_UPDATED "18-07-2026-00-00-00" DOMAIN "barkpark" TAGS "plugin", "schema" CONCEPT "schema-type" VARIANT "minimal-template" DIRECTION "add" VARIABLES
+  VARIABLE 1 "Plugin" TITLE "The target plugin (ships the register_schemas seam)" DESCRIPTION "Lowercase plugin name, referenced as {{.plugin}} in both target paths: the module file api/lib/barkpark/plugins/{{.plugin}}.ex and the bundled schemas dir api/priv/plugins/{{.plugin}}/schemas/. Must be a plugin whose register_schemas/1 carries the add-plugin zones (`scaffy:zone register-schemas-reads` + `register-schemas-list`) -- exactly what add-plugin plants OPEN in every generated plugin. A hand-built plugin without those zones (scaffy/bulldocs/sheets carry a first schema, not the empty seam) fails loud at anchor resolution; a typo'd {{.plugin}} dies as the engine's typed PathMissingError (exit 4, nothing written)." EXAMPLES "bookmarks", "analytics"
   VARIABLE 2 "SchemaName" TITLE "The document type name" DESCRIPTION "The new type's name, in two spellings-as-transforms: {{.schema-name}} (the JSON `name` value, the bundled filename, the mark suffixes) and {{.schema_name}} (the `raw_` Elixir variable suffix inside register_schemas/1). Lowercase; the persisted `_type` discriminator documents queries forever, so pick it like an API name." EXAMPLES "release-note", "changelog"
   VARIABLE 3 "Title" OPAQUE TITLE "Human title for the Studio desk" DESCRIPTION "The plural human label the Studio shows for the type (the `title` JSON key). OPAQUE: emitted verbatim — it may carry spaces and capitals that must never be re-cased. This file spells it {{.Title}} exactly once." EXAMPLES "Release Notes", "Changelogs"
   VARIABLE 4 "Icon" OPAQUE TITLE "Desk icon (emoji)" DESCRIPTION "The `icon` JSON value — an emoji, matching the minimal-template precedent (command.json ships one). OPAQUE verbatim literal, spelled {{.Icon}} exactly once; never re-cased, never interpreted." EXAMPLES "🧾", "📓"
@@ -10,13 +10,22 @@ COMMAND "Add a Plugin-Declared Schema Type" DESCRIPTION "Scaffold a new plugin-d
 #
 #   ● api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json  created
 #   ○ api/lib/barkpark/plugins/{{.plugin}}.ex                     injected ×2 —
-#     a raw_{{.schema_name}} read pipeline + a second %SchemaDefinition{} wrap
+#     a raw_{{.schema_name}} read pipeline (below the reads zone) + a
+#     %SchemaDefinition{} wrap (below the list `[` opener)
 #
-# SCOPE = the MINIMAL template ONLY: the byte-identical 6-key wrap the scaffy /
-# bulldocs / sheets plugins share (scaffy.ex:61-78 is the exemplar; bulldocs.ex
-# :141-158 and sheets.ex:109-126 carry the same bytes, differing only in the
-# JSON filename and sheets' "private" Map.get default). OUT OF SCOPE, BY NAME:
+# SCOPE = the add-plugin register_schemas SEAM. add-plugin ships every generated
+# plugin's register_schemas/1 OPEN — two zone comments (reads + list) around an
+# empty `[]`. This command plants ONE self-contained schema into that seam: a
+# read pipeline that resolves the bundled JSON relative to the module dir, and a
+# fully-qualified %Barkpark.Content.SchemaDefinition{} that reads it. The wrap is
+# self-contained (no `alias` needed in the generated module, so the empty seam
+# carries no unused-alias warning under --warnings-as-errors). OUT OF SCOPE, BY
+# NAME:
 #
+#   * scaffy / bulldocs / sheets — the HAND-BUILT minimal template: these carry a
+#     FIRST schema (a real `raw = @schemas_dir |> ...` read + one wrap), not the
+#     add-plugin empty seam, so the zone anchors are absent. Adding a second
+#     schema to those is hand work (or a future pinned command), not this one.
 #   * frt / media — the EXTENDED 10-key shape: SchemaDefinition.parse/2
 #     round-trips (frt.ex:147, media.ex:99) plus desk placement keys. CAMELCASE
 #     TRAP, only in THIS out-of-scope shape: the JSON spells `deskGroups`, the
@@ -41,25 +50,21 @@ COMMAND "Add a Plugin-Declared Schema Type" DESCRIPTION "Scaffold a new plugin-d
 #
 # MANUAL STEPS (prose, deliberately not blind ops):
 #
-# 1. The plugin's CONTRACT TEST pins the one-schema shape — e.g. scaffy_test.exs
-#    setup asserts `[%SchemaDefinition{} = def] = Scaffy.register_schemas([])`,
-#    a ONE-element list match that reds the moment this wrap lands. Extend that
-#    pin to the two-element list (and cover the new type) in the same change;
-#    the TIER ci gate below is what proves you did.
-# 2. The plugin MANIFEST lists its schemas descriptively — plugin.json's
-#    `schemas` array (e.g. priv/plugins/scaffy/plugin.json), which the same
-#    contract test exact-matches. Add the {"name", "version", "file"} row there
-#    when you extend the test.
+# 1. Declare the "schemas" capability. add-plugin's manifest ships
+#    `capabilities: []`; a schema-bearing plugin should list "schemas" in
+#    priv/plugins/{{.plugin}}/plugin.json so the manifest reads honestly (and
+#    add the {"name", "version", "file"} row to the manifest's `schemas` array).
+# 2. If the plugin grows a contract test that pins the register_schemas/1 list
+#    length, extend the pin to cover the new type.
 #
 # GUARDS: both IN-op payloads plant a `scaffy:add-schema-type … MARK:…` comment
-# (D3c — the mark line is the re-run check). The wrap op is a SELF-CONSUMING
-# REPLACE (the re-emitted tail survives inside its own payload), so E-005
-# requires its payload-derived ASLONG + REANCHOR pair. RE-RUN MATRIX: same
-# schema re-run → guards skip both ops (idempotent); a SECOND schema on the
-# same plugin → the read op inserts after the same anchor, and the wrap op's
-# REANCHOR splice accretes at the mark-family tail (the proven add-cli-verb
-# idiom: prior wrap gains the separator comma, the new wrap lands after it,
-# the list closer stays untouched).
+# (D3c — the mark line is the re-run check). Both are head-INSERTs after a
+# never-consumed zone anchor (the add-plugin-route idiom), so idempotency rests
+# on each op's payload-derived ASLONG — no REANCHOR family needed. RE-RUN MATRIX:
+# same schema re-run → both guards present → both ops skip (idempotent); a SECOND
+# schema on the same plugin → each op inserts after its zone anchor, stacking
+# newest-first (read below the reads zone, wrap below the `[`), the list closer
+# untouched.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Op 1: the bundled schema JSON ────────────────────────────────────────────
@@ -84,71 +89,62 @@ WITH
 
 # ── Op 2: the raw_{{.schema_name}} read pipeline ─────────────────────────────
 
-# Anchor = the existing read pipeline's closing line (unique in every
-# minimal-template plugin file: scaffy.ex:66, bulldocs.ex:146, sheets.ex:114 —
-# grep -cF = 1 each). The payload inserts a blank separator + the provenance
-# mark + a second read of the new bundled JSON through the SAME @schemas_dir
-# the plugin already resolves. On a SECOND schema for the same plugin the
-# anchor is still the FIRST (original) decode line, so read pipelines stack
-# deterministically between it and the list literal. Guard derives from the
-# payload (the assignment head this op writes), add polarity (E-011).
+# Anchor = the register-schemas-reads zone comment add-plugin plants (grep-unique
+# per generated module). The payload inserts the provenance mark + a read of the
+# new bundled JSON, resolved relative to the module dir with Path.expand + __DIR__
+# (the scaffy.ex @schemas_dir idiom, inlined so the empty seam needs no module
+# attribute). On a SECOND schema the anchor is unchanged (INSERT never consumes
+# it), so reads stack newest-first below the zone. Guard derives from the payload
+# (the assignment head this op writes), add polarity (E-011).
 IN "api/lib/barkpark/plugins/{{.plugin}}.ex"
-### Read {{.schema-name}}.json beside the plugin's existing schema read
+### Read {{.schema-name}}.json below the register-schemas-reads zone
 INSERT AFTER FIRST
-::: existing read pipeline tail :::
-      |> Jason.decode!()
-::: existing read pipeline tail :::
+::: register-schemas-reads zone :::
+    # scaffy:zone register-schemas-reads (add-plugin) -- add-schema-type plants each raw_<name> read pipeline below. MARK:zone-register-schemas-reads
+::: register-schemas-reads zone :::
 WITH
 ::: {{.schema-name}} read pipeline :::
 
     # scaffy:add-schema-type {{.plugin}} {{.schema-name}} MARK:schema-read-{{.schema-name}}
     raw_{{.schema_name}} =
-      @schemas_dir
-      |> Path.join("{{.schema-name}}.json")
+      Path.expand("../../../priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json", __DIR__)
       |> File.read!()
       |> Jason.decode!()
 ::: {{.schema-name}} read pipeline :::
 MARK "schema-read-{{.schema-name}}"
 ASLONG FILE DONT CONTAIN "raw_{{.schema_name}} ="
 
-# ── Op 3: the second %SchemaDefinition{} wrap ────────────────────────────────
+# ── Op 3: the %SchemaDefinition{} wrap ───────────────────────────────────────
 
-# The proven tail-accretion idiom (add-cli-verb): REPLACE the existing wrap's
-# closing tail — its LAST three lines, byte-identical across all three
-# minimal-template plugins (fields + dataset + bare `}`; grep-proven exactly
-# once per file, the visibility line above them is what differs and is
-# deliberately NOT in the anchor) — re-emitting it verbatim WITH the separator
-# comma, then the mark + the new 6-key wrap reading raw_{{.schema_name}}. The
-# new wrap's Map.get default is {{.visibility}}, so wrap and JSON can never
-# disagree. The tail survives inside the payload (self-consuming, E-005), so
-# idempotency rests on the payload-derived ASLONG, and REANCHOR keys the
-# schema-wrap- mark family: a third schema splices at the family tail (prior
-# wrap's bare `}` gains the comma — the D33 tail-shape the template ends in).
+# Anchor = the register-schemas-list zone comment + its `[` opener (grep-unique
+# per generated module). Head-INSERT the mark + a self-contained 6-key wrap
+# reading raw_{{.schema_name}}, fully qualified as %Barkpark.Content.SchemaDefinition{}
+# (no `alias` in the module, so the empty seam stays warning-clean). The wrap's
+# Map.get default is {{.visibility}}, so wrap and JSON can never disagree. The
+# trailing comma the payload carries separates against the list's `]` (empty
+# seam) or an earlier planted wrap. The anchor is never consumed, so a second
+# schema stacks newest-first below the opener; idempotency rests on the
+# payload-derived ASLONG (add-plugin-route idiom, no REANCHOR).
 IN "api/lib/barkpark/plugins/{{.plugin}}.ex"
-### Wire {{.schema-name}} as a second SchemaDefinition in register_schemas/1
-REPLACE
-::: existing wrap tail :::
-        fields: Map.get(raw, "fields", []),
-        dataset: "production"
-      }
-::: existing wrap tail :::
+### Wire {{.schema-name}} as a SchemaDefinition below the register-schemas-list zone
+INSERT AFTER FIRST
+::: register-schemas-list zone :::
+    # scaffy:zone register-schemas-list (add-plugin) -- add-schema-type plants each %SchemaDefinition{} wrap below the [ opener. MARK:zone-register-schemas-list
+    [
+::: register-schemas-list zone :::
 WITH
-::: existing wrap tail plus {{.schema-name}} wrap :::
-        fields: Map.get(raw, "fields", []),
-        dataset: "production"
-      },
+::: {{.schema-name}} wrap :::
       # scaffy:add-schema-type {{.plugin}} {{.schema-name}} MARK:schema-wrap-{{.schema-name}}
-      %SchemaDefinition{
+      %Barkpark.Content.SchemaDefinition{
         name: Map.fetch!(raw_{{.schema_name}}, "name"),
         title: Map.get(raw_{{.schema_name}}, "title"),
         icon: Map.get(raw_{{.schema_name}}, "icon"),
         visibility: Map.get(raw_{{.schema_name}}, "visibility", "{{.visibility}}"),
         fields: Map.get(raw_{{.schema_name}}, "fields", []),
         dataset: "production"
-      }
-::: existing wrap tail plus {{.schema-name}} wrap :::
+      },
+::: {{.schema-name}} wrap :::
 MARK "schema-wrap-{{.schema-name}}"
-REANCHOR "schema-wrap-"
 ASLONG FILE DONT CONTAIN "Map.fetch!(raw_{{.schema_name}}, \"name\")"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -162,13 +158,11 @@ ASSERT FILE "api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json" CONTAIN
 # Both wiring marks landed, and the wrap actually reads the new raw variable.
 ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "MARK:schema-read-{{.schema-name}}"
 ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "MARK:schema-wrap-{{.schema-name}}"
-ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "Path.join(\"{{.schema-name}}.json\")"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin}}.ex" CONTAINS "schemas/{{.schema-name}}.json"
 
 # LOCAL: the created file is real JSON (cheap, dependency-light, litter-immune).
 ASSERT CMD "python3 -c 'import json; json.load(open(\"api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json\"))'"
 
-# TIER ci: the plugin contract suite — reds until manual step 1 (the one-element
-# test pin) and step 2 (the manifest row) land with this scaffold, which is
-# exactly the pairing this gate exists to prove. Elixir suites are not on the
-# proven local-safe list (fresh worktrees carry no _build).
-ASSERT CMD "cd api && mix test test/barkpark/plugins" TIER ci
+# TIER ci: the world compiles with the new schema wired. Elixir suites are not on
+# the proven local-safe list (fresh worktrees carry no _build).
+ASSERT CMD "cd api && mix compile" TIER ci

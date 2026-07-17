@@ -72,11 +72,18 @@ WITH
 
 # ---------------------------------------------------------------------------
 # 2/5 ● Entry module — lib/barkpark/plugins/<name>.ex
-#     Mirrors lib/plugin.ex.eex. ONE line of body: `use Barkpark.Plugin`. The
+#     Mirrors lib/plugin.ex.eex. Body = `use Barkpark.Plugin` + three OPEN
+#     composition seams (register_routes/1, cli_commands/0, register_schemas/1),
+#     each returning [] and carrying the openers/zone-marks the plugin command
+#     family anchors on (add-plugin-route, add-cli-verb, add-schema-type). The
+#     seams are why the 6-command feature-pack chain composes with zero
+#     hand-bridged registration edits — plant the contract, empty, at birth. The
 #     behaviour reads + validates the manifest at COMPILE time (no runtime
 #     eval). Lives in the compiled tree (elixirc_paths sees it) so the plugin
 #     actually registers. manifest_path climbs three dirs from
-#     lib/barkpark/plugins/ to the app root, then down into priv/plugins/.
+#     lib/barkpark/plugins/ to the app root, then down into priv/plugins/. The
+#     EEx generator lib/plugin.ex.eex ships the identical seam block, so
+#     `mix barkpark.plugin.new` and this command stay byte-parallel (D7).
 # ---------------------------------------------------------------------------
 CREATE FILE IF ABSENT "api/lib/barkpark/plugins/{{.plugin_name}}.ex"
 WITH
@@ -102,6 +109,37 @@ defmodule Barkpark.Plugins.{{.PluginName}} do
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/{{.plugin_name}}/plugin.json"
+
+  # ── Composition seams (scaffy) ──────────────────────────────────────────
+  # Three registration callbacks ship OPEN so the scaffy plugin command family
+  # composes on this module with zero hand-bridged edits (the "plant the
+  # contract" doctrine). Each returns [] today; each add-* command anchors on
+  # the openers/marks below and inserts one element:
+  #   * register_routes/1  -- `bp scaffy run add-plugin-route`  (a route tuple)
+  #   * cli_commands/0      -- `bp scaffy run add-cli-verb`      (a verb map)
+  #   * register_schemas/1  -- `bp scaffy run add-schema-type`   (a schema wrap)
+  # Leave the `do`/`[` openers and the zone comments intact -- they are anchors.
+
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def cli_commands do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def register_schemas(_opts) do
+    # scaffy:zone register-schemas-reads (add-plugin) -- add-schema-type plants each raw_<name> read pipeline below. MARK:zone-register-schemas-reads
+
+    # scaffy:zone register-schemas-list (add-plugin) -- add-schema-type plants each %SchemaDefinition{} wrap below the [ opener. MARK:zone-register-schemas-list
+    [
+    ]
+  end
 end
 ::: {{.plugin_name}} entry module :::
 
@@ -197,6 +235,12 @@ end
 ASSERT FILE "api/priv/plugins/{{.plugin_name}}/plugin.json" CONTAINS "\"module\": \"Barkpark.Plugins.{{.PluginName}}\""
 ASSERT FILE "api/priv/plugins/{{.plugin_name}}/plugin.json" CONTAINS "\"plugin_name\": \"{{.plugin_name}}\""
 ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "use Barkpark.Plugin, manifest_path: \"../../../priv/plugins/{{.plugin_name}}/plugin.json\""
+# The three composition seams ship OPEN — the exact openers/marks the plugin
+# command family anchors on (add-plugin-route / add-cli-verb / add-schema-type).
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "def register_routes(_ctx) do"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "def cli_commands do"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "MARK:zone-register-schemas-reads"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "MARK:zone-register-schemas-list"
 ASSERT FILE "api/priv/plugins/{{.plugin_name}}/README.md" CONTAINS "# {{.plugin_name}}"
 ASSERT FILE "api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep" EXISTS
 ASSERT FILE "api/test/barkpark/plugins/{{.plugin_name}}_test.exs" CONTAINS "defmodule Barkpark.Plugins.{{.PluginName}}Test do"
