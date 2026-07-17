@@ -89,6 +89,8 @@ func runCloudSite(out *writer, g globals, args []string) int {
 		return runCloudSiteOpen(out, g, rest)
 	case "preflight":
 		return runCloudSitePreflight(out, g, rest)
+	case "settings":
+		return runCloudSiteSettings(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage)", verb), exitUsage)
 	}
@@ -584,6 +586,62 @@ func siteIsNode(kind, runtimeTarget string) bool {
 
 // runCloudSiteStatus is `bp cloud site status <site>` — the current deployment +
 // its stage. Honest empty state when the site has never deployed.
+// runCloudSiteSettings is `bp cloud site settings <site> [--theme <p>]
+// [--doc-type <t>]` — PATCH the between-deploys-safe fields. Infrastructural
+// fields stay immutable (name/slug/kind/framework/template/ports); an empty
+// change is an honest usage error. The new values take effect on the NEXT
+// deploy — the receipt says so.
+func runCloudSiteSettings(out *writer, g globals, args []string) int {
+	const usage = "bp cloud site settings <site> [--theme evergreen|ember|fjord|charple] [--doc-type <type>]"
+	a, err := parseHzArgs(args, []string{"theme", "doc-type"}, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) != 1 {
+		return useError(out, "usage", fmt.Sprintf("want exactly one <site> (usage: %s)", usage), exitUsage)
+	}
+	ref := a.pos[0]
+
+	patch := map[string]any{}
+	if v := strings.TrimSpace(a.val("theme")); v != "" {
+		patch["theme"] = v
+	}
+	if v := strings.TrimSpace(a.val("doc-type")); v != "" {
+		patch["doc_type"] = v
+	}
+	if len(patch) == 0 {
+		return useError(out, "usage",
+			"nothing to change — pass --theme and/or --doc-type (usage: "+usage+")", exitUsage)
+	}
+
+	cfg, ok := siteCloudConfig(out, "update a site's settings")
+	if !ok {
+		return exitAuth
+	}
+	id, rerr := resolveOpenSiteID(cfg, ref)
+	if rerr != nil {
+		return openResolveFail(out, rerr)
+	}
+
+	site, serr := cfg.CloudClient().UpdateSpawnSiteSettings(cloudCtx(), id, patch)
+	if serr != nil {
+		return cloudFail(out, "update site settings", serr)
+	}
+
+	if out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
+		return exitOK
+	}
+	out.outf("✓ %s settings updated", hzCell(site.Name))
+	if site.Theme != "" {
+		out.outf("  theme:   %s", hzCell(site.Theme))
+	}
+	if site.Template != "" {
+		out.outf("  starter: %s", hzCell(site.Template))
+	}
+	out.outf("  (applies on the next deploy — run `bp cloud site deploy %s`)", ref)
+	return exitOK
+}
+
 func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	const usage = "bp cloud site status <site>"
 	a, err := parseHzArgs(args, nil, nil, usage)
@@ -806,6 +864,8 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"slug":      s.Slug,
 		"kind":      s.Kind,
 		"framework": s.Framework,
+		"template":  s.Template,
+		"theme":     s.Theme,
 		"workspace": s.Workspace,
 		"project":   s.Project,
 		"dataset":   s.Dataset,
@@ -939,6 +999,7 @@ USAGE
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
+  bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.

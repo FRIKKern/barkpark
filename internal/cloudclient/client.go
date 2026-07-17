@@ -1356,19 +1356,22 @@ func RuntimeTargetIsNode(target string) bool {
 // with no matching field, so a static-only struct would make a node site's port
 // invisible to `bp cloud site status -o json`.
 type SpawnSite struct {
-	ID                  string          `json:"id"`
-	BarkparkID          string          `json:"barkpark_id"`
-	TeamID              string          `json:"team_id"`
-	Name                string          `json:"name"`
-	Slug                string          `json:"slug"`
-	Kind                string          `json:"kind"`
-	Framework           string          `json:"framework"`
-	Workspace           string          `json:"workspace"`
-	Project             string          `json:"project"`
-	Dataset             string          `json:"dataset"`
-	URL                 string          `json:"url"`
-	Instance            string          `json:"instance"`
-	RuntimeTarget       string          `json:"runtime_target,omitempty"`
+	ID            string `json:"id"`
+	BarkparkID    string `json:"barkpark_id"`
+	TeamID        string `json:"team_id"`
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	Kind          string `json:"kind"`
+	Framework     string `json:"framework"`
+	Workspace     string `json:"workspace"`
+	Project       string `json:"project"`
+	Dataset       string `json:"dataset"`
+	URL           string `json:"url"`
+	Instance      string `json:"instance"`
+	RuntimeTarget string `json:"runtime_target,omitempty"`
+	// search-template W2/W6: the shipped starter + deploy-pinned palette.
+	Template            string          `json:"template,omitempty"`
+	Theme               string          `json:"theme,omitempty"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`
@@ -1479,6 +1482,29 @@ func (c *Client) CreateSpawnSite(ctx context.Context, req SpawnSiteCreate) (Spaw
 // GetSpawnSite returns one spawned site by id via GET /v1/sites/:id (Bearer),
 // decoded into the spawner view (kind + dataset triple + embedded current
 // deployment). A 404 does not leak existence across team boundaries.
+// UpdateSpawnSiteSettings PATCHes /v1/sites/:id (Bearer) with the operator-
+// mutable settings (search-template W8): theme (the deploy-pinned palette) and
+// doc_type (the featured content type). Only the keys present in patch are sent;
+// the server ignores infrastructural fields and answers 422 nothing_to_update on
+// an empty body. Returns the updated row. A 404 is the same no-leak 404 GetSite
+// surfaces; a 422 is *CloudRouteError{Code:"invalid_settings"|...}.
+func (c *Client) UpdateSpawnSiteSettings(ctx context.Context, id string, patch map[string]any) (SpawnSite, error) {
+	status, body, err := c.do(ctx, "PATCH", "/v1/sites/"+esc(id), true, patch)
+	if err != nil {
+		return SpawnSite{}, err
+	}
+	if !ok(status) {
+		return SpawnSite{}, cloudError(status, body)
+	}
+	var out struct {
+		Site SpawnSite `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return SpawnSite{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
 func (c *Client) GetSpawnSite(ctx context.Context, id string) (SpawnSite, error) {
 	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(id), true, nil)
 	if err != nil {
