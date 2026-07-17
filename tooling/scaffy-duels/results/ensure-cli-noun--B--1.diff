@@ -1,0 +1,13 @@
+diff --git a/internal/cli/builtins.go b/internal/cli/builtins.go
+index 45c958fe0..147d32d9a 100644
+--- a/internal/cli/builtins.go
++++ b/internal/cli/builtins.go
+@@ -306,7 +306,7 @@ func whoamiSourceLabel(source string, active bool) string {
+ var completionNouns = []string{
+ 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
+ 	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
+-	"logout", "make", "mcp", "media", "migrate", "onramp", "paper", "plugin", "provider", "register",
++	"logout", "make", "mcp", "duelnoun", "media", "migrate", "onramp", "paper", "plugin", "provider", "register",
+ 	"scaffy", "schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
+ 	"sites", "style", "subscribe", "task", "tasks", "team", "teams", "tinker", "token", "uninstall", "upgrade",
+ 	"use", "vercel", "version", "webhook", "whoami", "workspace",

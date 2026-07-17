@@ -48,7 +48,10 @@ PY
 WARM_START="$(date +%s)"
 WARM_ARGS=()
 [[ "$NEEDS_WARM" == "true" || "$NEEDS_WARM" == "True" ]] && WARM_ARGS+=(--with-elixir)
-WT="$("${SCAFFY_DUELS_DIR}/warm-worktree.sh" "$CELL" "${WARM_ARGS[@]}" | tail -n1)"
+# bash 3.2 + set -u: expanding an EMPTY array as "${WARM_ARGS[@]}" is an
+# "unbound variable" error — use the ${arr[@]+...} guard so a no-warm chore
+# (needs_elixir_warm=false, e.g. ensure-cli-noun) passes zero args cleanly.
+WT="$("${SCAFFY_DUELS_DIR}/warm-worktree.sh" "$CELL" ${WARM_ARGS[@]+"${WARM_ARGS[@]}"} | tail -n1)"
 [[ -d "$WT" ]] || die "warm-worktree returned no worktree ($WT)"
 
 # --- boundary chore staging ---------------------------------------------------
@@ -78,19 +81,25 @@ PY
   )
 }
 
-# Resolve RESOLVE_AT_RUN sentinels from the CELL TREE (flagship count bumps):
-# CountBefore <- toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx,
+# Resolve RESOLVE_AT_RUN sentinels from the CELL TREE AT THE PIN (flagship count
+# bumps): CountBefore <- toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx,
 # ParityCountBefore <- EXPECTED_COUNT= in scripts/pd-parity-completeness.sh,
 # each *After = its Before + 1 (OPAQUE+SUCCESSOR pairs). Fails LOUD if a sentinel
 # survives unresolved — a sentinel passed verbatim would exit-2 the engine and
 # must never score.
+# Reads HEAD blobs (git show), NEVER the working file: after a run the working
+# tree carries the bumped counts, so a working-file re-resolve at REMOVE time
+# derived N+1/N+2, hashed a different receipt id, and remove said not_found —
+# reversibility false-red (mechanical). HEAD is invariant across run/remove.
 _resolve_vars() { # $1 = vars json object -> resolved json on stdout
   python3 - "$1" "$WT" <<'PY'
-import json,re,sys
+import json,re,subprocess,sys
 vars,wt=json.loads(sys.argv[1]),sys.argv[2]
 def grab(path,pat):
-    m=re.search(pat,open(f"{wt}/{path}").read())
-    if not m: sys.exit(f"resolve: no match for {pat!r} in {path}")
+    blob=subprocess.run(["git","-C",wt,"show",f"HEAD:{path}"],
+                        capture_output=True,text=True,check=True).stdout
+    m=re.search(pat,blob)
+    if not m: sys.exit(f"resolve: no match for {pat!r} in HEAD:{path}")
     return int(m.group(1))
 if any(v=="RESOLVE_AT_RUN" for v in vars.values()):
     n=grab("js/packages/react/tests/PortableDoc.test.tsx",r"toHaveLength\((\d+)\)")

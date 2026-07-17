@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "scaffy remove: no receipt for \"Add PortableDoc Block Type\" at /private/tmp/scaffy-duel-flagship--A--1/.scaffy/receipts/block-type--duelmark--a3ef0bc567c3.json — nothing to remove (was the command applied with exactly these vars?)"
+  },
+  "ok": false
+}

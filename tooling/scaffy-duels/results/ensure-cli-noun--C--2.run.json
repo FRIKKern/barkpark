@@ -1,0 +1,37 @@
+{
+  "asserts": [
+    {
+      "index": 0,
+      "kind": "file-contains",
+      "line": 98,
+      "path": "internal/cli/builtins.go",
+      "status": "pass",
+      "text": "\"duelnoun\""
+    },
+    {
+      "index": 1,
+      "kind": "cmd",
+      "line": 104,
+      "status": "pass",
+      "text": "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+    }
+  ],
+  "command": "Ensure a bp completion noun",
+  "direction": "add",
+  "duration_ms": 13434,
+  "ok": true,
+  "ops": [
+    {
+      "index": 0,
+      "kind": "insert-after-first",
+      "line": 80,
+      "mark": "ensure-cli-noun",
+      "path": "internal/cli/builtins.go",
+      "status": "injected"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-ensure-cli-noun--C--2/.scaffy/receipts/ensure-cli-noun--duelnoun--21abe7493a7c.json",
+  "vars": {
+    "Noun": "duelnoun"
+  }
+}

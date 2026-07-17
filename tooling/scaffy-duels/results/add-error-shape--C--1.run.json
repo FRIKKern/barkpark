@@ -1,0 +1,72 @@
+{
+  "asserts": [
+    {
+      "index": 0,
+      "kind": "file-contains",
+      "line": 193,
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "pass",
+      "text": "MARK:error-hint-duel_probe"
+    },
+    {
+      "index": 1,
+      "kind": "file-contains",
+      "line": 194,
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "pass",
+      "text": "MARK:error-shape-duel_probe"
+    },
+    {
+      "index": 2,
+      "kind": "file-contains",
+      "line": 195,
+      "path": "api/test/barkpark/content/errors_test.exs",
+      "status": "pass",
+      "text": "MARK:error-test-duel_probe"
+    },
+    {
+      "index": 3,
+      "kind": "cmd",
+      "line": 204,
+      "status": "pass",
+      "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs"
+    }
+  ],
+  "command": "Add an API Error Shape",
+  "direction": "add",
+  "duration_ms": 7723,
+  "ok": true,
+  "ops": [
+    {
+      "index": 0,
+      "kind": "replace",
+      "line": 99,
+      "mark": "error-hint-duel_probe",
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "injected"
+    },
+    {
+      "index": 1,
+      "kind": "insert-after-first",
+      "line": 133,
+      "mark": "error-shape-duel_probe",
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "injected"
+    },
+    {
+      "index": 2,
+      "kind": "insert-after-first",
+      "line": 163,
+      "mark": "error-test-duel_probe",
+      "path": "api/test/barkpark/content/errors_test.exs",
+      "status": "injected"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-add-error-shape--C--1/.scaffy/receipts/error-shape--duel-probe--e811af0c9837.json",
+  "vars": {
+    "Hint": "Retry the duel probe once the transient condition clears.",
+    "Message": "duel probe error",
+    "Status": "418",
+    "error_code": "duel_probe"
+  }
+}

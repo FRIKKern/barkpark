@@ -1,0 +1,13 @@
+diff --git a/api/config/config.exs b/api/config/config.exs
+index 23239d151..f94aed5d5 100644
+--- a/api/config/config.exs
++++ b/api/config/config.exs
+@@ -246,6 +246,8 @@ config :barkpark, Oban,
+        # nightly reads never kick off in the same tick.
+        {"31 3 * * *", Barkpark.Workers.TagDistribution},
+        {"0 4 * * *", Barkpark.Search.Workers.Prune},
++       {"0 4 * * *", Barkpark.Workers.DuelSmokeReaper},
++       {"0 5 * * *", Barkpark.Workers.DuelSmokeSweeper},
+        # Recover webhook deliveries stranded in `pending` by a dispatcher
+        # crash / BEAM restart mid-delivery — re-dispatches any row still
+        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)

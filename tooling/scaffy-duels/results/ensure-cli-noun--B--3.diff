@@ -1,0 +1,26 @@
+diff --git a/internal/cli/builtins.go b/internal/cli/builtins.go
+index 45c958fe0..a8121b2eb 100644
+--- a/internal/cli/builtins.go
++++ b/internal/cli/builtins.go
+@@ -305,7 +305,7 @@ func whoamiSourceLabel(source string, active bool) string {
+ // switch and fails on drift — do not hand-trim this without updating the switch.
+ var completionNouns = []string{
+ 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
+-	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
++	"doc", "doctor", "duelnoun", "export", "go-live", "help", "instance", "launch", "listen", "login",
+ 	"logout", "make", "mcp", "media", "migrate", "onramp", "paper", "plugin", "provider", "register",
+ 	"scaffy", "schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
+ 	"sites", "style", "subscribe", "task", "tasks", "team", "teams", "tinker", "token", "uninstall", "upgrade",
+diff --git a/internal/cli/usage.go b/internal/cli/usage.go
+index 695a8f80a..ed9ee9de3 100644
+--- a/internal/cli/usage.go
++++ b/internal/cli/usage.go
+@@ -33,7 +33,7 @@ func usageTop(out *writer) {
+ 	out.errf("      --limit/--offset/--all   pagination")
+ 	out.errf("      --manifest <path>  load the manifest from a file (offline)")
+ 	out.errf("")
+-	out.errf("built-ins: use · servers · migrate · export · paper · tasks · vercel · tinker · seed · make · capabilities · whoami · version · upgrade · uninstall · signup · login · logout · completion")
++	out.errf("built-ins: use · servers · migrate · export · paper · tasks · vercel · tinker · seed · make · capabilities · whoami · version · upgrade · uninstall · signup · login · logout · completion · duelnoun")
+ 	out.errf("")
+ 	out.errf("tasks:")
+ 	out.errf("  bp tasks               open the live portrait task board (glanceable pane;")

@@ -1,0 +1,57 @@
+{
+  "cell": "ensure-cli-noun--B--3",
+  "chore": "ensure-cli-noun",
+  "arm": "B",
+  "rep": "3",
+  "cap_usd": 3.0,
+  "worktree": "/private/tmp/scaffy-duel-ensure-cli-noun--B--3",
+  "duration_ms": 210000,
+  "warm_ms": 5000,
+  "meter": {
+    "total_cost_usd": 1.5124811999999999,
+    "usage": {
+      "input_tokens": 70,
+      "cache_creation_input_tokens": 79391,
+      "cache_read_input_tokens": 2813684,
+      "output_tokens": 12788,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 79391,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 231,
+          "cache_read_input_tokens": 102167,
+          "cache_creation_input_tokens": 987,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 987
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "source": "claude-cli-json"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [],
+    "tier_ci_forced": [],
+    "agent_gate": [
+      {
+        "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+        "rc": 0
+      }
+    ],
+    "diff_sha256": "64ace4b2ecb0a8b531f9d705f5aae2e7be073381345553a0995f4b18a0af726e",
+    "reversible": false
+  }
+}
