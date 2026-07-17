@@ -5180,6 +5180,63 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/secrets": {
+      "get": {
+        "operationId": "secret.scoped-ls.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List a workspace's scoped run-secret names with masked values.",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/members": {
       "post": {
         "operationId": "media.add-member.scoped",
@@ -5886,6 +5943,226 @@
         "summary": "Mint a read-only, workspace-bound API token (public-read/read only).",
         "tags": [
           "token"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/secrets/{name}": {
+      "delete": {
+        "operationId": "secret.scoped-rm.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a workspace-scoped run-secret by name.",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      },
+      "get": {
+        "operationId": "secret.scoped-get.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reveal a workspace-scoped run-secret's unmasked value (audited).",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      },
+      "put": {
+        "operationId": "secret.scoped-set.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: value.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set or rotate a workspace-scoped run-secret value.",
+        "tags": [
+          "secret"
         ],
         "x-barkpark-scope": "scoped_admin"
       }

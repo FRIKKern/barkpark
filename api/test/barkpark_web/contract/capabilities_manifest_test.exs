@@ -720,8 +720,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       for id <- @chat_commands do
         cmd = find_cmd(manifest, id)
         assert cmd != nil, "#{id} not found in manifest"
-        assert cmd["auth_tier"] == "admin", "#{id} must be admin-tier; got: #{inspect(cmd["auth_tier"])}"
-        assert cmd["source"] == "core", "#{id} must be a core command; got: #{inspect(cmd["source"])}"
+
+        assert cmd["auth_tier"] == "admin",
+               "#{id} must be admin-tier; got: #{inspect(cmd["auth_tier"])}"
+
+        assert cmd["source"] == "core",
+               "#{id} must be a core command; got: #{inspect(cmd["source"])}"
       end
     end
 
@@ -744,7 +748,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         assert cmd["http"]["method"] == method, "#{id} method"
         assert cmd["http"]["path_template"] == path, "#{id} path"
         # Instance-global admin (D21): no per-doc scoped mirror.
-        refute Map.has_key?(cmd, "scoped_prefix"), "#{id} must have no scoped_prefix (D21 instance-global)"
+        refute Map.has_key?(cmd, "scoped_prefix"),
+               "#{id} must have no scoped_prefix (D21 instance-global)"
       end
     end
 
@@ -772,8 +777,10 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       anon = conn |> get("/v1/capabilities") |> json_response(200)
 
       assert anon["auth_tier"] == "none"
+
       refute Enum.any?(anon["commands"], &(&1["noun"] == "chat")),
              "anon manifest leaked a chat command"
+
       refute Enum.any?(anon["nouns"], &(&1["name"] == "chat")),
              "anon manifest leaked the chat noun name"
     end
@@ -812,6 +819,88 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       refute Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
              "chat-only token unexpectedly sees the chat noun — if D36 shipped the tier " <>
                "remap, update this pin instead of leaving it red"
+    end
+  end
+
+  describe "scoped run-secrets commands (connectors D200)" do
+    # The per-workspace tier of the run-secrets store gets four DEDICATED
+    # verbs whose workspace/project slugs are BAKED into path_template — NOT
+    # the scoped_prefix mechanism (ctx.ScopedMirror is never set in any
+    # production Go path; the flat-template+scoped_prefix shape 404s, proven
+    # live on token.create / #3197). The flat secret.* entries stay the
+    # instance-GLOBAL tier, byte-identical.
+    @scoped_secret_expected %{
+      "secret.scoped-ls" => {"GET", "/w/:workspace_slug/p/:project_slug/v1/secrets", false},
+      "secret.scoped-get" =>
+        {"GET", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", false},
+      "secret.scoped-set" => {"PUT", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", true},
+      "secret.scoped-rm" =>
+        {"DELETE", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", true}
+    }
+
+    test "the four scoped verbs are scoped_admin with slugs BAKED into path_template, no scoped_prefix",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      for {id, {method, path, writes}} <- @scoped_secret_expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path_template"
+        assert cmd["auth_tier"] == "scoped_admin", "#{id} must be scoped_admin tier"
+        assert cmd["writes"] == writes, "#{id} writes flag"
+
+        refute Map.has_key?(cmd, "scoped_prefix"),
+               "#{id} must NOT carry scoped_prefix (that shape is proven broken — #3197)"
+      end
+    end
+
+    test "name/value args ride the scoped verbs exactly like their flat siblings", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      assert Enum.map(find_cmd(manifest, "secret.scoped-get")["args"], & &1["name"]) == ["name"]
+      assert Enum.map(find_cmd(manifest, "secret.scoped-rm")["args"], & &1["name"]) == ["name"]
+
+      set_args = Enum.map(find_cmd(manifest, "secret.scoped-set")["args"], & &1["name"])
+      assert set_args == ["name", "value"]
+
+      ls = find_cmd(manifest, "secret.scoped-ls")
+      assert ls["args"] == []
+    end
+
+    test "the FLAT secret.* entries stay byte-identical global-tier admin", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      flat_expected = %{
+        "secret.ls" => {"GET", "/v1/secrets", false},
+        "secret.get" => {"GET", "/v1/secrets/:name", false},
+        "secret.set" => {"PUT", "/v1/secrets/:name", true},
+        "secret.rm" => {"DELETE", "/v1/secrets/:name", true}
+      }
+
+      for {id, {method, path, writes}} <- flat_expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path_template drifted"
+        assert cmd["auth_tier"] == "admin", "#{id} must STAY blanket admin (global tier)"
+        assert cmd["writes"] == writes, "#{id} writes flag"
+        refute Map.has_key?(cmd, "scoped_prefix"), "#{id} must not grow a scoped_prefix"
+      end
+    end
+
+    test "the scoped route the templates point at exists (not a route-miss 404)", %{conn: conn} do
+      # Grounds path_template against the real router: an ANONYMOUS call into
+      # the scoped block hits the membership gate (401/403/404-not_found from
+      # ResolveWorkspace on an unknown slug) — never a bare NoRouteError. The
+      # full auth/tenant matrix lives in scoped_secret_controller_test.exs.
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/w/no-such-workspace/p/default/v1/secrets")
+
+      assert resp.status in [401, 403, 404]
+      assert %{"error" => %{"code" => _}} = Jason.decode!(resp.resp_body)
     end
   end
 
