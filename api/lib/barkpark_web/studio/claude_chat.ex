@@ -335,11 +335,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         # W25-E (D214/D217): fold the SAME per-turn tool-session ticket (threaded
         # beside the descriptors, minted ONCE in `tool_descriptors_for/1`) into the
         # payload as a TOP-LEVEL `bpConnectorTicket` — the wire contract the shim
-        # (W25-N) reads IN-VM to fetch+decrypt+embed the connector credential
-        # (D38 held: Elixir passes the SEALED-ref fetch-authorization, never
-        # plaintext). It rides ONLY when ≥1 server survived (the flag itself does),
-        # so a 0-server turn is byte-identical to W12 regardless of the ticket. The
-        # key name is the wire contract — NEVER rename.
+        # (W25-N) reads HOST-side to fetch each entry's FINISHED auth headers from
+        # the bridge's loopback tool-headers route, then embeds them into the config
+        # it copies into the sandbox (D213: the BRIDGE owns decryption; the shim
+        # never sees a credential_ref). D38 held: Elixir threads only the non-secret
+        # ticket — never a sealed ref, never plaintext. It rides ONLY when ≥1 server
+        # survived (the flag itself does), so a 0-server turn is byte-identical to
+        # W12 regardless of the ticket. The key name is the wire contract — NEVER
+        # rename.
         json = Jason.encode!(cloud_mcp_payload(servers, session_opts))
         ["--mcp-config-b64", Base.encode64(json)]
 
@@ -1589,7 +1592,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # Returns `{ticket, descriptors}`: the SAME workspace-scoped tool-session
     # ticket that authorized the descriptor fetch is surfaced so a :cloud turn can
     # thread it into the b64 mcp payload as `bpConnectorTicket` (W25-E, D214/D217)
-    # — the shim reads it IN-VM to fetch+decrypt the connector credential. It is
+    # — the shim reads it HOST-side to fetch each connector's FINISHED auth headers
+    # from the bridge (the bridge owns decryption, D213). It is
     # minted EXACTLY ONCE here (never a second mint downstream); the self-hosted
     # mcp-config path ignores it (its descriptors carry a self-fetching
     # headersHelper). Any failure path returns `{nil, []}` — no ticket, no servers.
@@ -1633,8 +1637,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         # ONE `tool_descriptors_for/1` call ⇒ ONE mint: store the descriptors AND
         # the SAME tool-session ticket that authorized their fetch. `cloud_build_args/2`
         # emits the ticket as `bpConnectorTicket` in the b64 payload beside
-        # `mcpServers` (W25-E, D214/D217) — the shim reads it IN-VM to fetch+decrypt
-        # the connector credential. A turn with no bridge/workspace gets
+        # `mcpServers` (W25-E, D214/D217) — the shim reads it HOST-side to fetch each
+        # connector's FINISHED auth headers from the bridge. A turn with no bridge/workspace gets
         # `{nil, []}` ⇒ no descriptors, no ticket ⇒ argv byte-identical to W12.
         {ticket, descriptors} = tool_descriptors_for(Map.get(session_opts, :workspace_id))
 

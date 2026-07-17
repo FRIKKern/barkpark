@@ -281,8 +281,9 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
     # W25-E (D214/D217): when the servers map is non-empty the b64 payload carries
     # the SAME per-turn tool-session ticket (threaded into session_opts beside the
     # descriptors) as a TOP-LEVEL `bpConnectorTicket` key beside `mcpServers` — the
-    # wire contract the in-sandbox shim (W25-N) reads to fetch+decrypt+embed the
-    # connector credential in-VM. 0-server rows stay byte-identical W12: no flag,
+    # wire contract the shim (W25-N) reads HOST-side to fetch each connector's
+    # FINISHED auth headers from the bridge and embed them into the copied config
+    # (the bridge owns decryption — D213). 0-server rows stay byte-identical W12: no flag,
     # and — even with a ticket in session_opts — no key (the ticket alone NEVER
     # forces the flag; the flag rides SOLELY on ≥1 surviving server).
     @tool_ticket "w25-e-tool-session-ticket-fixture"
