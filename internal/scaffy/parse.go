@@ -439,15 +439,22 @@ func (p *parser) parseDelete(fs []field, ln int) {
 }
 
 func (p *parser) parseInsert(fs []field, ln int) {
-	if len(fs) != 3 || fs[1].text != "AFTER" || (fs[2].text != "FIRST" && fs[2].text != "LAST") {
-		p.add(ln, RuleMalformedStatement, "malformed INSERT — expected: INSERT AFTER FIRST|LAST",
+	if len(fs) != 3 || (fs[1].text != "AFTER" && fs[1].text != "BEFORE") || (fs[2].text != "FIRST" && fs[2].text != "LAST") {
+		p.add(ln, RuleMalformedStatement, "malformed INSERT — expected: INSERT AFTER|BEFORE FIRST|LAST",
 			"the occurrence pin is mandatory (D7/A3); bare ABOVE/AFTER/BEFORE are retired")
 		p.i++
 		return
 	}
-	verb := InsertAfterFirst
-	if fs[2].text == "LAST" {
+	var verb InOpVerb
+	switch {
+	case fs[1].text == "AFTER" && fs[2].text == "FIRST":
+		verb = InsertAfterFirst
+	case fs[1].text == "AFTER" && fs[2].text == "LAST":
 		verb = InsertAfterLast
+	case fs[1].text == "BEFORE" && fs[2].text == "FIRST":
+		verb = InsertBeforeFirst
+	default:
+		verb = InsertBeforeLast
 	}
 	p.parseInVerb(fs, ln, verb, 3)
 }

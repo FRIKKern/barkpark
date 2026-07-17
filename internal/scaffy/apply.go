@@ -68,7 +68,7 @@ const (
 // OpResult is one op's outcome.
 type OpResult struct {
 	Index      int    `json:"index"`
-	Kind       string `json:"kind"` // create | delete | insert-after-first | insert-after-last | replace | remove
+	Kind       string `json:"kind"` // create | delete | insert-after-first | insert-after-last | insert-before-first | insert-before-last | replace | remove
 	Path       string `json:"path"`
 	Mark       string `json:"mark,omitempty"`
 	Status     string `json:"status"`
@@ -482,19 +482,24 @@ func applyInOp(cmd *Command, sub *substituter, tr *tree, index int, o *InOp) (*O
 	}
 
 	switch o.Verb {
-	case InsertAfterFirst, InsertAfterLast:
+	case InsertAfterFirst, InsertAfterLast, InsertBeforeFirst, InsertBeforeLast:
 		payload, err := sub.payloadBytes(cmd, o.Payload, srcFile)
 		if err != nil {
 			return nil, nil, err
 		}
 		idx := bytes.Index(content, target)
-		if o.Verb == InsertAfterLast {
+		if o.Verb == InsertAfterLast || o.Verb == InsertBeforeLast {
 			idx = bytes.LastIndex(content, target)
 		}
 		if idx < 0 {
 			return nil, nil, applyErrorf(srcFile, o.Pos.Line, "%s anchor not found in %q", o.Verb, rel)
 		}
+		// AFTER splices at the anchor's end; BEFORE splices at its start
+		// (the anchor survives untouched either way).
 		pos := idx + len(target)
+		if o.Verb == InsertBeforeFirst || o.Verb == InsertBeforeLast {
+			pos = idx
+		}
 		next := make([]byte, 0, len(content)+len(payload))
 		next = append(next, content[:pos]...)
 		next = append(next, payload...)
@@ -527,6 +532,10 @@ func inOpKind(v InOpVerb) string {
 		return "insert-after-first"
 	case InsertAfterLast:
 		return "insert-after-last"
+	case InsertBeforeFirst:
+		return "insert-before-first"
+	case InsertBeforeLast:
+		return "insert-before-last"
 	case Replace:
 		return "replace"
 	case RemoveVerb:

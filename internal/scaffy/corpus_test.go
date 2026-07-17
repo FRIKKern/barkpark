@@ -80,10 +80,12 @@ func TestCorpusParsesZeroFindings(t *testing.T) {
 // census is the operation tally across the whole corpus, derived from
 // the parsed AST (never from regex over the source text).
 type census struct {
-	create           int // CREATE FILE IF ABSENT
-	insertAfterFirst int // INSERT AFTER FIRST
-	insertAfterLast  int // INSERT AFTER LAST
-	replace          int // REPLACE
+	create            int // CREATE FILE IF ABSENT
+	insertAfterFirst  int // INSERT AFTER FIRST
+	insertAfterLast   int // INSERT AFTER LAST
+	insertBeforeFirst int // INSERT BEFORE FIRST
+	insertBeforeLast  int // INSERT BEFORE LAST
+	replace           int // REPLACE
 	remove           int // REMOVE
 	deleteFile       int // DELETE FILE IF PRESENT
 	mark             int // ops carrying a MARK
@@ -120,6 +122,10 @@ func countCorpus(t *testing.T) census {
 					c.insertAfterFirst++
 				case InsertAfterLast:
 					c.insertAfterLast++
+				case InsertBeforeFirst:
+					c.insertBeforeFirst++
+				case InsertBeforeLast:
+					c.insertBeforeLast++
 				case Replace:
 					c.replace++
 				case RemoveVerb:
@@ -153,17 +159,19 @@ func countCorpus(t *testing.T) census {
 // classifies one differently — fails here with a field-by-field diff.
 func TestCorpusCensus(t *testing.T) {
 	want := census{
-		create:           17,
-		insertAfterFirst: 26, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple
-		insertAfterLast:  1,
-		replace:          11,
-		remove:           1,
-		deleteFile:       1,
-		mark:             39, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route
-		markVirtual:      2,
-		assertFile:       75, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail
-		assertCmd:        35, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
-		assertCmdTierCI:  14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
+		create:            17,
+		insertAfterFirst:  26, // +2 2026-07-17: ensure-root-layout-zones' two zone plants; +3: ensure-router-zones' three; +2: add-plugin-bucket's pipeline + wrapper; +1: add-plugin-route's head tuple
+		insertAfterLast:   1,
+		insertBeforeFirst: 1,  // 2026-07-17 INSERT BEFORE ratified: add-canonical-marker's marker plant (was the self-consuming REPLACE)
+		insertBeforeLast:  0,  // grammar-legal, zero corpus instances (like SNIPPET/USE — exercised by synthetic fixtures)
+		replace:           10, // -1: add-canonical-marker's self-consuming REPLACE became INSERT BEFORE FIRST
+		remove:            1,
+		deleteFile:        1,
+		mark:              39, // +2: zone-script-assets + zone-live-hooks; +3: the three router zones; +2: add-plugin-bucket's pipeline + scope marks; +1: add-plugin-route
+		markVirtual:       2,
+		assertFile:        75, // +2: the two zone-declaration postconditions; +3: the router trio; +3: add-plugin-bucket's two marks + collector line; +2: add-plugin-route's mark + tuple tail
+		assertCmd:         35, // +2: the two `cd api && mix compile` (TIER ci) HEEx/router proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
+		assertCmdTierCI:   14, // +2: same — the corpus's HEEx + router compile proofs; +1: add-plugin-bucket's; +1: add-plugin-route's
 	}
 	got := countCorpus(t)
 	if got != want {
@@ -181,6 +189,8 @@ func censusDiff(want, got census) string {
 		{"CREATE", want.create, got.create},
 		{"INSERT AFTER FIRST", want.insertAfterFirst, got.insertAfterFirst},
 		{"INSERT AFTER LAST", want.insertAfterLast, got.insertAfterLast},
+		{"INSERT BEFORE FIRST", want.insertBeforeFirst, got.insertBeforeFirst},
+		{"INSERT BEFORE LAST", want.insertBeforeLast, got.insertBeforeLast},
 		{"REPLACE", want.replace, got.replace},
 		{"REMOVE", want.remove, got.remove},
 		{"DELETE", want.deleteFile, got.deleteFile},

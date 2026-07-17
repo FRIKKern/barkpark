@@ -70,7 +70,7 @@ every entry answers a proven repetition. Every command lives at
 | **add-docs-card** | Creates a routing-table row in `CLAUDE.md` + a card file with a `doc-tier` header. The 7-card cap makes it a *scratch demo* today — it can only land paired with a remove. |
 | **remove-docs-card** | The symmetry partner: removes the row, the card file and the `docs/INDEX.md` brace-expansion mention, leaving the tree byte-clean. Proves every mutating op is reversible from its `MARK`. |
 | **add-error-shape** | Lands a new v1 JSON error code end-to-end (38 clause-adds in `errors.ex` history): a fix-suggesting `@hints` entry, a `build/1` clause, a test — accreting behind marks. `known_codes/0`, the OpenAPI `Error.code` enum and the coverage test all self-derive. |
-| **add-canonical-marker** | Plants the two-line `@canonical capability:<slug>` marker above any **public** entry point (274 commit mentions, 40 live markers). The head line crosses as an `OPAQUE` variable taken verbatim (D58) — multi-clause Elixir heads and Go signatures both anchor cleanly. |
+| **add-canonical-marker** | Plants the two-line `@canonical capability:<slug>` marker above any **public** entry point (274 commit mentions, 40 live markers). The head line crosses as an `OPAQUE` variable taken verbatim (D58) — multi-clause Elixir heads and Go signatures both anchor cleanly. Since W6 it is the corpus's one `INSERT BEFORE FIRST` (see the Wave-6 ruling — its original self-consuming-REPLACE spelling is the fixture that ratified the primitive). |
 | **ensure-import** | The first **ensure** command: idempotently ensures a module `import` line exists in an Elixir file — insert once after a caller-named anchor, skip forever after. Guard = the full import line itself (the ensure law, below). |
 | **ensure-cli-noun** | Same law, Go spelling: ensures a top-level noun sits in **both** scaffy-owned copies of the `bp` noun set — `completionNouns` (shell completion) and `usageBuiltins` (the top-level usage built-ins line, a slice since the 2026-07-17 drift backfill). Ends the three-copy noun drift the W6 duels measured as the catalog's worst gap. The dispatch copy stays hand-written, gated by `TestCompletionNounsCoverAllDispatchedBuiltins` + its usage mirror. |
 | **add-backfill-task** | All-CREATE: a safe-by-default one-shot backfill `Mix.Task` (8+ live tasks share the idiom byte-for-byte) — a bare run is a DRY RUN that writes nothing, `--apply` mutates — plus a paired pure-helper test that never boots the app. |
@@ -272,9 +272,9 @@ ASSERT FILE "docs/INDEX.md" CONTAINS "tui,{{.card-name}}}.md"
 ```
 
 **FIRST / LAST pins (carried from D7).** Whenever a positional anchor could match twice,
-the occurrence is pinned explicitly — `INSERT AFTER FIRST` / `INSERT AFTER LAST` — so a
-human (and later the engine) applies it at exactly one unambiguous site. No implicit
-"first match wins."
+the occurrence is pinned explicitly — `INSERT AFTER|BEFORE FIRST` / `INSERT AFTER|BEFORE
+LAST` — so a human (and later the engine) applies it at exactly one unambiguous site. No
+implicit "first match wins."
 
 ### Wave-2 rulings — D20–D26, the validator's law
 
@@ -402,6 +402,37 @@ The constraint is enforced on **both halves of the D37 split**, exactly like `SH
 `bp scaffy fmt` needs **zero** changes: `joinFields` is keyword-agnostic, so a canonical
 `ONEOF` line (the comma bound to the preceding member) is already a Format identity and
 survives byte-exact and idempotent — pinned by a fixpoint test.
+
+### Wave-6 ruling — `INSERT BEFORE FIRST|LAST`, the prepend primitive
+
+Ratified from the D55 deferral under the no-fixture-no-primitive discipline, with
+**add-canonical-marker** as the motivating fixture. The verb splices the fenced payload
+directly **before** the pinned anchor occurrence; the anchor bytes survive untouched. Every
+AFTER law carries over verb-generically — fenced target + `WITH` payload, mandatory `MARK`
+(E-007) planted by the payload (E-008), payload-derived guards (E-006), FIRST/LAST
+occurrence pins (at-least-once anchor policy, like AFTER — D20 exactly-once stays
+`REPLACE`/`REMOVE`-only) — and `REANCHOR` stays `REPLACE`-only (P-005). A `remove` inverts
+it exactly like an AFTER insert: the receipt's post-image is excised byte-exactly.
+
+The deferral had priced this as ergonomics — "prepend above a surviving head" was
+expressible as a self-consuming `REPLACE` re-emitting the head, so add-canonical-marker
+shipped on that idiom. The ratify experiment run-proved it was a **latent defect**, not
+ergonomics: E-005 *forces* a `REANCHOR` onto every self-consuming `REPLACE`, and for the
+prepend idiom that clause is a corruption vector. Marking a **second, different-slug**
+capability in the same file left the per-slug guard silent, so the planted
+`MARK:canonical-` family hijacked the anchor and the splice either **aborted** (D33 tail
+desync — `{`/`do`-terminal heads) or **silently corrupted** under a green report
+(`}`-terminal one-liner heads: comma appended to real code + a duplicate bodyless head
+planted). As a plain `INSERT BEFORE FIRST` the op is not self-consuming, carries no
+`REANCHOR`, and the two-slug scenario is two independent clean inserts — pinned forever by
+`TestCanonicalMarkerTwoSlugsOneFile`.
+
+`bp scaffy fmt` again needs **zero** changes (keyword-agnostic `joinFields`, pinned by the
+fmt golden); an unpinned `INSERT BEFORE` is P-002
+(`testdata/red/P-002-insert-before-unpinned.scaffy`). Corpus census: 1 `INSERT BEFORE
+FIRST` (the canonical-marker plant), `REPLACE` 11→10; `INSERT BEFORE LAST` is grammar-legal
+with zero corpus instances, exercised by synthetic fixtures (the `SNIPPET`/`USE`
+precedent).
 
 ## Gate tiers
 

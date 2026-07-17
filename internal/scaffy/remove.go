@@ -256,10 +256,12 @@ func invertOp(tr *tree, rpath string, idx int, op ReceiptOp) (*OpResult, bool, *
 		return drift(firstDiffLine(content, op.PreImage),
 			"a file now exists at the deleted path but matches neither absence nor the recorded pre-image — refusing to overwrite")
 
-	case "insert-after-first", "insert-after-last":
-		// Inverse of INSERT: locate the recorded post-image bytes
-		// exactly once and excise them. No pre-image exists for an
-		// insert — the pre state is "file without the payload".
+	case "insert-after-first", "insert-after-last", "insert-before-first", "insert-before-last":
+		// Inverse of INSERT (AFTER and BEFORE alike — both splice the
+		// payload beside an untouched anchor): locate the recorded
+		// post-image bytes exactly once and excise them. No pre-image
+		// exists for an insert — the pre state is "file without the
+		// payload".
 		if !exists {
 			return drift(1, "target file missing — cannot excise the recorded insertion")
 		}

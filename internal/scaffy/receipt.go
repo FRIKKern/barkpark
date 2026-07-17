@@ -39,7 +39,7 @@ type Receipt struct {
 
 // ReceiptOp is one applied op's fat record.
 type ReceiptOp struct {
-	Kind       string `json:"kind"` // create | delete | insert-after-first | insert-after-last | replace | remove
+	Kind       string `json:"kind"` // create | delete | insert-after-first | insert-after-last | insert-before-first | insert-before-last | replace | remove
 	Path       string `json:"path"` // resolved, repo-relative
 	Mark       string `json:"mark,omitempty"`
 	Reanchored bool   `json:"reanchored,omitempty"`
