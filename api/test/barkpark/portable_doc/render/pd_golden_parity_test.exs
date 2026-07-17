@@ -32,7 +32,9 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
   # ── scope: exactly the 46 in-scope types ─────────────────────────────────────
 
   test "the array holds exactly 46 in-scope types" do
-    assert length(GenPdParity.types()) == 46
+    # scaffy:add-block-type Diff MARK:parity-count-test-diff
+    # scaffy:add-block-type Filetree MARK:parity-count-test-filetree
+    assert length(GenPdParity.types()) == 48
   end
 
   test "both members of all 3 alias pairs are present" do

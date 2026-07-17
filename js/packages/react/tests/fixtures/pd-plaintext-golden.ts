@@ -12,7 +12,7 @@
 // exact plain text `toPlainText([golden.input])` must produce for that type,
 // derived from the SAME frozen `pd-golden` fixtures (never re-authoring them).
 //
-// PARTITION (18 prose / 28 textless = 46). Every one of the 46 grammar types
+// PARTITION (20 prose / 28 textless = 48). Every one of the 48 grammar types
 // appears in EXACTLY ONE of the two maps below; the test fails if any golden
 // type is in neither (silent-drop ≠ intentional-skip) or in both.
 
@@ -48,6 +48,9 @@ export const PROSE_GOLDEN: Record<string, string> = {
   columns: 'Left column body.\n\nRight column body.',
   section: 'Alpha cell\n\nBeta cell',
   terminal: 'Inside the frame.',
+  // code-story blocks (starter parity: the `text` attr the scaffold wraps)
+  diff: 'Parity starter text',
+  filetree: 'Parity starter text',
 }
 
 /**
