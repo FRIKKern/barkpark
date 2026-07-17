@@ -485,7 +485,8 @@ Steps — task first, code second, and the ledger stays LIVE throughout:
 8. Final ledger state: every criterion you proved carries concrete evidence (gate output, test names, branch); merge-gated criteria stay open and lifecycle stays in_progress — the LEAD closes on merge. Your branch is named in the evidence.
 ${TASKS_BLOCK}
 ${LIVENESS_BLOCK}
-Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.`,
+Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.
+Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a repeated shape (block types, workers, error shapes, CLI verbs/nouns, migrations, plugins, routes/buckets, schema types, SDK methods, docs cards, canonical markers, imports, console helpers), check \`ls scaffy/commands/\` — if a command covers the chore, run \`bp scaffy run scaffy/commands/<name>.scaffy --var …\` instead of editing by hand (validate-first, receipts make it reversible; told agents produce engine-identical bytes, untold agents drift and lose reversibility).`,
       { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: item.builder_model === 'fable' ? 'fable' : 'opus', isolation: 'worktree' }
     )
   )
