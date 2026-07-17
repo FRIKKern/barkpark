@@ -1,0 +1,19 @@
+# Synthetic add-direction fixture — exercises D56 ONEOF enum variables:
+# an OPAQUE ONEOF variable (referenced by exactly one spelling, in a
+# path position — OPAQUE is path-casing exempt) and a transform ONEOF
+# variable (referenced by its Pascal spelling in an assert text). Every
+# EXAMPLES value is a declared member of its ONEOF set (no E-021).
+COMMAND "add-schema-type"
+DESCRIPTION "Select a visibility and a tier for a new schema type (synthetic fixture)."
+LAST_UPDATED "17-07-2026-10-00-00"
+DOMAIN "barkpark"
+TAGS "scaffy, synthetic"
+CONCEPT "schema-type"
+VARIANT "minimal"
+DIRECTION "add"
+
+VARIABLE 1 "Visibility" OPAQUE ONEOF "public", "private" TITLE "Visibility" DESCRIPTION "Whether the schema type is public or private." EXAMPLES "public", "private"
+VARIABLE 2 "Tier" ONEOF "element", "widget", "section" TITLE "Composition tier" DESCRIPTION "Where the block sits on the composition ladder." EXAMPLES "element", "widget", "section"
+
+ASSERT FILE "api/priv/plugins/scaffy/schemas/{{.Visibility}}.json" EXISTS
+ASSERT FILE "api/lib/barkpark/portable_doc/tiers.ex" CONTAINS "@{{.Tier}} ~w("

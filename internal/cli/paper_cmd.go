@@ -3,12 +3,15 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
@@ -109,6 +112,27 @@ func runPaperView(out *writer, g globals, args []string) int {
 		usagePaperView(out, false)
 		return exitUsage
 	}
+	target := parsePaperRef(opt.slug)
+	opt.slug = target.id
+	suppressInheritedToken := false
+	// A pasted Paper URL is a complete location, not merely an id. Make its
+	// origin and tenant path authoritative so the CLI cannot silently read a
+	// same-named Paper from the currently active server/workspace/project.
+	if target.server != "" {
+		if g.token == "" && !paperServerTrusted(target.server, resolveContext(g).Server) {
+			suppressInheritedToken = true
+		}
+		g.server = target.server
+	}
+	if target.workspace != "" {
+		g.workspace = target.workspace
+	}
+	if target.project != "" {
+		g.project = target.project
+	}
+	if target.dataset != "" {
+		g.dataset = target.dataset
+	}
 
 	// -o resolution: an explicit global -o/--json wins (the global parser already
 	// reflected it into g/out.output); else ansi (this command's default — NOT the
@@ -134,6 +158,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 		g.server = opt.server
 	}
 	ctx := resolveContext(g)
+	if suppressInheritedToken || target.share != "" {
+		// Never attach an active/environment credential to an arbitrary pasted
+		// origin or to a capability URL. Unknown origins require an explicit
+		// --token; item-share URLs authenticate solely with their share token.
+		ctx.Token = ""
+	}
 
 	// Perspective: papers are public → published by default; --perspective lets a
 	// caller see drafts/raw. An empty/unknown value falls back to published.
@@ -152,38 +182,32 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Perspective: perspective,
 	})
 
-	// Fetch every paper, then match the slug. The query endpoint's `filter` param
-	// is a no-op on this server, so we go through the RAW query body to get the
-	// _id/slug/title for matching and the not-found slug list. (apiclient.Doc now
-	// also normalizes "_id" into Doc.ID, but the raw path stays — it needs every
-	// doc's slug, not just the typed subset.) The matched raw doc is then decoded
-	// into an apiclient.Doc so Doc.PaperBlocks() drives the render, per the M0
-	// client contract.
-	raws, qerr := paperFetchAll(client, perspective)
+	// A Paper link already names canonical document identity. Read that one
+	// document directly so a successful `bp paper view` remains O(1) as the
+	// corpus grows. PaperDoc preserves workspace/project scope and asks the API
+	// to resolve task blocks before rendering.
+	var raw []byte
+	var qerr error
+	if target.share != "" {
+		raw, qerr = fetchSharedPaper(ctx.Server, target)
+	} else {
+		raw, qerr = client.PaperDoc(ctx.Dataset, opt.slug, perspective)
+	}
 	if qerr != nil {
-		return paperError(out, jsonOut, "query", fmt.Sprintf("query papers failed: %v", qerr), exitGeneric)
+		return paperError(out, jsonOut, "not_found", fmt.Sprintf("read paper %q failed: %v", opt.slug, qerr), exitNotFound)
 	}
-	if len(raws) == 0 {
-		return paperError(out, jsonOut, "empty",
-			"no papers found on "+ctx.Server+" (dataset "+ctx.Dataset+", perspective "+perspective+")",
-			exitNotFound)
-	}
-
-	match, found := paperMatch(raws, opt.slug)
-	if !found {
-		return paperNotFound(out, jsonOut, opt.slug, raws, ctx.Server)
-	}
+	match := paperRawDoc{id: opt.slug, slug: opt.slug, raw: raw}
 
 	// -o json: print the raw paper document verbatim (re-indented for stability).
 	if jsonOut {
-		out.renderRaw(match.raw)
+		out.renderRaw(raw)
 		return exitOK
 	}
 
 	// Decode the matched doc's block tree through the apiclient.Doc seam, then via
 	// pdrender.Decode → []pdrender.Block.
 	var doc apiclient.Doc
-	if err := json.Unmarshal(match.raw, &doc); err != nil {
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return paperError(out, jsonOut, "decode", "decode paper: "+err.Error(), exitGeneric)
 	}
 	blocksRaw := doc.PaperBlocks()
@@ -228,7 +252,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Theme:         theme,
 		Profile:       profile,
 		RefResolver:   paperRefResolver(client, ctx.Dataset, perspective),
-		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, raws),
+		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, []paperRawDoc{match}),
 		ValueResolver: paperValueResolver(client, ctx.Dataset, perspective, blocksRaw),
 		ImageResolver: paperImageResolver(ctx.Server, ctx.Token),
 	}
@@ -240,6 +264,147 @@ func runPaperView(out *writer, g globals, args []string) int {
 	out.outf("%s", rendered)
 	return exitOK
 }
+
+// normalizePaperRef accepts the three forms users naturally paste into a
+// terminal: a bare Paper id, a `/papers/<id>` path, or a full scoped/unscoped
+// Paper URL. The public route segment is the stable boundary; query strings,
+// fragments, and a trailing slash never become part of document identity.
+type paperRef struct {
+	id          string
+	server      string
+	workspace   string
+	project     string
+	dataset     string
+	browserPath string
+	share       string
+}
+
+func parsePaperRef(ref string) paperRef {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return paperRef{}
+	}
+	parsed, err := url.Parse(ref)
+	if err != nil {
+		return paperRef{id: ref}
+	}
+	path := parsed.Path
+	if path == "" || (!strings.HasPrefix(ref, "/") && parsed.Scheme == "" && parsed.Host == "") {
+		return paperRef{id: ref}
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	target := paperRef{browserPath: parsed.EscapedPath(), share: parsed.Query().Get("share")}
+	if parsed.Scheme != "" && parsed.Host != "" {
+		target.server = parsed.Scheme + "://" + parsed.Host
+	}
+	for i := 0; i+1 < len(parts); i++ {
+		switch parts[i] {
+		case "w":
+			target.workspace, _ = url.PathUnescape(parts[i+1])
+		case "p":
+			target.project, _ = url.PathUnescape(parts[i+1])
+		case "d":
+			target.dataset, _ = url.PathUnescape(parts[i+1])
+		}
+	}
+	for i := len(parts) - 2; i >= 0; i-- {
+		if parts[i] == "papers" && parts[i+1] != "" {
+			if id, unescapeErr := url.PathUnescape(parts[i+1]); unescapeErr == nil {
+				target.id = id
+				return completePaperRef(target)
+			}
+			target.id = parts[i+1]
+			return completePaperRef(target)
+		}
+		if i > 0 && parts[i-1] == "studio" && parts[i] == "paper" && parts[i+1] != "" {
+			if id, unescapeErr := url.PathUnescape(parts[i+1]); unescapeErr == nil {
+				target.id = id
+				return completePaperRef(target)
+			}
+			target.id = parts[i+1]
+			return completePaperRef(target)
+		}
+	}
+	target.id = ref
+	return target
+}
+
+func completePaperRef(target paperRef) paperRef {
+	if target.workspace == "" {
+		target.workspace = "default"
+	}
+	if target.project == "" {
+		target.project = "default"
+	}
+	if target.dataset == "" {
+		target.dataset = "production"
+	}
+	return target
+}
+
+func paperServerTrusted(target, active string) bool {
+	normalize := func(value string) string { return strings.TrimRight(value, "/") }
+	if normalize(target) == normalize(active) {
+		return true
+	}
+	if cfg, err := LoadConfig(); err == nil && cfg != nil {
+		_, ok := cfg.FindServer(target)
+		return ok
+	}
+	return false
+}
+
+func fetchSharedPaper(server string, target paperRef) ([]byte, error) {
+	if target.browserPath == "" || target.share == "" {
+		return nil, fmt.Errorf("invalid Paper share URL")
+	}
+	endpoint := strings.TrimRight(server, "/") + strings.TrimRight(target.browserPath, "/") +
+		"/source?share=" + url.QueryEscape(target.share)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "*/*")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Paper source status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Title  string `json:"title"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	doc := map[string]any{"_id": target.id, "_type": "paper", "title": payload.Title}
+	switch payload.Source.Kind {
+	case "blocks":
+		var blocks any
+		if err := json.Unmarshal(payload.Source.Blocks, &blocks); err != nil {
+			return nil, err
+		}
+		doc["blocks"] = blocks
+	case "html":
+		doc["body_html"] = payload.Source.HTML
+	default:
+		return nil, fmt.Errorf("Paper source is empty")
+	}
+	return json.Marshal(doc)
+}
+
+func normalizePaperRef(ref string) string { return parsePaperRef(ref).id }
 
 // paperRawDoc is one fetched paper: its identity fields (for matching + the
 // not-found list) and the verbatim JSON (for -o json and block decode).

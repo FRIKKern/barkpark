@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -246,6 +247,55 @@ package widgets
 	}
 	if string(out) != string(src) {
 		t.Errorf("corpus spellings are not a fmt fixpoint\n--- got ---\n%s--- want ---\n%s", out, src)
+	}
+}
+
+// TestParseOneOf pins the D56 ONEOF parse: the comma-separated quoted
+// enum set lands in VariableDecl.OneOf (in order), OneOfPos carries the
+// declaration line, and the keyword coexists with OPAQUE + the rest.
+func TestParseOneOf(t *testing.T) {
+	src := []byte(`DIRECTION "add"
+VARIABLE 1 "Visibility" OPAQUE ONEOF "public", "private" TITLE "t" DESCRIPTION "d" EXAMPLES "public"
+ASSERT FILE "x/{{.Visibility}}.json" EXISTS
+`)
+	cmd, findings := Parse("oneof.scaffy", src)
+	if len(findings) != 0 {
+		t.Fatalf("unexpected parse findings: %v", findings)
+	}
+	if len(cmd.Variables) != 1 {
+		t.Fatalf("got %d variables, want 1", len(cmd.Variables))
+	}
+	v := cmd.Variables[0]
+	if !v.Opaque {
+		t.Errorf("OPAQUE not parsed alongside ONEOF")
+	}
+	want := []string{"public", "private"}
+	if !reflect.DeepEqual(v.OneOf, want) {
+		t.Errorf("OneOf = %v, want %v", v.OneOf, want)
+	}
+	if v.OneOfPos.Line != 2 {
+		t.Errorf("OneOfPos.Line = %d, want 2", v.OneOfPos.Line)
+	}
+	if len(v.Examples) != 1 || v.Examples[0] != "public" {
+		t.Errorf("EXAMPLES = %v, want [public]", v.Examples)
+	}
+}
+
+// TestParseUnknownVariableKeywordNamesOneOf: the unknown-keyword hint
+// lists ONEOF among the legal keywords (D56, parse.go:373).
+func TestParseUnknownVariableKeywordNamesOneOf(t *testing.T) {
+	src := []byte(`DIRECTION "add"
+VARIABLE 1 "X" BOGUS "y" TITLE "t" DESCRIPTION "d" EXAMPLES "z"
+`)
+	_, findings := Parse("bad.scaffy", src)
+	found := false
+	for _, f := range findings {
+		if f.Rule == RuleMalformedStatement && strings.Contains(f.Hint, "ONEOF") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("unknown-keyword hint does not mention ONEOF; findings: %v", findings)
 	}
 }
 

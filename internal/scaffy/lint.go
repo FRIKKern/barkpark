@@ -61,8 +61,28 @@ func (l *linter) variables() {
 		if v.Shape != "" {
 			l.lintShape(v)
 		}
+		if len(v.OneOf) > 0 {
+			l.lintOneOf(v)
+		}
 		if v.Successor != "" {
 			l.lintSuccessor(v, byName)
+		}
+	}
+}
+
+// lintOneOf reds a declared EXAMPLES value that is not a member of the
+// variable's ONEOF set (E-021, D56). The runtime (checkOneOf) owns the
+// live --var value; this is the source-text half, mirroring lintShape.
+func (l *linter) lintOneOf(v *VariableDecl) {
+	set := make(map[string]bool, len(v.OneOf))
+	for _, m := range v.OneOf {
+		set[m] = true
+	}
+	for _, ex := range v.Examples {
+		if !set[ex] {
+			l.add(v.OneOfPos.Line, RuleOneOf,
+				fmt.Sprintf("EXAMPLES %q is not one of the variable's ONEOF members", ex),
+				"every EXAMPLES value of a ONEOF variable must be a declared member of the set (D56)")
 		}
 	}
 }

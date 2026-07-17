@@ -334,7 +334,7 @@ D18 confirmed live: s3 is the API producer the merged s4/s5 Go card waited on �
 truth now complete. Stale pre-D16 charter dup #3823 CLOSED. Backlog round-2 (wsc-bl-real-fixtures,
 wsc-bl-workflow-sse) NOT built this wave — they serialize behind s3 and are a future round.
 
-### Wave 2 · round 2 (2026-07-17) — the two honesty-ceiling backlog picks BUILDING
+### Wave 2 · round 2 (2026-07-17) — BOTH picks MERGED (#3909 + #3910)
 Wave Paper: `wsc-wave-2026-07-17-r2` (style=article). s3 (#3865) is MERGED and LIVE on guerrilla,
 so both picks are unblocked and dispatch as ROUND 1 (disjoint file sets — build in parallel).
 Decide ran two explore rounds; five verifiers PROVED the seam (no rumor survived). Decisions
@@ -351,3 +351,9 @@ Known main-flakes to rerun-once (NOT real breaks): queue_test.exs:462 planner-se
 the sandbox-ownership DBConnection cascade (media_search / history_test:15 / rate_limit:24).
 New backlog filed: **wsc-bl-workflow-sse-detail** (D24 expanded-detail ceiling). PARKED still:
 prs-open, busiest-child (honesty star holds them). Review appends the debrief.
+
+
+**Outcome (steward close-out 2026-07-17):** BOTH round-2 slices LANDED.
+- **wsc-bl-real-fixtures → #3909 MERGED** — REAL SIGKILL-interrupted ndjson + `workflow_agent`-scoped attempt==1 proof; test-only (Elixir + prod-compile green, no Go gate, Sobelow test-only noise). Task closed done.
+- **wsc-bl-workflow-sse → #3910 MERGED** — the `event: workflow` SSE frame + per-session `Recorder.topic` re-broadcast + Go `LiveWorkflow` state/reduce/render. Its `.go` change exposed a LATENT foreign scaffy Go-gate drift on main (`corpusFileCount=7` vs 12 files) — fixed by foreign #3912 (7→12); steward then rebased #3910's sse commit clean onto the fixed main, go-vet + Elixir green, Sobelow verified baseline noise (touches recorder/chat_controller, NO router/pipeline). Task closed done.
+Wave-2 round-2 COMPLETE — all five surfaces now honest on prod-shaped interrupted data + bp chat's strip updates mid-turn. Remaining backlog: **wsc-bl-workflow-sse-detail** (D24 expanded-detail ceiling) + the newly-filed agent-detail slices **wsc-ad-gui / wsc-ad-tui** (see-what-subagents-are-doing); PARKED by honesty-star: prs-open, busiest-child.

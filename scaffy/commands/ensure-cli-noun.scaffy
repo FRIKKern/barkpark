@@ -1,0 +1,104 @@
+COMMAND "Ensure a bp completion noun" DESCRIPTION "Idempotently make sure a top-level noun appears in the bp CLI shell-completion set — append its quoted literal to completionNouns once, skip forever after. The ensure family: the guard keys on the hand-reproducible noun literal itself, so a human who typed the same entry first wins and scaffy stays out of the way." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "scaffold" CONCEPT "ensure-cli-noun" VARIANT "go" DIRECTION "add" VARIABLES
+  VARIABLE 1 "Noun" TITLE "Top-level bp noun to make completable" DESCRIPTION "The `bp <noun>` this entry completes — a lowercase single word (the four canonical casings coincide), or a hyphenated verb like `go-live` in kebab. Referenced here only as {{.noun}} (kebab)." EXAMPLES "widget", "go-live", "sheet"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ENSURE LAW (charter D57) — why this is not a MARK-guarded command
+# ─────────────────────────────────────────────────────────────────────────────
+# An ensure command guarantees a line a developer could just as well have typed
+# by hand — here, one `"noun",` entry in completionNouns. So idempotency keys on
+# that HAND-REPRODUCIBLE literal, the quoted noun `"{{.noun}}"`, and NEVER on a
+# `MARK:` comment. That is the whole distinction from add-oban-worker /
+# add-cli-verb, whose guards key on the mark because scaffy OWNS the block it
+# plants. Here it does not: a human's completion entry and scaffy's are the same
+# `"noun",` line, and the guard must treat them identically.
+#
+# Two consequences fall out of that law, both binding on every ensure-* command:
+#
+#   1. A NO-OP RUN WRITES NO RECEIPT. If the guard already sees `"{{.noun}}"`
+#      (however it got there — scaffy earlier, or a hand edit), the op is skipped
+#      and NOTHING is written: no file change, and no receipt in
+#      `.scaffy/receipts/`. Scaffy records only what it actually did.
+#
+#   2. `bp scaffy remove` AFTER A SKIP EXITS 4 — AND THAT IS CORRECT. remove is
+#      receipt replay (D36). A skipped ensure wrote no receipt, so remove finds
+#      none and exits 4 (ReceiptMissingError), leaving the file untouched. Scaffy
+#      never owned that noun entry, so it must not remove it. Exit 4 here is the
+#      SUCCESS signal of the ensure contract, not a failure — do not "fix" it.
+#
+# QUOTED-LITERAL GUARD, FILE-WIDE (the counterpart to ensure-import's caveat).
+# Unlike ensure-import's bare `import Logger` substring — a prefix of
+# `import Logger.Handlers` — this guard `"{{.noun}}"` is delimited by a quote on
+# BOTH sides, so `"widget"` is NOT a substring of `"widgets"` (the closing quote
+# breaks the match). It does NOT suffer the prefix false-skip. The one real edge
+# is that the guard is FILE-scoped: if the exact quoted literal `"{{.noun}}"`
+# already appears ANYWHERE in builtins.go (a help string, another slice), the op
+# false-skips. For plausible nouns this never collides; if it might, add the
+# completionNouns entry by hand. Documented, non-issue for the common case.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THIS COMMAND DOES NOT TOUCH — the two-copy discipline
+# ─────────────────────────────────────────────────────────────────────────────
+# A completable noun lives in THREE places today; this command owns exactly ONE:
+#
+#   • completionNouns (builtins.go)      ← THIS command appends here.
+#   • the `switch noun` dispatch (cli.go) ← HAND-WRITTEN, deliberately not touched.
+#   • the per-noun usage line (usage.go)  ← stuck at 19 nouns since 2026-07-03;
+#                                            EXCLUDED here, tracked in backlog
+#                                            scaffy-backlog-usage-noun-drift-fix.
+#
+# The dispatch case is left to the human because a `case "{{.noun}}":` needs a
+# real handler — code, not a scaffold. The invariant that keeps the two in sync
+# is TestCompletionNounsCoverAllDispatchedBuiltins (builtins_test.go): it asserts
+# every DISPATCHED case is present in completionNouns — a SUBSET check. So a
+# completionNouns SUPERSET is legal: this command may add the completion entry
+# BEFORE (or without) the matching dispatch case, and the test stays green. That
+# is exactly the probe that proves this command safe — plant the noun, run the
+# test, it passes even with no dispatch case behind it.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP — insert `"{{.noun}}",` once, right after the completionNouns opening
+# ─────────────────────────────────────────────────────────────────────────────
+# The array's last element `"workspace",` carries a trailing comma, so a bare
+# INSERT is comma-safe (A3) — no self-consuming REPLACE, no REANCHOR needed. The
+# anchor is the array-OPENING line, which is unique in the file and ordering-
+# neutral: completionNouns is a completion SET, so a new entry right after the
+# `{` is as valid as one at the tail. Each ensured noun stacks its own guarded
+# entry there; order never matters. The payload plants a provenance comment
+# carrying the mark (a remove handle + a reader's breadcrumb) plus the entry. The
+# mark name is the FIXED kebab `ensure-cli-noun`: a plain MARK requires its
+# `MARK:` text verbatim in the payload (it is here), and it need not be per-noun
+# unique because remove is receipt replay keyed on command+vars (D35/D36) — two
+# ensured nouns in one file get two receipts and retract independently, even
+# sharing the mark comment.
+#
+# The ASLONG guard is the ENSURE LAW in one line: DONT CONTAIN the quoted noun.
+# It is a verbatim substring of the payload (E-006, add polarity → guard derives
+# from what the op writes), ASCII, and brace-safe (`}}` is followed by `\"`,
+# never a literal `}`).
+IN "internal/cli/builtins.go"
+### Ensure "{{.noun}}" is a completion noun
+INSERT AFTER FIRST
+::: completionNouns opening :::
+var completionNouns = []string{
+::: completionNouns opening :::
+WITH
+::: {{.noun}} completion noun :::
+	// scaffy:ensure-cli-noun {{.noun}} MARK:ensure-cli-noun
+	"{{.noun}}",
+::: {{.noun}} completion noun :::
+MARK "ensure-cli-noun"
+ASLONG FILE DONT CONTAIN "\"{{.noun}}\""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# The quoted noun is present (verbatim substring of the payload the op writes).
+# This holds whether scaffy inserted the entry this run or a prior run / a hand
+# edit already had it — the ensure contract guarantees the END STATE.
+ASSERT FILE "internal/cli/builtins.go" CONTAINS "\"{{.noun}}\""
+
+# Drift gate — the completion/dispatch invariant. A LOCAL Go test (A2:
+# proven-safe): adding a completionNouns entry keeps it green because the check
+# is dispatched-⊆-completionNouns; a superset never reds. Runs in the apply
+# worktree; the engine appends CC=/usr/bin/clang for cgo.
+ASSERT CMD "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"

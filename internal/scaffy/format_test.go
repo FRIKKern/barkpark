@@ -88,6 +88,34 @@ func TestFormatNeverTouchesProseOrPayload(t *testing.T) {
 	}
 }
 
+// TestFormatOneOfFixpoint proves format.go needs ZERO changes for D56
+// ONEOF: joinFields is keyword-agnostic, so a canonical ONEOF VARIABLE
+// line (two-space indented, the comma bound to the preceding member) is
+// already a Format identity, the clause survives byte-exact, and Format
+// stays idempotent over it.
+func TestFormatOneOfFixpoint(t *testing.T) {
+	canonical := []byte("DIRECTION \"add\"\n\n" +
+		"  VARIABLE 1 \"Visibility\" OPAQUE ONEOF \"public\", \"private\" TITLE \"t\" DESCRIPTION \"d\" EXAMPLES \"public\"\n\n" +
+		"ASSERT FILE \"x/{{.Visibility}}.json\" EXISTS\n")
+	once, err := Format(canonical)
+	if err != nil {
+		t.Fatalf("Format(canonical): %v", err)
+	}
+	if !bytes.Equal(once, canonical) {
+		t.Errorf("canonical ONEOF source is not a Format identity\n--- got ---\n%s--- want ---\n%s", once, canonical)
+	}
+	if !bytes.Contains(once, []byte(`ONEOF "public", "private"`)) {
+		t.Errorf("Format mangled the ONEOF clause:\n%s", once)
+	}
+	twice, err := Format(once)
+	if err != nil {
+		t.Fatalf("Format(once): %v", err)
+	}
+	if !bytes.Equal(twice, once) {
+		t.Errorf("Format not idempotent over ONEOF\n--- once ---\n%s--- twice ---\n%s", once, twice)
+	}
+}
+
 // TestFormatErrorOnUnclosedFence: without the closing fence line the
 // payload boundary is undecidable — fmt refuses instead of guessing.
 func TestFormatErrorOnUnclosedFence(t *testing.T) {

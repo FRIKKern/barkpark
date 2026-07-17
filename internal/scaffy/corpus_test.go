@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 7
+const corpusFileCount = 14
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -46,7 +46,7 @@ func corpusFiles(t *testing.T) []string {
 	return paths
 }
 
-// TestCorpusFileCount: exactly 7 .scaffy files, asserted before anything
+// TestCorpusFileCount: exactly 14 .scaffy files, asserted before anything
 // else touches their bytes.
 func TestCorpusFileCount(t *testing.T) {
 	corpusFiles(t)
@@ -148,22 +148,22 @@ func countCorpus(t *testing.T) census {
 }
 
 // TestCorpusCensus: the frozen operation census (charter D30). Derived
-// from the parsed AST across all 7 files and matched EXACTLY. Any drift
+// from the parsed AST across all 14 files and matched EXACTLY. Any drift
 // — a corpus edit that adds/removes an op, or a parser change that
 // classifies one differently — fails here with a field-by-field diff.
 func TestCorpusCensus(t *testing.T) {
 	want := census{
-		create:           11,
-		insertAfterFirst: 5,
+		create:           14,
+		insertAfterFirst: 11,
 		insertAfterLast:  1,
-		replace:          5,
+		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             12,
+		mark:             24,
 		markVirtual:      2,
-		assertFile:       30,
-		assertCmd:        15,
-		assertCmdTierCI:  6,
+		assertFile:       55,
+		assertCmd:        28,
+		assertCmdTierCI:  10,
 	}
 	got := countCorpus(t)
 	if got != want {

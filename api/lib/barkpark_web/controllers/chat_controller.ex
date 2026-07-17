@@ -410,6 +410,14 @@ defmodule BarkparkWeb.ChatController do
       {:claude_chat_permission, ask} ->
         chunk_or_stop(conn, sse_permission_frame(ask))
 
+      {:chat_workflow, _sid, summary} ->
+        # Live workflow delta (wsc-bl-workflow-sse, D22): the Recorder's SECOND
+        # broadcast lands here on the per-session topic. The sid is embedded in the
+        # topic the forwarder subscribed to, so it is authoritative — this clause
+        # ignores the tuple's sid and forwards the compact summary as its own
+        # change-only frame, removing the D13 mid-turn strip lag.
+        chunk_or_stop(conn, sse_workflow_frame(summary))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -479,6 +487,16 @@ defmodule BarkparkWeb.ChatController do
   # The public exit frame (D23) — EXACTLY status + reason; the internal tail is
   # not a parameter, so it is structurally unable to leak here.
   def sse_exit_frame(status), do: "event: exit\ndata: #{Jason.encode!(exit_payload(status))}\n\n"
+
+  @doc false
+  # The live workflow frame (wsc-bl-workflow-sse, D23): the COMPACT
+  # workflow_summary map (StudioChat.workflow_summary/1), encoded byte-identical
+  # to the list wire (ONE parser on the Go side). WORKFLOW-ONLY — no epic sibling
+  # — and UNREPLAYABLE: NO `id:` seq, exactly like the runtime/permission/exit
+  # deltas (D5); a resuming client re-reads settled workflow truth off the
+  # turn-boundary rail, never off a replayed workflow frame.
+  def sse_workflow_frame(summary),
+    do: "event: workflow\ndata: #{Jason.encode!(summary)}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric

@@ -2024,6 +2024,9 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:shared_paper_browser, :paper_reader_csp])
 
+    get("/papers/:slug/source", BulldocsSourceController, :show)
+    get("/papers/:slug/email", BulldocsEmailController, :show)
+
     # LIVE scoped reader (P4): the same BulldocsLive as the flat /papers/:slug
     # surface — per-block real-time streaming included (the paper PubSub topic
     # is already ws-keyed) — mounted behind the share/membership gates above.
@@ -2200,6 +2203,21 @@ defmodule BarkparkWeb.Router do
     post("/v1/webhooks/:dataset/:id/reenable", WebhookController, :reenable)
     put("/v1/webhooks/:dataset/:id", WebhookController, :update)
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
+  end
+
+  # Scoped run-secrets (admin) — the per-workspace tier of the encrypted
+  # store (connectors D197/D199). Same SecretController as the flat
+  # /v1/secrets route; the controller keys the tier off the ROUTE
+  # (path_params carries :workspace_slug here) and threads the resolved
+  # workspace id — a workspace admin manages ONLY their workspace's scoped
+  # secrets, never the global tier.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    get("/v1/secrets", SecretController, :index)
+    get("/v1/secrets/:name", SecretController, :show)
+    put("/v1/secrets/:name", SecretController, :update)
+    delete("/v1/secrets/:name", SecretController, :delete)
   end
 
   # Scoped v1 media — admin search ops.
