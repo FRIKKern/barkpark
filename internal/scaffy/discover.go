@@ -68,16 +68,24 @@ type DiscoverOptions struct {
 	CommandsDir string // catalog dir, repo-root-relative; "" = scaffy/commands
 }
 
+// RecentWindowDays is the fixed span (before the until commit's day) of the
+// recent sub-window reported alongside the full aggregate. It is a constant,
+// not a flag, so the recent column is reproducible from the until commit
+// alone — the same honesty guarantee as the main window derivation.
+const RecentWindowDays = 90
+
 // DiscoverWindow records exactly which commits were mined, so a reader can
 // reproduce every number.
 type DiscoverWindow struct {
-	Since      string `json:"since"`
-	UntilRev   string `json:"until_rev"`
-	UntilSHA   string `json:"until_sha"`
-	UntilDay   string `json:"until_day"`
-	Derivation string `json:"derivation"`
-	NoMerges   bool   `json:"no_merges"`
-	Commits    int    `json:"commits"`
+	Since       string `json:"since"`
+	UntilRev    string `json:"until_rev"`
+	UntilSHA    string `json:"until_sha"`
+	UntilDay    string `json:"until_day"`
+	Derivation  string `json:"derivation"`
+	NoMerges    bool   `json:"no_merges"`
+	Commits     int    `json:"commits"`
+	RecentSince string `json:"recent_since"` // start of the last-N-day sub-window (pin-derived)
+	RecentDays  int    `json:"recent_days"`  // span of that sub-window, always RecentWindowDays
 }
 
 // ShapeSplit is the numstat commit classification for one file:
@@ -98,16 +106,29 @@ type SupportHistogram struct {
 	Ge5 int `json:"ge5"`
 }
 
+// Decomposition is the recency-honesty signal: a candidate is DECOMPOSED when
+// a single in-window commit gutted the file (see decomposition rule in
+// logShapes). It exposes the divergence a 12-month aggregate hides — a file
+// whose ranked churn is mostly PRE-decomposition history no longer resembling
+// its current shape (the studio_live.ex ghost-vein failure mode).
+type Decomposition struct {
+	Detected     bool `json:"detected"`
+	MaxDelete    int  `json:"max_delete"`    // largest single-commit deletions in the window
+	CurrentLines int  `json:"current_lines"` // the file's line count at the until commit
+}
+
 // AccretionCandidate is one ranked accretion-file row.
 type AccretionCandidate struct {
-	Rank      int              `json:"rank"`
-	Path      string           `json:"path"`
-	Commits   int              `json:"commits"`
-	Partners  int              `json:"partners"` // distinct co-changed files, uncapped
-	Support   SupportHistogram `json:"support"`
-	Shape     ShapeSplit       `json:"shape"`
-	Coverage  string           `json:"coverage"` // served | partial | unserved
-	CoveredBy []string         `json:"covered_by,omitempty"`
+	Rank          int              `json:"rank"`
+	Path          string           `json:"path"`
+	Commits       int              `json:"commits"`
+	RecentCommits int              `json:"recent_commits"` // commits inside the last-N-day sub-window
+	Partners      int              `json:"partners"`       // distinct co-changed files, uncapped
+	Support       SupportHistogram `json:"support"`
+	Shape         ShapeSplit       `json:"shape"`
+	Decomp        Decomposition    `json:"decomposition"`
+	Coverage      string           `json:"coverage"` // served | partial | unserved
+	CoveredBy     []string         `json:"covered_by,omitempty"`
 }
 
 // DirCount is one hot directory of strict co-creation pairs.
@@ -153,8 +174,11 @@ var coCreationRules = []struct{ src, test string }{
 	{".tsx", ".test.tsx"},
 }
 
-// commitRec is one mined commit: every touched path, and the ADDED subset.
+// commitRec is one mined commit: its commit day (YYYY-MM-DD, from %cI, used to
+// place the commit in the recent sub-window), every touched path, and the
+// ADDED subset.
 type commitRec struct {
+	day   string
 	files []string
 	added []string
 }
@@ -197,6 +221,15 @@ func Discover(opts DiscoverOptions) (*DiscoverReport, error) {
 		return nil, err
 	}
 
+	// The recent sub-window: RecentWindowDays before the until commit's day,
+	// pin-derived exactly like the main window (never wall-clock). A commit is
+	// "recent" when its day is on or after recentSince.
+	untilT, perr := time.Parse("2006-01-02", untilDay)
+	if perr != nil {
+		return nil, fmt.Errorf("cannot parse until commit day %q: %w", untilDay, perr)
+	}
+	recentSince := untilT.AddDate(0, 0, -RecentWindowDays).Format("2006-01-02")
+
 	minSupport := opts.MinSupport
 	if minSupport <= 0 {
 		minSupport = 5
@@ -224,10 +257,15 @@ func Discover(opts DiscoverOptions) (*DiscoverReport, error) {
 	}
 
 	touch := map[string]int{}         // file → commits touching it
+	recentTouch := map[string]int{}   // file → commits touching it inside the recent sub-window
 	fileCommits := map[string][]int{} // file → commit indexes
 	for i, c := range commits {
+		recent := c.day >= recentSince // YYYY-MM-DD strings sort chronologically
 		for _, f := range c.files {
 			touch[f]++
+			if recent {
+				recentTouch[f]++
+			}
 			fileCommits[f] = append(fileCommits[f], i)
 		}
 	}
@@ -277,24 +315,36 @@ func Discover(opts DiscoverOptions) (*DiscoverReport, error) {
 		}
 		coverage, coveredBy := catalog.coverage(f)
 		candidates = append(candidates, AccretionCandidate{
-			Rank:      rank + 1,
-			Path:      f,
-			Commits:   touch[f],
-			Partners:  len(support),
-			Support:   hist,
-			Coverage:  coverage,
-			CoveredBy: coveredBy,
+			Rank:          rank + 1,
+			Path:          f,
+			Commits:       touch[f],
+			RecentCommits: recentTouch[f],
+			Partners:      len(support),
+			Support:       hist,
+			Coverage:      coverage,
+			CoveredBy:     coveredBy,
 		})
 	}
 
-	// ── Pass 2 (batched): numstat over the candidate paths only → shapes ────
+	// ── Pass 2 (batched): numstat over the candidate paths only → shapes +
+	// the decomposition flag. Current line counts (one batched cat-file over
+	// the ≤top candidate blobs at the until commit) supply the denominator for
+	// the >50% gut test — not a per-file storm, a single bounded process.
 	if len(paths) > 0 {
-		shapes, serr := logShapes(rootDir, since, sha, paths)
+		currentLines, lerr := blobLineCounts(rootDir, sha, paths)
+		if lerr != nil {
+			return nil, lerr
+		}
+		shapes, decomp, serr := logShapes(rootDir, since, sha, paths, currentLines)
 		if serr != nil {
 			return nil, serr
 		}
 		for i := range candidates {
-			candidates[i].Shape = shapes[candidates[i].Path]
+			p := candidates[i].Path
+			candidates[i].Shape = shapes[p]
+			d := decomp[p]
+			d.CurrentLines = currentLines[p]
+			candidates[i].Decomp = d
 		}
 	}
 
@@ -303,13 +353,15 @@ func Discover(opts DiscoverOptions) (*DiscoverReport, error) {
 
 	return &DiscoverReport{
 		Window: DiscoverWindow{
-			Since:      since,
-			UntilRev:   until,
-			UntilSHA:   sha,
-			UntilDay:   untilDay,
-			Derivation: derivation,
-			NoMerges:   true,
-			Commits:    len(commits),
+			Since:       since,
+			UntilRev:    until,
+			UntilSHA:    sha,
+			UntilDay:    untilDay,
+			Derivation:  derivation,
+			NoMerges:    true,
+			Commits:     len(commits),
+			RecentSince: recentSince,
+			RecentDays:  RecentWindowDays,
 		},
 		MinSupport:      minSupport,
 		Top:             top,
@@ -412,8 +464,11 @@ const commitSentinel = "@@C@@"
 func gitSince(day string) string { return day + "T00:00:00" }
 
 func logNameStatus(root, since, until string) ([]commitRec, error) {
+	// The sentinel line carries the committer date (%cI); its first 10 chars
+	// are the commit day, used to place the commit in the recent sub-window.
+	// The SHA is not parsed anywhere, so nothing is lost by dropping %H.
 	out, err := gitOutput(root, "log", "--no-merges", "--since="+gitSince(since),
-		"--format="+commitSentinel+"%H", "--name-status", until)
+		"--format="+commitSentinel+"%cI", "--name-status", until)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +481,9 @@ func logNameStatus(root, since, until string) ([]commitRec, error) {
 		if strings.HasPrefix(line, commitSentinel) {
 			commits = append(commits, commitRec{})
 			cur = &commits[len(commits)-1]
+			if iso := strings.TrimPrefix(line, commitSentinel); len(iso) >= 10 {
+				cur.day = iso[:10]
+			}
 			continue
 		}
 		if line == "" || cur == nil {
@@ -470,19 +528,32 @@ func lsTreeSet(root, until string) (map[string]bool, error) {
 // (everything else — binary "-" and zero-line commits included). ONE batched
 // invocation over the candidate pathspec; --no-renames keeps numstat paths
 // brace-free (shape figures are not part of the mine.sh parity contract).
-func logShapes(root, since, until string, paths []string) (map[string]ShapeSplit, error) {
+//
+// The same stream also detects DECOMPOSITION — the recency-honesty flag. Each
+// numstat line IS one commit's delta for that file, so a "single commit gutted
+// the file" test needs no grouping. The rule (documented in the help text):
+//
+//	del > add  AND  del > currentLines[f]/2
+//
+// i.e. a net-removing commit whose deletions exceed half the file's CURRENT
+// (until-commit) line count — the honest approximation of ">50% of the file's
+// lines at that time" (current lines stand in for the pre-commit count, which
+// numstat deltas cannot reconstruct across a partial window). currentLines is
+// the pre-computed batched line count; a 0 (missing/binary) never flags.
+func logShapes(root, since, until string, paths []string, currentLines map[string]int) (map[string]ShapeSplit, map[string]Decomposition, error) {
 	args := []string{"log", "--no-merges", "--no-renames", "--since=" + gitSince(since),
 		"--format=" + commitSentinel + "%H", "--numstat", until, "--"}
 	args = append(args, paths...)
 	out, err := gitOutput(root, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	want := map[string]bool{}
 	for _, p := range paths {
 		want[p] = true
 	}
 	shapes := map[string]ShapeSplit{}
+	decomp := map[string]Decomposition{}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -494,9 +565,10 @@ func logShapes(root, since, until string, paths []string) (map[string]ShapeSplit
 		if len(fields) != 3 || !want[fields[2]] {
 			continue
 		}
+		f := fields[2]
 		add, aerr := strconv.Atoi(fields[0])
 		del, derr := strconv.Atoi(fields[1])
-		s := shapes[fields[2]]
+		s := shapes[f]
 		switch {
 		case aerr != nil || derr != nil: // binary "-"
 			s.Mixed++
@@ -507,9 +579,80 @@ func logShapes(root, since, until string, paths []string) (map[string]ShapeSplit
 		default:
 			s.Mixed++
 		}
-		shapes[fields[2]] = s
+		shapes[f] = s
+		// Decomposition: a single net-removing commit that gutted >50% of the
+		// file's current line count.
+		if aerr == nil && derr == nil && del > add && currentLines[f] > 0 && del > currentLines[f]/2 {
+			d := decomp[f]
+			d.Detected = true
+			if del > d.MaxDelete {
+				d.MaxDelete = del
+			}
+			decomp[f] = d
+		}
 	}
-	return shapes, sc.Err()
+	return shapes, decomp, sc.Err()
+}
+
+// blobLineCounts returns the line count of each path's blob at the until
+// commit — ONE batched `git cat-file --batch` over the ≤top candidates (fed
+// their `<until>:<path>` refs on stdin), never a per-file process storm. A
+// missing or binary blob counts as 0 (and so never trips the decomposition
+// test). Deterministic: pinned to the until SHA, independent of the worktree.
+func blobLineCounts(root, until string, paths []string) (map[string]int, error) {
+	counts := map[string]int{}
+	if len(paths) == 0 {
+		return counts, nil
+	}
+	var in bytes.Buffer
+	for _, p := range paths {
+		in.WriteString(until + ":" + p + "\n")
+	}
+	cmd := exec.Command("git", "-C", root, "cat-file", "--batch")
+	cmd.Stdin = &in
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("git cat-file --batch: %s", msg)
+	}
+	// Output per request: a header line "<sha> <type> <size>\n", then <size>
+	// content bytes, then a trailing "\n"; or "<ref> missing\n" for an absent
+	// blob. Requests come back in input order.
+	pos := 0
+	for _, p := range paths {
+		nl := bytes.IndexByte(out[pos:], '\n')
+		if nl < 0 {
+			break
+		}
+		header := string(out[pos : pos+nl])
+		pos += nl + 1
+		fields := strings.Fields(header)
+		if len(fields) < 3 || fields[1] == "missing" {
+			counts[p] = 0 // "<ref> missing" (2 fields) or any non-blob header
+			continue
+		}
+		size, serr := strconv.Atoi(fields[2])
+		if serr != nil || pos+size > len(out) {
+			counts[p] = 0
+			break
+		}
+		content := out[pos : pos+size]
+		pos += size
+		if pos < len(out) && out[pos] == '\n' {
+			pos++ // skip the record-terminating newline cat-file appends
+		}
+		n := bytes.Count(content, []byte{'\n'})
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			n++ // a final line with no trailing newline still counts
+		}
+		counts[p] = n
+	}
+	return counts, nil
 }
 
 // mineCoCreation applies the fixed suffix-pair rules to every commit's ADDED
