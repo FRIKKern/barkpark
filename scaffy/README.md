@@ -47,14 +47,16 @@ and it becomes the parser's test fixtures in the next wave.
 | Wave | Ships | State |
 |---|---|---|
 | **W1** — corpus + showcase | 7 full `.scaffy` commands, this README, the showcase paper | shipped |
-| **W2** — parser + validator | `bp scaffy validate` / `bp scaffy fmt` in Go: the grammar as code — strict tokens, derived-guard check, weak-guard lint, casing-consistency lint. The Wave-2 rulings below are its law | **this wave** |
+| **W2** — parser + validator | `bp scaffy validate` / `bp scaffy fmt` in Go: the grammar as code — strict tokens, derived-guard check, weak-guard lint, casing-consistency lint. The Wave-2 rulings below are its law | **shipped** |
 | **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | **shipped** |
 | **W4** — commands as content | a `command` document type, the corpus served from the connected Barkpark, `bp scaffy pull <concept>/<variant>` + `bp scaffy ls --remote` (validate-first + consent gate) | **shipped** |
+| **W5** — ONEOF + the frequency-mined seven | the `ONEOF` enum primitive (D56, lint `E-021`), 7 new commands (add-error-shape, add-canonical-marker, ensure-import, ensure-cli-noun, add-backfill-task, add-schema-type, classify-block-type), the flagship's pd-parity leg, corpus reconciled at 14 and seeded | **shipped** |
 
 ## The command corpus
 
-Seven commands, each covering a thing Barkpark development actually repeats. Every command
-lives at `scaffy/commands/<name>.scaffy`.
+Fourteen commands, each covering a thing Barkpark development actually repeats — the
+Wave-5 additions were frequency-mined from twelve months of git history, so every entry
+answers a proven repetition. Every command lives at `scaffy/commands/<name>.scaffy`.
 
 | Command | What it does |
 |---|---|
@@ -65,6 +67,25 @@ lives at `scaffy/commands/<name>.scaffy`.
 | **add-plugin** | All-CREATE, zero-inject: `plugin.json` + `README.md` + `schemas/.gitkeep` + a one-line `use Barkpark.Plugin` module + a test — the live `mix barkpark.plugin.new` templates, formalized. `discover_and_register/0` auto-collects the rest. |
 | **add-docs-card** | Creates a routing-table row in `CLAUDE.md` + a card file with a `doc-tier` header. The 7-card cap makes it a *scratch demo* today — it can only land paired with a remove. |
 | **remove-docs-card** | The symmetry partner: removes the row, the card file and the `docs/INDEX.md` brace-expansion mention, leaving the tree byte-clean. Proves every mutating op is reversible from its `MARK`. |
+| **add-error-shape** | Lands a new v1 JSON error code end-to-end (38 clause-adds in `errors.ex` history): a fix-suggesting `@hints` entry, a `build/1` clause, a test — accreting behind marks. `known_codes/0`, the OpenAPI `Error.code` enum and the coverage test all self-derive. |
+| **add-canonical-marker** | Plants the two-line `@canonical capability:<slug>` marker above any **public** entry point (274 commit mentions, 40 live markers). The head line crosses as an `OPAQUE` variable taken verbatim (D58) — multi-clause Elixir heads and Go signatures both anchor cleanly. |
+| **ensure-import** | The first **ensure** command: idempotently ensures a module `import` line exists in an Elixir file — insert once after a caller-named anchor, skip forever after. Guard = the full import line itself (the ensure law, below). |
+| **ensure-cli-noun** | Same law, Go spelling: ensures a top-level noun sits in the `bp` shell-completion set. Ends a three-copy noun drift (usage prose stuck at 19 nouns through 15 noun-adding commits). The dispatch copy stays hand-written, gated by `TestCompletionNounsCoverAllDispatchedBuiltins`. |
+| **add-backfill-task** | All-CREATE: a safe-by-default one-shot backfill `Mix.Task` (8+ live tasks share the idiom byte-for-byte) — a bare run is a DRY RUN that writes nothing, `--apply` mutates — plus a paired pure-helper test that never boots the app. |
+| **add-schema-type** | A plugin-declared document type in the MINIMAL-template shape (the byte-identical 6-key `SchemaDefinition` wrap scaffy/bulldocs/sheets share): one schema JSON created + two `register_schemas/1` injections. `Visibility` is a `ONEOF` enum — `public`\|`private`, anything else refused at substitution time. |
+| **classify-block-type** | Closes add-block-type's manual step: adds a block type to its composition-doctrine tier word list in `tiers.ex` via one self-consuming REPLACE of the `@{{.Tier}} ~w(` opener. `Tier` is the corpus's first `ONEOF` (`element`\|`widget`\|`section`). |
+
+### The ensure law (D57)
+
+An `ensure-*` command is `DIRECTION "add"` whose `ASLONG` guard keys on a **payload-body
+substring a hand-edit would also produce** — the full import line, the full quoted noun
+literal — **never** on the `MARK:` comment. Run-proven: guarded on the mark alone, the
+engine injected a duplicate against a hand-planted import; guarded on the line, it skipped
+clean. The corollaries are part of the contract: a human who typed the same line first
+wins (the run is a no-op and writes **no receipt**), and a later `bp scaffy remove` exits
+4 **expected** — scaffy never owned the line, so there is nothing it may retract. Guard
+the **full** line: a bare prefix false-skips on `import Logger.Foo`. The law does not
+extend to `MARK VIRTUAL` count-bumps, which stay receipt-owned.
 
 ## Grammar reference
 
