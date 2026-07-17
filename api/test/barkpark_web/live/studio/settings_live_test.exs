@@ -756,7 +756,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   # (D207 naming ban) and never re-clone the vacuous forged-ws SCOPE tests (those
   # are caught by `guard_bound_ws/3` before the re-gate ever runs).
   describe "chat execution profile toggle (W23-2)" do
-    setup %{conn: conn} do
+    setup do
       # Two tokens, BOTH holding the flat global admin permission so BOTH clear
       # the coarse mount gate. The per-write re-gate is the ONLY thing that
       # separates them at the target workspace.
