@@ -30,6 +30,18 @@ const (
 	screenChat                 // an open conversation
 )
 
+// focusZone is which conversation zone owns the arrow keys (wave session-card
+// charter D14). There was deliberately no zone concept before this — the
+// composer was the only owner — so the zero value IS the composer and every
+// pre-existing key path is unchanged unless the workflow strip is both visible
+// and explicitly focused.
+type focusZone int
+
+const (
+	focusComposer focusZone = iota // default: keys type/scroll as always
+	focusWorkflow                  // the below-composer workflow strip/panel
+)
+
 // Model is the shell. State is the reduced conversation truth; everything else
 // is UI the reducer is intentionally blind to.
 type Model struct {
@@ -51,6 +63,16 @@ type Model struct {
 	input      string // the composer draft (charter D14 continuity — PATCHed on quit/switch)
 	scroll     int    // -1 = follow mode (bottom); >=0 = pinned top line
 	cardCursor int    // focus ring index into the pending answerable cards (Tab cycles)
+
+	// The below-composer workflow panel's focus model (wave session-card charter
+	// D14): focus names which zone owns the arrow keys — the composer by default;
+	// the workflow strip after arrow-down (only while the strip is visible).
+	// wfExpanded is the Enter-opened two-pane detail; wfPhase is the selected
+	// phase POSITION in the journey's Phases slice. KeyRunes always compose —
+	// typing never moves panel selection (it snaps focus back to the composer).
+	focus      focusZone
+	wfExpanded bool
+	wfPhase    int
 
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
 	mode         string
@@ -232,12 +254,18 @@ func (m Model) openSession(s Session) Model {
 		// Law-2: hydrate the agents rail from the resumed session's snapshot so a
 		// surface switch lands on the same mission control Studio last showed.
 		Rail: decodeRail(s.RailSnapshot),
+		// The workflow panel decodes from the SAME snapshot (charter D13) — a
+		// resumed mid-run epic cycle lands with its strip already below the composer.
+		Workflow: decodeWorkflow(s.RailSnapshot),
 	}
 	m.input = s.Draft
 	m.mode, m.modelChoice, m.effortChoice = s.Mode, s.ModelChoice, s.EffortChoice
 	m.screen = screenChat
 	m.scroll = -1
 	m.cardCursor = 0
+	m.focus = focusComposer
+	m.wfExpanded = false
+	m.wfPhase = 0
 	m.pickErr = ""
 	return m
 }
@@ -281,6 +309,9 @@ func (m Model) leaveSession() (Model, tea.Cmd) {
 	m.loading = true
 	m.input = ""
 	m.st = State{}
+	m.focus = focusComposer
+	m.wfExpanded = false
+	m.wfPhase = 0
 	return m, tea.Batch(patch, m.loadSessionsCmd())
 }
 

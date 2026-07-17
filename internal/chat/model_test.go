@@ -3,8 +3,10 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -371,5 +373,170 @@ func TestStreamFrameDrivesReducer(t *testing.T) {
 	nm, _ := m.Update(streamFrameMsg{name: "chat", data: delta})
 	if nm.(Model).st.Tail != "hi" {
 		t.Fatalf("a live delta frame must accumulate the tail, got %q", nm.(Model).st.Tail)
+	}
+}
+
+// ── the below-composer workflow panel's focus model (charter D14) ────────────
+
+// liveWorkflowState builds a State carrying the REAL mid-run epic-cycle
+// workflow fixture — the strip is visible (entry live).
+func liveWorkflowState(t *testing.T) State {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/rail_workflow_live.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wf := decodeWorkflow(raw)
+	if wf == nil {
+		t.Fatal("fixture must decode a workflow")
+	}
+	return State{SessionID: "s1", Workflow: wf}
+}
+
+// wfTestModel is a conversation-screen model at a fixed clock.
+func wfTestModel(t *testing.T, st State) Model {
+	m := newTestModel(&fakeTransport{})
+	m.screen = screenChat
+	m.width, m.height = 80, 24
+	m.scroll = -1
+	m.st = st
+	m.now = func() time.Time { return time.UnixMilli(1782767557221).Add(90 * time.Second) }
+	return m
+}
+
+// TestArrowDownFocusesStripOnlyWhenVisible: with a live workflow and the
+// transcript following the bottom, KeyDown hands focus to the strip; with no
+// workflow, KeyDown keeps its scroll meaning and focus never moves (D14).
+func TestArrowDownFocusesStripOnlyWhenVisible(t *testing.T) {
+	// no workflow → KeyDown is pure scroll, focus stays on the composer
+	m := wfTestModel(t, State{SessionID: "s1"})
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	if got := nm.(Model); got.focus != focusComposer {
+		t.Fatal("KeyDown without a strip must never move focus")
+	}
+
+	// live workflow + follow mode → KeyDown focuses the strip
+	m = wfTestModel(t, liveWorkflowState(t))
+	nm, _ = m.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	got := nm.(Model)
+	if got.focus != focusWorkflow {
+		t.Fatal("KeyDown with a visible strip must focus it")
+	}
+
+	// arrow-up returns to the composer
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	if nm.(Model).focus != focusComposer {
+		t.Fatal("KeyUp on the collapsed strip must return focus to the composer")
+	}
+
+	// a scrolled reader keeps scroll semantics — KeyDown scrolls instead of
+	// stealing focus until the transcript re-follows the bottom
+	m = wfTestModel(t, liveWorkflowState(t))
+	m.scroll = 0
+	nm, _ = m.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	if nm.(Model).focus != focusComposer {
+		t.Fatal("KeyDown while scrolled must keep its scroll meaning")
+	}
+}
+
+// TestWorkflowEnterExpandsEscCollapses: Enter on the focused strip opens the
+// two-pane detail landed on the ACTIVE phase; up/down move the phase selection
+// (clamped); Esc collapses and returns focus to the composer — it never
+// interrupts from inside the panel.
+func TestWorkflowEnterExpandsEscCollapses(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if !got.wfExpanded {
+		t.Fatal("Enter on the focused strip must expand the detail")
+	}
+	if got.wfPhase != 5 {
+		t.Fatalf("expansion must land on the active phase (position 5), got %d", got.wfPhase)
+	}
+
+	// down moves the selection and clamps at the last phase
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	got = nm.(Model)
+	if got.wfPhase != 6 {
+		t.Fatalf("KeyDown must select the next phase, got %d", got.wfPhase)
+	}
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+	got = nm.(Model)
+	if got.wfPhase != 6 {
+		t.Fatalf("KeyDown must clamp at the last phase, got %d", got.wfPhase)
+	}
+	// up moves back
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	got = nm.(Model)
+	if got.wfPhase != 5 {
+		t.Fatalf("KeyUp must select the previous phase, got %d", got.wfPhase)
+	}
+
+	// Esc collapses back to the composer and does NOT interrupt
+	nm, _ = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got = nm.(Model)
+	if got.wfExpanded || got.focus != focusComposer {
+		t.Fatalf("Esc must collapse and return to the composer, expanded=%v focus=%v",
+			got.wfExpanded, got.focus)
+	}
+	if got.st.Phase == TurnInterrupting {
+		t.Fatal("Esc inside the panel must never interrupt the turn")
+	}
+}
+
+// TestWorkflowKeyRunesAlwaysCompose is the D14 regression: typing while the
+// panel holds focus lands in the composer and NEVER moves the panel selection
+// (focus snaps home so the next Enter sends instead of expanding).
+func TestWorkflowKeyRunesAlwaysCompose(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 3
+
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	got := nm.(Model)
+	if got.input != "x" {
+		t.Fatalf("KeyRunes must always compose, input=%q", got.input)
+	}
+	if got.wfPhase != 3 {
+		t.Fatalf("typing must never move the panel selection, got %d", got.wfPhase)
+	}
+	if got.focus != focusComposer {
+		t.Fatal("typing must snap focus back to the composer")
+	}
+}
+
+// TestWorkflowFocusDropsWhenStripVanishes: a run that settles on a
+// turn-boundary refetch takes its strip away — a key pressed afterwards finds
+// the composer focused, never a dead zone.
+func TestWorkflowFocusDropsWhenStripVanishes(t *testing.T) {
+	m := wfTestModel(t, liveWorkflowState(t))
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.st.Workflow.Status = "completed" // the refetch settled the entry
+
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	got := nm.(Model)
+	if got.focus != focusComposer || got.wfExpanded {
+		t.Fatalf("a vanished strip must drop focus to the composer, focus=%v expanded=%v",
+			got.focus, got.wfExpanded)
+	}
+}
+
+// TestTailRefetchRehydratesWorkflow proves the D13 freshness seam: the
+// turn-boundary GET's rail_snapshot re-decodes the workflow exactly where the
+// rail re-decodes — no new SSE frame, no polling.
+func TestTailRefetchRehydratesWorkflow(t *testing.T) {
+	raw, err := os.ReadFile("testdata/rail_workflow_live.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	st, _ := Reduce(State{SessionID: "s1"}, TailFetchedEvent{
+		Session: Session{ID: "s1", RailSnapshot: raw},
+	}, time.Now())
+	if st.Workflow == nil || st.Workflow.TaskID != "epccmplt" {
+		t.Fatalf("the turn-boundary refetch must hydrate the workflow, got %+v", st.Workflow)
 	}
 }

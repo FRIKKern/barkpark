@@ -72,30 +72,16 @@ type RailEntry struct {
 // decodeRail turns the rail_snapshot map (task_id => entry) into a task-id-sorted
 // slice — stable order so a resumed session's rail reads identically every paint.
 // Malformed entries are skipped (forward-compatible, same tolerance as the rest
-// of the decoder); an empty/absent snapshot yields nil (no rail band).
+// of the decoder); an empty/absent snapshot yields nil (no rail band). It
+// projects from decodeRailWire (workflow.go) — the ONE parsing of the rail wire
+// shape, shared with the below-composer workflow panel's decodeWorkflow.
 func decodeRail(raw json.RawMessage) []RailEntry {
-	if len(raw) == 0 {
-		return nil
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m := decodeRailWire(raw)
+	if len(m) == 0 {
 		return nil
 	}
 	entries := make([]RailEntry, 0, len(m))
-	for tid, er := range m {
-		var e struct {
-			Status string `json:"status"`
-			Row    struct {
-				Description string `json:"description"`
-				TaskType    string `json:"task_type"`
-			} `json:"row"`
-			Usage struct {
-				TotalTokens *int `json:"total_tokens"`
-			} `json:"usage"`
-		}
-		if err := json.Unmarshal(er, &e); err != nil {
-			continue
-		}
+	for tid, e := range m {
 		label := e.Row.Description
 		if label == "" {
 			label = e.Row.TaskType

@@ -66,6 +66,13 @@ type State struct {
 	// (Law-2). Re-decoded on every full session load / turn-boundary refetch.
 	Rail []RailEntry
 
+	// Workflow is the open session's workflow-bearing rail entry (wave
+	// session-card charter D13): the highest-seq entry carrying a workflow node
+	// list, decoded from the SAME rail_snapshot as Rail at the SAME turn-boundary
+	// sites — no new SSE frame, no polling (mid-turn lag is the accepted UX
+	// ceiling). nil for plain chats — the below-composer panel then costs zero.
+	Workflow *Workflow
+
 	// AnswerInFlight maps a card's request_id → the decision ("allow"/"deny")
 	// POSTed but not yet confirmed by a refetch — the immediate-feedback layer:
 	// the card reads "answering: allow…" until the server-resolved row lands and
@@ -403,9 +410,11 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 	st.Local = dropSettledLocal(st.Local, fresh)
 	// Law-2 rail continuity: re-hydrate the agents rail from the refetched
 	// snapshot so a resumed session (and every turn boundary) shows the same
-	// mission control Studio shows.
+	// mission control Studio shows. The workflow panel re-decodes at the SAME
+	// site — turn-boundary freshness (charter D13), one snapshot, one moment.
 	if len(ev.Session.RailSnapshot) > 0 {
 		st.Rail = decodeRail(ev.Session.RailSnapshot)
+		st.Workflow = decodeWorkflow(ev.Session.RailSnapshot)
 	}
 	// Any in-flight answer whose card is no longer pending has been resolved
 	// server-side (by this TUI's POST or by a Studio answer to the SAME row) —

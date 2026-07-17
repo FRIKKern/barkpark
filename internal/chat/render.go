@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -399,7 +400,8 @@ func railStatusLabel(status string) string {
 }
 
 // formatTokens is the compact token count Studio's format_tokens renders:
-// <1k verbatim, <10k one decimal (1.2k), <1M whole (42k), else 1.3M.
+// <1k verbatim, <10k one decimal (1.2k), <1M whole k ROUNDED (145.5k → 146k,
+// parity with Elixir's round/1 — truncation drifted low), else 1.3M.
 func formatTokens(n int) string {
 	switch {
 	case n < 0:
@@ -409,9 +411,258 @@ func formatTokens(n int) string {
 	case n < 10000:
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	case n < 1000000:
-		return fmt.Sprintf("%dk", n/1000)
+		return fmt.Sprintf("%dk", int(math.Round(float64(n)/1000)))
 	default:
 		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+}
+
+// ── the below-composer workflow panel (wave session-card charter D13–D15) ────
+
+// workflowStripVisible: the strip (and therefore the whole panel) exists ONLY
+// while the open session's workflow entry is live — a settled run drops the
+// strip and gives the transcript its rows back; plain chats never had it, so
+// idle frames are byte-identical to the pre-panel geometry.
+func (m Model) workflowStripVisible() bool {
+	return m.st.Workflow != nil && entryLifecycle(m.st.Workflow.Status) == "live"
+}
+
+// workflowPanelLines is the whole panel paint: the collapsed strip, plus the
+// Enter-expanded two-pane detail. nil when no live workflow — chatFooter and
+// bodyHeight both key off this one function, so the paint and the geometry can
+// never disagree.
+func (m Model) workflowPanelLines() []string {
+	if !m.workflowStripVisible() {
+		return nil
+	}
+	wf := m.st.Workflow
+	j := journeyOf(wf)
+	lines := []string{renderWorkflowStrip(m.width, wf, j, m.now(), m.focus == focusWorkflow)}
+	if m.wfExpanded {
+		lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase)...)
+	}
+	return lines
+}
+
+// renderWorkflowStrip is the collapsed one-liner: '○ <label>' left; the
+// Claude-Code-style '<done>/<total> agents done · <elapsed> · ↓<tokens>' right.
+// done counts SETTLED agents (success + failed — an honest 13/17); elapsed and
+// tokens are omitted entirely when the wire carries no figure (charter D15).
+// A focused strip swaps the glyph for a bold ❯ so the operator sees which zone
+// the arrows drive.
+func renderWorkflowStrip(width int, wf *Workflow, j WorkflowJourney, now time.Time, focused bool) string {
+	right := fmt.Sprintf("%d/%d agents done", j.Settled(), j.AgentsTotal)
+	if el, ok := workflowElapsed(wf, j, now); ok {
+		right += " · " + formatElapsed(el)
+	}
+	if j.HasTokens {
+		right += " · ↓" + formatTokens(j.Tokens)
+	}
+
+	glyph := badgeStyle.Render("○")
+	label := wf.Label
+	if focused {
+		glyph = focusBar.Render("❯")
+	}
+	// truncate the label so the counters always keep their right-edge seat
+	maxLabel := width - lipgloss.Width(right) - 5
+	if maxLabel < 8 {
+		maxLabel = 8
+	}
+	label = truncate(label, maxLabel)
+	if focused {
+		label = titleStyle.Render(label)
+	}
+	left := glyph + " " + label
+	pad := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if pad < 2 {
+		pad = 2
+	}
+	return left + strings.Repeat(" ", pad) + dimStyle.Render(right)
+}
+
+// workflowDetailMaxAgents caps the agents pane so a 20-surveyor Explore phase
+// never eats the transcript — the overflow row says how many more are running.
+const workflowDetailMaxAgents = 8
+
+// renderWorkflowDetail is the Enter-expanded two-pane detail: phases left
+// (glyph + title + settled/total), the SELECTED phase's agents right (glyph +
+// pair-grammar label + model family · tokens + elapsed). Selection is the ▸
+// row; the footer hint row is owned by chatFooter (it swaps the hints line).
+func renderWorkflowDetail(width int, wf *Workflow, j WorkflowJourney, now time.Time, sel int) []string {
+	if len(j.Phases) == 0 {
+		return nil
+	}
+	if sel < 0 || sel >= len(j.Phases) {
+		sel = 0
+	}
+	leftW := clamp(width/3, 16, 30)
+	rightW := width - leftW - 3
+	if rightW < 8 {
+		rightW = 8
+	}
+
+	left := make([]string, 0, len(j.Phases))
+	for i, p := range j.Phases {
+		cursor := "  "
+		title := truncate(p.Title, leftW-9)
+		if i == sel {
+			cursor = focusBar.Render("▸ ")
+			title = titleStyle.Render(title)
+		}
+		row := cursor + workflowPhaseGlyph(p) + " " + title
+		if p.Total > 0 {
+			row += dimStyle.Render(fmt.Sprintf(" %d/%d", p.Settled(), p.Total))
+		}
+		if pad := leftW - lipgloss.Width(row); pad > 0 {
+			row += strings.Repeat(" ", pad)
+		}
+		left = append(left, row)
+	}
+
+	right := workflowAgentLines(rightW, j.Phases[sel], j.EntryStatus, now)
+
+	rows := len(left)
+	if len(right) > rows {
+		rows = len(right)
+	}
+	sep := dimStyle.Render(" │ ")
+	blank := strings.Repeat(" ", leftW)
+	out := make([]string, 0, rows)
+	for i := 0; i < rows; i++ {
+		l, r := blank, ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		out = append(out, l+sep+r)
+	}
+	return out
+}
+
+// workflowAgentLines paints the selected phase's agents pane. An agentless
+// phase says so honestly instead of rendering an empty gutter.
+func workflowAgentLines(w int, p WorkflowPhase, entryStatus string, now time.Time) []string {
+	if len(p.Agents) == 0 {
+		return []string{dimStyle.Render(truncate("no agents in this phase yet", w))}
+	}
+	agents := p.Agents
+	overflow := 0
+	if len(agents) > workflowDetailMaxAgents {
+		overflow = len(agents) - workflowDetailMaxAgents
+		agents = agents[:workflowDetailMaxAgents]
+	}
+	out := make([]string, 0, len(agents)+1)
+	for _, a := range agents {
+		out = append(out, workflowAgentLine(w, a, entryStatus, now))
+	}
+	if overflow > 0 {
+		out = append(out, dimStyle.Render(fmt.Sprintf("  … +%d more", overflow)))
+	}
+	return out
+}
+
+// workflowAgentLine is one agent row: state glyph · label (pair grammar: dim
+// kind + bold rest) · model family · tokens, with the elapsed right-aligned —
+// each figure rendered ONLY when the wire carries it (charter D15).
+func workflowAgentLine(w int, a WorkflowNode, entryStatus string, now time.Time) string {
+	elapsed := ""
+	if el, ok := agentElapsed(a, entryStatus, now); ok {
+		elapsed = formatElapsed(el)
+	}
+
+	meta := ""
+	if fam := modelFamily(a.Model); fam != "" {
+		meta = fam
+	}
+	if a.Tokens != nil {
+		if meta != "" {
+			meta += " · "
+		}
+		meta += formatTokens(*a.Tokens)
+	}
+
+	// budget the plain label so glyph+meta+elapsed keep their seats
+	budget := w - 3 - lipgloss.Width(elapsed)
+	if meta != "" {
+		budget -= lipgloss.Width(meta) + 2
+	}
+	if budget < 6 {
+		budget = 6
+	}
+	label := a.Label
+	if label == "" {
+		label = "agent"
+	}
+	var labelOut string
+	if kind, rest, pair := workflowLabelParts(label); pair && lipgloss.Width(label) <= budget {
+		labelOut = dimStyle.Render(kind+":") + titleStyle.Render(rest)
+	} else {
+		labelOut = truncate(label, budget)
+	}
+
+	line := workflowAgentGlyph(a) + " " + labelOut
+	if meta != "" {
+		line += "  " + dimStyle.Render(meta)
+	}
+	if elapsed != "" {
+		if pad := w - lipgloss.Width(line) - lipgloss.Width(elapsed); pad > 0 {
+			line += strings.Repeat(" ", pad)
+		} else {
+			line += " "
+		}
+		line += dimStyle.Render(elapsed)
+	}
+	return line
+}
+
+// workflowPhaseGlyph is the phase-state glyph of the D58 truth table: done ✓,
+// active ❯ (the breathing frontier), interrupted ✕, skipped/unreached a dim ·,
+// future its dim index — the same vocabulary Studio's journey renders.
+func workflowPhaseGlyph(p WorkflowPhase) string {
+	switch p.Status {
+	case "done":
+		return allowStyle.Render("✓")
+	case "active":
+		return badgeStyle.Render("❯")
+	case "interrupted":
+		return noticeStyle.Render("✕")
+	case "future":
+		return dimStyle.Render(fmt.Sprintf("%d", p.Index))
+	default: // skipped / unreached
+		return dimStyle.Render("·")
+	}
+}
+
+// workflowAgentGlyph mirrors Studio's rail_agent_glyph: failed ✕, terminal ✓,
+// live ● — through the SAME ported state sets, never an enumeration.
+func workflowAgentGlyph(a WorkflowNode) string {
+	switch {
+	case workflowStateFailed(a.State):
+		return noticeStyle.Render("✕")
+	case workflowStateTerminal(a.State):
+		return allowStyle.Render("✓")
+	default:
+		return badgeStyle.Render("●")
+	}
+}
+
+// formatElapsed is the compact wall-clock duration the panel renders: 42s,
+// 3m12s, 1h04m. Only ever called with a wire-derived duration (charter D15).
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	s := int(d.Seconds())
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm%02ds", s/60, s%60)
+	default:
+		return fmt.Sprintf("%dh%02dm", s/3600, (s%3600)/60)
 	}
 }
 
@@ -720,6 +971,25 @@ func (m Model) chatFooter() string {
 		}
 		hints = label + "  ·  " + hints
 	}
+
+	// The below-composer workflow panel (wave session-card charter D13/D14).
+	// STRICTLY conditional: with no live workflow this function returns the
+	// exact 3-line stack it always did — idle frames stay byte-identical.
+	if panel := m.workflowPanelLines(); len(panel) > 0 {
+		if m.focus == focusWorkflow {
+			// the panel owns the arrows — the hints say so honestly (esc here
+			// collapses; it never interrupts from inside the panel)
+			if m.wfExpanded {
+				hints = "↑/↓ select phase · esc back · ctrl+c quit"
+			} else {
+				hints = "enter details · ↑ composer · ctrl+c quit"
+			}
+		} else {
+			hints += " · ↓ workflow"
+		}
+		return notice + "\n" + composer + "\n" +
+			strings.Join(panel, "\n") + "\n" + dimStyle.Render(hints)
+	}
 	return notice + "\n" + composer + "\n" + dimStyle.Render(hints)
 }
 
@@ -769,9 +1039,12 @@ func window(lines []string, height, scroll int) []string {
 }
 
 // bodyHeight is the transcript viewport row count: the frame minus the two
-// header rows and the three footer rows, floored at one.
+// header rows and the three footer rows, floored at one. The below-composer
+// workflow panel eats transcript rows CONDITIONALLY (wave session-card charter
+// D14): with no live workflow this stays the height-5 constant verbatim, so an
+// idle session's geometry is byte-identical to the pre-panel frame.
 func (m Model) bodyHeight() int {
-	h := m.height - 5
+	h := m.height - 5 - len(m.workflowPanelLines())
 	if h < 1 {
 		h = 1
 	}
