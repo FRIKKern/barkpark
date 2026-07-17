@@ -1085,8 +1085,14 @@
         // resolve=tasks: the API resolve seam (p-resolve-seam) — without it the
         // wasm renders raw `query` blocks as "[task-list — unresolved]" while
         // the article view shows live tasks (tui-task-widget-resolution-parity).
+        // Paper identity is `_id` — the public `/papers/:slug` route resolves
+        // that document id. Most live Papers intentionally carry no separate
+        // `slug` content field, so filtering on `slug` makes the embedded TUI
+        // view report that it cannot load blocks even while Reader view works.
+        // Use the query API's canonical `field=value` spelling; `slug=="…"`
+        // is neither the identity field nor valid GROQ-lite filter syntax.
         var url = "/v1/data/query/production/paper?resolve=tasks&filter=" +
-          encodeURIComponent('slug=="' + slug + '"');
+          encodeURIComponent("_id=" + slug);
         var r = await fetch(url, { headers: { accept: "application/json" } });
         var d = await r.json();
         var docs = (d.result && d.result.documents) || [];
