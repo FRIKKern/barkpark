@@ -1650,6 +1650,47 @@ defmodule Barkpark.StudioChatTest do
       assert s.done == 1
       assert s.failed == 0
     end
+
+    # wsc-bl-real-fixtures (D62/D21): a NEW provenance-headed fixture replaying the
+    # SAME real killed run (wf_1e38c940-f75) VERBATIM, but carrying a
+    # fixture_provenance header line — the convention the pre-header
+    # epic_cycle_interrupted fixture predates. Two invariants that fixture never
+    # asserted: fold_rail NO-OPS on the header line (it dispatches on subtype; a
+    # provenance frame has none), and the interrupt SIGNATURE is the ABSENCE of a
+    # terminal type:result frame (a SIGKILL never flushes one).
+    test "a REAL provenance-headed killed run folds the interrupted frontier — header no-ops, no result frame" do
+      frames = load_ndjson("epic_cycle_interrupted_real.ndjson")
+
+      # the D62 provenance header rides the file …
+      assert Enum.any?(frames, &(&1["type"] == "fixture_provenance"))
+      # … and the SIGKILL signature: the CLI flushed NO terminal result frame
+      refute Enum.any?(frames, &(&1["type"] == "result"))
+
+      rail = fold_rail(frames)
+      # fold_rail no-ops on the header (no subtype) → exactly one workflow entry,
+      # still "running" because no terminal frame ever arrived
+      assert only_entry(rail)["status"] == "running"
+
+      # teardown supplies "interrupted" (as prod's interrupt_rail_entries does)
+      entry = rail |> interrupt_flip() |> only_entry()
+      assert entry["status"] == "interrupted"
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+      by_index = Map.new(phases, &{&1.index, &1.status})
+
+      assert by_index[1] == :done
+      assert by_index[2] == :interrupted
+      # phases 3–7 never breathed → :unreached tail
+      assert Enum.all?(3..7, &(by_index[&1] == :unreached))
+
+      assert s.entry_status == :interrupted
+      assert s.active == %{index: 2, title: "Explore"}
+      assert s.phases_run == 1
+      assert s.agents_total == 5
+      assert s.running == 4
+      assert s.done == 1
+      assert s.failed == 0
+    end
   end
 
   describe "workflow_summary/1 — sidebar-fold edges (wsc charter D2/D3/D7)" do
@@ -2071,6 +2112,27 @@ defmodule Barkpark.StudioChatTest do
       assert card.phase == "Explore"
       assert card.running == 4
     end
+
+    # wsc-bl-real-fixtures (D62/D21): the D3 CARD side of the provenance-headed real
+    # killed run. summary_of folds load_ndjson |> fold_rail (header no-ops) |>
+    # interrupt_flip |> workflow_summary — the compact sidebar card the five merged
+    # surfaces read must project the interrupted frontier from prod-shaped data.
+    test "the REAL provenance-headed killed run projects the interrupted D3 card" do
+      card = summary_of("epic_cycle_interrupted_real.ndjson", &interrupt_flip/1)
+
+      assert card.outcome == :interrupted
+      assert card.terminal? == true
+      assert card.phase == "Explore"
+      assert card.phase_index == 2
+      assert card.ticks == [:done, :interrupted] ++ List.duplicate(:unreached, 5)
+      # the 4 explorers stayed `progress` (non-terminal) — never counted done
+      assert card.agents_done == 1
+      assert card.agents_total == 5
+      assert card.running == 4
+      # progress-state agents keep startedAt and never earn durationMs/ended_at
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+    end
   end
 
   describe "workflow_summary/1 — derived-truth edges (D3)" do
@@ -2197,6 +2259,72 @@ defmodule Barkpark.StudioChatTest do
       # the 13/17-style settled counter survives the round-trip
       assert committed["epic_cycle_progress"]["agents_done"] == 29
       assert committed["epic_cycle_interrupted"]["agents_done"] == 1
+    end
+  end
+
+  # ── attempt>1 closes by DOCUMENTED PROOF (wsc-bl-real-fixtures, charter D21/D25) ─
+  #
+  # `attempt` is external Claude-Code Task-tool telemetry, forwarded through the
+  # rail VERBATIM: rail_put_workflow (studio_chat.ex) is a bare `Map.put` with no
+  # field logic and no derive path, and barkpark has NO repo mechanism (workflow
+  # runner or Studio UI) to force a retry. So every workflow_agent node on every
+  # wire we hold carries attempt==1 — the honest proof, never a fabricated
+  # attempt=2. This test asserts it across BOTH the Elixir ndjson fixtures AND the
+  # Go testdata mirrors the merged bp-chat card decodes, SCOPED to workflow_agent
+  # nodes so fixtures with none no-op rather than false-pass.
+  @testdata_dir Path.expand("../../../internal/chat/testdata", __DIR__)
+
+  # Recursively collect every `attempt` value under a "workflow_agent"-typed node,
+  # at any nesting depth (task_progress frames nest them under "workflow_progress";
+  # rail snapshots nest them under an entry's "workflow" list).
+  defp collect_agent_attempts(%{"type" => "workflow_agent"} = node), do: [Map.get(node, "attempt")]
+  defp collect_agent_attempts(map) when is_map(map),
+    do: Enum.flat_map(Map.values(map), &collect_agent_attempts/1)
+  defp collect_agent_attempts(list) when is_list(list),
+    do: Enum.flat_map(list, &collect_agent_attempts/1)
+  defp collect_agent_attempts(_), do: []
+
+  describe "workflow_agent attempt==1 across every committed fixture (D21/D25 documented proof)" do
+    test "every workflow_agent node — ndjson fixtures AND Go mirrors — carries attempt==1" do
+      ndjson_attempts =
+        @fixtures_dir
+        |> Path.join("*.ndjson")
+        |> Path.wildcard()
+        |> Enum.map(&Path.basename/1)
+        |> Enum.flat_map(fn name ->
+          name |> load_ndjson() |> Enum.flat_map(&collect_agent_attempts/1)
+        end)
+
+      testdata_attempts =
+        @testdata_dir
+        |> Path.join("*.json")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          path |> File.read!() |> Jason.decode!() |> collect_agent_attempts()
+        end)
+
+      all = ndjson_attempts ++ testdata_attempts
+
+      # non-vacuous: the fixtures/mirrors that DO carry workflow_agent nodes were
+      # actually visited (guards against a silent false-pass on an empty walk)
+      assert length(all) > 0
+      # and every collected value is a real retry counter of exactly 1 — no node
+      # carries attempt>1 anywhere, and no missing/phantom attempt slipped in
+      assert Enum.uniq(all) == [1],
+             "a workflow_agent node carried attempt != 1: #{inspect(Enum.uniq(all))} — " <>
+               "attempt>1 must never be fabricated (D21); rail_put_workflow is a bare Map.put"
+    end
+
+    test "the scoping is real — the non-workflow ndjson fixtures no-op, not false-pass" do
+      no_workflow =
+        ~w(background_tasks.ndjson foreground_task.ndjson interrupt_no_active_turn.ndjson
+           mcp_permission_denied.ndjson mcp_tool_success.ndjson mid_turn_queued_user.ndjson
+           transcript_workday.ndjson unauthed_stream.ndjson)
+
+      for name <- no_workflow do
+        attempts = name |> load_ndjson() |> Enum.flat_map(&collect_agent_attempts/1)
+        assert attempts == [], "#{name} unexpectedly carried workflow_agent nodes"
+      end
     end
   end
 

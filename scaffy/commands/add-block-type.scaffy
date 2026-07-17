@@ -1,13 +1,16 @@
-COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
+COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
   VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
-  VARIABLE 2 "CountBefore" OPAQUE TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints." EXAMPLES "42"
-  VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "43"
+  VARIABLE 2 "CountBefore" OPAQUE TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (46 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints." EXAMPLES "46"
+  VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "47"
+  VARIABLE 4 "ParityCountBefore" OPAQUE TITLE "Golden-parity census before this run" DESCRIPTION "The compose-dispatch census the parity harness currently pins — the number in EXPECTED_COUNT= in scripts/pd-parity-completeness.sh AND inside `== N` in pd_golden_parity_test.exs (46 at authoring time). A DIFFERENT number line from the JS registry's CountBefore — the two pins move independently (compose.ex dispatches 60 types with 14 excluded; the react SDK scopes its own registry) and only coincidentally both read 46 today. OPAQUE numeric literal, never re-cased." EXAMPLES "46"
+  VARIABLE 5 "ParityCountAfter" OPAQUE SUCCESSOR "ParityCountBefore" TITLE "Golden-parity census after this run" DESCRIPTION "ParityCountBefore plus one — what both parity count pins must say once the compose clause and its golden fixture exist. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "47"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHAT THIS COMMAND HONESTLY DOES
 #
-# 3 required code surfaces + fail-closed JS test parity + optional CSS and
-# classification. Never "4 surfaces auto-injected":
+# 3 required code surfaces + fail-closed JS test parity + the required
+# golden-parity harness leg + optional CSS and classification. Never
+# "4 surfaces auto-injected":
 #
 #   ● internal/pdrender/{{.block_name}}.go          created — Go renderer
 #   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test
@@ -15,6 +18,14 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #   ○ js/packages/react/src/blocks/core.ts          injected ×2 — emitter + map entry
 #   ○ js/packages/react/tests/PortableDoc.test.tsx  injected ×2 — CASES fixture + count bump
 #   ○ api/lib/barkpark/portable_doc/render/compose.ex injected — compose_block clause
+#   ○ api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex injected — @inputs parity fixture
+#   ○ scripts/pd-parity-completeness.sh             injected — EXPECTED_COUNT pin bump
+#   ○ api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs injected — census pin bump
+#
+# The gen_pd_parity ASSERT CMD below additionally GENERATES (never injects) the
+# frozen golden pair api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json
+# + js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json —
+# derived artifacts, receipt-unowned; manual step 5 is their rollback recipe.
 #
 # The JS surface is FAIL-CLOSED at four edits: the react test suite asserts
 # CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry
@@ -57,12 +68,26 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run
 #    rendered fine with zero CSS; this step is genuinely optional.
 #
-# 4. Count prose (optional tidy). Three comments mention the registry count in
-#    prose and go stale by one: the test title "covers EXACTLY the 42 in-scope
-#    types" (PortableDoc.test.tsx:309), the CASES doc comment ("all 42 render",
-#    PortableDoc.test.tsx:12), and the REGISTERED_TYPES doc comment ("the 42
-#    in-scope PortableDocument types", src/blocks/registry.ts). Cosmetic — no
-#    assertion reads them; tidy them when you touch those files.
+# 4. Count prose (optional tidy). Comments mention the two censuses in prose
+#    and go stale by one: the test title "covers EXACTLY the 46 in-scope
+#    types" (PortableDoc.test.tsx:340), the CASES doc comment ("all 46 render",
+#    PortableDoc.test.tsx:12), the REGISTERED_TYPES doc comment ("the 46
+#    in-scope", src/blocks/registry.ts:32) — and on the
+#    parity side the "46" mentions in gen_pd_parity.ex's moduledoc, the
+#    pd_golden_parity_test.exs test title "the array holds exactly 46 in-scope
+#    types" + its moduledoc, and pd-parity-completeness.sh's comments. Cosmetic
+#    — no assertion reads them; tidy them when you touch those files.
+#
+# 5. Derived parity fixtures (rollback recipe). The gen_pd_parity ASSERT CMD
+#    writes the golden PAIR
+#    api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json +
+#    js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json.
+#    These are DERIVED artifacts — the receipt does NOT own them (the mix task
+#    wrote the bytes, not scaffy), so `bp scaffy remove` alone cannot retract
+#    them. Full rollback is three moves: `bp scaffy remove` (inverts every
+#    .go/.ts/.tsx/.ex/.exs/.sh edit above), trash the two generated fixture
+#    files by hand, then re-run `bash scripts/pd-parity-completeness.sh` to
+#    prove the tree re-greened at the original {{.ParityCountBefore}} census.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────
@@ -274,6 +299,78 @@ WITH
 ::: {{.block-name}} compose clause :::
 MARK "ex-compose-{{.block-name}}"
 
+# ── Surface 4: golden-parity harness (closes the local-green/CI-red gap) ────
+
+# The three surfaces above go green on every local ASSERT while CI still reds:
+# doc-gates.yml runs scripts/pd-parity-completeness.sh on ANY **/*.ex diff
+# (compose.ex is one), and that script counts compose.ex's dispatched types
+# against a hard EXPECTED_COUNT pin — a new compose clause without a golden
+# fixture + census bump = a CI red the local ASSERT list never exercised.
+# This leg is REQUIRED (house doctrine — tests are never optional), and it is
+# why the census crosses as a SECOND OPAQUE+SUCCESSOR pair: ParityCountBefore/
+# After pin the compose-dispatch census (46 at authoring time), a different
+# number line from the JS registry's CountBefore/After — the two pins move
+# independently and only coincidentally both read 46 today.
+
+# Parity fixture 1/3: one realistic authored input for the new type in the
+# generator's hand-literal @inputs map. The anchor is the map's opening line
+# (`@inputs %{`, gen_pd_parity.ex:81, grep -cF = 1). The sample MUST satisfy
+# the compose clause Surface 3 writes: that clause reads exactly one attr —
+# `text`, via stringish/1 — and a non-empty text is what keeps the frozen
+# shape projection non-empty (pd_golden_parity_test.exs reds on an empty
+# shape). Guard derives from the MARK line.
+IN "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex"
+### Add the {{.block-name}} parity input to the @inputs hand-literal map
+INSERT AFTER FIRST
+::: inputs map opening anchor :::
+  @inputs %{
+::: inputs map opening anchor :::
+WITH
+::: {{.block-name}} parity input :::
+    # scaffy:add-block-type {{.BlockName}} MARK:parity-input-{{.block-name}}
+    "{{.block-name}}" => %{"type" => "{{.block-name}}", "text" => "Parity starter text"},
+::: {{.block-name}} parity input :::
+MARK "parity-input-{{.block-name}}"
+
+# Census pin 2/3: the completeness script's EXPECTED_COUNT. A REPLACE against
+# the current count line (unique — every other mention reads $EXPECTED_COUNT).
+# The target never survives in the replacement (ParityCountBefore ≠
+# ParityCountAfter), but A4 hygiene still applies: the explicit ASLONG below
+# matches the MARK line this op writes, and re-runs anchor at that mark. A
+# second add-block-type run (a different block) is authored against the
+# THEN-current census pair — its own mark stacks above the line.
+IN "scripts/pd-parity-completeness.sh"
+### Bump the completeness census pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: expected count anchor :::
+EXPECTED_COUNT={{.ParityCountBefore}}
+::: expected count anchor :::
+WITH
+::: {{.block-name}} completeness pin bump :::
+# scaffy:add-block-type {{.BlockName}} MARK:parity-count-script-{{.block-name}}
+EXPECTED_COUNT={{.ParityCountAfter}}
+::: {{.block-name}} completeness pin bump :::
+MARK "parity-count-script-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:parity-count-script-{{.block-name}}"
+
+# Census pin 3/3: the parity suite's scope assertion (pd_golden_parity_test.exs
+# :35 — `assert length(GenPdParity.types()) == N`, unique). Same REPLACE
+# discipline as pin 2/3; the mark comment sits inside the test's do-block, a
+# legal Elixir comment position.
+IN "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs"
+### Bump the parity suite census assert from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: census assert anchor :::
+    assert length(GenPdParity.types()) == {{.ParityCountBefore}}
+::: census assert anchor :::
+WITH
+::: {{.block-name}} census assert bump :::
+    # scaffy:add-block-type {{.BlockName}} MARK:parity-count-test-{{.block-name}}
+    assert length(GenPdParity.types()) == {{.ParityCountAfter}}
+::: {{.block-name}} census assert bump :::
+MARK "parity-count-test-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:parity-count-test-{{.block-name}}"
+
 # ── Post-conditions ──────────────────────────────────────────────────────────
 
 # Per-surface file asserts — each string is a verbatim substring of what an op
@@ -286,6 +383,9 @@ ASSERT FILE "js/packages/react/src/blocks/core.ts" CONTAINS "MARK:js-map-{{.bloc
 ASSERT FILE "js/packages/react/tests/PortableDoc.test.tsx" CONTAINS "MARK:js-case-{{.block-name}}"
 ASSERT FILE "js/packages/react/tests/PortableDoc.test.tsx" CONTAINS "toHaveLength({{.CountAfter}})"
 ASSERT FILE "api/lib/barkpark/portable_doc/render/compose.ex" CONTAINS "MARK:ex-compose-{{.block-name}}"
+ASSERT FILE "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex" CONTAINS "MARK:parity-input-{{.block-name}}"
+ASSERT FILE "scripts/pd-parity-completeness.sh" CONTAINS "EXPECTED_COUNT={{.ParityCountAfter}}"
+ASSERT FILE "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs" CONTAINS "== {{.ParityCountAfter}}"
 
 # Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the
 # NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)
@@ -304,3 +404,15 @@ ASSERT CMD "cd js && pnpm install && pnpm build"
 ASSERT CMD "cd js/packages/react && npx tsc --noEmit"
 ASSERT CMD "cd js/packages/react && npx vitest run"
 ASSERT CMD "cd api && mix test test/barkpark/portable_doc/render_test.exs" TIER ci
+# Golden-parity leg (Surface 4). ONE gen run writes BOTH mirrors (proven —
+# mirror_dirs() is the api fixtures dir + the js pd-golden dir); the EXISTS
+# asserts sit between the CMDs on purpose: assertions execute in source order,
+# so the pair is checked the moment the generator claims to have written it.
+# The completeness script MUST run under bash (its shebang — zsh word-splits
+# vacuously → false green), and the parity suite is the scoped single-file mix
+# test A2 proved local-safe with a warm _build.
+ASSERT CMD "cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity"
+ASSERT FILE "api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json" EXISTS
+ASSERT FILE "js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json" EXISTS
+ASSERT CMD "bash scripts/pd-parity-completeness.sh"
+ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs"

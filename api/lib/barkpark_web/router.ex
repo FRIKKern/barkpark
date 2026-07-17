@@ -2024,6 +2024,9 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:shared_paper_browser, :paper_reader_csp])
 
+    get("/papers/:slug/source", BulldocsSourceController, :show)
+    get("/papers/:slug/email", BulldocsEmailController, :show)
+
     # LIVE scoped reader (P4): the same BulldocsLive as the flat /papers/:slug
     # surface — per-block real-time streaming included (the paper PubSub topic
     # is already ws-keyed) — mounted behind the share/membership gates above.

@@ -111,6 +111,43 @@ func TestSuccessorCheckedNeverComputed(t *testing.T) {
 	wantVarError(t, cmd, map[string]string{"CountBefore": "42"}, "missing --var CountAfter")
 }
 
+func TestOneOfMemberAccepted(t *testing.T) {
+	// OPAQUE + ONEOF: every declared member substitutes verbatim (D56).
+	cmd := varCmd(&VariableDecl{Name: "Visibility", Opaque: true, OneOf: []string{"public", "private"}})
+	for _, member := range []string{"public", "private"} {
+		s := mustSubst(t, cmd, map[string]string{"Visibility": member})
+		got, err := s.text("{{.Visibility}}", "test.scaffy", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != member {
+			t.Fatalf("ONEOF member %q: substituted to %q", member, got)
+		}
+	}
+}
+
+func TestOneOfNonMemberRejected(t *testing.T) {
+	// A --var value outside the set is a VarError (exit 2), like SHAPE.
+	cmd := varCmd(&VariableDecl{Name: "Visibility", Opaque: true, OneOf: []string{"public", "private"}})
+	wantVarError(t, cmd, map[string]string{"Visibility": "internal"}, "ONEOF")
+	// The error names the offending value and the legal members.
+	wantVarError(t, cmd, map[string]string{"Visibility": "internal"}, `"public", "private"`)
+}
+
+func TestOneOfTransformMemberAccepted(t *testing.T) {
+	// A non-OPAQUE (transform) ONEOF variable accepts a member and still
+	// resolves through the joiners.
+	cmd := varCmd(&VariableDecl{Name: "Tier", OneOf: []string{"element", "widget", "section"}})
+	s := mustSubst(t, cmd, map[string]string{"Tier": "widget"})
+	got, err := s.text("{{.Tier}}", "test.scaffy", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Widget" {
+		t.Fatalf("transform ONEOF Pascal spelling: got %q, want Widget", got)
+	}
+}
+
 func TestUnknownTokenFails(t *testing.T) {
 	cmd := varCmd(&VariableDecl{Name: "BlockName"})
 	s := mustSubst(t, cmd, map[string]string{"BlockName": "X"})

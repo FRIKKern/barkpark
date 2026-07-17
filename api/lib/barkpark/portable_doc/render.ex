@@ -272,6 +272,19 @@ defmodule Barkpark.PortableDoc.Render do
     document(~s(<div style="padding:28px 12px;">) <> card <> "</div>", palette)
   end
 
+  @doc "Wrap an already-sanitized legacy HTML fragment in the email document chrome."
+  def render_html_document(html, opts \\ %{}) when is_binary(html) do
+    style = Map.get(opts, :style, :email)
+    theme = Map.get(opts, :theme, :evergreen)
+    palette = Barkpark.PortableDoc.Render.Palettes.palette_for(style, theme)
+
+    card =
+      ~s(<div style="max-width:#{palette.width}px;margin:0 auto;padding:28px 24px;background:#{palette.paper};border-radius:12px;">) <>
+        html <> "</div>"
+
+    document(~s(<div style="padding:28px 12px;">) <> card <> "</div>", palette)
+  end
+
   @doc """
   Render a full portable-doc block list to one concatenated HTML fragment, in
   order. Used to refresh the `body_html` cache from the block source of truth.

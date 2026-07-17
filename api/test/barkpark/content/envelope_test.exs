@@ -52,6 +52,66 @@ defmodule Barkpark.Content.EnvelopeTest do
     refute env["_id"] == "HIJACK"
   end
 
+  test "Paper envelopes promote every legacy body shape to canonical blocks", %{doc: doc} do
+    nested = [%{"type" => "heading", "text" => "Nested"}]
+    bare = [%{"type" => "divider"}]
+
+    assert Envelope.render(%{doc | type: "paper", content: %{"body" => %{"blocks" => nested}}})[
+             "blocks"
+           ] == nested
+
+    assert Envelope.render(%{doc | type: "paper", content: %{"body" => bare}})["blocks"] == bare
+
+    assert [%{"type" => "heading", "text" => "Markdown"} | _] =
+             Envelope.render(%{doc | type: "paper", content: %{"body" => "# Markdown"}})[
+               "blocks"
+             ]
+  end
+
+  test "Paper top-level blocks stay authoritative and non-Papers are not promoted", %{doc: doc} do
+    nested = [%{"type" => "divider"}]
+    content = %{"blocks" => [], "body" => %{"blocks" => nested}}
+
+    assert Envelope.render(%{doc | type: "paper", content: content})["blocks"] == []
+
+    refute Map.has_key?(
+             Envelope.render(%{doc | type: "post", content: %{"body" => nested}}),
+             "blocks"
+           )
+  end
+
+  test "Paper promotion cannot resurrect a redacted private body", %{doc: doc} do
+    schema = schema_with([%{"name" => "body", "type" => "string", "private" => true}])
+    paper = %{doc | type: "paper", content: %{"body" => "# Secret"}}
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "body")
+    refute Map.has_key?(rendered, "blocks")
+  end
+
+  test "Paper promotion cannot resurrect redacted canonical blocks from body", %{doc: doc} do
+    schema = schema_with([%{"name" => "blocks", "type" => "array", "private" => true}])
+    blocks = [%{"type" => "heading", "text" => "Secret"}]
+
+    paper = %{
+      doc
+      | type: "paper",
+        content: %{"blocks" => blocks, "body" => %{"blocks" => blocks}}
+    }
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "blocks")
+  end
+
+  test "body-only Paper promotion obeys private destination visibility", %{doc: doc} do
+    schema = schema_with([%{"name" => "blocks", "type" => "array", "private" => true}])
+    blocks = [%{"type" => "heading", "text" => "Legacy secret"}]
+    paper = %{doc | type: "paper", content: %{"body" => %{"blocks" => blocks}}}
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "blocks")
+  end
+
   # ── Phase 3: field-visibility redaction ─────────────────────────────────────
 
   defp schema_with(fields), do: %SchemaDefinition{name: "post", fields: fields}

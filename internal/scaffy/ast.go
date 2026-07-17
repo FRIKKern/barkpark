@@ -84,6 +84,9 @@ type HeaderField struct {
 // 14 ASCII digits forming a real UTC YYYYMMDDHHMMSS instant, D16/D22).
 // SUCCESSOR declares the value to be the named sibling variable + 1;
 // the validator lints the EXAMPLES pair (D22).
+// ONEOF constrains the value to a closed set of quoted members; the
+// runtime rejects a non-member --var value (VarError, exit 2) and the
+// validator reds a declared EXAMPLES value outside the set (E-021, D56).
 type VariableDecl struct {
 	Pos          Pos
 	Index        int
@@ -93,6 +96,8 @@ type VariableDecl struct {
 	ShapePos     Pos
 	Successor    string
 	SuccessorPos Pos
+	OneOf        []string // ONEOF "a", "b", … — a comma-separated quoted enum set (D56)
+	OneOfPos     Pos
 	Title        string
 	Description  string
 	Examples     []string // EXAMPLES "a", "b", … — a comma-separated quoted list
