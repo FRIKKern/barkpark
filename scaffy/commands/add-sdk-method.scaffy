@@ -1,0 +1,334 @@
+COMMAND "Add a JS SDK Client Method" DESCRIPTION "Land a new @barkpark/core client method end-to-end — the six-file layer-parity chore the SDK repeats ~3x/month (34 commits in 12 months touch types.ts + client.ts + index.ts together): a starter module wrapping a dataset-scoped GET in the house transport pattern, Result/Options types plus the BarkparkClient interface signature, the createClient wiring entry, both index.ts barrel exports, an msw test pair, and the changesets entry the js/ CI gate requires — the corpus's first changeset-creating command. Idempotent behind six per-method marks; every anchor is a never-consumed fixed line, so no REANCHOR families are needed." LAST_UPDATED "17-07-2026-14-00-00" DOMAIN "barkpark" TAGS "sdk", "scaffold", "testing" CONCEPT "sdk-method" VARIANT "ts-read" DIRECTION "add" VARIABLES
+  VARIABLE 1 "MethodName" TITLE "Name the client method" DESCRIPTION "The method's name, declared PascalCase and rendered per position (A1): {{.methodName}} (camel) is the client method AND the module's exported function — the house wiring shadow, client.ts's `getBacklinks(id, opts) { return getBacklinks(frozen, id, opts) }` idiom; {{.method-name}} (kebab) is the module filename (image-url.ts precedent), the test filename, the changeset slug and every mark suffix. Pick a verb-first name like the 30+ live methods (get*/list*/search*/export*)." EXAMPLES "GetUsageReport", "ListLocales", "GetDatasetHealth"
+  VARIABLE 2 "TypeBase" TITLE "Base name for the public types" DESCRIPTION "PascalCase noun stem for the two new public types, {{.TypeBase}}Result and {{.TypeBase}}Options — the BacklinksResult/BacklinksOptions convention. Deliberately a SEPARATE variable from MethodName: the live corpus derives type names from the noun, not the verb (getAnalytics returns DatasetAnalytics, getBacklinks returns BacklinksResult), and that judgment cannot be a casing transform." EXAMPLES "UsageReport", "Locales", "DatasetHealth"
+  VARIABLE 3 "HttpPath" OPAQUE TITLE "The dataset-scoped API path prefix" DESCRIPTION "The v1 route WITHOUT the trailing dataset segment — the method appends /:dataset itself, exactly like analytics.ts:21 builds `${scopePrefix(config)}/v1/data/analytics/${encodeURIComponent(config.dataset)}`. Leading slash, no trailing slash. OPAQUE: verbatim, never re-cased, one token spelling ({{.HttpPath}}) throughout." EXAMPLES "/v1/data/usage", "/v1/data/locales", "/v1/data/health"
+  VARIABLE 4 "Summary" OPAQUE TITLE "One-line method summary" DESCRIPTION "What the method fetches, one clause, lowercase start, no trailing period — it is spliced mid-sentence into the JSDoc on the module function, the types, the interface signature, and the changeset body. OPAQUE: verbatim prose, ASCII, no braces or backticks." EXAMPLES "the dataset's usage report", "the locales configured for the dataset"
+
+# ===========================================================================
+# add-sdk-method — the SDK layer-parity chore, mechanized.
+#
+# PRIOR ART & EVIDENCE (the 2026-07-17 anchor survey). Every new capability
+# grows the same six-file cluster, measured at 34 commits in 12 months
+# (~3/month) touching js/packages/core/src/{types,client,index}.ts together —
+# getSearchSuggestions (#873), listDatasets (#732), getAnalytics (#706),
+# exportDataset (#696), webhook mgmt (#604), searchAssets (#585)… Each commit
+# lands: a per-concern module under src/ (analytics.ts, export.ts), the
+# Result/Options types + a BarkparkClient signature in types.ts, an import +
+# wiring entry in client.ts, a value export + type re-export in index.ts, an
+# msw test under tests/, and a js/.changeset/ entry (the changesets CI job
+# blocks packages/** PRs without one — js/CLAUDE.md hard rule). README is NOT
+# part of the shape: all five exemplar commits touch zero READMEs.
+#
+# WHY NO REANCHOR FAMILIES (the survey's key structural finding). Unlike the
+# oban crontab and the @hints map — whose last elements carry no trailing
+# separator, forcing the A3 self-consuming REPLACE + REANCHOR — every accretion
+# site here is either newline-separated (import lines, export lines, interface
+# members) or a collection whose EVERY entry carries a trailing comma (the
+# createClient object literal, index.ts's export-type block: house prettier
+# style). So all six injections are bare INSERT AFTER FIRST against a FIXED
+# anchor line that is never consumed, each payload plants its own per-method
+# mark, and idempotency is the engine's implicit planted-MARK guard — a re-run
+# with the same MethodName sees MARK:sdk-…-<method-name> and skips. Sibling
+# accretion is LIFO after the same anchors (the add-error-shape Op B/C idiom),
+# which is safe because ordering is neutral at every site: object property
+# order, interface member order, export order and import order are all
+# semantically irrelevant in TS.
+#
+# THE SIX ANCHORS, grep-proven unique (2026-07-17):
+#   client.ts:22    import { getBacklinks } from './backlinks'
+#   client.ts:280   const client: BarkparkClientWithHandshake = {
+#   types.ts:16     export type Perspective = 'published' | 'drafts' | 'raw'
+#   types.ts:1044   export interface BarkparkClient {
+#   index.ts:16     export { createClient } from './client'
+#   index.ts:187      ApiVersion,   (the './types' block's first member)
+#
+# WHY NO Verb ONEOF (ruled out, with evidence). 27 of the 34 surveyed commits
+# are GET reads; the write-shaped minority (upsertSchema PUT, createWorkspace
+# POST, webhook CRUD) diverges STRUCTURALLY, not lexically — `kind: 'write'`,
+# a body, a MutateEnvelope unwrap, different test fixtures. Scaffy payloads
+# are conditional-free text, so a Verb enum would demand per-verb payload
+# bodies the grammar cannot express. The starter therefore scaffolds the
+# dominant shape — a token-scoped dataset GET in the analytics/backlinks
+# transport idiom — and the module body carries a fenced TODO explaining the
+# write flip (kind, method, body) for the author to make by hand.
+#
+# ORDER DEPENDENCY, DELIBERATE. tsc's excess-property check means the
+# createClient object literal may only carry the method once BarkparkClient
+# declares it — so the types.ts signature op precedes the client.ts wiring op,
+# and the tsc gate at the bottom is what catches any drift between them.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# OP 1 — the starter module. Compiles and RUNS as-is: dataset-scoped GET via
+# the house transport (scopePrefix + request + tolerant `result ?? data`
+# unwrap — the getSearchSuggestions/getBacklinks idiom), AbortSignal plumbed.
+# The permissive Result starter and the write-flip note are fenced TODOs.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "js/packages/core/src/{{.method-name}}.ts"
+WITH
+::: {{.method-name}} module :::
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Barkpark contributors
+
+// {{.TypeBase}} — fetches {{.Summary}} (`GET {{.HttpPath}}/:dataset`).
+// A token-scoped dataset read in the house transport idiom (analytics.ts,
+// backlinks.ts). scaffy:add-sdk-method starter — refine the response typing in
+// types.ts ({{.TypeBase}}Result), then delete this pointer comment.
+//
+// TODO(scaffy:add-sdk-method) if this method should WRITE instead of read:
+// switch reqOpts to `{ kind: 'write', method: 'POST', body: … }`, return the
+// MutateEnvelope shapes, and mirror a write exemplar (schemas.ts upsertSchema)
+// rather than this read skeleton.
+
+import { scopePrefix } from './scope'
+import { request } from './transport'
+import type { BarkparkClientConfig, {{.TypeBase}}Result, {{.TypeBase}}Options } from './types'
+
+/**
+ * Fetch {{.Summary}} (`GET {{.HttpPath}}/:dataset`).
+ * Prefer `client.{{.methodName}}()`.
+ */
+export async function {{.methodName}}(
+  config: BarkparkClientConfig,
+  opts?: {{.TypeBase}}Options,
+): Promise<{{.TypeBase}}Result> {
+  const path = `${scopePrefix(config)}{{.HttpPath}}/${encodeURIComponent(config.dataset)}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{{.TypeBase}}Result & { result?: {{.TypeBase}}Result }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as {{.TypeBase}}Result
+}
+::: {{.method-name}} module :::
+
+# ---------------------------------------------------------------------------
+# OP 2 — the msw test pair, byte-shaped on analytics.test.ts: one happy-path
+# (route hit + unwrap) and one error-propagation case, against the shared
+# fixtures server. Self-contained — the fixture imports carry all setup.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "js/packages/core/tests/{{.method-name}}.test.ts"
+WITH
+::: {{.method-name}} test :::
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from './fixtures/server'
+import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
+import { createClient } from '../src/client'
+import type { BarkparkClientConfig } from '../src/types'
+
+const baseConfig: BarkparkClientConfig = {
+  projectUrl: TEST_BASE_URL,
+  dataset: TEST_DATASET,
+  apiVersion: '2026-04-17',
+  token: 't',
+}
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => {
+  server.resetHandlers()
+  resetFixtures()
+})
+afterAll(() => server.close())
+
+describe('{{.methodName}}', () => {
+  it('GETs {{.HttpPath}}/:dataset and unwraps the payload', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}{{.HttpPath}}/:ds`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const res = await bp.{{.methodName}}()
+    expect(res.ok).toBe(true)
+    expect(seenPath).toContain(`{{.HttpPath}}/${TEST_DATASET}`)
+  })
+
+  it('propagates a server error', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}{{.HttpPath}}/:ds`, () =>
+        HttpResponse.json({ error: { code: 'unauthorized' } }, { status: 401 }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    await expect(bp.{{.methodName}}()).rejects.toThrow()
+  })
+})
+::: {{.method-name}} test :::
+
+# ---------------------------------------------------------------------------
+# OP 3 — the public types. Anchored right after the Perspective alias
+# (types.ts:16, unique, never consumed) — exactly where ExportOptions landed
+# in the exportDataset exemplar. The Result starter is deliberately
+# permissive ([key: string]: unknown) so the slice compiles before the author
+# types the real fields; the TODO says so out loud.
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/types.ts"
+### Declare {{.TypeBase}}Result + {{.TypeBase}}Options after the Perspective alias
+INSERT AFTER FIRST
+::: perspective alias :::
+export type Perspective = 'published' | 'drafts' | 'raw'
+::: perspective alias :::
+WITH
+::: {{.TypeBase}} types :::
+
+// scaffy:add-sdk-method {{.method-name}} MARK:sdk-types-{{.method-name}}
+/** Result of `client.{{.methodName}}()` — {{.Summary}} (`GET {{.HttpPath}}/:dataset`). */
+export interface {{.TypeBase}}Result {
+  // TODO(scaffy:add-sdk-method): replace this permissive starter with the
+  // endpoint's real response fields (see DatasetAnalytics / BacklinksResult).
+  [key: string]: unknown
+}
+
+/** Options for `client.{{.methodName}}()`. */
+export interface {{.TypeBase}}Options {
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+::: {{.TypeBase}} types :::
+MARK "sdk-types-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 4 — the BarkparkClient signature, inserted right after the interface
+# opening (types.ts:1044, unique). Interface member order is semantically
+# neutral; landing at the head keeps the anchor never-consumed. Must precede
+# Op 6 (see ORDER DEPENDENCY above).
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/types.ts"
+### Declare client.{{.methodName}}() on the BarkparkClient interface
+INSERT AFTER FIRST
+::: BarkparkClient opening :::
+export interface BarkparkClient {
+::: BarkparkClient opening :::
+WITH
+::: {{.methodName}} signature :::
+  // scaffy:add-sdk-method {{.method-name}} MARK:sdk-signature-{{.method-name}}
+  /** Fetch {{.Summary}} (`GET {{.HttpPath}}/:dataset`). */
+  {{.methodName}}(opts?: {{.TypeBase}}Options): Promise<{{.TypeBase}}Result>
+::: {{.methodName}} signature :::
+MARK "sdk-signature-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 5 — the client.ts import. Import lines are newline-separated, so a bare
+# INSERT after the (unique, stable) backlinks import is separator-safe.
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/client.ts"
+### Import {{.methodName}} from its module
+INSERT AFTER FIRST
+::: backlinks import :::
+import { getBacklinks } from './backlinks'
+::: backlinks import :::
+WITH
+::: {{.methodName}} import :::
+// scaffy:add-sdk-method {{.method-name}} MARK:sdk-import-{{.method-name}}
+import { {{.methodName}} } from './{{.method-name}}'
+::: {{.methodName}} import :::
+MARK "sdk-import-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 6 — the createClient wiring, inserted right after the object-literal
+# opening (client.ts:280, unique). Every entry in the literal carries a
+# trailing comma, and property order is neutral, so the head slot is as valid
+# as the tail. The method-shorthand body calls the IMPORTED {{.methodName}}
+# (shorthand creates no shadowing binding — the live getBacklinks idiom).
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/client.ts"
+### Wire client.{{.methodName}}() in createClient
+INSERT AFTER FIRST
+::: client literal opening :::
+  const client: BarkparkClientWithHandshake = {
+::: client literal opening :::
+WITH
+::: {{.methodName}} wiring :::
+    // scaffy:add-sdk-method {{.method-name}} MARK:sdk-wire-{{.method-name}}
+    {{.methodName}}(opts) {
+      return {{.methodName}}(frozen, opts)
+    },
+::: {{.methodName}} wiring :::
+MARK "sdk-wire-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 7 — the index.ts value export (the composable-without-createClient
+# surface every module also ships). Newline-separated export lines; the
+# createClient export (index.ts:16) is the file's head anchor.
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/index.ts"
+### Barrel-export {{.methodName}} from the package root
+INSERT AFTER FIRST
+::: createClient export :::
+export { createClient } from './client'
+::: createClient export :::
+WITH
+::: {{.methodName}} export :::
+// scaffy:add-sdk-method {{.method-name}} MARK:sdk-export-{{.method-name}}
+export { {{.methodName}} } from './{{.method-name}}'
+::: {{.methodName}} export :::
+MARK "sdk-export-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 8 — the index.ts type re-export, inserted after the './types' block's
+# first member (`  ApiVersion,` — unique in the file). Every member of the
+# block carries a trailing comma and the list is order-neutral, so a bare
+# INSERT is separator-safe; a `//` comment line is legal inside an
+# `export type { … }` block.
+# ---------------------------------------------------------------------------
+IN "js/packages/core/src/index.ts"
+### Re-export the {{.TypeBase}} types from the package root
+INSERT AFTER FIRST
+::: ApiVersion member :::
+  ApiVersion,
+::: ApiVersion member :::
+WITH
+::: {{.TypeBase}} type re-export :::
+  // scaffy:add-sdk-method {{.method-name}} MARK:sdk-type-export-{{.method-name}}
+  {{.TypeBase}}Result,
+  {{.TypeBase}}Options,
+::: {{.TypeBase}} type re-export :::
+MARK "sdk-type-export-{{.method-name}}"
+
+# ---------------------------------------------------------------------------
+# OP 9 — the changeset, a corpus first. The js/ CI `changesets` job BLOCKS any
+# packages/** PR without one (js/CLAUDE.md hard rule), and every exemplar
+# commit ships exactly this shape (sdk-export-dataset.md, sdk-get-analytics.md
+# …): front-matter bumping @barkpark/core minor + one **Added:** line. A new
+# public method is semver-minor by definition, so the bump is mechanical — no
+# judgment left for a manual step.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "js/.changeset/sdk-{{.method-name}}.md"
+WITH
+::: {{.method-name}} changeset :::
+---
+'@barkpark/core': minor
+---
+
+**Added:** `client.{{.methodName}}(opts?)` — fetches {{.Summary}} (`GET {{.HttpPath}}/:dataset`). New `{{.TypeBase}}Result` / `{{.TypeBase}}Options` public types.
+::: {{.method-name}} changeset :::
+
+# ===========================================================================
+# POSTCONDITIONS. ASSERT FILE: every planted mark plus the load-bearing lines
+# of the created files (payload-derived, ASCII, brace-safe — each `}}` is a
+# token closing followed by `R`, `O`, `(`, `.` or a quote, never `}`).
+# ===========================================================================
+ASSERT FILE "js/packages/core/src/{{.method-name}}.ts" CONTAINS "export async function {{.methodName}}("
+ASSERT FILE "js/packages/core/tests/{{.method-name}}.test.ts" CONTAINS "describe('{{.methodName}}'"
+ASSERT FILE "js/packages/core/src/types.ts" CONTAINS "MARK:sdk-types-{{.method-name}}"
+ASSERT FILE "js/packages/core/src/types.ts" CONTAINS "MARK:sdk-signature-{{.method-name}}"
+ASSERT FILE "js/packages/core/src/client.ts" CONTAINS "MARK:sdk-import-{{.method-name}}"
+ASSERT FILE "js/packages/core/src/client.ts" CONTAINS "MARK:sdk-wire-{{.method-name}}"
+ASSERT FILE "js/packages/core/src/index.ts" CONTAINS "MARK:sdk-export-{{.method-name}}"
+ASSERT FILE "js/packages/core/src/index.ts" CONTAINS "MARK:sdk-type-export-{{.method-name}}"
+ASSERT FILE "js/.changeset/sdk-{{.method-name}}.md" CONTAINS "'@barkpark/core': minor"
+
+# Run gates — all LOCAL per the proven tier table: the pnpm bootstrap is THE
+# precondition for the tsc + vitest gates in a fresh worktree (103 phantom
+# errors -> 0), the scoped vitest run exercises exactly the created test pair,
+# and tsc --noEmit is what catches signature/wiring drift (the ORDER
+# DEPENDENCY tripwire). The full cross-package suite, lint sweep and size
+# budget stay on the js-tests.yml CI gate.
+ASSERT CMD "cd js && pnpm install && pnpm --filter @barkpark/core build"
+ASSERT CMD "cd js/packages/core && npx vitest run tests/{{.method-name}}.test.ts"
+ASSERT CMD "cd js/packages/core && npx tsc --noEmit"
