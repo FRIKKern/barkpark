@@ -46,12 +46,19 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #
 # CONDITIONAL / MANUAL STEPS (prose, deliberately NOT blind ops — read these):
 #
-# 1. Composition tier (conditional). tiers.ex classifies every block type as
-#    :element | :widget | :section (api/lib/barkpark/portable_doc/tiers.ex).
-#    An UNCLASSIFIED type degrades safely to :element (slots.ex:98 —
-#    `tier_of(block) || :element`), so a leaf block needs nothing. Add
-#    "{{.block-name}}" to the tiers.ex word-list ONLY if the block composes
-#    other blocks (:widget) or owns its children's layout (:section).
+# 1. Composition tier (MANDATORY — ALWAYS run classify-block-type next). tiers.ex
+#    classifies every block type as :element | :widget | :section
+#    (api/lib/barkpark/portable_doc/tiers.ex). At RUNTIME an unclassified type
+#    degrades safely to :element (slots.ex:98 — `tier_of(block) || :element`),
+#    which once read as "a leaf block needs nothing" — WRONG for CI. A compose
+#    clause (Surface 3 above) makes the type renderable, and tiers_test.exs pins
+#    a completeness invariant ("completeness vs. the render surface" describe
+#    block) that REDS on any renderable type with no tier. So classification is
+#    NOT conditional: the moment Surface 3 lands, run
+#    `bp scaffy run classify-block-type --var BlockName={{.block-name}}
+#    --var Tier=<element|widget|section>` — leaf blocks pick :element EXPLICITLY,
+#    never nothing. See classify-block-type's PAIRING LAW + RE-RUN MATRIX for the
+#    same-tier second-block hand-edit case (D79).
 #
 # 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs
 #    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`
@@ -88,6 +95,24 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #    .go/.ts/.tsx/.ex/.exs/.sh edit above), trash the two generated fixture
 #    files by hand, then re-run `bash scripts/pd-parity-completeness.sh` to
 #    prove the tree re-greened at the original {{.ParityCountBefore}} census.
+#
+# 6. Growing the renderer STALES the golden — mandatory SECOND regen (NOT this
+#    run). The @inputs sample this command plants
+#    (`"text" => "Parity starter text"`) and the frozen golden pair both capture
+#    the STARTER contract: `text` escaped into a `bp-{{.block-name}}` wrapper.
+#    The moment you grow the compose clause / renderer past that starter (real
+#    attrs, a real Pd-node composition), the surfaces stop emitting the starter
+#    shape and pd_golden_parity_test.exs reds against the now-stale golden.
+#    Growing is a SEPARATE, later edit than this scaffold, so its regen cannot
+#    be pre-baked here — after you grow the block, by HAND:
+#      (a) edit the {{.block-name}} entry in gen_pd_parity.ex's @inputs to the
+#          grown block's real authored shape;
+#      (b) `cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity`
+#          (rewrites BOTH golden mirrors from the new @inputs);
+#      (c) `bash scripts/pd-parity-completeness.sh`;
+#      (d) `cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs`.
+#    NO census bump this time — the type already exists; only the golden bytes
+#    change. Skip this and the grow PR ships a green local scaffold over a red CI.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────
@@ -387,6 +412,21 @@ ASSERT FILE "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex" CONTAINS 
 ASSERT FILE "scripts/pd-parity-completeness.sh" CONTAINS "EXPECTED_COUNT={{.ParityCountAfter}}"
 ASSERT FILE "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs" CONTAINS "== {{.ParityCountAfter}}"
 
+# DRY-RUN HONESTY (benchmark note — read before you chase a phantom var bug).
+# `bp scaffy run add-block-type … --dry-run` on THIS command ALWAYS reports
+# ok:false, and that is COSMETIC, not a --var mistake. A dry-run executes
+# nothing (D39: no writes, no ASSERT CMDs — the gen_pd_parity generator never
+# runs), so the two golden-fixture `ASSERT FILE … EXISTS` lines above
+# (the {{.block-name}}.golden.json pair) evaluate against a tree where those
+# files were never generated: they are structurally ABSENT, the asserts fail,
+# and ok goes false regardless of the vars. When you use the dry-run to METER
+# the scaffold (engine-only wall-clock; tokens=0), read `duration_ms` from the
+# structured envelope UNCONDITIONALLY — never gate the reading on ok or the exit
+# code. A real (non-dry) run generates the pair via the gen_pd_parity ASSERT CMD
+# BEFORE the EXISTS asserts evaluate, so there ok reflects the true post-apply
+# state. (The starter golden then goes stale the moment you grow the block —
+# manual step 6 above is its regen.)
+#
 # Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the
 # NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)
 # — never the whole pdrender suite. The react vitest run is the fail-closed
