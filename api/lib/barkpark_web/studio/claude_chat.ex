@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         {exe, args}
 
       _ ->
-        case execution_profile() do
+        case execution_profile(session_opts) do
           :cloud -> {sandbox_runner(), cloud_build_args(mode, session_opts)}
           _self_hosted -> {binary(), build_args(mode, session_opts)}
         end
@@ -147,6 +147,65 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       _ -> :self_hosted
     end
   end
+
+  @doc """
+  The turn's EFFECTIVE execution profile (connectors D205): the per-workspace
+  choice when the Session resolved one into `session_opts` (see
+  `resolve_workspace_execution_profile/1`), else the global config
+  (`execution_profile/0`). The Session resolves the workspace ONCE in `init/1`
+  and threads `:execution_profile` here, so BOTH consumers — `command/2` and
+  the cloud tool-descriptor threading — read the SAME resolution.
+  """
+  @spec execution_profile(map()) :: :self_hosted | :cloud
+  def execution_profile(session_opts) when is_map(session_opts) do
+    case Map.get(session_opts, :execution_profile) do
+      profile when profile in [:cloud, :self_hosted] -> profile
+      _ -> execution_profile()
+    end
+  end
+
+  @doc """
+  Resolve `session_opts[:workspace_id]` into an explicit `:execution_profile`
+  (connectors D205 — the per-workspace consumer seam). ONE `Tenancy` lookup per
+  Session spawn, from `Session.init/1` — per-session human cadence, never a
+  Registry callback. Fail-safe: a nil workspace_id (host-admin/:global sessions
+  stamp SQL NULL), a missing row, an absent/malformed/unknown
+  `settings["chat"]["execution_profile"]`, or ANY lookup failure leaves
+  `session_opts` untouched — `execution_profile/1` then falls through to the
+  global config and thus `:self_hosted` (fail-safe, never fail-cloud). When the
+  workspace carries an explicit `"cloud"`/`"self_hosted"`, the per-workspace
+  value WINS over the global config in BOTH directions; the `:command` config
+  tuple stays the outermost verbatim bypass in `command/2`, untouched by this.
+  """
+  @spec resolve_workspace_execution_profile(map()) :: map()
+  def resolve_workspace_execution_profile(session_opts) when is_map(session_opts) do
+    case workspace_execution_profile(Map.get(session_opts, :workspace_id)) do
+      profile when profile in [:cloud, :self_hosted] ->
+        Map.put(session_opts, :execution_profile, profile)
+
+      _ ->
+        session_opts
+    end
+  end
+
+  defp workspace_execution_profile(workspace_id) when is_binary(workspace_id) do
+    workspace = Barkpark.Tenancy.get_workspace_by_id(workspace_id)
+
+    case Barkpark.Tenancy.workspace_chat_settings(workspace)["execution_profile"] do
+      "cloud" -> :cloud
+      "self_hosted" -> :self_hosted
+      _ -> nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "claude chat: workspace execution-profile lookup failed (#{inspect(e)}) — global profile"
+      )
+
+      nil
+  end
+
+  defp workspace_execution_profile(_), do: nil
 
   @doc """
   The executable that spawns a Cloud turn — the `cloud-sandbox-runner` shim
@@ -1144,6 +1203,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             session_opts
         end
 
+      # Resolve the turn's EFFECTIVE execution profile ONCE from the session's
+      # workspace (connectors D205 — the per-workspace consumer seam): a
+      # workspace with `settings["chat"]["execution_profile"]` set wins over
+      # the global config in both directions; nil workspace / missing row /
+      # unset key / any lookup failure falls through to the global config and
+      # thus :self_hosted (fail-safe, never fail-cloud). The stashed profile
+      # feeds BOTH consumers below — the descriptor threading AND `command/2` —
+      # so a cloud-profiled workspace can never get a cloud turn with no tool
+      # descriptors (a half-resolution is banned by D205).
+      session_opts = ClaudeChat.resolve_workspace_execution_profile(session_opts)
+
       # For a :cloud turn, fetch this workspace's tool-connector descriptors
       # HOST-side (the SAME fail-soft bridge idiom as setup_mcp) and thread them
       # into session_opts so `cloud_build_args/2` can emit the scoped
@@ -1520,8 +1590,11 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # cross-checks them against the workspace's live installs. A self-hosted turn
     # is returned untouched (its descriptors ride the mcp-config file); a cloud
     # turn with no bridge/workspace gets `[]` ⇒ argv byte-identical to W12.
+    # Reads the SAME per-spawn resolution `init/1` stashed into session_opts
+    # (connectors D205) — never a second/global-only read, which would strip a
+    # cloud-profiled workspace's tool descriptors.
     defp maybe_thread_cloud_tool_descriptors(session_opts) do
-      if ClaudeChat.execution_profile() == :cloud do
+      if ClaudeChat.execution_profile(session_opts) == :cloud do
         descriptors = tool_descriptors_for(Map.get(session_opts, :workspace_id))
         Map.put(session_opts, :tool_descriptors, descriptors)
       else
