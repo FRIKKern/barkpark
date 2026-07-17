@@ -410,6 +410,14 @@ defmodule BarkparkWeb.ChatController do
       {:claude_chat_permission, ask} ->
         chunk_or_stop(conn, sse_permission_frame(ask))
 
+      {:chat_workflow, _sid, summary} ->
+        # Live workflow delta (wsc-bl-workflow-sse, D22): the Recorder's SECOND
+        # broadcast lands here on the per-session topic. The sid is embedded in the
+        # topic the forwarder subscribed to, so it is authoritative — this clause
+        # ignores the tuple's sid and forwards the compact summary as its own
+        # change-only frame, removing the D13 mid-turn strip lag.
+        chunk_or_stop(conn, sse_workflow_frame(summary))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -479,6 +487,16 @@ defmodule BarkparkWeb.ChatController do
   # The public exit frame (D23) — EXACTLY status + reason; the internal tail is
   # not a parameter, so it is structurally unable to leak here.
   def sse_exit_frame(status), do: "event: exit\ndata: #{Jason.encode!(exit_payload(status))}\n\n"
+
+  @doc false
+  # The live workflow frame (wsc-bl-workflow-sse, D23): the COMPACT
+  # workflow_summary map (StudioChat.workflow_summary/1), encoded byte-identical
+  # to the list wire (ONE parser on the Go side). WORKFLOW-ONLY — no epic sibling
+  # — and UNREPLAYABLE: NO `id:` seq, exactly like the runtime/permission/exit
+  # deltas (D5); a resuming client re-reads settled workflow truth off the
+  # turn-boundary rail, never off a replayed workflow frame.
+  def sse_workflow_frame(summary),
+    do: "event: workflow\ndata: #{Jason.encode!(summary)}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric
@@ -901,8 +919,14 @@ defmodule BarkparkWeb.ChatController do
   end
 
   # The sidebar shape (D14 vacuous-green trap — NO draft/rail/choices here).
+  # Wave-session-card (wsc charter D6 — amends D14 ADDITIVELY): a session whose
+  # rail carries a workflow gains the compact derived `workflow` summary
+  # (~300B, the D3 pinned shape) and — when the ledger resolves one — an `epic`
+  # goal map (D9). The raw rail_snapshot (measured 38kB for a 29-agent run)
+  # still NEVER rides a list surface; plain sessions keep the exact shape
+  # above, key for key.
   defp sidebar_json(%StudioChat.Session{} = s) do
-    %{
+    base = %{
       id: s.id,
       provider: s.provider,
       execution_target: s.execution_target,
@@ -922,6 +946,18 @@ defmodule BarkparkWeb.ChatController do
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     }
+
+    case StudioChat.workflow_summary(s.rail_snapshot) do
+      nil -> base
+      workflow -> base |> Map.put(:workflow, workflow) |> put_epic(s)
+    end
+  end
+
+  defp put_epic(json, %StudioChat.Session{} = s) do
+    case StudioChat.epic_goal(s.provider, s.id) do
+      nil -> json
+      epic -> Map.put(json, :epic, epic)
+    end
   end
 
   @doc """

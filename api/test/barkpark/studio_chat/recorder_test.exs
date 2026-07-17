@@ -1457,6 +1457,39 @@ defmodule Barkpark.StudioChat.RecorderTest do
       refute_receive {:chat_workflow, ^sid, _}, 100
     end
 
+    test "the summary ALSO rides the per-session topic (the SSE wire) and NEVER leaks cross-session (wsc-bl-workflow-sse, D22)",
+         %{sid: sid, recorder: recorder} do
+      # A SECOND session — its per-session topic is a leak tripwire.
+      other = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: other, mode: "plan"})
+
+      # The Studio sidebar keys off the GLOBAL activity topic; the SSE forwarder
+      # keys off THIS session's per-session topic — both must fire.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      # …and the OTHER session's topic — session B must never see session A.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(other))
+
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(recorder, workflow_progress("t", "running"))
+
+      # The activity topic fires (Studio, unchanged)…
+      assert_receive {:chat_workflow, ^sid, summary_activity}, 200
+      # …AND the per-session topic fires the SAME summary (the SSE wire, D22).
+      assert_receive {:chat_workflow, ^sid, summary_session}, 200
+      assert summary_activity == summary_session
+      assert summary_session.label == "run"
+
+      # Tenant-safe BY CONSTRUCTION: topic(other) embeds a DIFFERENT sid, so a
+      # subscriber on session B's stream never receives session A's workflow — no
+      # ^id filter needed (the topic key IS the scope).
+      refute_receive {:chat_workflow, ^other, _}, 100
+    end
+
     test "task_updated folds patch.end_time onto the rail entry; workflow_summary surfaces ended_at (charter D5)",
          %{sid: sid, recorder: recorder} do
       frame(

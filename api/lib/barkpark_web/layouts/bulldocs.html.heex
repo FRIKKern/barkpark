@@ -1082,17 +1082,28 @@
       }
 
       async function fetchBlocks(slug) {
-        // resolve=tasks: the API resolve seam (p-resolve-seam) — without it the
-        // wasm renders raw `query` blocks as "[task-list — unresolved]" while
-        // the article view shows live tasks (tui-task-widget-resolution-parity).
-        var url = "/v1/data/query/production/paper?resolve=tasks&filter=" +
-          encodeURIComponent('slug=="' + slug + '"');
-        var r = await fetch(url, { headers: { accept: "application/json" } });
+        // Read through a route mounted inside the SAME Papers capability as the
+        // current page. This preserves membership, section-share, item-share,
+        // workspace/project, dataset, and the `?share=` token without exposing
+        // the broader document API to browser code.
+        var url = location.pathname.replace(/\/+$/, "") + "/source" + location.search;
+        // Browser fetch defaults to Accept: */*, which the Paper page's HTML
+        // capability pipeline accepts. Do not opt into a separate JSON pipeline.
+        var r = await fetch(url);
+        if (!r.ok) return null;
         var d = await r.json();
-        var docs = (d.result && d.result.documents) || [];
-        var doc = docs[0];
-        if (!doc) return null;
-        return (doc.blocks) || (doc.content && doc.content.blocks) || null;
+        var source = d && d.source;
+        if (source && source.kind === "blocks" && Array.isArray(source.blocks)) return source.blocks;
+        if (source && source.kind === "html" && typeof source.html === "string") {
+          var parsed = new DOMParser().parseFromString(source.html, "text/html");
+          var text = (parsed.body.textContent || "").replace(/\s+/g, " ").trim();
+          return [{
+            id: "legacy-html",
+            type: "paragraph",
+            content: [{ type: "text", value: text }]
+          }];
+        }
+        return null;
       }
 
       // A FIXED terminal width — the render is always this many columns, regardless
@@ -1147,7 +1158,7 @@
             now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) +
             " (just now)";
         }
-        var raw = location.pathname.replace(/\/+$/, "") + "/email";
+        var raw = location.pathname.replace(/\/+$/, "") + "/email" + location.search;
         var replyEl = document.getElementById("bp-mail-reply");
         if (replyEl) replyEl.href = "mailto:papers@barkpark.cloud?subject=" + encodeURIComponent("Re: " + subject);
         var fwdEl = document.getElementById("bp-mail-forward");

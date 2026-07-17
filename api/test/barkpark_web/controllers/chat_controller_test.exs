@@ -97,6 +97,63 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   defp json_conn(raw), do: as(build_conn(), raw)
 
+  # ── wave-session-card wire fixtures (wsc charter D3/D6/D9) ────────────────
+
+  # A live 2-phase workflow rail: Explore settled, Build 1 done + 1 running.
+  defp workflow_rail do
+    %{
+      "wf" => %{
+        "status" => "running",
+        "seq" => 1,
+        "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:a",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 10
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:b",
+            "state" => "progress",
+            "startedAt" => 200
+          }
+        ]
+      }
+    }
+  end
+
+  defp sidebar_entry(admin, sid) do
+    entry =
+      json_conn(admin)
+      |> get("/v1/chat/sessions")
+      |> json_response(200)
+      |> Map.fetch!("sessions")
+      |> Enum.find(&(&1["id"] == sid))
+
+    assert entry, "expected the session in the active list"
+    entry
+  end
+
+  # epic_goal reads the published documents table directly — insert the lean
+  # ledger rows, no claim machinery (the READ path is under test).
+  defp insert_ledger_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
   # ── A. eight-route auth matrix (16 negative-auth assertions) ────────────────
 
   describe "auth matrix — auth runs BEFORE any UUID/store/runtime work (obligation A)" do
@@ -444,6 +501,96 @@ defmodule BarkparkWeb.ChatControllerTest do
       refute Map.has_key?(entry, "draft")
       refute Map.has_key?(entry, "model_choice")
       refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────
+
+    test "a workflow rail earns the compact `workflow` key; the raw rail stays off the wire",
+         %{admin: a1, sid: sid} do
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, workflow_rail())
+
+      entry = sidebar_entry(a1, sid)
+      workflow = entry["workflow"]
+
+      # the D3 PINNED key set, string-keyed on the wire — S4's Go mirror
+      # renders these fields verbatim (D13); the terminal flag serialises as
+      # the Elixir atom `terminal?` verbatim
+      assert workflow |> Map.keys() |> Enum.sort() ==
+               ~w(agents_done agents_total ended_at label outcome phase phase_index phases_total running started_at terminal? ticks tokens)
+
+      assert workflow["outcome"] == "live"
+      assert workflow["terminal?"] == false
+      # Explore carries no agents while the run lives → :future; Build breathes
+      assert workflow["ticks"] == ["future", "active"]
+      assert workflow["phase"] == "Build"
+      assert workflow["phase_index"] == 2
+      assert workflow["phases_total"] == 2
+      assert workflow["agents_done"] == 1
+      assert workflow["agents_total"] == 2
+      assert workflow["running"] == 1
+      assert workflow["started_at"] == 100
+      assert workflow["ended_at"] == nil
+      assert workflow["label"] == "wave 1"
+
+      # D14's law is NOT amended away: the raw snapshot never rides the list
+      refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    test "a plain session carries NO workflow/epic keys (Ecto-doctrine omission mirror of draft/effort_choice)",
+         %{admin: a1, sid: sid} do
+      # even a rail WITHOUT workflow nodes is a plain row on the wire — the
+      # compact key exists only for workflow sessions (vacuous-green trap: the
+      # key must be ABSENT, not null)
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(sid, %{
+          "bg" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_shell", "description" => "npm test"}
+          }
+        })
+
+      entry = sidebar_entry(a1, sid)
+      refute Map.has_key?(entry, "workflow")
+      refute Map.has_key?(entry, "epic")
+      refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    test "the epic-goal map rides only when the ledger resolves the one-hop chain (wsc D9)",
+         %{admin: a1, sid: sid} do
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, workflow_rail())
+
+      # no held claim → workflow present, epic absent (never invented)
+      entry = sidebar_entry(a1, sid)
+      assert Map.has_key?(entry, "workflow")
+      refute Map.has_key?(entry, "epic")
+
+      worker = ClaudeChat.worker_id(sid)
+
+      insert_ledger_task!("task-wsc-wire-epic", "Wire Epic", %{
+        "lifecycle_status" => "in_progress",
+        "wave_status" => "wave: building"
+      })
+
+      insert_ledger_task!("task-wsc-wire-held", "Held slice", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-wire-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      insert_ledger_task!("task-wsc-wire-done", "Done slice", %{
+        "lifecycle_status" => "done",
+        "parent_id" => "task-wsc-wire-epic"
+      })
+
+      epic = sidebar_entry(a1, sid)["epic"]
+      assert epic["id"] == "task-wsc-wire-epic"
+      assert epic["title"] == "Wire Epic"
+      assert epic["slices_done"] == 1
+      assert epic["slices_total"] == 2
+      assert epic["wave_status"] == "wave: building"
+      # "PRs open" has no data source (wsc D8) — no such key, ever
+      refute Map.has_key?(epic, "prs_open")
     end
 
     test "?archived= filters the shelf; a malformed value is 400", %{admin: a1, sid: sid} do
@@ -969,6 +1116,31 @@ defmodule BarkparkWeb.ChatControllerTest do
         |> Jason.decode!()
 
       assert data == %{"type" => "assistant", "text" => "hi"}
+    end
+
+    test "workflow frame is the compact summary JSON with NO id (live delta, D23)" do
+      # The COMPACT workflow_summary map, byte-identical to the list wire; a live
+      # delta like chat/permission/exit — unreplayable, so NO `id:` seq.
+      summary = %{label: "run", agents_done: 1, agents_total: 3, running: 2, terminal?: false}
+      frame = ChatController.sse_workflow_frame(summary)
+      assert String.starts_with?(frame, "event: workflow\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      assert data == %{
+               "label" => "run",
+               "agents_done" => 1,
+               "agents_total" => 3,
+               "running" => 2,
+               "terminal?" => false
+             }
     end
 
     test "permission + keepalive frames" do

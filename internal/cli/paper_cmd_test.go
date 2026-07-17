@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -116,5 +119,104 @@ func TestParsePaperArgsFullRoundTrip(t *testing.T) {
 	}
 	if p.server != "prod" {
 		t.Fatalf("server = %q, want prod", p.server)
+	}
+}
+
+func TestNormalizePaperRef(t *testing.T) {
+	cases := map[string]string{
+		"paper-id":          "paper-id",
+		"/papers/paper-id":  "paper-id",
+		"/papers/paper-id/": "paper-id",
+		"https://guerrilla.barkpark.cloud/papers/paper-id?view=tui#top":                           "paper-id",
+		"https://guerrilla.barkpark.cloud/w/default/p/default/d/production/studio/paper/paper-id": "paper-id",
+		"https://guerrilla.barkpark.cloud/w/default/p/default/papers/scoped-id":                   "scoped-id",
+		"/papers/id%20with%20spaces": "id with spaces",
+	}
+	for input, want := range cases {
+		if got := normalizePaperRef(input); got != want {
+			t.Errorf("normalizePaperRef(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestParsePaperRefPreservesURLContext(t *testing.T) {
+	got := parsePaperRef("https://guerrilla.barkpark.cloud/w/acme/p/rocket/d/staging/studio/paper/launch-plan")
+	want := paperRef{
+		id: "launch-plan", server: "https://guerrilla.barkpark.cloud",
+		workspace: "acme", project: "rocket", dataset: "staging",
+		browserPath: "/w/acme/p/rocket/d/staging/studio/paper/launch-plan",
+	}
+	if got != want {
+		t.Fatalf("parsePaperRef context = %#v, want %#v", got, want)
+	}
+
+	got = parsePaperRef("https://guerrilla.barkpark.cloud/w/acme/p/rocket/papers/launch-plan")
+	if got.server != "https://guerrilla.barkpark.cloud" || got.workspace != "acme" || got.project != "rocket" || got.dataset != "production" || got.id != "launch-plan" {
+		t.Fatalf("scoped public Paper URL context lost: %#v", got)
+	}
+
+	got = parsePaperRef("https://guerrilla.barkpark.cloud/papers/launch-plan")
+	if got.workspace != "default" || got.project != "default" || got.dataset != "production" {
+		t.Fatalf("unscoped public Paper URL did not reset to its canonical tenant: %#v", got)
+	}
+}
+
+func TestRunPaperViewUsesPastedURLOriginAndTenantPath(t *testing.T) {
+	var requested string
+	var authorization string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.RequestURI()
+		authorization = r.Header.Get("Authorization")
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"_id":"launch-plan","_type":"paper","title":"Launch","blocks":[]}}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	url := srv.URL + "/w/acme/p/rocket/d/staging/studio/paper/launch-plan"
+	code := runPaperView(w, globals{outputSet: true}, []string{url})
+	if code != exitOK {
+		t.Fatalf("runPaperView exit = %d, stderr = %s", code, stderr.String())
+	}
+	wantPath := "/w/acme/p/rocket/v1/data/doc/staging/paper/launch-plan"
+	if !strings.HasPrefix(requested, wantPath+"?") {
+		t.Fatalf("request URI = %q, want prefix %q", requested, wantPath+"?")
+	}
+	if !strings.Contains(requested, "perspective=published") || !strings.Contains(requested, "resolve=tasks") {
+		t.Fatalf("request URI missing reader query contract: %q", requested)
+	}
+	if authorization != "" {
+		t.Fatalf("unknown pasted origin received active Authorization header %q", authorization)
+	}
+}
+
+func TestRunPaperViewPreservesItemShareWithoutBearer(t *testing.T) {
+	var requested, authorization, accept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.RequestURI()
+		authorization = r.Header.Get("Authorization")
+		accept = r.Header.Get("Accept")
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"Shared","source":{"kind":"blocks","blocks":[]}}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	shared := srv.URL + "/w/acme/p/rocket/papers/shared-plan?share=cap-secret"
+	if code := runPaperView(w, globals{outputSet: true}, []string{shared}); code != exitOK {
+		t.Fatalf("runPaperView exit = %d, stderr = %s", code, stderr.String())
+	}
+	if requested != "/w/acme/p/rocket/papers/shared-plan/source?share=cap-secret" {
+		t.Fatalf("share request URI = %q", requested)
+	}
+	if authorization != "" {
+		t.Fatalf("share request received Authorization header %q", authorization)
+	}
+	if accept != "*/*" {
+		t.Fatalf("share request Accept = %q, want */*", accept)
 	}
 }

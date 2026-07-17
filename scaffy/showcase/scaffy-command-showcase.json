@@ -38,7 +38,7 @@
       "content": [
         {
           "type": "text",
-          "value": "Seven commands, full text, nothing elided. Each one is a chore Barkpark development actually repeats — a new PortableDoc block across three runtimes, an Oban cron worker, a bp CLI verb, a migration, a plugin, a docs card — captured as a "
+          "value": "Fourteen commands, full text, nothing elided. Each one is a chore Barkpark development actually repeats — a new PortableDoc block across three runtimes, an Oban cron worker, a bp CLI verb, a migration, a plugin, a docs card, and since Wave 5 an API error shape, a @canonical marker, the ensure family, a backfill Mix task, a plugin-declared schema type and a composition-tier classification — captured as a "
         },
         {
           "type": "text",
@@ -59,11 +59,11 @@
       "items": [
         {
           "label": "commands, full text",
-          "value": "7"
+          "value": "14"
         },
         {
           "label": "lines of .scaffy",
-          "value": "1001"
+          "value": "2152"
         },
         {
           "label": "code surfaces the flagship wires",
@@ -206,13 +206,13 @@
           [
             {
               "type": "text",
-              "value": "4"
+              "value": "7"
             }
           ],
           [
             {
               "type": "text",
-              "value": "go test + vitest (LOCAL)"
+              "value": "go test + vitest + pd-parity harness (LOCAL)"
             }
           ]
         ],
@@ -407,6 +407,230 @@
               "value": "budgets + DONT CONTAIN sweep"
             }
           ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a v1 JSON error code end-to-end — hint, build clause, test"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "scoped mix test ×2 (LOCAL, warm build)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-canonical-marker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a @canonical capability marker above any public entry point"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "grep head-line probe (LOCAL) + anchors-check (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ensure-import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "an Elixir import line — once, then never again"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix compile (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a bp completion noun — once, then never again"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go test completion-coverage (LOCAL)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-backfill-task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a safe-by-default dry-run/--apply backfill Mix task + test"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "scoped mix test (LOCAL, warm build)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-schema-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a plugin-declared document type, minimal-template shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "python json.load (LOCAL) + mix test plugins (TIER ci)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "classify-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a block type into its composition-doctrine tier list"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "grep tier-list probe (LOCAL) + tiers test (TIER ci)"
+            }
+          ]
         ]
       ]
     },
@@ -445,13 +669,13 @@
       "id": "scs-013",
       "type": "code",
       "lang": "text",
-      "value": "barkpark/\n├── internal/pdrender/\n│   ├── timeline.go                            ● created\n│   ├── timeline_test.go                       ● created\n│   └── pdrender.go                            ○ injected  @MARK go-registry-timeline\n├── js/packages/react/\n│   ├── src/blocks/core.ts                     ○ injected ×2  @MARK js-emitter / js-map\n│   └── tests/PortableDoc.test.tsx             ○ injected ×2  @MARK js-case / js-count\n└── api/lib/barkpark/portable_doc/render/\n    └── compose.ex                             ○ injected  @MARK ex-compose-timeline"
+      "value": "barkpark/\n├── internal/pdrender/\n│   ├── timeline.go                            ● created\n│   ├── timeline_test.go                       ● created\n│   └── pdrender.go                            ○ injected  @MARK go-registry-timeline\n├── js/packages/react/\n│   ├── src/blocks/core.ts                     ○ injected ×2  @MARK js-emitter / js-map\n│   └── tests/PortableDoc.test.tsx             ○ injected ×2  @MARK js-case / js-count\n├── api/lib/barkpark/portable_doc/render/\n│   └── compose.ex                             ○ injected  @MARK ex-compose-timeline\n├── api/lib/mix/tasks/\n│   └── barkpark.portable_doc.gen_pd_parity.ex ○ injected  @MARK parity-input-timeline\n├── scripts/pd-parity-completeness.sh          ○ injected  EXPECTED_COUNT pin bump\n└── api/test/barkpark/portable_doc/render/\n    └── pd_golden_parity_test.exs              ○ injected  census pin bump\n\n(+ the gen_pd_parity gate GENERATES the frozen golden pair under\n api/test/support/fixtures/pd-parity/ and js/…/tests/fixtures/pd-golden/ —\n derived artifacts, receipt-unowned; the command's prose carries their rollback recipe)"
     },
     {
       "id": "scs-014",
       "type": "code",
       "lang": "scaffy",
-      "value": "COMMAND \"Add PortableDoc Block Type\" DESCRIPTION \"Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper).\" LAST_UPDATED \"16-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"portabledoc\", \"block\", \"render\" CONCEPT \"block-type\" VARIANT \"starter\" VARIABLES\n  VARIABLE 1 \"BlockName\" TITLE \"Name your block type\" DESCRIPTION \"PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake).\" EXAMPLES \"Timeline\", \"FactBox\", \"Milestone\"\n  VARIABLE 2 \"CountBefore\" TITLE \"Registry count before this run\" DESCRIPTION \"The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (42 at authoring time). Opaque numeric literal, no casing transform. Scaffy has no arithmetic, so the count crosses as a declared pair; the W2 validator lints CountAfter = CountBefore + 1.\" EXAMPLES \"42\"\n  VARIABLE 3 \"CountAfter\" TITLE \"Registry count after this run\" DESCRIPTION \"CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. Opaque numeric literal, no casing transform.\" EXAMPLES \"43\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND HONESTLY DOES\n#\n# 3 required code surfaces + fail-closed JS test parity + optional CSS and\n# classification. Never \"4 surfaces auto-injected\":\n#\n#   ● internal/pdrender/{{.block_name}}.go          created — Go renderer\n#   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test\n#   ○ internal/pdrender/pdrender.go                 injected — DefaultRegistry entry\n#   ○ js/packages/react/src/blocks/core.ts          injected ×2 — emitter + map entry\n#   ○ js/packages/react/tests/PortableDoc.test.tsx  injected ×2 — CASES fixture + count bump\n#   ○ api/lib/barkpark/portable_doc/render/compose.ex injected — compose_block clause\n#\n# The JS surface is FAIL-CLOSED at four edits: the react test suite asserts\n# CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry\n# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The Go\n# registry is OPEN (no count test) and the Elixir clause set is OPEN (unknown\n# types degrade through the catch-all) — for those two surfaces the MARK-planted\n# injection is the whole story.\n#\n# The starter render is identical on every surface: the block's `text` attr in\n# a `bp-{{.block-name}}` wrapper (terminal: sanitized + width-wrapped text).\n# Grow each surface from its exemplar afterwards; the scaffold guarantees the\n# block EXISTS everywhere with parity at birth, not that it is finished.\n#\n# GUARDS: every payload below plants a `scaffy:add-block-type … MARK:…` comment,\n# so INSERT guards derive from the payload itself (D3c — the mark line IS the\n# re-run check). The one REPLACE carries an explicit ASLONG because a REPLACE\n# without a payload-derived guard is a lint error (A4).\n#\n# CONDITIONAL / MANUAL STEPS (prose, deliberately NOT blind ops — read these):\n#\n# 1. Composition tier (conditional). tiers.ex classifies every block type as\n#    :element | :widget | :section (api/lib/barkpark/portable_doc/tiers.ex).\n#    An UNCLASSIFIED type degrades safely to :element (slots.ex:98 —\n#    `tier_of(block) || :element`), so a leaf block needs nothing. Add\n#    \"{{.block-name}}\" to the tiers.ex word-list ONLY if the block composes\n#    other blocks (:widget) or owns its children's layout (:section).\n#\n# 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs\n#    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`\n#    pre-rendered-HTML kind, which walk.ex already passes through verbatim\n#    (walk.ex:153, `def walk(%{\"kind\" => \"_raw\", \"html\" => html}, …), do: html`\n#    — the same hatch ~68 sibling compose clauses use). If you later replace\n#    the starter with a genuinely new node kind, THAT is when walk.ex gets a\n#    clause — by hand, next to its siblings.\n#\n# 3. Block-view CSS (optional). If the block needs styling beyond bare text,\n#    add a rule to api/assets/paper-surface/paper-surface.css scoped as\n#    `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout` at\n#    paper-surface.css:213). NEVER inject root.html.heex — it has no per-type\n#    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run\n#    rendered fine with zero CSS; this step is genuinely optional.\n#\n# 4. Count prose (optional tidy). Three comments mention the registry count in\n#    prose and go stale by one: the test title \"covers EXACTLY the 42 in-scope\n#    types\" (PortableDoc.test.tsx:309), the CASES doc comment (\"all 42 render\",\n#    PortableDoc.test.tsx:12), and the REGISTERED_TYPES doc comment (\"the 42\n#    in-scope PortableDocument types\", src/blocks/registry.ts). Cosmetic — no\n#    assertion reads them; tidy them when you touch those files.\n# ─────────────────────────────────────────────────────────────────────────────\n\n# ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────\n\n# Topical renderer file. Implements the Renderer interface\n# (pdrender.go:168, `Render(b Block, ctx RenderCtx) []string`). Modeled on\n# eyebrowRenderer (richblocks.go:389) — the minimal single-attr exemplar; see\n# gaugelist.go for a full data block. Helpers used: attrStr (attrs.go:16),\n# sanitizeText (inline.go:427 — strips control bytes so a hostile `text` can't\n# inject ANSI), wrapLines (blocks.go:15).\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}.go\"\nWITH\n::: {{.block-name}} renderer :::\npackage pdrender\n\n// ── {{.block-name}} ─────────────────────────────────────────────────────────\n// Mirrors compose_block({{.block-name}}) (compose.ex): the starter render is\n// the block's `text` attr, sanitized and width-wrapped. Empty text renders\n// nothing (honest empty state — no phantom blank line in the document flow).\n// Grow this into the block's real terminal form; eyebrowRenderer\n// (richblocks.go) shows themed styling, gaugelist.go a full data block.\ntype {{.blockName}}Renderer struct{}\n\nfunc ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string {\n\ttext := sanitizeText(attrStr(b.Attrs, \"text\"))\n\tif text == \"\" {\n\t\treturn nil\n\t}\n\treturn wrapLines(text, ctx.Width)\n}\n::: {{.block-name}} renderer :::\n\n# Named test — the scoped ASSERT CMD below runs exactly this (never the whole\n# pdrender suite: worktree-pollution red). testRegistry() (render_test.go:27)\n# pins the lipgloss profile so output is byte-stable; going through the\n# registry (not the bare struct) also proves the DefaultRegistry injection.\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}_test.go\"\nWITH\n::: {{.block-name}} test :::\npackage pdrender\n\nimport (\n\t\"strings\"\n\t\"testing\"\n\n\t\"github.com/charmbracelet/x/ansi\"\n)\n\n// Test{{.BlockName}}Renderer proves the {{.block-name}} block renders its text\n// THROUGH the registry — one assertion covering both the renderer and its\n// DefaultRegistry registration.\nfunc Test{{.BlockName}}Renderer(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{\"text\": \"hello from {{.block-name}}\"}}\n\tgot := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), \"\\n\"))\n\tif !strings.Contains(got, \"hello from {{.block-name}}\") {\n\t\tt.Fatalf(\"{{.block-name}} render missing text, got %q\", got)\n\t}\n}\n\n// Test{{.BlockName}}RendererEmptyIsSilent pins the honest empty state: a\n// {{.block-name}} block with no text contributes zero lines.\nfunc Test{{.BlockName}}RendererEmptyIsSilent(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{}}\n\tif lines := reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}); len(lines) != 0 {\n\t\tt.Fatalf(\"empty {{.block-name}} should render nothing, got %d lines\", len(lines))\n\t}\n}\n::: {{.block-name}} test :::\n\n# Register in the DefaultRegistry block map (pdrender.go:249-361). The map is\n# OPEN — assignments are order-independent and there is no count test (a 43rd\n# type left the full suite green in the proof run). Anchor is the heading\n# registration, the map's first and structurally most stable line (unique,\n# grep -cF = 1). Guard derives from the payload's MARK line.\nIN \"internal/pdrender/pdrender.go\"\n### Register {{.block-name}} in the DefaultRegistry block map\nINSERT AFTER FIRST\n::: registry head anchor :::\n\tr.blocks[\"heading\"] = headingRenderer{ir: ir}\n::: registry head anchor :::\nWITH\n::: {{.block-name}} registration :::\n\t// scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}\n\tr.blocks[\"{{.block-name}}\"] = {{.blockName}}Renderer{}\n::: {{.block-name}} registration :::\nMARK \"go-registry-{{.block-name}}\"\n\n# ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────\n\n# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,\n# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml\n# and str are already in scope in core.ts. Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Add the {{.block-name}} emitter beside the eyebrow exemplar\nINSERT AFTER FIRST\n::: eyebrow emitter anchor :::\nconst eyebrow: Emit = (b) => `<p class=\"bp-role-eyebrow\">${escapeHtml(str(b.text))}</p>`\n::: eyebrow emitter anchor :::\nWITH\n::: {{.block-name}} emitter :::\n\n// scaffy:add-block-type {{.BlockName}} MARK:js-emitter-{{.block-name}}\n// Mirrors compose_block({{.block-name}}): starter emit — `text` escaped into\n// the bp-{{.block-name}} wrapper, byte-identical to the Elixir _raw clause.\nconst {{.blockName}}: Emit = (b) => `<div class=\"bp-{{.block-name}}\">${escapeHtml(str(b.text))}</div>`\n::: {{.block-name}} emitter :::\nMARK \"js-emitter-{{.block-name}}\"\n\n# Edit 2/4: the coreEmitters map entry (core.ts:700). registry.ts spreads\n# coreEmitters into DISPATCH, and REGISTERED_TYPES = Object.keys(DISPATCH) —\n# this single entry is what makes the type exist for the SDK. The map's last\n# entry `roadmap,` (unique at this indent, grep -c = 1) KEEPS its trailing\n# comma, so a plain INSERT after it is safe — this is not an A3 last-element\n# case. Key is quoted because kebab-case types need it ('status-legend' sets\n# the precedent). Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Register the {{.block-name}} emitter in the coreEmitters map\nINSERT AFTER FIRST\n::: coreEmitters tail anchor :::\n  roadmap,\n::: coreEmitters tail anchor :::\nWITH\n::: {{.block-name}} map entry :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-map-{{.block-name}}\n  '{{.block-name}}': {{.blockName}},\n::: {{.block-name}} map entry :::\nMARK \"js-map-{{.block-name}}\"\n\n# Edit 3/4: the CASES fixture. The suite's self-proof test asserts\n# CASES ≡ REGISTERED_TYPES (PortableDoc.test.tsx:310-313) — without this\n# fixture the toEqual reds. Anchor is the heading case, the array's first and\n# most stable row (unique). Marker = the wrapper class the emitter writes.\n# Guard derives from the MARK line.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Add the {{.block-name}} fixture to CASES\nINSERT AFTER FIRST\n::: cases head anchor :::\n  { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },\n::: cases head anchor :::\nWITH\n::: {{.block-name}} case :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-case-{{.block-name}}\n  { type: '{{.block-name}}', block: { type: '{{.block-name}}', text: 'Starter' }, marker: 'bp-{{.block-name}}' },\n::: {{.block-name}} case :::\nMARK \"js-case-{{.block-name}}\"\n\n# Edit 4/4: the count bump — the fail-closed pin itself. A REPLACE, not an\n# INSERT: the assertion line must change in place. The replacement does not\n# contain the target (CountBefore ≠ CountAfter), but A4 hygiene still applies:\n# the explicit ASLONG below matches the MARK line this op writes, and re-runs\n# anchor at that mark, never at the mutated count. A second add-block-type run\n# (a different block) is authored against the THEN-current count pair — its\n# target is the new toHaveLength line, and its own mark stacks above it.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Bump the registry count assertion from {{.CountBefore}} to {{.CountAfter}}\nREPLACE\n::: count assertion anchor :::\n    expect(registered).toHaveLength({{.CountBefore}})\n::: count assertion anchor :::\nWITH\n::: {{.block-name}} count bump :::\n    // scaffy:add-block-type {{.BlockName}} MARK:js-count-{{.block-name}}\n    expect(registered).toHaveLength({{.CountAfter}})\n::: {{.block-name}} count bump :::\nMARK \"js-count-{{.block-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:js-count-{{.block-name}}\"\n\n# ── Surface 3: Elixir (api compose) ──────────────────────────────────────────\n\n# One compose_block/2 clause, inserted BEFORE the unknown-type catch-all\n# (`def compose_block(%{\"type\" => type}, _style)`, compose.ex:1190) — clause\n# order is load-bearing: anything after the catch-all is unreachable. The\n# anchor is the END of the last typed clause (the chart email clause,\n# compose.ex:1180-1181; `chart_email_html(b)` is unique, grep -cF = 1).\n# Inserting AFTER it — rather than before the catch-all's comment — keeps the\n# catch-all's own doc comment attached to its clause. render.ex is UNTOUCHED:\n# render_block/2 (render.ex:182) is the entry point and dispatches every type\n# through compose; it needs zero edits. Guard derives from the MARK line.\nIN \"api/lib/barkpark/portable_doc/render/compose.ex\"\n### Add the {{.block-name}} compose clause before the unknown-type catch-all\nINSERT AFTER FIRST\n::: last typed clause anchor :::\n    %{\"kind\" => \"_raw\", \"html\" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}\n  end\n::: last typed clause anchor :::\nWITH\n::: {{.block-name}} compose clause :::\n\n  # scaffy:add-block-type {{.BlockName}} MARK:ex-compose-{{.block-name}}\n  # Starter compose for `{{.block-name}}`: the block's `text` attr escaped into\n  # its bp-{{.block-name}} wrapper through the `_raw` pre-rendered-HTML hatch\n  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling\n  # clauses use). Every style gets the same div for now; replace with a real\n  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)\n  # as the block grows semantics. `text` goes through the tolerant stringish/1\n  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of\n  # the wrapper (papers are schemaless — same defense as the catch-all below).\n  def compose_block(%{\"type\" => \"{{.block-name}}\"} = b, _style) do\n    text = stringish(Map.get(b, \"text\", \"\"))\n\n    %{\n      \"kind\" => \"_raw\",\n      \"html\" => ~s(<div class=\"bp-{{.block-name}}\">) <> Util.escape_html(text) <> ~s(</div>)\n    }\n  end\n::: {{.block-name}} compose clause :::\nMARK \"ex-compose-{{.block-name}}\"\n\n# ── Post-conditions ──────────────────────────────────────────────────────────\n\n# Per-surface file asserts — each string is a verbatim substring of what an op\n# above writes (ASCII, brace-free).\nASSERT FILE \"internal/pdrender/{{.block_name}}.go\" CONTAINS \"func ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string\"\nASSERT FILE \"internal/pdrender/{{.block_name}}_test.go\" CONTAINS \"func Test{{.BlockName}}Renderer(t *testing.T)\"\nASSERT FILE \"internal/pdrender/pdrender.go\" CONTAINS \"MARK:go-registry-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-emitter-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-map-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"MARK:js-case-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"toHaveLength({{.CountAfter}})\"\nASSERT FILE \"api/lib/barkpark/portable_doc/render/compose.ex\" CONTAINS \"MARK:ex-compose-{{.block-name}}\"\n\n# Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the\n# NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)\n# — never the whole pdrender suite. The react vitest run is the fail-closed\n# proof: it reds unless all four JS edits landed. Every Elixir gate is TIER ci\n# until scoped local mix test is proven safe.\nASSERT CMD \"go vet ./internal/pdrender/...\"\nASSERT CMD \"CC=/usr/bin/clang go build ./internal/pdrender/\"\nASSERT CMD \"go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1\"\nASSERT CMD \"cd js/packages/react && npx tsc --noEmit\"\nASSERT CMD \"cd js/packages/react && npx vitest run\"\nASSERT CMD \"cd api && mix test test/barkpark/portable_doc/render_test.exs\" TIER ci\n"
+      "value": "COMMAND \"Add PortableDoc Block Type\" DESCRIPTION \"Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper).\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"portabledoc\", \"block\", \"render\" CONCEPT \"block-type\" VARIANT \"starter\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"BlockName\" TITLE \"Name your block type\" DESCRIPTION \"PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake).\" EXAMPLES \"Timeline\", \"FactBox\", \"Milestone\"\n  VARIABLE 2 \"CountBefore\" OPAQUE TITLE \"Registry count before this run\" DESCRIPTION \"The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (46 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints.\" EXAMPLES \"46\"\n  VARIABLE 3 \"CountAfter\" OPAQUE SUCCESSOR \"CountBefore\" TITLE \"Registry count after this run\" DESCRIPTION \"CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair.\" EXAMPLES \"47\"\n  VARIABLE 4 \"ParityCountBefore\" OPAQUE TITLE \"Golden-parity census before this run\" DESCRIPTION \"The compose-dispatch census the parity harness currently pins — the number in EXPECTED_COUNT= in scripts/pd-parity-completeness.sh AND inside `== N` in pd_golden_parity_test.exs (46 at authoring time). A DIFFERENT number line from the JS registry's CountBefore — the two pins move independently (compose.ex dispatches 60 types with 14 excluded; the react SDK scopes its own registry) and only coincidentally both read 46 today. OPAQUE numeric literal, never re-cased.\" EXAMPLES \"46\"\n  VARIABLE 5 \"ParityCountAfter\" OPAQUE SUCCESSOR \"ParityCountBefore\" TITLE \"Golden-parity census after this run\" DESCRIPTION \"ParityCountBefore plus one — what both parity count pins must say once the compose clause and its golden fixture exist. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair.\" EXAMPLES \"47\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND HONESTLY DOES\n#\n# 3 required code surfaces + fail-closed JS test parity + the required\n# golden-parity harness leg + optional CSS and classification. Never\n# \"4 surfaces auto-injected\":\n#\n#   ● internal/pdrender/{{.block_name}}.go          created — Go renderer\n#   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test\n#   ○ internal/pdrender/pdrender.go                 injected — DefaultRegistry entry\n#   ○ js/packages/react/src/blocks/core.ts          injected ×2 — emitter + map entry\n#   ○ js/packages/react/tests/PortableDoc.test.tsx  injected ×2 — CASES fixture + count bump\n#   ○ api/lib/barkpark/portable_doc/render/compose.ex injected — compose_block clause\n#   ○ api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex injected — @inputs parity fixture\n#   ○ scripts/pd-parity-completeness.sh             injected — EXPECTED_COUNT pin bump\n#   ○ api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs injected — census pin bump\n#\n# The gen_pd_parity ASSERT CMD below additionally GENERATES (never injects) the\n# frozen golden pair api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json\n# + js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json —\n# derived artifacts, receipt-unowned; manual step 5 is their rollback recipe.\n#\n# The JS surface is FAIL-CLOSED at four edits: the react test suite asserts\n# CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry\n# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The Go\n# registry is OPEN (no count test) and the Elixir clause set is OPEN (unknown\n# types degrade through the catch-all) — for those two surfaces the MARK-planted\n# injection is the whole story.\n#\n# The starter render is identical on every surface: the block's `text` attr in\n# a `bp-{{.block-name}}` wrapper (terminal: sanitized + width-wrapped text).\n# Grow each surface from its exemplar afterwards; the scaffold guarantees the\n# block EXISTS everywhere with parity at birth, not that it is finished.\n#\n# GUARDS: every payload below plants a `scaffy:add-block-type … MARK:…` comment,\n# so INSERT guards derive from the payload itself (D3c — the mark line IS the\n# re-run check). The one REPLACE carries an explicit ASLONG because a REPLACE\n# without a payload-derived guard is a lint error (A4).\n#\n# CONDITIONAL / MANUAL STEPS (prose, deliberately NOT blind ops — read these):\n#\n# 1. Composition tier (conditional). tiers.ex classifies every block type as\n#    :element | :widget | :section (api/lib/barkpark/portable_doc/tiers.ex).\n#    An UNCLASSIFIED type degrades safely to :element (slots.ex:98 —\n#    `tier_of(block) || :element`), so a leaf block needs nothing. Add\n#    \"{{.block-name}}\" to the tiers.ex word-list ONLY if the block composes\n#    other blocks (:widget) or owns its children's layout (:section).\n#\n# 2. walk.ex kind dispatch (conditional — NOT needed here). walk.ex only needs\n#    a new clause for a NEW Pd node kind. This scaffold composes to the `_raw`\n#    pre-rendered-HTML kind, which walk.ex already passes through verbatim\n#    (walk.ex:153, `def walk(%{\"kind\" => \"_raw\", \"html\" => html}, …), do: html`\n#    — the same hatch ~68 sibling compose clauses use). If you later replace\n#    the starter with a genuinely new node kind, THAT is when walk.ex gets a\n#    clause — by hand, next to its siblings.\n#\n# 3. Block-view CSS (optional). If the block needs styling beyond bare text,\n#    add a rule to api/assets/paper-surface/paper-surface.css scoped as\n#    `.bp-paper-surface .bp-{{.block-name}} { … }` (exemplar: `.bp-callout` at\n#    paper-surface.css:213). NEVER inject root.html.heex — it has no per-type\n#    anchor, only ad-hoc editor-affordance rules. The dummy-block proof run\n#    rendered fine with zero CSS; this step is genuinely optional.\n#\n# 4. Count prose (optional tidy). Comments mention the two censuses in prose\n#    and go stale by one: the test title \"covers EXACTLY the 46 in-scope\n#    types\" (PortableDoc.test.tsx:340), the CASES doc comment (\"all 46 render\",\n#    PortableDoc.test.tsx:12), the REGISTERED_TYPES doc comment (\"the 46\n#    in-scope\", src/blocks/registry.ts:32) — and on the\n#    parity side the \"46\" mentions in gen_pd_parity.ex's moduledoc, the\n#    pd_golden_parity_test.exs test title \"the array holds exactly 46 in-scope\n#    types\" + its moduledoc, and pd-parity-completeness.sh's comments. Cosmetic\n#    — no assertion reads them; tidy them when you touch those files.\n#\n# 5. Derived parity fixtures (rollback recipe). The gen_pd_parity ASSERT CMD\n#    writes the golden PAIR\n#    api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json +\n#    js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json.\n#    These are DERIVED artifacts — the receipt does NOT own them (the mix task\n#    wrote the bytes, not scaffy), so `bp scaffy remove` alone cannot retract\n#    them. Full rollback is three moves: `bp scaffy remove` (inverts every\n#    .go/.ts/.tsx/.ex/.exs/.sh edit above), trash the two generated fixture\n#    files by hand, then re-run `bash scripts/pd-parity-completeness.sh` to\n#    prove the tree re-greened at the original {{.ParityCountBefore}} census.\n# ─────────────────────────────────────────────────────────────────────────────\n\n# ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────\n\n# Topical renderer file. Implements the Renderer interface\n# (pdrender.go:168-170; the `Render(b Block, ctx RenderCtx) []string`\n# signature is :169). Modeled on\n# eyebrowRenderer (richblocks.go:389) — the minimal single-attr exemplar; see\n# gaugelist.go for a full data block. Helpers used: attrStr (attrs.go:16),\n# sanitizeText (inline.go:427 — strips control bytes so a hostile `text` can't\n# inject ANSI), wrapLines (blocks.go:15).\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}.go\"\nWITH\n::: {{.block-name}} renderer :::\npackage pdrender\n\n// ── {{.block-name}} ─────────────────────────────────────────────────────────\n// Mirrors compose_block({{.block-name}}) (compose.ex): the starter render is\n// the block's `text` attr, sanitized and width-wrapped. Empty text renders\n// nothing (honest empty state — no phantom blank line in the document flow).\n// Grow this into the block's real terminal form; eyebrowRenderer\n// (richblocks.go) shows themed styling, gaugelist.go a full data block.\ntype {{.blockName}}Renderer struct{}\n\nfunc ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string {\n\ttext := sanitizeText(attrStr(b.Attrs, \"text\"))\n\tif text == \"\" {\n\t\treturn nil\n\t}\n\treturn wrapLines(text, ctx.Width)\n}\n::: {{.block-name}} renderer :::\n\n# Named test — the scoped ASSERT CMD below runs exactly this (never the whole\n# pdrender suite: worktree-pollution red). testRegistry() (render_test.go:27)\n# pins the lipgloss profile so output is byte-stable; going through the\n# registry (not the bare struct) also proves the DefaultRegistry injection.\nCREATE FILE IF ABSENT \"internal/pdrender/{{.block_name}}_test.go\"\nWITH\n::: {{.block-name}} test :::\npackage pdrender\n\nimport (\n\t\"strings\"\n\t\"testing\"\n\n\t\"github.com/charmbracelet/x/ansi\"\n)\n\n// Test{{.BlockName}}Renderer proves the {{.block-name}} block renders its text\n// THROUGH the registry — one assertion covering both the renderer and its\n// DefaultRegistry registration.\nfunc Test{{.BlockName}}Renderer(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{\"text\": \"hello from {{.block-name}}\"}}\n\tgot := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), \"\\n\"))\n\tif !strings.Contains(got, \"hello from {{.block-name}}\") {\n\t\tt.Fatalf(\"{{.block-name}} render missing text, got %q\", got)\n\t}\n}\n\n// Test{{.BlockName}}RendererEmptyIsSilent pins the honest empty state: a\n// {{.block-name}} block with no text contributes zero lines.\nfunc Test{{.BlockName}}RendererEmptyIsSilent(t *testing.T) {\n\treg := testRegistry()\n\tb := Block{Type: \"{{.block-name}}\", Attrs: map[string]any{}}\n\tif lines := reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}); len(lines) != 0 {\n\t\tt.Fatalf(\"empty {{.block-name}} should render nothing, got %d lines\", len(lines))\n\t}\n}\n::: {{.block-name}} test :::\n\n# Register in the DefaultRegistry block map (pdrender.go:249-389). The map is\n# OPEN — assignments are order-independent and there is no count test (a 43rd\n# type left the full suite green in the proof run). Anchor is the heading\n# registration, the map's first and structurally most stable line (unique,\n# grep -cF = 1). Guard derives from the payload's MARK line.\nIN \"internal/pdrender/pdrender.go\"\n### Register {{.block-name}} in the DefaultRegistry block map\nINSERT AFTER FIRST\n::: registry head anchor :::\n\tr.blocks[\"heading\"] = headingRenderer{ir: ir}\n::: registry head anchor :::\nWITH\n::: {{.block-name}} registration :::\n\t// scaffy:add-block-type {{.BlockName}} MARK:go-registry-{{.block-name}}\n\tr.blocks[\"{{.block-name}}\"] = {{.blockName}}Renderer{}\n::: {{.block-name}} registration :::\nMARK \"go-registry-{{.block-name}}\"\n\n# ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────\n\n# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,\n# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml\n# and str are already in scope in core.ts. Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Add the {{.block-name}} emitter beside the eyebrow exemplar\nINSERT AFTER FIRST\n::: eyebrow emitter anchor :::\nconst eyebrow: Emit = (b) => `<p class=\"bp-role-eyebrow\">${escapeHtml(str(b.text))}</p>`\n::: eyebrow emitter anchor :::\nWITH\n::: {{.block-name}} emitter :::\n\n// scaffy:add-block-type {{.BlockName}} MARK:js-emitter-{{.block-name}}\n// Mirrors compose_block({{.block-name}}): starter emit — `text` escaped into\n// the bp-{{.block-name}} wrapper, byte-identical to the Elixir _raw clause.\nconst {{.blockName}}: Emit = (b) => `<div class=\"bp-{{.block-name}}\">${escapeHtml(str(b.text))}</div>`\n::: {{.block-name}} emitter :::\nMARK \"js-emitter-{{.block-name}}\"\n\n# Edit 2/4: the coreEmitters map entry (core.ts:700). registry.ts spreads\n# coreEmitters into DISPATCH, and REGISTERED_TYPES = Object.keys(DISPATCH) —\n# this single entry is what makes the type exist for the SDK. The map's last\n# entry `roadmap,` (unique at this indent, grep -c = 1) KEEPS its trailing\n# comma, so a plain INSERT after it is safe — this is not an A3 last-element\n# case. Key is quoted because kebab-case types need it ('status-legend' sets\n# the precedent). Guard derives from the MARK line.\nIN \"js/packages/react/src/blocks/core.ts\"\n### Register the {{.block-name}} emitter in the coreEmitters map\nINSERT AFTER FIRST\n::: coreEmitters tail anchor :::\n  roadmap,\n::: coreEmitters tail anchor :::\nWITH\n::: {{.block-name}} map entry :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-map-{{.block-name}}\n  '{{.block-name}}': {{.blockName}},\n::: {{.block-name}} map entry :::\nMARK \"js-map-{{.block-name}}\"\n\n# Edit 3/4: the CASES fixture. The suite's self-proof test asserts\n# CASES ≡ REGISTERED_TYPES (PortableDoc.test.tsx:310-313) — without this\n# fixture the toEqual reds. Anchor is the heading case, the array's first and\n# most stable row (unique). Marker = the wrapper class the emitter writes.\n# Guard derives from the MARK line.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Add the {{.block-name}} fixture to CASES\nINSERT AFTER FIRST\n::: cases head anchor :::\n  { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },\n::: cases head anchor :::\nWITH\n::: {{.block-name}} case :::\n  // scaffy:add-block-type {{.BlockName}} MARK:js-case-{{.block-name}}\n  { type: '{{.block-name}}', block: { type: '{{.block-name}}', text: 'Starter' }, marker: 'bp-{{.block-name}}' },\n::: {{.block-name}} case :::\nMARK \"js-case-{{.block-name}}\"\n\n# Edit 4/4: the count bump — the fail-closed pin itself. A REPLACE, not an\n# INSERT: the assertion line must change in place. The replacement does not\n# contain the target (CountBefore ≠ CountAfter), but A4 hygiene still applies:\n# the explicit ASLONG below matches the MARK line this op writes, and re-runs\n# anchor at that mark, never at the mutated count. A second add-block-type run\n# (a different block) is authored against the THEN-current count pair — its\n# target is the new toHaveLength line, and its own mark stacks above it.\nIN \"js/packages/react/tests/PortableDoc.test.tsx\"\n### Bump the registry count assertion from {{.CountBefore}} to {{.CountAfter}}\nREPLACE\n::: count assertion anchor :::\n    expect(registered).toHaveLength({{.CountBefore}})\n::: count assertion anchor :::\nWITH\n::: {{.block-name}} count bump :::\n    // scaffy:add-block-type {{.BlockName}} MARK:js-count-{{.block-name}}\n    expect(registered).toHaveLength({{.CountAfter}})\n::: {{.block-name}} count bump :::\nMARK \"js-count-{{.block-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:js-count-{{.block-name}}\"\n\n# ── Surface 3: Elixir (api compose) ──────────────────────────────────────────\n\n# One compose_block/2 clause, inserted BEFORE the unknown-type catch-all\n# (`def compose_block(%{\"type\" => type}, _style)`, compose.ex:1190) — clause\n# order is load-bearing: anything after the catch-all is unreachable. The\n# anchor is the END of the last typed clause (the chart email clause,\n# compose.ex:1180-1181; `chart_email_html(b)` is unique, grep -cF = 1).\n# Inserting AFTER it — rather than before the catch-all's comment — keeps the\n# catch-all's own doc comment attached to its clause. render.ex is UNTOUCHED:\n# render_block/2 (render.ex:182) is the entry point and dispatches every type\n# through compose; it needs zero edits. Guard derives from the MARK line.\nIN \"api/lib/barkpark/portable_doc/render/compose.ex\"\n### Add the {{.block-name}} compose clause before the unknown-type catch-all\nINSERT AFTER FIRST\n::: last typed clause anchor :::\n    %{\"kind\" => \"_raw\", \"html\" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}\n  end\n::: last typed clause anchor :::\nWITH\n::: {{.block-name}} compose clause :::\n\n  # scaffy:add-block-type {{.BlockName}} MARK:ex-compose-{{.block-name}}\n  # Starter compose for `{{.block-name}}`: the block's `text` attr escaped into\n  # its bp-{{.block-name}} wrapper through the `_raw` pre-rendered-HTML hatch\n  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling\n  # clauses use). Every style gets the same div for now; replace with a real\n  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)\n  # as the block grows semantics. `text` goes through the tolerant stringish/1\n  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of\n  # the wrapper (papers are schemaless — same defense as the catch-all below).\n  def compose_block(%{\"type\" => \"{{.block-name}}\"} = b, _style) do\n    text = stringish(Map.get(b, \"text\", \"\"))\n\n    %{\n      \"kind\" => \"_raw\",\n      \"html\" => ~s(<div class=\"bp-{{.block-name}}\">) <> Util.escape_html(text) <> ~s(</div>)\n    }\n  end\n::: {{.block-name}} compose clause :::\nMARK \"ex-compose-{{.block-name}}\"\n\n# ── Surface 4: golden-parity harness (closes the local-green/CI-red gap) ────\n\n# The three surfaces above go green on every local ASSERT while CI still reds:\n# doc-gates.yml runs scripts/pd-parity-completeness.sh on ANY **/*.ex diff\n# (compose.ex is one), and that script counts compose.ex's dispatched types\n# against a hard EXPECTED_COUNT pin — a new compose clause without a golden\n# fixture + census bump = a CI red the local ASSERT list never exercised.\n# This leg is REQUIRED (house doctrine — tests are never optional), and it is\n# why the census crosses as a SECOND OPAQUE+SUCCESSOR pair: ParityCountBefore/\n# After pin the compose-dispatch census (46 at authoring time), a different\n# number line from the JS registry's CountBefore/After — the two pins move\n# independently and only coincidentally both read 46 today.\n\n# Parity fixture 1/3: one realistic authored input for the new type in the\n# generator's hand-literal @inputs map. The anchor is the map's opening line\n# (`@inputs %{`, gen_pd_parity.ex:81, grep -cF = 1). The sample MUST satisfy\n# the compose clause Surface 3 writes: that clause reads exactly one attr —\n# `text`, via stringish/1 — and a non-empty text is what keeps the frozen\n# shape projection non-empty (pd_golden_parity_test.exs reds on an empty\n# shape). Guard derives from the MARK line.\nIN \"api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex\"\n### Add the {{.block-name}} parity input to the @inputs hand-literal map\nINSERT AFTER FIRST\n::: inputs map opening anchor :::\n  @inputs %{\n::: inputs map opening anchor :::\nWITH\n::: {{.block-name}} parity input :::\n    # scaffy:add-block-type {{.BlockName}} MARK:parity-input-{{.block-name}}\n    \"{{.block-name}}\" => %{\"type\" => \"{{.block-name}}\", \"text\" => \"Parity starter text\"},\n::: {{.block-name}} parity input :::\nMARK \"parity-input-{{.block-name}}\"\n\n# Census pin 2/3: the completeness script's EXPECTED_COUNT. A REPLACE against\n# the current count line (unique — every other mention reads $EXPECTED_COUNT).\n# The target never survives in the replacement (ParityCountBefore ≠\n# ParityCountAfter), but A4 hygiene still applies: the explicit ASLONG below\n# matches the MARK line this op writes, and re-runs anchor at that mark. A\n# second add-block-type run (a different block) is authored against the\n# THEN-current census pair — its own mark stacks above the line.\nIN \"scripts/pd-parity-completeness.sh\"\n### Bump the completeness census pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}\nREPLACE\n::: expected count anchor :::\nEXPECTED_COUNT={{.ParityCountBefore}}\n::: expected count anchor :::\nWITH\n::: {{.block-name}} completeness pin bump :::\n# scaffy:add-block-type {{.BlockName}} MARK:parity-count-script-{{.block-name}}\nEXPECTED_COUNT={{.ParityCountAfter}}\n::: {{.block-name}} completeness pin bump :::\nMARK \"parity-count-script-{{.block-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:parity-count-script-{{.block-name}}\"\n\n# Census pin 3/3: the parity suite's scope assertion (pd_golden_parity_test.exs\n# :35 — `assert length(GenPdParity.types()) == N`, unique). Same REPLACE\n# discipline as pin 2/3; the mark comment sits inside the test's do-block, a\n# legal Elixir comment position.\nIN \"api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs\"\n### Bump the parity suite census assert from {{.ParityCountBefore}} to {{.ParityCountAfter}}\nREPLACE\n::: census assert anchor :::\n    assert length(GenPdParity.types()) == {{.ParityCountBefore}}\n::: census assert anchor :::\nWITH\n::: {{.block-name}} census assert bump :::\n    # scaffy:add-block-type {{.BlockName}} MARK:parity-count-test-{{.block-name}}\n    assert length(GenPdParity.types()) == {{.ParityCountAfter}}\n::: {{.block-name}} census assert bump :::\nMARK \"parity-count-test-{{.block-name}}\"\nASLONG FILE DONT CONTAIN \"MARK:parity-count-test-{{.block-name}}\"\n\n# ── Post-conditions ──────────────────────────────────────────────────────────\n\n# Per-surface file asserts — each string is a verbatim substring of what an op\n# above writes (ASCII, brace-free).\nASSERT FILE \"internal/pdrender/{{.block_name}}.go\" CONTAINS \"func ({{.blockName}}Renderer) Render(b Block, ctx RenderCtx) []string\"\nASSERT FILE \"internal/pdrender/{{.block_name}}_test.go\" CONTAINS \"func Test{{.BlockName}}Renderer(t *testing.T)\"\nASSERT FILE \"internal/pdrender/pdrender.go\" CONTAINS \"MARK:go-registry-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-emitter-{{.block-name}}\"\nASSERT FILE \"js/packages/react/src/blocks/core.ts\" CONTAINS \"MARK:js-map-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"MARK:js-case-{{.block-name}}\"\nASSERT FILE \"js/packages/react/tests/PortableDoc.test.tsx\" CONTAINS \"toHaveLength({{.CountAfter}})\"\nASSERT FILE \"api/lib/barkpark/portable_doc/render/compose.ex\" CONTAINS \"MARK:ex-compose-{{.block-name}}\"\nASSERT FILE \"api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex\" CONTAINS \"MARK:parity-input-{{.block-name}}\"\nASSERT FILE \"scripts/pd-parity-completeness.sh\" CONTAINS \"EXPECTED_COUNT={{.ParityCountAfter}}\"\nASSERT FILE \"api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs\" CONTAINS \"== {{.ParityCountAfter}}\"\n\n# Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the\n# NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)\n# — never the whole pdrender suite. The react vitest run is the fail-closed\n# proof: it reds unless all four JS edits landed. Every Elixir gate is TIER ci\n# until scoped local mix test is proven safe.\nASSERT CMD \"go vet ./internal/pdrender/...\"\nASSERT CMD \"CC=/usr/bin/clang go build ./internal/pdrender/\"\nASSERT CMD \"go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1\"\n# Precondition for BOTH JS gates below (D29): in a fresh worktree the js\n# workspace has no node_modules and no built package dists — tsc reds with\n# ~103 cannot-find-module errors and vitest cannot resolve the workspace\n# deps. One install + build greens both (proven: 103 errors -> 0, exit 0\n# twice; vitest 12 files / 192 tests).\nASSERT CMD \"cd js && pnpm install && pnpm build\"\nASSERT CMD \"cd js/packages/react && npx tsc --noEmit\"\nASSERT CMD \"cd js/packages/react && npx vitest run\"\nASSERT CMD \"cd api && mix test test/barkpark/portable_doc/render_test.exs\" TIER ci\n# Golden-parity leg (Surface 4). ONE gen run writes BOTH mirrors (proven —\n# mirror_dirs() is the api fixtures dir + the js pd-golden dir); the EXISTS\n# asserts sit between the CMDs on purpose: assertions execute in source order,\n# so the pair is checked the moment the generator claims to have written it.\n# The completeness script MUST run under bash (its shebang — zsh word-splits\n# vacuously → false green), and the parity suite is the scoped single-file mix\n# test A2 proved local-safe with a warm _build.\nASSERT CMD \"cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity\"\nASSERT FILE \"api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json\" EXISTS\nASSERT FILE \"js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json\" EXISTS\nASSERT CMD \"bash scripts/pd-parity-completeness.sh\"\nASSERT CMD \"cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs\"\n"
     },
     {
       "id": "scs-015",
@@ -2776,6 +3000,1898 @@
             {
               "type": "text",
               "value": "no-op — already retracted (3 skipped), 0ms"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-067",
+      "type": "divider"
+    },
+    {
+      "id": "scs-068",
+      "type": "heading",
+      "level": 2,
+      "text": "Wave 5 — seven more repetitions, captured"
+    },
+    {
+      "id": "scs-069",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Every entry below answers a proven repetition, frequency-mined from twelve months of git history at Decide time: 38 clause-adds in errors.ex, 274 commits mentioning @canonical with 40 live markers, a three-copy CLI-noun drift stuck since July 3rd through fifteen noun-adding commits, 8+ Mix tasks carrying the byte-identical dry-run/--apply idiom. Wave 5 also lands the first grammar primitive since the Wave-2 annotations: ONEOF, the closed enum variable (D56) — a wrong --var value is refused at substitution time, before anything is written. The corpus census below is the same one internal/scaffy/corpus_test.go freezes as executable law: 14 files, re-derived from the parsed AST, any drift red."
+        }
+      ]
+    },
+    {
+      "id": "scs-070",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Command"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Concept"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Variant"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "What it does"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "build-clause"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a new v1 error code: @hints entry + build/1 clause + test; known_codes/0, the OpenAPI enum and the coverage test self-derive"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-canonical-marker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "canonical-marker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plant-above-head"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plants the two-line @canonical marker above any public def/func/export so grep lands on the one true implementation"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ensure-import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ensure-import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "elixir"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "idempotently ensures an Elixir import line exists — guard is the import line itself, so a hand-edit wins"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "idempotently ensures a noun sits in the bp shell-completion set — same ensure law, Go spelling"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-backfill-task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "backfill-task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "dry-run-apply"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a one-shot backfill Mix.Task where a bare run writes nothing and --apply mutates — plus its paired pure-helper test"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-schema-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "schema-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "minimal-template"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a plugin-declared document type in the 6-key minimal-template shape; Visibility is a ONEOF enum"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "classify-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tier-classify"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "adds a block type to its composition-doctrine tier word list — the manual step add-block-type could only describe; Tier is the corpus's first ONEOF"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "scs-071",
+      "type": "divider"
+    },
+    {
+      "id": "scs-072",
+      "type": "heading",
+      "level": 2,
+      "text": "add-error-shape — a v1 error code lands end-to-end"
+    },
+    {
+      "id": "scs-073",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The scar this closes was measured, not guessed: 38 clause-adds in errors.ex's history, each one the same three edits by hand. The command accretes behind marks — a fix-suggesting @hints entry, a build/1 clause mapping {:error, :code} to its {code, message, status} envelope, and a test — and everything else self-derives: known_codes/0 reads @hints, the OpenAPI Error.code enum and the coverage test read known_codes/0. The test carries a deliberate tripwire: it asserts the new code's membership in known_codes(), so a hint entry that never landed cannot pass."
+        }
+      ]
+    },
+    {
+      "id": "scs-074",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/\n    ├── lib/barkpark/content/errors.ex         ○ injected ×2  @MARK error-hint-… / error-shape-…\n    └── test/barkpark/content/errors_test.exs  ○ injected     @MARK error-test-…\n\n(zero ● — errors.ex already owns the registry; the command accretes into it behind marks)"
+    },
+    {
+      "id": "scs-075",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add an API Error Shape\" DESCRIPTION \"Land a new v1 JSON error code end-to-end: a fix-suggesting @hints entry, a build/1 clause that maps its {:error, :code} tuple to a {code, message, status} envelope, and a unit test — idempotently, accreting behind marks. known_codes/0, the OpenAPI Error.code enum, and the coverage test all self-derive.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"scaffy\", \"testing\", \"scaffold\" CONCEPT \"error-shape\" VARIANT \"build-clause\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"error_code\" OPAQUE TITLE \"The stable error code\" DESCRIPTION \"The snake_case `code` string the envelope carries and callers key on. Also the atom in the {:error, :code} tuple build/1 matches. OPAQUE: never re-cased, one spelling per file (this file uses the kebab joiner-output {{.error-code}} so it is legal inside mark names), exempt from path-casing lints.\" EXAMPLES \"playground_expired\", \"billing_required\", \"region_unavailable\"\n  VARIABLE 2 \"Hint\" OPAQUE TITLE \"Fix-suggesting hint\" DESCRIPTION \"One imperative line telling the caller what to fix. Registered in @hints and stamped onto the envelope additively (code/message/status stay stable). OPAQUE: verbatim, never re-cased.\" EXAMPLES \"Start a fresh playground session — this one's TTL elapsed and its data was reaped.\"\n  VARIABLE 3 \"Message\" OPAQUE TITLE \"Envelope message\" DESCRIPTION \"The human-readable `message` field of the error envelope build/1 returns. OPAQUE: verbatim, never re-cased.\" EXAMPLES \"playground session expired\", \"billing setup required\"\n  VARIABLE 4 \"Status\" OPAQUE TITLE \"HTTP status code\" DESCRIPTION \"The integer HTTP status the envelope carries (unquoted number in the map literal). OPAQUE: verbatim, one spelling per file.\" EXAMPLES \"403\", \"402\", \"422\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# What this command does (and, deliberately, does NOT touch)\n# ─────────────────────────────────────────────────────────────────────────────\n# A new public v1 error code is a SMALL, CLOSED edit surface — the query/legacy\n# \"duplicated error emitters\" scar is healed: 13 controllers action_fallback into\n# FallbackController → Content.Errors, so both controllers emit only shared\n# tuples (charter D54a). There is NO FOREACH-over-emitters to do. The mechanizable\n# surface is exactly THREE sites, all in two files:\n#\n#   ● errors.ex @hints  — the fix-suggesting hint, keyed off the stable `code`.\n#                         Registering it here is what enters the code into\n#                         known_codes/0 (errors.ex:132-134 = Map.keys(@hints) ∪\n#                         @public_inline_codes), and THAT is the single source\n#                         for the served OpenAPI `Error.code` enum. (Op A)\n#   ● errors.ex build/1 — the clause that maps {:error, :code} to the\n#                         {code, message, status} envelope, inserted BEFORE the\n#                         true catch-all (which matches everything). (Op B)\n#   ● errors_test.exs   — a unit test pinning the envelope shape AND the\n#                         known_codes/0 membership (the DELIBERATE tripwire —\n#                         known_codes derives from @hints, so the OpenAPI\n#                         drift-guard is a tautology; only a membership test\n#                         catches a dropped @hints entry). (Op C)\n#\n# TWO ACCRETION IDIOMS, chosen by the SEPARATOR of the collection each op grows:\n#   • Op A grows the @hints MAP, whose entries are COMMA-separated. Its last\n#     entry (quota_exceeded) carries no trailing comma before the closing `}`, so\n#     a bare INSERT would abut two map pairs with no separator (a syntax error).\n#     The fix is the A3 comma-list idiom: a self-consuming REPLACE that re-emits\n#     the last entry WITH a comma + the new entry, guarded by a payload-derived\n#     ASLONG and REANCHOR (E-005). REANCHOR's splice inserts a COMMA between\n#     siblings — exactly right for a map. The map's `}` is OUTSIDE the anchor.\n#   • Ops B and C grow collections of `defp` clauses / `test` blocks, which are\n#     separated by BLANK LINES, not commas. REANCHOR would wrongly splice a comma\n#     between them (a syntax error), so they use INSERT AFTER FIRST instead: the\n#     new block is inserted after a fixed, stable anchor and the anchor is left\n#     intact (never self-consuming, so E-005 does not apply). Idempotency is the\n#     engine's implicit planted-MARK guard — a second run with the same code sees\n#     its own `MARK:error-…-<code>` already present and skips. Sibling accretion\n#     is LIFO (each new code lands right after the same anchor), which is fine:\n#     order among these blocks is irrelevant (disjoint clause patterns; a flat\n#     test list).\n#\n# SELF-DERIVING — ZERO ops, do NOT touch:\n#   • known_codes/0 (errors.ex:132-134) recomputes from @hints on every call.\n#   • The OpenAPI `Error.code` enum (Barkpark.Api.OpenApi) reads known_codes/0.\n#   • test/barkpark_web/contract/error_code_coverage_test.exs globs the controller\n#     dirs for emitted codes and asserts emitted ⊆ known_codes — a build/1-only\n#     code (never written INLINE by a controller) simply never appears in\n#     `emitted`, so growing known_codes can never red it.\n#\n# NOT MECHANIZED — one required MANUAL step (see the §9 note at the bottom):\n#   • docs/api-v1.md §9 is a HAND-CURATED human prose list, and it IS gate-locked\n#     by errors_doc_coverage_test.exs (every known code must appear verbatim in\n#     backticks in §9). A generic command cannot mechanize the append: (1) §9 is\n#     editorial prose grouped by category (core / additive / endpoint-specific) —\n#     which bucket a new code belongs to is a human judgment; (2) api-v1.md sits\n#     at its CI-enforced byte budget (13991/14000 B — 9 bytes of headroom), so a\n#     mechanical append overflows check-doc-budgets.sh, and the doc contract\n#     FORBIDS raising the cap. Adding the §9 line (with a compensating prose\n#     trim) is the author's one hand-edit; this command is loud about it rather\n#     than papering over it or falsely claiming self-derivation.\n\n# Token spellings-as-transforms (D3d / A1). error_code is OPAQUE (its VALUE is\n# substituted verbatim, never re-cased). Under D22 an OPAQUE reference uses ONE\n# spelling per file — any legal joiner-output of the declared name. This file uses\n# the kebab spelling {{.error-code}} throughout, because a MARK name must be kebab\n# (E-019) and the snake `error_code` would red it. The value is unaffected:\n#   {{.error-code}}  → playground_expired  (the --var value, verbatim)\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP A — register the fix-suggesting hint (this is what enters known_codes/0)\n# ─────────────────────────────────────────────────────────────────────────────\n# The @hints map's LAST entry is `\"quota_exceeded\" => \"…\"` (errors.ex:72-73) and\n# the map's closing `}` (:74) follows with NO trailing comma before it — a bare\n# INSERT of a second entry abuts two map pairs with no separator (Elixir syntax\n# error). Under A3 the append is a FENCED REPLACE of that last ENTRY (the `}` stays\n# OUTSIDE the anchor, exactly like add-oban-worker keeps the `]` outside): re-emit\n# the quota_exceeded entry WITH a trailing comma, then the mark comment, then the\n# new `\"{{.error-code}}\" => \"{{.Hint}}\"` entry.\n#\n# A4/A5 + E-005: the quota_exceeded entry survives as a substring of the\n# replacement (self-consuming), so idempotency rests on the payload-derived\n# ASLONG guard (the per-code mark substring — ASCII, brace-safe, and it ALSO\n# refuses a code already hand-registered under the same mark). REANCHOR makes the\n# sibling-accretion path first-class: the first code anchors on the quota_exceeded\n# structural target and plants MARK:error-hint-<code>; a later code anchors at the\n# LAST planted mark block of that family (the mark comment + its entry line, whose\n# tail ends in `\"`) and WITH re-emits that block + comma + the new entry — the map\n# grows at the family's tail, the structural target is never re-matched once\n# consumed, and same-code re-runs are a no-op.\nIN \"api/lib/barkpark/content/errors.ex\"\n### Append {{.error-code}} hint to the @hints map after the quota_exceeded entry\nREPLACE\n::: quota_exceeded hint entry :::\n    \"quota_exceeded\" =>\n      \"This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.\"\n::: quota_exceeded hint entry :::\nWITH\n::: quota_exceeded plus {{.error-code}} hint :::\n    \"quota_exceeded\" =>\n      \"This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.\",\n    # scaffy:add-error-shape {{.error-code}} MARK:error-hint-{{.error-code}}\n    \"{{.error-code}}\" => \"{{.Hint}}\"\n::: quota_exceeded plus {{.error-code}} hint :::\nMARK \"error-hint-{{.error-code}}\"\nREANCHOR \"error-hint-\"\nASLONG FILE DONT CONTAIN \"MARK:error-hint-{{.error-code}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP B — the build/1 clause, inserted BEFORE the true catch-all\n# ─────────────────────────────────────────────────────────────────────────────\n# The catch-all `defp build(_)` (errors.ex:498-499) maps ANY unrecognized reason\n# to a 500, so a new clause MUST precede it. `defp` clauses are separated by BLANK\n# LINES, not commas, so this is an INSERT AFTER FIRST (not the A3 comma idiom): the\n# anchor is the last real clause before the catch-all — the is_binary/internal_error\n# clause (:495-496, unique) — and the new clause is inserted right after it, still\n# ABOVE the catch-all. The anchor is left intact (not self-consuming; E-005 N/A).\n# Order relative to the is_binary clause is irrelevant: `:{{.error-code}}` is an\n# atom, is_binary only matches binaries — disjoint patterns.\n#\n# Idempotency is the engine's implicit planted-MARK guard: a re-run with the same\n# code finds MARK:error-shape-<code> already present and skips. No ASLONG is\n# needed, and REANCHOR is deliberately ABSENT — its comma-splice is only correct\n# for comma-separated collections (Op A), never for blank-line-separated clauses.\nIN \"api/lib/barkpark/content/errors.ex\"\n### Insert build/1 clause for :{{.error-code}} above the catch-all\nINSERT AFTER FIRST\n::: is_binary internal_error clause :::\n  defp build({:error, reason}) when is_binary(reason),\n    do: %{code: \"internal_error\", message: reason, status: 500}\n::: is_binary internal_error clause :::\nWITH\n::: {{.error-code}} build clause :::\n\n  # scaffy:add-error-shape {{.error-code}} MARK:error-shape-{{.error-code}}\n  defp build({:error, :{{.error-code}}}),\n    do: %{code: \"{{.error-code}}\", message: \"{{.Message}}\", status: {{.Status}}}\n::: {{.error-code}} build clause :::\nMARK \"error-shape-{{.error-code}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP C — the unit test (envelope shape + known_codes/0 membership tripwire)\n# ─────────────────────────────────────────────────────────────────────────────\n# errors_test.exs is a flat test list (no describe blocks) closed by the module\n# `end` at :290. Tests are separated by BLANK LINES, so — like Op B — this is an\n# INSERT AFTER FIRST, anchored on the last test (the label_spine membership\n# tripwire, :287-289, unique). The new test is inserted after it, before the\n# module `end`. Idempotency is the implicit planted-MARK guard; no ASLONG, no\n# REANCHOR (blank-line-separated, not comma-separated).\n#\n# The new test asserts BOTH the envelope (code/message/status) AND\n# MapSet.member? on known_codes/0 — the deliberate tripwire, because the OpenAPI\n# drift-guard is a tautology (known_codes derives from @hints): drop the @hints\n# entry Op A planted and this membership assertion is what fails.\nIN \"api/test/barkpark/content/errors_test.exs\"\n### Insert a {{.error-code}} test after the label_spine test\nINSERT AFTER FIRST\n::: label_spine test block :::\n  test \"label_spine is a registered code (OpenAPI enum + hint table truthful)\" do\n    assert MapSet.member?(Errors.known_codes(), \"label_spine\")\n  end\n::: label_spine test block :::\nWITH\n::: {{.error-code}} test :::\n\n  # scaffy:add-error-shape {{.error-code}} MARK:error-test-{{.error-code}}\n  test \"maps :{{.error-code}} to its envelope and registers {{.error-code}} in known_codes\" do\n    Logger.metadata(request_id: nil)\n\n    env = Errors.to_envelope({:error, :{{.error-code}}})\n    assert env.code == \"{{.error-code}}\"\n    assert env.status == {{.Status}}\n    assert env.message == \"{{.Message}}\"\n    # additive fix-suggesting hint, like every other registered code\n    assert is_binary(env.hint) and env.hint != \"\"\n    # the deliberate tripwire: known_codes derives from @hints, so this membership\n    # assertion is what catches a dropped @hints entry (the OpenAPI guard can't).\n    assert MapSet.member?(Errors.known_codes(), \"{{.error-code}}\")\n  end\n::: {{.error-code}} test :::\nMARK \"error-test-{{.error-code}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n# ASSERT FILE: each op's mark is present (verbatim substrings the ops write).\nASSERT FILE \"api/lib/barkpark/content/errors.ex\" CONTAINS \"MARK:error-hint-{{.error-code}}\"\nASSERT FILE \"api/lib/barkpark/content/errors.ex\" CONTAINS \"MARK:error-shape-{{.error-code}}\"\nASSERT FILE \"api/test/barkpark/content/errors_test.exs\" CONTAINS \"MARK:error-test-{{.error-code}}\"\n\n# ASSERT CMD: the errors unit test (envelope shape + membership tripwire) AND the\n# served-vocabulary coverage guard. Scoped single-file `mix test` is LOCAL-safe\n# with a warm api/_build (charter A2, RESOLVED 2026-07-16: this exact pair runs\n# 27 tests green in ~0.7s warm) — no DB (both are `use ExUnit.Case`), no phx.server.\n# NOTE: errors_doc_coverage_test.exs (the §9 ratchet) is deliberately NOT asserted\n# here — see the §9 manual-step note below; a build/1-only code cannot satisfy it\n# until §9 is hand-edited.\nASSERT CMD \"cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# §9 — the ONE required MANUAL step (why it is not an op)\n# ─────────────────────────────────────────────────────────────────────────────\n# docs/api-v1.md §9 lists the public error vocabulary in human prose, and\n# api/test/barkpark/content/errors_doc_coverage_test.exs is the anti-drift RATCHET:\n# it asserts every known_codes/0 code appears verbatim in backticks in §9. So\n# after this command runs, add a line for {{.error-code}} to §9 by hand:\n#\n#     `{{.error-code}}` {{.Status}} — {{.Message}}\n#\n# placed in the category that fits (additive vs. endpoint-specific), TRIMMING\n# adjacent prose to stay within the 14000-byte budget (check-doc-budgets.sh, an\n# enforced merge gate — api-v1.md currently has ~9 bytes of headroom, and the doc\n# contract forbids raising the cap). This editorial judgment — bucket + budget\n# offset — is why no MARK/REPLACE can own it. Everything the MACHINE consumes\n# (known_codes/0, the OpenAPI Error.code enum, error_code_coverage_test.exs)\n# already self-derives from Op A's @hints entry; §9 is the human contract only.\n"
+    },
+    {
+      "id": "scs-076",
+      "type": "terminal",
+      "footer": "dry-run against the live tree — 3 ops computed, nothing written; the scoped errors + coverage suites are the LOCAL closing gate (warm api/_build)",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-error-shape.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var error_code=rate_limited --var Status=429 --var Message='Too many requests' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Hint='Slow down: wait for the Retry-After header before retrying.' --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/content/errors.ex @MARK:error-hint-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/content/errors.ex @MARK:error-shape-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/test/barkpark/content/errors_test.exs @MARK:error-test-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/barkpark/content/errors.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "-      \"This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      \"This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    # scaffy:add-error-shape rate_limited MARK:error-hint-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    \"rate_limited\" => \"Slow down: wait for the Retry-After header before retrying.\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  # scaffy:add-error-shape rate_limited MARK:error-shape-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  defp build({:error, :rate_limited}),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    do: %{code: \"rate_limited\", message: \"Too many requests\", status: 429}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/test/barkpark/content/errors_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  # scaffy:add-error-shape rate_limited MARK:error-test-rate_limited"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  test \"maps :rate_limited to its envelope and registers rate_limited in known_codes\" do"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    Logger.metadata(request_id: nil)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    env = Errors.to_envelope({:error, :rate_limited})"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    assert env.code == \"rate_limited\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    assert env.status == 429"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    assert env.message == \"Too many requests\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    # additive fix-suggesting hint, like every other registered code"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    assert is_binary(env.hint) and env.hint != \"\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    # the deliberate tripwire: known_codes derives from @hints, so this membership"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    # assertion is what catches a dropped @hints entry (the OpenAPI guard can't)."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    assert MapSet.member?(Errors.known_codes(), \"rate_limited\")"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  end"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/content/errors.ex \"MARK:error-hint-rate_limited\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/content/errors.ex \"MARK:error-shape-rate_limited\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/test/barkpark/content/errors_test.exs \"MARK:error-test-rate_limited\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 3 injected, 3 mark(s), 11ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-077",
+      "type": "divider"
+    },
+    {
+      "id": "scs-078",
+      "type": "heading",
+      "level": 2,
+      "text": "add-canonical-marker — grep lands on the one true implementation"
+    },
+    {
+      "id": "scs-079",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "274 commits mention @canonical and 40 markers are live in the tree — planted by hand until now. One self-consuming REPLACE injects a scaffy provenance line plus the @canonical capability:<slug> pointer directly above the head line it certifies. The head line crosses as an OPAQUE variable taken verbatim — that is the D58 ruling: fenced anchors are line-granular, so multi-clause Elixir heads and brace-terminated Go signatures both anchor cleanly. The LOCAL gate re-greps that a public def/func/export follows within six lines, the same invariant docs-anchors-check.sh §8 enforces in CI."
+        }
+      ]
+    },
+    {
+      "id": "scs-080",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── {{.TargetFile}}                            ○ injected  @MARK canonical-{{.slug}}\n\n(zero ● — two comment lines above the head line the marker certifies, any language)"
+    },
+    {
+      "id": "scs-081",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Plant a @canonical Marker\" DESCRIPTION \"Plant the two-line `@canonical capability:<slug>` marker above any PUBLIC entry point so a cold agent's `grep '@canonical capability:'` LANDS on the one true implementation of a capability. One self-consuming REPLACE: a scaffy provenance line + the `@canonical` pointer line, injected directly above the head line the marker certifies. Works on Go funcs and Elixir public defs alike — the head line is taken VERBATIM as an opaque anchor, so multi-clause Elixir heads and brace-terminated Go signatures both anchor cleanly.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"docs\", \"cli\", \"search\" CONCEPT \"canonical-marker\" VARIANT \"plant-above-head\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"TargetFile\" OPAQUE TITLE \"File holding the entry point to mark\" DESCRIPTION \"Repo-relative path of the source file whose public entry point becomes the canonical owner of a capability. OPAQUE: a path, never re-cased, exempt from path-casing lints — this file spells it {{.TargetFile}} throughout. The command is language-agnostic: any file whose comment syntax matches CommentToken (Go `//`, Elixir `#`).\" EXAMPLES \"internal/apiclient/client.go\", \"api/lib/barkpark/content/graph.ex\"\n  VARIABLE 2 \"HeadLine\" OPAQUE TITLE \"The exact head line to mark (verbatim)\" DESCRIPTION \"The FULL source line of the public entry point, copied byte-for-byte from the file — the whole `func New(cfg Config) *Client {` or `def clamp_depth(nil), do: @default_depth`, never a name-prefix. This is the load-bearing lesson (D58): fenced anchors are LINE-granular, so a name-prefix anchor like `func New(` would clean-MISS the byte-exact match (D20) — the anchor must BE the whole line. OPAQUE: the line is re-emitted verbatim inside the payload, never re-cased. For a multi-clause Elixir function anchor the FIRST clause head — no two clause heads are byte-identical, so the full-line anchor is still unique (D20 exactly-once). WARNING 1: the line must occur EXACTLY ONCE in TargetFile (D20) — pick a longer, more specific head line if a bare signature repeats (a name-prefix like `func New(` matches ZERO times, since the fenced anchor is the whole line incl. its trailing newline, and is refused). WARNING 2 (indentation): copy the head WITH its leading whitespace — a `def` nested in a `defmodule` is 2-space indented, and only a byte-exact copy keeps that indent on the surviving head line. The two planted comment lines are emitted flush-left; `mix format` realigns leading comments to the following code's column on its next pass, so the planted marker settles to the head's indent (Go top-level funcs are column-0, so no realign is needed there).\" EXAMPLES \"func New(cfg Config) *Client {\", \"  def clamp_depth(nil), do: @default_depth\", \"  def render(assigns) do\"\n  VARIABLE 3 \"slug\" OPAQUE TITLE \"The capability slug (kebab, unique repo-wide)\" DESCRIPTION \"The kebab-case capability name — the repo-wide-unique key in `@canonical capability:<slug>`. `grep -rn '@canonical capability:'` IS the index, so the slug must not already exist on any other impl (§8 invariant (a): a duplicate slug turns CI red). OPAQUE: one spelling per file, `{{.slug}}` everywhere — it names the capability, it is not a code identifier to be re-cased.\" EXAMPLES \"api-client-new\", \"graph-depth-clamp\", \"preview-manifest\"\n  VARIABLE 4 \"Aka\" OPAQUE TITLE \"aka: grep vocabulary (comma-list, no spaces)\" DESCRIPTION \"The `aka:` search words an agent actually types to find this code — comma-separated, NO spaces (so `depth,clamp,bound` lands a `grep clamp` on the marked head). OPAQUE literal: emitted verbatim into the marker line, never re-cased. Keep it to the words that would otherwise MISS the canonical impl (jargon names, error strings, alternate spellings).\" EXAMPLES \"New,client,constructor\", \"depth,clamp,bound,pagination\", \"og,opengraph,unfurl,share-card\"\n  VARIABLE 5 \"CommentToken\" OPAQUE TITLE \"Line-comment token for the target language\" DESCRIPTION \"The host language's line-comment marker — `//` for Go/TS/JS, `#` for Elixir/Ruby/shell. OPAQUE literal: it prefixes both planted lines and is emitted verbatim. The command carries no language table; the caller states the token, keeping this one command usable across every surface.\" EXAMPLES \"//\", \"#\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# What this plants, and why it is a SELF-CONSUMING REPLACE (D58)\n# ─────────────────────────────────────────────────────────────────────────────\n# A canonical marker is two comment lines that must sit DIRECTLY ABOVE a public\n# entry point, because scripts/docs-anchors-check.sh §8(b) asserts a public\n# `def `/`func `/`export ` within 6 lines BELOW every `@canonical capability:`\n# line. There is no stable structural anchor \"one line above the head\" to INSERT\n# against — the only byte-exact, line-granular anchor is the head line ITSELF.\n# So the op is a REPLACE of the head line WITH { provenance line + @canonical\n# line + the same head line }. The head line survives as a substring of its own\n# payload → this is a SELF-CONSUMING REPLACE, and E-005 requires it carry BOTH:\n#\n#   • a payload-derived ASLONG (idempotency rests on text the op writes), and\n#   • a REANCHOR (run-≥2 keys on the planted mark family, never the mutated head).\n#\n# The guard is `capability:{{.slug}}` — the exact substring the @canonical line\n# writes. On a re-run with the same slug the guard is already present → the whole\n# op is skipped (the marker is planted once, never doubled). MARK VIRTUAL was\n# REJECTED here (D58): the mark line IS plantable as a real comment, so a nominal\n# handle would be strictly weaker than the receipt-backed real mark.\n#\n# INSERT BEFORE (prepend above a surviving head) is the primitive this idiom\n# would prefer, but it is DEFERRED (D55) — this command ships TODAY on the proven\n# self-consuming-REPLACE + ASLONG + REANCHOR idiom, which is fully expressible in\n# the v2 grammar.\n#\n# ─────────────────────────────────────────────────────────────────────────────\n# PRE-RUN CHECK — the different-slug double-mark residual (D58)\n# ─────────────────────────────────────────────────────────────────────────────\n# The ASLONG guard is per-SLUG (`capability:{{.slug}}`). It refuses a re-plant of\n# the SAME slug, but it is BLIND to a DIFFERENT-slug marker already sitting on the\n# same head — a second run with a fresh slug would plant a second marker above the\n# same entry point. Before running, grep the target for any existing marker:\n#\n#     grep -n '@canonical capability:' <TargetFile>\n#\n# If the head already carries a marker, DON'T run this — a public entry point owns\n# at most one capability slug. This is the demand-driven doctrine (CLAUDE.md\n# \"Canonical-impl markers\"): tag ONLY a genuinely-forked or jargon-named capability\n# that a cold agent would otherwise have to find among decoys — a well-named,\n# unforked function earns no marker, and a marker is REMOVED once dedup kills its\n# decoys. The marker certifies \"one owner,\" never \"bug-free.\"\n#\n# Token spellings (D3d / A1): every variable here is OPAQUE, so each renders in\n# exactly ONE spelling — no casing transforms. `{{.slug}}` is the capability name,\n# never a code identifier; `{{.HeadLine}}` / `{{.TargetFile}}` / `{{.Aka}}` /\n# `{{.CommentToken}}` are all verbatim literals.\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP — replace the head line with { provenance + @canonical + head } (D58)\n# ─────────────────────────────────────────────────────────────────────────────\n# The fenced anchor is the head line, byte-exact and line-granular (D20): it must\n# occur EXACTLY ONCE in TargetFile. The payload re-emits it VERBATIM as its last\n# line, with the two marker lines above. The provenance line plants the real mark\n# `MARK:canonical-{{.slug}}` (D24 — a plain MARK requires its `MARK:<name>` text in\n# the op's own payload; present here). ASLONG is the @canonical line's own\n# `capability:{{.slug}}` substring (A4 — self-consuming, so idempotency rests\n# ENTIRELY on this payload-derived guard; ASCII, brace-free, no `}}` beside a\n# literal `}`). REANCHOR `canonical-` keys run ≥2 on the planted mark family\n# (E-005 demands ASLONG + REANCHOR together on a self-consuming REPLACE).\nIN \"{{.TargetFile}}\"\n### Plant @canonical capability:{{.slug}} above the marked head\nREPLACE\n::: target head line :::\n{{.HeadLine}}\n::: target head line :::\nWITH\n::: {{.slug}} canonical marker :::\n{{.CommentToken}} scaffy:add-canonical-marker {{.slug}} MARK:canonical-{{.slug}}\n{{.CommentToken}} @canonical capability:{{.slug}} aka:{{.Aka}}\n{{.HeadLine}}\n::: {{.slug}} canonical marker :::\nMARK \"canonical-{{.slug}}\"\nREANCHOR \"canonical-\"\nASLONG FILE DONT CONTAIN \"capability:{{.slug}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n# ASSERT FILE: both planted lines are present. Both strings are verbatim\n# substrings the op writes and are guard-consistent with the ASLONG (A4/A5:\n# ASCII, no `}}` adjacent to a literal `}`).\nASSERT FILE \"{{.TargetFile}}\" CONTAINS \"@canonical capability:{{.slug}} aka:{{.Aka}}\"\nASSERT FILE \"{{.TargetFile}}\" CONTAINS \"MARK:canonical-{{.slug}}\"\n\n# ASSERT CMD (LOCAL): the §8(b) invariant in isolation — the marker sits on a\n# PUBLIC entry point, i.e. a `def `/`func `/`export ` within 6 lines below the\n# `@canonical capability:` line. `grep -A6` scopes to exactly the §8 window; this\n# is the cheap, litter-immune local proof that the marker is well-placed.\nASSERT CMD \"grep -A6 'capability:{{.slug}}' {{.TargetFile}} | grep -qE '^[[:space:]]*(def |func |export )'\"\n\n# ASSERT CMD (TIER ci): the FULL guard, §8(a) uniqueness + §8(b) placement across\n# the whole tree. Deferred to CI — in the litter-saturated primary checkout\n# docs-anchors-check.sh hangs past 115s scanning the tree (README clean-checkout\n# caveat); CI runs it green in a fresh checkout in ~24s.\nASSERT CMD \"bash scripts/docs-anchors-check.sh\" TIER ci\n"
+    },
+    {
+      "id": "scs-082",
+      "type": "terminal",
+      "footer": "dry-run: the marker planted above errors.ex's known_codes/0 head — the grep gate proves a public entry point follows, exactly what CI's §8 re-checks",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-canonical-marker.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var TargetFile=api/lib/barkpark/content/errors.ex --var HeadLine='  def known_codes do' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var slug=error-code-registry --var Aka='error codes,known_codes,unknown_tag' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var CommentToken='#' --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/content/errors.ex @MARK:canonical-error-code-registry"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/barkpark/content/errors.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+# scaffy:add-canonical-marker error-code-registry MARK:canonical-error-code-registry"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+# @canonical capability:error-code-registry aka:error codes,known_codes,unknown_tag"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/content/errors.ex \"@canonical capability:error-code-registry aka:error codes,known_codes,unknown_tag\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/content/errors.ex \"MARK:canonical-error-code-registry\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd grep -A6 'capability:error-code-registry' api/lib/barkpark/content/errors.ex | grep -qE '^[[:space:]]*(def |func |export )'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd bash scripts/docs-anchors-check.sh — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 1 injected, 1 mark(s), 5ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-083",
+      "type": "divider"
+    },
+    {
+      "id": "scs-084",
+      "type": "heading",
+      "level": 2,
+      "text": "ensure-import — the ensure family: insert once, skip forever"
+    },
+    {
+      "id": "scs-085",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The first ensure command. DIRECTION is add, but the guard deliberately keys on the full import line itself — text a HAND-edit would also produce — never on the MARK comment. That is the run-proven ensure law (D57): guarded on the mark alone, the engine injected a duplicate against a hand-planted import; guarded on the line, it skipped clean with zero receipt written. The corollaries are part of the contract: a no-op ensure run writes no receipt, and a remove after it exits 4 — expected, because scaffy never owned the line."
+        }
+      ]
+    },
+    {
+      "id": "scs-086",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── {{.TargetFile}}                            ○ injected once  @MARK ensure-import\n\n(runs 2..n: guard sees `import {{.Module}}` already present — skip, no receipt)"
+    },
+    {
+      "id": "scs-087",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Ensure an Elixir import\" DESCRIPTION \"Idempotently make sure a module `import` line exists in an Elixir file — insert it once after a caller-named anchor line, skip forever after. The ensure family: the guard keys on the hand-reproducible import line itself, so a human who typed the same line first wins and scaffy stays out of the way.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"scaffy\", \"scaffold\" CONCEPT \"ensure-import\" VARIANT \"elixir\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"Module\" OPAQUE TITLE \"Module to import\" DESCRIPTION \"The module name imported — the exact text after `import `, e.g. `Logger` or `Ecto.Query`. OPAQUE: substituted verbatim, never re-cased; a module name carries dots and mixed case, so there is one spelling per file ({{.Module}}).\" EXAMPLES \"Logger\", \"Ecto.Query\", \"Bitwise\"\n  VARIABLE 2 \"TargetFile\" OPAQUE TITLE \"File to edit\" DESCRIPTION \"Repo-relative path of the Elixir source that should carry the import. OPAQUE — a path is never re-cased.\" EXAMPLES \"api/lib/barkpark/content.ex\", \"api/lib/barkpark/plugins/tickets.ex\"\n  VARIABLE 3 \"AnchorLine\" OPAQUE TITLE \"Existing line to insert after\" DESCRIPTION \"The verbatim existing line the import is placed directly after — typically the module's `use` line or its first existing `import`/`alias`. The full line, exactly as it appears (leading indentation included). OPAQUE: matched verbatim, never re-cased.\" EXAMPLES \"  use Ecto.Schema\", \"  use Barkpark, :context\", \"  require Logger\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# THE ENSURE LAW (charter D57) — why this is not a MARK-guarded command\n# ─────────────────────────────────────────────────────────────────────────────\n# An ensure command guarantees a line a developer could just as well have typed\n# by hand. So idempotency keys on that HAND-REPRODUCIBLE line — the full import\n# text `import {{.Module}}` — and NEVER on a `MARK:` comment. This is the whole\n# distinction from add-oban-worker / add-cli-verb, whose guards key on the mark:\n# there, scaffy OWNS the block it plants. Here it does not — a human import and a\n# scaffy import are the same line, and the guard must treat them identically.\n#\n# Two consequences fall out of that law, both binding on every ensure-* command:\n#\n#   1. A NO-OP RUN WRITES NO RECEIPT. If the guard already sees `import {{.Module}}`\n#      (however it got there — scaffy earlier, or a hand edit), the op is skipped\n#      and NOTHING is written: no file change, and crucially no receipt in\n#      `.scaffy/receipts/`. Scaffy records only what it actually did.\n#\n#   2. `bp scaffy remove` AFTER A SKIP EXITS 4 — AND THAT IS CORRECT. remove is\n#      receipt replay (D36). A skipped ensure wrote no receipt, so remove finds\n#      none and exits 4 (ReceiptMissingError), leaving the file untouched. Scaffy\n#      never owned that import line, so it must not remove it. Exit 4 here is the\n#      SUCCESS signal of the ensure contract, not a failure — do not \"fix\" it.\n#\n# SUBSTRING FALSE-SKIP CAVEAT (read before using on submodule imports). The guard\n# is a plain substring test: `import {{.Module}}`. So `import Logger` is a\n# substring of an ALREADY-PRESENT `import Logger.Handlers` — the run would skip\n# and never add the bare `import Logger` you asked for. The guard cannot tell a\n# prefix apart from a whole import. Mitigation: pass the EXACT module you mean; if\n# you need `import Logger` and the file already imports `import Logger.Handlers`,\n# the two are genuinely different imports and this substring guard will not add\n# the second — insert it by hand, or narrow the design (a trailing-newline guard\n# is not expressible in a single-line ASLONG). This is a known, documented edge;\n# for the overwhelmingly common flat-module case it is a non-issue.\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP — insert `import {{.Module}}` once, directly after the anchor line\n# ─────────────────────────────────────────────────────────────────────────────\n# INSERT AFTER FIRST {{.AnchorLine}}: the payload lands immediately below the\n# first occurrence of the caller's anchor. The payload plants a provenance\n# comment carrying the mark (so remove has a handle and a reader sees where the\n# line came from) plus the import itself. The mark name is the FIXED kebab\n# `ensure-import`: a plain MARK requires its `MARK:` text verbatim in the payload\n# (it is here), and it need not be per-module unique because remove is receipt\n# replay keyed on command+vars (D35/D36) — two ensured imports in one file get\n# two receipts and retract independently, even sharing the mark comment.\n#\n# The ASLONG guard is the ENSURE LAW in one line: DONT CONTAIN the import text\n# itself. It is a verbatim substring of the payload (E-006, add polarity → guard\n# derives from what the op writes), ASCII, and brace-safe (`}}` is followed by a\n# space, never a literal `}`).\nIN \"{{.TargetFile}}\"\n### Ensure `import {{.Module}}` exists after the anchor line\nINSERT AFTER FIRST\n::: anchor line :::\n{{.AnchorLine}}\n::: anchor line :::\nWITH\n::: {{.Module}} import :::\n  # scaffy:ensure-import {{.Module}} MARK:ensure-import\n  import {{.Module}}\n::: {{.Module}} import :::\nMARK \"ensure-import\"\nASLONG FILE DONT CONTAIN \"import {{.Module}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n# The import is present (verbatim substring of the payload the op writes). This\n# ASSERT FILE holds whether scaffy inserted the line this run or a prior run / a\n# hand edit already had it — the ensure contract guarantees the END STATE.\nASSERT FILE \"{{.TargetFile}}\" CONTAINS \"import {{.Module}}\"\n\n# Compile gate — an import of a module that does not exist fails compilation.\n# Every Elixir gate is TIER ci (A2): never run in the apply worktree, only on CI\n# where the BEAM toolchain is provisioned. A skipped (no-op) run still asserts —\n# the end state is what is checked.\nASSERT CMD \"cd api && mix compile\" TIER ci\n"
+    },
+    {
+      "id": "scs-088",
+      "type": "callout",
+      "tone": "info",
+      "title": "The ensure law (D57)",
+      "content": [
+        {
+          "type": "text",
+          "value": "ensure-* guards key on a payload-body substring a hand-edit would also produce — the full import line, the full noun literal — never on MARK:. A human who typed the same line first wins and scaffy stays out of the way: the run is a no-op, writes NO receipt, and a later remove exits 4 because there is nothing scaffy owns to retract. Guard the FULL line — a bare prefix false-skips on import Logger.Foo."
+        }
+      ]
+    },
+    {
+      "id": "scs-089",
+      "type": "terminal",
+      "footer": "dry-run: one injected op after the caller-named anchor line; mix compile is TIER ci — Elixir compiles the world, so the gate runs in the PR",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/ensure-import.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Module=Ecto.Query --var TargetFile=api/lib/barkpark/scim/token.ex \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var AnchorLine='  import Ecto.Changeset' --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/scim/token.ex @MARK:ensure-import"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/barkpark/scim/token.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  # scaffy:ensure-import Ecto.Query MARK:ensure-import"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  import Ecto.Query"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/scim/token.ex \"import Ecto.Query\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix compile — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 1 injected, 1 mark(s), 1ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-090",
+      "type": "divider"
+    },
+    {
+      "id": "scs-091",
+      "type": "heading",
+      "level": 2,
+      "text": "ensure-cli-noun — ending a three-copy drift"
+    },
+    {
+      "id": "scs-092",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The evidence is a drift, not a diff: the bp CLI's noun set lives in three copies, and at Decide time they read 46 (dispatch), 55 (completionNouns) and 19 (usage prose) — the last stuck since July 3rd through fifteen noun-adding commits, including the one that added scaffy itself. This command owns the append copy under the same ensure law as ensure-import: the guard is the quoted noun literal, so a hand-added noun makes the run a clean no-op. The dispatch case stays hand-written — TestCompletionNounsCoverAllDispatchedBuiltins is the LOCAL gate that keeps the two in lockstep."
+        }
+      ]
+    },
+    {
+      "id": "scs-093",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── internal/cli/builtins.go                   ○ injected  @MARK ensure-cli-noun\n\n(runs 2..n: guard sees the quoted noun already in completionNouns — skip, no receipt)"
+    },
+    {
+      "id": "scs-094",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Ensure a bp completion noun\" DESCRIPTION \"Idempotently make sure a top-level noun appears in the bp CLI shell-completion set — append its quoted literal to completionNouns once, skip forever after. The ensure family: the guard keys on the hand-reproducible noun literal itself, so a human who typed the same entry first wins and scaffy stays out of the way.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"cli\", \"scaffold\" CONCEPT \"ensure-cli-noun\" VARIANT \"go\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"Noun\" TITLE \"Top-level bp noun to make completable\" DESCRIPTION \"The `bp <noun>` this entry completes — a lowercase single word (the four canonical casings coincide), or a hyphenated verb like `go-live` in kebab. Referenced here only as {{.noun}} (kebab).\" EXAMPLES \"widget\", \"go-live\", \"sheet\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# THE ENSURE LAW (charter D57) — why this is not a MARK-guarded command\n# ─────────────────────────────────────────────────────────────────────────────\n# An ensure command guarantees a line a developer could just as well have typed\n# by hand — here, one `\"noun\",` entry in completionNouns. So idempotency keys on\n# that HAND-REPRODUCIBLE literal, the quoted noun `\"{{.noun}}\"`, and NEVER on a\n# `MARK:` comment. That is the whole distinction from add-oban-worker /\n# add-cli-verb, whose guards key on the mark because scaffy OWNS the block it\n# plants. Here it does not: a human's completion entry and scaffy's are the same\n# `\"noun\",` line, and the guard must treat them identically.\n#\n# Two consequences fall out of that law, both binding on every ensure-* command:\n#\n#   1. A NO-OP RUN WRITES NO RECEIPT. If the guard already sees `\"{{.noun}}\"`\n#      (however it got there — scaffy earlier, or a hand edit), the op is skipped\n#      and NOTHING is written: no file change, and no receipt in\n#      `.scaffy/receipts/`. Scaffy records only what it actually did.\n#\n#   2. `bp scaffy remove` AFTER A SKIP EXITS 4 — AND THAT IS CORRECT. remove is\n#      receipt replay (D36). A skipped ensure wrote no receipt, so remove finds\n#      none and exits 4 (ReceiptMissingError), leaving the file untouched. Scaffy\n#      never owned that noun entry, so it must not remove it. Exit 4 here is the\n#      SUCCESS signal of the ensure contract, not a failure — do not \"fix\" it.\n#\n# QUOTED-LITERAL GUARD, FILE-WIDE (the counterpart to ensure-import's caveat).\n# Unlike ensure-import's bare `import Logger` substring — a prefix of\n# `import Logger.Handlers` — this guard `\"{{.noun}}\"` is delimited by a quote on\n# BOTH sides, so `\"widget\"` is NOT a substring of `\"widgets\"` (the closing quote\n# breaks the match). It does NOT suffer the prefix false-skip. The one real edge\n# is that the guard is FILE-scoped: if the exact quoted literal `\"{{.noun}}\"`\n# already appears ANYWHERE in builtins.go (a help string, another slice), the op\n# false-skips. For plausible nouns this never collides; if it might, add the\n# completionNouns entry by hand. Documented, non-issue for the common case.\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND DOES NOT TOUCH — the two-copy discipline\n# ─────────────────────────────────────────────────────────────────────────────\n# A completable noun lives in THREE places today; this command owns exactly ONE:\n#\n#   • completionNouns (builtins.go)      ← THIS command appends here.\n#   • the `switch noun` dispatch (cli.go) ← HAND-WRITTEN, deliberately not touched.\n#   • the per-noun usage line (usage.go)  ← stuck at 19 nouns since 2026-07-03;\n#                                            EXCLUDED here, tracked in backlog\n#                                            scaffy-backlog-usage-noun-drift-fix.\n#\n# The dispatch case is left to the human because a `case \"{{.noun}}\":` needs a\n# real handler — code, not a scaffold. The invariant that keeps the two in sync\n# is TestCompletionNounsCoverAllDispatchedBuiltins (builtins_test.go): it asserts\n# every DISPATCHED case is present in completionNouns — a SUBSET check. So a\n# completionNouns SUPERSET is legal: this command may add the completion entry\n# BEFORE (or without) the matching dispatch case, and the test stays green. That\n# is exactly the probe that proves this command safe — plant the noun, run the\n# test, it passes even with no dispatch case behind it.\n\n# ─────────────────────────────────────────────────────────────────────────────\n# OP — insert `\"{{.noun}}\",` once, right after the completionNouns opening\n# ─────────────────────────────────────────────────────────────────────────────\n# The array's last element `\"workspace\",` carries a trailing comma, so a bare\n# INSERT is comma-safe (A3) — no self-consuming REPLACE, no REANCHOR needed. The\n# anchor is the array-OPENING line, which is unique in the file and ordering-\n# neutral: completionNouns is a completion SET, so a new entry right after the\n# `{` is as valid as one at the tail. Each ensured noun stacks its own guarded\n# entry there; order never matters. The payload plants a provenance comment\n# carrying the mark (a remove handle + a reader's breadcrumb) plus the entry. The\n# mark name is the FIXED kebab `ensure-cli-noun`: a plain MARK requires its\n# `MARK:` text verbatim in the payload (it is here), and it need not be per-noun\n# unique because remove is receipt replay keyed on command+vars (D35/D36) — two\n# ensured nouns in one file get two receipts and retract independently, even\n# sharing the mark comment.\n#\n# The ASLONG guard is the ENSURE LAW in one line: DONT CONTAIN the quoted noun.\n# It is a verbatim substring of the payload (E-006, add polarity → guard derives\n# from what the op writes), ASCII, and brace-safe (`}}` is followed by `\\\"`,\n# never a literal `}`).\nIN \"internal/cli/builtins.go\"\n### Ensure \"{{.noun}}\" is a completion noun\nINSERT AFTER FIRST\n::: completionNouns opening :::\nvar completionNouns = []string{\n::: completionNouns opening :::\nWITH\n::: {{.noun}} completion noun :::\n\t// scaffy:ensure-cli-noun {{.noun}} MARK:ensure-cli-noun\n\t\"{{.noun}}\",\n::: {{.noun}} completion noun :::\nMARK \"ensure-cli-noun\"\nASLONG FILE DONT CONTAIN \"\\\"{{.noun}}\\\"\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n# The quoted noun is present (verbatim substring of the payload the op writes).\n# This holds whether scaffy inserted the entry this run or a prior run / a hand\n# edit already had it — the ensure contract guarantees the END STATE.\nASSERT FILE \"internal/cli/builtins.go\" CONTAINS \"\\\"{{.noun}}\\\"\"\n\n# Drift gate — the completion/dispatch invariant. A LOCAL Go test (A2:\n# proven-safe): adding a completionNouns entry keeps it green because the check\n# is dispatched-⊆-completionNouns; a superset never reds. Runs in the apply\n# worktree; the engine appends CC=/usr/bin/clang for cgo.\nASSERT CMD \"go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1\"\n"
+    },
+    {
+      "id": "scs-095",
+      "type": "terminal",
+      "footer": "dry-run: the noun appended to completionNouns; the completion-coverage test is LOCAL and closes the loop against the dispatch copy",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/ensure-cli-noun.scaffy --var Noun=quiz --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject internal/cli/builtins.go @MARK:ensure-cli-noun"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- internal/cli/builtins.go"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+\t// scaffy:ensure-cli-noun quiz MARK:ensure-cli-noun"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+\t\"quiz\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains internal/cli/builtins.go \"\\\"quiz\\\"\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 1 injected, 1 mark(s), 3ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-096",
+      "type": "divider"
+    },
+    {
+      "id": "scs-097",
+      "type": "heading",
+      "level": 2,
+      "text": "add-backfill-task — safe by default, byte for byte"
+    },
+    {
+      "id": "scs-098",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Eight-plus Mix tasks in the tree carry this exact idiom, copy-pasted: the same @switches, the same negation guard, the same 'Safe by default' moduledoc. The command is all-CREATE — a bare run of the generated task is a DRY RUN that streams the target rows, counts what would change and writes nothing; --apply performs the mutation, and every write sits inside the unless dry_run? block so the safe default can never write. The paired test pins the flag logic as pure helper calls, no app boot required."
+        }
+      ]
+    },
+    {
+      "id": "scs-099",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/\n    ├── lib/mix/tasks/barkpark.{{.task_name}}.ex        ● created\n    └── test/mix/tasks/barkpark.{{.task_name}}_test.exs ● created\n\n(zero ○ — Mix discovers tasks by filename; nothing to wire)"
+    },
+    {
+      "id": "scs-100",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add a Backfill Mix Task\" DESCRIPTION \"Scaffold a safe-by-default one-shot backfill Mix.Task — a bare run is a DRY RUN that streams the target rows, counts them, and writes nothing; `--apply` performs the mutation. Ends the copy-paste idiom shared byte-for-byte by 8+ existing barkpark.*.backfill tasks: the same @switches, the same negation guard, the same house 'Safe by default' moduledoc. Ships a paired pure-helper test that pins the flag logic without booting the app.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"scaffold\", \"ecto\", \"testing\" CONCEPT \"backfill-task\" VARIANT \"dry-run-apply\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"TaskName\" TITLE \"Name your backfill task\" DESCRIPTION \"The Mix task's name, PascalCase and single-segment — end it in 'Backfill' by house convention. This is the A1 casing showcase: ONE declaration spells the PascalCase module suffix (Mix.Tasks.Barkpark.{{.TaskName}}), the snake_case file suffix and mix invocation ({{.task_name}} → barkpark.{{.task_name}}), guaranteed in agreement. Mix derives the task name from the module by underscoring each segment, so `EdgesBackfill` answers to `mix barkpark.edges_backfill` and lives in barkpark.edges_backfill.ex — pick a name whose underscored form reads well.\" EXAMPLES \"EdgesBackfill\", \"PreviewBackfill\", \"InventoryStatusBackfill\"\n  VARIABLE 2 \"Summary\" OPAQUE TITLE \"One-line operator summary (moduledoc + @shortdoc)\" DESCRIPTION \"What the backfill sweeps and why, one sentence. Shown at the top of `mix help {{.task_name}}` and in the moduledoc. OPAQUE: never re-cased, one spelling per file, plain prose with no braces.\" EXAMPLES \"Backfill body-walk content edges for pre-existing papers.\", \"Stamp content[preview] onto legacy published papers.\", \"Rehydrate embedded sheet snapshots that predate the extractor.\"\n\n# ===========================================================================\n# add-backfill-task — the DECLARATIVE form of the byte-identical idiom every\n# `barkpark.*.backfill` Mix task hand-copies.\n#\n# PRIOR ART & EVIDENCE. `api/lib/mix/tasks/` carries a family of one-shot\n# backfill tasks — barkpark.edges.backfill, barkpark.media.backfill,\n# barkpark.preview.backfill, barkpark.paper.backfill_block_ids,\n# barkpark.paper.doctrine_backfill — each independently re-typing the SAME\n# safe-by-default skeleton: `use Mix.Task`, `@switches [dry_run:, apply:,\n# dataset:]`, the parse-and-raise-on-invalid preamble, and the load-bearing\n# negation guard that makes a bare invocation a dry run. The canonical guard\n# is `api/lib/mix/tasks/barkpark.edges.backfill.ex:51` — this command mirrors\n# that exact expression VERBATIM (it is the payload-derived ASSERT FILE guard\n# below), so a task authored here is byte-faithful to the exemplar the whole\n# corpus already agrees on.\n#\n# ALL-CREATE, ZERO INJECTION. Like add-plugin and add-migration, this command\n# touches NO accretion file — a Mix task is DISCOVERED, never registered:\n# `Mix.Task.load_all/0` walks the `Mix.Tasks.*` module namespace at invocation\n# time, so dropping a module under `lib/mix/tasks/` on the `elixirc_paths` tree\n# IS the registration. There is no router, barrel, registry, or config map to\n# inject into, so every op below is a whole-file `CREATE FILE IF ABSENT` and\n# there are zero `MARK` ops (MARK anchors a marker INSIDE a host file; this\n# command has no host file). Idempotency and reversibility are therefore\n# structural: IF ABSENT is the guard (a second run writes nothing), and the two\n# created file paths are the remove handles (Wave-3 `remove` deletes exactly\n# this set, leaving the tree byte-clean).\n#\n# COMPILES AS-IS, MUTATION IS A FENCED TODO. The created task compiles and RUNS\n# today: the dry-run path streams the corpus, counts candidate rows, and reports\n# — writing nothing. The actual write is a clearly fenced TODO region inside the\n# single `unless dry_run?` block, so the safe default can never write and the\n# author fills in only the mutation. The four-way flag truth table is factored\n# into a PURE `dry_run?/1` so the paired test pins it WITHOUT booting the app or\n# touching the DB (LOCAL-safe warm `mix test`, A2's scoped-single-file gate).\n# ===========================================================================\n\n# ---------------------------------------------------------------------------\n# 1/2 ● Task module — lib/mix/tasks/barkpark.<task>.ex\n#     Mirrors barkpark.edges.backfill.ex: the house moduledoc with the \"Safe by\n#     default\" section, @shortdoc, @switches, the parse-and-raise preamble, the\n#     byte-exact negation guard (factored into the pure dry_run?/1), and a\n#     Repo.stream sweep whose write is a fenced TODO. Lives on the elixirc_paths\n#     tree so `mix` discovers it — no registration edit exists to plant.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/lib/mix/tasks/barkpark.{{.task_name}}.ex\"\nWITH\n::: {{.task_name}} task module :::\ndefmodule Mix.Tasks.Barkpark.{{.TaskName}} do\n  @moduledoc \"\"\"\n  {{.Summary}}\n\n  ## Safe by default\n\n  A bare invocation is a DRY RUN — it streams the target rows, counts the ones\n  that still need the backfill, and reports what WOULD change without writing.\n  Pass `--apply` to actually perform the mutation.\n\n      # report only (writes nothing) — the safe default\n      mix barkpark.{{.task_name}}\n      mix barkpark.{{.task_name}} --dry-run\n\n      # perform the backfill\n      mix barkpark.{{.task_name}} --apply\n\n      # narrow to one dataset\n      mix barkpark.{{.task_name}} --apply --dataset production\n  \"\"\"\n  @shortdoc \"{{.Summary}}\"\n\n  use Mix.Task\n\n  import Ecto.Query, only: [from: 2]\n\n  alias Barkpark.Content.Document\n  alias Barkpark.Repo\n\n  @switches [dry_run: :boolean, apply: :boolean, dataset: :string]\n\n  @impl Mix.Task\n  def run(args) do\n    Mix.Task.run(\"app.start\")\n\n    {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)\n\n    if invalid != [] do\n      Mix.raise(\"Unknown arguments: #{inspect(invalid)}\")\n    end\n\n    dry_run? = dry_run?(opts)\n    dataset = Keyword.get(opts, :dataset, \"production\")\n\n    {:ok, {scanned, changed}} =\n      Repo.transaction(fn ->\n        dataset\n        |> base_query()\n        |> Repo.stream()\n        |> Enum.reduce({0, 0}, fn row, {scanned, changed} ->\n          if needs_backfill?(row) do\n            unless dry_run? do\n              # -- TODO: PERFORM THE MUTATION --------------------------------\n              # Replace this block with the real write for `row`, e.g.\n              #\n              #     row\n              #     |> Document.changeset(patch_for(row))\n              #     |> Repo.update!()\n              #\n              # Keep every write INSIDE this `unless dry_run?` so the safe\n              # default can never write; the dry-run path already counted it.\n              # --------------------------------------------------------------\n              :ok\n            end\n\n            {scanned + 1, changed + 1}\n          else\n            {scanned + 1, changed}\n          end\n        end)\n      end)\n\n    Mix.shell().info(\"scanned #{scanned} row(s) in #{dataset}; #{changed} need backfill\")\n\n    if dry_run? do\n      Mix.shell().info(\"\\nDry run — nothing was written. Re-run with --apply to write.\")\n    end\n  end\n\n  @doc \"\"\"\n  Safe-default flag logic — write ONLY when `--apply` is explicitly given and\n  not negated by `--dry-run`. Any other combination is a dry run. Pure and\n  side-effect-free (no app boot, no DB) so it is unit-tested directly. This\n  expression is byte-identical to the corpus exemplar\n  `barkpark.edges.backfill.ex:51`.\n  \"\"\"\n  def dry_run?(opts) do\n    not (Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false))\n  end\n\n  # The rows still awaiting the backfill. Narrow this to the real predicate\n  # (a NULL column, a missing content key, a stale version) so the sweep only\n  # touches what it must.\n  defp base_query(dataset) do\n    from(d in Document, where: d.dataset == ^dataset)\n  end\n\n  # TODO: return true only for rows that still need the backfill. Left total\n  # (false) so a fresh task is a safe no-op until you fill in the predicate.\n  defp needs_backfill?(_row), do: false\nend\n::: {{.task_name}} task module :::\n\n# ---------------------------------------------------------------------------\n# 2/2 ● Task test — test/mix/tasks/barkpark.<task>_test.exs\n#     Mirrors the api/test/mix/tasks/ convention (barkpark.plugin.new_test.exs,\n#     barkpark.preview.backfill_test.exs). Pins the pure dry_run?/1 truth table\n#     — the safe-default contract — WITHOUT app.start or a DB, so it is a\n#     LOCAL-safe scoped `mix test` (A2 warm-build gate), not a CI-only sweep.\n# ---------------------------------------------------------------------------\nCREATE FILE IF ABSENT \"api/test/mix/tasks/barkpark.{{.task_name}}_test.exs\"\nWITH\n::: {{.task_name}} task test :::\ndefmodule Mix.Tasks.Barkpark.{{.TaskName}}Test do\n  # Pins the safe-default flag contract of `mix barkpark.{{.task_name}}`. Pure:\n  # exercises `dry_run?/1` directly, so it needs neither app.start nor the Repo\n  # — a LOCAL-safe scoped `mix test` (A2). Add DataCase-backed --apply coverage\n  # once the mutation TODO in the task module is filled in.\n  use ExUnit.Case, async: true\n\n  alias Mix.Tasks.Barkpark.{{.TaskName}}\n\n  describe \"dry_run?/1 — safe by default\" do\n    test \"no flags is a dry run\" do\n      assert {{.TaskName}}.dry_run?([])\n    end\n\n    test \"--dry-run is a dry run\" do\n      assert {{.TaskName}}.dry_run?(dry_run: true)\n    end\n\n    test \"--apply writes (not a dry run)\" do\n      refute {{.TaskName}}.dry_run?(apply: true)\n    end\n\n    test \"--apply --dry-run is a dry run (dry-run wins)\" do\n      assert {{.TaskName}}.dry_run?(apply: true, dry_run: true)\n    end\n  end\nend\n::: {{.task_name}} task test :::\n\n# ===========================================================================\n# Post-conditions — assert both files landed with the load-bearing content.\n# Guards are ASCII substrings of what the ops above write (payload-derived),\n# and brace-safe (every `}}` is a variable token followed by a space, `)`, `,`\n# or `]`, never a literal `}`).\n# ===========================================================================\nASSERT FILE \"api/lib/mix/tasks/barkpark.{{.task_name}}.ex\" CONTAINS \"defmodule Mix.Tasks.Barkpark.{{.TaskName}} do\"\nASSERT FILE \"api/lib/mix/tasks/barkpark.{{.task_name}}.ex\" CONTAINS \"@switches [dry_run: :boolean, apply: :boolean, dataset: :string]\"\nASSERT FILE \"api/lib/mix/tasks/barkpark.{{.task_name}}.ex\" CONTAINS \"not (Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false))\"\nASSERT FILE \"api/lib/mix/tasks/barkpark.{{.task_name}}.ex\" CONTAINS \"Re-run with --apply to write.\"\nASSERT FILE \"api/test/mix/tasks/barkpark.{{.task_name}}_test.exs\" CONTAINS \"defmodule Mix.Tasks.Barkpark.{{.TaskName}}Test do\"\nASSERT FILE \"api/test/mix/tasks/barkpark.{{.task_name}}_test.exs\" CONTAINS \"refute {{.TaskName}}.dry_run?(apply: true)\"\n\n# Run gate — the paired pure-helper test. LOCAL (no TIER ci): a scoped\n# single-file `mix test` is proven LOCAL-safe on a warm `api/_build` (A2,\n# 2026-07-16); `CC=/usr/bin/clang` pins the real compiler past the shadowing\n# `cc` wrapper. Full DataCase --apply coverage is deferred to CI with the rest\n# of the suite once the mutation TODO is filled in.\nASSERT CMD \"cd api && CC=/usr/bin/clang mix test test/mix/tasks/barkpark.{{.task_name}}_test.exs\"\n"
+    },
+    {
+      "id": "scs-101",
+      "type": "terminal",
+      "footer": "dry-run, curated: 2 files would be created — the full 140-line diff is the source above with tokens expanded; the scoped test is the LOCAL closing gate",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-backfill-task.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var TaskName=RetagPapers \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Summary='Re-derive weighted tags for every published paper' --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● would create api/lib/mix/tasks/barkpark.retag_papers.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● would create api/test/mix/tasks/barkpark.retag_papers_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/mix/tasks/barkpark.retag_papers.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+defmodule Mix.Tasks.Barkpark.RetagPapers do"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  @moduledoc \"\"\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  Re-derive weighted tags for every published paper"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  ## Safe by default"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": " "
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "· · ·  (the full Safe-by-default moduledoc, the guarded unless dry_run? body and the paired pure-helper test follow — 126 diff lines, exactly the source above with tokens expanded)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": " "
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/mix/tasks/barkpark.retag_papers.ex \"not (Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false))\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/mix/tasks/barkpark.retag_papers.ex \"Re-run with --apply to write.\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/test/mix/tasks/barkpark.retag_papers_test.exs \"defmodule Mix.Tasks.Barkpark.RetagPapersTest do\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/test/mix/tasks/barkpark.retag_papers_test.exs \"refute RetagPapers.dry_run?(apply: true)\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd cd api && CC=/usr/bin/clang mix test test/mix/tasks/barkpark.retag_papers_test.exs"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 2 created, 1ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-102",
+      "type": "divider"
+    },
+    {
+      "id": "scs-103",
+      "type": "heading",
+      "level": 2,
+      "text": "add-schema-type — a document type a plugin declares, ONEOF-guarded"
+    },
+    {
+      "id": "scs-104",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The minimal-template shape and nothing else, by name (D59): the byte-identical 6-key SchemaDefinition wrap that scaffy, bulldocs and sheets share — frt/media's extended 10-key parse and onixedit's sub-schema splice are out of scope. One created schema JSON plus two injections into register_schemas/1, and bootstrap auto-registers the type on every boot, idempotent on (name, dataset). Visibility is a ONEOF enum variable: public|private is the whole legal universe, and the engine refuses anything else at substitution time — before a single byte lands."
+        }
+      ]
+    },
+    {
+      "id": "scs-105",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/\n    ├── priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json  ● created\n    └── lib/barkpark/plugins/{{.plugin}}.ex                     ○ injected ×2  @MARK schema-read / schema-wrap"
+    },
+    {
+      "id": "scs-106",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Add a Plugin-Declared Schema Type\" DESCRIPTION \"Scaffold a new plugin-declared document type in the MINIMAL-template shape (charter D54c/D59): create the plugin's bundled schema JSON (name/title/icon/visibility/fields — one sample field, NO dataset key, NO type key) and wire it into the plugin module's register_schemas/1 as a second byte-identical 6-key SchemaDefinition wrap, exactly the scaffy/bulldocs/sheets shape. Visibility is a ONEOF enum variable (D56): the engine refuses any --var Visibility outside public|private at substitution time, before anything is written. Bootstrap auto-registers the result on every boot, idempotent on (name, dataset).\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"plugin\", \"schema\" CONCEPT \"schema-type\" VARIANT \"minimal-template\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"Plugin\" TITLE \"The target plugin (minimal-template shape)\" DESCRIPTION \"Lowercase plugin name, referenced as {{.plugin}} in both target paths: the module file api/lib/barkpark/plugins/{{.plugin}}.ex and the bundled schemas dir api/priv/plugins/{{.plugin}}/schemas/. Must be one of the MINIMAL-template plugins (scaffy, bulldocs, sheets — see the scope prose below): the wiring anchors are byte-exact against that shared shape, and any other plugin fails loud at anchor resolution. The module file must already exist — the engine's typed PathMissingError enforces that precondition for free (exit 4, nothing written).\" EXAMPLES \"scaffy\", \"bulldocs\", \"sheets\"\n  VARIABLE 2 \"SchemaName\" TITLE \"The document type name\" DESCRIPTION \"The new type's name, in two spellings-as-transforms: {{.schema-name}} (the JSON `name` value, the bundled filename, the mark suffixes) and {{.schema_name}} (the `raw_` Elixir variable suffix inside register_schemas/1). Lowercase; the persisted `_type` discriminator documents queries forever, so pick it like an API name.\" EXAMPLES \"release-note\", \"changelog\"\n  VARIABLE 3 \"Title\" OPAQUE TITLE \"Human title for the Studio desk\" DESCRIPTION \"The plural human label the Studio shows for the type (the `title` JSON key). OPAQUE: emitted verbatim — it may carry spaces and capitals that must never be re-cased. This file spells it {{.Title}} exactly once.\" EXAMPLES \"Release Notes\", \"Changelogs\"\n  VARIABLE 4 \"Icon\" OPAQUE TITLE \"Desk icon (emoji)\" DESCRIPTION \"The `icon` JSON value — an emoji, matching the minimal-template precedent (command.json ships one). OPAQUE verbatim literal, spelled {{.Icon}} exactly once; never re-cased, never interpreted.\" EXAMPLES \"🧾\", \"📓\"\n  VARIABLE 5 \"Visibility\" ONEOF \"public\", \"private\" TITLE \"Anonymous-read visibility\" DESCRIPTION \"The schema's `visibility` — public gives tokenless reads on the generic query endpoint (the scaffy/bulldocs choice), private returns 404 anonymously and requires a token (the sheets choice). ONEOF is the runtime wall (D56): any other value is a usage error at substitution — exit 2, nothing written. Referenced in its lowercase spelling {{.visibility}} in both the JSON value and the Elixir wrap's Map.get default.\" EXAMPLES \"public\", \"private\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND HONESTLY DOES — and what it deliberately does NOT\n#\n#   ● api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json  created\n#   ○ api/lib/barkpark/plugins/{{.plugin}}.ex                     injected ×2 —\n#     a raw_{{.schema_name}} read pipeline + a second %SchemaDefinition{} wrap\n#\n# SCOPE = the MINIMAL template ONLY: the byte-identical 6-key wrap the scaffy /\n# bulldocs / sheets plugins share (scaffy.ex:61-78 is the exemplar; bulldocs.ex\n# :141-158 and sheets.ex:109-126 carry the same bytes, differing only in the\n# JSON filename and sheets' \"private\" Map.get default). OUT OF SCOPE, BY NAME:\n#\n#   * frt / media — the EXTENDED 10-key shape: SchemaDefinition.parse/2\n#     round-trips (frt.ex:147, media.ex:99) plus desk placement keys. CAMELCASE\n#     TRAP, only in THIS out-of-scope shape: the JSON spells `deskGroups`, the\n#     Elixir struct field is `desk_groups` (frt.ex:126, media.ex:108,\n#     schema_definition.ex:24) — a rename this command never touches.\n#   * onixedit — the sub-schema splice: one schema assembled from split JSON\n#     parts, not one file per type.\n#   * tickets / quiz — the INLINE-Elixir style: the SchemaDefinition is built\n#     in code (quiz.ex:96-104 via Content.schema/0, tickets.ex:82) with NO\n#     bundled JSON to anchor on.\n#\n# ADJACENT PRIOR ART, different artifact half: `bp make schema <name>`\n# (internal/cli/make_cmd.go) emits a schema v2 JSON skeleton for hand-POSTing\n# to /v1/schemas — the AD-HOC registration path (admin auth, tenant stamped\n# from the request). This command owns the OTHER half: PLUGIN-DECLARED schemas,\n# bundled in priv/ and re-registered by Bootstrap on every boot. D10's \"overlaps\n# bp make schema\" is stale for exactly this reason.\n#\n# PRECONDITION, enforced FREE: both IN-ops target the plugin module file, so a\n# plugin that does not exist (or a typo'd {{.plugin}}) dies as the engine's\n# typed PathMissingError — exit 4, nothing written — before any anchor logic.\n#\n# MANUAL STEPS (prose, deliberately not blind ops):\n#\n# 1. The plugin's CONTRACT TEST pins the one-schema shape — e.g. scaffy_test.exs\n#    setup asserts `[%SchemaDefinition{} = def] = Scaffy.register_schemas([])`,\n#    a ONE-element list match that reds the moment this wrap lands. Extend that\n#    pin to the two-element list (and cover the new type) in the same change;\n#    the TIER ci gate below is what proves you did.\n# 2. The plugin MANIFEST lists its schemas descriptively — plugin.json's\n#    `schemas` array (e.g. priv/plugins/scaffy/plugin.json), which the same\n#    contract test exact-matches. Add the {\"name\", \"version\", \"file\"} row there\n#    when you extend the test.\n#\n# GUARDS: both IN-op payloads plant a `scaffy:add-schema-type … MARK:…` comment\n# (D3c — the mark line is the re-run check). The wrap op is a SELF-CONSUMING\n# REPLACE (the re-emitted tail survives inside its own payload), so E-005\n# requires its payload-derived ASLONG + REANCHOR pair. RE-RUN MATRIX: same\n# schema re-run → guards skip both ops (idempotent); a SECOND schema on the\n# same plugin → the read op inserts after the same anchor, and the wrap op's\n# REANCHOR splice accretes at the mark-family tail (the proven add-cli-verb\n# idiom: prior wrap gains the separator comma, the new wrap lands after it,\n# the list closer stays untouched).\n# ─────────────────────────────────────────────────────────────────────────────\n\n# ── Op 1: the bundled schema JSON ────────────────────────────────────────────\n\n# The minimal-template key set, mirroring command.json's field style: name /\n# title / icon / visibility / fields with ONE sample body field. NO `dataset`\n# key (the wrap hardcodes \"production\", the minimal-template law) and NO `type`\n# key (the schema's `name` IS the document type discriminator).\nCREATE FILE IF ABSENT \"api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json\"\nWITH\n::: {{.schema-name}} schema json :::\n{\n  \"name\": \"{{.schema-name}}\",\n  \"title\": \"{{.Title}}\",\n  \"icon\": \"{{.Icon}}\",\n  \"visibility\": \"{{.visibility}}\",\n  \"fields\": [\n    { \"name\": \"title\", \"title\": \"Title\", \"type\": \"string\", \"surface\": \"body\" }\n  ]\n}\n::: {{.schema-name}} schema json :::\n\n# ── Op 2: the raw_{{.schema_name}} read pipeline ─────────────────────────────\n\n# Anchor = the existing read pipeline's closing line (unique in every\n# minimal-template plugin file: scaffy.ex:66, bulldocs.ex:146, sheets.ex:114 —\n# grep -cF = 1 each). The payload inserts a blank separator + the provenance\n# mark + a second read of the new bundled JSON through the SAME @schemas_dir\n# the plugin already resolves. On a SECOND schema for the same plugin the\n# anchor is still the FIRST (original) decode line, so read pipelines stack\n# deterministically between it and the list literal. Guard derives from the\n# payload (the assignment head this op writes), add polarity (E-011).\nIN \"api/lib/barkpark/plugins/{{.plugin}}.ex\"\n### Read {{.schema-name}}.json beside the plugin's existing schema read\nINSERT AFTER FIRST\n::: existing read pipeline tail :::\n      |> Jason.decode!()\n::: existing read pipeline tail :::\nWITH\n::: {{.schema-name}} read pipeline :::\n\n    # scaffy:add-schema-type {{.plugin}} {{.schema-name}} MARK:schema-read-{{.schema-name}}\n    raw_{{.schema_name}} =\n      @schemas_dir\n      |> Path.join(\"{{.schema-name}}.json\")\n      |> File.read!()\n      |> Jason.decode!()\n::: {{.schema-name}} read pipeline :::\nMARK \"schema-read-{{.schema-name}}\"\nASLONG FILE DONT CONTAIN \"raw_{{.schema_name}} =\"\n\n# ── Op 3: the second %SchemaDefinition{} wrap ────────────────────────────────\n\n# The proven tail-accretion idiom (add-cli-verb): REPLACE the existing wrap's\n# closing tail — its LAST three lines, byte-identical across all three\n# minimal-template plugins (fields + dataset + bare `}`; grep-proven exactly\n# once per file, the visibility line above them is what differs and is\n# deliberately NOT in the anchor) — re-emitting it verbatim WITH the separator\n# comma, then the mark + the new 6-key wrap reading raw_{{.schema_name}}. The\n# new wrap's Map.get default is {{.visibility}}, so wrap and JSON can never\n# disagree. The tail survives inside the payload (self-consuming, E-005), so\n# idempotency rests on the payload-derived ASLONG, and REANCHOR keys the\n# schema-wrap- mark family: a third schema splices at the family tail (prior\n# wrap's bare `}` gains the comma — the D33 tail-shape the template ends in).\nIN \"api/lib/barkpark/plugins/{{.plugin}}.ex\"\n### Wire {{.schema-name}} as a second SchemaDefinition in register_schemas/1\nREPLACE\n::: existing wrap tail :::\n        fields: Map.get(raw, \"fields\", []),\n        dataset: \"production\"\n      }\n::: existing wrap tail :::\nWITH\n::: existing wrap tail plus {{.schema-name}} wrap :::\n        fields: Map.get(raw, \"fields\", []),\n        dataset: \"production\"\n      },\n      # scaffy:add-schema-type {{.plugin}} {{.schema-name}} MARK:schema-wrap-{{.schema-name}}\n      %SchemaDefinition{\n        name: Map.fetch!(raw_{{.schema_name}}, \"name\"),\n        title: Map.get(raw_{{.schema_name}}, \"title\"),\n        icon: Map.get(raw_{{.schema_name}}, \"icon\"),\n        visibility: Map.get(raw_{{.schema_name}}, \"visibility\", \"{{.visibility}}\"),\n        fields: Map.get(raw_{{.schema_name}}, \"fields\", []),\n        dataset: \"production\"\n      }\n::: existing wrap tail plus {{.schema-name}} wrap :::\nMARK \"schema-wrap-{{.schema-name}}\"\nREANCHOR \"schema-wrap-\"\nASLONG FILE DONT CONTAIN \"Map.fetch!(raw_{{.schema_name}}, \\\"name\\\")\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n\n# The bundled JSON exists and carries the chosen visibility verbatim.\nASSERT FILE \"api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json\" EXISTS\nASSERT FILE \"api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json\" CONTAINS \"\\\"visibility\\\": \\\"{{.visibility}}\\\"\"\n\n# Both wiring marks landed, and the wrap actually reads the new raw variable.\nASSERT FILE \"api/lib/barkpark/plugins/{{.plugin}}.ex\" CONTAINS \"MARK:schema-read-{{.schema-name}}\"\nASSERT FILE \"api/lib/barkpark/plugins/{{.plugin}}.ex\" CONTAINS \"MARK:schema-wrap-{{.schema-name}}\"\nASSERT FILE \"api/lib/barkpark/plugins/{{.plugin}}.ex\" CONTAINS \"Path.join(\\\"{{.schema-name}}.json\\\")\"\n\n# LOCAL: the created file is real JSON (cheap, dependency-light, litter-immune).\nASSERT CMD \"python3 -c 'import json; json.load(open(\\\"api/priv/plugins/{{.plugin}}/schemas/{{.schema-name}}.json\\\"))'\"\n\n# TIER ci: the plugin contract suite — reds until manual step 1 (the one-element\n# test pin) and step 2 (the manifest row) land with this scaffold, which is\n# exactly the pairing this gate exists to prove. Elixir suites are not on the\n# proven local-safe list (fresh worktrees carry no _build).\nASSERT CMD \"cd api && mix test test/barkpark/plugins\" TIER ci\n"
+    },
+    {
+      "id": "scs-107",
+      "type": "terminal",
+      "footer": "dry-run: the 6-key JSON + both register_schemas/1 injections computed; python json.load is the LOCAL gate, the plugins suite is TIER ci",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-schema-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Plugin=scaffy --var SchemaName=release-note --var Title='Release Notes' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Icon=🧾 --var Visibility=public --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "● would create api/priv/plugins/scaffy/schemas/release-note.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/plugins/scaffy.ex @MARK:schema-read-release-note"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/plugins/scaffy.ex @MARK:schema-wrap-release-note"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/priv/plugins/scaffy/schemas/release-note.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+{"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  \"name\": \"release-note\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  \"title\": \"Release Notes\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  \"icon\": \"🧾\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  \"visibility\": \"public\","
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  \"fields\": ["
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    { \"name\": \"title\", \"title\": \"Title\", \"type\": \"string\", \"surface\": \"body\" }"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  ]"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+}"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/barkpark/plugins/scaffy.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    # scaffy:add-schema-type scaffy release-note MARK:schema-read-release-note"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+    raw_release_note ="
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      @schemas_dir"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      |> Path.join(\"release-note.json\")"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      |> File.read!()"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      |> Jason.decode!()"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      },"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      # scaffy:add-schema-type scaffy release-note MARK:schema-wrap-release-note"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+      %SchemaDefinition{"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        name: Map.fetch!(raw_release_note, \"name\"),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        title: Map.get(raw_release_note, \"title\"),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        icon: Map.get(raw_release_note, \"icon\"),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        visibility: Map.get(raw_release_note, \"visibility\", \"public\"),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        fields: Map.get(raw_release_note, \"fields\", []),"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+        dataset: \"production\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-exists api/priv/plugins/scaffy/schemas/release-note.json"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/priv/plugins/scaffy/schemas/release-note.json \"\\\"visibility\\\": \\\"public\\\"\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/plugins/scaffy.ex \"MARK:schema-read-release-note\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/plugins/scaffy.ex \"MARK:schema-wrap-release-note\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/plugins/scaffy.ex \"Path.join(\\\"release-note.json\\\")\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd python3 -c 'import json; json.load(open(\"api/priv/plugins/scaffy/schemas/release-note.json\"))'"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/plugins — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 1 created, 2 injected, 2 mark(s), 1ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-108",
+      "type": "terminal",
+      "footer": "the ONEOF wall (D56): a --var value outside the declared set is refused at substitution time, the same error class as a malformed SHAPE",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-schema-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Plugin=scaffy --var SchemaName=release-note --var Title='Release Notes' \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var Icon=🧾 --var Visibility=banana --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "bp: scaffy run: --var Visibility: \"banana\" is not one of ONEOF \"public\", \"private\" (D56)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "exit 2 — usage error, nothing written, no receipt"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-109",
+      "type": "divider"
+    },
+    {
+      "id": "scs-110",
+      "type": "heading",
+      "level": 2,
+      "text": "classify-block-type — the corpus’s first ONEOF, closing the D11 gap"
+    },
+    {
+      "id": "scs-111",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "add-block-type's conditional step 1 was prose: 'classify your block in tiers.ex by hand'. This command makes it an op — one self-consuming REPLACE of the chosen tier's ~w( opener line, re-emitted with the block type as the list's first word, provenance comment above. Tier is the first ONEOF enum variable in the corpus: element, widget or section per the composition doctrine, and the variable-templated anchor @{{.Tier}} ~w( means the one command serves all three lists. The transcripts below are both real: the valid run computes one injection; the banana run is refused before anything is written."
+        }
+      ]
+    },
+    {
+      "id": "scs-112",
+      "type": "code",
+      "lang": "text",
+      "value": "barkpark/\n└── api/lib/barkpark/portable_doc/tiers.ex     ○ injected  @MARK tier-{{.tier}}-{{.block-name}}"
+    },
+    {
+      "id": "scs-113",
+      "type": "code",
+      "lang": "scaffy",
+      "value": "COMMAND \"Classify a PortableDoc Block Type\" DESCRIPTION \"Add a block type to its composition-doctrine tier word list in api/lib/barkpark/portable_doc/tiers.ex — the step add-block-type could only describe as manual prose (its conditional step 1, the D11 gap). One self-consuming REPLACE of the chosen tier's ~w( opener line: a scaffy provenance comment above it plus the opener re-emitted with the block type as the list's first word. Tier is the first ONEOF enum variable in the corpus (D56): the engine refuses any --var Tier outside element|widget|section at substitution time, before anything is written.\" LAST_UPDATED \"17-07-2026-00-00-00\" DOMAIN \"barkpark\" TAGS \"portabledoc\", \"block\" CONCEPT \"block-type\" VARIANT \"tier-classify\" DIRECTION \"add\" VARIABLES\n  VARIABLE 1 \"BlockName\" TITLE \"The block type to classify\" DESCRIPTION \"The PortableDoc `type` string of the block being classified, referenced in its kebab spelling {{.block-name}} throughout — it is the literal word planted into the ~w list, the same string compose_block/2 dispatches on. Classify the SAME spelling add-block-type scaffolded; tiers_test.exs cross-checks the two surfaces byte-for-byte.\" EXAMPLES \"timeline\", \"fact-box\", \"milestone\"\n  VARIABLE 2 \"Tier\" ONEOF \"element\", \"widget\", \"section\" TITLE \"The composition-doctrine tier\" DESCRIPTION \"Which word list the block joins (tiers.ex, composition-doctrine ladder): element = a single-purpose leaf, widget = composes elements into ONE purposeful unit, section = owns its children's LAYOUT. ONEOF is the runtime wall (D56): any other value is a usage error at substitution — exit 2, nothing written. Referenced in its lowercase spelling {{.tier}} so the value lands verbatim in `@element` / `@widget` / `@section`. NOTE the section caveat in the prose below: today's @section list is one-line, so a :section classification fails loud at the anchor instead of applying.\" EXAMPLES \"element\", \"widget\", \"section\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# WHAT THIS COMMAND HONESTLY DOES (closes the D11 'conditional/manual' gap)\n#\n#   ○ api/lib/barkpark/portable_doc/tiers.ex   injected — provenance comment +\n#     {{.block-name}} planted as the FIRST word of the @{{.tier}} ~w list\n#\n# add-block-type's prose step 1 told you to hand-edit tiers.ex; this command IS\n# that edit. Word order inside a ~w list is non-semantic (the module folds the\n# lists into set maps, tiers.ex:88-89), so first-word placement is safe and\n# gives the op a stable, templatable anchor: the list's opener line.\n#\n# PAIRING LAW — run AFTER add-block-type (or any change that gives the type a\n# compose_block/2 clause). tiers_test.exs pins completeness in BOTH directions\n# (test/barkpark/portable_doc/tiers_test.exs \"completeness vs. the render\n# surface\"): every renderable type must have a tier AND Tiers must not claim a\n# type the reader cannot produce. A word planted here without its compose\n# clause reds that second direction — which is why the mix gate below is\n# TIER ci: it goes green exactly when the pair has landed together.\n#\n# ANCHOR REALITY (D5, grep-proven at authoring time):\n#   @element ~w(   tiers.ex:57 — multi-line list, opener line matches once\n#   @widget ~w(    tiers.ex:75 — multi-line list, opener line matches once\n#   @section       tiers.ex:86 — ONE-LINE list: `  @section ~w(section columns)`\n# The fenced anchor is the bare opener LINE `  @{{.tier}} ~w(`, so Tier=section\n# clean-MISSES today's one-line shape: the engine refuses loud (D20 — anchor\n# occurs 0 times, run aborts, NOTHING written). That is honest fail-closed\n# behaviour, kept deliberately: new :section types are rare (the tier holds\n# exactly section + columns), and silently rewriting a one-line list risks the\n# exact accretion corruption D20 exists to block. If you genuinely add a third\n# :section type, hand-edit tiers.ex:86 (and consider breaking the list open to\n# the multi-line shape, which makes this command apply to it thereafter).\n#\n# WHY A SELF-CONSUMING REPLACE (the D58 idiom, not an INSERT): a comment cannot\n# live INSIDE a ~w( sigil (every token in the parens is a word), so the mark\n# line must sit ABOVE the opener — and the only byte-exact, line-granular\n# anchor for \"above the opener\" is the opener line itself. The opener survives\n# as a substring of its own payload, so E-005 requires BOTH the payload-derived\n# ASLONG below (idempotency: a re-run with the same block skips) and a REANCHOR.\n#\n# RE-RUN MATRIX (per tier family, mark prefix tier-{{.tier}}-):\n#   * same block, same tier   → ASLONG guard `~w({{.block-name}}` already\n#     present → op skips (idempotent, D23).\n#   * new block, DIFFERENT tier → that tier's family has no mark yet → fresh\n#     run-1 anchor on its own opener line → clean apply.\n#   * new block, SAME tier → REANCHOR's run-2 splice asserts the family tail\n#     ends in the template's closing byte; this template's tail is the mutated\n#     opener (ends in the block word), so the check FAILS LOUD and nothing is\n#     written (D33 tail-desync refusal — the splice's comma separator would\n#     corrupt a ~w list, so refusing is correct). Classify the second\n#     same-tier block by hand, or `bp scaffy remove` the first and re-run both.\n# ─────────────────────────────────────────────────────────────────────────────\n\n# The one op. Target = the chosen tier's opener line, byte-exact with its\n# 2-space indent (tiers.ex:57/:75). Payload = provenance comment planting the\n# real mark (D24 — MARK:<name> verbatim in the payload) + the opener re-emitted\n# with {{.block-name}} as the first list word (the original word lines that\n# follow are untouched — ~w( spans lines). ASLONG derives from the payload\n# (`~w({{.block-name}}` is text this op writes) with add polarity (E-011);\n# REANCHOR keys the per-tier mark family (E-005 pair).\nIN \"api/lib/barkpark/portable_doc/tiers.ex\"\n### Plant {{.block-name}} into the @{{.tier}} word list\nREPLACE\n::: {{.tier}} list opener :::\n  @{{.tier}} ~w(\n::: {{.tier}} list opener :::\nWITH\n::: {{.tier}} opener plus {{.block-name}} :::\n  # scaffy:classify-block-type {{.block-name}} MARK:tier-{{.tier}}-{{.block-name}}\n  @{{.tier}} ~w({{.block-name}}\n::: {{.tier}} opener plus {{.block-name}} :::\nMARK \"tier-{{.tier}}-{{.block-name}}\"\nREANCHOR \"tier-{{.tier}}-\"\nASLONG FILE DONT CONTAIN \"~w({{.block-name}}\"\n\n# ─────────────────────────────────────────────────────────────────────────────\n# POSTCONDITIONS\n# ─────────────────────────────────────────────────────────────────────────────\n\n# The block word sits directly inside the RIGHT tier's list opener, and the\n# provenance mark is planted. Both strings are verbatim substrings the op\n# writes (A4/A5: ASCII, no }} beside a literal brace).\nASSERT FILE \"api/lib/barkpark/portable_doc/tiers.ex\" CONTAINS \"@{{.tier}} ~w({{.block-name}}\"\nASSERT FILE \"api/lib/barkpark/portable_doc/tiers.ex\" CONTAINS \"MARK:tier-{{.tier}}-{{.block-name}}\"\n\n# LOCAL: the cheap litter-immune placement proof — the word is on the chosen\n# tier's opener line, not merely somewhere in the file.\nASSERT CMD \"grep -q '@{{.tier}} ~w({{.block-name}}' api/lib/barkpark/portable_doc/tiers.ex\"\n\n# TIER ci: the completeness invariant itself — EVERY renderable type has a\n# tier AND Tiers claims nothing unrenderable. Green exactly when this run is\n# paired with the block's compose clause (see PAIRING LAW above). Deferred to\n# CI: this worktree-agnostic Elixir suite is not on the proven local-safe list.\nASSERT CMD \"cd api && mix test test/barkpark/portable_doc/tiers_test.exs\" TIER ci\n"
+    },
+    {
+      "id": "scs-114",
+      "type": "terminal",
+      "footer": "dry-run, Tier=widget: one REPLACE of the @widget ~w( opener, both FILE asserts already provable against the overlay",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/classify-block-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var BlockName=timeline --var Tier=widget --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ would inject api/lib/barkpark/portable_doc/tiers.ex @MARK:tier-widget-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "--- api/lib/barkpark/portable_doc/tiers.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "-  @widget ~w("
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  # scaffy:classify-block-type timeline MARK:tier-widget-timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "+  @widget ~w(timeline"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/portable_doc/tiers.ex \"@widget ~w(timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ pass file-contains api/lib/barkpark/portable_doc/tiers.ex \"MARK:tier-widget-timeline\""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… would run cmd grep -q '@widget ~w(timeline' api/lib/barkpark/portable_doc/tiers.ex"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "… deferred cmd cd api && mix test test/barkpark/portable_doc/tiers_test.exs — TIER ci, runs in the PR"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "dry-run — 1 injected, 1 mark(s), 1ms; nothing written, no receipt, no CMDs run"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scs-115",
+      "type": "terminal",
+      "footer": "ONEOF names the offending value and lists the legal members — free text in a closed slot is now a grammar refusal, not a review catch",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/classify-block-type.scaffy \\"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "    --var BlockName=timeline --var Tier=banana --dry-run"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "bp: scaffy run: --var Tier: \"banana\" is not one of ONEOF \"element\", \"widget\", \"section\" (D56)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "exit 2 — usage error, nothing written, no receipt"
             }
           ]
         }

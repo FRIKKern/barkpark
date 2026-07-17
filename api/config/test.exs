@@ -175,3 +175,10 @@ config :barkpark, Barkpark.StudioChat,
 # tests start their own anonymous instance with injected seams. Mirrors the
 # Sync.PushWorker `enabled?` gate. (Auth is lazy and stays boot-started.)
 config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
+
+# Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process
+# Port lifecycle in test: `:auto` would flip to the systemd transient-unit path
+# on any host where `systemd-run` happens to resolve (some Linux CI images),
+# making the stub-command tests host-dependent. The unit-path tests opt into
+# `:systemd` explicitly with a stubbed launcher + is-active probe.
+config :barkpark, Barkpark.Sites.DeployRunner, runner_mode: :port

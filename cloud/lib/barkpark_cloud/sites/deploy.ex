@@ -273,7 +273,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp start_on_box(ctx, %Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
     case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp, read_token)) do
       {:ok, status, _body} when status in 200..299 ->
-        poll(ctx, deployment.build_id, poll_max())
+        poll(ctx, deployment.build_id, poll_max(), poll_grace())
 
       {:ok, status, body} ->
         fail(ctx, box_refusal(status, body))
@@ -376,15 +376,37 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp scoped_api_url(_site, _bp), do: nil
 
   ## The poll loop: read the box, CAS what changed, repeat until terminal.
+  ##
+  ## Two INDEPENDENT budgets ride this loop (charter D-restart-grace):
+  ##
+  ##   * `left` — the BUILD budget. Every poll that actually reached the box and
+  ##     saw the build still `running` (or a 404 not-yet-picked-up) spends one; at
+  ##     zero the build genuinely stalled and the row fails "did not finish in time".
+  ##
+  ##   * `grace_left` — the RESTART budget. An `{:error, _}` poll means the box was
+  ##     UNREACHABLE for this beat — and on this fleet that is almost never a dead
+  ##     box, it is `barkpark.service` bouncing under an api/** auto-deploy while a
+  ##     site build runs on it. Failing the row on the FIRST such blip (as the loop
+  ##     used to) marks it `failed` ~2s in, and a failed Deployment row is
+  ##     permanently unresurrectable — so the surviving on-box build could never
+  ##     settle live (D35, proven). Instead we tolerate a BOUNDED run of consecutive
+  ##     unreachable polls (~90s of default grace) WITHOUT spending build budget, so
+  ##     the box finishes its restart and the control plane re-attaches.
+  ##
+  ## The two budgets never share a counter: `grace_left` RESETS to full on ANY poll
+  ## that reached the box (a 2xx or a 404), so a restart mid-build costs nothing
+  ## against a later, unrelated blip — only a GENUINELY dead box (grace consecutive
+  ## errors with no reachable poll between) exhausts the grace and fails honestly,
+  ## with the same `unreachable/2` reason the first-blip fail used to give.
 
-  defp poll(ctx, _build_id, 0),
+  defp poll(ctx, _build_id, 0, _grace_left),
     do:
       fail(
         ctx,
         "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
       )
 
-  defp poll(ctx, build_id, left) do
+  defp poll(ctx, build_id, left, grace_left) do
     case BoxRelay.poll_deploy(ctx.bp, ctx.site.slug, build_id) do
       {:ok, status, body} when status in 200..299 ->
         report = normalize_report(body)
@@ -393,25 +415,37 @@ defmodule BarkparkCloud.Sites.Deploy do
         case report.state do
           :succeeded -> settle_live(ctx, report)
           :failed -> fail(ctx, report.failure_reason || stage_failure_copy(report))
-          :running -> sleep_then_poll(ctx, build_id, left)
+          # The box was reachable: spend one build beat and REFRESH the grace budget.
+          :running -> sleep_then_poll(ctx, build_id, left - 1, poll_grace())
         end
 
       # The box has not started reporting yet (a 404 on a build id it hasn't
-      # picked up) — keep waiting rather than inventing a failure.
+      # picked up) — keep waiting rather than inventing a failure. Reachable, so
+      # the grace budget resets here too.
       {:ok, 404, _body} ->
-        sleep_then_poll(ctx, build_id, left)
+        sleep_then_poll(ctx, build_id, left - 1, poll_grace())
 
       {:ok, status, body} ->
         fail(ctx, box_refusal(status, body))
 
+      # A restart-shaped blip: the box was unreachable this beat. Spend GRACE (not
+      # build budget) and re-poll — `left` is untouched, so a long restart never
+      # eats into "did the build finish in time". `grace_left` is proven > 0 here.
+      {:error, _reason} when grace_left > 0 ->
+        Process.sleep(poll_ms())
+        poll(ctx, build_id, left, grace_left - 1)
+
+      # Grace exhausted: this is not a blip, the box is really gone. Fail honestly
+      # with the box's own unreachable reason — exactly the pre-grace behaviour,
+      # now only after the restart window has closed.
       {:error, reason} ->
         fail(ctx, unreachable(ctx.bp, reason))
     end
   end
 
-  defp sleep_then_poll(ctx, build_id, left) do
+  defp sleep_then_poll(ctx, build_id, left, grace_left) do
     Process.sleep(poll_ms())
-    poll(ctx, build_id, left - 1)
+    poll(ctx, build_id, left, grace_left)
   end
 
   # CAS each NEW stage transition onto the row: `stage` (which stage is in
@@ -1005,6 +1039,14 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   defp poll_ms, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_ms, 2_000)
   defp poll_max, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_max, 450)
+
+  # The restart-grace budget (charter D-restart-grace): how many CONSECUTIVE
+  # unreachable polls the loop tolerates before failing the row. 45 × the 2s
+  # poll interval ≈ 90s — long enough for a `barkpark.service` bounce (nuke
+  # `_build/prod` + recompile + restart) to complete mid-build, short enough that
+  # a genuinely dead box still fails inside a couple of minutes. Config-defaulted
+  # so tests can shrink it to a handful.
+  defp poll_grace, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_grace, 45)
 
   defp worker_id, do: "site-deploy-#{System.unique_integer([:positive])}@#{node()}"
 end

@@ -70,6 +70,8 @@
 //	E-019  mark name is not kebab, or duplicates another mark in the same
 //	       target file (D24)
 //	E-020  DIRECTION header missing or not "add"|"remove" (D23)
+//	E-021  ONEOF violation: a declared EXAMPLES value is not a member of
+//	       the variable's ONEOF enum set (D56)
 //	W-001  byte-identical payload appears twice — define a SNIPPET and
 //	       USE it (D3(e))
 //	W-002  declared VARIABLE is never referenced
@@ -105,6 +107,7 @@ const (
 	RuleTier               = "E-018"
 	RuleMarkName           = "E-019"
 	RuleDirectionRequired  = "E-020"
+	RuleOneOf              = "E-021"
 	RuleDuplicatePayload   = "W-001"
 	RuleUnusedVariable     = "W-002"
 	RuleGenericFenceLabel  = "W-003"
@@ -154,6 +157,7 @@ var Rules = []RuleInfo{
 	{RuleTier, SeverityError, "TIER value must be ci"},
 	{RuleMarkName, SeverityError, "mark name must be kebab and unique within its target file"},
 	{RuleDirectionRequired, SeverityError, "DIRECTION header missing or not add|remove"},
+	{RuleOneOf, SeverityError, "ONEOF violation: an EXAMPLES value is outside the declared enum set"},
 	{RuleDuplicatePayload, SeverityWarn, "duplicate payload — define a SNIPPET and USE it"},
 	{RuleUnusedVariable, SeverityWarn, "declared VARIABLE is never referenced"},
 	{RuleGenericFenceLabel, SeverityWarn, "generic fence label — name the block"},

@@ -748,10 +748,18 @@ defmodule Barkpark.Sites.DeployRunnerTest do
                DeployRequest.new(%{"slug" => "s", "build_id" => "b1"})
 
       assert {:ok, %DeployRequest{template: :astro_starter}} =
-               DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "template" => "astro-starter"})
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "template" => "astro-starter"
+               })
 
       assert {:ok, %DeployRequest{template: :next_starter}} =
-               DeployRequest.new(%{"slug" => "s", "build_id" => "b1", "template" => "next-starter"})
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "template" => "next-starter"
+               })
 
       assert {:ok, %DeployRequest{template: :search_starter}} =
                DeployRequest.new(%{
@@ -790,6 +798,266 @@ defmodule Barkpark.Sites.DeployRunnerTest do
                  "build_id" => "b1",
                  "env" => %{"BARKPARK_TOKEN" => "tok\nBPSTAGE name=SWITCH status=ok"}
                })
+    end
+  end
+
+  # ── systemd transient-unit path: observer + finalizer + re-attach ─────────
+  #
+  # (search-template W6 D29/D31/D32/D33) On a systemd box the build no longer
+  # hangs off the BEAM — it runs as a SIBLING transient unit that survives a
+  # barkpark.service restart, and the Runner OBSERVES its durable status/log
+  # files + FINALIZES from them. These tests stub `systemd-run` and
+  # `systemctl is-active` (absent on macOS/CI) so the whole path runs hermetically.
+
+  # Writes an executable script to a tmp file and returns its path.
+  defp write_script(body) do
+    path = Path.join(System.tmp_dir!(), "bp-dr-#{System.unique_integer([:positive])}.sh")
+    File.write!(path, body)
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  # A stand-in for `systemd-run`: parses `--property=EnvironmentFile=`, sources it
+  # (so the engine sees BARKPARK_SITE_STATUS_FILE/LOG_FILE + the build vars), and
+  # execs the engine command. It also dumps its OWN argv so a test can prove the
+  # unit flags — and prove NO secret rides argv. Runs SYNCHRONOUSLY, which is
+  # faithful: `systemd-run` registers-and-returns, and here the "unit" simply
+  # completes before the call returns, after which is-active reports it gone.
+  defp fake_systemd_run(argv_dump) do
+    write_script("""
+    #!/usr/bin/env bash
+    printf '%s\\n' "$@" > #{argv_dump}
+    envfile=""
+    cmd=()
+    for arg in "$@"; do
+      case "$arg" in
+        --property=EnvironmentFile=*) envfile="${arg#--property=EnvironmentFile=}" ;;
+        --unit=*|--property=*|--collect) ;;
+        *) cmd+=("$arg") ;;
+      esac
+    done
+    if [ -n "$envfile" ]; then set -a; . "$envfile"; set +a; fi
+    # `systemd-run` exits 0 on REGISTRATION success — the unit's own exit code is
+    # async and irrelevant here. Run the engine, then always exit 0.
+    "${cmd[@]}"
+    exit 0
+    """)
+  end
+
+  defp echo_script(word), do: write_script("#!/usr/bin/env bash\necho #{word}\n")
+
+  # A run-state dir isolated per test (must survive a "restart" — a fresh
+  # GenServer — so it is a real dir, not deleted mid-test).
+  defp run_dir do
+    dir = Path.join(System.tmp_dir!(), "bp-dr-runstate-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    dir
+  end
+
+  # Start a FRESH Runner instance (its own init/1 re-attaches) — the app's
+  # singleton already booted, so re-attach must be exercised on a new process.
+  defp start_fresh_runner do
+    name = :"dr_reattach_#{System.unique_integer([:positive])}"
+    {:ok, pid} = GenServer.start_link(DeployRunner, [], name: name)
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    pid
+  end
+
+  # Simulate a build a PRIOR BEAM launched: manifest + (partial) status/log +
+  # a 0600 secret env file on disk, named for a still-or-once-live unit.
+  defp seed_manifest(dir, slug, opts) do
+    unit = "bp-site-build-#{slug}-#{Keyword.get(opts, :build_id, "b1")}-1.service"
+    status_file = Path.join(dir, "#{slug}.status")
+    log_file = Path.join(dir, "#{slug}.log")
+    env_file = Path.join(dir, "#{slug}.env")
+
+    File.write!(status_file, Keyword.get(opts, :status, ""))
+    File.write!(log_file, Keyword.get(opts, :log, ""))
+    File.write!(env_file, "BARKPARK_TOKEN=secret\n")
+    File.chmod!(env_file, 0o600)
+
+    manifest = %{
+      "slug" => slug,
+      "build_id" => Keyword.get(opts, :build_id, "b1"),
+      "content_rev" => "rev-1",
+      "mode" => "deploy",
+      "runtime_target" => "static",
+      "unit_name" => unit,
+      "status_file" => status_file,
+      "log_file" => log_file,
+      "build_env_file" => env_file,
+      "started_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    File.write!(Path.join(dir, "#{slug}.manifest.json"), Jason.encode!(manifest))
+    %{unit: unit, status_file: status_file, env_file: env_file}
+  end
+
+  describe "systemd unit path — spawn + finalize" do
+    test "spawns a transient unit, writes a 0600 EnvironmentFile (no secret on argv), reconstructs :done from the status file" do
+      dir = run_dir()
+      argv_dump = Path.join(dir, "argv.dump")
+
+      engine =
+        stub("""
+        echo 'BPSTAGE name=PLAN status=ok build_id=b9' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=BUILD status=started build_id=b9' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'npm build output here' >> "$BARKPARK_SITE_LOG_FILE"
+        echo 'BPSTAGE name=BUILD status=ok build_id=b9' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=SWITCH status=ok build_id=b9' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 0
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(argv_dump), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: engine
+      )
+
+      request =
+        req("unitspawn",
+          build_id: "b9",
+          content_rev: "rev-7",
+          env: %{
+            "BARKPARK_API_URL" => "http://127.0.0.1:4000",
+            "BARKPARK_TOKEN" => "per-site-token"
+          }
+        )
+
+      assert DeployRunner.trigger(request) == {:ok, :started}
+
+      # The EnvironmentFile is 0600 and CARRIES the secret; argv does NOT.
+      env_file = Path.join(dir, "unitspawn.env")
+      assert File.exists?(env_file)
+      %{mode: mode} = File.stat!(env_file)
+      assert Bitwise.band(mode, 0o777) == 0o600
+      env_contents = File.read!(env_file)
+      assert env_contents =~ "BARKPARK_TOKEN=per-site-token"
+      assert env_contents =~ "BARKPARK_SITE_STATUS_FILE="
+      assert env_contents =~ ~r/^PATH=/m
+
+      argv = File.read!(argv_dump)
+      assert argv =~ ~r/^--unit=bp-site-build-unitspawn-b9-\d+\.service$/m
+      assert argv =~ "--property=MemoryMax=1500M"
+      assert argv =~ "--property=CPUQuota=150%"
+      assert argv =~ "--property=EnvironmentFile=#{env_file}"
+      assert argv =~ "--collect"
+      # The secret NEVER reaches a ps-visible command line.
+      refute argv =~ "per-site-token"
+
+      # is-active reports the unit gone ⇒ finalize :done from the durable fold.
+      status = DeployRunner.status("unitspawn")
+      assert status.state == :done
+      assert status.exit_code == 0
+      assert status.build_id == "b9"
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD SWITCH)
+      # started was superseded by ok (upsert), and build_id preserved.
+      assert Enum.all?(status.stages, &(&1.build_id == "b9"))
+      assert Enum.any?(status.log, &String.contains?(&1, "npm build output here"))
+
+      # The secret env file is swept once the run finalizes.
+      refute File.exists?(env_file)
+    end
+
+    test "a failed unit reconstructs its typed exit + the real reason from the fold" do
+      dir = run_dir()
+
+      engine =
+        stub("""
+        echo 'BPSTAGE name=BUILD status=started build_id=b1' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'npm ERR! 401 Unauthorized' >> "$BARKPARK_SITE_LOG_FILE"
+        echo 'BPSTAGE name=BUILD status=failed build_id=b1 detail="FATAL: 401 Unauthorized - the site read token is invalid"' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 12
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("failed"), []},
+        command: engine
+      )
+
+      assert DeployRunner.trigger(req("unitfail", build_id: "b1")) == {:ok, :started}
+
+      status = DeployRunner.status("unitfail")
+      assert status.state == :done
+      assert status.exit_code == 12
+      assert status.failure_reason =~ "BUILD failed (exit 12)"
+      assert status.failure_reason =~ "401 Unauthorized - the site read token is invalid"
+      assert [%{name: "BUILD", status: "failed"}] = status.stages
+    end
+  end
+
+  describe "systemd unit path — re-attach on init (D32)" do
+    test "re-attaches to a live unit: :running, fold repopulated, same-slug re-trigger 409s" do
+      dir = run_dir()
+
+      seed_manifest(dir, "reattach-live",
+        build_id: "b7",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=b7\nBPSTAGE name=BUILD status=started build_id=b7\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("active"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+
+      status = GenServer.call(pid, {:status, "reattach-live"})
+      assert status.state == :running
+      assert status.build_id == "b7"
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD)
+      assert %{name: "BUILD", status: "started"} = List.last(status.stages)
+
+      # The single-flight slot was re-claimed across the "restart".
+      assert GenServer.call(pid, {:trigger, req("reattach-live", build_id: "b8")}) ==
+               {:error, :already_running}
+    end
+
+    test "finalizes a terminal unit on boot: :done from the status file, env file swept" do
+      dir = run_dir()
+
+      seeded =
+        seed_manifest(dir, "reattach-done",
+          build_id: "b3",
+          status:
+            "BPSTAGE name=PLAN status=ok build_id=b3\nBPSTAGE name=BUILD status=failed build_id=b3 detail=\"disk full during npm ci\"\n",
+          log: "npm ERR! ENOSPC\n"
+        )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+
+      # init re-attach saw the unit gone ⇒ it swept the secret env file.
+      refute File.exists?(seeded.env_file)
+
+      status = GenServer.call(pid, {:status, "reattach-done"})
+      assert status.state == :done
+      assert status.exit_code == 12
+      assert status.failure_reason =~ "BUILD failed (exit 12)"
+      assert status.failure_reason =~ "disk full during npm ci"
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD)
     end
   end
 end

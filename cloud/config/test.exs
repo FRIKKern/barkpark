@@ -132,4 +132,8 @@ config :barkpark_cloud,
   # than spawned, so a route test asserts a settled row instead of racing a Task.
   site_deploy_starter: BarkparkCloud.Sites.Deploy.NoopStarter,
   site_deploy_poll_ms: 0,
-  site_deploy_poll_max: 10
+  site_deploy_poll_max: 10,
+  # The restart-grace budget, shrunk to 3 so grace-exhaustion (4 consecutive
+  # unreachable polls) and grace-reset (a good poll refreshing the budget between
+  # two error bursts) are cheap to prove. Prod default is 45 (~90s).
+  site_deploy_poll_grace: 3
