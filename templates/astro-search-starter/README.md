@@ -41,3 +41,67 @@ npm run dev
 
 `BARKPARK_THEME` pins the palette (evergreen · ember · fjord · charple);
 visitors' own picker choices still win.
+
+## The finder is THE finder — proving it (`parity-check`)
+
+This edition ships the same dual-engine search as the original Next finder:
+**indx** (typo-tolerant) and **Postgres FTS**, per keystroke, straight from
+the browser. The acceptance bar is not a vibe — it is **measured** and
+re-runnable with `scripts/parity-check.mjs` (Node stdlib, zero deps).
+
+The bar is **cross-EDITION parity, per engine**: the Next finder and the Astro
+finder, given the *same engine* and the *same query*, must return the *same
+hits*. It is **not** cross-*engine* identity — indx and Postgres legitimately
+diverge on multi-term and typo queries (e.g. `portable document` → indx 37
+hits, Postgres 100). Parity is a *set* relation, not an ordered one: both
+editions read the identical route on the identical server, so hit order is a
+server-side ranking detail that jitters run-to-run at a capped-result boundary,
+never an edition property.
+
+The harness hits the exact flat-anonymous route the finder uses:
+
+```
+GET /v1/data/search/:dataset?q&engine&types&perspective=published&limit=100
+```
+
+### Record a baseline (against the reference edition)
+
+Build/deploy the **reference** edition (the live Next finder, or the last
+signed-off Astro deploy) and record its hit sets:
+
+```bash
+node scripts/parity-check.mjs \
+  --base https://guerrilla.barkpark.cloud \
+  --dataset production --type paper \
+  --write parity-baseline.json
+```
+
+This sweeps a committed **13-query, corpus-real** fixture (override with
+`--fixture <json>`) across `{indx, postgres}`, **asserts determinism** (each
+`(query, engine)` returns the same hit set across a repeat run), and writes
+`{query, engine → [ids]}`. It exits non-zero if any pair is non-deterministic.
+
+### Sign off this edition (side-by-side, both engine modes)
+
+Point the **same** command at *this* edition's live deploy and `--compare`:
+
+```bash
+node scripts/parity-check.mjs \
+  --base https://<this-edition-host> \
+  --dataset production --type paper \
+  --compare parity-baseline.json
+```
+
+It re-runs the sweep and **exits non-zero on any per-`(query, engine)` hit-set
+divergence**, naming the dropped/appeared doc ids. **Exit 0 across both engine
+modes IS the parity sign-off.** Example clean run against guerrilla:
+
+```
+OK — every (query, engine) hit set is deterministic across a repeat run.
+...
+OK — every (query, engine) hit set matches parity-baseline.json. Parity holds.
+```
+
+Build against guerrilla (or your own box) first — `cp .env.example .env`,
+`npm install`, `npm run build` — so the deploy under test is real; then run the
+two commands above. Same query → same hits, both engines: signed off.
