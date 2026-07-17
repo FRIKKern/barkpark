@@ -27,7 +27,7 @@ const corpusDir = "../../scaffy/commands"
 // corpusFileCount is the frozen size of the corpus. Asserted first so an
 // empty or half-globbed directory can never vacuously pass the per-file
 // loops below (distrust vacuous green).
-const corpusFileCount = 15
+const corpusFileCount = 16
 
 // corpusFiles globs the corpus and fails loudly if the count drifts from
 // the frozen size. Every corpus test funnels through here, so a missing
@@ -46,7 +46,7 @@ func corpusFiles(t *testing.T) []string {
 	return paths
 }
 
-// TestCorpusFileCount: exactly 15 .scaffy files, asserted before anything
+// TestCorpusFileCount: exactly 16 .scaffy files, asserted before anything
 // else touches their bytes.
 func TestCorpusFileCount(t *testing.T) {
 	corpusFiles(t)
@@ -153,17 +153,17 @@ func countCorpus(t *testing.T) census {
 // classifies one differently — fails here with a field-by-field diff.
 func TestCorpusCensus(t *testing.T) {
 	want := census{
-		create:           17, // +3 2026-07-17: add-sdk-method (module, test, changeset)
-		insertAfterFirst: 18, // +6: add-sdk-method's six fixed-anchor injections
+		create:           17,
+		insertAfterFirst: 20, // +2 2026-07-17: ensure-root-layout-zones' two zone plants
 		insertAfterLast:  1,
 		replace:          11,
 		remove:           1,
 		deleteFile:       1,
-		mark:             31, // +6: one per add-sdk-method injection
+		mark:             33, // +2: zone-script-assets + zone-live-hooks
 		markVirtual:      2,
-		assertFile:       65, // +9: add-sdk-method marks + created-file postconditions
-		assertCmd:        31, // +3: pnpm build, scoped vitest, tsc --noEmit (all LOCAL)
-		assertCmdTierCI:  10,
+		assertFile:       67, // +2: the two zone-declaration postconditions
+		assertCmd:        32, // +1: cd api && mix compile (TIER ci)
+		assertCmdTierCI:  11, // +1: same — the corpus's HEEx compile proof
 	}
 	got := countCorpus(t)
 	if got != want {
