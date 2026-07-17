@@ -1652,6 +1652,168 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "workflow_summary/1 — sidebar-fold edges (wsc charter D2/D3/D7)" do
+    # The pinned D3 shape, the two committed-fixture folds, nil/no-workflow
+    # rails, and the highest-seq pick are proven in the canonical
+    # "workflow_summary/1 — … (D3 shape)" describes below (wsc-s1). These are
+    # the s3-side edges the sidebar leans on.
+
+    test "a stamped end_time rides through as ended_at (D5 read side)" do
+      rail = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail()
+      [{tid, entry}] = Map.to_list(rail)
+      rail = Map.put(rail, tid, Map.put(entry, "end_time", 1_782_771_832_104))
+
+      assert StudioChat.workflow_summary(rail).ended_at == 1_782_771_832_104
+    end
+
+    test "a live run wears the active phase word and the settled counter" do
+      summary =
+        StudioChat.workflow_summary(%{
+          "wf" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+            "workflow" => [
+              %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+              %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 1,
+                "label" => "explore",
+                "state" => "done",
+                "startedAt" => 100,
+                "tokens" => 10
+              },
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 2,
+                "label" => "build:a",
+                "state" => "error",
+                "startedAt" => 200
+              },
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 2,
+                "label" => "build:b",
+                "state" => "progress",
+                "startedAt" => 150
+              }
+            ]
+          }
+        })
+
+      assert summary.outcome == :live
+      assert summary.terminal? == false
+      assert summary.phase == "Build"
+      assert summary.phase_index == 2
+      # the tick spine mirrors the journey statuses in order
+      assert summary.ticks == [:done, :active]
+      # done + failed = settled (the error terminal counts as finished, D2)
+      assert summary.agents_done == 2
+      assert summary.agents_total == 3
+      assert summary.running == 1
+      assert summary.started_at == 100
+      assert summary.label == "wave 1"
+    end
+  end
+
+  # Direct Repo inserts — epic_goal reads the published documents table; no
+  # claim machinery is exercised (the fold under test is the READ, not the
+  # write path).
+  defp insert_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  describe "epic_goal/2 — one-hop ledger read (wsc charter D8/D9)" do
+    test "resolves epic title · slices done/total · wave_status through the held claim" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      insert_task!("task-wsc-epic", "Wave Session Card", %{
+        "kind" => "task",
+        "lifecycle_status" => "in_progress",
+        "wave_status" => "wave: building 5 slices"
+      })
+
+      insert_task!("task-wsc-held", "Slice s3", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      insert_task!("task-wsc-s1", "Slice s1", %{
+        "lifecycle_status" => "done",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      insert_task!("task-wsc-s2", "Slice s2", %{
+        "lifecycle_status" => "cancelled",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      insert_task!("task-wsc-s4", "Slice s4", %{
+        "lifecycle_status" => "open",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      goal = StudioChat.epic_goal("claude", sid)
+
+      assert goal.id == "task-wsc-epic"
+      assert goal.title == "Wave Session Card"
+      # done + cancelled are settled; held (in_progress) + open are not
+      assert goal.slices_done == 2
+      assert goal.slices_total == 4
+      assert goal.wave_status == "wave: building 5 slices"
+      # "PRs open" has no data source (D8) — the shape carries no such key
+      refute Map.has_key?(goal, :prs_open)
+    end
+
+    test "nil at every missing hop — no claim, no parent, vanished epic" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      # no claim at all
+      assert StudioChat.epic_goal("claude", sid) == nil
+
+      # a held claim WITHOUT a parent hop
+      insert_task!("task-wsc-orphan", "Orphan", %{
+        "lifecycle_status" => "in_progress",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+
+      # a parent hop to a task that does not exist
+      insert_task!("task-wsc-dangling", "Dangling", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-never-published",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+    end
+
+    test "a draft-twin claim never resolves (published ledger only)" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      insert_task!("drafts.task-wsc-draft", "Draft twin", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+    end
+  end
+
   describe "workflow_journey/1 — derived-truth edges (charter D58)" do
     test ":skipped falls out of a COMPLETED entry with an agentless trailing phase" do
       entry = %{

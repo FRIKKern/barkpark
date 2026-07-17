@@ -6249,6 +6249,271 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # ── wave-session-card: the sidebar's two conditional lines (wsc D8-D11) ────
+  # A session driving an epic cycle earns (a) phase ticks + phase word +
+  # settled/total counter and (b) an epic-goal line — and ONLY such a session:
+  # every plain row renders byte-identically to before (D11). Live truth is the
+  # {:chat_workflow} overlay (D4); cold truth is workflow_summary over the
+  # select-widened rail_snapshot at refresh_sessions (D7).
+
+  # A live 2-phase rail: Explore settled, Build 1 done + 1 running (2/3 settled
+  # counting the explorer, D2's done+failed law exercised via unit tests).
+  defp live_workflow_rail do
+    %{
+      "wf" => %{
+        "status" => "running",
+        "seq" => 1,
+        "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "explore",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 10
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:a",
+            "state" => "done",
+            "startedAt" => 200,
+            "tokens" => 5
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:b",
+            "state" => "progress",
+            "startedAt" => 300
+          }
+        ]
+      }
+    }
+  end
+
+  # epic_goal reads the published documents table directly — lean ledger rows,
+  # no claim machinery (the READ fold is under test, not the write path).
+  defp insert_ledger_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  defp seed_epic_ledger!(worker) do
+    insert_ledger_task!("task-wsc-epic", "Wave Session Card", %{
+      "lifecycle_status" => "in_progress",
+      "wave_status" => "wave: building 5 slices"
+    })
+
+    insert_ledger_task!("task-wsc-held", "Slice s3", %{
+      "lifecycle_status" => "in_progress",
+      "parent_id" => "task-wsc-epic",
+      "claim" => %{"worker" => worker, "now" => "gating"}
+    })
+
+    insert_ledger_task!("task-wsc-s1", "Slice s1", %{
+      "lifecycle_status" => "done",
+      "parent_id" => "task-wsc-epic"
+    })
+
+    insert_ledger_task!("task-wsc-s2", "Slice s2", %{
+      "lifecycle_status" => "open",
+      "parent_id" => "task-wsc-epic"
+    })
+
+    :ok
+  end
+
+  describe "wave session card — sidebar two lines (wsc charter D8-D11)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "COLD: a completed rail renders every tick settled + complete · n/n — no Recorder alive",
+         %{conn: conn} do
+      rail = fold_epic(load_epic("epic_cycle_progress.ndjson"))
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.outcome == :completed
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+      assert card =~ "complete · #{summary.agents_done}/#{summary.agents_total}"
+      # one tick per phase, all settled — a completed cycle never breathes
+      assert length(String.split(card, "border-radius: 50%")) - 1 == summary.phases_total
+      assert length(String.split(card, "var(--life-done)")) - 1 == summary.phases_total
+      refute card =~ "bp-chat-live-dot"
+    end
+
+    test "LIVE: a {:chat_workflow} ping overlays ticks + phase word + counter; the active tick breathes",
+         %{conn: conn} do
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      refute has_element?(view, ~s([data-test-id="chat-workflow-#{sess.id}"]))
+
+      summary = StudioChat.workflow_summary(live_workflow_rail())
+      send(view.pid, {:chat_workflow, sess.id, summary})
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+      assert card =~ "Build · 2/3 agents"
+      # done tick evergreen, active tick breathing on the EXISTING pulse class
+      assert card =~ "var(--life-done)"
+      assert card =~ "bp-chat-live-dot"
+      assert card =~ "var(--life-in_progress)"
+      # the future-phase outline is the dim border token — none here (2 phases,
+      # frontier is the last), so pin the tick count instead
+      assert length(String.split(card, "border-radius: 50%")) - 1 == summary.phases_total
+    end
+
+    test "INTERRUPTED: a dead rail renders its frontier honestly and never breathes", %{
+      conn: conn
+    } do
+      rail =
+        "epic_cycle_interrupted.ndjson"
+        |> load_epic()
+        |> fold_epic()
+        |> Map.new(fn
+          {tid, %{"status" => "running"} = e} -> {tid, Map.put(e, "status", "interrupted")}
+          other -> other
+        end)
+
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.outcome == :interrupted
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+
+      assert card =~
+               "interrupted in #{summary.phase} · #{summary.agents_done}/#{summary.agents_total}"
+
+      # the dead frontier wears the blocked token and NEVER the pulse class
+      assert card =~ "var(--life-blocked)"
+      refute card =~ "bp-chat-live-dot"
+    end
+
+    test "MINIMALISM (D11): a non-workflow row renders byte-identical with vs without rail data",
+         %{conn: conn} do
+      # pin the row's only clock read far in the past so both mounts read the
+      # same age label
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      two_days_ago = DateTime.add(DateTime.utc_now(), -2 * 86_400, :second)
+
+      StudioChat.get_session(sess.id)
+      |> Ecto.Changeset.change(last_active_at: two_days_ago)
+      |> Barkpark.Repo.update!()
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      plain_row = view |> element(~s([data-test-id="chat-session-row"])) |> render()
+
+      # a rail WITHOUT workflow nodes (a plain background shell task) must not
+      # move a byte of the row
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(sess.id, %{
+          "bg" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_shell", "description" => "npm test"}
+          }
+        })
+
+      {:ok, view2, _html} = live(conn, "/studio/chat")
+      with_rail_row = view2 |> element(~s([data-test-id="chat-session-row"])) |> render()
+
+      assert plain_row == with_rail_row
+      refute plain_row =~ "chat-workflow-"
+      refute plain_row =~ "chat-epic-"
+    end
+
+    test "EPIC (D9): the epic-goal line folds title · slices · wave_status off the ledger", %{
+      conn: conn
+    } do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      {:ok, _sess} = StudioChat.create_session(%{id: sid, mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, live_workflow_rail())
+      seed_epic_ledger!(worker)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      line = view |> element(~s([data-test-id="chat-epic-#{sid}"])) |> render()
+      assert line =~ "Wave Session Card"
+      assert line =~ "1/3 slices"
+      assert line =~ "wave: building 5 slices"
+      # "PRs open" was DROPPED (D8) — no data source exists; never invented
+      refute render(view) =~ "PRs open"
+    end
+
+    test "SIBLING (D9): the epic parent's heartbeat re-reads the line; the claim.worker fold is untouched",
+         %{conn: conn} do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      {:ok, _sess} = StudioChat.create_session(%{id: sid, mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, live_workflow_rail())
+      seed_epic_ledger!(worker)
+
+      # open the session so the Doing strip / hand-task fold is live for it
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert render(view) =~ "wave: building 5 slices"
+
+      # the EXISTING claim.worker clause raises the strip (untouched behavior)
+      send(
+        view.pid,
+        task_changed("task-wsc-held", "Slice s3", %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-wsc-epic",
+          "claim" => %{"worker" => worker, "now" => "gating"},
+          "acceptance_criteria" => [%{"met" => true}]
+        })
+      )
+
+      assert render(view) =~ "data-role=\"chat-hand-task\""
+
+      # the epic heartbeat moves on the ledger…
+      Barkpark.Repo.get_by!(Barkpark.Content.Document, doc_id: "task-wsc-epic", type: "task")
+      |> Ecto.Changeset.change(
+        content: %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: complete — debrief"
+        }
+      )
+      |> Barkpark.Repo.update!()
+
+      # …and the SIBLING step (doc_id == a held task's parent_id) re-reads it
+      # off the same dataset stream — zero new PubSub topics
+      send(
+        view.pid,
+        task_changed("task-wsc-epic", "Wave Session Card", %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: complete — debrief"
+        })
+      )
+
+      html = render(view)
+      assert html =~ "wave: complete — debrief"
+      refute html =~ "wave: building 5 slices"
+      # the strip row survived — the claim.worker clause is untouched
+      assert html =~ "data-role=\"chat-hand-task\""
+    end
+  end
+
   # Connectors epic wave 1 (charter D17/D18): the admin chat LiveView is the
   # `:global` superuser path — the tenant seam added to the store MUST NOT change
   # what the admin sidebar sees. It surfaces sessions of EVERY owner (a

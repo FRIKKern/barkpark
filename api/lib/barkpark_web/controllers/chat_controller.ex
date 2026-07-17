@@ -901,8 +901,14 @@ defmodule BarkparkWeb.ChatController do
   end
 
   # The sidebar shape (D14 vacuous-green trap — NO draft/rail/choices here).
+  # Wave-session-card (wsc charter D6 — amends D14 ADDITIVELY): a session whose
+  # rail carries a workflow gains the compact derived `workflow` summary
+  # (~300B, the D3 pinned shape) and — when the ledger resolves one — an `epic`
+  # goal map (D9). The raw rail_snapshot (measured 38kB for a 29-agent run)
+  # still NEVER rides a list surface; plain sessions keep the exact shape
+  # above, key for key.
   defp sidebar_json(%StudioChat.Session{} = s) do
-    %{
+    base = %{
       id: s.id,
       provider: s.provider,
       execution_target: s.execution_target,
@@ -922,6 +928,18 @@ defmodule BarkparkWeb.ChatController do
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     }
+
+    case StudioChat.workflow_summary(s.rail_snapshot) do
+      nil -> base
+      workflow -> base |> Map.put(:workflow, workflow) |> put_epic(s)
+    end
+  end
+
+  defp put_epic(json, %StudioChat.Session{} = s) do
+    case StudioChat.epic_goal(s.provider, s.id) do
+      nil -> json
+      epic -> Map.put(json, :epic, epic)
+    end
   end
 
   @doc """
