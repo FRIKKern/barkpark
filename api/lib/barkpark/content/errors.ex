@@ -89,6 +89,11 @@ defmodule Barkpark.Content.Errors do
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
                          "invalid_enrollment",
+                         # Site-deploy status by build_id (search-template W6 D34) —
+                         # site_deploy_controller.ex: a status probe naming a build
+                         # this box is not running answers an honest 404, never a
+                         # stale slug-keyed ghost.
+                         "build_id_mismatch",
                          # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
                          "invalid_paper",
                          "invalid_text",

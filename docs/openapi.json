@@ -105,6 +105,7 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "build_id_mismatch",
                   "conflict",
                   "constraint",
                   "cors_forbidden",

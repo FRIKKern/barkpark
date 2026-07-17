@@ -349,5 +349,53 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                slug stages started_at state
              )
     end
+
+    test "a non-empty build_id that does not match the served run is 404", %{conn: conn} do
+      # A slug that never deployed serves an idle run whose build_id is nil, so
+      # any non-empty polled build_id is a mismatch — the control plane keeps
+      # waiting rather than adopting the idle (or a newer) run.
+      assert %{"error" => %{"code" => "build_id_mismatch", "message" => message}} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "brand-new", "build_id" => "b1"})
+               |> json_response(404)
+
+      assert message =~ "brand-new"
+      assert message =~ "b1"
+    end
+
+    test "an empty build_id falls back to slug-only match (rollback await-flip)", %{conn: conn} do
+      assert %{"state" => "idle", "slug" => "brand-new"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "brand-new", "build_id" => ""})
+               |> json_response(200)
+    end
+  end
+
+  # ── build_id match key — the pure decision (charter D34) ─────────────────
+
+  describe "resolve_status_match/2 (pure)" do
+    alias BarkparkWeb.SiteDeployController
+
+    test "a matching build_id serves" do
+      assert :serve = SiteDeployController.resolve_status_match(%{build_id: "b1"}, "b1")
+    end
+
+    test "a mismatched build_id is not_found" do
+      assert :not_found = SiteDeployController.resolve_status_match(%{build_id: "b1"}, "b2")
+    end
+
+    test "an empty build_id serves (slug-only, backward compatible)" do
+      assert :serve = SiteDeployController.resolve_status_match(%{build_id: "b1"}, "")
+    end
+
+    test "an absent build_id serves (legacy caller)" do
+      assert :serve = SiteDeployController.resolve_status_match(%{build_id: "b1"}, nil)
+    end
+
+    test "a non-empty build_id against an idle run (nil build_id) is not_found" do
+      assert :not_found = SiteDeployController.resolve_status_match(%{build_id: nil}, "b1")
+    end
   end
 end

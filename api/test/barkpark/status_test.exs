@@ -11,7 +11,11 @@ defmodule Barkpark.StatusTest do
 
   test "get_incident resolves a real incident by its UUID" do
     {:ok, incident} =
-      Status.create_incident(%{title: "Elevated errors", impact: "minor", status: "investigating"})
+      Status.create_incident(%{
+        title: "Elevated errors",
+        impact: "minor",
+        status: "investigating"
+      })
 
     assert %Status.Incident{} = fetched = Status.get_incident(incident.id)
     assert fetched.id == incident.id

@@ -15,12 +15,18 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   @password "correct-horse-battery"
 
   defp json_conn(conn), do: put_req_header(conn, "content-type", "application/json")
-  defp authed(token), do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+
+  defp authed(token),
+    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
 
   setup %{conn: conn} do
-    conn |> json_conn() |> post("/v1/auth/register", Jason.encode!(%{email: "pk@example.com", password: @password}))
+    conn
+    |> json_conn()
+    |> post("/v1/auth/register", Jason.encode!(%{email: "pk@example.com", password: @password}))
+
     token =
-      build_conn() |> json_conn()
+      build_conn()
+      |> json_conn()
       |> post("/v1/auth/login", Jason.encode!(%{email: "pk@example.com", password: @password}))
       |> json_response(201)
       |> Map.fetch!("token")
@@ -52,7 +58,13 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     # rpIdHash || flags(UP|UV|AT = 0x45) || signCount(0) || attestedCredentialData
     auth_data = :crypto.hash(:sha256, Webauthn.rp_id()) <> <<0x45>> <> <<0::32>> <> acd
 
-    att_obj = CBOR.encode(%{"fmt" => "none", "attStmt" => %{}, "authData" => %CBOR.Tag{tag: :bytes, value: auth_data}})
+    att_obj =
+      CBOR.encode(%{
+        "fmt" => "none",
+        "attStmt" => %{},
+        "authData" => %CBOR.Tag{tag: :bytes, value: auth_data}
+      })
+
     cdj = client_data("webauthn.create", challenge_b64)
 
     %{
@@ -86,7 +98,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     cred = make_credential(ch["challenge"])
 
     authed(token)
-    |> post("/v1/auth/webauthn/register", Jason.encode!(Map.put(cred.body, :challenge_token, ch["challenge_token"])))
+    |> post(
+      "/v1/auth/webauthn/register",
+      Jason.encode!(Map.put(cred.body, :challenge_token, ch["challenge_token"]))
+    )
     |> json_response(201)
 
     cred
@@ -94,17 +109,29 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
   # ── tests ────────────────────────────────────────────────────────────────────
 
-  test "register a passkey, then sign in with it (usernameless) → a fresh session", %{token: token, user: user} do
+  test "register a passkey, then sign in with it (usernameless) → a fresh session", %{
+    token: token,
+    user: user
+  } do
     cred = register!(token)
     assert Webauthn.has_passkey?(user)
 
     # Usernameless login: challenge → assertion → session token.
-    ch = build_conn() |> json_conn() |> post("/v1/auth/webauthn/login/challenge", "{}") |> json_response(200)
+    ch =
+      build_conn()
+      |> json_conn()
+      |> post("/v1/auth/webauthn/login/challenge", "{}")
+      |> json_response(200)
+
     assertion = make_assertion(cred, ch["challenge"], 1)
 
     resp =
-      build_conn() |> json_conn()
-      |> post("/v1/auth/webauthn/login", Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"])))
+      build_conn()
+      |> json_conn()
+      |> post(
+        "/v1/auth/webauthn/login",
+        Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"]))
+      )
       |> json_response(201)
 
     assert resp["token"]
@@ -114,12 +141,27 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   test "a forged/mismatched assertion is rejected", %{token: token} do
     _cred = register!(token)
     # A DIFFERENT authenticator (wrong key) for the same cred id-less challenge.
-    ch = build_conn() |> json_conn() |> post("/v1/auth/webauthn/login/challenge", "{}") |> json_response(200)
-    forged = make_credential(ch["challenge"])
-    bogus = make_assertion(%{priv: forged.priv, cred_id: :crypto.strong_rand_bytes(16)}, ch["challenge"], 1)
+    ch =
+      build_conn()
+      |> json_conn()
+      |> post("/v1/auth/webauthn/login/challenge", "{}")
+      |> json_response(200)
 
-    assert build_conn() |> json_conn()
-           |> post("/v1/auth/webauthn/login", Jason.encode!(Map.put(bogus, :challenge_token, ch["challenge_token"])))
+    forged = make_credential(ch["challenge"])
+
+    bogus =
+      make_assertion(
+        %{priv: forged.priv, cred_id: :crypto.strong_rand_bytes(16)},
+        ch["challenge"],
+        1
+      )
+
+    assert build_conn()
+           |> json_conn()
+           |> post(
+             "/v1/auth/webauthn/login",
+             Jason.encode!(Map.put(bogus, :challenge_token, ch["challenge_token"]))
+           )
            |> json_response(401)
   end
 
@@ -131,9 +173,14 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     # Age the session so a guarded action (mfa/disable) is challenged.
     hash = Accounts.UserSession.hash_token(token)
     old = DateTime.utc_now() |> DateTime.add(-20 * 60, :second) |> DateTime.truncate(:microsecond)
-    Repo.update_all(from(s in Accounts.UserSession, where: s.token_hash == ^hash), set: [mfa_verified_at: old])
 
-    assert authed(token) |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password})) |> json_response(401)
+    Repo.update_all(from(s in Accounts.UserSession, where: s.token_hash == ^hash),
+      set: [mfa_verified_at: old]
+    )
+
+    assert authed(token)
+           |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+           |> json_response(401)
 
     # Step up with the passkey → fresh again.
     ch = authed(token) |> post("/v1/auth/webauthn/step-up/challenge", "{}") |> json_response(200)
@@ -141,7 +188,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     step =
       authed(token)
-      |> post("/v1/auth/webauthn/step-up", Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"])))
+      |> post(
+        "/v1/auth/webauthn/step-up",
+        Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"]))
+      )
       |> json_response(200)
 
     assert step["factor"] == "passkey"
@@ -151,9 +201,24 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     cred = register!(token)
 
     first = fn count ->
-      ch = build_conn() |> json_conn() |> post("/v1/auth/webauthn/login/challenge", "{}") |> json_response(200)
-      build_conn() |> json_conn()
-      |> post("/v1/auth/webauthn/login", Jason.encode!(Map.put(make_assertion(cred, ch["challenge"], count), :challenge_token, ch["challenge_token"])))
+      ch =
+        build_conn()
+        |> json_conn()
+        |> post("/v1/auth/webauthn/login/challenge", "{}")
+        |> json_response(200)
+
+      build_conn()
+      |> json_conn()
+      |> post(
+        "/v1/auth/webauthn/login",
+        Jason.encode!(
+          Map.put(
+            make_assertion(cred, ch["challenge"], count),
+            :challenge_token,
+            ch["challenge_token"]
+          )
+        )
+      )
     end
 
     assert first.(5) |> json_response(201)
@@ -169,9 +234,20 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert [%{"id" => id}] = list["credentials"]
 
     # login emits passkey_login
-    ch = build_conn() |> json_conn() |> post("/v1/auth/webauthn/login/challenge", "{}") |> json_response(200)
-    build_conn() |> json_conn()
-    |> post("/v1/auth/webauthn/login", Jason.encode!(Map.put(make_assertion(cred, ch["challenge"], 1), :challenge_token, ch["challenge_token"])))
+    ch =
+      build_conn()
+      |> json_conn()
+      |> post("/v1/auth/webauthn/login/challenge", "{}")
+      |> json_response(200)
+
+    build_conn()
+    |> json_conn()
+    |> post(
+      "/v1/auth/webauthn/login",
+      Jason.encode!(
+        Map.put(make_assertion(cred, ch["challenge"], 1), :challenge_token, ch["challenge_token"])
+      )
+    )
     |> json_response(201)
 
     assert Repo.one(from e in Event, where: e.action == "passkey_login")
@@ -179,7 +255,11 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     # delete removes it
     assert authed(token) |> delete("/v1/auth/webauthn/credentials/#{id}") |> json_response(200)
-    assert authed(token) |> get("/v1/auth/webauthn/credentials") |> json_response(200) |> Map.fetch!("credentials") == []
+
+    assert authed(token)
+           |> get("/v1/auth/webauthn/credentials")
+           |> json_response(200)
+           |> Map.fetch!("credentials") == []
   end
 
   # BinToTerm scar: the stored `cose_key` is decoded with `binary_to_term/2
@@ -212,8 +292,14 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   # Binary_id scar: a non-UUID :id must fold into not_found, NOT raise
   # Ecto.CastError → 500 inside the id: get_by cast. Any authed user could
   # trigger the 500 trivially by DELETEing a garbage id.
-  test "DELETE a non-UUID credential id → 404 not_found, never a CastError 500", %{token: token, user: user} do
-    assert authed(token) |> delete("/v1/auth/webauthn/credentials/not-a-uuid") |> json_response(404)
+  test "DELETE a non-UUID credential id → 404 not_found, never a CastError 500", %{
+    token: token,
+    user: user
+  } do
+    assert authed(token)
+           |> delete("/v1/auth/webauthn/credentials/not-a-uuid")
+           |> json_response(404)
+
     # context guard short-circuits before any Postgres cast
     assert {:error, :not_found} == Webauthn.delete_credential(user, "not-a-uuid")
   end

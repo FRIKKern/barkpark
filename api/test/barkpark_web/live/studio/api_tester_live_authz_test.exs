@@ -36,7 +36,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLiveAuthzTest do
     admin_raw = "api-tester-authz-admin-" <> Ecto.UUID.generate()
 
     {:ok, admin_tok} =
-      Auth.create_token(admin_raw, "authz-admin", "production", ~w(read write admin), default_ws.id)
+      Auth.create_token(
+        admin_raw,
+        "authz-admin",
+        "production",
+        ~w(read write admin),
+        default_ws.id
+      )
 
     {:ok, _} = TenancyAuth.create_membership(ws.id, admin_tok.id, "admin")
 

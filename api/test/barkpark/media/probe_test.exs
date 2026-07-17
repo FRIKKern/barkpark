@@ -39,7 +39,8 @@ defmodule Barkpark.Media.ProbeTest do
 
     webp =
       "RIFF" <>
-        <<13::32-little>> <> "WEBP" <> "VP8L" <> <<5::32-little>> <> <<0x2F>> <> <<bits::32-little>>
+        <<13::32-little>> <>
+        "WEBP" <> "VP8L" <> <<5::32-little>> <> <<0x2F>> <> <<bits::32-little>>
 
     path = write_temp!(webp, "probe-lossless.webp")
 
