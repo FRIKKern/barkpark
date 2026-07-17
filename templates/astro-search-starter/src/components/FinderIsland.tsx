@@ -23,7 +23,8 @@ import type { UpstreamSearchJson } from '../finder/lib/find-shape'
 import type { FindResponse, SearchEngine, PopularQuery } from '../finder/lib/find'
 import { DOC_TYPES } from '../finder/lib/find'
 import { DATASET } from '../finder/lib/config'
-import type { PrefixSeed } from '../finder/lib/prefix-seed'
+import { buildPrefixSeed } from '../finder/lib/prefix-seed'
+import type { PrefixSeed, SeedDoc } from '../finder/lib/prefix-seed'
 
 // Barkpark API ORIGIN — the flat/anonymous search routes live at the bare
 // origin (a SCOPED apiUrl 404s the flat route, same class the graph handles).
@@ -227,9 +228,16 @@ interface SeedState {
 // (browse, engine=indx — the engine the seed was baked with). Without this the
 // first-paint browse landing renders EMPTY (raw JSON has no `.hits`) and the
 // finder skips its refetch on the matching seed key.
+// The build (`src/lib/bp.ts` → `browseSeed`) bakes `initialSeed` as the RANKED
+// CORPUS — a flat `SeedDoc[]` — NOT an already-built `PrefixSeed`. The island is
+// what "turns [that] ranked corpus into an in-browser prefix index" (per the
+// baker's own contract), so `shapeSeed` MUST run `buildPrefixSeed` here. Passing
+// the raw array straight through made `lookupPrefix` read `seed.index[key]` on
+// an Array (no `.index`) → `Cannot read properties of undefined` on the first
+// 1–2 char keystroke, which unmounted the whole island ("everything disappears").
 interface RawSeed {
   initialData: UpstreamSearchJson | null
-  initialSeed: PrefixSeed | null
+  initialSeed: SeedDoc[] | null
 }
 
 function shapeSeed(raw: RawSeed | null): SeedState {
@@ -243,7 +251,14 @@ function shapeSeed(raw: RawSeed | null): SeedState {
         upstreamMs: null,
       })
     : null
-  return { initialData, initialSeed: raw.initialSeed ?? null }
+  return {
+    initialData,
+    // Build the in-browser prefix index from the ranked corpus the build baked.
+    initialSeed:
+      raw.initialSeed && raw.initialSeed.length > 0
+        ? buildPrefixSeed(raw.initialSeed)
+        : null,
+  }
 }
 
 export default function FinderIsland() {
