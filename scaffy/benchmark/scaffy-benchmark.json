@@ -1,0 +1,3337 @@
+{
+  "slug": "scaffy-benchmark",
+  "style": "article",
+  "description": "The measured Scaffy W6 benchmark: five real Barkpark chores, four arms, 32 registered cells at pin 591fdcd53. The catalog-armed agent matches the raw engine byte-for-byte on every fully-covered chore; the engine does it for $0 in seconds with zero variance — and the paper reports every place the win narrows or the measurement has limits: the ~$0.55 spawn floor, the partial-coverage tax, the boundary staging leak, and predictions P1–P5 scored against the prereg.",
+  "main_tag": "benchmark",
+  "tags": [
+    {
+      "tag": "benchmark",
+      "strength": 90,
+      "rationale": "THE flagship benchmark paper — the W6 measurement is the artifact."
+    },
+    {
+      "tag": "scaffy",
+      "strength": 70,
+      "rationale": "The tool under measurement; the atlas, doctrine and leaps govern the epic."
+    },
+    {
+      "tag": "duels",
+      "strength": 55,
+      "rationale": "Same chore, competing arms, pre-registered matrix — results reported here."
+    },
+    {
+      "tag": "measurement",
+      "strength": 45,
+      "rationale": "Real CLI meter (total_cost_usd + usage), mechanical gates, byte-matched scoreboard."
+    },
+    {
+      "tag": "token-efficiency",
+      "strength": 30,
+      "rationale": "Output-token economy and the cache-dominated spawn floor, measured honestly."
+    }
+  ],
+  "blocks": [
+    {
+      "id": "sbm-001",
+      "type": "eyebrow",
+      "text": "Scaffy · the W6 benchmark · 32 registered cells at pin 591fdcd53 · measured 2026-07-17"
+    },
+    {
+      "id": "sbm-002",
+      "type": "heading",
+      "level": 1,
+      "text": "The Scaffy benchmark: byte-identical to the agent at $0 — wherever the catalog covers the chore",
+      "role": "title"
+    },
+    {
+      "id": "sbm-003",
+      "type": "byline",
+      "items": [
+        "32/32 cells gates-green",
+        "matrix spend $16.54 ($17.19 with declared off-matrix)",
+        "engine: $0 · 8–29 s · variance 0",
+        "agents: $0.37–$1.81 · 51–300 s",
+        "consistency C ≤ A ≤ B on every expressible chore",
+        "predictions P1–P5 scored honestly"
+      ]
+    },
+    {
+      "id": "sbm-004",
+      "type": "ingress",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Scaffy is commands as content."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " A command is a "
+        },
+        {
+          "type": "code",
+          "value": ".scaffy"
+        },
+        {
+          "type": "text",
+          "value": " file: a declarative, idempotent, reversible scaffolding document that CREATEs a vertical slice and injects its wiring into the accretion files a plain generator can never touch — registries, routers, barrels, config maps — at guarded, marker-planted anchors, closing with assertions that run the repo's own gates. Commands are Barkpark documents: authored as text, stored, versioned, tagged, served over one connect, executed by "
+        },
+        {
+          "type": "code",
+          "value": "bp scaffy run"
+        },
+        {
+          "type": "text",
+          "value": ", reversed by "
+        },
+        {
+          "type": "code",
+          "value": "bp scaffy remove"
+        },
+        {
+          "type": "text",
+          "value": ". The doctrine behind it: every fact has one owner; every derived surface is collected at runtime, generated from a manifest, or applied by a command — never maintained by hand. This paper is the measurement: five real Barkpark chores, four arms, every number below re-derivable from "
+        },
+        {
+          "type": "code",
+          "value": "tooling/scaffy-duels/results/"
+        },
+        {
+          "type": "text",
+          "value": " in the repo."
+        }
+      ]
+    },
+    {
+      "id": "sbm-005",
+      "type": "stats",
+      "items": [
+        {
+          "label": "registered cells, all run",
+          "value": "32/32"
+        },
+        {
+          "label": "chores where agent bytes == engine bytes",
+          "value": "3/3 fully covered"
+        },
+        {
+          "label": "engine cost, every chore",
+          "value": "$0"
+        },
+        {
+          "label": "engine wall-clock",
+          "value": "8–29 s"
+        },
+        {
+          "label": "engine diff variance",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "sbm-006",
+      "type": "callout",
+      "title": "The headline finding",
+      "tone": "success",
+      "content": [
+        {
+          "type": "text",
+          "value": "On all three chores the catalog fully expresses — "
+        },
+        {
+          "type": "code",
+          "value": "add-error-shape"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "code",
+          "value": "add-oban-worker"
+        },
+        {
+          "type": "text",
+          "value": ", and the flagship "
+        },
+        {
+          "type": "code",
+          "value": "add-block-type"
+        },
+        {
+          "type": "text",
+          "value": " — the catalog-armed agent produced bytes "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "identical to the raw engine"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (diff shas "
+        },
+        {
+          "type": "code",
+          "value": "17f6ffab…"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "code",
+          "value": "f614a3d4…"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "type": "code",
+          "value": "42ec6e0e…"
+        },
+        {
+          "type": "text",
+          "value": "), and the raw engine produced them for "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "$0, in 8–29 seconds, with zero variance across reps and a byte-clean remove"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". Where coverage was partial, the win narrowed. Where no command expressed the chore, the catalog neither helped nor hindered. Both halves of that sentence are measured below — including every place the measurement itself has a limit."
+        }
+      ]
+    },
+    {
+      "id": "sbm-007",
+      "type": "heading",
+      "level": 2,
+      "text": "Scoreboard — median per arm per chore, byte-matched to scores.json"
+    },
+    {
+      "id": "sbm-008",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Reading key. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "Arms: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " = agent with an explicit catalog-first instruction · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "A′"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " = Scaffy on disk but unmentioned in the brief · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "B"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " = bare agent, hand-editing · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "C"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " = the raw engine, no agent. Cost = the claude CLI's own "
+        },
+        {
+          "type": "code",
+          "value": "total_cost_usd"
+        },
+        {
+          "type": "text",
+          "value": " (the D66 meter; arm C is engine-only, $0 by construction). Work seconds exclude worktree pre-warm (D67). Distinct shas = "
+        },
+        {
+          "type": "code",
+          "value": "sha256(git diff)"
+        },
+        {
+          "type": "text",
+          "value": " compared across reps (D68). Reversible = "
+        },
+        {
+          "type": "code",
+          "value": "bp scaffy remove"
+        },
+        {
+          "type": "text",
+          "value": " receipt replay → "
+        },
+        {
+          "type": "code",
+          "value": "git diff --exit-code"
+        },
+        {
+          "type": "text",
+          "value": " = 0."
+        }
+      ]
+    },
+    {
+      "id": "sbm-009",
+      "type": "table",
+      "header": [
+        "chore",
+        "arm",
+        "n",
+        "green",
+        "med cost USD",
+        "med out-tok",
+        "med work s",
+        "distinct shas",
+        "reversible"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.5633"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1478"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "56"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (== C)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A′"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.5179"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1982"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "54"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (≠ C)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "B"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.5524"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2121"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "55"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "12"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1.0755"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "10178"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "185"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "B"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3/3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1.5265"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "12788"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "218"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "22"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.4588"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1788"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "65.5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (== C)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "B"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.4748"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2743"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "94.5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (≠ C)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "boundary"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.4551"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3226"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (empty diff)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "N/A"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "boundary"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "B"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2/2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.5251"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3281"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "67"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "N/A"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "flagship"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1/1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "29"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1/1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "flagship"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1/1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.3744"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2696"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "88"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1 (== C)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0/1"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sbm-010",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "The three orderings, verbatim from the run summary. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "Consistency (distinct shas, ascending): "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "C ≤ A ≤ B on every expressible chore"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (C always 1; A: 1/2/1/1; B: 2/3/1/2). Wall-clock: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "C ≪ A ≤ B everywhere"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (engine 8–29 s vs agents 51–300 s). Correctness: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "32/32 gates-green"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — and per D67 every gate was a harness-re-run mechanical check, never trust. Spend: matrix cells $16.54; with the declared $0.11 CLI liveness probe and the $0.54 archived flagship attempt, $17.19 total. No cell reached its cap; the largest was "
+        },
+        {
+          "type": "code",
+          "value": "ensure-cli-noun--B--2"
+        },
+        {
+          "type": "text",
+          "value": " at $1.806 against a $3.00 cap."
+        }
+      ]
+    },
+    {
+      "id": "sbm-011",
+      "type": "terminal",
+      "footer": "add-error-shape, arm C, three reps — the determinism floor: one sha, $0, seconds, exact reversal. Arm A produced the SAME sha for a median $0.5633.",
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy run scaffy/commands/add-error-shape.scaffy --var … # rep 1 of 3"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ injected api/lib/barkpark/content/errors.ex @MARK:error-shape-duel_probe"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "○ injected api/lib/barkpark/content/errors.ex @MARK:error-hint-duel_probe"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ cd api && mix test errors_test.exs error_code_coverage_test.exs  (rc 0)"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "work 8 s · $0.0000 · sha256(git diff) = 17f6ffab2bd3… — identical across all 3 reps"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp scaffy remove scaffy/commands/add-error-shape.scaffy --var <same set>"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "✔ git diff --exit-code → 0 — byte-clean, 3/3 reps"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sbm-012",
+      "type": "heading",
+      "level": 2,
+      "text": "The real cons — everything observed, nothing hidden"
+    },
+    {
+      "id": "sbm-013",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "This section is why the scoreboard is credible. Every limit the run surfaced, in full:"
+        }
+      ]
+    },
+    {
+      "id": "sbm-014",
+      "type": "list",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The ~$0.55 spawn floor. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Agent cost on small chores is cache-dominated: on add-error-shape, arm A's median $0.5633 does "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "not"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " beat arm B's $0.5524 on dollars — P1's cost clause held only for output tokens (1478 vs 2121, −30%). Dollar separation appears only when the chore grows: ensure-cli-noun A $1.0755 vs B $1.5265. On small chores the engine's dollar win is real ($0), but the agent-vs-agent dollar gap is noise around the spawn floor."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The partial-coverage tax (ensure-cli-noun). "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The registered brief names "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "two"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " noun lists; the catalog command plants only the completion list. Every arm-A agent ran "
+          },
+          {
+            "type": "code",
+            "value": "bp scaffy run"
+          },
+          {
+            "type": "text",
+            "value": " (receipts replayed clean) "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "and then hand-topped-up usage.go"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — so A's shas ≠ C's sha and reversibility died on the top-up. "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Engine-green ≠ brief-complete"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": the command was gate-green while the brief was not done, and this was the most expensive agent chore in the matrix (10–15k output tokens, 2–5 minutes)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The boundary staging leak — P4 is inconclusive as registered. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The registered recipe re-planted the bug as an "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "uncommitted working-tree revert"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " while the pin contains the fix commit. 3 of 4 agents saw the modification in "
+          },
+          {
+            "type": "code",
+            "value": "git status"
+          },
+          {
+            "type": "text",
+            "value": ", recognized the reverted fix, and restored HEAD with git — empty diffs (sha "
+          },
+          {
+            "type": "code",
+            "value": "e3b0c442…"
+          },
+          {
+            "type": "text",
+            "value": " = sha256 of the empty string), $0.40–0.48, mechanically green, judgment legs passing vacuously. Only "
+          },
+          {
+            "type": "code",
+            "value": "boundary--B--2"
+          },
+          {
+            "type": "text",
+            "value": " authored a real fix (108-line diff: "
+          },
+          {
+            "type": "code",
+            "value": "context.WithTimeout"
+          },
+          {
+            "type": "text",
+            "value": " inside ExecRunner.Run, the two required subtests, signature byte-unchanged) at $0.6525 / 4571 out-tok / 83 s — the one authentic boundary datum, ~1.5× the git-restore path. Design lesson, binding on the next benchmark: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "plant bugs as committed state"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (orphan commit or history rewrite) so recovery cannot be a checkout. A small scoring artifact rode along: the A-arm reversal guard string-compared against the wrong sentinel, so boundary \"reversible\" values are annotated N/A — diffs and transcripts unaffected."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The A-flagship single-rep footnote. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "flagship--A--1"
+          },
+          {
+            "type": "text",
+            "value": " is a single rep, and it is attempt 2 — attempt 1 ($0.539, also green, same sha "
+          },
+          {
+            "type": "code",
+            "value": "42ec6e0e…"
+          },
+          {
+            "type": "text",
+            "value": ") was discarded for a harness bug in receipt-variable resolution; its envelopes are preserved as "
+          },
+          {
+            "type": "code",
+            "value": "*.attempt1.*"
+          },
+          {
+            "type": "text",
+            "value": ". And A's transcript used the command as a checklist without a replayable receipt at the registered vars — remove returned not_found, so its reversibility is honestly false."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The flagship's untracked-fixture nuance. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The two generated pd-parity fixtures are untracked and survive remove (porcelain captured) — invisible to "
+          },
+          {
+            "type": "code",
+            "value": "git diff"
+          },
+          {
+            "type": "text",
+            "value": ", W5's documented rollback nuance, restated here rather than hidden."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Folklore, retired by measurement. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The W1-era \"56–80k tokens per command\" figure was an unverified estimate — no task evidence, no paper, no artifact ever found. It is not data and appears here only to be retired: measured bare agents spent "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "2k–15k output tokens per chore"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (median 2,121 on add-error-shape; median 12,788 and max 15,109 on ensure-cli-noun)."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "sbm-015",
+      "type": "heading",
+      "level": 3,
+      "text": "Predictions P1–P5, scored against the prereg"
+    },
+    {
+      "id": "sbm-016",
+      "type": "table",
+      "header": [
+        "prediction",
+        "registered claim (condensed)",
+        "verdict"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "P1"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C: $0, variance 0, byte-clean remove. A: green, token cost well under B. A′: ≥1/2 hand-edits. B: green with byte-variance."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Largely CONFIRMED, one miss."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " A beat B on output tokens (1478 vs 2121, −30%) but "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "not on dollars"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " ($0.5633 vs $0.5524 — the spawn floor). A′ was "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "stronger"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " than predicted: 2/2 hand-edited. C's floor re-proven in situ ("
+            },
+            {
+              "type": "code",
+              "value": "17f6ffab…"
+            },
+            {
+              "type": "text",
+              "value": " ×3)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "P2"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Smallest diffs in the matrix; B's lowest absolute spend; \"if A loses to B anywhere in catalog land, it is here\"."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Direction confirmed, magnitude WRONG."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " It was the "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "most expensive"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " agent chore in the matrix. And A did not lose: A < B on cost, tokens, wall-clock, and variance (2 vs 3 shas). The cause is itself a coverage datum — see the partial-coverage tax above."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "P3"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " add-oban-worker ×2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C deterministic under double-apply; A green on both applies; B highest variance, ≥1 rep red or drifting on the forced gate."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "HALF CONFIRMED — B sturdier than predicted."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " C and A confirmed (A byte-identical to C, receipts replayed clean). B: "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "wrong"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — both reps green and byte-identical to each other (1 sha, ≠ C). B still paid 1.5× A's output tokens and 1.4× wall-clock."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "P4"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " boundary"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Scaffy LOSES by design: A pays a catalog tax for zero payoff; A cost ≥ B; C scored no-expression."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "INCONCLUSIVE — staging leak."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " The A-vs-B comparison collapsed into git archaeology for 3 of 4 cells; not scoreable as registered. What survives: the catalog was zero help and zero hindrance (A agents never reached for scaffy — correct), and authoring the fix cost ~1.5× the restore path (B--2). The design lesson is the datum."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "P5"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " flagship add-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "C: milliseconds at $0, all asserts green on three surfaces, byte-clean remove incl. derived fixtures. A: green but spends real dollars for the same bytes."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "CONFIRMED, two footnotes."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " C: all 22 non-deferred asserts green across Go + JS + Elixir at $0 (the apply is milliseconds; the 29 s is the assert suite). A: same bytes for $0.3744. Footnotes: the untracked fixtures, and the single-rep second attempt — both above."
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sbm-017",
+      "type": "heading",
+      "level": 2,
+      "text": "The real pros — symmetric, all observed"
+    },
+    {
+      "id": "sbm-018",
+      "type": "list",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Byte-identity at full coverage. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "A == C on 3/3 fully-covered chores ("
+          },
+          {
+            "type": "code",
+            "value": "17f6ffab…"
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "code",
+            "value": "f614a3d4…"
+          },
+          {
+            "type": "text",
+            "value": " / "
+          },
+          {
+            "type": "code",
+            "value": "42ec6e0e…"
+          },
+          {
+            "type": "text",
+            "value": "). The catalog did not merely help the agent — it made the agent's output indistinguishable from the machine's."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The engine floor. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "C: variance 0 on every expressible chore, $0, 8–29 s wall (and the 29 s flagship figure is the assert suite — "
+          },
+          {
+            "type": "code",
+            "value": "pnpm install"
+          },
+          {
+            "type": "text",
+            "value": ", vitest, parity scripts; the apply itself is milliseconds), remove byte-clean on tracked files, every run."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Determinism under repetition. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "add-oban-worker ran "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "twice per cell"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": REANCHOR double-apply deterministic (identical shas), double-remove byte-clean, forced DataCase gate green."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Output-token economy. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "A < B on output tokens on every catalog chore: −30% (add-error-shape), −20% (ensure-cli-noun), −35% (add-oban-worker)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The hardest chore is where A won biggest. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "On ensure-cli-noun — exactly where the prereg feared A would lose — A beat B on cost ($1.0755 vs $1.5265), tokens, wall-clock (185 s vs 218 s), and variance (2 vs 3 shas)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Reversibility is a receipt, not a hope. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Every cell that ran the engine at the registered vars replayed its receipt to a byte-clean tree: all 9 C reps, add-error-shape A 3/3, add-oban-worker A 2/2 (including double-remove)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Honest neutrality at the boundary. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "No expression = no hindrance: boundary medians A $0.4551 vs B $0.5251 — noise-level — and A agents correctly never opened the catalog."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "sbm-019",
+      "type": "heading",
+      "level": 2,
+      "text": "A′ — the doctrine gap: the reminder IS the mechanism"
+    },
+    {
+      "id": "sbm-020",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "A′ put Scaffy on disk and said nothing. Result: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "2/2 reps hand-edited"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — the transcripts never mention scaffy, and both reps converged with arm B on the very same hand-edit bytes ("
+        },
+        {
+          "type": "code",
+          "value": "a0530fb9…"
+        },
+        {
+          "type": "text",
+          "value": "), indistinguishable from bare hands. A added one catalog-first sentence to the brief: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "3/3 reps reached for the catalog and matched the engine's bytes"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". The entire delta between \"tool ignored\" and \"byte-identical to the machine\" is one sentence in a brief. Adoption is not a tooling problem; it is a doctrine problem — and the effect is binary, not marginal. Leap L2 encodes the sentence permanently (CLAUDE.md/skill wiring, backlog "
+        },
+        {
+          "type": "code",
+          "value": "scaffy-backlog-catalog-first-doctrine"
+        },
+        {
+          "type": "text",
+          "value": "). Precedent: the optical-compression benchmark reached the same shape of result — artifacts on disk changed nothing until placement doctrine told agents when to reach for them."
+        }
+      ]
+    },
+    {
+      "id": "sbm-021",
+      "type": "heading",
+      "level": 2,
+      "text": "Adoption doctrine — evidence-scoped"
+    },
+    {
+      "id": "sbm-022",
+      "type": "table",
+      "header": [
+        "use case",
+        "verdict",
+        "basis (specific cells)"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Fully-covered catalog chore (error shape, cron worker, block type)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "USE NOW"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A == C byte-identity on 3/3 chores; C $0 / 8–29 s / variance 0 / byte-clean remove ("
+            },
+            {
+              "type": "code",
+              "value": "17f6ffab"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "f614a3d4"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "42ec6e0e"
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Repeat accretion (second worker into the same cron block)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "USE NOW"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "REANCHOR double-apply deterministic, double-remove byte-clean, forced DataCase gate green (add-oban-worker C cells)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Partially-covered chore (ensure-cli-noun today)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "MITIGATE FIRST"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Engine-green ≠ brief-complete: A topped up usage.go by hand, shas ≠ C, reversibility lost. Run the command, then top up — or close the coverage gap first ("
+            },
+            {
+              "type": "code",
+              "value": "scaffy-backlog-usage-noun-drift-fix"
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Counting on un-instructed agents to adopt the catalog"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "MITIGATE FIRST"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A′ 2/2 hand-edited with the tool on disk; wire the catalog-first doctrine (L2) before assuming adoption"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Novel one-off judgment fix (the boundary chore)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "NEVER (as a Scaffy job)"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "No catalog expression (grep-proven); A $0.4551 vs B $0.5251 — no help, no hindrance; the authentic fix was authored, not scaffolded (boundary--B--2)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Sub-3-instance frequency chores"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "NEVER (authoring unamortized)"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The D55/D60 cut discipline; authoring cost is real (review-rounds proxy: W1 5/8 slices review-fixed → W5 6/6 clean) and needs frequency to amortize"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sbm-023",
+      "type": "heading",
+      "level": 2,
+      "text": "The use-case atlas — 14 commands, the cuts, the deferrals, the vein ahead"
+    },
+    {
+      "id": "sbm-024",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Catalog counts, honestly: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "12 commands local at the duel pin, 14 on main since W5 round 3, 14 served on guerrilla (tokenless read via "
+        },
+        {
+          "type": "code",
+          "value": "bp scaffy ls --remote"
+        },
+        {
+          "type": "text",
+          "value": "). Frequency evidence below comes from the checked-in reproducible miner ("
+        },
+        {
+          "type": "code",
+          "value": "tooling/scaffy-mine"
+        },
+        {
+          "type": "text",
+          "value": ", window pinned to the pin commit's own day, 1.8 s full-repo pass) or from live-tree greps recorded in the charter — never from retired folklore. The miner's honesty record also governs what is NOT cited: the irreproducible router-partner count is dropped; the distribution truth for router.ex is 174 commits and 1,280 naive co-change partners, falling to 378 / 164 / 78 / 53 at support ≥2…≥5."
+        }
+      ]
+    },
+    {
+      "id": "sbm-025",
+      "type": "table",
+      "header": [
+        "command",
+        "wave",
+        "shape",
+        "frequency / evidence",
+        "verdict today"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1→W5 v2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3 code surfaces + parity goldens, 11 ops"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "duel-measured: C $0 / 29 s, A $0.3744 for the same bytes; W7 birthed two real blocks (diff, filetree) with it"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "USE NOW — measured"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2-site errors.ex accretion + test"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "miner: 38 added `defp build(` clause-lines across 19 commits in 12 mo (the frequency champion)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "USE NOW — measured"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "worker + test + cron REANCHOR"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cron block accretes; duel-proven deterministic under double-apply"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "USE NOW — measured"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2 of the 3 noun copies"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3-copy drift is real: usage.go stuck at 19 nouns across 15 noun-adding commits (live grep, charter D59)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "MITIGATE FIRST — partial coverage, measured"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ensure-import"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ensure law; zero-mutation row of the reversibility matrix"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ensure-family idiom, guard on the payload body (run-proven end-to-end at W5 verify)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-canonical-marker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "self-consuming REPLACE planting @canonical above a public head"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "40 live markers in tree (live grep, charter D59)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-backfill-task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CREATE pair (Mix task + test)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8+ Mix.Tasks share the byte-identical dry-run/--apply idiom (live grep, charter D59)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-schema-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "minimal 6-key plugin-schema template (ONEOF)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3 plugins share the byte-identical wrap; richer shapes out of scope by name (D59)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "classify-block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ONEOF tier append into tiers.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mandatory per new block — the tiers gate reds any renderable-unclassified type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today; 2nd same-tier = documented hand-edit (D79)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-cli-verb"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one cli_commands map append (REANCHOR)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "manifest-driven CLI made the verb a one-liner; excluded from the duels because its only functional gate is TIER-ci — a duel green would have been vacuous"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today, gate-honesty caveat"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-migration"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CREATE with SHAPE-validated ts14 var"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "timestamped migrations are continuous background accretion"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-plugin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all-CREATE 5-file slice"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "formalizes mix barkpark.plugin.new (named prior art)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "add-docs-card + remove-docs-card"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "W1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "symmetry pair, VIRTUAL marks"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the 7-card hard cap makes remove non-optional; demoed create→verify→remove byte-clean"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "expressible today (cap-bound, scratch demo)"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sbm-026",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Cut, with evidence (D60 — re-litigate only on new instances): "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "add-changeset"
+        },
+        {
+          "type": "text",
+          "value": " (CREATE-only; "
+        },
+        {
+          "type": "code",
+          "value": "pnpm changeset"
+        },
+        {
+          "type": "text",
+          "value": " already exists), "
+        },
+        {
+          "type": "code",
+          "value": "add-test-fixture"
+        },
+        {
+          "type": "text",
+          "value": " (CREATE-only, no anchor machinery), "
+        },
+        {
+          "type": "code",
+          "value": "update-oban-cron"
+        },
+        {
+          "type": "text",
+          "value": " (zero schedule-only edits in all of history — every crontab touch was an ADD, already covered), "
+        },
+        {
+          "type": "code",
+          "value": "add-retriever"
+        },
+        {
+          "type": "text",
+          "value": " (2 implementations ever; the third similarly-named module is a decoy), and "
+        },
+        {
+          "type": "code",
+          "value": "add-api-route-parity"
+        },
+        {
+          "type": "text",
+          "value": " retired as scoped — the manifest↔router cross-check is dead code and the contract test does not auto-extend; its successor "
+        },
+        {
+          "type": "code",
+          "value": "add-plugin-route"
+        },
+        {
+          "type": "text",
+          "value": " is backlogged on real evidence (8 plugins added "
+        },
+        {
+          "type": "code",
+          "value": "register_routes/1"
+        },
+        {
+          "type": "text",
+          "value": ")."
+        }
+      ]
+    },
+    {
+      "id": "sbm-027",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Grammar verdicts and deferrals (D55, D80): "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "FOREACH "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "rejected"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (its motivating fixture dissolved — the inherited DSL never had it; closed sets are explicit ops with independently-invertible receipts); optional op-groups "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "rejected"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (tests are never optional); conditionals "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "rejected"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (DIRECTION + VARIANT already split polarity and flavor); a chain/meta-command primitive "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "rejected on the lived W7 fixture"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — the 3-command birth chain ran fine as a shell recipe, and the one real bleed (the second same-tier classify) is a REANCHOR structural limit no chain would fix. Deferred, by name, awaiting ≥3 instances: composition (a schema rewrite), INSERT BEFORE (expressible today as self-consuming REPLACE — add-canonical-marker ships on that idiom), and value-capture (2 instances ever)."
+        }
+      ]
+    },
+    {
+      "id": "sbm-028",
+      "type": "heading",
+      "level": 3,
+      "text": "The vein ahead — loop-mined, task-filed"
+    },
+    {
+      "id": "sbm-029",
+      "type": "list",
+      "items": [
+        [
+          {
+            "type": "code",
+            "value": "add-sdk-method"
+          },
+          {
+            "type": "text",
+            "value": " ("
+          },
+          {
+            "type": "code",
+            "value": "task-020d46f4164178b7"
+          },
+          {
+            "type": "text",
+            "value": "): 34 commits in 12 months touch "
+          },
+          {
+            "type": "code",
+            "value": "types.ts"
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "code",
+            "value": "client.ts"
+          },
+          {
+            "type": "text",
+            "value": " + "
+          },
+          {
+            "type": "code",
+            "value": "index.ts"
+          },
+          {
+            "type": "text",
+            "value": " together (~3/month, measured 2026-07-17, reproduce-recipe in the task) — the strongest unserved vein, bigger than add-error-shape's 19 commits. Four-file mark-family command; anchor survey pending."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "root.html.heex marker zones ("
+          },
+          {
+            "type": "code",
+            "value": "task-8b5d0576c9d045bc"
+          },
+          {
+            "type": "text",
+            "value": "): 169 co-change commits in 12 months, and a 25-commit shape sample reads "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "56% pure/mostly-ADD"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — marker-zone shaped (theme block +58/−0, composer chrome +54/−0, grants CSS +46/−0). The candidate inverts the W1 lesson: when a hot accretion file lacks anchors, the command IS planting the zones."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The co-creation law, quantified: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "236 strict basename-paired .ex+_test.exs co-creations in the pinned 12-month window (304 loose) — the born-together signal nearly every command in the catalog already encodes ("
+          },
+          {
+            "type": "code",
+            "value": "tooling/scaffy-mine"
+          },
+          {
+            "type": "text",
+            "value": ", canon)."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "sbm-030",
+      "type": "heading",
+      "level": 2,
+      "text": "The crossover, quantified"
+    },
+    {
+      "id": "sbm-031",
+      "type": "diagram",
+      "caption": "The three measured regimes. Full coverage: the engine wins outright. Partial: run it, then top up — and close the gap. None: agent work, and honestly no tax for having the catalog around.",
+      "source": "flowchart TD\n  Q[\"a repeating chore arrives\"] --> F{\"does a catalog command express it?\"}\n  F -->|\"fully\"| C[\"bp scaffy run — $0 · seconds · variance 0 · receipt-replay remove\"]\n  F -->|\"partially\"| P[\"run the command, then top up by hand — engine-green is not brief-complete; extend the command (L4)\"]\n  F -->|\"not at all\"| N[\"agent work — the catalog neither helps nor hinders (measured at the boundary)\"]"
+    },
+    {
+      "id": "sbm-032",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Full coverage → the engine wins outright. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "$0, 8–29 s, variance 0, byte-clean remove; the agent's only remaining role is deciding to run it — and when it does (arm A), it reproduces the engine's bytes exactly. "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Partial coverage → the win narrows. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "The engine stays gate-green and reversible for its share, but agents pay the difference: ensure-cli-noun A $1.0755 / 185 s vs B $1.5265 / 218 s — the command saved $0.4510 and 33 s and held variance at 2 shas vs 3, but the hand top-up cost A its reversibility. "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "No expression → no help, and honestly no hindrance. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "Boundary medians: A $0.4551 vs B $0.5251 — noise-level — with zero catalog consultations in the A transcripts."
+        }
+      ]
+    },
+    {
+      "id": "sbm-033",
+      "type": "code",
+      "lang": "text",
+      "value": "adopt(chore)  ⇔  authoring_cost(chore)  <  frequency/yr × per_use_savings\n\nper_use_savings, measured against the bare agent (arm B medians):\n  full coverage     $0.4748–$1.5265  +  47–206 s  +  variance→0  +  receipt-replay remove\n  partial coverage  $0.4510          +  33 s      +  variance 3→2 shas  (reversibility lost on the top-up)\n  no expression     ≈ $0             (boundary: A −$0.07 vs B — noise)\n\nauthoring_cost — no token record exists; the honest proxy is review rounds:\n  W1: 5/8 slices needed review fixes  →  W5: 6/6 review-clean\n  (front-loaded and amortizing; never averaged into one number)"
+    },
+    {
+      "id": "sbm-034",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "A dollars-honesty note: at today's chore sizes the dollar column is the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "weakest"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " argument for the engine — the ~$0.55 cache-dominated spawn floor means agent-vs-agent dollar gaps on small chores are noise. The strong, always-on arguments are the ones agents cannot buy at any spend: variance 0, seconds instead of minutes, and a remove that replays a receipt instead of hoping a hand-edit was clean. The engine does not beat the floor; it bypasses it."
+        }
+      ]
+    },
+    {
+      "id": "sbm-035",
+      "type": "heading",
+      "level": 2,
+      "text": "Leaps, ranked with build costs"
+    },
+    {
+      "id": "sbm-036",
+      "type": "table",
+      "header": [
+        "#",
+        "leap",
+        "build cost",
+        "why the data says so"
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "L1"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "bp scaffy discover"
+            },
+            {
+              "type": "text",
+              "value": " — the frequency miner as a first-class subcommand"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LOW — ~300–400 LOC of stdlib Go, ~1 focused session; the checked-in bash miner (1.8 s full-repo) is the spec and the golden-test oracle"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The atlas above is only as good as its frequency evidence; discover makes the catalog's justification a build artifact instead of an agent transcript ("
+            },
+            {
+              "type": "code",
+              "value": "scaffy-backlog-discover-go-pass"
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "L2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Catalog-first doctrine encoding"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TRIVIAL — one sentence of CLAUDE.md/skill wiring"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The highest measured leverage in the whole run: A′→A flips 0/2 catalog use into 3/3 with byte-identity — the effect is binary ("
+            },
+            {
+              "type": "code",
+              "value": "scaffy-backlog-catalog-first-doctrine"
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "L3"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "bp scaffy validate --repo"
+            },
+            {
+              "type": "text",
+              "value": " as a CI drift gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SMALL — doc-gates wiring + a "
+            },
+            {
+              "type": "code",
+              "value": "scaffy/commands/**"
+            },
+            {
+              "type": "text",
+              "value": " trigger + one deliberately-drifted red tripwire"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Anchors rot silently otherwise; wired nowhere today (workflow grep, D71) ("
+            },
+            {
+              "type": "code",
+              "value": "scaffy-backlog-validate-repo-ci-gate"
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "L4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Coverage completeness — what the results themselves demand"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SMALL per command"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The matrix's one narrow win was a coverage gap, not an engine gap: closing ensure-cli-noun's third copy ("
+            },
+            {
+              "type": "code",
+              "value": "scaffy-backlog-usage-noun-drift-fix"
+            },
+            {
+              "type": "text",
+              "value": ") converts the partial-coverage tax into full coverage. And the benchmark's own lesson rides here: the next boundary plants its bug as committed state"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sbm-037",
+      "type": "heading",
+      "level": 2,
+      "text": "W7 cross-check — the dogfood numbers"
+    },
+    {
+      "id": "sbm-038",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "While this paper was being written, W7 used the flagship command to birth two "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "real"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " block types — "
+        },
+        {
+          "type": "code",
+          "value": "diff"
+        },
+        {
+          "type": "text",
+          "value": " and "
+        },
+        {
+          "type": "code",
+          "value": "filetree"
+        },
+        {
+          "type": "text",
+          "value": ". Engine scaffold: dry-run 9 ms, tokens 0 (real-run wall of 21–36 s was the ASSERT CMD gates, reported separately per D83). Growing the starters into real renderers was metered agent work: Go surface 426 s wall (merged, #3967); web surfaces 952 s (stamped in the task ledger, in review at publish time). That split is the crossover, lived: the deterministic slice takes milliseconds and zero tokens; judgment work stays agent work. This paper renders its diffs and file trees as plain code blocks — the web growth had not merged at publish time, and the honest choice was not to demo blocks the reader's surface cannot yet render."
+        }
+      ]
+    },
+    {
+      "id": "sbm-039",
+      "type": "divider"
+    },
+    {
+      "id": "sbm-040",
+      "type": "paragraph",
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Lineage and reproduction: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "pre-registration "
+        },
+        {
+          "type": "code",
+          "value": "scaffy-duels-prereg"
+        },
+        {
+          "type": "text",
+          "value": " (locked before any duel token, predictions dated) · raw data "
+        },
+        {
+          "type": "code",
+          "value": "tooling/scaffy-duels/results/"
+        },
+        {
+          "type": "text",
+          "value": " — "
+        },
+        {
+          "type": "code",
+          "value": "scores.json"
+        },
+        {
+          "type": "text",
+          "value": " (the manifest every number here byte-matches), per-cell claude-CLI envelopes verbatim, dirty-arm diffs, "
+        },
+        {
+          "type": "code",
+          "value": "boundary_judgment.json"
+        },
+        {
+          "type": "text",
+          "value": ", and the serial run log · miner "
+        },
+        {
+          "type": "code",
+          "value": "tooling/scaffy-mine/"
+        },
+        {
+          "type": "text",
+          "value": " · wave paper "
+        },
+        {
+          "type": "code",
+          "value": "bp-scaffy-wave6-2026-07-17"
+        },
+        {
+          "type": "text",
+          "value": " · charter decisions D63–D73 at "
+        },
+        {
+          "type": "code",
+          "value": ".claude/workflows/bp-scaffy-charter.md"
+        },
+        {
+          "type": "text",
+          "value": " · this paper's payload and re-ingest recipe checked in at "
+        },
+        {
+          "type": "code",
+          "value": "scaffy/benchmark/"
+        },
+        {
+          "type": "text",
+          "value": ". Every scoreboard number is a quotation, not a summary."
+        }
+      ]
+    }
+  ]
+}
