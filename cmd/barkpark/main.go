@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -78,7 +79,11 @@ func runTUI() int {
 		default:
 			// Note: the logged-in-to-Cloud-but-no-barkpark state is intercepted
 			// above (before the Connecting print), so it never reaches here.
-			fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
+			// Advice is derived from the RESOLVED target: a remote host (guerrilla/
+			// prod) gets a reachability + `bp doctor` line; only a local-dev target
+			// gets the mix-phx.server remedy (it used to print unconditionally, which
+			// is useless advice when you are pointed at a remote server).
+			fmt.Fprintf(os.Stderr, "%s\n", cli.LoadFailureAdvice(cfg.BaseURL))
 		}
 		return 1
 	}
@@ -91,6 +96,19 @@ func runTUI() int {
 		fmt.Fprintf(os.Stderr, "Desk structure from server\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "Desk structure built client-side (server endpoint unavailable)\n")
+	}
+
+	// Non-interactive invocation (piped output, CI, an agent harness with no
+	// controlling terminal): schemas loaded fine, but bubbletea would try to open
+	// /dev/tty for its alt-screen and fail with a raw "could not open a new TTY:
+	// device not configured" error + exit 1 — an opaque failure for a perfectly
+	// healthy connection. Detect the missing TTY BEFORE tea.NewProgram and print a
+	// compact content-first status card (what this binary is, where it is connected,
+	// how many schemas it sees, the commands that work without a terminal), then exit
+	// 0. A loaded schema set with no terminal is a complete, healthy state, not an
+	// error. The interactive path (both stdin and stdout are terminals) is unchanged.
+	if !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
+		return headlessStatusCard(os.Stdout, cfg, ds, len(schemas))
 	}
 
 	// Start TUI
@@ -112,5 +130,28 @@ func runTUI() int {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+// headlessStatusCard prints the compact content-first status card for a
+// non-interactive invocation (schemas loaded, but no usable terminal for the
+// desk) and returns the process exit code — always 0, because a loaded schema set
+// with no terminal is a complete, healthy state, not an error. It is split out of
+// runTUI so the "prints the card AND exits 0" contract is unit-testable without a
+// live server or a faked TTY (the surrounding runTUI needs both).
+func headlessStatusCard(w io.Writer, cfg apiclient.Config, ds *apiclient.Client, schemaCount int) int {
+	bin, err := os.Executable()
+	if err != nil || bin == "" {
+		bin = os.Args[0]
+	}
+	fmt.Fprintln(w, cli.RenderStatusCard(cli.StatusCardInfo{
+		Bin:         bin,
+		BaseURL:     cfg.BaseURL,
+		Source:      cli.ServerSource(),
+		Workspace:   ds.Workspace,
+		Project:     ds.Project,
+		Dataset:     ds.Dataset,
+		SchemaCount: schemaCount,
+	}))
 	return 0
 }
