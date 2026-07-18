@@ -518,6 +518,181 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   def gauge_list_html(_), do: empty("gauge-list")
 
+  # ── bar-chart ──────────────────────────────────────────────────────────────
+  #
+  # Browser twin of pdrender's bar_chart.go (B003). Horizontal bars for
+  # categorical counts: bars [{label, value}] in author order, denom = `max`
+  # when positive else the DATA MAX (never the sum — these are counts, not
+  # shares, unlike gauge-list share mode), proportion clamped [0,1]. `values:
+  # true` prints the raw value after each bar. Absent/empty bars → the honest
+  # empty box.
+
+  @doc "Horizontal bars for categorical counts: label + fill bar (+ optional value)."
+  def bar_chart_html(block) when is_map(block) do
+    bars = block |> get("bars") |> as_list() |> Enum.filter(&is_map/1)
+
+    case bars do
+      [] ->
+        empty("bar-chart")
+
+      _ ->
+        values = Enum.map(bars, &(numeric(get(&1, "value")) || 0.0))
+        explicit_max = numeric(get(block, "max"))
+
+        denom =
+          case explicit_max do
+            m when is_number(m) and m > 0 -> m
+            _ -> Enum.max(values)
+          end
+
+        denom = if denom > 0, do: denom, else: 1.0
+        show_values = get(block, "values") == true
+
+        body =
+          bars
+          |> Enum.zip(values)
+          |> Enum.map_join("", fn {b, value} ->
+            prop = clamp(value / denom, 0.0, 1.0)
+
+            digit_html =
+              if show_values,
+                do: ~s|<span class="bp-bar-chart__d">#{escape_html(fmt(value))}</span>|,
+                else: ""
+
+            ~s|<div class="bp-bar-chart__row">| <>
+              ~s|<span class="bp-bar-chart__l">#{b |> get("label") |> display_string() |> escape_html()}</span>| <>
+              ~s|<span class="bp-bar-chart__bar"><i style="width:#{fmt(prop * 100)}%"></i></span>| <>
+              digit_html <> "</div>"
+          end)
+
+        ~s|<div class="bp-bar-chart">#{body}</div>|
+    end
+  end
+
+  def bar_chart_html(_), do: empty("bar-chart")
+
+  @doc "Email-safe bar-chart: a text summary badge (label: value per row), the chart precedent."
+  def bar_chart_email_html(block, theme \\ :evergreen)
+
+  def bar_chart_email_html(block, theme) when is_map(block) do
+    bars = block |> get("bars") |> as_list() |> Enum.filter(&is_map/1)
+
+    case bars do
+      [] ->
+        empty_email("bar-chart", theme)
+
+      _ ->
+        sk = email_skin(theme)
+
+        rows =
+          Enum.map_join(bars, "", fn b ->
+            label = b |> get("label") |> display_string()
+            value = fmt(numeric(get(b, "value")) || 0.0)
+
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.ink};margin:2px 0">#{escape_html(label)}: #{escape_html(value)}</div>|
+          end)
+
+        ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+          rows <>
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
+    end
+  end
+
+  def bar_chart_email_html(_, theme), do: empty_email("bar-chart", theme)
+
+  # ── criteria-progress ─────────────────────────────────────────────────────
+  #
+  # Acceptance-criteria met/total rolled up per row, or aggregated to one
+  # total row (B034). Renders from its OWN attrs — no live task-resolver
+  # query at render time (the wishlist's `query` shape is a later Edit-time
+  # resolver concern, not this birth). Same proportional-bar vocabulary as
+  # bar-chart, but the denominator is each row's own `total` (a fraction,
+  # not a shared max) and the digit is always shown (met/total IS the
+  # datum, not optional embellishment like bar-chart's `values` toggle).
+  #
+  #   criteria-progress: {rows: [{label, met, total}], detail?: "rows"|"total"}
+  #
+  #   - rows    [{label, met, total}], author order preserved (default
+  #             mode). Empty/absent -> the honest empty box.
+  #   - detail  "total" collapses all rows into one aggregate bar (summed
+  #             met/total, label "Total"); default "rows" keeps them
+  #             separate.
+
+  @doc "Acceptance-criteria met/total per row (or aggregated): label + fraction bar + met/total digits."
+  def criteria_progress_html(block) when is_map(block) do
+    rows = block |> get("rows") |> as_list() |> Enum.filter(&is_map/1)
+
+    case rows do
+      [] ->
+        empty("criteria-progress")
+
+      _ ->
+        body =
+          rows
+          |> effective_criteria_rows(get(block, "detail"))
+          |> Enum.map_join("", fn row ->
+            met = numeric(get(row, "met")) || 0.0
+            total = numeric(get(row, "total")) || 0.0
+            prop = if total > 0, do: clamp(met / total, 0.0, 1.0), else: 0.0
+            label = row |> get("label") |> display_string()
+
+            ~s|<div class="bp-criteria-progress__row">| <>
+              ~s|<span class="bp-criteria-progress__l">#{escape_html(label)}</span>| <>
+              ~s|<span class="bp-criteria-progress__bar"><i style="width:#{fmt(prop * 100)}%"></i></span>| <>
+              ~s|<span class="bp-criteria-progress__d">#{escape_html(fmt(met))}/#{escape_html(fmt(total))}</span>| <>
+              "</div>"
+          end)
+
+        ~s|<div class="bp-criteria-progress">#{body}</div>|
+    end
+  end
+
+  def criteria_progress_html(_), do: empty("criteria-progress")
+
+  @doc "Email-safe criteria-progress: a text summary badge (label: met/total per row)."
+  def criteria_progress_email_html(block, theme \\ :evergreen)
+
+  def criteria_progress_email_html(block, theme) when is_map(block) do
+    rows = block |> get("rows") |> as_list() |> Enum.filter(&is_map/1)
+
+    case rows do
+      [] ->
+        empty_email("criteria-progress", theme)
+
+      _ ->
+        sk = email_skin(theme)
+
+        row_html =
+          rows
+          |> effective_criteria_rows(get(block, "detail"))
+          |> Enum.map_join("", fn row ->
+            met = fmt(numeric(get(row, "met")) || 0.0)
+            total = fmt(numeric(get(row, "total")) || 0.0)
+            label = row |> get("label") |> display_string()
+
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.ink};margin:2px 0">#{escape_html(label)}: #{escape_html(met)}/#{escape_html(total)}</div>|
+          end)
+
+        ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+          row_html <>
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live progress.</div></div>|
+    end
+  end
+
+  def criteria_progress_email_html(_, theme), do: empty_email("criteria-progress", theme)
+
+  defp effective_criteria_rows(rows, "total"), do: [aggregate_criteria_row(rows)]
+  defp effective_criteria_rows(rows, _), do: rows
+
+  defp aggregate_criteria_row(rows) do
+    {met, total} =
+      Enum.reduce(rows, {0.0, 0.0}, fn row, {m, t} ->
+        {m + (numeric(get(row, "met")) || 0.0), t + (numeric(get(row, "total")) || 0.0)}
+      end)
+
+    %{"label" => "Total", "met" => met, "total" => total}
+  end
+
   # Resolved gauge rows for either mode: {:ok, [%{label, prop, digit, note}]},
   # {:ok, []} when the mode's data key is absent/empty, {:error, :epic} for the
   # unbacked count groupBy.

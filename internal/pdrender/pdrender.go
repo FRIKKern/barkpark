@@ -286,6 +286,14 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Video MARK:go-registry-video
+	r.blocks["video"] = videoRenderer{}
+	// scaffy:add-block-type CriteriaProgress MARK:go-registry-criteria-progress
+	r.blocks["criteria-progress"] = criteriaProgressRenderer{}
+	// scaffy:add-block-type Equation MARK:go-registry-equation
+	r.blocks["equation"] = equationRenderer{}
+	// scaffy:add-block-type BarChart MARK:go-registry-bar-chart
+	r.blocks["bar-chart"] = barChartRenderer{}
 	// scaffy:add-block-type Expandable MARK:go-registry-expandable
 	r.blocks["expandable"] = expandableRenderer{reg: r}
 	// scaffy:add-block-type Footnote MARK:go-registry-footnote

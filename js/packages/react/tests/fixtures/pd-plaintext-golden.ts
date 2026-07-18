@@ -53,6 +53,8 @@ export const PROSE_GOLDEN: Record<string, string> = {
   steps: 'Claim the task\n\nRun bp task next.\n\nStamp evidence',
   // grown (pbw-stier-footnote): each note's text, in order
   footnote: 'The board updates live.\n\nYou always feel progress.',
+  // grown (pbw-stier-equation): the tex source is reading content, the `code` precedent
+  equation: 'E = mc^2',
   // code-story blocks (W7 grow: diff reads its verbatim `diff` attr (D75),
   // filetree its verbatim `text` tree lines (D78) — the `code` precedent)
   diff:
@@ -86,6 +88,12 @@ export const PROSE_GOLDEN: Record<string, string> = {
  * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
  */
 export const TEXTLESS_SKIP: Record<string, string> = {
+  // scaffy:add-block-type Video MARK:plaintext-skip-video
+  'video': 'media embed — a native <video> file, no reading-flow prose (same textless family as image/asciicast)',
+  // scaffy:add-block-type CriteriaProgress MARK:plaintext-skip-criteria-progress
+  'criteria-progress': 'attrs-derived met/total rollup (labels + numeric fractions) — no reading-flow prose, same textless family as bar-chart/chart/heatmap',
+  // scaffy:add-block-type BarChart MARK:plaintext-skip-bar-chart
+  'bar-chart': 'attrs-derived categorical counts (labels + numeric values) — no reading-flow prose, same textless family as chart/heatmap',
   // scaffy:add-block-type Expandable MARK:plaintext-skip-expandable
   'expandable': 'starter block — no blockText dispatch clause yet, so toPlainText returns empty; move to PROSE_GOLDEN with a clause + golden when the block grows reading-flow prose (manual step 7)',
   // scaffy:add-block-type Toc MARK:plaintext-skip-toc

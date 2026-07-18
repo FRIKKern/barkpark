@@ -493,6 +493,37 @@ const asciicast: Emit = (b) => {
   )
 }
 
+// scaffy:add-block-type Video MARK:js-emitter-video
+// Mirrors compose_block(video) (:article) — the JS twin of Figures.video_html.
+// Plain <video> file block (B062): a native <video controls> element, zero
+// client JS. An asset-less video (no `src`) renders nothing — the `image`
+// precedent (editor scaffolding, skipped). `captions` is filtered to maps.
+const video: Emit = (b) => {
+  const src = str(b.src).trim()
+  if (src === '') return ''
+
+  const poster = str(b.poster).trim()
+  const posterAttr = poster === '' ? '' : ` poster="${safeUrl(poster)}"`
+  const loopAttr = b.loop === true ? ' loop' : ''
+
+  const tracks = asList(b.captions)
+    .filter(isMap)
+    .map((c) => {
+      const lang = str(c.lang)
+      const trackSrc = str(c.src)
+      const langAttr = lang === '' ? '' : ` srclang="${escapeAttr(lang)}"`
+      return `<track kind="captions"${langAttr} src="${safeUrl(trackSrc)}">`
+    })
+    .join('')
+
+  return (
+    `<figure style="margin:1.6rem 0">` +
+    `<video controls playsinline style="max-width:100%;border-radius:6px"${posterAttr}${loopAttr} src="${safeUrl(src)}">` +
+    tracks +
+    `</video></figure>`
+  )
+}
+
 /* action (walk.ex button/2) */
 
 const action: Emit = (b) => {
@@ -1015,6 +1046,8 @@ export const coreEmitters: Record<string, Emit> = {
   stage,
   'task-detail': taskDetailEmit,
   roadmap,
+  // scaffy:add-block-type Video MARK:js-map-video
+  'video': video,
   // scaffy:add-block-type Expandable MARK:js-map-expandable
   'expandable': expandable,
   // scaffy:add-block-type Footnote MARK:js-map-footnote

@@ -16,6 +16,7 @@ import { chatEmitters } from './chat'
 import { tableEmitters } from './table'
 import { sheetEmitters } from './sheet'
 import { taskboardEmitters } from './taskboard'
+import { mathEmitters } from './math'
 
 type Emit = (block: Block) => string
 
@@ -27,6 +28,7 @@ const DISPATCH: Record<string, Emit> = {
   ...tableEmitters,
   ...sheetEmitters,
   ...taskboardEmitters,
+  ...mathEmitters,
 }
 
 /** The full set of registered block types this renderer handles — every key in

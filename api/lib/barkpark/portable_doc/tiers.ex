@@ -63,6 +63,10 @@ defmodule Barkpark.PortableDoc.Tiers do
   # no MARK could be planted — the D33/D80 refusal). @section stays a one-line
   # `~w` deliberately: a third :section type is rare and remains a hand edit.
   @element [
+    # scaffy:classify-block-type video MARK:tier-video--element
+    "video",
+    # scaffy:classify-block-type equation MARK:tier-equation--element
+    "equation",
     # scaffy:classify-block-type blockquote MARK:tier-blockquote--element
     "blockquote",
     # prose + media + structure leaves
@@ -106,6 +110,10 @@ defmodule Barkpark.PortableDoc.Tiers do
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
+    # scaffy:classify-block-type criteria-progress MARK:tier-criteria-progress--widget
+    "criteria-progress",
+    # scaffy:classify-block-type bar-chart MARK:tier-bar-chart--widget
+    "bar-chart",
     # scaffy:classify-block-type expandable MARK:tier-expandable--widget
     "expandable",
     # scaffy:classify-block-type footnote MARK:tier-footnote--widget

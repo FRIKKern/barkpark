@@ -79,6 +79,33 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
+    # scaffy:add-block-type Video MARK:parity-input-video
+    "video" => %{
+      "type" => "video",
+      "src" => "https://ex.com/demo.mp4",
+      "poster" => "https://ex.com/demo-poster.jpg",
+      "captions" => [%{"lang" => "en", "src" => "https://ex.com/en.vtt"}]
+    },
+    # scaffy:add-block-type CriteriaProgress MARK:parity-input-criteria-progress
+    "criteria-progress" => %{
+      "type" => "criteria-progress",
+      "rows" => [
+        %{"label" => "Survey every corpus chapter", "met" => 2, "total" => 5},
+        %{"label" => "File child tasks", "met" => 5, "total" => 5}
+      ]
+    },
+    # scaffy:add-block-type Equation MARK:parity-input-equation
+    "equation" => %{"type" => "equation", "tex" => "E = mc^2", "display" => true},
+    # scaffy:add-block-type BarChart MARK:parity-input-bar-chart
+    "bar-chart" => %{
+      "type" => "bar-chart",
+      "bars" => [
+        %{"label" => "paragraph", "value" => 40},
+        %{"label" => "heading", "value" => 25},
+        %{"label" => "list", "value" => 10}
+      ],
+      "values" => true
+    },
     # scaffy:add-block-type Expandable MARK:parity-input-expandable
     "expandable" => %{
       "type" => "expandable",

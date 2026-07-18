@@ -146,4 +146,43 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       cap <>
       "</figure>"
   end
+
+  # Plain `<video>` file block (B062) — a native browser element, zero client
+  # JS. Article mode emits the real `<video controls>` (plus optional
+  # `poster`/`loop` attrs and a `<track>` per caption); email/default has no
+  # video runtime, so it degrades to the poster image (if any) linking to the
+  # src, else a plain "Watch the video" link (the asciicast degrade
+  # precedent). `captions` is a pre-filtered list of `%{"lang" => …, "src" =>
+  # …}` maps — the compose_block caller owns that filtering.
+  def video_html(src, poster, captions, loop, :article) do
+    poster_attr = if poster == "", do: "", else: ~s( poster="#{safe_url(poster)}")
+    loop_attr = if loop, do: " loop", else: ""
+
+    tracks =
+      Enum.map_join(captions, "", fn c ->
+        lang = Map.get(c, "lang", "")
+        track_src = Map.get(c, "src", "")
+        lang_attr = if lang == "", do: "", else: ~s( srclang="#{escape_html(lang)}")
+        ~s(<track kind="captions"#{lang_attr} src="#{safe_url(track_src)}">)
+      end)
+
+    ~s(<figure style="margin:1.6rem 0">) <>
+      ~s(<video controls playsinline style="max-width:100%;border-radius:6px"#{poster_attr}#{loop_attr} src="#{safe_url(src)}">) <>
+      tracks <>
+      "</video></figure>"
+  end
+
+  def video_html(src, poster, _captions, _loop, _style) do
+    poster_img =
+      if poster == "" do
+        ""
+      else
+        ~s(<img src="#{safe_url(poster)}" alt="" style="max-width:100%;border-radius:6px;display:block;margin-bottom:8px">)
+      end
+
+    ~s(<figure style="margin:16px 0">) <>
+      poster_img <>
+      ~s(<a href="#{safe_url(src)}">Watch the video</a>) <>
+      "</figure>"
+  end
 end

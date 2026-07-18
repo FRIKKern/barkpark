@@ -548,6 +548,82 @@ const gaugeList: Emit = (block) => {
   return `<div class="bp-gauge">${titleHtml}${body}</div>`
 }
 
+/* ── bar-chart (horizontal bars for categorical counts, B003) ──────────────── */
+//
+// bar-chart: {bars: [{label, value}], max?, values?}. Rides the same
+// proportional-bar vocabulary as gauge-list's share mode (a labeled row +
+// a filled track), but denominated by the DATA MAX (never the sum — bars
+// are categorical counts, not shares) unless an explicit `max` is given.
+const barChart: Emit = (block) => {
+  const bars = asArr(get(block, 'bars')).filter(isMap)
+  if (bars.length === 0) return empty('bar-chart')
+  const values = bars.map((b) => numeric(get(b, 'value')) ?? 0.0)
+  const explicitMax = numeric(get(block, 'max'))
+  let denom = explicitMax !== null && explicitMax > 0 ? explicitMax : Math.max(...values)
+  if (denom <= 0) denom = 1.0
+  const showValues = get(block, 'values') === true
+
+  const rows = bars
+    .map((b, i) => {
+      const label = displayString(get(b, 'label'))
+      const value = values[i] ?? 0.0
+      const prop = clamp(value / denom, 0.0, 1.0)
+      const digitHtml = showValues
+        ? `<span class="bp-bar-chart__d">${escapeHtml(fmt(value))}</span>`
+        : ''
+      return (
+        `<div class="bp-bar-chart__row">` +
+        `<span class="bp-bar-chart__l">${escapeHtml(label)}</span>` +
+        `<span class="bp-bar-chart__bar"><i style="width:${fmt(prop * 100)}%"></i></span>` +
+        digitHtml +
+        `</div>`
+      )
+    })
+    .join('')
+  return `<div class="bp-bar-chart">${rows}</div>`
+}
+
+/* ── criteria-progress (acceptance-criteria met/total rollup, B034) ───────── */
+//
+// criteria-progress: {rows: [{label, met, total}], detail?: 'rows'|'total'}.
+// Renders from its OWN attrs — no live task-resolver query at render time.
+// Same proportional-bar vocabulary as bar-chart, but the denominator is each
+// row's own `total` (a fraction, not a shared max) and the digit is always
+// shown (met/total IS the datum). `detail: 'total'` collapses all rows into
+// one aggregate bar (summed met/total, label "Total").
+function effectiveCriteriaRows(rows: unknown[], detail: unknown): unknown[] {
+  if (detail !== 'total') return rows
+  let met = 0
+  let total = 0
+  for (const row of rows) {
+    met += numeric(get(row, 'met')) ?? 0
+    total += numeric(get(row, 'total')) ?? 0
+  }
+  return [{ label: 'Total', met, total }]
+}
+
+const criteriaProgress: Emit = (block) => {
+  const rows = asArr(get(block, 'rows')).filter(isMap)
+  if (rows.length === 0) return empty('criteria-progress')
+
+  const body = effectiveCriteriaRows(rows, get(block, 'detail'))
+    .map((row) => {
+      const met = numeric(get(row, 'met')) ?? 0
+      const total = numeric(get(row, 'total')) ?? 0
+      const prop = total > 0 ? clamp(met / total, 0.0, 1.0) : 0.0
+      const label = displayString(get(row, 'label'))
+      return (
+        `<div class="bp-criteria-progress__row">` +
+        `<span class="bp-criteria-progress__l">${escapeHtml(label)}</span>` +
+        `<span class="bp-criteria-progress__bar"><i style="width:${fmt(prop * 100)}%"></i></span>` +
+        `<span class="bp-criteria-progress__d">${escapeHtml(fmt(met))}/${escapeHtml(fmt(total))}</span>` +
+        `</div>`
+      )
+    })
+    .join('')
+  return `<div class="bp-criteria-progress">${body}</div>`
+}
+
 export const datavizEmitters: Record<string, Emit> = {
   stat,
   stats,
@@ -555,4 +631,6 @@ export const datavizEmitters: Record<string, Emit> = {
   heatmap,
   chart,
   'gauge-list': gaugeList,
+  'bar-chart': barChart,
+  'criteria-progress': criteriaProgress,
 }

@@ -50,7 +50,11 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Steps MARK:typekeyed-corpus-steps
     // scaffy:add-block-type Footnote MARK:typekeyed-corpus-footnote
     // scaffy:add-block-type Expandable MARK:typekeyed-corpus-expandable
-    expect(cases.length).toBe(53)
+    // scaffy:add-block-type BarChart MARK:typekeyed-corpus-bar-chart
+    // scaffy:add-block-type Equation MARK:typekeyed-corpus-equation
+    // scaffy:add-block-type CriteriaProgress MARK:typekeyed-corpus-criteria-progress
+    // scaffy:add-block-type Video MARK:typekeyed-corpus-video
+    expect(cases.length).toBe(57)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -75,13 +79,17 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 21 prose + 28 textless = 49', () => {
-    expect(Object.keys(PROSE_GOLDEN).length).toBe(23)
+  it('the partition is 24 prose + 31 textless = 55', () => {
+    // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
+    expect(Object.keys(PROSE_GOLDEN).length).toBe(24)
     // scaffy:add-block-type Toc MARK:typekeyed-textless-toc
     // scaffy:add-block-type Steps MARK:typekeyed-textless-steps
     // scaffy:add-block-type Footnote MARK:typekeyed-textless-footnote
     // scaffy:add-block-type Expandable MARK:typekeyed-textless-expandable
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(30)
+    // scaffy:add-block-type BarChart MARK:typekeyed-textless-bar-chart
+    // scaffy:add-block-type CriteriaProgress MARK:typekeyed-textless-criteria-progress
+    // scaffy:add-block-type Video MARK:typekeyed-textless-video
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(33)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 
