@@ -445,7 +445,7 @@ test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 82 pins (the ratc
   assert.equal(r.unresolved.length, 0, "evergreen leaves no slot unresolved");
   assert.equal(r.pinned.length, 82, "evergreen override count is frozen at 82 (56 legacy + 26 zinc characterization freezes)");
   // byte identity is what the seam guard rides on — spot-check across formats.
-  assert.equal(r.values["primary.light"], "163 46% 22%");           // HSL native
+  assert.equal(r.values["primary.light"], "151.96 71.81% 29.22%");  // HSL native (designer mint #15804e, gui-remake GR2)
   assert.equal(r.values["border.light"], "240 5.9% 90%");           // HSL pinned (zinc freeze)
   assert.equal(r.values["cliChrome.chrome-ink.dark"], "#e4e4e7");   // hex pinned (zinc freeze)
   assert.equal(r.values["cliChrome.chrome-toolbar-bg.light"], "#fafafa"); // hex NATIVE (formula hits it)

@@ -1,16 +1,16 @@
 {
   "name": "ember",
-  "_note": "Warm terracotta/amber — campfire-at-the-park. Accent rides ~H30 (burnt orange light, glowing amber dark); the neutral ladder and paper ground re-hue warm off the accent, so paper/ink visibly carry heat, never grey. The dark amber accent is the on-accent flip's live test (bright fill → near-ink text).",
+  "_note": "Warm terracotta/amber — campfire-at-the-park. Accent rides ~H19 (designer terracotta #b34e1e light, glowing coral #e8875a dark — console-remake accepted ramp); the neutral ladder and paper ground re-hue warm off the accent, so paper/ink visibly carry heat, never grey. The dark amber accent is the on-accent flip's live test (bright fill → near-ink text).",
   "modes": {
     "light": {
       "bg": "30 40% 99%",
       "ink": "22 24% 11%",
-      "accent": "20 82% 42%"
+      "accent": "19.33 71.29% 40.98%"
     },
     "dark": {
       "bg": "24 22% 8%",
       "ink": "32 24% 92%",
-      "accent": "30 92% 60%"
+      "accent": "19.01 75.53% 63.14%"
     }
   },
   "overrides": {
