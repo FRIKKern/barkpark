@@ -25,6 +25,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # ones a relevance score is most likely to crown.
   @default_ranking_pool_size 500
 
+  # Heavy `content` keys that dominate the DB→Elixir transfer + jsonb decode of
+  # the RETURNED rows. Measured on guerrilla (barkpark_prod, 2026-07-18): a
+  # paper's `content` JSON averages 87,916 bytes, of which the heavy keys are
+  # ~98.8% — stripping them drops the per-row payload to 1,040 bytes. At
+  # limit=100 that is ~8.6MB → ~102KB of content text shipped Elixir-ward and
+  # jsonb-decoded per keystroke (the returned-row half of the search latency; a
+  # calm-box limit=5→100 delta of +132ms). When a `?fields=` caller's allowlist
+  # needs NONE of these keys, `maybe_light_select/2` drops them at the DB so only
+  # the scalar content the envelope keeps crosses the wire. The DB detoast itself
+  # is already paid by the ranking ORDER BY on the keyword path, so this is pure
+  # ship+decode savings there. MUST stay in sync with the drop fragment below.
+  @heavy_content_keys ~w(body body_html blocks cells)
+
   @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) ::
           {[struct()], non_neg_integer(), map()}
@@ -97,6 +110,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> order_rank(parsed, config)
       |> limit(^limit)
       |> offset(^offset)
+      |> maybe_light_select(Keyword.get(opts, :fields))
       |> Repo.all()
 
     count = base |> exclude(:order_by) |> select([d], count(d.id)) |> Repo.one() || 0
@@ -129,6 +143,56 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp bounded_pool(base, _), do: base
+
+  # Retrieval column projection (search-latency slice a). The DB-level twin of
+  # `Content.Envelope.project/2`: when the caller passed `?fields=`, SELECT the
+  # identity/versioning/tenancy columns + `title` the envelope always needs, plus
+  # a `content` with the heavy blobs (`@heavy_content_keys`) stripped — so a
+  # paper hit ships its scalars (title/description/slug/…) but not its ~37KB
+  # `body_html`. Returns MAPS (atom-keyed) instead of `%Document{}`; every
+  # downstream consumer (Envelope.render/3, Highlighter, the pipeline's
+  # `doc_type/1`) reads hits via `doc.field` / `%{field: _}` and is map-safe.
+  #
+  # FAIL-SAFE, never lossy: applied ONLY when the `fields=` allowlist requests
+  # NONE of the heavy keys. A `fields=blocks` / `fields=body` caller (or the
+  # no-`fields=` full-envelope caller) keeps the full `%Document{}` struct, so
+  # `Envelope.render`'s paper block-promotion (which reads `content["body"]`/
+  # `["blocks"]`) is never silently starved. Every scalar in the allowlist is
+  # SELECTed verbatim, so the rendered+projected envelope is byte-identical.
+  defp maybe_light_select(query, fields) when is_binary(fields) do
+    requested =
+      fields
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    if requested != [] and Enum.all?(@heavy_content_keys, &(&1 not in requested)) do
+      select(query, [d], %{
+        id: d.id,
+        doc_id: d.doc_id,
+        type: d.type,
+        dataset: d.dataset,
+        dataset_id: d.dataset_id,
+        title: d.title,
+        status: d.status,
+        rev: d.rev,
+        owner_id: d.owner_id,
+        workspace_id: d.workspace_id,
+        project_id: d.project_id,
+        inserted_at: d.inserted_at,
+        updated_at: d.updated_at,
+        content:
+          type(
+            fragment("(? - 'body' - 'body_html' - 'blocks' - 'cells')", d.content),
+            :map
+          )
+      })
+    else
+      query
+    end
+  end
+
+  defp maybe_light_select(query, _fields), do: query
 
   # Dataset-wide (browse) / match-set (query) facet buckets per dimension, in
   # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},

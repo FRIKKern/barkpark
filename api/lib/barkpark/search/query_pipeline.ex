@@ -149,7 +149,16 @@ defmodule Barkpark.Search.QueryPipeline do
         # a grant-derived caller's search dropped the flag before either retriever
         # and saw out-of-grant hits (the ag-search-grant-leak deny). nil/absent =
         # ordinary read (no narrowing), so members/tokens/anonymous are unchanged.
-        grant_scoped: Keyword.get(opts, :grant_scoped)
+        grant_scoped: Keyword.get(opts, :grant_scoped),
+        # Retrieval column projection (search-latency slice a). The caller's
+        # `?fields=` allowlist — threaded to the Postgres retriever so a hit set
+        # it will render+project down to a few scalars is SELECTed without the
+        # heavy `content` blobs (a paper's body_html is ~37KB/row; at limit=100
+        # that dominates the DB→Elixir transfer + jsonb decode the pipeline `ms`
+        # measures). The DB-level twin of `Content.Envelope.project/2`: it only
+        # ever DROPS content keys the caller did not ask for, so the rendered
+        # envelope is byte-identical. nil/absent → the full struct (unchanged).
+        fields: Keyword.get(opts, :fields)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery
