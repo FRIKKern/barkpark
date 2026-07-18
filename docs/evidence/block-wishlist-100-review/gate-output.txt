@@ -1,0 +1,10 @@
+anchors=100
+literal_unsupported_count=1
+stier_children=12
+body_unsupported_count=0
+GATE_OK
+
+# NOTE: literal_unsupported_count=1 is the theme stylesheet's CSS comment documenting the
+# degrade emitter - present on EVERY paper page (the published wishlist page shows the identical
+# single match, ruled prose by charter D19). body_unsupported_count strips <style>/<script>:
+# zero real unsupported-block renders. GATE_OK is the corrected, content-true form.
