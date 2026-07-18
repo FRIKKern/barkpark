@@ -106,6 +106,14 @@ defmodule Barkpark.PortableDoc.Tiers do
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
+    # scaffy:classify-block-type expandable MARK:tier-expandable--widget
+    "expandable",
+    # scaffy:classify-block-type footnote MARK:tier-footnote--widget
+    "footnote",
+    # scaffy:classify-block-type steps MARK:tier-steps--widget
+    "steps",
+    # scaffy:classify-block-type toc MARK:tier-toc--widget
+    "toc",
     # scaffy:classify-block-type diff MARK:tier-diff--widget
     "diff",
     "filetree",

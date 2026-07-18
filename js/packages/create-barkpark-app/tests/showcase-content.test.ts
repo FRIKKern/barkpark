@@ -58,11 +58,19 @@ const goldens = loadGoldens()
 describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => {
   it('seeds exactly the 49 canonical block types, in sync with the pd-golden fixtures', () => {
     // Guards against drift between the generated seed and the parity fixtures.
-    expect(goldens).toHaveLength(49)
+    // scaffy:add-block-type Toc MARK:showcase-goldens-toc
+    // scaffy:add-block-type Steps MARK:showcase-goldens-steps
+    // scaffy:add-block-type Footnote MARK:showcase-goldens-footnote
+    // scaffy:add-block-type Expandable MARK:showcase-goldens-expandable
+    expect(goldens).toHaveLength(53)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
-    expect(new Set(seedTypes).size).toBe(49)
+    // scaffy:add-block-type Toc MARK:showcase-seedset-toc
+    // scaffy:add-block-type Steps MARK:showcase-seedset-steps
+    // scaffy:add-block-type Footnote MARK:showcase-seedset-footnote
+    // scaffy:add-block-type Expandable MARK:showcase-seedset-expandable
+    expect(new Set(seedTypes).size).toBe(53)
   })
 
   it('renders all 49 distinct types through renderPortableDocument, each with its golden class-markers', () => {
@@ -95,7 +103,11 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
       markersSeen.add(`${block.type}:${rootTag}:${bpClasses.sort().join(',')}`)
     }
 
-    expect(markersSeen.size).toBe(49)
+    // scaffy:add-block-type Toc MARK:showcase-markers-toc
+    // scaffy:add-block-type Steps MARK:showcase-markers-steps
+    // scaffy:add-block-type Footnote MARK:showcase-markers-footnote
+    // scaffy:add-block-type Expandable MARK:showcase-markers-expandable
+    expect(markersSeen.size).toBe(53)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {

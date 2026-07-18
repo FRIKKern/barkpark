@@ -286,6 +286,14 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Expandable MARK:go-registry-expandable
+	r.blocks["expandable"] = expandableRenderer{reg: r}
+	// scaffy:add-block-type Footnote MARK:go-registry-footnote
+	r.blocks["footnote"] = footnoteRenderer{}
+	// scaffy:add-block-type Steps MARK:go-registry-steps
+	r.blocks["steps"] = stepsRenderer{reg: r}
+	// scaffy:add-block-type Toc MARK:go-registry-toc
+	r.blocks["toc"] = tocRenderer{}
 	// scaffy:add-block-type Blockquote MARK:go-registry-blockquote
 	r.blocks["blockquote"] = blockquoteRenderer{ir: ir}
 	// scaffy:add-block-type Filetree MARK:go-registry-filetree

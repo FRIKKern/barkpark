@@ -244,6 +244,14 @@ function blockText(b: Block): string {
       return childrenText(b.blocks)
     case 'terminal':
       return childrenText(b.children ?? b.blocks)
+    // Steps: each step's title + its nested blocks' prose, in order.
+    case 'steps':
+      return joinBlocks(
+        asList(b.steps).map((s) => (isMap(s) ? joinBlocks([str(s.title), childrenText(s.blocks)]) : '')),
+      )
+    // Footnote: each note's text, in order.
+    case 'footnote':
+      return joinBlocks(asList(b.notes).map((n) => (isMap(n) ? str(n.text) : '')))
     // ── data-viz / forms / chat / media / structural → textless ───────────
     default:
       return ''

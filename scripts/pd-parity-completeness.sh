@@ -22,7 +22,11 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type Diff MARK:parity-count-script-diff
 # scaffy:add-block-type Filetree MARK:parity-count-script-filetree
 # scaffy:add-block-type Blockquote MARK:parity-count-script-blockquote
-EXPECTED_COUNT=49
+# scaffy:add-block-type Toc MARK:parity-count-script-toc
+# scaffy:add-block-type Steps MARK:parity-count-script-steps
+# scaffy:add-block-type Footnote MARK:parity-count-script-footnote
+# scaffy:add-block-type Expandable MARK:parity-count-script-expandable
+EXPECTED_COUNT=53
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2
