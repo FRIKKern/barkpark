@@ -28,6 +28,11 @@ config :barkpark, Barkpark.Repo,
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
 config :barkpark, error_test_routes: true
 
+# Search-intel record writes are async in prod (a keystroke must never stall on
+# the event INSERT); tests run them sync so every existing "row exists after
+# record" assertion stays deterministic. The async path has its own test.
+config :barkpark, search_intel_record_async: false
+
 # Preview-JWT test signing secret (throwaway). Kept OUT of config.exs so Sobelow
 # Config.Secrets stays clean (test.exs is in Sobelow's config skip-list). Merges
 # with the ttl_seconds/issuer base set in config.exs.
