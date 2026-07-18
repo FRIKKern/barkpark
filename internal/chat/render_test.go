@@ -434,7 +434,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	epic := &EpicGoal{ID: "task-x", Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5,
 		WaveStatus: "wave: building 5 slices"}
-	lines := workflowCardLines(80, &wf, epic)
+	lines := workflowCardLines(80, &wf, epic, 0)
 	if len(lines) != 2 {
 		t.Fatalf("a workflow row with an epic goal grows two lines, got %d:\n%v", len(lines), lines)
 	}
@@ -461,7 +461,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 	// A terminal wave settles honestly to its lifecycle word, never a stuck
 	// phase — straight off s1's shared interrupted fold.
 	interrupted := loadSharedSummaries(t)["epic_cycle_interrupted"]
-	iout := strings.Join(workflowCardLines(80, &interrupted, nil), "\n")
+	iout := strings.Join(workflowCardLines(80, &interrupted, nil, 0), "\n")
 	if !strings.Contains(iout, "interrupted") {
 		t.Errorf("an interrupted wave must render 'interrupted', got:\n%s", iout)
 	}
@@ -469,13 +469,78 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 		t.Errorf("the dead-frontier tick must render the interrupted glyph, got:\n%s", iout)
 	}
 	// No epic goal → exactly one line (no fabricated goal line).
-	if got := len(workflowCardLines(80, &interrupted, nil)); got != 1 {
+	if got := len(workflowCardLines(80, &interrupted, nil, 0)); got != 1 {
 		t.Errorf("a goal-less workflow row grows exactly one line, got %d", got)
 	}
 
 	// A nil summary adds nothing — the minimalism contract.
-	if workflowCardLines(80, nil, epic) != nil {
+	if workflowCardLines(80, nil, epic, 0) != nil {
 		t.Fatal("a nil workflow summary must add no lines (even with a stray epic)")
+	}
+}
+
+// TestWorkflowTickLineNeedsYouPill is criterion 2: on a live workflow row the
+// needs-you pill REPLACES the status word when PendingApprovals>0 (needs-you >
+// working, single-badge — one word slot, never a new line, never side-by-side);
+// a terminal wave is never needs-you (its lifecycle word wins even with pending);
+// and a plain workflow row (pending=0) is unchanged.
+func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json") // live, phase word "Build"
+
+	pill := workflowTickLine(80, &wf, 2)
+	if !strings.Contains(pill, "needs you") || !strings.Contains(pill, "⏸") {
+		t.Fatalf("a live workflow with a pending gate must show the needs-you pill, got:\n%q", pill)
+	}
+	if strings.Contains(pill, "\n") {
+		t.Fatalf("the needs-you pill must never add a line (single-badge law), got:\n%q", pill)
+	}
+	if strings.Contains(pill, "Build") {
+		t.Fatalf("needs-you > working — the pill must REPLACE the live status word, got:\n%q", pill)
+	}
+	// the fleet counter still rides alongside (the pill only swaps the word slot).
+	if !strings.Contains(pill, "13/17") {
+		t.Fatalf("the pill must not eat the settled/total counter, got:\n%q", pill)
+	}
+
+	// pending=0 → the ordinary status word, no pill.
+	plain := workflowTickLine(80, &wf, 0)
+	if strings.Contains(plain, "needs you") {
+		t.Fatalf("no pending gate must show no pill, got:\n%q", plain)
+	}
+	if !strings.Contains(plain, "Build") {
+		t.Fatalf("without a gate the live phase word must render, got:\n%q", plain)
+	}
+
+	// a terminal wave is never needs-you even with a stale pending count.
+	term := loadSharedSummaries(t)["epic_cycle_interrupted"]
+	tline := workflowTickLine(80, &term, 3)
+	if strings.Contains(tline, "needs you") {
+		t.Fatalf("a terminal wave must never show needs-you, got:\n%q", tline)
+	}
+	if !strings.Contains(tline, "interrupted") {
+		t.Fatalf("a terminal wave keeps its lifecycle word, got:\n%q", tline)
+	}
+}
+
+// TestPickerRowSurfacesNeedsYou proves the pill flows through the picker row: a
+// workflow session with pending approvals shows the needs-you pill on its tick
+// line, while a plain (workflow-less) row stays byte-identical to the legacy
+// render regardless of its pending count.
+func TestPickerRowSurfacesNeedsYou(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json")
+	m := Model{width: 80, sessions: []SessionSummary{
+		{ID: "plain", Title: "just a chat", MessageCount: 4, PendingApprovals: 1},
+		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, PendingApprovals: 2, Workflow: &wf},
+	}}
+	rows := m.pickerRows()
+	if !strings.Contains(rows[2], "needs you") {
+		t.Fatalf("a workflow row with pending approvals must surface the pill, got:\n%q", rows[2])
+	}
+	// a plain row never grows a tick line — byte-identical to legacy even with a
+	// pending count (the pill is a WORKFLOW-row affordance only).
+	if rows[1] != legacyPickerRow(m.sessions[0]) {
+		t.Fatalf("a plain row must stay byte-identical to legacy, got:\n%q\nwant:\n%q",
+			rows[1], legacyPickerRow(m.sessions[0]))
 	}
 }
 
@@ -716,7 +781,7 @@ func TestWorkflowDetailTwoPane(t *testing.T) {
 	_ = mi
 	wf := mi.st.Workflow
 	j := journeyOf(wf)
-	rows := workflowAgentLines(50, j.Phases[1], j.EntryStatus, mi.now())
+	rows := workflowAgentLines(50, j.Phases[1], j.EntryStatus, mi.now(), true)
 	agentPane := strings.Join(rows, "\n")
 	if !strings.Contains(agentPane, "explore:") && !strings.Contains(agentPane, "liveness-anatomy") {
 		t.Fatalf("agent pane must render the pair-grammar labels, got:\n%s", agentPane)
@@ -798,5 +863,374 @@ func TestWorkflowFooterHints(t *testing.T) {
 	}
 	if strings.Contains(foot, "esc interrupt") {
 		t.Fatalf("the panel's hints must not claim esc interrupts, got:\n%s", foot)
+	}
+}
+
+// ── wsc-map-inline: the execution-map round (charter D40–D44) ────────────────
+
+// TestAgentSnippetExtraction pins the D40 ladder on hand-built payloads: the
+// truncation-tolerant key regex (RE2 captures an UNTERMINATED tail — the corpus
+// truth is 817/820 previews clip at 401 chars), key priority, escape handling,
+// the dangling-backslash drop, the bare-prose first-sentence fallback, and the
+// never-brace-noise guarantee.
+func TestAgentSnippetExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		// the 1-line RE2 proof: a clipped value with NO closing quote captures to
+		// end-of-string (the (?:\\.|[^"\\])* tail).
+		{"clipped-unterminated-tail", `{"phase":2,"summary":"IMPORTANT FINDING: Phase 2 is done`, "IMPORTANT FINDING: Phase 2 is done"},
+		{"key-priority-direction-first", `{"summary":"later","direction":"WAVE 11 — alive at a glance`, "WAVE 11 — alive at a glance"},
+		{"test-summary-when-no-summary", `{"phase":2,"ok":true,"test_summary":"64 tests, 0 failures`, "64 tests, 0 failures"},
+		{"escapes-unescaped", `{"summary":"a \"quoted\" word\nnext line`, `a "quoted" word next line`},
+		{"dangling-backslash-dropped", `{"summary":"clipped mid-escape \`, "clipped mid-escape"},
+		{"trailing-ellipsis-stripped", `{"summary":"the tail was clipped …`, "the tail was clipped"},
+		{"json-without-headline-keys", `{"phase":4,"ok":true,"committed":false,"files":["a.ex"]`, ""},
+		{"prose-first-sentence", "The fix landed cleanly. More detail follows here.", "The fix landed cleanly."},
+		{"prose-markdown-markers-stripped", "## Verdict\nrest of the report", "Verdict"},
+		{"empty", "   ", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentSnippet(tc.in); got != tc.want {
+				t.Fatalf("agentSnippet(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAgentSnippetSyntheticWholeParse drives the committed SYNTHETIC
+// untruncated-object fixture (agent_snippet_synthetic.json — D29/D37 precedent:
+// zero real captures parse whole, so the whole-parse branch is exercised by
+// hand-built payloads, never a doctored real fixture).
+func TestAgentSnippetSyntheticWholeParse(t *testing.T) {
+	raw, err := os.ReadFile("testdata/agent_snippet_synthetic.json")
+	if err != nil {
+		t.Fatalf("read synthetic fixture: %v", err)
+	}
+	var fx struct {
+		Cases []struct {
+			Name    string `json:"name"`
+			Preview string `json:"preview"`
+			Want    string `json:"want"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatalf("decode synthetic fixture: %v", err)
+	}
+	if len(fx.Cases) == 0 {
+		t.Fatal("the synthetic fixture must carry cases")
+	}
+	for _, c := range fx.Cases {
+		if got := agentSnippet(c.Preview); got != c.Want {
+			t.Fatalf("%s: agentSnippet = %q, want %q", c.Name, got, c.Want)
+		}
+	}
+}
+
+// collectResultPreviews walks decoded JSON for every "resultPreview" string —
+// the corpus harvester for the brace-noise proof.
+func collectResultPreviews(v any, out *[]string) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, vv := range x {
+			if k == "resultPreview" {
+				if s, ok := vv.(string); ok {
+					*out = append(*out, s)
+				}
+				continue
+			}
+			collectResultPreviews(vv, out)
+		}
+	case []any:
+		for _, vv := range x {
+			collectResultPreviews(vv, out)
+		}
+	}
+}
+
+// TestAgentSnippetCorpusNeverBraceNoise is the D40 corpus proof: over EVERY
+// resultPreview in the committed fixtures, agentSnippet returns either "" or a
+// clean headline — never raw JSON noise (the codex parse-first design yields
+// zero snippets on this corpus; string passthrough yields brace-noise; ours
+// must yield clean extractions).
+func TestAgentSnippetCorpusNeverBraceNoise(t *testing.T) {
+	files, err := filepath.Glob("testdata/*.json")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob testdata: %v (%d files)", err, len(files))
+	}
+	total, extracted := 0, 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatalf("decode %s: %v", f, err)
+		}
+		var previews []string
+		collectResultPreviews(v, &previews)
+		for _, p := range previews {
+			total++
+			got := agentSnippet(p)
+			if got == "" {
+				continue
+			}
+			extracted++
+			if strings.HasPrefix(got, "{") || strings.HasPrefix(got, "[") || strings.HasPrefix(got, `"`) {
+				t.Fatalf("%s: brace-noise snippet %q from preview %q", f, got, p[:60])
+			}
+		}
+	}
+	if total < 30 {
+		t.Fatalf("corpus proof needs the committed fixtures' previews, walked only %d", total)
+	}
+	if extracted == 0 {
+		t.Fatal("the extractor must land snippets on the real corpus, got none")
+	}
+}
+
+// TestWorkflowSettledRowSnippets is the D40 render law: a dimmed snippet line
+// rides under SETTLED rows only — a running agent never carries one (no live
+// churn), and a settled agent whose preview yields nothing adds no line.
+func TestWorkflowSettledRowSnippets(t *testing.T) {
+	done := `{"summary":"landed the fold; gate green`
+	running := `{"summary":"half-way through the fold`
+	noise := `{"phase":3,"ok":true`
+	wf := &Workflow{Status: "running", Label: "fleet", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:done", State: "done", ResultPreview: &done},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:live", State: "progress", ResultPreview: &running},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:quiet", State: "done", ResultPreview: &noise},
+	}}
+	j := journeyOf(wf)
+	rows := workflowAgentLines(80, j.Phases[0], j.EntryStatus, time.Now(), true)
+	out := strings.Join(rows, "\n")
+	if !strings.Contains(out, "landed the fold; gate green") {
+		t.Fatalf("a settled row must carry its snippet, got:\n%s", out)
+	}
+	if strings.Contains(out, "half-way") {
+		t.Fatalf("a running row must NEVER carry a snippet, got:\n%s", out)
+	}
+	if strings.Contains(out, "{") {
+		t.Fatalf("no brace-noise may ever render, got:\n%s", out)
+	}
+	// 3 agent rows + exactly 1 snippet line (the noise preview yields "")
+	if len(rows) != 4 {
+		t.Fatalf("rows = 3 agents + 1 snippet, got %d:\n%s", len(rows), out)
+	}
+}
+
+// TestWorkflowStallBadge is the D41 proof: a non-terminal agent whose
+// lastProgressAt is >90s old wears the warn-token 'no progress since <HH:MM>'
+// (never an absolute 'stalled' verdict, never a crashed/stopped state); fresh,
+// terminal and timestamp-less agents wear nothing; and a pending answerable
+// card suppresses EVERY badge — waiting on the operator is never a stall.
+func TestWorkflowStallBadge(t *testing.T) {
+	base := time.UnixMilli(1783633800000)
+	old := base.Add(-2 * time.Minute).UnixMilli()
+	fresh := base.Add(-30 * time.Second).UnixMilli()
+	wf := &Workflow{Status: "running", Label: "fleet", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:slow", State: "progress", LastProgressAt: &old},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:fresh", State: "progress", LastProgressAt: &fresh},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:done", State: "done", LastProgressAt: &old},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "build:quiet", State: "progress"},
+	}}
+	m := Model{width: 110, height: 30, screen: screenChat, scroll: -1,
+		st: State{SessionID: "s1", Workflow: wf}}
+	m.now = func() time.Time { return base }
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 0
+
+	out := strings.Join(m.workflowPanelLines(), "\n")
+	want := "no progress since " + time.UnixMilli(old).Format("15:04")
+	if !strings.Contains(out, want) {
+		t.Fatalf("a >90s-quiet running agent must wear %q, got:\n%s", want, out)
+	}
+	if n := strings.Count(out, "no progress since"); n != 1 {
+		t.Fatalf("fresh/terminal/timestamp-less agents must wear NO badge (want exactly 1, got %d):\n%s", n, out)
+	}
+	if strings.Contains(strings.ToLower(out), "stalled") || strings.Contains(strings.ToLower(out), "crashed") {
+		t.Fatalf("the badge must never claim an absolute stalled/crashed verdict, got:\n%s", out)
+	}
+
+	// suppression: any pending answerable card silences every stall badge
+	m.st.Messages = []Message{pendingCard("plan")}
+	out = strings.Join(m.workflowPanelLines(), "\n")
+	if strings.Contains(out, "no progress since") {
+		t.Fatalf("a pending answerable card must suppress all stall badges, got:\n%s", out)
+	}
+}
+
+// TestWorkflowResultBox is the D43 proof: once the rail entry settles (while
+// the strip still stands on a fresher live summary), the panel bottom states
+// the EntryStatus verbatim + settled/total + tokens; the grade line rides ONLY
+// when the cached picker Epic's wave_status carries 'complete — grade'; a
+// failed fleet gets a first-class '✕ N failed' line; and an interrupted wave
+// is never dressed with a resultPreview snippet.
+func TestWorkflowResultBox(t *testing.T) {
+	m := stripModel(t, "rail_workflow_completed.json")
+	// the real mid-window: the rail refetch landed terminal before the final SSE
+	// workflow frame — the strip stands on the (still non-terminal) live summary
+	m.st.LiveWorkflow = &SessionWorkflow{Label: "core-auth", AgentsDone: 29, AgentsTotal: 29}
+	m.sessions = []SessionSummary{{ID: "s1",
+		Epic: &EpicGoal{Title: "Epic", WaveStatus: "wave: complete — grade A-"}}}
+
+	out := strings.Join(m.workflowPanelLines(), "\n")
+	for _, want := range []string{"completed", "29/29 agents", "↓2.1M", "wave: complete — grade A-"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("result box must carry %q, got:\n%s", want, out)
+		}
+	}
+
+	// the grade line renders ONLY on the 'complete — grade' heartbeat substring
+	m.sessions[0].Epic.WaveStatus = "wave: building 6 slices"
+	out = strings.Join(m.workflowPanelLines(), "\n")
+	if strings.Contains(out, "wave: building") {
+		t.Fatalf("a non-grade wave_status must never ride the result box, got:\n%s", out)
+	}
+
+	// a completed entry carrying failures states them first-class
+	failed := &Workflow{Status: "completed", Label: "x", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "a", State: "done"},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "b", State: "error"},
+		{Type: "workflow_agent", PhaseIndex: 1, Label: "c", State: "failed"},
+	}}
+	fm := m
+	fm.st.Workflow = failed
+	out = strings.Join(fm.workflowPanelLines(), "\n")
+	if !strings.Contains(out, "✕ 2 failed") {
+		t.Fatalf("a failed fleet must state '✕ 2 failed' first-class, got:\n%s", out)
+	}
+
+	// interrupted: stated verbatim, never dressed with a resultPreview snippet
+	mi := stripModel(t, "rail_workflow_interrupted.json")
+	mi.st.LiveWorkflow = &SessionWorkflow{Label: "epic", AgentsDone: 1, AgentsTotal: 5}
+	out = strings.Join(mi.workflowPanelLines(), "\n")
+	if !strings.Contains(out, "interrupted") {
+		t.Fatalf("an interrupted wave must state 'interrupted', got:\n%s", out)
+	}
+	if strings.Contains(out, "WAVE 11") {
+		t.Fatalf("an interrupted result box must never carry a resultPreview snippet, got:\n%s", out)
+	}
+}
+
+// synthetic18Workflow is the MANDATORY D44 fixture: an 18-agent phase with
+// running agents at wire indices 0, 9 and 17 (no real fixture exceeds 5
+// agents/phase — before D44, a running agent at wire index ≥9 was silently
+// folded and cursor-unreachable). Comment-labelled SYNTHETIC per D29/D37.
+func synthetic18Workflow() *Workflow {
+	nodes := []WorkflowNode{{Type: "workflow_phase", Index: 1, Title: "Build"}}
+	for i := 0; i < 18; i++ {
+		state := "done"
+		if i == 0 || i == 9 || i == 17 {
+			state = "progress"
+		}
+		p := fmt.Sprintf("brief %d", i)
+		rp := fmt.Sprintf(`{"summary":"result %02d clipped`, i)
+		n := WorkflowNode{Type: "workflow_agent", PhaseIndex: 1,
+			Label: fmt.Sprintf("build:agent-%02d", i), State: state, Attempt: 1, PromptPreview: &p}
+		if state == "done" {
+			n.ResultPreview = &rp
+		}
+		nodes = append(nodes, n)
+	}
+	return &Workflow{Status: "running", Label: "wide fleet", Nodes: nodes}
+}
+
+// TestVisibleAgentsPinsRunning is the D44 projection proof on the synthetic
+// 18-agent phase: running agents are NEVER folded (wire 0/9/17 all visible at
+// cap 8, wire order), the index map translates every painted row back to its
+// wire position, the overflow row counts settled only, and the detail pane
+// resolves the SAME agent the painted row names (cursor == paint == detail).
+func TestVisibleAgentsPinsRunning(t *testing.T) {
+	j := journeyOf(synthetic18Workflow())
+	p := j.Phases[0]
+	visible, indexMap, settledOverflow := visibleAgents(p)
+	if len(visible) != workflowDetailMaxAgents {
+		t.Fatalf("cap must hold at %d, got %d", workflowDetailMaxAgents, len(visible))
+	}
+	if settledOverflow != 10 {
+		t.Fatalf("overflow counts settled only (15 settled − 5 shown = 10), got %d", settledOverflow)
+	}
+	// wire order + faithful translation
+	for i, ix := range indexMap {
+		if i > 0 && ix <= indexMap[i-1] {
+			t.Fatalf("visible must stay in wire order, indexMap=%v", indexMap)
+		}
+		if visible[i].Label != p.Agents[ix].Label {
+			t.Fatalf("index map must translate position %d to wire %d faithfully", i, ix)
+		}
+	}
+	// running never folded
+	seen := map[int]bool{}
+	for _, ix := range indexMap {
+		seen[ix] = true
+	}
+	for _, ix := range []int{0, 9, 17} {
+		if !seen[ix] {
+			t.Fatalf("running agent at wire %d must be pinned, indexMap=%v", ix, indexMap)
+		}
+	}
+
+	// paint == projection: every visible label renders; a folded settled agent
+	// (wire 8 — beyond the settled backfill) does not; overflow row says +10.
+	rows := workflowAgentLines(60, p, j.EntryStatus, time.Now(), true)
+	out := strings.Join(rows, "\n")
+	for _, a := range visible {
+		if !strings.Contains(out, a.Label[len("build:"):]) {
+			t.Fatalf("painted rows must carry visible agent %q, got:\n%s", a.Label, out)
+		}
+	}
+	if strings.Contains(out, "agent-08") {
+		t.Fatalf("a folded settled agent must not paint, got:\n%s", out)
+	}
+	if !strings.Contains(out, "+10 more") {
+		t.Fatalf("the overflow row must count the 10 folded settled agents, got:\n%s", out)
+	}
+
+	// detail == paint: the pane at each visible position names the SAME agent
+	// the painted row names — including the pinned running agents past the old
+	// cap (wire 9 at position 6, wire 17 at position 7).
+	for pos, wantWire := range map[int]int{6: 9, 7: 17} {
+		pane := strings.Join(renderWorkflowAgentDetail(80, j, time.Now(), 0, pos, true), "\n")
+		want := fmt.Sprintf("agent-%02d", wantWire)
+		if !strings.Contains(pane, want) {
+			t.Fatalf("detail at position %d must resolve %s via the index map, got:\n%s", pos, want, pane)
+		}
+		// the naive phase.Agents[pos] addressing would name agent-06/agent-07
+		wrong := fmt.Sprintf("agent-%02d", pos)
+		if strings.Contains(pane, wrong) {
+			t.Fatalf("detail must NEVER address phase.Agents[%d] directly, got:\n%s", pos, pane)
+		}
+	}
+
+	// the running>cap edge: 10 running + 4 settled pins the first 8 running
+	// (wire order) and the overflow row suffixes the hidden running count.
+	nodes := []WorkflowNode{{Type: "workflow_phase", Index: 1, Title: "Explore"}}
+	for i := 0; i < 14; i++ {
+		state := "progress"
+		if i >= 10 {
+			state = "done"
+		}
+		nodes = append(nodes, WorkflowNode{Type: "workflow_agent", PhaseIndex: 1,
+			Label: fmt.Sprintf("explore:a-%02d", i), State: state})
+	}
+	je := journeyOf(&Workflow{Status: "running", Nodes: nodes})
+	vis, im, so := visibleAgents(je.Phases[0])
+	if len(vis) != 8 || so != 4 {
+		t.Fatalf("running>cap edge: want 8 visible / 4 settled overflow, got %d/%d", len(vis), so)
+	}
+	for i, ix := range im {
+		if ix != i {
+			t.Fatalf("running>cap edge must pin the FIRST 8 running in wire order, indexMap=%v", im)
+		}
+	}
+	erows := strings.Join(workflowAgentLines(60, je.Phases[0], je.EntryStatus, time.Now(), true), "\n")
+	if !strings.Contains(erows, "+4 more (2 running)") {
+		t.Fatalf("the overflow row must read '… +4 more (2 running)', got:\n%s", erows)
 	}
 }

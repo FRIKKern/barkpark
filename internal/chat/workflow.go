@@ -322,6 +322,55 @@ func journeyOf(wf *Workflow) WorkflowJourney {
 	return j
 }
 
+// visibleAgents is the pin-running projection the agents pane paints (wave
+// session-card charter D44, amending D35): every RUNNING agent is pinned (wire
+// order), settled agents backfill up to workflowDetailMaxAgents, and the pick
+// is re-sorted to wire order so the pane reads like the wire. It returns the
+// visible nodes, the index map (visible position → position in p.Agents — the
+// ONE translation every consumer shares, so the painted row list, the cursor
+// clamp and the detail pane can never address different agents), and the count
+// of SETTLED agents folded behind the overflow row. When running agents alone
+// exceed the cap, the first cap running agents (wire order) are pinned and the
+// hidden-running rest is the render's "(M running)" suffix — the returned
+// overflow still counts settled only.
+func visibleAgents(p WorkflowPhase) ([]WorkflowNode, []int, int) {
+	agents := p.Agents
+	if len(agents) <= workflowDetailMaxAgents {
+		idx := make([]int, len(agents))
+		for i := range idx {
+			idx[i] = i
+		}
+		return agents, idx, 0
+	}
+	var running, settled []int
+	for i, a := range agents {
+		if workflowStateTerminal(a.State) {
+			settled = append(settled, i)
+		} else {
+			running = append(running, i)
+		}
+	}
+	pick := running
+	if len(pick) > workflowDetailMaxAgents {
+		pick = pick[:workflowDetailMaxAgents] // wire-order prefix of the running set
+	} else if fill := workflowDetailMaxAgents - len(pick); fill > 0 {
+		if fill > len(settled) {
+			fill = len(settled)
+		}
+		pick = append(append([]int(nil), pick...), settled[:fill]...)
+		sort.Ints(pick) // back to wire order
+	}
+	visible := make([]WorkflowNode, len(pick))
+	settledShown := 0
+	for i, ix := range pick {
+		visible[i] = agents[ix]
+		if workflowStateTerminal(agents[ix].State) {
+			settledShown++
+		}
+	}
+	return visible, pick, len(settled) - settledShown
+}
+
 // phaseStatus is the ported phase_status/4 truth table (charter D58): an
 // agentless phase reads the entry's fate; a phase with agents reads the
 // frontier + lifecycle. Exactly one phase is active/interrupted at a time

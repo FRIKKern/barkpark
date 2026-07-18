@@ -1,8 +1,10 @@
 package chat
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +44,7 @@ var (
 	titleStyle  = lipgloss.NewStyle().Bold(true)
 	youStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	badgeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	warnStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
 	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	cardBar     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 	focusBar    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -111,8 +114,22 @@ func bodyWidth(width int) int {
 // (render.go window()); this function is width-pure and clock-free so the
 // golden harness can diff it against the Studio projection.
 func (m Model) transcriptLines(width int) []string {
+	lines, _ := m.transcriptBuild(width, "")
+	return lines
+}
+
+// transcriptBuild is the ONE conversation accumulator (wsc-needs-you): it walks
+// the messages exactly once and, alongside the flat line slice, records the line
+// index where the card whose request_id == targetRID begins (its first content
+// line, after the block separator). startLine is -1 when targetRID is "" or the
+// target card is not present/answerable — so the needs-you Enter-jump pins the
+// viewport straight to the pending card off this SAME walk, never a forked second
+// pass over the transcript. transcriptLines is the width-pure/clock-free façade
+// the golden harness diffs against the Studio projection.
+func (m Model) transcriptBuild(width int, targetRID string) ([]string, int) {
 	w := bodyWidth(width)
 	var lines []string
+	startLine := -1
 	push := func(ls ...string) {
 		if len(lines) > 0 && len(ls) > 0 {
 			lines = append(lines, "")
@@ -128,9 +145,20 @@ func (m Model) transcriptLines(width int) []string {
 	for _, msg := range m.st.Messages {
 		focused := focusRID != "" && msg.RequestID() == focusRID && answerable(msg)
 		inflight := m.st.AnswerInFlight[msg.RequestID()]
-		if r := renderMessage(width, msg, focused, inflight); len(r) > 0 {
-			push(r...)
+		r := renderMessage(width, msg, focused, inflight)
+		if len(r) == 0 {
+			continue
 		}
+		// Capture the target card's block start BEFORE the push, accounting for the
+		// blank separator push prepends once the slice is non-empty.
+		if targetRID != "" && startLine < 0 && msg.RequestID() == targetRID && answerable(msg) {
+			sep := 0
+			if len(lines) > 0 {
+				sep = 1
+			}
+			startLine = len(lines) + sep
+		}
+		push(r...)
 	}
 	for _, ls := range m.st.Local {
 		push(renderLocalSend(w, ls)...)
@@ -141,7 +169,7 @@ func (m Model) transcriptLines(width int) []string {
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
 	}
-	return lines
+	return lines, startLine
 }
 
 // renderMessage renders one settled Postgres row (charter D8). Assistant rows
@@ -443,35 +471,108 @@ func (m Model) workflowPanelLines() []string {
 		return nil
 	}
 	focused := m.focus == focusWorkflow
-	// The collapsed strip prefers the live compact summary (wsc-bl-workflow-sse):
-	// its counters/elapsed advance mid-turn off the SSE `event: workflow` delta,
-	// no rail refetch. Fall back to the rail fold when no summary has arrived yet
-	// (resume, or a pre-SSE server).
+	needsYou := m.needsYou()
+	// D41: a pending answerable card suppresses EVERY stall badge — a fleet
+	// waiting on the operator is never stalled (the wait is the operator's).
+	// needsYou implies !stallOK, so the warn banner and stall badges can never
+	// render together (one urgent state at a time).
+	stallOK := len(m.answerableCards()) == 0
+	// The collapsed strip: the needs-you cockpit state (a live workflow blocked on
+	// a pending answerable card) WINS — it flips to the warn banner so someone
+	// watching the workflow strip sees the session is waiting on them (Enter jumps
+	// to the card). Otherwise the strip prefers the live compact summary
+	// (wsc-bl-workflow-sse) — its counters/elapsed advance mid-turn off the SSE
+	// `event: workflow` delta, no rail refetch — falling back to the rail fold when
+	// no summary has arrived yet (resume, or a pre-SSE server).
 	var strip string
-	if lw := m.st.LiveWorkflow; lw != nil {
-		strip = renderWorkflowStripSummary(m.width, lw, m.now(), focused)
-	} else {
+	switch {
+	case needsYou:
+		strip = renderWorkflowNeedsYouStrip(m.width, m.workflowLabel(), focused)
+	case m.st.LiveWorkflow != nil:
+		strip = renderWorkflowStripSummary(m.width, m.st.LiveWorkflow, m.now(), focused)
+	default:
 		strip = renderWorkflowStrip(m.width, m.st.Workflow, journeyOf(m.st.Workflow), m.now(), focused)
 	}
 	lines := []string{strip}
-	// The Enter-expanded detail iterates per-agent Nodes the compact summary
-	// LACKS, so it stays sourced from the raw rail fold — turn-boundary fresh (the
-	// accepted ceiling, backlogged wsc-bl-workflow-sse-detail). Guard on Workflow
-	// because a summary-only strip can be up before the rail has hydrated.
-	if m.wfExpanded && m.st.Workflow != nil {
+	if m.st.Workflow != nil {
 		wf := m.st.Workflow
 		j := journeyOf(wf)
-		lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase)...)
-		// The THIRD focus level (wave session-card charter D30/D39): the selected
-		// agent's detail pane, appended INSIDE this one function so bodyHeight
-		// self-corrects and the frame height stays fixed — mirroring the shipped
-		// Studio pane (#3959). Additive under wfAgentDetail: an idle or a
-		// phase-only panel is byte-identical to before this level existed.
-		if m.wfAgentDetail {
-			lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent)...)
+		// The Enter-expanded detail iterates per-agent Nodes the compact summary
+		// LACKS, so it stays sourced from the raw rail fold — turn-boundary fresh
+		// (the accepted ceiling, backlogged wsc-bl-workflow-sse-detail). Guard on
+		// Workflow because a summary-only strip can be up before the rail hydrated.
+		if m.wfExpanded {
+			// The needs-you banner also rides ABOVE the phase panes in the expanded
+			// panel — the same warn phrase as the collapsed strip, so the pending gate
+			// stays visible while the operator reads the detail.
+			if needsYou {
+				lines = append(lines, warnStyle.Render(needsYouBanner))
+			}
+			lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase, stallOK)...)
+			// The THIRD focus level (wave session-card charter D30/D39): the selected
+			// agent's detail pane, appended INSIDE this one function so bodyHeight
+			// self-corrects and the frame height stays fixed — mirroring the shipped
+			// Studio pane (#3959). Additive under wfAgentDetail: an idle or a
+			// phase-only panel is byte-identical to before this level existed.
+			if m.wfAgentDetail {
+				lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent, stallOK)...)
+			}
 		}
+		// D43: the terminal result box — the panel bottom once the rail entry has
+		// settled (reachable while the strip still stands on a fresher live
+		// summary): the outcome stated verbatim, never a vanish-with-no-verdict.
+		lines = append(lines, m.workflowResultBox(j)...)
 	}
 	return lines
+}
+
+// workflowResultBox is the D43 terminal result box: outcome glyph + the entry's
+// lifecycle word VERBATIM ('completed'/'interrupted') + the honest settled/total
+// and token figures, a FIRST-CLASS failed line whenever the fleet carries
+// failures (j.Failed otherwise renders nowhere at summary level — a 'completed'
+// entry can carry failed agents), and the epic grade line ONLY when the cached
+// picker Epic's wave_status heartbeat carries 'complete — grade' (task-spine
+// truth already on the list wire — ZERO new wire; the richer epic-on-session
+// ride is backlog wsc-bl-epic-on-session-json). An interrupted wave is stated
+// plainly and NEVER dressed with a resultPreview snippet. nil while live.
+func (m Model) workflowResultBox(j WorkflowJourney) []string {
+	if j.EntryStatus == "live" {
+		return nil
+	}
+	glyph := allowStyle.Render("✓")
+	if j.EntryStatus == "interrupted" {
+		glyph = noticeStyle.Render("✕")
+	}
+	head := glyph + " " + titleStyle.Render(j.EntryStatus) +
+		dimStyle.Render(fmt.Sprintf(" · %d/%d agents", j.Settled(), j.AgentsTotal))
+	if j.HasTokens {
+		head += dimStyle.Render(" · ↓" + formatTokens(j.Tokens))
+	}
+	out := []string{head}
+	if j.Failed > 0 {
+		out = append(out, "  "+noticeStyle.Render(fmt.Sprintf("✕ %d failed", j.Failed)))
+	}
+	if epic := m.cachedEpic(); epic != nil && strings.Contains(epic.WaveStatus, "complete — grade") {
+		w := m.width - 2
+		if w < 8 {
+			w = 8
+		}
+		out = append(out, "  "+dimStyle.Render(truncate(epic.WaveStatus, w)))
+	}
+	return out
+}
+
+// cachedEpic resolves the open session's epic-goal line from the PICKER cache —
+// the list wire already carries Epic per session row (wsc D9/D12), so the grade
+// line costs zero new wire. nil when the cache has no row (or no epic) for the
+// open session — the box then simply omits the grade line, never fabricates one.
+func (m Model) cachedEpic() *EpicGoal {
+	for _, s := range m.sessions {
+		if s.ID == m.st.SessionID {
+			return s.Epic
+		}
+	}
+	return nil
 }
 
 // renderWorkflowAgentDetail is the third focus level (wave session-card charter
@@ -490,18 +591,19 @@ func (m Model) workflowPanelLines() []string {
 // line, and the result ARE the honest window; every absent field is omitted, not
 // fabricated. nil when the selection resolves to no agent (a detail-less phase),
 // so the pane never paints an empty gutter.
-func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selPhase, selAgent int) []string {
+func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selPhase, selAgent int, stallOK bool) []string {
 	if selPhase < 0 || selPhase >= len(j.Phases) {
 		return nil
 	}
-	agents := j.Phases[selPhase].Agents
-	if len(agents) > workflowDetailMaxAgents {
-		agents = agents[:workflowDetailMaxAgents] // never index past what the pane paints
-	}
-	if selAgent < 0 || selAgent >= len(agents) {
+	// The pane addresses the SAME pin-running projection the row list paints
+	// (charter D44): the selection resolves through visibleAgents' index map,
+	// NEVER phase.Agents[selAgent] directly — a folded settled agent must not
+	// shift which agent the cursor names.
+	visible, indexMap, _ := visibleAgents(j.Phases[selPhase])
+	if selAgent < 0 || selAgent >= len(visible) {
 		return nil
 	}
-	a := agents[selAgent]
+	a := j.Phases[selPhase].Agents[indexMap[selAgent]]
 
 	w := width - 2
 	if w < 8 {
@@ -510,7 +612,7 @@ func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selP
 	indent := "  "
 
 	// Header row: the selected agent's own line (glyph/label/model/tokens/elapsed).
-	out := []string{workflowAgentLine(width, a, j.EntryStatus, now)}
+	out := []string{workflowAgentLine(width, a, j.EntryStatus, now, stallOK)}
 
 	// attempt>1 retry chip FIRST.
 	if a.Attempt > 1 {
@@ -612,7 +714,7 @@ func renderWorkflowStrip(width int, wf *Workflow, j WorkflowJourney, now time.Ti
 	if j.HasTokens {
 		right += " · ↓" + formatTokens(j.Tokens)
 	}
-	return workflowStripLine(width, wf.Label, right, focused)
+	return workflowStripLine(width, badgeStyle.Render("○"), wf.Label, right, focused)
 }
 
 // renderWorkflowStripSummary paints the collapsed strip from the COMPACT live
@@ -629,15 +731,32 @@ func renderWorkflowStripSummary(width int, wf *SessionWorkflow, now time.Time, f
 	if wf.Tokens > 0 {
 		right += " · ↓" + formatTokens(wf.Tokens)
 	}
-	return workflowStripLine(width, wf.Label, right, focused)
+	return workflowStripLine(width, badgeStyle.Render("○"), wf.Label, right, focused)
+}
+
+// needsYouBanner is the warn-token needs-you phrase shared by the collapsed strip
+// (its right cluster) and the expanded panel's banner line, so the two can never
+// drift: '⏸ needs you — approval pending'. The pending gate is truth the TUI
+// already tracks (answerableCards ∩ a live workflow) — zero new wire.
+const needsYouBanner = "⏸ needs you — approval pending"
+
+// renderWorkflowNeedsYouStrip is the collapsed strip in the needs-you cockpit
+// state (wsc-needs-you): a live workflow whose session is blocked on a pending
+// answerable card. The counter cluster is REPLACED by the warn needs-you banner —
+// a single, unmissable state, never a counter shown alongside a pending gate. The
+// focus glyph still wins when the strip owns the arrows (the operator sees which
+// zone Enter drives — Enter here jumps to the card).
+func renderWorkflowNeedsYouStrip(width int, label string, focused bool) string {
+	return workflowStripLine(width, warnStyle.Render("⏸"), label, warnStyle.Render(needsYouBanner), focused)
 }
 
 // workflowStripLine lays out the collapsed one-liner: a focus-aware glyph +
-// truncated label on the left, the dim counter cluster right-aligned. The label
-// yields columns first so the counters always keep their right-edge seat. Shared
-// by the live-summary path and the rail-fold fallback so the two can never drift.
-func workflowStripLine(width int, label, right string, focused bool) string {
-	glyph := badgeStyle.Render("○")
+// truncated label on the left, the styled cluster right-aligned. The label yields
+// columns first so the cluster always keeps its right-edge seat. Shared by the
+// live-summary path, the rail-fold fallback, and the needs-you banner so they can
+// never drift. The caller supplies the base glyph; a focused strip always swaps it
+// for the bold ❯ so the operator sees which zone the arrows drive.
+func workflowStripLine(width int, glyph, label, right string, focused bool) string {
 	if focused {
 		glyph = focusBar.Render("❯")
 	}
@@ -678,11 +797,129 @@ func summaryElapsed(wf *SessionWorkflow, now time.Time) (time.Duration, bool) {
 // never eats the transcript — the overflow row says how many more are running.
 const workflowDetailMaxAgents = 8
 
+// ── D40: the inline result snippet extractor ─────────────────────────────────
+
+// agentSnippetKeys is the headline-key priority order (charter D40): the first
+// key PRESENT wins, whole-value — the summary/title IS the headline, so no
+// first-sentence surgery happens on key-extracted values.
+var agentSnippetKeys = [...]string{"direction", "summary", "title", "test_summary", "evidence", "notes"}
+
+// agentSnippetKeyRes are the truncation-tolerant per-key extractors:
+// "<k>"\s*:\s*"((?:\\.|[^"\\])*) — the corpus truth is 817/820 real
+// resultPreview values clip at exactly 401 chars (never parseable JSON), so the
+// unanchored escape-aware body capture runs to end-of-string when the closing
+// quote was clipped away. RE2 handles the unterminated tail without backtracking.
+var agentSnippetKeyRes = func() [len(agentSnippetKeys)]*regexp.Regexp {
+	var res [len(agentSnippetKeys)]*regexp.Regexp
+	for i, k := range agentSnippetKeys {
+		res[i] = regexp.MustCompile(`"` + k + `"\s*:\s*"((?:\\.|[^"\\])*)`)
+	}
+	return res
+}()
+
+// agentSnippet extracts the one-line headline of a settled agent's persisted
+// resultPreview (wave session-card charter D40) — pure PRESENTATION of
+// wire-carried text, never synthesis. The ladder: (a) blank → ""; (b) a
+// defensive whole-parse for the rare untruncated JSON object (first present
+// key wins); (c) the truncation-tolerant key-regex over the same keys; (d) a
+// bare-prose first-line/first-sentence fallback for non-JSON payloads. Every
+// branch funnels through cleanSnippet, and a JSON-shaped payload that yields no
+// key returns "" — the row renders NOTHING rather than brace-noise.
+func agentSnippet(preview string) string {
+	s := strings.TrimSpace(preview)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "{") {
+		// (b) whole-parse — exercised by the synthetic untruncated fixture; zero
+		// real captures reach it (they all clip mid-object).
+		var obj map[string]any
+		if json.Unmarshal([]byte(s), &obj) == nil {
+			for _, k := range agentSnippetKeys {
+				if v, ok := obj[k].(string); ok {
+					if out := cleanSnippet(v); out != "" {
+						return out
+					}
+				}
+			}
+			return ""
+		}
+		// (c) key-regex over the clipped tail.
+		for i := range agentSnippetKeys {
+			if got := agentSnippetKeyRes[i].FindStringSubmatch(s); got != nil {
+				if out := cleanSnippet(unescapeJSONFragment(got[1])); out != "" {
+					return out
+				}
+			}
+		}
+		return "" // JSON-shaped but headline-less — never brace-noise
+	}
+	// (d) bare prose: first line, leading markdown markers stripped, first
+	// sentence — the ONLY branch that does sentence extraction.
+	line := strings.TrimSpace(strings.TrimLeft(firstLine(s), "#* "))
+	if i := strings.Index(line, ". "); i > 0 {
+		line = line[:i+1]
+	}
+	return cleanSnippet(line)
+}
+
+// unescapeJSONFragment resolves the escape sequences a regex-captured JSON
+// string body still carries (\n \t \" \\ \/ — newlines/tabs become spaces for
+// the one-line snippet) and DROPS a dangling trailing backslash left by a
+// clip mid-escape.
+func unescapeJSONFragment(s string) string {
+	if n := len(s); n > 0 && s[n-1] == '\\' {
+		i := n
+		for i > 0 && s[i-1] == '\\' {
+			i--
+		}
+		if (n-i)%2 == 1 {
+			s = s[:n-1]
+		}
+	}
+	return strings.NewReplacer(
+		`\n`, " ", `\t`, " ", `\r`, " ", `\"`, `"`, `\\`, `\`, `\/`, "/",
+	).Replace(s)
+}
+
+// cleanSnippet normalizes an extracted headline to one honest line: real
+// newlines/tabs become spaces, whitespace collapses, and a trailing clip
+// ellipsis is dropped (the width truncate re-adds its own when needed, D31).
+func cleanSnippet(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "…"), "...")
+	return strings.TrimSpace(s)
+}
+
+// ── D41: the no-progress badge ───────────────────────────────────────────────
+
+// workflowStallAfter is the D41 no-progress threshold: a non-terminal agent
+// whose last wire-carried progress tick is older wears the warn badge.
+const workflowStallAfter = 90 * time.Second
+
+// agentStallBadge is the honesty-shaped stall signal (charter D41): for a
+// NON-terminal agent whose lastProgressAt is older than workflowStallAfter it
+// returns 'no progress since <HH:MM>' — a statement true under ANY staleness of
+// the rail (lastProgressAt refreshes only at the turn-boundary refetch sites),
+// where an absolute 'stalled' verdict would fabricate one. Agents without the
+// timestamp get no badge (never synthesized), and bp carries no pid signal so
+// no crashed/stopped/dead state exists anywhere.
+func agentStallBadge(a WorkflowNode, now time.Time) string {
+	if workflowStateTerminal(a.State) || a.LastProgressAt == nil {
+		return ""
+	}
+	at := time.UnixMilli(*a.LastProgressAt)
+	if now.Sub(at) <= workflowStallAfter {
+		return ""
+	}
+	return "no progress since " + at.Format("15:04")
+}
+
 // renderWorkflowDetail is the Enter-expanded two-pane detail: phases left
 // (glyph + title + settled/total), the SELECTED phase's agents right (glyph +
 // pair-grammar label + model family · tokens + elapsed). Selection is the ▸
 // row; the footer hint row is owned by chatFooter (it swaps the hints line).
-func renderWorkflowDetail(width int, wf *Workflow, j WorkflowJourney, now time.Time, sel int) []string {
+func renderWorkflowDetail(width int, wf *Workflow, j WorkflowJourney, now time.Time, sel int, stallOK bool) []string {
 	if len(j.Phases) == 0 {
 		return nil
 	}
@@ -713,7 +950,7 @@ func renderWorkflowDetail(width int, wf *Workflow, j WorkflowJourney, now time.T
 		left = append(left, row)
 	}
 
-	right := workflowAgentLines(rightW, j.Phases[sel], j.EntryStatus, now)
+	right := workflowAgentLines(rightW, j.Phases[sel], j.EntryStatus, now, stallOK)
 
 	rows := len(left)
 	if len(right) > rows {
@@ -735,35 +972,57 @@ func renderWorkflowDetail(width int, wf *Workflow, j WorkflowJourney, now time.T
 	return out
 }
 
-// workflowAgentLines paints the selected phase's agents pane. An agentless
-// phase says so honestly instead of rendering an empty gutter.
-func workflowAgentLines(w int, p WorkflowPhase, entryStatus string, now time.Time) []string {
+// workflowAgentLines paints the selected phase's agents pane over the
+// visibleAgents pin-running projection (charter D44): running agents are never
+// folded, settled rows carry their D40 result snippet as a dimmed second line,
+// and the overflow row counts the folded SETTLED agents (suffixing the hidden
+// running count in the running>cap edge). An agentless phase says so honestly
+// instead of rendering an empty gutter.
+func workflowAgentLines(w int, p WorkflowPhase, entryStatus string, now time.Time, stallOK bool) []string {
 	if len(p.Agents) == 0 {
 		return []string{dimStyle.Render(truncate("no agents in this phase yet", w))}
 	}
-	agents := p.Agents
-	overflow := 0
-	if len(agents) > workflowDetailMaxAgents {
-		overflow = len(agents) - workflowDetailMaxAgents
-		agents = agents[:workflowDetailMaxAgents]
+	visible, _, settledOverflow := visibleAgents(p)
+	out := make([]string, 0, len(visible)+1)
+	hiddenRunning := p.Running
+	for _, a := range visible {
+		out = append(out, workflowAgentLine(w, a, entryStatus, now, stallOK))
+		if !workflowStateTerminal(a.State) {
+			hiddenRunning--
+			continue
+		}
+		// D40: the inline result snippet — a dimmed second line under SETTLED rows
+		// only (running rows never carry one: no live churn). The extracted
+		// headline goes FULL to the width truncate (D31); "" renders nothing.
+		if a.ResultPreview != nil {
+			if snip := agentSnippet(*a.ResultPreview); snip != "" {
+				out = append(out, dimStyle.Render(truncate("    "+snip, w)))
+			}
+		}
 	}
-	out := make([]string, 0, len(agents)+1)
-	for _, a := range agents {
-		out = append(out, workflowAgentLine(w, a, entryStatus, now))
-	}
-	if overflow > 0 {
-		out = append(out, dimStyle.Render(fmt.Sprintf("  … +%d more", overflow)))
+	if settledOverflow > 0 || hiddenRunning > 0 {
+		row := fmt.Sprintf("  … +%d more", settledOverflow)
+		if hiddenRunning > 0 {
+			row += fmt.Sprintf(" (%d running)", hiddenRunning)
+		}
+		out = append(out, dimStyle.Render(row))
 	}
 	return out
 }
 
 // workflowAgentLine is one agent row: state glyph · label (pair grammar: dim
-// kind + bold rest) · model family · tokens, with the elapsed right-aligned —
-// each figure rendered ONLY when the wire carries it (charter D15).
-func workflowAgentLine(w int, a WorkflowNode, entryStatus string, now time.Time) string {
+// kind + bold rest) · optional D41 no-progress badge · model family · tokens,
+// with the elapsed right-aligned — each figure rendered ONLY when the wire
+// carries it (charter D15).
+func workflowAgentLine(w int, a WorkflowNode, entryStatus string, now time.Time, stallOK bool) string {
 	elapsed := ""
 	if el, ok := agentElapsed(a, entryStatus, now); ok {
 		elapsed = formatElapsed(el)
+	}
+
+	stall := ""
+	if stallOK {
+		stall = agentStallBadge(a, now)
 	}
 
 	meta := ""
@@ -777,10 +1036,13 @@ func workflowAgentLine(w int, a WorkflowNode, entryStatus string, now time.Time)
 		meta += formatTokens(*a.Tokens)
 	}
 
-	// budget the plain label so glyph+meta+elapsed keep their seats
+	// budget the plain label so glyph+badge+meta+elapsed keep their seats
 	budget := w - 3 - lipgloss.Width(elapsed)
 	if meta != "" {
 		budget -= lipgloss.Width(meta) + 2
+	}
+	if stall != "" {
+		budget -= lipgloss.Width(stall) + 2
 	}
 	if budget < 6 {
 		budget = 6
@@ -797,6 +1059,9 @@ func workflowAgentLine(w int, a WorkflowNode, entryStatus string, now time.Time)
 	}
 
 	line := workflowAgentGlyph(a) + " " + labelOut
+	if stall != "" {
+		line += "  " + noticeStyle.Render(stall)
+	}
 	if meta != "" {
 		line += "  " + dimStyle.Render(meta)
 	}
@@ -912,11 +1177,11 @@ func cardBody(msg Message) string {
 // carries the SIBLING epic goal, wsc D9): the epic title + slices-done/total +
 // wave_status. Returns nil for a nil summary — the caller adds nothing, so a
 // non-workflow row is byte-identical to today.
-func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal) []string {
+func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal, pending int) []string {
 	if wf == nil {
 		return nil
 	}
-	out := []string{"  " + workflowTickLine(w-2, wf)}
+	out := []string{"  " + workflowTickLine(w-2, wf, pending)}
 	if epic != nil {
 		out = append(out, "  "+workflowGoalLine(w-2, epic))
 	}
@@ -926,22 +1191,30 @@ func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal) []string {
 // workflowTickLine paints the phase ticks + phase/outcome + settled/total counter
 // (+ tokens when present). Elapsed is deliberately omitted on list rows (D15 —
 // there is no per-row clock in the picker); tokens render only when Tokens > 0
-// (never synthesised).
-func workflowTickLine(w int, wf *SessionWorkflow) string {
+// (never synthesised). When the session is blocked on a pending gate (pending>0)
+// and the run is still live, the needs-you pill REPLACES the live status word —
+// needs-you > working, a single badge in the word slot (never a new line, never
+// side-by-side) — so the picker surfaces "this session is waiting on you" at a
+// glance. A terminal wave is never needs-you: its lifecycle word still wins.
+func workflowTickLine(w int, wf *SessionWorkflow, pending int) string {
 	var ticks strings.Builder
 	for _, s := range phaseTicks(wf) {
 		ticks.WriteString(tickGlyph(s))
 	}
 	counter := fmt.Sprintf("%d/%d", wf.AgentsDone, wf.AgentsTotal)
 	word := wf.Phase
-	if wf.Terminal {
+	switch {
+	case wf.Terminal:
 		// the wire's lifecycle word verbatim ("completed"/"interrupted") — an
 		// honest settle, never a stuck phase word
 		word = wf.Outcome
 		if word == "" {
 			word = "completed"
 		}
-	} else if word == "" {
+	case pending > 0:
+		// the needs-you pill supersedes the live phase word (needs-you > working)
+		word = warnStyle.Render("⏸ needs you")
+	case word == "":
 		word = "working"
 	}
 	line := ticks.String() + dimStyle.Render(" · ") + word + dimStyle.Render(" · ") + counter
@@ -1079,7 +1352,7 @@ func (m Model) pickerRows() []string {
 			meta += " · " + age
 		}
 		row := fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
-		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic); len(extra) > 0 {
+		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic, s.PendingApprovals); len(extra) > 0 {
 			row += "\n" + strings.Join(extra, "\n")
 		}
 		rows = append(rows, row)
