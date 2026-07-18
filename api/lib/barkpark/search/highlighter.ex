@@ -7,6 +7,21 @@ defmodule Barkpark.Search.Highlighter do
   @mark_open "<mark>"
   @mark_close "</mark>"
 
+  # Snippet (AXI R3): a bounded plain-text window (~160 chars) around the FIRST
+  # needle match, scanned over these fields in order. `content.*` fields ride
+  # the same sealed visibility predicate as highlights (visible_highlight_fields
+  # → Envelope.field_readable?/3) — an unreadable field can never leak through a
+  # snippet. No ts_headline: this is pure in-memory windowing over field text.
+  @snippet_fields [
+    "title",
+    "content.description",
+    "content.summary",
+    "content.excerpt",
+    "content.body"
+  ]
+  @snippet_window 160
+  @snippet_lead 60
+
   @type schema_fun :: (String.t() | nil -> term())
 
   @spec highlight_documents([struct()], map(), map(), CallerContext.t() | nil, schema_fun()) ::
@@ -43,6 +58,99 @@ defmodule Barkpark.Search.Highlighter do
 
   defp doc_type(%{type: t}), do: t
   defp doc_type(_), do: nil
+
+  @doc """
+  Plain-text snippets for brief hit cards: `%{doc_id => snippet | nil}`.
+
+  For each document, scan the snippet fields in order (`config`'s
+  `"snippet_fields"`, defaulting to #{inspect(@snippet_fields)}) and return a
+  ~#{@snippet_window}-char window around the FIRST needle match, with `…`
+  ellipses marking truncation. `nil` when nothing readable matches.
+
+  Visibility is the SAME sealed path highlights use: `content.*` fields pass
+  through `visible_highlight_fields/3` (⇒ `Envelope.field_readable?/3`), which
+  fails closed for a nil caller and for a type with no resolvable schema — an
+  unreadable field never contributes a snippet. Output is raw field text (no
+  `<mark>`, no HTML): consumers render it as text, unlike the highlights map
+  whose strings carry real markup.
+  """
+  @spec snippet_documents([struct()], map(), map(), CallerContext.t() | nil, schema_fun()) ::
+          %{optional(String.t()) => String.t() | nil}
+  def snippet_documents(
+        docs,
+        parsed,
+        config,
+        caller_context \\ nil,
+        schema_fun \\ fn _ -> nil end
+      )
+      when is_list(docs) do
+    needles = highlight_needles(parsed)
+    configured = Map.get(config, "snippet_fields", @snippet_fields)
+
+    Map.new(docs, fn doc ->
+      fields = visible_highlight_fields(configured, caller_context, schema_fun.(doc_type(doc)))
+      {doc.doc_id, first_snippet(doc, fields, needles)}
+    end)
+  end
+
+  defp first_snippet(_doc, _fields, []), do: nil
+
+  defp first_snippet(doc, fields, needles) do
+    Enum.find_value(fields, fn field ->
+      doc |> document_field_text(field) |> snippet_text(needles)
+    end)
+  end
+
+  defp snippet_text(nil, _needles), do: nil
+  defp snippet_text("", _needles), do: nil
+
+  defp snippet_text(text, needles) when is_binary(text) do
+    lowered = String.downcase(text)
+
+    case Enum.filter(needles, &String.contains?(lowered, &1)) do
+      [] ->
+        nil
+
+      present ->
+        # Same longest-first alternation as highlight_text/2, but we only need
+        # the FIRST match's byte offsets (unicode-safe: PCRE offsets fall on
+        # codepoint boundaries with the `u` flag).
+        pattern =
+          present
+          |> Enum.sort_by(&(-String.length(&1)))
+          |> Enum.map(&Regex.escape/1)
+          |> Enum.join("|")
+
+        regex = Regex.compile!("(" <> pattern <> ")", "iu")
+
+        case Regex.run(regex, text, return: :index) do
+          [{start, len} | _] ->
+            prefix = binary_part(text, 0, start)
+            match = binary_part(text, start, len)
+            suffix = binary_part(text, start + len, byte_size(text) - start - len)
+            snippet_window(prefix, match, suffix)
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  # Keep up to @snippet_lead trailing graphemes of context before the match and
+  # fill the remaining budget after it, ellipsising whichever side was cut. The
+  # result is ≤ @snippet_window graphemes unless the match itself is longer.
+  defp snippet_window(prefix, match, suffix) do
+    plen = String.length(prefix)
+    lead_keep = min(plen, @snippet_lead)
+    lead = String.slice(prefix, plen - lead_keep, lead_keep)
+    tail_budget = max(@snippet_window - lead_keep - String.length(match), 0)
+    tail = String.slice(suffix, 0, tail_budget)
+
+    left = if lead_keep < plen, do: "…", else: ""
+    right = if String.length(suffix) > tail_budget, do: "…", else: ""
+
+    left <> lead <> match <> tail <> right
+  end
 
   @spec highlight_media([struct()], map(), map(), %{optional(String.t()) => struct()}) :: map()
   def highlight_media(files, parsed, config, docs_by_file_id) when is_list(files) do
@@ -152,10 +260,20 @@ defmodule Barkpark.Search.Highlighter do
 
   defp document_field_text(doc, "title"), do: doc.title
 
-  defp document_field_text(doc, "content.slug") do
+  # Any `content.*` field yields its text when the stored value is a plain
+  # binary (blocks/maps/lists ⇒ nil — no PortableDoc flattening here). Callers
+  # NEVER reach this for a field the caller may not read: every `content.*`
+  # field name is filtered through `visible_highlight_fields/3` first.
+  defp document_field_text(doc, "content." <> path) do
     case doc.content do
-      %{"slug" => slug} when is_binary(slug) -> slug
-      _ -> nil
+      %{} = content ->
+        case Map.get(content, path) do
+          value when is_binary(value) -> value
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 

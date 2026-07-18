@@ -200,6 +200,107 @@ defmodule Barkpark.Search.HighlighterTest do
     end
   end
 
+  # AXI R3: brief-card snippets — a bounded plain-text window around the first
+  # match, sealed through the SAME visibility path as highlights
+  # (visible_highlight_fields → Envelope.field_readable?/3).
+  describe "snippet_documents/5 (AXI R3 brief snippets)" do
+    test "a readable description yields a bounded window around the first match" do
+      filler = String.duplicate("lorem ipsum dolor sit amet consectetur ", 30)
+      text = filler <> "the alphabeacon signal fires here " <> filler
+
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "No needle in this title",
+        content: %{"description" => text}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      # Schema declares `description` with no visibility flags ⇒ public.
+      schema = %{"fields" => [%{"name" => "description"}]}
+      schema_fun = fn "post" -> schema end
+
+      result =
+        Highlighter.snippet_documents([doc], parsed, %{}, CallerContext.anonymous(), schema_fun)
+
+      snippet = result["d1"]
+      assert is_binary(snippet)
+      assert snippet =~ "alphabeacon"
+      # Both sides were cut, so both carry an ellipsis; the window is bounded.
+      assert String.starts_with?(snippet, "…")
+      assert String.ends_with?(snippet, "…")
+      assert String.length(snippet) <= 162
+    end
+
+    test "title is the first snippet field and needs no schema" do
+      doc = %FakeDoc{doc_id: "d1", type: "post", title: "Alphabeacon guide", content: %{}}
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+
+      result = Highlighter.snippet_documents([doc], parsed, %{})
+
+      # Short text ⇒ the whole (original-case) title, no ellipses, no <mark>.
+      assert result["d1"] == "Alphabeacon guide"
+    end
+
+    test "a schema-PRIVATE field never contributes a snippet — nil caller fails closed" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"description" => "the alphabeacon secret payload"}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      schema = %{"fields" => [%{"name" => "description", "private" => true}]}
+      schema_fun = fn "post" -> schema end
+
+      for caller <- [nil, CallerContext.anonymous(), CallerContext.from_user("u1")] do
+        result = Highlighter.snippet_documents([doc], parsed, %{}, caller, schema_fun)
+        assert result["d1"] == nil
+      end
+    end
+
+    test "no schema ⇒ content.* snippet dropped (fail-closed); admin bypasses" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"description" => "the alphabeacon hidden text"}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+
+      # No schema resolver ⇒ visibility unknown ⇒ no content.* snippet.
+      assert Highlighter.snippet_documents([doc], parsed, %{}, CallerContext.anonymous())["d1"] ==
+               nil
+
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      assert Highlighter.snippet_documents([doc], parsed, %{}, admin)["d1"] =~ "alphabeacon"
+    end
+
+    test "non-binary content values (blocks/maps) are skipped, never crash" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"body" => [%{"type" => "paragraph", "text" => "alphabeacon"}]}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+
+      assert Highlighter.snippet_documents([doc], parsed, %{}, admin)["d1"] == nil
+    end
+
+    test "no needles ⇒ nil snippet" do
+      doc = %FakeDoc{doc_id: "d1", type: "post", title: "Anything", content: %{}}
+
+      assert Highlighter.snippet_documents([doc], %{terms: [], phrases: [], prefixes: []}, %{})[
+               "d1"
+             ] == nil
+    end
+  end
+
   describe "highlight_media/4" do
     test "highlights filename when it contains the needle" do
       file = %FakeFile{id: 42, original_name: "photo.jpg", filename: "elixir-logo.png"}

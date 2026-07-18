@@ -73,6 +73,29 @@ defmodule BarkparkWeb.SearchLocalTest do
     end
   end
 
+  # AXI R3: the loopback fast-path consumes the SAME shared HitEnvelope builder
+  # as the standard endpoint, so ?view=brief yields identical brief cards here.
+  test "?view=brief returns brief hit cards through the shared envelope", %{conn: conn} do
+    resp =
+      conn
+      |> get("/v1/data/local/search/#{@ds}", q: "localuniqalphagrid", view: "brief")
+
+    assert resp.status == 200
+    body = Jason.decode!(resp.resp_body)
+    assert body["count"] >= 1
+
+    [card | _] = body["documents"]
+    assert Enum.sort(Map.keys(card)) == ~w(highlights id slug snippet title type)
+    assert card["id"] == "local-test-doc"
+    assert card["type"] == "post"
+    assert card["snippet"] =~ "LocalUniqAlphagrid"
+
+    # Envelope key parity with the full view (same keys the full-shape test pins).
+    for k <- ~w(documents count query parsedQuery highlights ms) do
+      assert Map.has_key?(body, k), "missing key #{k}"
+    end
+  end
+
   test "missing q → 400 (matches the standard endpoint's missing_q shape)", %{conn: conn} do
     resp = conn |> get("/v1/data/local/search/#{@ds}")
     assert resp.status == 400
