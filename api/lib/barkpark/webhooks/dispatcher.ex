@@ -351,6 +351,31 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
+  Deliver one CHAT_BLOCKED notification to `webhook` through the durable state
+  machine (herd layer, charter D57h). `payload` is the exact wire map
+  (`session_id`/`title`/`workspace_id`/`blocked_since`/`ask_role` — never message
+  content or tool input); `dedupe_key` is the pending ask's `chat_messages` id
+  stringified.
+
+  Claims an exactly-once slot first (partial UNIQUE(endpoint_id, dedupe_key)):
+  `{:skipped, :already_delivered}` when a re-sweep hits an ask already notified,
+  otherwise the row is created (`source_kind: "chat_blocked"`, `event_id` NULL,
+  body snapshotted for crash-recovery rebuild) and the signed attempt loop runs.
+  `event_id` is nil so the delivery-id headers are omitted (matching media/audit).
+  Same return contract as `deliver/3`.
+  """
+  def deliver_chat_blocked(%Barkpark.Webhooks.Webhook{} = webhook, payload, dedupe_key)
+      when is_map(payload) and is_binary(dedupe_key) do
+    body = Jason.encode!(payload)
+
+    case Webhooks.claim_chat_blocked_delivery(webhook.id, dedupe_key, %{"body" => body}) do
+      {:ok, delivery} -> attempt(webhook, body, nil, delivery, 1)
+      {:error, :already_delivered} -> {:skipped, :already_delivered}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   The synchronous core of the audit bridge: the matching subscriptions + the
   encoded payload for `event`. Split out so selection + payload are unit-testable
   without the fire-and-forget `fan_out` spawn (which, like every webhook
