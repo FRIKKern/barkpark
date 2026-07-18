@@ -768,4 +768,41 @@ defmodule BarkparkCloud.SitesDeployTest do
                BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
     end
   end
+
+  describe "teardown/2 — the inverse of a spawn (site delete, box half)" do
+    test "returns :ok and sends mode=teardown + the site slug when the box confirms" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      assert :ok = Deploy.teardown(site, bp)
+
+      assert [{:teardown, payload}] = FakeBoxRelay.calls()
+      assert payload.mode == "teardown"
+      assert payload.slug == site.slug
+      # A static site tears down with the symlink engine.
+      assert payload.runtime_target == "static"
+    end
+
+    test "a node site tears down with runtime_target=node (the slot-stopping engine)" do
+      bp = team_fixture() |> live_barkpark()
+      site = static_site(bp, %{kind: "node", framework: "nextjs"})
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      assert :ok = Deploy.teardown(site, bp)
+      assert [{:teardown, payload}] = FakeBoxRelay.calls()
+      assert payload.runtime_target == "node"
+    end
+
+    test "a box that could not tear the site down is a FAILURE (non-2xx), never a false :ok" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        teardown: {:ok, 422, %{"error" => "caddy validate rejected the disarm"}}
+      )
+
+      assert {:error, status, detail} = Deploy.teardown(site, bp)
+      refute status in 200..299
+      assert is_binary(detail)
+    end
+  end
 end

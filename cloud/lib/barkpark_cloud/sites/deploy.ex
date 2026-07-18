@@ -681,6 +681,37 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
+  @doc """
+  Tear a site down on its box (the inverse of a spawn): stop the slots, disarm the
+  Caddy route, delete the release tree. Carries `runtime_target` so the box picks
+  the right engine (`site-deploy-node.sh` stops slots; `site-deploy.sh` doesn't).
+
+  Returns `:ok` once the box confirms `TORN_DOWN=`, or `{:error, status, detail}`
+  — the CALLER must only deregister the site row on `:ok`, or a still-serving box
+  gets orphaned.
+  """
+  @spec teardown(Site.t(), Barkpark.t()) :: :ok | {:error, pos_integer(), String.t()}
+  def teardown(%Site{} = site, %Barkpark{} = bp) do
+    case BoxRelay.teardown(bp, %{
+           mode: "teardown",
+           slug: site.slug,
+           runtime_target: runtime_target(site)
+         }) do
+      {:ok, status, _body} when status in 200..299 ->
+        :ok
+
+      {:ok, status, body} when status in 400..599 ->
+        {:error, 422,
+         rollback_refusal(body, "the instance could not tear this site down (HTTP #{status})")}
+
+      {:ok, _status, body} ->
+        {:error, 422, rollback_refusal(body, "the instance could not tear this site down")}
+
+      {:error, reason} ->
+        {:error, 502, unreachable(bp, reason)}
+    end
+  end
+
   # The box has flipped. Point the site at the deployment that owns the now-live
   # build so `bp cloud site status` tells the truth immediately (no polling
   # window where the site claims the build it just rolled AWAY from).

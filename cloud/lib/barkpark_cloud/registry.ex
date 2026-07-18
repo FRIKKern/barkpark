@@ -521,6 +521,15 @@ defmodule BarkparkCloud.Registry do
   def delete_barkpark(%Barkpark{} = barkpark), do: Repo.delete(barkpark)
 
   @doc """
+  Delete a Site row — the CP half of a site delete. Cascades the site's
+  deployments (`on_delete: :delete_all`). The BOX half (stop slots + disarm the
+  Caddy route + delete the tree) is a separate `Sites.Deploy.teardown/2` the
+  caller must run FIRST, or a still-serving box is orphaned by the deregister.
+  """
+  @spec delete_site(Site.t()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def delete_site(%Site{} = site), do: Repo.delete(site)
+
+  @doc """
   Land an agent health report onto `barkpark`. Accepts a subset of
   `%{health_status, version, git_commit, agent_status, last_seen_at}` — the
   narrow `health_changeset` means a health report can't rename the Barkpark or
