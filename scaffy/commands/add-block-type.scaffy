@@ -1,15 +1,18 @@
-COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap) — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
+COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap), plus the three downstream count-sync sites the generated golden set feeds — the create-barkpark-app showcase seed, the cloud vendored template copy, and the type-keyed toPlainText partition — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
   VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
   VARIABLE 2 "CountBefore" OPAQUE TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (46 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints." EXAMPLES "46"
   VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "47"
-  VARIABLE 4 "ParityCountBefore" OPAQUE TITLE "Golden-parity census before this run" DESCRIPTION "The compose-dispatch census the parity harness currently pins — the number in EXPECTED_COUNT= in scripts/pd-parity-completeness.sh AND inside `== N` in pd_golden_parity_test.exs (46 at authoring time). A DIFFERENT number line from the JS registry's CountBefore — the two pins move independently (compose.ex dispatches 60 types with 14 excluded; the react SDK scopes its own registry) and only coincidentally both read 46 today. OPAQUE numeric literal, never re-cased." EXAMPLES "46"
+  VARIABLE 4 "ParityCountBefore" OPAQUE TITLE "Golden-parity census before this run" DESCRIPTION "The compose-dispatch census the parity harness currently pins — the number in EXPECTED_COUNT= in scripts/pd-parity-completeness.sh AND inside `== N` in pd_golden_parity_test.exs (46 at authoring time). This SAME golden-dir-derived census also pins three downstream sites the gen_pd_parity golden set feeds: the three showcase-seed count assertions in create-barkpark-app's showcase-content.test.ts and the pd-golden corpus pin (`cases.length`) in react's toPlainText.typekeyed.test.ts — every count that tracks the golden-dir size moves as one. A DIFFERENT number line from the JS registry's CountBefore — the two pins move independently (compose.ex dispatches 60 types with 14 excluded; the react SDK scopes its own registry) and only coincidentally both read 46 today. OPAQUE numeric literal, never re-cased." EXAMPLES "46"
   VARIABLE 5 "ParityCountAfter" OPAQUE SUCCESSOR "ParityCountBefore" TITLE "Golden-parity census after this run" DESCRIPTION "ParityCountBefore plus one — what both parity count pins must say once the compose clause and its golden fixture exist. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "47"
+  VARIABLE 6 "TextlessSkipBefore" OPAQUE TITLE "toPlainText TEXTLESS_SKIP size before this run" DESCRIPTION "The textless half of the type-keyed toPlainText partition — the number inside `expect(Object.keys(TEXTLESS_SKIP).length).toBe(N)` in js/packages/react/tests/toPlainText.typekeyed.test.ts (28 at this amendment's authoring time; the prose half, 20-21, stays fixed). A THIRD independent number line: the starter block has no blockText clause so it extracts to '' → it is always classified TEXTLESS, so the textless half takes the +1 while the prose half does not. OPAQUE numeric literal, never re-cased." EXAMPLES "28"
+  VARIABLE 7 "TextlessSkipAfter" OPAQUE SUCCESSOR "TextlessSkipBefore" TITLE "toPlainText TEXTLESS_SKIP size after this run" DESCRIPTION "TextlessSkipBefore plus one — what the textless-partition pin must say once the new type is added to the TEXTLESS_SKIP allow-list. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "29"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHAT THIS COMMAND HONESTLY DOES
 #
 # 3 required code surfaces + fail-closed JS test parity + the required
-# golden-parity harness leg + optional CSS and classification. Never
+# golden-parity harness leg + the 3 downstream count-sync sites the generated
+# golden set feeds (Surface 5) + optional CSS and classification. Never
 # "4 surfaces auto-injected":
 #
 #   ● internal/pdrender/{{.block_name}}.go          created — Go renderer
@@ -21,11 +24,22 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #   ○ api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex injected — @inputs parity fixture
 #   ○ scripts/pd-parity-completeness.sh             injected — EXPECTED_COUNT pin bump
 #   ○ api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs injected — census pin bump
+#   ○ js/packages/create-barkpark-app/tests/showcase-content.test.ts injected ×3 — showcase census pins
+#   ○ js/packages/react/tests/toPlainText.typekeyed.test.ts injected ×2 — corpus + textless-partition pins
+#   ○ js/packages/react/tests/fixtures/pd-plaintext-golden.ts injected — TEXTLESS_SKIP allow-list entry
 #
 # The gen_pd_parity ASSERT CMD below additionally GENERATES (never injects) the
 # frozen golden pair api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json
 # + js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json —
 # derived artifacts, receipt-unowned; manual step 5 is their rollback recipe.
+#
+# Surface 5's ASSERT CMDs GENERATE (never inject) two more receipt-unowned
+# artifacts from that golden set: gen-showcase-content.mjs REWRITES the
+# blog-starter showcase seed (js/packages/create-barkpark-app/templates/
+# blog-starter/seeds/showcase-content.ts), and `make cloud-templates-sync`
+# re-vendors that seed into cloud/priv/templates/blog-starter/. Manual step 5
+# is their rollback too; the cloud vendored copy carries NO injected pin — it is
+# a byte-mirror the drift ASSERT CMD proves clean.
 #
 # The JS surface is FAIL-CLOSED at four edits: the react test suite asserts
 # CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry
@@ -92,10 +106,17 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #    js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json.
 #    These are DERIVED artifacts — the receipt does NOT own them (the mix task
 #    wrote the bytes, not scaffy), so `bp scaffy remove` alone cannot retract
-#    them. Full rollback is three moves: `bp scaffy remove` (inverts every
-#    .go/.ts/.tsx/.ex/.exs/.sh edit above), trash the two generated fixture
-#    files by hand, then re-run `bash scripts/pd-parity-completeness.sh` to
-#    prove the tree re-greened at the original {{.ParityCountBefore}} census.
+#    them. Nor are the two Surface-5 generated artifacts (the regenerated
+#    showcase seed + its cloud vendored copy) receipt-owned. Full rollback:
+#    (a) `bp scaffy remove` (inverts every .go/.ts/.tsx/.ex/.exs/.sh edit above,
+#        including the Surface-5 pin bumps + the TEXTLESS_SKIP entry);
+#    (b) trash the two generated golden fixture files by hand (the golden dir
+#        now back to {{.ParityCountBefore}});
+#    (c) `cd js/packages/create-barkpark-app && node scripts/gen-showcase-content.mjs`
+#        (the seed reverts to the {{.ParityCountBefore}}-block body);
+#    (d) `make cloud-templates-sync` (the vendored copy reverts with it);
+#    (e) `bash scripts/pd-parity-completeness.sh` to prove the tree re-greened at
+#        the original {{.ParityCountBefore}} census.
 #
 # 6. Growing the renderer STALES the golden — mandatory SECOND regen (NOT this
 #    run). The @inputs sample this command plants
@@ -114,6 +135,22 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #      (d) `cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs`.
 #    NO census bump this time — the type already exists; only the golden bytes
 #    change. Skip this and the grow PR ships a green local scaffold over a red CI.
+#
+# 7. Growing the block into PROSE moves it out of TEXTLESS_SKIP (NOT this run).
+#    This scaffold classifies the new type into the toPlainText TEXTLESS_SKIP
+#    allow-list (Surface 5) because the starter has NO `blockText` dispatch
+#    clause in js/packages/react/src/toPlainText.ts — so toPlainText returns ''
+#    for it, honestly textless AT BIRTH. If you later grow the block to carry
+#    reading-flow prose (an excerpt/SEO-meta/search-index would want its text),
+#    that is a SEPARATE, later edit: by HAND (a) add a `case '{{.block-name}}':`
+#    clause to `blockText` returning the block's prose; (b) move the
+#    `'{{.block-name}}'` key from TEXTLESS_SKIP to PROSE_GOLDEN in
+#    js/packages/react/tests/fixtures/pd-plaintext-golden.ts with the exact
+#    expected string (derived from THIS type's frozen pd-golden `.input`); (c)
+#    flip the two partition pins in toPlainText.typekeyed.test.ts (prose +1,
+#    textless −1 — the corpus pin does NOT move, the type already counts). The
+#    partition test reds until the type is in EXACTLY ONE half, so a half-done
+#    migration cannot ship green.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Surface 1: Go (internal/pdrender) ────────────────────────────────────────
@@ -397,6 +434,122 @@ WITH
 MARK "parity-count-test-{{.block-name}}"
 ASLONG FILE DONT CONTAIN "MARK:parity-count-test-{{.block-name}}"
 
+# ── Surface 5: downstream count-sync sites the generated golden set feeds ─────
+# gen_pd_parity (Surface 4) writes ONE new golden into the js pd-golden dir; the
+# golden-dir size IS the compose-dispatch census ({{.ParityCountBefore}} →
+# {{.ParityCountAfter}}), so three DOWNSTREAM consumers that read that dir each
+# pin the same +1. Two are hand-pinned test files this section bumps in place
+# (sites 4 + 6, below); the third — the cloud vendored template copy (site 5) —
+# is a byte-mirror re-synced by the `make cloud-templates-sync` ASSERT CMD, so it
+# carries NO injected pin. The site-4 pins + site-6 corpus pin reuse the EXISTING
+# ParityCount pair (they are the SAME golden-dir census, only LOOKING independent);
+# only the site-6 textless pin needs its own TextlessSkip pair.
+
+# ── Site 4: create-barkpark-app showcase seed (3 census pins) ────────────────
+# The blog-starter's flagship post body is REGENERATED from the pd-golden set by
+# scripts/gen-showcase-content.mjs (a Surface-5 ASSERT CMD); showcase-content.test.ts
+# then guards seed≡goldens AND pins the census in THREE literal count assertions —
+# each reds on the new golden until bumped. Same REPLACE+MARK+ASLONG discipline as
+# the parity census pins (Surface 4). All three reuse the ParityCount pair.
+IN "js/packages/create-barkpark-app/tests/showcase-content.test.ts"
+### Bump the showcase goldens-length pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: showcase goldens-length anchor :::
+    expect(goldens).toHaveLength({{.ParityCountBefore}})
+::: showcase goldens-length anchor :::
+WITH
+::: {{.block-name}} showcase goldens pin :::
+    // scaffy:add-block-type {{.BlockName}} MARK:showcase-goldens-{{.block-name}}
+    expect(goldens).toHaveLength({{.ParityCountAfter}})
+::: {{.block-name}} showcase goldens pin :::
+MARK "showcase-goldens-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:showcase-goldens-{{.block-name}}"
+
+IN "js/packages/create-barkpark-app/tests/showcase-content.test.ts"
+### Bump the showcase seed-Set-size pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: showcase seed-set anchor :::
+    expect(new Set(seedTypes).size).toBe({{.ParityCountBefore}})
+::: showcase seed-set anchor :::
+WITH
+::: {{.block-name}} showcase seed-set pin :::
+    // scaffy:add-block-type {{.BlockName}} MARK:showcase-seedset-{{.block-name}}
+    expect(new Set(seedTypes).size).toBe({{.ParityCountAfter}})
+::: {{.block-name}} showcase seed-set pin :::
+MARK "showcase-seedset-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:showcase-seedset-{{.block-name}}"
+
+IN "js/packages/create-barkpark-app/tests/showcase-content.test.ts"
+### Bump the showcase distinct-renderings pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: showcase markers anchor :::
+    expect(markersSeen.size).toBe({{.ParityCountBefore}})
+::: showcase markers anchor :::
+WITH
+::: {{.block-name}} showcase markers pin :::
+    // scaffy:add-block-type {{.BlockName}} MARK:showcase-markers-{{.block-name}}
+    expect(markersSeen.size).toBe({{.ParityCountAfter}})
+::: {{.block-name}} showcase markers pin :::
+MARK "showcase-markers-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:showcase-markers-{{.block-name}}"
+
+# ── Site 6: type-keyed toPlainText partition (2 pins + 1 classification) ──────
+# toPlainText.typekeyed.test.ts reads the SAME pd-golden corpus and pins its size,
+# and pins the PROSE/TEXTLESS partition. The starter has no `blockText` clause, so
+# toPlainText returns '' for it — it is TEXTLESS, and the partition test reds
+# unless the type is BOTH counted (textless pin +1) AND allow-listed (silent-drop
+# ≠ intentional-skip). The prose half is UNTOUCHED (the starter extracts no prose);
+# only the corpus pin (ParityCount) and the textless pin (TextlessSkip) move +1.
+
+# Corpus-size pin — the SAME census as ParityCount (it counts the golden dir).
+IN "js/packages/react/tests/toPlainText.typekeyed.test.ts"
+### Bump the toPlainText corpus pin from {{.ParityCountBefore}} to {{.ParityCountAfter}}
+REPLACE
+::: typekeyed corpus anchor :::
+    expect(cases.length).toBe({{.ParityCountBefore}})
+::: typekeyed corpus anchor :::
+WITH
+::: {{.block-name}} typekeyed corpus pin :::
+    // scaffy:add-block-type {{.BlockName}} MARK:typekeyed-corpus-{{.block-name}}
+    expect(cases.length).toBe({{.ParityCountAfter}})
+::: {{.block-name}} typekeyed corpus pin :::
+MARK "typekeyed-corpus-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:typekeyed-corpus-{{.block-name}}"
+
+# Textless-partition pin — an INDEPENDENT census (TextlessSkip): the prose half
+# stays fixed while the textless half takes the +1. REPLACE against the current
+# textless literal (unique — the prose line reads `PROSE_GOLDEN`, never TEXTLESS).
+IN "js/packages/react/tests/toPlainText.typekeyed.test.ts"
+### Bump the toPlainText textless-partition pin from {{.TextlessSkipBefore}} to {{.TextlessSkipAfter}}
+REPLACE
+::: typekeyed textless anchor :::
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe({{.TextlessSkipBefore}})
+::: typekeyed textless anchor :::
+WITH
+::: {{.block-name}} typekeyed textless pin :::
+    // scaffy:add-block-type {{.BlockName}} MARK:typekeyed-textless-{{.block-name}}
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe({{.TextlessSkipAfter}})
+::: {{.block-name}} typekeyed textless pin :::
+MARK "typekeyed-textless-{{.block-name}}"
+ASLONG FILE DONT CONTAIN "MARK:typekeyed-textless-{{.block-name}}"
+
+# The classification itself — the new type joins the TEXTLESS_SKIP allow-list.
+# Anchor is the map's opening line (unique). The rationale states WHY it is
+# textless AT BIRTH (no dispatch clause) and points to the grow move (manual
+# step 7). Guard derives from the payload's MARK line (D3c — no ASLONG needed).
+IN "js/packages/react/tests/fixtures/pd-plaintext-golden.ts"
+### Classify {{.block-name}} into the TEXTLESS_SKIP allow-list
+INSERT AFTER FIRST
+::: textless-skip map anchor :::
+export const TEXTLESS_SKIP: Record<string, string> = {
+::: textless-skip map anchor :::
+WITH
+::: {{.block-name}} textless-skip entry :::
+  // scaffy:add-block-type {{.BlockName}} MARK:plaintext-skip-{{.block-name}}
+  '{{.block-name}}': 'starter block — no blockText dispatch clause yet, so toPlainText returns empty; move to PROSE_GOLDEN with a clause + golden when the block grows reading-flow prose (manual step 7)',
+::: {{.block-name}} textless-skip entry :::
+MARK "plaintext-skip-{{.block-name}}"
+
 # ── Post-conditions ──────────────────────────────────────────────────────────
 
 # Per-surface file asserts — each string is a verbatim substring of what an op
@@ -412,6 +565,11 @@ ASSERT FILE "api/lib/barkpark/portable_doc/render/compose.ex" CONTAINS "MARK:ex-
 ASSERT FILE "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex" CONTAINS "MARK:parity-input-{{.block-name}}"
 ASSERT FILE "scripts/pd-parity-completeness.sh" CONTAINS "EXPECTED_COUNT={{.ParityCountAfter}}"
 ASSERT FILE "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs" CONTAINS "== {{.ParityCountAfter}}"
+# Surface 5 postconditions — the downstream census pins + the classification.
+ASSERT FILE "js/packages/create-barkpark-app/tests/showcase-content.test.ts" CONTAINS "MARK:showcase-goldens-{{.block-name}}"
+ASSERT FILE "js/packages/react/tests/toPlainText.typekeyed.test.ts" CONTAINS "cases.length).toBe({{.ParityCountAfter}})"
+ASSERT FILE "js/packages/react/tests/toPlainText.typekeyed.test.ts" CONTAINS "TEXTLESS_SKIP).length).toBe({{.TextlessSkipAfter}})"
+ASSERT FILE "js/packages/react/tests/fixtures/pd-plaintext-golden.ts" CONTAINS "MARK:plaintext-skip-{{.block-name}}"
 
 # DRY-RUN HONESTY (benchmark note — read before you chase a phantom var bug).
 # `bp scaffy run add-block-type … --dry-run` on THIS command ALWAYS reports
@@ -430,20 +588,21 @@ ASSERT FILE "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs" CO
 #
 # Gate commands. LOCAL tier = the proven-safe list only. The Go test run is the
 # NAMED test (both Test{{.BlockName}}Renderer* functions match the -run prefix)
-# — never the whole pdrender suite. The react vitest run is the fail-closed
-# proof: it reds unless all four JS edits landed. Every Elixir gate is TIER ci
-# until scoped local mix test is proven safe.
+# — never the whole pdrender suite. The react vitest run (relocated to Surface 5,
+# post-generation) is the fail-closed proof: it reds unless all four JS edits
+# landed. Every Elixir gate is TIER ci until scoped local mix test is proven safe.
 ASSERT CMD "go vet ./internal/pdrender/..."
 ASSERT CMD "CC=/usr/bin/clang go build ./internal/pdrender/"
 ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=1"
-# Precondition for BOTH JS gates below (D29): in a fresh worktree the js
-# workspace has no node_modules and no built package dists — tsc reds with
-# ~103 cannot-find-module errors and vitest cannot resolve the workspace
-# deps. One install + build greens both (proven: 103 errors -> 0, exit 0
-# twice; vitest 12 files / 192 tests).
+# Precondition for every JS gate (D29): in a fresh worktree the js workspace has
+# no node_modules and no built package dists — tsc reds with ~103
+# cannot-find-module errors and vitest cannot resolve the workspace deps. One
+# install + build greens them (proven: 103 errors -> 0, exit 0). The react vitest
+# run is RELOCATED into Surface 5 (below): it must run AFTER gen_pd_parity mints
+# the new golden, because toPlainText.typekeyed.test.ts pins `cases.length`
+# against the LIVE pd-golden corpus and would red here on the old size.
 ASSERT CMD "cd js && pnpm install && pnpm build"
 ASSERT CMD "cd js/packages/react && npx tsc --noEmit"
-ASSERT CMD "cd js/packages/react && npx vitest run"
 ASSERT CMD "cd api && mix test test/barkpark/portable_doc/render_test.exs" TIER ci
 # Golden-parity leg (Surface 4). ONE gen run writes BOTH mirrors (proven —
 # mirror_dirs() is the api fixtures dir + the js pd-golden dir); the EXISTS
@@ -457,3 +616,33 @@ ASSERT FILE "api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json" EX
 ASSERT FILE "js/packages/react/tests/fixtures/pd-golden/{{.block-name}}.golden.json" EXISTS
 ASSERT CMD "bash scripts/pd-parity-completeness.sh"
 ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs"
+
+# ── Surface 5 gates: the downstream sync sites, all POST-generation ──────────
+# Everything here reads the pd-golden corpus gen_pd_parity just minted (above),
+# so it can only be validated once that golden exists. Running any of it before
+# the generation step would red on a corpus of the OLD size — which is exactly
+# the CI-only miss (compose-clause green locally, downstream red in CI) this
+# amendment closes.
+
+# The full react suite, RELOCATED from beside tsc. toPlainText.typekeyed.test.ts
+# counts the LIVE pd-golden corpus (now {{.ParityCountAfter}}) and partitions it,
+# so it greens only with the new golden present + the site-6 pins bumped.
+# PortableDoc.test.tsx's registry count needs only the code injection and is happy
+# here too. This is the fail-closed proof: it reds unless all four JS edits landed.
+ASSERT CMD "cd js/packages/react && npx vitest run"
+
+# Site 4 — regenerate the showcase seed from the now-{{.ParityCountAfter}} golden
+# corpus, then run its pinned test. gen-showcase-content.mjs REWRITES
+# templates/blog-starter/seeds/showcase-content.ts (a derived artifact,
+# receipt-unowned — manual step 5 is its rollback); the test proves seed≡goldens
+# and the three bumped census pins.
+ASSERT CMD "cd js/packages/create-barkpark-app && node scripts/gen-showcase-content.mjs"
+ASSERT CMD "cd js/packages/create-barkpark-app && npx vitest run"
+
+# Site 5 — re-vendor the control-plane template copy from the regenerated seed,
+# then prove no drift. `make cloud-templates-sync` byte-copies blog-starter +
+# website-starter into cloud/priv/templates (derived, receipt-unowned — manual
+# step 5 reverts it). The drift test is TIER ci (cloud mix env, heavyweight): CI
+# runs BarkparkCloud.Templates.AppFilesDriftTest, the same both-directions gate.
+ASSERT CMD "make cloud-templates-sync"
+ASSERT CMD "cd cloud && mix test test/barkpark_cloud/templates/app_files_drift_test.exs" TIER ci
