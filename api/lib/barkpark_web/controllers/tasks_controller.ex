@@ -62,8 +62,24 @@ defmodule BarkparkWeb.TasksController do
       |> Keyword.merge(scope_opts(conn))
 
     docs = Tasks.ready(opts)
-    counts = Params.batch_edge_counts(docs)
-    json(conn, %{ok: true, docs: Enum.map(docs, &Params.render_doc_with_counts(&1, counts))})
+    json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
+  end
+
+  # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
+  # caller's requested view. `?view=brief` → the frozen brief cards
+  # (child_count via ONE batched grouped query, no content echo, no work
+  # digests); absent/unknown view → the full bd-compatible shape with edge
+  # counts (the server default STAYS full — SDK/Studio/taskboard untouched).
+  defp render_task_list(docs, conn, params) do
+    case Params.parse_view(params["view"]) do
+      :brief ->
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_brief(&1, child_counts))
+
+      :full ->
+        counts = Params.batch_edge_counts(docs)
+        Enum.map(docs, &Params.render_doc_with_counts(&1, counts))
+    end
   end
 
   # ─── GET /v1/tasks/prime ────────────────────────────────────────────────
@@ -84,12 +100,34 @@ defmodule BarkparkWeb.TasksController do
     scope = scope_opts(conn)
     worker = params["worker"]
     limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
+    view = Params.parse_view(params["view"])
 
     %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
       Tasks.prime([worker: worker, limit: limit] ++ scope)
 
     ready = Tasks.ready([limit: limit] ++ scope)
-    counts = Params.batch_edge_counts(in_progress ++ ready)
+
+    # axi-s1: card render in the requested view — brief cards batch ONE
+    # child-count query over the union; full keeps the historical edge-count
+    # shape. Brief prime also trims recent_events to 5 rows (full keeps the
+    # limit default of 10) — orientation, not replay; required for the ≤5 KB
+    # brief-prime target (charter decision 12).
+    {in_progress_cards, ready_cards} =
+      case view do
+        :brief ->
+          child_counts = Params.batch_child_counts(in_progress ++ ready, scope)
+
+          {Enum.map(in_progress, &Params.render_brief(&1, child_counts)),
+           Enum.map(ready, &Params.render_brief(&1, child_counts))}
+
+        :full ->
+          counts = Params.batch_edge_counts(in_progress ++ ready)
+
+          {Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
+           Enum.map(ready, &Params.render_doc_with_counts(&1, counts))}
+      end
+
+    events = if view == :brief, do: Enum.take(events, 5), else: events
 
     # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
     # distinct parent of its in-progress claims (rail_rev per rail, so a burst
@@ -98,8 +136,8 @@ defmodule BarkparkWeb.TasksController do
     base = %{
       ok: true,
       worker: worker,
-      in_progress: Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
-      ready: Enum.map(ready, &Params.render_doc_with_counts(&1, counts)),
+      in_progress: in_progress_cards,
+      ready: ready_cards,
       recent_events: events,
       counts: lifecycle_counts,
       rails: prime_rails(in_progress, conn)
@@ -195,8 +233,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
-    counts = Params.batch_edge_counts(docs)
-    json(conn, %{ok: true, docs: Enum.map(docs, &Params.render_doc_with_counts(&1, counts))})
+    json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────

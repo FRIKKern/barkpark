@@ -1822,6 +1822,201 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # ─── axi-s1 (R1/R2): ?view=brief cards + full-view claim de-dup ─────────
+  # The brief card is FROZEN (charter decision 3): id/doc_id, title, status,
+  # lifecycle_status, priority, assignee, claim{worker,epoch,now},
+  # criteria_met, criteria_total, child_count, parent_id, updated_at — no
+  # content echo, no work digests. Absent/unknown view = full (server default
+  # stays full). Full view keeps exactly ONE claim copy — the top-level one.
+  describe "?view=brief (axi-s1 R1/R2)" do
+    @brief_keys ~w(assignee child_count claim criteria_met criteria_total doc_id id
+                   lifecycle_status parent_id priority status title updated_at)
+
+    test "ready?view=brief returns exactly the frozen field set — no content echo, no digests",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-ready")
+
+      mk_task!(uniq("brief-ready-a"), scope, %{
+        "parent_id" => phase,
+        "priority" => 1,
+        "assignee" => "someone",
+        "acceptance_criteria" => [
+          %{"criterion" => "one", "met" => true, "evidence" => "x"},
+          %{"criterion" => "two", "met" => false, "evidence" => ""}
+        ]
+      })
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      assert payload["ok"] == true
+      assert [card] = payload["docs"]
+
+      assert Enum.sort(Map.keys(card)) == Enum.sort(@brief_keys)
+
+      refute Map.has_key?(card, "content")
+      refute Map.has_key?(card, "work_digest")
+      refute Map.has_key?(card, "work_field_digests")
+      refute Map.has_key?(card, "dependency_count")
+
+      assert card["title"] != nil
+      assert card["lifecycle_status"] == "open"
+      assert card["priority"] == 1
+      assert card["assignee"] == "someone"
+      assert card["parent_id"] == phase
+      assert card["criteria_met"] == 1
+      assert card["criteria_total"] == 2
+      assert card["child_count"] == 0
+      # Unclaimed: the claim key is present and honestly nil.
+      assert Map.fetch!(card, "claim") == nil
+    end
+
+    test "absent and unknown view both return the full shape unchanged",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-fallback")
+      mk_task!(uniq("brief-fallback"), scope, %{"parent_id" => phase})
+
+      for suffix <- ["", "&view=bogus"] do
+        payload =
+          conn
+          |> authed()
+          |> get("/v1/tasks/ready?phase_id=#{phase}#{suffix}")
+          |> json_response(200)
+
+        assert [doc] = payload["docs"]
+        # Full-shape markers the brief card never carries.
+        assert Map.has_key?(doc, "content")
+        assert Map.has_key?(doc, "type")
+        assert Map.has_key?(doc, "dependency_count")
+        refute Map.has_key?(doc, "child_count")
+        refute Map.has_key?(doc, "criteria_met")
+      end
+    end
+
+    test "brief claim is cut to {worker, epoch, now} — digests dropped, now survives",
+         %{conn: conn, scope: scope} do
+      task_id = uniq("brief-claim")
+      task = mk_task!(task_id, scope)
+      {:ok, claimed} = Tasks.claim_by_id(task_id, "brief-worker", scope)
+      {:ok, _} = Tasks.pulse_by_id(claimed.id, "brief-worker", text: "halfway through")
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?view=brief")
+        |> json_response(200)
+
+      card = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], task_id))
+      assert card, "claimed task missing from brief index"
+
+      claim = card["claim"]
+      assert claim["worker"] == "brief-worker"
+      assert is_integer(claim["epoch"])
+      assert claim["now"]["text"] == "halfway through"
+      # The claim work digests are full-view detail — never on the brief card.
+      assert Enum.sort(Map.keys(claim)) == ["epoch", "now", "worker"]
+    end
+
+    test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-dedup")
+      _task = mk_task!(uniq("dedup-claim"), scope, %{"parent_id" => phase})
+
+      payload =
+        conn
+        |> authed()
+        |> post("/v1/tasks/claim", Jason.encode!(%{worker_id: "worker-1", phase_id: phase}))
+        |> json_response(200)
+
+      # Top-level claim: the single wire copy, fully formed.
+      assert payload["doc"]["claim"]["worker"] == "worker-1"
+      assert payload["doc"]["claim"]["epoch"] == 1
+      assert is_binary(payload["doc"]["claim"]["work_digest"])
+
+      # The content echo no longer duplicates it.
+      refute Map.has_key?(payload["doc"]["content"], "claim")
+
+      # DB storage is untouched — content["claim"] stays the write-path truth.
+      stored = Repo.get_by!(Document, doc_id: payload["doc"]["doc_id"])
+      assert stored.content["claim"]["worker"] == "worker-1"
+    end
+
+    test "child_count is tenancy-scoped: a child in another workspace is NOT counted",
+         %{conn: conn, scope: scope} do
+      import Barkpark.TenancyFixtures, only: [create_workspace!: 0, create_project!: 1]
+
+      parent_id = uniq("brief-parent")
+      parent = mk_task!(parent_id, scope)
+      mk_task!(uniq("brief-child-a"), scope, %{"parent_id" => parent.doc_id})
+      mk_task!(uniq("brief-child-b"), scope, %{"parent_id" => parent.doc_id})
+
+      # A foreign-tenant child pointing at the SAME parent doc_id.
+      foreign_ws = create_workspace!()
+      foreign_project = create_project!(foreign_ws)
+      foreign_scope = [workspace_id: foreign_ws.id, project_id: foreign_project.id]
+      register_schemas!(foreign_scope)
+      mk_task!(uniq("brief-child-foreign"), foreign_scope, %{"parent_id" => parent.doc_id})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?view=brief")
+        |> json_response(200)
+
+      card = Enum.find(payload["docs"], &(&1["doc_id"] == parent.doc_id))
+      assert card, "parent task missing from brief index"
+      assert card["child_count"] == 2
+    end
+
+    test "prime?view=brief trims recent_events to 5 and is ≥10x smaller than full on fat fixtures",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-prime")
+      fat = String.duplicate("All work and no play makes Jack a dull boy. ", 200)
+
+      ids =
+        for i <- 1..8 do
+          id = uniq("brief-prime-#{i}")
+          mk_task!(id, scope, %{"parent_id" => phase, "description" => fat})
+          id
+        end
+
+      # Six claims → ≥6 task.claimed events, and six fat in_progress docs.
+      for id <- Enum.take(ids, 6) do
+        {:ok, _} = Tasks.claim_by_id(id, "prime-worker-#{id}", scope)
+      end
+
+      full = conn |> authed() |> get("/v1/tasks/prime")
+      brief = conn |> authed() |> get("/v1/tasks/prime?view=brief")
+
+      full_payload = json_response(full, 200)
+      brief_payload = json_response(brief, 200)
+
+      # Full keeps its default event window; brief trims to 5.
+      assert length(full_payload["recent_events"]) > 5
+      assert length(brief_payload["recent_events"]) == 5
+
+      # Brief cards, not full docs, in both slices.
+      assert Enum.all?(
+               brief_payload["in_progress"] ++ brief_payload["ready"],
+               &(not Map.has_key?(&1, "content") and Map.has_key?(&1, "child_count"))
+             )
+
+      # Envelope keys survive the cut.
+      assert Map.has_key?(brief_payload, "counts")
+      assert Map.has_key?(brief_payload, "rails")
+
+      full_bytes = byte_size(full.resp_body)
+      brief_bytes = byte_size(brief.resp_body)
+      IO.puts("axi-s1 byte probe: prime full=#{full_bytes}B brief=#{brief_bytes}B")
+
+      assert full_bytes >= 10 * brief_bytes,
+             "brief prime not ≥10x smaller: full=#{full_bytes}B brief=#{brief_bytes}B"
+    end
+  end
+
   # ─── Audit hardening: caller token id stamped onto workflow events ──────
   # Each task-workflow mutation driven through the controller with an
   # authenticated bearer stamps that token's id onto the emitted
