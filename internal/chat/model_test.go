@@ -1096,3 +1096,38 @@ func TestFleetFrameReducesWhileAttached(t *testing.T) {
 		t.Fatalf("the herd must keep reducing while attached, got %+v", m.herd.Rows["a"])
 	}
 }
+
+// TestToggleModeFlipsPlanAutopilot proves the ctrl+p grammar: plan ⇄ auto,
+// odd raw modes land on plan first (the safe direction), both the display
+// truth and the D14 continuity field move together, and no session means no
+// patch.
+func TestToggleModeFlipsPlanAutopilot(t *testing.T) {
+	m := Model{st: State{SessionID: "s1", Mode: "plan"}}
+	m2, cmd := m.toggleMode()
+	if m2.st.Mode != "auto" || m2.mode != "auto" {
+		t.Fatalf("plan must flip to auto (display+continuity), got st=%q m=%q", m2.st.Mode, m2.mode)
+	}
+	if cmd == nil {
+		t.Fatal("toggle must emit the persist/steer PATCH command")
+	}
+	if !strings.Contains(m2.st.Notice, "Autopilot") {
+		t.Fatalf("notice must announce Autopilot, got %q", m2.st.Notice)
+	}
+
+	m3, _ := m2.toggleMode()
+	if m3.st.Mode != "plan" {
+		t.Fatalf("auto must flip back to plan, got %q", m3.st.Mode)
+	}
+
+	// An odd raw mode (resumed acceptEdits, armed bypass, …) lands on plan.
+	odd := Model{st: State{SessionID: "s1", Mode: "bypassPermissions"}}
+	odd2, _ := odd.toggleMode()
+	if odd2.st.Mode != "plan" {
+		t.Fatalf("odd mode must land on plan first, got %q", odd2.st.Mode)
+	}
+
+	// No open session — inert.
+	if _, cmd := (Model{}).toggleMode(); cmd != nil {
+		t.Fatal("no session must mean no patch command")
+	}
+}

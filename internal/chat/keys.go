@@ -140,6 +140,9 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyCtrlB:
 		return m.leaveSession()
+	case tea.KeyCtrlP:
+		// Flip Plan ⇄ Autopilot (the header badge is the truth surface).
+		return m.toggleMode()
 	case tea.KeyBackspace:
 		m.input = trimLastRune(m.input)
 		return m, nil

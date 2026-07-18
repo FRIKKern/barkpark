@@ -756,7 +756,26 @@ defmodule BarkparkWeb.ChatController do
   end
 
   defp apply_patch_op(id, {:draft, value}), do: StudioChat.set_draft(id, value)
-  defp apply_patch_op(id, {:mode, value}), do: StudioChat.set_mode(id, value)
+
+  # A mode PATCH also steers a LIVE runtime (best-effort) so a TUI-side toggle
+  # takes effect mid-session, not just on the next spawn. `req_mode` already
+  # fail-closed the value (D22 — bypassPermissions never arrives here); if the
+  # steer is lost, the Recorder's init-frame observation self-heals. Steer only
+  # on an actual CHANGE (the TUI's leave-PATCH echoes the current mode every
+  # exit); a dead or absent Recorder is the routine offline case — persist only.
+  defp apply_patch_op(id, {:mode, value}) do
+    prior = StudioChat.get_session(id)
+    StudioChat.set_mode(id, value)
+
+    with %StudioChat.Session{mode: mode, provider: provider} when mode != value <- prior,
+         recorder when is_pid(recorder) <- Recorder.whereis(id),
+         {:ok, session} <- Recorder.session_pid(recorder) do
+      Runtime.steer(provider, session, %{mode: value})
+    else
+      _ -> :ok
+    end
+  end
+
   defp apply_patch_op(id, {:model_choice, value}), do: StudioChat.set_model_choice(id, value)
   defp apply_patch_op(id, {:effort_choice, value}), do: StudioChat.set_effort_choice(id, value)
   defp apply_patch_op(id, {:title, value}), do: StudioChat.rename(id, value)
@@ -769,7 +788,8 @@ defmodule BarkparkWeb.ChatController do
   defp validate_create(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, @create_keys),
-         {:ok, provider} <- opt_enum(params, "provider", StudioChat.Session.providers(), "claude"),
+         {:ok, provider} <-
+           opt_enum(params, "provider", StudioChat.Session.providers(), "claude"),
          {:ok, target} <-
            opt_enum(params, "execution_target", StudioChat.Session.execution_targets(), "managed"),
          {:ok, host_id} <- opt_uuid(params, "execution_host_id"),

@@ -538,3 +538,72 @@ func TestRailContinuityHydratesFromRefetch(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// TestInitFrameCapturesModelAndMode proves the header-truth capture: the init
+// frame's resolved model + permissionMode land in State, a frame missing them
+// never blanks known values, and the CLI's post-plan "default" is NOT painted
+// (the server redirects it to Autopilot; the turn-boundary refetch carries
+// that truth here).
+func TestInitFrameCapturesModelAndMode(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, chatFrame(t, map[string]any{
+		"type": "system", "subtype": "init",
+		"model": "claude-opus-4-8[1m]", "permissionMode": "plan",
+	}))
+	if st.Model != "claude-opus-4-8[1m]" {
+		t.Fatalf("Model = %q, want the observed wire id", st.Model)
+	}
+	if st.Mode != "plan" {
+		t.Fatalf("Mode = %q, want plan", st.Mode)
+	}
+
+	// A bare init (no model/permissionMode keys) never blanks the facts.
+	st, _ = drive(st, t0, initFrame(t))
+	if st.Model != "claude-opus-4-8[1m]" || st.Mode != "plan" {
+		t.Fatalf("bare init must not blank facts, got model=%q mode=%q", st.Model, st.Mode)
+	}
+
+	// The CLI's own post-plan flip reports "default" — inert for display.
+	st, _ = drive(st, t0, chatFrame(t, map[string]any{
+		"type": "system", "subtype": "init", "permissionMode": "default",
+	}))
+	if st.Mode != "plan" {
+		t.Fatalf("post-plan default must not paint, got mode=%q", st.Mode)
+	}
+}
+
+// TestTailFetchedRefreshesMode proves the turn-boundary mode sync: the store
+// row is where the server-side plan→autopilot switch lands, and the refetch
+// carries it to the badge.
+func TestTailFetchedRefreshesMode(t *testing.T) {
+	st := State{SessionID: "s1", Mode: "plan"}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1", Mode: "auto"}})
+	if st.Mode != "auto" {
+		t.Fatalf("Mode = %q, want auto after refetch", st.Mode)
+	}
+	// A row with no mode never blanks the badge.
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}})
+	if st.Mode != "auto" {
+		t.Fatalf("modeless refetch must not blank, got %q", st.Mode)
+	}
+}
+
+// TestPlanApproveNoticePromisesAutopilot proves the plan-approve optimism: an
+// allow on a plan card says what happens next; a deny (keep planning) keeps
+// the ordinary answering notice.
+func TestPlanApproveNoticePromisesAutopilot(t *testing.T) {
+	planCard := Message{Seq: 1, Role: "plan", Metadata: map[string]any{
+		"request_id": "r1", "approval_status": "pending",
+	}}
+	st := State{SessionID: "s1", Messages: []Message{planCard}}
+	st, _ = drive(st, t0, AnswerEvent{RequestID: "r1", Decision: "allow"})
+	if !strings.Contains(st.Notice, "Autopilot") {
+		t.Fatalf("plan-approve notice must promise Autopilot, got %q", st.Notice)
+	}
+
+	st2 := State{SessionID: "s1", Messages: []Message{planCard}}
+	st2, _ = drive(st2, t0, AnswerEvent{RequestID: "r1", Decision: "deny"})
+	if strings.Contains(st2.Notice, "Autopilot") {
+		t.Fatalf("plan-keep must not promise Autopilot, got %q", st2.Notice)
+	}
+}

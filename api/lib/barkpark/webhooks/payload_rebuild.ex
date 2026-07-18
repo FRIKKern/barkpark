@@ -44,6 +44,23 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
     end
   end
 
+  # A chat_blocked row (herd layer, charter D57h) targets a real workspace-scoped
+  # `webhooks` row (`endpoint_id`) but has no `mutation_events` source
+  # (`event_id` NULL), so the signed body was snapshotted at claim time and is
+  # read back verbatim — NEVER rebuilt from the ask (the pending row may already
+  # have been answered/deleted by retry time). MUST precede the catch-all clause:
+  # the catch-all's `Repo.get(MutationEvent, nil)` RAISES on a NULL event_id, so
+  # without this a snapshot-carrying retry would crash RetryWorker /
+  # StuckDeliverySweeper instead of resuming.
+  def rebuild(%Delivery{source_kind: "chat_blocked"} = delivery) do
+    with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
+         %{"body" => body} when is_binary(body) <- delivery.payload_snapshot do
+      {:ok, webhook, body}
+    else
+      _ -> :gone
+    end
+  end
+
   def rebuild(%Delivery{} = delivery) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
          %MutationEvent{} = event <- Repo.get(MutationEvent, delivery.event_id) do
