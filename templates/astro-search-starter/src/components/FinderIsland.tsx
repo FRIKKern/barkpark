@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react'
 import { Finder } from '../finder/finder'
 import { FinderErrorBoundary } from './FinderErrorBoundary'
+import GraphPane from './GraphPane'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
@@ -242,18 +243,34 @@ export default function FinderIsland() {
     }
   }, [])
 
-  // Wrap the whole finder tree: a throw anywhere below degrades to the on-brand
+  // Wrap the whole tree: a throw anywhere below degrades to the on-brand
   // fallback instead of blanking the page (the island IS the page here).
+  //
+  // The MASTER SPLIT (stw7-backlog-astro-graph-landing-reintegrate): the same
+  // composition as the Next edition's (finder)/layout.tsx — the finder as the
+  // left rail at variant="master" (which switches ON its graph-matches
+  // publishing), the corpus graph filling the right pane. Both live in this ONE
+  // island because the finder→graph bridge is React context (GraphMatches +
+  // HoveredDoc) — two Astro islands would be two roots with no shared state.
+  // On mobile the rail is full-width and the graph hides (the original's
+  // `hidden md:flex` welcome-pane behaviour); rail widths mirror the original.
   return (
     <FinderErrorBoundary>
       <HoveredDocProvider>
         <FinderNavProvider>
-          <Finder
-            variant="page"
-            initialData={seed.initialData}
-            initialSeed={seed.initialSeed}
-            initialEngine="indx"
-          />
+          <div className="flex h-screen w-full overflow-hidden">
+            <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
+              <Finder
+                variant="master"
+                initialData={seed.initialData}
+                initialSeed={seed.initialSeed}
+                initialEngine="indx"
+              />
+            </aside>
+            <div className="hidden min-w-0 flex-1 md:block">
+              <GraphPane />
+            </div>
+          </div>
         </FinderNavProvider>
       </HoveredDocProvider>
     </FinderErrorBoundary>
