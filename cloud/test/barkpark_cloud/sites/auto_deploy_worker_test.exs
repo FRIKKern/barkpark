@@ -172,4 +172,34 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
                perform_job(AutoDeployWorker, %{"site_id" => Ecto.UUID.generate()})
     end
   end
+
+  describe "debounce window (D44 amendment: 60s default, env-overridable, floored)" do
+    # The window is read per-enqueue from AUTODEPLOY_DEBOUNCE_S so a small box
+    # can stretch it without a deploy; the floor keeps it never LESS debounced
+    # than the original D44 5s.
+    test "defaults to 60s, honors a valid override, floors garbage and sub-5 values" do
+      site_id = Ecto.UUID.generate()
+
+      grab = fn ->
+        {:ok, job} = AutoDeployWorker.enqueue(site_id)
+        seconds = DateTime.diff(job.scheduled_at, DateTime.utc_now())
+        Repo.delete_all(from(j in Oban.Job, where: j.id == ^job.id))
+        seconds
+      end
+
+      System.delete_env("AUTODEPLOY_DEBOUNCE_S")
+      assert_in_delta grab.(), 60, 3
+
+      System.put_env("AUTODEPLOY_DEBOUNCE_S", "120")
+      assert_in_delta grab.(), 120, 3
+
+      System.put_env("AUTODEPLOY_DEBOUNCE_S", "2")
+      assert_in_delta grab.(), 60, 3
+
+      System.put_env("AUTODEPLOY_DEBOUNCE_S", "nonsense")
+      assert_in_delta grab.(), 60, 3
+    after
+      System.delete_env("AUTODEPLOY_DEBOUNCE_S")
+    end
+  end
 end
