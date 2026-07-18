@@ -412,7 +412,13 @@ const darkTokens = { ...lightTokens, ...darkOverrides };
 // base dark block (0,1,0), and `html[data-bp-theme="X"][data-theme="dark"]`
 // (0,2,1) overrides everything — so a dark identity state is
 // base-light ∪ base-dark ∪ identity-light ∪ identity-dark, later spread wins.
-const IDENTITY_RAMPS = ["evergreen", "charple", "ember", "fjord"];
+// DISCOVERED from the CSS, never hardcoded: a new identity (iris is landing in
+// this same wave) must join the contrast fanout the moment its block exists —
+// a fixed list would silently re-create the checked-subset dishonesty this
+// detector exists to cure.
+const IDENTITY_RAMPS = [
+  ...new Set([...css.matchAll(/^html\[data-bp-theme="([a-z0-9-]+)"\]\s*\{/gm)].map((m) => m[1])),
+];
 const identityTokens = {}; // id -> { light, dark }
 for (const id of IDENTITY_RAMPS) {
   identityTokens[id] = {
@@ -421,10 +427,11 @@ for (const id of IDENTITY_RAMPS) {
   };
 }
 
-// THE 10 theme states the SPA actually renders (charter GR5): base light/dark
-// plus each identity light/dark. Every CONTRAST_PAIRS entry is resolved against
-// all ten — the contrast manifest fans from 2 states to 10 (34 pairs → 340
-// evaluations) so an identity ramp cannot ship an unreadable pairing unseen.
+// EVERY theme state the SPA actually renders (charter GR5): base light/dark
+// plus each discovered identity's light/dark. Every CONTRAST_PAIRS entry is
+// resolved against all of them — with today's 4 identities the manifest fans
+// from 2 states to 10 (34 pairs → 340 evaluations); a 5th identity fans it
+// further automatically, so a ramp cannot ship an unreadable pairing unseen.
 const THEME_STATES = [
   ["base-light", lightTokens],
   ["base-dark", darkTokens],
@@ -629,7 +636,7 @@ const pxFontSizes = []; // R4
     // GR5) are token blocks too, so their raw ramp values are contract, not E6.
     if (
       depth === 0 &&
-      /^\s*(?::root|\[data-theme="dark"\]|html\[data-bp-theme="[a-z]+"\](?:\[data-theme="dark"\])?)\s*\{\s*$/.test(line)
+      /^\s*(?::root|\[data-theme="dark"\]|html\[data-bp-theme="[a-z0-9-]+"\](?:\[data-theme="dark"\])?)\s*\{\s*$/.test(line)
     )
       inTokenBlock = true;
     for (const ch of line) {
