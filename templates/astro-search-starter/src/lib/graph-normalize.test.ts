@@ -5,7 +5,7 @@
 // edition's lib/graph.ts, so the two landings render the same graph.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeCorpusGraph, computeRootId } from './graph-normalize.ts'
+import { normalizeCorpusGraph, computeRootId, markNonNavigable } from './graph-normalize.ts'
 
 test('normalizes aliased upstream fields into the renderer shape', () => {
   const g = normalizeCorpusGraph({
@@ -55,4 +55,28 @@ test('a garbage upstream degrades to an empty graph, never a throw', () => {
   assert.deepEqual(normalizeCorpusGraph(null), { nodes: [], edges: [], rootId: null })
   assert.deepEqual(normalizeCorpusGraph('nope'), { nodes: [], edges: [], rootId: null })
   assert.deepEqual(normalizeCorpusGraph({}), { nodes: [], edges: [], rootId: null })
+})
+
+test('markNonNavigable phantoms non-built types, keeps edges, re-roots on a navigable node', () => {
+  const base = normalizeCorpusGraph({
+    nodes: [
+      { id: 'p1', type: 'paper', title: 'P1' },
+      { id: 't1', type: 'task', title: 'T1' },
+      { id: 't2', type: 'task', title: 'T2' },
+      { id: 'ghost', type: 'paper', title: 'G', phantom: true },
+    ],
+    edges: [
+      { from_id: 't1', to_id: 'p1' },
+      { from_id: 't1', to_id: 't2' },
+    ],
+  })
+  // Un-marked, the hub 't1' (degree 2) would be root.
+  assert.equal(base.rootId, 't1')
+
+  const g = markNonNavigable(base, ['paper'])
+  assert.equal(g.nodes.find((n) => n.id === 'p1')?.phantom, undefined, 'built type stays navigable')
+  assert.equal(g.nodes.find((n) => n.id === 't1')?.phantom, true, 'non-built type is phantom')
+  assert.equal(g.nodes.find((n) => n.id === 'ghost')?.phantom, true, 'upstream phantom preserved')
+  assert.equal(g.edges.length, 2, 'edges untouched — phantoms keep their context lines')
+  assert.equal(g.rootId, 'p1', 'root re-chosen from navigable nodes only')
 })
