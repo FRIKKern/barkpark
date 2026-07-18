@@ -161,21 +161,62 @@ defmodule Barkpark.Content.Papers do
   end
 
   defp strip_hidden_html(html) do
-    hidden =
-      ~r/<([a-z][a-z0-9:-]*)\b(?=[^>]*(?:\shidden(?:\s|=|>)|\saria-hidden\s*=\s*(?:"true"|'true'|true)))[^>]*>.*?<\/\1\s*>/is
+    {_stack, visible} =
+      ~r/<[^>]*>|[^<]+/s
+      |> Regex.scan(html)
+      |> List.flatten()
+      |> Enum.reduce({[], []}, &strip_hidden_token/2)
 
-    stripped =
-      hidden
-      |> Regex.replace(html, "")
-      |> then(
-        &Regex.replace(
-          ~r/<[a-z][a-z0-9:-]*\b(?=[^>]*(?:\shidden(?:\s|=|>)|\saria-hidden\s*=\s*(?:"true"|'true'|true)))[^>]*>/is,
-          &1,
-          ""
-        )
-      )
+    visible
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+  end
 
-    if stripped == html, do: stripped, else: strip_hidden_html(stripped)
+  @html_void_elements ~w(area base br col embed hr img input link meta param source track wbr)
+
+  defp strip_hidden_token(token, {stack, visible}) do
+    cond do
+      closing_html_tag?(token) ->
+        [_, tag] = Regex.run(~r/^<\s*\/\s*([a-z][a-z0-9:-]*)[^>]*>$/is, token)
+        hidden? = hidden_stack?(stack)
+        next_stack = close_html_tag(stack, String.downcase(tag))
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      opening_html_tag?(token) ->
+        [_, tag, attrs] = Regex.run(~r/^<\s*([a-z][a-z0-9:-]*)\b(.*)>$/is, token)
+        tag = String.downcase(tag)
+        hidden? = hidden_stack?(stack) or hidden_html_attrs?(attrs)
+        void? = tag in @html_void_elements or Regex.match?(~r/\/\s*>$/, token)
+        next_stack = if void?, do: stack, else: [{tag, hidden?} | stack]
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      hidden_stack?(stack) ->
+        {stack, visible}
+
+      true ->
+        {stack, [token | visible]}
+    end
+  end
+
+  defp closing_html_tag?(token),
+    do: Regex.match?(~r/^<\s*\/\s*[a-z][a-z0-9:-]*[^>]*>$/is, token)
+
+  defp opening_html_tag?(token),
+    do: Regex.match?(~r/^<\s*[a-z][a-z0-9:-]*\b.*>$/is, token)
+
+  defp hidden_stack?([{_tag, hidden?} | _]), do: hidden?
+  defp hidden_stack?([]), do: false
+
+  defp hidden_html_attrs?(attrs) do
+    Regex.match?(~r/(?:^|\s)hidden(?:\s|=|$)/i, attrs) or
+      Regex.match?(~r/(?:^|\s)aria-hidden\s*=\s*(?:"true"|'true'|true)(?:\s|$)/i, attrs)
+  end
+
+  defp close_html_tag(stack, tag) do
+    case Enum.split_while(stack, fn {open_tag, _hidden?} -> open_tag != tag end) do
+      {_unclosed, []} -> stack
+      {_unclosed, [_matched | rest]} -> rest
+    end
   end
 
   defp decode_visible_entities(text) do

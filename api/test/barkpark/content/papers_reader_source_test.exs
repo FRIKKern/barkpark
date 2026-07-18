@@ -184,6 +184,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     for body <- [
           ~s(<p hidden>Invisible prose</p>),
           ~s(<p aria-hidden="true">Invisible prose</p>),
+          ~s(<div hidden><div>nested</div><p>still hidden</p></div>),
           ~s(<span aria-label="Metadata only"></span>),
           ~s(<span title="Metadata only"></span>),
           ~s(<img hidden alt="Invisible diagram">),

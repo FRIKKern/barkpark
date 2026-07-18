@@ -32,6 +32,13 @@ func TestPaperBodyEvidence(t *testing.T) {
 			text:   "Mail Diagram",
 		},
 		{
+			name:   "email excludes complete nested hidden subtrees",
+			mode:   "email",
+			source: `<html><body class="bp-paper-surface"><div hidden><div>nested</div><p>still hidden</p></div></body></html>`,
+			found:  true,
+			text:   "",
+		},
+		{
 			name:   "empty authored GUI body remains empty",
 			mode:   "gui",
 			source: `<html><body>Chrome<article id="paper-body"></article></body></html>`,
