@@ -64,7 +64,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// test can prove the MCP→tail→seam translation placed every field in the
 	// request body exactly as `bp task close … --set criteria:=[…]` would.
 	var closeBody []byte
-	var primeQuery string
+	var primeQuery, readyQuery, showQuery string
 	// stamp/pulse capture: body proves the positionals landed in the JSON body,
 	// query proves the flags rode as query params — the whole tail→seam translation.
 	var stampBody, pulseBody []byte
@@ -77,8 +77,10 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 			primeQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"primed":true}}`)
 		case req.URL.Path == "/v1/tasks/ready":
+			readyQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"tasks":[{"doc_id":"t1"}]}}`)
 		case req.URL.Path == "/v1/tasks/t1":
+			showQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"doc_id":"t1","title":"first"}}`)
 		case req.URL.Path == "/v1/tasks/claim":
 			// Empty queue: 200 with ok:false — a valid outcome, not an error.
@@ -191,6 +193,22 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	if !strings.Contains(primeQuery, "worker=cursor-test") || !strings.Contains(primeQuery, "limit=5") {
 		t.Fatalf("task_prime query = %q, want worker+limit as query params", primeQuery)
 	}
+	// An MCP consumer is an agent: prime requests the brief view (AXI R1).
+	if !strings.Contains(primeQuery, "view=brief") {
+		t.Fatalf("task_prime query = %q, want view=brief", primeQuery)
+	}
+
+	// task_ready — the queue-head read also requests brief.
+	resReady, err := cs.CallTool(bg, &mcp.CallToolParams{Name: "task_ready", Arguments: map[string]any{"limit": 3}})
+	if err != nil {
+		t.Fatalf("CallTool task_ready: %v", err)
+	}
+	if resReady.IsError {
+		t.Fatalf("task_ready unexpectedly IsError: %s", mcpContentText(resReady))
+	}
+	if !strings.Contains(readyQuery, "view=brief") || !strings.Contains(readyQuery, "limit=3") {
+		t.Fatalf("task_ready query = %q, want view=brief + limit", readyQuery)
+	}
 
 	// tools/call task_show — the backing response body rides back as content.
 	res, err := cs.CallTool(bg, &mcp.CallToolParams{
@@ -205,6 +223,10 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	if !strings.Contains(mcpContentText(res), `"title":"first"`) {
 		t.Fatalf("task_show content = %q, want the task body", mcpContentText(res))
+	}
+	// task_show is the full-detail escape hatch: it must NEVER send a view param.
+	if strings.Contains(showQuery, "view=") {
+		t.Fatalf("task_show query = %q, want NO view param (full-only escape hatch)", showQuery)
 	}
 
 	// task_next on an empty queue: 200 {ok:false,reason:no_ready} is NOT an error.

@@ -27,6 +27,14 @@ type globals struct {
 	yes     bool // --yes: skip the prod write-guard confirm
 	help    bool // -h/--help
 	version bool // --version/-V: print the CLI version and exit
+	full    bool // --full: force the full server view even where a brief agent default applies
+
+	// view is the request-side response projection: applyQuery appends ?view=
+	// when it is non-empty. The CLI resolves it in runCommand (resolveView —
+	// brief for machine output on a command whose manifest declares views);
+	// the MCP handlers set it directly on their local globals copy. Never a
+	// user flag — --full is the user-facing escape hatch.
+	view string
 
 	// Pagination knobs. Present? tracked so a command can tell "user set --limit"
 	// from "user left it default".
@@ -64,7 +72,7 @@ var boolFlags = map[string]bool{
 	"--json": true, "-q": true, "--quiet": true,
 	"-v": true, "--verbose": true,
 	"--no-color": true, "--dry-run": true,
-	"--yes": true, "--all": true,
+	"--yes": true, "--all": true, "--full": true,
 	"-h": true, "--help": true,
 	"--version": true, "-V": true,
 }
@@ -204,6 +212,8 @@ func (g *globals) set(key, val string) error {
 		g.yes = true
 	case "--all":
 		g.all = true
+	case "--full":
+		g.full = true
 	case "--limit":
 		n, err := strconv.Atoi(val)
 		if err != nil {

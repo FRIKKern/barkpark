@@ -196,6 +196,11 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
+	// Resolve the request-side view HERE, with the writer in hand — never
+	// inside buildManifestRequest, which is pure/writer-less and shared by the
+	// headless MCP dispatch (the MCP handlers set g.view themselves).
+	g.view = resolveView(out, g, cmd)
+
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
 		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
@@ -236,8 +241,81 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 	if status >= 200 && status < 300 {
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+		emitHelpHints(out, respBody)
 	}
 	return handleResponse(out, cmd, status, respBody)
+}
+
+// resolveView decides the ?view= projection for a CLI invocation (AXI R1,
+// charter decision 5 — option B): brief only when ALL of (a) the resolved
+// output is machine-readable (json/yaml — folds the piped default and an
+// explicit -o json; an explicit -o table while piped stays FULL), (b) the user
+// did not force --full, and (c) the command's manifest declares a views
+// contract with an agent default. Commands without a views declaration never
+// get a view param — they are full-only by contract (task.get IS the escape
+// hatch). Empty string means "send no view param" (server default, full).
+func resolveView(out *writer, g globals, cmd manifest.Command) string {
+	if g.full || !out.machineOut() {
+		return ""
+	}
+	if cmd.Views == nil {
+		return ""
+	}
+	return cmd.Views.DefaultForAgents
+}
+
+// agentViewGlobals returns g with the command's manifest-declared agent-default
+// view applied — the ONE generic seam by which headless agent surfaces (the MCP
+// bridge) inherit brief views from the capabilities contract with zero
+// per-tool code. A command without a views declaration passes through
+// untouched (no view param, full-only by contract).
+func agentViewGlobals(g globals, cmd manifest.Command) globals {
+	if !g.full && cmd.Views != nil && cmd.Views.DefaultForAgents != "" {
+		g.view = cmd.Views.DefaultForAgents
+	}
+	return g
+}
+
+// emitHelpHints prints a success envelope's top-level {"help":[…]} entries —
+// concrete next-step command templates the server authors beside its mutation
+// emitters (AXI R5) — to STDERR, one "help: …" line each. It is called from
+// runCommand's post-2xx hook (the warnIfDefaultPageMayBeTruncated call-site
+// pattern), which fires in ALL four output modes; it must NEVER live inside
+// renderSuccess, whose json/yaml arms print the raw payload and are
+// structurally silent on advisory fields (see
+// TestRenderSuccessJSONSilentOnAdvisories). stdout stays one parseable
+// document; json/yaml consumers read the help field itself.
+func emitHelpHints(out *writer, respBody []byte) {
+	for _, h := range helpEntries(respBody) {
+		out.errf("help: %s", h)
+	}
+}
+
+// helpEntries extracts the non-empty string entries of a top-level "help"
+// array from a response envelope, looking first at the raw body (the tasks
+// endpoints emit flat envelopes) and then inside a {"result": …} wrapper.
+// Absent, empty, or malformed help never prints and never errors.
+func helpEntries(body []byte) []string {
+	if hs := topLevelHelpStrings(body); len(hs) > 0 {
+		return hs
+	}
+	return topLevelHelpStrings(unwrapResult(body))
+}
+
+func topLevelHelpStrings(body []byte) []string {
+	var env struct {
+		Help []any `json:"help"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Help) == 0 {
+		return nil
+	}
+	hs := make([]string, 0, len(env.Help))
+	for _, h := range env.Help {
+		if s, ok := h.(string); ok && s != "" {
+			hs = append(hs, s)
+		}
+	}
+	return hs
 }
 
 // warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
@@ -476,6 +554,13 @@ func bindArgs(cmd manifest.Command, pos []string) (map[string]string, error) {
 // placeholders are already consumed by BuildURL and are skipped here.
 func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string][]string, args map[string]string) string {
 	q := url.Values{}
+
+	// The resolved response projection (AXI brief views). g.view is set only by
+	// resolveView (CLI, gated on a manifest views declaration) or deliberately
+	// by an MCP handler — so a non-empty value is always intentional.
+	if g.view != "" {
+		q.Set("view", g.view)
+	}
 
 	if cmd.Paginated {
 		if g.limitSet {

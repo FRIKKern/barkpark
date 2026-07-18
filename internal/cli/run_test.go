@@ -75,6 +75,133 @@ func TestRunCommandTruncationNoticeBoundaries(t *testing.T) {
 	}
 }
 
+// TestRunCommandBriefViewFlip locks the option-B request-side flip (AXI R1,
+// charter decision 5): machine output (json/yaml) on a command whose manifest
+// declares views sends ?view=<default_for_agents>; the human shapes
+// (table/minimal — incl. an explicit -o table while piped), --full, and a
+// command WITHOUT a views declaration never send a view param.
+func TestRunCommandBriefViewFlip(t *testing.T) {
+	withViews := paginatedReadCommand(100)
+	withViews.Views = &manifest.Views{
+		Supported:        []string{"brief", "full"},
+		Default:          "full",
+		DefaultForAgents: "brief",
+	}
+	noViews := paginatedReadCommand(100)
+
+	tests := []struct {
+		name     string
+		output   string
+		g        globals
+		cmd      manifest.Command
+		wantView string
+	}{
+		{name: "json gets brief", output: "json", cmd: withViews, wantView: "brief"},
+		{name: "yaml gets brief", output: "yaml", cmd: withViews, wantView: "brief"},
+		{name: "explicit table stays full", output: "table", cmd: withViews, wantView: ""},
+		{name: "minimal stays full", output: "minimal", cmd: withViews, wantView: ""},
+		{name: "--full overrides brief", output: "json", g: globals{full: true}, cmd: withViews, wantView: ""},
+		{name: "no views declaration never sends view", output: "json", cmd: noViews, wantView: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotView string
+			var hadView bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotView = r.URL.Query().Get("view")
+				_, hadView = r.URL.Query()["view"]
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"docs":[]}`))
+			}))
+			defer srv.Close()
+
+			var stdout, stderr bytes.Buffer
+			out := newWriter(&stdout, &stderr)
+			g := tc.g
+			g.output = tc.output
+			g.outputSet = true
+			out.applyGlobals(g)
+
+			code := runCommand(out, g, manifest.Context{Server: srv.URL}, &manifest.Manifest{}, tc.cmd, nil)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr.String())
+			}
+			if gotView != tc.wantView {
+				t.Fatalf("view param = %q, want %q", gotView, tc.wantView)
+			}
+			if tc.wantView == "" && hadView {
+				t.Fatal("request carried an empty view param; want NO view param at all")
+			}
+		})
+	}
+}
+
+// TestRunCommandEmitsHelpHintsAllModes locks the R5 render seam: help[] entries
+// on a 2xx envelope print to STDERR under ALL four output modes — the hook
+// lives at runCommand's post-2xx site (the warnIfDefaultPageMayBeTruncated
+// pattern), which is the one place proven to fire regardless of output shape —
+// and stdout stays a single parseable document.
+func TestRunCommandEmitsHelpHintsAllModes(t *testing.T) {
+	body := `{"ok":true,"doc":{"doc_id":"t1"},"help":["bp task stamp t1 w1 3 --criterion 0 --met --evidence \"…\"","bp task close t1 w1 3 done"]}`
+
+	for _, output := range []string{"json", "yaml", "table", "minimal"} {
+		t.Run(output, func(t *testing.T) {
+			stdout, stderr, code := runPageResponse(t, output, globals{yes: true}, nonPaginatedReadCommand(), body)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr)
+			}
+			if !strings.Contains(stderr, "help: bp task stamp t1") || !strings.Contains(stderr, "help: bp task close t1") {
+				t.Fatalf("%s stderr = %q, want both help entries", output, stderr)
+			}
+			if strings.Contains(stdout, "help: ") {
+				t.Fatalf("help hint contaminated %s stdout: %q", output, stdout)
+			}
+			if output == "json" {
+				var v map[string]any
+				if err := json.Unmarshal([]byte(stdout), &v); err != nil {
+					t.Fatalf("JSON stdout is not parseable: %v\n%s", err, stdout)
+				}
+			}
+		})
+	}
+}
+
+// A {"result":…}-wrapped envelope still surfaces its help[] (helpEntries checks
+// both the raw body and the unwrapped payload).
+func TestRunCommandEmitsHelpHintsUnderResultWrapper(t *testing.T) {
+	body := `{"result":{"ok":true,"help":["bp task pulse t1 w1 --now \"…\""]}}`
+	_, stderr, code := runPageResponse(t, "json", globals{}, nonPaginatedReadCommand(), body)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stderr, "help: bp task pulse t1") {
+		t.Fatalf("stderr = %q, want the wrapped help entry", stderr)
+	}
+}
+
+// TestRenderSuccessJSONSilentOnAdvisories is the protective twin (ported from
+// the wave's cli-flip-seam verify probe): renderSuccess's json/yaml arms print
+// the raw payload and NOTHING else — warnings and help on the envelope are
+// structurally dropped there. This is exactly WHY emitHelpHints hooks at
+// runCommand post-2xx and must never move inside renderSuccess: anyone
+// relocating it will red this test's sibling above.
+func TestRenderSuccessJSONSilentOnAdvisories(t *testing.T) {
+	body := []byte(`{"ok":true,"warnings":["unmet criteria"],"help":["bp task close t1 w1 3 done"]}`)
+
+	for _, output := range []string{"json", "yaml"} {
+		t.Run(output, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			out := newWriter(&stdout, &stderr)
+			out.output = output
+			renderSuccess(out, nonPaginatedReadCommand(), body)
+			if stderr.String() != "" {
+				t.Fatalf("renderSuccess under -o %s wrote to stderr: %q — the json-silence premise this slice is built on has changed; re-audit the help[] hook placement", output, stderr.String())
+			}
+		})
+	}
+}
+
 func runPageResponse(t *testing.T, output string, g globals, cmd manifest.Command, body string) (string, string, int) {
 	t.Helper()
 

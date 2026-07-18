@@ -88,6 +88,26 @@ type Command struct {
 	// SetKey, when set, nests the `--set` fields under that key in the body
 	// instead of merging them flat — `doc patch` needs `{patch:{id,type,set:{…}}}`.
 	SetKey string `json:"set_key,omitempty"`
+	// Views, when set, declares the response projections this command's route
+	// supports (AXI brief views, axi-agent-ergonomics-review R1). The server
+	// emits it only when the client opts in with ?views=1 on GET
+	// /v1/capabilities, so older servers — and servers predating the views
+	// feature — simply omit it and the field stays nil (dormant). A command
+	// without a views declaration is full-only forever; the CLI/MCP consumers
+	// must never send a ?view= param for it.
+	Views *Views `json:"views,omitempty"`
+}
+
+// Views is a command's declared response-projection contract (frozen shape,
+// charter bp-axi-brief-views decision 2): the supported view names, the
+// server-side default when no ?view= is sent, and the view an agent-facing
+// consumer (piped CLI, MCP) should request by default. Strict decode: every key
+// the server emits is modelled here — an unknown key inside views fails Parse
+// exactly like any other structural typo.
+type Views struct {
+	Supported        []string `json:"supported"`
+	Default          string   `json:"default"`
+	DefaultForAgents string   `json:"default_for_agents"`
 }
 
 // Arg is a positional argument (thin per the M0 freeze: name/required/type/summary).

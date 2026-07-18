@@ -53,6 +53,28 @@ func TestFetchCachesThenHonors304(t *testing.T) {
 	}
 }
 
+// Fetch opts into the additive views emission with ?views=1 (charter law 7:
+// new-key safety = opt-in emission). Old servers ignore the param — proven
+// inert — and a views-aware server emits per-command views only to callers
+// that send it.
+func TestFetchSendsViewsOptIn(t *testing.T) {
+	var views string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		views = r.URL.Query().Get("views")
+		w.Header().Set("ETag", "e1")
+		_, _ = w.Write([]byte(minimalManifest))
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
+	if _, err := Fetch(c, nil); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if views != "1" {
+		t.Errorf("GET /v1/capabilities views param = %q, want \"1\"", views)
+	}
+}
+
 // A nil cache disables caching — Fetch does an unconditional GET (no
 // If-None-Match) and parses fresh every time.
 func TestFetchNilCacheUnconditional(t *testing.T) {
