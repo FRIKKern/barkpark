@@ -21,6 +21,18 @@ defmodule Barkpark.Content.Document do
     field :content, :map, default: %{}
     field :rev, :string
 
+    # DB-GENERATED STORED scalars mirrored out of `content` for the search path
+    # (search-latency slice b, migration 20260718090000). Reading these narrow
+    # text columns avoids detoasting the ~88KB `content` jsonb per candidate row
+    # in the slug-ILIKE match arm + the author/category facet GROUP BYs. They are
+    # `GENERATED ALWAYS AS (...) STORED` in Postgres — write-only-by-the-DB — so
+    # they are intentionally ABSENT from `changeset/2`'s cast list; the write path
+    # never sets them, and any attempt would be rejected by Postgres. Loaded on
+    # every read; populated for existing rows by the migration's table rewrite.
+    field :slug_text, :string
+    field :author_text, :string
+    field :category_text, :string
+
     # Row/ownership ACL (Phase 4, core-auth). The user who owns this row on an
     # `owner_scoped: true` type. NULL = unowned (visible to everyone). Stamped on
     # the write path ONLY for owner_scoped types from the acting user's id; a

@@ -198,11 +198,17 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},
   # empty-label buckets dropped, biggest first.
   defp facet_counts(base) do
+    # Every facet dimension now GROUPs BY a real column — `type`/`status` were
+    # always columns; `author`/`category` moved to the `author_text`/`category_text`
+    # GENERATED STORED columns (slice b), so the facet GROUP BYs no longer detoast
+    # `content` per matching row. The bucket labels stay "author"/"category" — the
+    # `meta.facets` shape is byte-identical (the columns mirror `content->>'author'`
+    # / `content->>'category'` exactly).
     %{}
     |> put_facet("type", group_column(base, :type))
     |> put_facet("status", group_column(base, :status))
-    |> put_facet("author", group_content(base, "author"))
-    |> put_facet("category", group_content(base, "category"))
+    |> put_facet("author", group_column(base, :author_text))
+    |> put_facet("category", group_column(base, :category_text))
   end
 
   defp group_column(base, field) do
@@ -210,17 +216,6 @@ defmodule Barkpark.Search.DocumentsRetriever do
     |> exclude(:order_by)
     |> group_by([d], field(d, ^field))
     |> select([d], {field(d, ^field), count(d.id)})
-    |> Repo.all()
-  end
-
-  defp group_content(base, key) do
-    # `selected_as` so GROUP BY references the SELECT alias — a parameterized
-    # `content->>$1` in both clauses reads as two different params to Postgres
-    # ("must appear in GROUP BY"); grouping by the alias avoids that.
-    base
-    |> exclude(:order_by)
-    |> select([d], {selected_as(fragment("?->>?", d.content, ^key), :facet_val), count(d.id)})
-    |> group_by([d], selected_as(:facet_val))
     |> Repo.all()
   end
 
@@ -288,23 +283,29 @@ defmodule Barkpark.Search.DocumentsRetriever do
             [d],
             fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
               ilike(d.title, ^pattern) or
-              ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern)
+              ilike(d.slug_text, ^pattern)
           )
 
         # Fuzzy title arm only for tokens long enough to be meaningful.
         #
         # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this). This
-        # `similarity(?, ?) > ?` arm is index-OPAQUE but rewriting it to the
-        # GIN-engaging `%` operator (the D46 idiom) buys NOTHING here: it is OR-d
-        # (`^clause or …`) with the UNINDEXED `coalesce(?->>'slug') ILIKE ?`
-        # sibling built into `clause` above. A BitmapOr can only form when EVERY
-        # branch is independently indexable, so the slug-ILIKE poisons the whole
-        # disjunction into a Seq Scan — PROVEN live: the full chain Seq-Scans even
-        # with the prod jsonb_path_ops slug index present, and dropping ONLY the
-        # slug arm restores a 3-way BitmapOr. A `%` rewrite here plans byte-
-        # identically to the Seq Scan; a full-path EXPLAIN "proving" a win is the
-        # vacuous-green trap. Un-poisoning needs a trgm expression index on
-        # content->>'slug' (backlog ae-search-or-arm-restructure). See D49(c).
+        # `similarity(?, ?) > ?` arm is index-OPAQUE, but rewriting it to the
+        # GIN-engaging `%` operator (the D46 idiom) still buys NOTHING: it is OR-d
+        # (`^clause or …`) with the UNINDEXED `slug_text ILIKE ?` sibling in
+        # `clause` above. A BitmapOr can only form when EVERY branch is
+        # independently indexable, so the slug-ILIKE keeps the whole disjunction a
+        # bitmap-filter scan — PROVEN live: even a trgm expression index on
+        # content->>'slug', created CONCURRENTLY, went EXPLAIN-unused (planner
+        # bitmap-scans documents_type_dataset_index then FILTERs the OR arms
+        # per row), and was dropped. The `%`-rewrite prohibition therefore stands.
+        #
+        # What slice b (migration 20260718090000) DID fix is the poison the D49
+        # note called out separately: the slug arm no longer reads
+        # `content->>'slug'` (a per-row detoast of the ~88KB `content` jsonb,
+        # measured +1,501 buffers on EVERY predicate eval — count + facets re-run
+        # it 4-5x/keystroke). It now reads the narrow `slug_text` GENERATED STORED
+        # column, so the filter is cheap without changing the plan shape or the
+        # matched set (slug_text = coalesce(content->>'slug','') by construction).
         clause =
           if String.length(term) >= min_fuzzy_len do
             dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
@@ -358,7 +359,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           [d],
           fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
             ilike(d.title, ^pattern) or
-            ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern) or
+            ilike(d.slug_text, ^pattern) or
             fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
         )
 
