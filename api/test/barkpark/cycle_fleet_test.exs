@@ -23,11 +23,11 @@ defmodule Barkpark.CycleFleetTest do
   alias Barkpark.Tenancy
 
   setup do
-    {workspace, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {workspace, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
 
     scope = %{
       workspace_id: workspace.id,
-      project_id: nil,
+      project_id: project.id,
       epic_id: "cycle-#{System.unique_integer([:positive])}",
       wave_id: "wave-1"
     }
@@ -879,12 +879,251 @@ defmodule Barkpark.CycleFleetTest do
       end
 
       assert {:ok, _result} =
-               CycleFleet.record_result(assignment, "valid-partition", %{
+               complete_result(
+                 assignment,
+                 "valid-partition",
+                 "completed",
+                 typed_outcomes(["unit-1"], ["unit-2"], [])
+               )
+    end
+
+    test "semantic_receipt-v1 rejects Build07-style structural completion and revalidates history",
+         %{scope: scope} do
+      units = Enum.map(1..11, &"unit-#{&1}")
+      assert {:ok, _wave} = CycleFleet.open_wave(epic_wave_attrs(scope, units))
+
+      assert {:ok, build07} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(scope, "build-07", "build", "epic-builder", units)
+               )
+
+      assert {:error, :semantic_receipt_task_not_bound} =
+               CycleFleet.record_result(build07, "build07-no-proof", %{
                  status: "completed",
-                 evidence: "paper://valid-partition",
+                 evidence: "paper://build07/claimed-complete",
                  evidence_revision: "rev-1",
-                 payload: typed_outcomes(["unit-1"], ["unit-2"], [])
+                 payload: typed_outcomes(units, [], [])
                })
+
+      task = ensure_semantic_task!(build07)
+
+      open_task =
+        task
+        |> Ecto.Changeset.change(
+          content: %{
+            task.content
+            | "lifecycle_status" => "open",
+              "acceptance_criteria" => [
+                %{
+                  "criterion" => "product behavior is actually complete",
+                  "met" => false,
+                  "evidence" => ""
+                }
+              ]
+          },
+          rev: Ecto.UUID.generate()
+        )
+        |> Repo.update!()
+
+      open_receipts = semantic_receipt_claims(build07, open_task, typed_outcomes(units, [], []))
+
+      assert {:error, :semantic_receipt_task_not_done} =
+               CycleFleet.record_result(build07, "build07-open-unmet", %{
+                 status: "completed",
+                 evidence: "paper://build07/miss-attempt-only",
+                 evidence_revision: open_task.rev,
+                 payload:
+                   units
+                   |> typed_outcomes([], [])
+                   |> Map.put(:semantic_receipts, open_receipts)
+               })
+
+      task =
+        open_task
+        |> Ecto.Changeset.change(
+          content: %{
+            open_task.content
+            | "lifecycle_status" => "done",
+              "acceptance_criteria" => semantic_criteria(build07.assignment_id)
+          },
+          rev: Ecto.UUID.generate()
+        )
+        |> Repo.update!()
+
+      assert {:error, :semantic_receipts_required} =
+               CycleFleet.record_result(build07, "build07-missing-receipts", %{
+                 status: "completed",
+                 evidence: "paper://build07/missing-receipts",
+                 evidence_revision: "rev-1",
+                 payload: typed_outcomes(units, [], [])
+               })
+
+      assert {:error, :semantic_receipts_required} =
+               Barkpark.EpicFleet.record_result(build07, "build07-direct-ledger-bypass", %{
+                 status: "completed",
+                 evidence: "paper://build07/direct-ledger-bypass",
+                 evidence_revision: "rev-1",
+                 payload: typed_outcomes(units, [], [])
+               })
+
+      outcomes = typed_outcomes(units, [], [])
+      receipts = semantic_receipt_claims(build07, task, outcomes)
+
+      duplicate_receipts = [hd(receipts) | receipts]
+
+      assert {:error, :semantic_receipt_duplicate_unit} =
+               CycleFleet.record_result(build07, "build07-duplicate-receipt", %{
+                 status: "completed",
+                 evidence: "paper://build07/duplicate",
+                 evidence_revision: "rev-1",
+                 payload: Map.put(outcomes, :semantic_receipts, duplicate_receipts)
+               })
+
+      foreign =
+        update_in(receipts, [Access.at(0), "task_id"], fn _ -> Ecto.UUID.generate() end)
+
+      assert {:error, :semantic_receipt_foreign_task} =
+               CycleFleet.record_result(build07, "build07-foreign-receipt", %{
+                 status: "completed",
+                 evidence: "paper://build07/foreign",
+                 evidence_revision: "rev-1",
+                 payload: Map.put(outcomes, :semantic_receipts, foreign)
+               })
+
+      stale = update_in(receipts, [Access.at(0), "task_rev"], fn _ -> "stale-rev" end)
+
+      assert {:error, :semantic_receipt_stale_task} =
+               CycleFleet.record_result(build07, "build07-stale-receipt", %{
+                 status: "completed",
+                 evidence: "paper://build07/stale",
+                 evidence_revision: "rev-1",
+                 payload: Map.put(outcomes, :semantic_receipts, stale)
+               })
+
+      malformed_claim = put_in(receipts, [Access.at(0), "claim"], "malformed")
+
+      assert {:error, :semantic_receipt_invalid_claim} =
+               CycleFleet.record_result(build07, "build07-malformed-claim", %{
+                 status: "completed",
+                 evidence: "paper://build07/malformed-claim",
+                 evidence_revision: "rev-1",
+                 payload: Map.put(outcomes, :semantic_receipts, malformed_claim)
+               })
+
+      contradictory =
+        update_in(receipts, [Access.at(0), "disposition"], fn _ -> "stalled" end)
+
+      assert {:error, :semantic_receipt_contradiction} =
+               CycleFleet.record_result(build07, "build07-contradictory-receipt", %{
+                 status: "completed",
+                 evidence: "paper://build07/contradiction",
+                 evidence_revision: "rev-1",
+                 payload: Map.put(outcomes, :semantic_receipts, contradictory)
+               })
+
+      attrs = %{
+        :status => "completed",
+        :evidence => "paper://build07/proved",
+        :evidence_revision => "task-rev-1",
+        :payload => Map.put(outcomes, :semantic_receipts, receipts),
+        "payload" => typed_outcomes([], units, [])
+      }
+
+      assert {:ok, first} = CycleFleet.record_result(build07, "build07-proved", attrs)
+      assert {:ok, replay} = CycleFleet.record_result(build07, "build07-proved", attrs)
+      assert replay.id == first.id
+      assert replay.payload_digest == first.payload_digest
+      assert first.payload["semantic_receipt_version"] == "semantic_receipt-v1"
+      assert length(first.payload["semantic_receipts"]) == 11
+      assert String.length(first.payload["semantic_receipt_index_hash"]) == 64
+      assert String.length(first.payload["terminal_payload_digest"]) == 64
+
+      assert first.payload["semantic_receipt_index_hash"] ==
+               Barkpark.EpicFleet.canonical_digest(%{
+                 "version" => "semantic_receipt-index-v1",
+                 "terminal_payload_digest" => first.payload["terminal_payload_digest"],
+                 "receipt_hashes" =>
+                   Enum.map(first.payload["semantic_receipts"], & &1["receipt_hash"])
+               })
+
+      assert {:ok, before_stale} = CycleFleet.reconcile(scope)
+      assert before_stale.invalid_build_result_assignment_ids == []
+
+      task
+      |> Ecto.Changeset.change(rev: Ecto.UUID.generate())
+      |> Repo.update!()
+
+      assert Repo.get!(Result, first.id)
+      assert {:ok, after_stale} = CycleFleet.reconcile(scope)
+      assert after_stale.invalid_build_result_assignment_ids == ["build-07"]
+      refute after_stale.exact
+    end
+
+    test "semantic_receipt-v1 requires a done Task with met evidence and a retained claim", %{
+      scope: scope
+    } do
+      assert {:ok, _wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
+
+      for {id, mutate, reason} <- [
+            {"open-task", &Map.put(&1, "lifecycle_status", "open"),
+             :semantic_receipt_task_not_done},
+            {"unmet-task", &put_in(&1, ["acceptance_criteria", Access.at(0), "met"], false),
+             :semantic_receipt_criteria_unmet},
+            {"missing-claim", &Map.delete(&1, "claim"), :semantic_receipt_claim_required}
+          ] do
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "build", "epic-builder", ["unit-1"])
+                 )
+
+        task = ensure_semantic_task!(assignment)
+        task |> Ecto.Changeset.change(content: mutate.(task.content)) |> Repo.update!()
+        outcomes = typed_outcomes(["unit-1"], [], [])
+
+        assert {:error, ^reason} =
+                 CycleFleet.record_result(assignment, "terminal-#{id}", %{
+                   status: "completed",
+                   evidence: "paper://#{id}",
+                   evidence_revision: "rev-1",
+                   payload: Map.put(outcomes, :semantic_receipts, [])
+                 })
+      end
+    end
+
+    test "reconciliation quarantines append-only history with a malformed receipt claim", %{
+      scope: scope
+    } do
+      assert {:ok, _wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
+
+      assert {:ok, assignment} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(
+                   scope,
+                   "build-malformed-history",
+                   "build",
+                   "epic-builder",
+                   ["unit-1"]
+                 )
+               )
+
+      task = ensure_semantic_task!(assignment)
+      outcomes = typed_outcomes(["unit-1"], [], [])
+
+      malformed =
+        assignment
+        |> semantic_receipt_claims(task, outcomes)
+        |> put_in([Access.at(0), "claim"], "malformed")
+
+      raw_insert_result!(
+        assignment,
+        "malformed-history",
+        Map.put(outcomes, :semantic_receipts, malformed)
+      )
+
+      assert Repo.get_by!(Result, assignment_id: assignment.id)
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.invalid_build_result_assignment_ids == ["build-malformed-history"]
+      refute summary.exact
     end
 
     test "database rejects a replacement whose predecessor is in another cycle wave", %{
@@ -1427,10 +1666,14 @@ defmodule Barkpark.CycleFleetTest do
   defp complete_result(assignment, key, status, payload) do
     payload =
       if assignment.phase == "build" and status == "completed" do
-        Map.merge(
-          %{completed_unit_ids: [], stalled_unit_ids: [], excluded_unit_ids: []},
-          payload
-        )
+        outcomes =
+          Map.merge(
+            %{completed_unit_ids: [], stalled_unit_ids: [], excluded_unit_ids: []},
+            payload
+          )
+
+        task = ensure_semantic_task!(assignment)
+        Map.put(outcomes, :semantic_receipts, semantic_receipt_claims(assignment, task, outcomes))
       else
         payload
       end
@@ -1441,6 +1684,98 @@ defmodule Barkpark.CycleFleetTest do
       evidence_revision: "rev-1",
       payload: payload
     })
+  end
+
+  defp ensure_semantic_task!(assignment) do
+    case Repo.get(AssignmentTask, assignment.id) do
+      %AssignmentTask{task_id: task_id} ->
+        Repo.get!(Document, task_id)
+
+      nil ->
+        wave = Repo.get!(Wave, assignment.cycle_wave_id)
+        project = Repo.get!(Barkpark.Tenancy.Project, wave.project_id)
+        {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+        worker = "builder-#{assignment.assignment_id}"
+        criteria = semantic_criteria(assignment.assignment_id)
+
+        task =
+          %Document{}
+          |> Document.changeset(%{
+            doc_id: "task.#{assignment.assignment_id}.#{System.unique_integer([:positive])}",
+            type: "task",
+            dataset: "production",
+            title: "Semantic proof for #{assignment.assignment_id}",
+            status: "draft",
+            content: %{
+              "kind" => "task",
+              "lifecycle_status" => "done",
+              "acceptance_criteria" => criteria,
+              "claim" => %{"worker" => worker, "epoch" => 1}
+            },
+            rev: Ecto.UUID.generate(),
+            workspace_id: assignment.workspace_id,
+            project_id: wave.project_id,
+            dataset_id: dataset.id
+          })
+          |> Repo.insert!()
+
+        assert {:ok, _binding} = CycleFleet.bind_assignment_task(assignment, task.id)
+        task
+    end
+  end
+
+  defp semantic_criteria(id) do
+    [
+      %{
+        "criterion" => "#{id} has verified evidence",
+        "met" => true,
+        "evidence" => "paper://criteria/#{id}"
+      }
+    ]
+  end
+
+  defp semantic_receipt_claims(assignment, task, outcomes) do
+    content = task.content
+    claim = Map.fetch!(content, "claim")
+    wave = Repo.get!(Wave, assignment.cycle_wave_id)
+
+    dispositions =
+      Enum.reduce(
+        [
+          shipped: Map.get(outcomes, :completed_unit_ids, []),
+          stalled: Map.get(outcomes, :stalled_unit_ids, []),
+          excluded: Map.get(outcomes, :excluded_unit_ids, [])
+        ],
+        %{},
+        fn {disposition, ids}, acc ->
+          Enum.reduce(ids, acc, &Map.put(&2, &1, Atom.to_string(disposition)))
+        end
+      )
+
+    assignment.unit_ids
+    |> Enum.sort()
+    |> Enum.map(fn unit_id ->
+      %{
+        "assignment_id" => assignment.id,
+        "ownership" => %{
+          "assignment_id" => assignment.id,
+          "assignment_key" => assignment.assignment_id,
+          "cycle_wave_id" => assignment.cycle_wave_id,
+          "snapshot_digest" => assignment.snapshot_digest,
+          "workspace_id" => assignment.workspace_id,
+          "project_id" => wave.project_id,
+          "dataset_id" => task.dataset_id
+        },
+        "task_id" => task.id,
+        "task_doc_id" => task.doc_id,
+        "task_rev" => task.rev,
+        "lifecycle_status" => "done",
+        "criteria" => semantic_criteria(assignment.assignment_id),
+        "claim" => %{"worker" => claim["worker"], "epoch" => claim["epoch"]},
+        "unit_id" => unit_id,
+        "disposition" => Map.get(dispositions, unit_id)
+      }
+    end)
   end
 
   defp stringify_keys(map) when is_map(map),

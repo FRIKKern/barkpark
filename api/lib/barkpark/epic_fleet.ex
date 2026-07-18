@@ -114,8 +114,6 @@ defmodule Barkpark.EpicFleet do
 
   def record_result(assignment_id, idempotency_key, attrs)
       when is_binary(assignment_id) and is_binary(idempotency_key) and is_map(attrs) do
-    attrs = result_attrs(assignment_id, idempotency_key, attrs)
-
     Repo.transaction(fn ->
       assignment =
         Assignment
@@ -128,7 +126,12 @@ defmodule Barkpark.EpicFleet do
           Repo.rollback(:assignment_not_found)
 
         %Assignment{} ->
-          reconcile_result(assignment_id, idempotency_key, attrs)
+          with {:ok, prepared_attrs} <- prepare_result_for_insert(assignment, attrs) do
+            prepared_attrs = result_attrs(assignment_id, idempotency_key, prepared_attrs)
+            reconcile_result(assignment_id, idempotency_key, prepared_attrs)
+          else
+            {:error, reason} -> Repo.rollback(reason)
+          end
       end
     end)
     |> unwrap_transaction()
@@ -389,6 +392,12 @@ defmodule Barkpark.EpicFleet do
       payload_digest: digest(Map.put(semantic, :evidence_digest, evidence_digest))
     })
   end
+
+  defp prepare_result_for_insert(%Assignment{cycle_wave_id: cycle_wave_id} = assignment, attrs)
+       when is_binary(cycle_wave_id),
+       do: Barkpark.CycleFleet.prepare_result_for_insert(assignment, attrs)
+
+  defp prepare_result_for_insert(%Assignment{}, attrs), do: {:ok, attrs}
 
   defp evidence_fields(%{evidence: evidence} = attrs) when is_map(evidence) do
     location = value(evidence, :location) || value(evidence, :ref)

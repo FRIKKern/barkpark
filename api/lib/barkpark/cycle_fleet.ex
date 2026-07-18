@@ -305,8 +305,22 @@ defmodule Barkpark.CycleFleet do
           {:ok, Result.t()} | {:error, Ecto.Changeset.t() | atom()}
   def record_result(%Assignment{} = assignment, idempotency_key, attrs)
       when is_binary(idempotency_key) and is_map(attrs) do
-    with :ok <- validate_cycle_result(assignment, attrs) do
-      EpicFleet.record_result(assignment, idempotency_key, attrs)
+    EpicFleet.record_result(assignment, idempotency_key, attrs)
+  end
+
+  @doc false
+  @spec prepare_result_for_insert(Assignment.t(), map()) :: {:ok, map()} | {:error, atom()}
+  def prepare_result_for_insert(%Assignment{} = assignment, attrs) when is_map(attrs) do
+    case completed_build?(assignment, attrs) do
+      true ->
+        with :ok <- validate_completed_build_result(assignment, value(attrs, :payload)),
+             {:ok, task} <- locked_semantic_task(assignment),
+             {:ok, payload} <- semantic_build_payload(assignment, value(attrs, :payload), task) do
+          {:ok, put_attr(attrs, :payload, payload)}
+        end
+
+      false ->
+        with :ok <- validate_cycle_result(assignment, attrs), do: {:ok, attrs}
     end
   end
 
@@ -928,6 +942,237 @@ defmodule Barkpark.CycleFleet do
 
   defp validate_cycle_result(%Assignment{}, _attrs), do: :ok
 
+  defp completed_build?(%Assignment{phase: "build"}, attrs),
+    do: value(attrs, :status) == "completed"
+
+  defp completed_build?(%Assignment{}, _attrs), do: false
+
+  defp locked_semantic_task(%Assignment{id: assignment_id}) do
+    case Repo.get(AssignmentTask, assignment_id) do
+      nil ->
+        {:error, :semantic_receipt_task_not_bound}
+
+      %AssignmentTask{task_id: task_id} ->
+        case Repo.one(
+               from(t in Document,
+                 where: t.id == ^task_id and t.type == "task",
+                 lock: "FOR UPDATE"
+               )
+             ) do
+          nil -> {:error, :semantic_receipt_task_not_found}
+          %Document{} = task -> {:ok, task}
+        end
+    end
+  end
+
+  defp semantic_task(%Assignment{id: assignment_id}) do
+    with %AssignmentTask{task_id: task_id} <- Repo.get(AssignmentTask, assignment_id),
+         %Document{} = task <- Repo.get_by(Document, id: task_id, type: "task") do
+      {:ok, task}
+    else
+      nil -> {:error, :semantic_receipt_task_not_bound}
+    end
+  end
+
+  defp semantic_build_payload(assignment, payload, task) when is_map(payload) do
+    with :ok <- validate_completed_build_result(assignment, payload),
+         {:ok, task_truth} <- semantic_task_truth(assignment, task),
+         {:ok, outcomes} <- build_outcomes(payload) do
+      receipts =
+        assignment
+        |> snapshot_units()
+        |> Enum.sort()
+        |> Enum.map(fn unit_id ->
+          disposition = Map.fetch!(outcomes, unit_id)
+
+          receipt =
+            task_truth
+            |> Map.merge(%{
+              "unit_id" => unit_id,
+              "disposition" => disposition
+            })
+
+          Map.put(receipt, "receipt_hash", EpicFleet.canonical_digest(receipt))
+        end)
+
+      with :ok <- validate_submitted_receipts(value(payload, :semantic_receipts), receipts) do
+        canonical_payload =
+          payload
+          |> stringify_keys()
+          |> Map.drop([
+            "semantic_receipts",
+            "semantic_receipt_version",
+            "semantic_receipt_index_hash",
+            "terminal_payload_digest"
+          ])
+
+        terminal_payload_digest = EpicFleet.canonical_digest(canonical_payload)
+        receipt_hashes = Enum.map(receipts, &Map.fetch!(&1, "receipt_hash"))
+
+        receipt_index_hash =
+          EpicFleet.canonical_digest(%{
+            "version" => "semantic_receipt-index-v1",
+            "terminal_payload_digest" => terminal_payload_digest,
+            "receipt_hashes" => receipt_hashes
+          })
+
+        {:ok,
+         canonical_payload
+         |> Map.merge(%{
+           "semantic_receipt_version" => "semantic_receipt-v1",
+           "semantic_receipts" => receipts,
+           "semantic_receipt_index_hash" => receipt_index_hash,
+           "terminal_payload_digest" => terminal_payload_digest
+         })}
+      end
+    end
+  end
+
+  defp semantic_build_payload(_assignment, _payload, _task),
+    do: {:error, :invalid_build_outcome_unit_ids}
+
+  defp semantic_task_truth(assignment, %Document{} = task) do
+    content = task.content || %{}
+    criteria = Map.get(content, "acceptance_criteria")
+    claim = Map.get(content, "claim") || %{}
+    wave = Repo.get(Wave, assignment.cycle_wave_id)
+
+    cond do
+      is_nil(wave) or task.workspace_id != assignment.workspace_id or
+          task.project_id != wave.project_id ->
+        {:error, :semantic_receipt_foreign_task}
+
+      Map.get(content, "lifecycle_status") != "done" ->
+        {:error, :semantic_receipt_task_not_done}
+
+      not (is_binary(task.rev) and String.trim(task.rev) != "") ->
+        {:error, :semantic_receipt_task_revision_required}
+
+      not (is_list(criteria) and criteria != []) ->
+        {:error, :semantic_receipt_criteria_required}
+
+      not Enum.all?(criteria, &valid_semantic_criterion?/1) ->
+        {:error, :semantic_receipt_criteria_unmet}
+
+      not (is_binary(Map.get(claim, "worker")) and
+             String.trim(Map.get(claim, "worker")) != "" and
+             is_integer(Map.get(claim, "epoch")) and Map.get(claim, "epoch") > 0) ->
+        {:error, :semantic_receipt_claim_required}
+
+      true ->
+        {:ok,
+         %{
+           "assignment_id" => assignment.id,
+           "ownership" => %{
+             "assignment_id" => assignment.id,
+             "assignment_key" => assignment.assignment_id,
+             "cycle_wave_id" => assignment.cycle_wave_id,
+             "snapshot_digest" => assignment.snapshot_digest,
+             "workspace_id" => assignment.workspace_id,
+             "project_id" => wave.project_id,
+             "dataset_id" => task.dataset_id
+           },
+           "task_id" => task.id,
+           "task_doc_id" => task.doc_id,
+           "task_rev" => task.rev,
+           "lifecycle_status" => "done",
+           "criteria" => Enum.map(criteria, &semantic_criterion/1),
+           "claim" => %{
+             "worker" => Map.fetch!(claim, "worker"),
+             "epoch" => Map.fetch!(claim, "epoch")
+           }
+         }}
+    end
+  end
+
+  defp valid_semantic_criterion?(criterion) when is_map(criterion) do
+    nonempty?(value(criterion, :criterion)) and value(criterion, :met) == true and
+      nonempty?(value(criterion, :evidence))
+  end
+
+  defp valid_semantic_criterion?(_criterion), do: false
+
+  defp semantic_criterion(criterion) do
+    %{
+      "criterion" => value(criterion, :criterion),
+      "met" => true,
+      "evidence" => value(criterion, :evidence)
+    }
+  end
+
+  defp validate_submitted_receipts(receipts, expected) when is_list(receipts) do
+    normalized = Enum.map(receipts, &stringify_keys/1)
+    unit_ids = Enum.map(normalized, &value(&1, :unit_id))
+
+    cond do
+      length(unit_ids) != MapSet.size(MapSet.new(unit_ids)) ->
+        {:error, :semantic_receipt_duplicate_unit}
+
+      length(normalized) != length(expected) ->
+        {:error, :semantic_receipt_count_mismatch}
+
+      true ->
+        expected_by_unit = Map.new(expected, &{Map.fetch!(&1, "unit_id"), &1})
+
+        Enum.reduce_while(normalized, :ok, fn submitted, :ok ->
+          submitted_claim = value(submitted, :claim, %{})
+
+          case Map.fetch(expected_by_unit, value(submitted, :unit_id)) do
+            :error ->
+              {:halt, {:error, :semantic_receipt_foreign_unit}}
+
+            {:ok, canonical} ->
+              without_hash = Map.delete(canonical, "receipt_hash")
+              submitted_hash = Map.get(submitted, "receipt_hash")
+
+              cond do
+                not is_map(submitted_claim) ->
+                  {:halt, {:error, :semantic_receipt_invalid_claim}}
+
+                value(submitted, :task_id) != Map.fetch!(canonical, "task_id") or
+                  value(submitted, :task_doc_id) != Map.fetch!(canonical, "task_doc_id") or
+                    value(submitted_claim, :worker) !=
+                      get_in(canonical, ["claim", "worker"]) ->
+                  {:halt, {:error, :semantic_receipt_foreign_task}}
+
+                value(submitted, :task_rev) != Map.fetch!(canonical, "task_rev") or
+                    value(submitted_claim, :epoch) !=
+                      get_in(canonical, ["claim", "epoch"]) ->
+                  {:halt, {:error, :semantic_receipt_stale_task}}
+
+                Map.drop(submitted, ["receipt_hash"]) != without_hash ->
+                  {:halt, {:error, :semantic_receipt_contradiction}}
+
+                not is_nil(submitted_hash) and
+                    submitted_hash != Map.fetch!(canonical, "receipt_hash") ->
+                  {:halt, {:error, :semantic_receipt_hash_mismatch}}
+
+                true ->
+                  {:cont, :ok}
+              end
+          end
+        end)
+    end
+  end
+
+  defp validate_submitted_receipts(_receipts, _expected),
+    do: {:error, :semantic_receipts_required}
+
+  defp build_outcomes(payload) do
+    with {:ok, shipped} <- strict_string_list(value(payload, :completed_unit_ids)),
+         {:ok, stalled} <- strict_string_list(value(payload, :stalled_unit_ids)),
+         {:ok, excluded} <- strict_string_list(value(payload, :excluded_unit_ids)) do
+      {:ok,
+       Enum.reduce(
+         [shipped: shipped, stalled: stalled, excluded: excluded],
+         %{},
+         fn {disposition, ids}, acc ->
+           Enum.reduce(ids, acc, &Map.put(&2, &1, Atom.to_string(disposition)))
+         end
+       )}
+    end
+  end
+
   defp validate_completed_build_result(assignment, payload) when is_map(payload) do
     owned = snapshot_units(assignment)
 
@@ -973,9 +1218,12 @@ defmodule Barkpark.CycleFleet do
   defp invalid_build_result_ids(rows) do
     Enum.reduce(rows, MapSet.new(), fn
       {assignment, %Result{status: "completed", payload: payload}}, invalid ->
-        case validate_completed_build_result(assignment, payload) do
-          :ok -> invalid
-          {:error, _} -> MapSet.put(invalid, assignment.assignment_id)
+        with {:ok, task} <- semantic_task(assignment),
+             {:ok, expected} <- semantic_build_payload(assignment, payload, task),
+             true <- expected == stringify_keys(payload) do
+          invalid
+        else
+          _ -> MapSet.put(invalid, assignment.assignment_id)
         end
 
       _, invalid ->
@@ -1267,9 +1515,10 @@ defmodule Barkpark.CycleFleet do
   defp value(_map, _key, default), do: default
 
   defp put_attr(map, key, value) do
-    if Map.has_key?(map, to_string(key)),
-      do: Map.put(map, to_string(key), value),
-      else: Map.put(map, key, value)
+    map
+    |> Map.delete(key)
+    |> Map.delete(to_string(key))
+    |> Map.put(key, value)
   end
 
   defp stringify_keys(map) when is_map(map),

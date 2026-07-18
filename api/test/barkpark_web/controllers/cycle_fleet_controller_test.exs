@@ -6,8 +6,9 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   alias Barkpark.{CycleFleet, Repo, Tenancy}
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
-  alias Barkpark.CycleFleet.AssignmentTask
+  alias Barkpark.CycleFleet.{AssignmentTask, Wave}
   alias Barkpark.EpicFleet
+  alias Barkpark.EpicFleet.Assignment
   alias Barkpark.Plugins.Capabilities
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -540,18 +541,36 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
     assert assignment_conflict["error"]["details"]["reason"] == "assignment_conflict"
 
-    result_params = %{
+    completed_outcomes = %{
+      "completed_unit_ids" => ["unit-1"],
+      "stalled_unit_ids" => [],
+      "excluded_unit_ids" => []
+    }
+
+    valid_payload = semantic_http_payload("build-1", completed_outcomes)
+
+    missing_receipts = %{
       "idempotency_key" => "terminal-build-1",
       "status" => "completed",
       "evidence" => "paper://build/1",
       "evidence_revision" => "rev-1",
-      "payload_json" =>
-        Jason.encode!(%{
-          "completed_unit_ids" => ["unit-1"],
-          "stalled_unit_ids" => [],
-          "excluded_unit_ids" => []
-        })
+      "payload_json" => Jason.encode!(completed_outcomes)
     }
+
+    missing =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments/build-1/results", missing_receipts)
+      |> json_response(422)
+
+    assert missing["error"]["details"]["reason"] =~ "semantic_receipts_required"
+
+    result_params =
+      Map.put(
+        missing_receipts,
+        "payload_json",
+        Jason.encode!(valid_payload)
+      )
 
     assert build_conn()
            |> bearer(token)
@@ -566,11 +585,13 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
         Map.put(
           result_params,
           "payload_json",
-          Jason.encode!(%{
-            "completed_unit_ids" => [],
-            "stalled_unit_ids" => ["unit-1"],
-            "excluded_unit_ids" => []
-          })
+          Jason.encode!(
+            semantic_http_payload("build-1", %{
+              "completed_unit_ids" => [],
+              "stalled_unit_ids" => ["unit-1"],
+              "excluded_unit_ids" => []
+            })
+          )
         )
       )
       |> json_response(409)
@@ -977,14 +998,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   defp create_http_result(base, token, assignment_id, status, payload) do
     payload =
       if status == "completed" do
-        Map.merge(
-          %{
-            "completed_unit_ids" => [],
-            "stalled_unit_ids" => [],
-            "excluded_unit_ids" => []
-          },
-          payload
-        )
+        semantic_http_payload(assignment_id, payload)
       else
         payload
       end
@@ -999,6 +1013,102 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       "payload_json" => Jason.encode!(payload)
     })
     |> json_response(201)
+  end
+
+  defp semantic_http_payload(assignment_id, payload) do
+    assignment = Repo.get_by!(Assignment, assignment_id: assignment_id)
+    task = ensure_semantic_http_task!(assignment)
+    wave = Repo.get!(Wave, assignment.cycle_wave_id)
+
+    outcomes =
+      Map.merge(
+        %{
+          "completed_unit_ids" => [],
+          "stalled_unit_ids" => [],
+          "excluded_unit_ids" => []
+        },
+        stringify_keys(payload)
+      )
+
+    dispositions =
+      Enum.reduce(
+        [
+          shipped: outcomes["completed_unit_ids"],
+          stalled: outcomes["stalled_unit_ids"],
+          excluded: outcomes["excluded_unit_ids"]
+        ],
+        %{},
+        fn {disposition, ids}, acc ->
+          Enum.reduce(ids, acc, &Map.put(&2, &1, Atom.to_string(disposition)))
+        end
+      )
+
+    receipts =
+      assignment.unit_ids
+      |> Enum.sort()
+      |> Enum.map(fn unit_id ->
+        %{
+          "assignment_id" => assignment.id,
+          "ownership" => %{
+            "assignment_id" => assignment.id,
+            "assignment_key" => assignment.assignment_id,
+            "cycle_wave_id" => assignment.cycle_wave_id,
+            "snapshot_digest" => assignment.snapshot_digest,
+            "workspace_id" => assignment.workspace_id,
+            "project_id" => wave.project_id,
+            "dataset_id" => task.dataset_id
+          },
+          "task_id" => task.id,
+          "task_doc_id" => task.doc_id,
+          "task_rev" => task.rev,
+          "lifecycle_status" => "done",
+          "criteria" => task.content["acceptance_criteria"],
+          "claim" => %{
+            "worker" => task.content["claim"]["worker"],
+            "epoch" => task.content["claim"]["epoch"]
+          },
+          "unit_id" => unit_id,
+          "disposition" => Map.fetch!(dispositions, unit_id)
+        }
+      end)
+
+    Map.put(outcomes, "semantic_receipts", receipts)
+  end
+
+  defp ensure_semantic_http_task!(assignment) do
+    case Repo.get(AssignmentTask, assignment.id) do
+      %AssignmentTask{task_id: task_id} ->
+        Repo.get!(Document, task_id)
+
+      nil ->
+        wave = Repo.get!(Wave, assignment.cycle_wave_id)
+        project = Repo.get!(Barkpark.Tenancy.Project, wave.project_id)
+        worker = "http-builder-#{assignment.assignment_id}"
+
+        task =
+          create_task!(
+            Repo.get!(Barkpark.Tenancy.Workspace, assignment.workspace_id),
+            project,
+            worker
+          )
+
+        content = %{
+          "kind" => "task",
+          "lifecycle_status" => "done",
+          "acceptance_criteria" => [
+            %{
+              "criterion" => "#{assignment.assignment_id} has HTTP evidence",
+              "met" => true,
+              "evidence" => "paper://http/#{assignment.assignment_id}"
+            }
+          ],
+          "claim" => %{"worker" => worker, "epoch" => 1}
+        }
+
+        task = task |> Ecto.Changeset.change(content: content) |> Repo.update!()
+        assert {:ok, _binding} = CycleFleet.bind_assignment_task(assignment, task.id)
+        task
+    end
   end
 
   defp get_cycle(base, token) do
