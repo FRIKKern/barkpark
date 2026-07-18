@@ -1,0 +1,18 @@
+anchors=100
+literal_unsupported_count=1
+stier_children=12
+body_unsupported_count=0
+GATE_OK
+
+# NOTE: literal_unsupported_count=1 is the theme stylesheet's CSS comment documenting the
+# degrade emitter - present on EVERY paper page (the published wishlist page shows the identical
+# single match, ruled prose by charter D19). body_unsupported_count strips <style>/<script>:
+# zero real unsupported-block renders. GATE_OK is the corrected, content-true form.
+
+# REVIEW RE-RUN (2026-07-18, paper rev 6 after review fixes):
+# anchors=100 body_unsupported=0 stier_refs=12 -> GATE_OK
+# Review fixes patched live via replace-block ops (rev 5 -> 6): rv-btier (sparkline/pie-chart
+# are tier A, not B), rv-ctier (choropleth/geojson-map 2.40, not 2.55), rv-next-callout
+# (EIGHT resolver-capped A candidates, not six). The 12 pbw-stier-* tasks were re-filed with
+# the DATA SHAPE section actually populated (original extraction read block key "code";
+# the wishlist paper stores code-block source under "value" - see make_cands.py).

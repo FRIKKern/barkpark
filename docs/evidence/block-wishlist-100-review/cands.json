@@ -1,0 +1,902 @@
+[
+ {
+  "id": "B001",
+  "name": "radial-dial",
+  "paras": [
+   "The D9 replacement for the struck linear gauge: a radial % dial for the single-number 'how far along' read (criteria met, budget burned). stat's max-bar and a 1-row gauge-list already own the linear form \u2014 the dial is the shape that doesn't exist yet.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"radial-dial\",\n  \"value\": 71, \"max\": 118,      // sweep = value/max, clamped\n  \"label\": \"criteria met\",\n  \"bands\"?: [{\"to\": 0.5, \"tone\": \"danger\"}, {\"to\": 0.9, \"tone\": \"warning\"}] }"
+ },
+ {
+  "id": "B002",
+  "name": "sparkline",
+  "paras": [
+   "A standalone trend strip. stat embeds a spark today, but you cannot place the strip alone beside prose or inside a table cell \u2014 the ledger's 23 stats uses show the appetite; this unlocks the bare form.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"sparkline\",\n  \"points\": [3, 5, 8, 9, 11, 13, 14],\n  \"label\"?: \"renderers/week\",\n  \"band\"?: {\"min\": 0, \"max\": 20}   // pin the y-span like chart axes }"
+ },
+ {
+  "id": "B003",
+  "name": "bar-chart",
+  "paras": [
+   "Horizontal bars for categorical counts \u2014 the D9-mandated form. chart draws line series only; gauge-list's horizontal-bar vocabulary is the TUI prior art, but there is no labeled categorical bar block on any surface.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"bar-chart\",\n  \"bars\": [{\"label\": \"paragraph\", \"value\": 4969}, {\"label\": \"heading\", \"value\": 3232}],\n  \"max\"?: 5000,                 // else data max\n  \"values\"?: true               // print the number after each bar }"
+ },
+ {
+  "id": "B004",
+  "name": "pie-chart",
+  "paras": [
+   "Pie/donut share-of-whole \u2014 absent on every surface (D9 confirms). The mermaid pie kind proves terminal feasibility; this is the data-native block (attrs, not diagram source).",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"pie-chart\",\n  \"slices\": [{\"label\": \"element\", \"value\": 25}, {\"label\": \"widget\", \"value\": 35}, {\"label\": \"section\", \"value\": 2}],\n  \"donut\"?: true, \"values\"?: true }"
+ },
+ {
+  "id": "B005",
+  "name": "scatter-plot",
+  "paras": [
+   "An x/y point cloud (correlation, cost-vs-size). Absent everywhere (D9); Observable's chart cell shows the demand for point-level plots in docs. Braille dots are the natural TUI medium.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"scatter-plot\",\n  \"series\": [{\"label\": \"PRs\", \"points\": [{\"x\": 1, \"y\": 3, \"label\"?: \"w1\"}]}],\n  \"axes\"?: {\"min\": 0, \"max\": 100, \"xLabel\": \"files\", \"yLabel\": \"lines\"} }"
+ },
+ {
+  "id": "B006",
+  "name": "area-chart",
+  "paras": [
+   "Stacked area for composition-over-time (task states by week, storage by kind). chart's line series are the substrate; stacking is a genuinely different read (parts of a whole moving).",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"area-chart\",\n  \"series\": [{\"label\": \"open\", \"points\": [4, 6, 5]}, {\"label\": \"done\", \"points\": [1, 3, 8]}],\n  \"stack\"?: true, \"axes\"?: {\"xLabels\": [\"w1\", \"\", \"w3\"]} }"
+ },
+ {
+  "id": "B007",
+  "name": "histogram",
+  "paras": [
+   "Distribution of a numeric list with binning (PR sizes, latency). No block bins today \u2014 authors pre-chew data into chart points by hand.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"histogram\",\n  \"values\": [12, 18, 22, 22, 30, 41, 55],\n  \"bins\"?: 8, \"range\"?: {\"min\": 0, \"max\": 60} }"
+ },
+ {
+  "id": "B008",
+  "name": "box-plot",
+  "paras": [
+   "Five-number distribution summary per label \u2014 the honest way to compare spreads (benchmark runs, review latencies) without hiding outliers in an average.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"box-plot\",\n  \"series\": [{\"label\": \"cold\", \"values\": [110, 140, 150, 180, 240]},\n             {\"label\": \"warm\", \"values\": [40, 55, 60, 70, 95]}] }"
+ },
+ {
+  "id": "B009",
+  "name": "waterfall-chart",
+  "paras": [
+   "Additive deltas walking to a total (budget, token spend, latency budget). A staple of cost stories; nothing on any surface draws signed running bars.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"waterfall-chart\",\n  \"steps\": [{\"label\": \"base\", \"delta\": 120}, {\"label\": \"cache\", \"delta\": -40}, {\"label\": \"retry\", \"delta\": 15}],\n  \"totalLabel\"?: \"net\" }"
+ },
+ {
+  "id": "B010",
+  "name": "funnel-chart",
+  "paras": [
+   "Stage drop-off (signup funnel, task pipeline survival). The Cloud console and onboarding docs hand-describe funnels in prose today.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"funnel-chart\",\n  \"stages\": [{\"label\": \"visit\", \"value\": 900}, {\"label\": \"signup\", \"value\": 210}, {\"label\": \"deploy\", \"value\": 80}] }"
+ },
+ {
+  "id": "B011",
+  "name": "radar-chart",
+  "paras": [
+   "Multi-axis profile comparison \u2014 score cards like the Cody 14-dimension grade or a per-surface feasibility profile read at a glance.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"radar-chart\",\n  \"axes\": [\"demand\", \"frequency\", \"unlock\", \"reach\"],\n  \"series\": [{\"label\": \"tabs\", \"values\": [5, 4, 4, 3]}] }"
+ },
+ {
+  "id": "B012",
+  "name": "treemap",
+  "paras": [
+   "Hierarchical share as nested rectangles (disk usage, the 4969-paragraph ledger census itself). Share-of-whole with hierarchy has no home block.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"treemap\",\n  \"nodes\": [{\"label\": \"prose\", \"value\": 8960, \"children\"?: [{\"label\": \"paragraph\", \"value\": 4969}]}] }"
+ },
+ {
+  "id": "B013",
+  "name": "sankey",
+  "paras": [
+   "Flows between stages (traffic sources -> pages, task states -> outcomes). High wow-per-byte for architecture and funnel docs; honest cost: layout is the hard part.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"sankey\",\n  \"links\": [{\"from\": \"open\", \"to\": \"claimed\", \"value\": 40}, {\"from\": \"claimed\", \"to\": \"done\", \"value\": 33}] }"
+ },
+ {
+  "id": "B014",
+  "name": "calendar-heatmap",
+  "paras": [
+   "Date-keyed contribution grid (GitHub-style). heatmap is row x col labels, not date-aware \u2014 authors cannot show 'activity by day over a year' without hand-slicing weeks.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"calendar-heatmap\",\n  \"entries\": [{\"date\": \"2026-07-01\", \"value\": 4}, {\"date\": \"2026-07-02\", \"value\": 9}],\n  \"months\"?: 12, \"ramp\"?: \"shade\" }"
+ },
+ {
+  "id": "B015",
+  "name": "scientific-plot",
+  "paras": [
+   "Function/log-scale plot with grid and pinned axes \u2014 the Typst gap. Sampled points in, honest axes out; unlocks engineering notes that today ship screenshots.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: STATIC (scaffy-startable, ~9-14 files; D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"scientific-plot\",\n  \"series\": [{\"label\": \"O(n log n)\", \"points\": [{\"x\": 1, \"y\": 0}, {\"x\": 10, \"y\": 33}]}],\n  \"xScale\"?: \"log\", \"yScale\"?: \"linear\", \"grid\"?: true }"
+ },
+ {
+  "id": "B016",
+  "name": "chart-cell",
+  "paras": [
+   "Observable's pull: a chart with field pickers bound to a live query \u2014 pick source, x, y, mark; the block re-shapes itself. The reactive-doc gateway drug.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: I1 \u2014 hydrated pickers over the resolver path (D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10)"
+  ],
+  "code": "{ \"type\": \"chart-cell\",\n  \"query\": {\"source\": \"tasks\", \"groupBy\": \"status\", \"agg\": {\"op\": \"count\"}},\n  \"mark\": \"bar\" | \"line\" | \"dot\",\n  \"pickers\"?: true              // render the field controls }"
+ },
+ {
+  "id": "B017",
+  "name": "data-grid",
+  "paras": [
+   "Observable's data table with inline wrangling: a query-driven grid with client sort/filter. table is static hand-typed cells; the ledger's 207 tables show how often people want tabular reads.",
+   "data-viz & charts \u00b7 :widget \u00b7 cost: I1 \u2014 hydrated sort/filter (D6) \u00b7 View: new Render.DataViz emitter \u2014 token palette, honest empty box \u00b7 Edit: E3 \u2014 server-paint + JSON island, not WYSIWYG (D3 default for data-viz) \u00b7 TUI: new pdrender renderer (braille / eighth-block vocabulary) \u00b7 React: port of the View emitter (@barkpark/react registry +1) \u00b7 Email: degrade badge: text summary (chart precedent, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10)"
+  ],
+  "code": "{ \"type\": \"data-grid\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"status\": \"open\"}},\n  \"columns\": [{\"field\": \"title\"}, {\"field\": \"priority\", \"sort\"?: \"asc\"}],\n  \"pageSize\"?: 25 }"
+ },
+ {
+  "id": "B018",
+  "name": "diagram-gantt-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): schedule bars over a date axis \u2014 the kind the Projects Board Gantt proves people want in docs too. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `gantt` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"gantt\\n  ...\"      // mermaid `gantt` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B019",
+  "name": "diagram-er-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): entity-relation boxes + crow's-feet \u2014 schema docs read in the terminal. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `er` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"er\\n  ...\"      // mermaid `er` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B020",
+  "name": "diagram-class-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): class boxes with members + relations \u2014 architecture notes for the Go/Elixir internals. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `class` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"class\\n  ...\"      // mermaid `class` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B021",
+  "name": "diagram-pie-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): share-of-whole in eighth-block arcs \u2014 the diagram twin of the pie-chart block. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `pie` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"pie\\n  ...\"      // mermaid `pie` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B022",
+  "name": "diagram-gitgraph-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): branch/merge topology \u2014 release and worktree runbooks. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `gitgraph` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"gitgraph\\n  ...\"      // mermaid `gitgraph` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B023",
+  "name": "diagram-state-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): state machines with transitions \u2014 lifecycle docs (task claim/close, deploy slots). The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `state` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"state\\n  ...\"      // mermaid `state` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B024",
+  "name": "diagram-journey-tui",
+  "paras": [
+   "Per-kind TUI mermaid renderer (D9): user-journey lanes with scores \u2014 UX and onboarding papers. The browser already renders every mermaid kind via pass-through; the terminal renders only the kinds with hand-built renderers (6 waves shipped so far) \u2014 this closes the `journey` gap.",
+   "diagrams & technical \u00b7 :element (existing `diagram` \u2014 a new TUI kind renderer, NOT a new type) \u00b7 cost: STATIC (Go-only; terminal-mermaid wave precedent) \u00b7 View: already full \u2014 browser is a mermaid.js pass-through (D9) \u00b7 Edit: E0 \u2014 unchanged (source editing as today) \u00b7 TUI: THE deliverable: native box-drawing renderer for this kind \u00b7 React: n/a \u2014 mermaid client already covers it \u00b7 Email: degrade badge: raw source (as today, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"diagram\",           // EXISTING block \u2014 new pdrender kind\n  \"source\": \"journey\\n  ...\"      // mermaid `journey` source, labels double-quoted\n}"
+ },
+ {
+  "id": "B025",
+  "name": "equation",
+  "paras": [
+   "Math/equation block \u2014 a confirmed Notion AND Typst gap. TeX source in, MathML out (native in every modern browser \u2014 zero client JS); the terminal prints aligned unicode or honest raw TeX.",
+   "diagrams & technical \u00b7 :element \u00b7 cost: STATIC (TeX -> MathML on the server; no client lib) \u00b7 View: server-side TeX -> MathML (native browser math; zero JS) \u00b7 Edit: E2 \u2014 source textarea; live MathML preview = E3 island later \u00b7 TUI: unicode approximation, raw TeX fallback \u00b7 React: port of the same TeX -> MathML transform \u00b7 Email: degrade badge: raw TeX source \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"equation\",\n  \"tex\": \"E = mc^2\",\n  \"display\"?: true              // block vs inline sizing }"
+ },
+ {
+  "id": "B026",
+  "name": "vector-diagram",
+  "paras": [
+   "Typst's gap: a declarative primitive canvas \u2014 boxes, arrows, labels at coordinates \u2014 for the diagrams mermaid's opinionated layouts refuse to draw (annotated architecture, memory layouts).",
+   "diagrams & technical \u00b7 :widget \u00b7 cost: STATIC (SVG emitter + box-drawing port) \u00b7 View: server-painted SVG \u00b7 Edit: E3 \u2014 JSON island \u00b7 TUI: box-drawing port (the layout-engine solver already speaks rectangles) \u00b7 React: SVG port \u00b7 Email: degrade badge: label list \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"vector-diagram\",\n  \"shapes\": [{\"kind\": \"box\", \"at\": [0, 0], \"size\": [12, 3], \"label\": \"API\"},\n             {\"kind\": \"arrow\", \"from\": [12, 1], \"to\": [20, 1], \"label\": \"SSE\"}],\n  \"grid\"?: [40, 12] }"
+ },
+ {
+  "id": "B027",
+  "name": "tree-diagram",
+  "paras": [
+   "Typst's gap: a tree from nested data (org charts, decision trees, taxonomy). filetree draws paths only; mermaid flowcharts can fake it but never read well in the terminal.",
+   "diagrams & technical \u00b7 :widget \u00b7 cost: STATIC (SVG + the filetree box-drawing vocabulary) \u00b7 View: server-painted SVG/CSS tree \u00b7 Edit: E3 \u2014 JSON island \u00b7 TUI: box-drawing port (filetree precedent) \u00b7 React: port \u00b7 Email: degrade badge: indented list (REAL enough to read) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"tree-diagram\",\n  \"root\": {\"label\": \"Document\", \"children\": [\n    {\"label\": \"Section\", \"children\": [{\"label\": \"Widget\"}, {\"label\": \"Element\"}]}]} }"
+ },
+ {
+  "id": "B028",
+  "name": "chemfig",
+  "paras": [
+   "Chemical structure rendering (Typst gap). Honest: the narrowest candidate in the family \u2014 include for completeness of the Typst survey, expect a low usefulness rank.",
+   "diagrams & technical \u00b7 :element \u00b7 cost: STATIC but specialist (dedicated layouter) \u00b7 View: server-painted SVG \u00b7 Edit: E2 \u2014 source textarea \u00b7 TUI: raw source (honest) \u00b7 React: port \u00b7 Email: degrade badge: raw source \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"chemfig\",\n  \"source\": \"C(-[:90]H)(-[:210]H)=O\"   // chemfig/SMILES-style source }"
+ },
+ {
+  "id": "B029",
+  "name": "timeline-gantt",
+  "paras": [
+   "A native gantt over a task query \u2014 the Projects Board shipped a bespoke Gantt, proving both demand and renderer; this moves the read into any paper (plans, wave charters).",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 task rows carry no date span today"
+  ],
+  "code": "{ \"type\": \"timeline-gantt\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"parent_id\": \"pd-block-wishlist-epic\"}},\n  \"on\"?: [\"inserted_at\", \"closed_at\"],  // bar span fields\n  \"lanes\"?: \"assignee\" }"
+ },
+ {
+  "id": "B030",
+  "name": "burndown-chart",
+  "paras": [
+   "Open-count over time with an ideal line \u2014 the sprint read. The agg path already supports count + over(closed_at) buckets, so this is nearly free: shape the two series, draw with the existing chart vocabulary.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"burndown-chart\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"parent_id\": \"epic-x\"},\n            \"over\": {\"bucket\": \"day\", \"on\": \"closed_at\", \"last\": 14}},\n  \"ideal\"?: true }"
+ },
+ {
+  "id": "B031",
+  "name": "task-calendar",
+  "paras": [
+   "Month grid of tasks by date (due/closed) \u2014 the planning read boards do not give. Pairs with calendar-heatmap but shows the tasks, not just intensity.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 needs date fields in the row shape"
+  ],
+  "code": "{ \"type\": \"task-calendar\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"labels\": [\"wave-1\"]}},\n  \"on\"?: \"closed_at\", \"month\"?: \"2026-07\" }"
+ },
+ {
+  "id": "B032",
+  "name": "activity-feed",
+  "paras": [
+   "Recent ledger events (claims, stamps, closes) as a feed \u2014 the 'is this epic alive?' read the memory doctrine keeps asking for. Everything-is-a-task makes the event stream the heartbeat.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 no task-event source is exposed to blocks"
+  ],
+  "code": "{ \"type\": \"activity-feed\",\n  \"query\": {\"source\": \"task-events\", \"filter\": {\"parent_id\": \"epic-x\"}, \"last\": 20},\n  \"kinds\"?: [\"claim\", \"stamp\", \"close\"] }"
+ },
+ {
+  "id": "B033",
+  "name": "claim-monitor",
+  "paras": [
+   "Live board of current claims: worker, lease age, pulse now-line per task. The ledger-liveness contract (pulse the now-line) has no reader surface today \u2014 this is it.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 claim/now-line fields are not in the resolver row shape"
+  ],
+  "code": "{ \"type\": \"claim-monitor\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"status\": \"in_progress\"}},\n  \"show\"?: [\"worker\", \"now\", \"epoch\", \"age\"] }"
+ },
+ {
+  "id": "B034",
+  "name": "criteria-progress",
+  "paras": [
+   "Acceptance-criteria met/total rolled up across a query (per task and aggregate). Resolver rows ALREADY carry criteria \u2014 this is a pure shaping + render job, the cheapest live candidate here.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"criteria-progress\",\n  \"query\": {\"source\": \"tasks\", \"filter\": {\"parent_id\": \"epic-x\"}},\n  \"detail\"?: \"rows\" | \"total\" }"
+ },
+ {
+  "id": "B035",
+  "name": "epic-heartbeat",
+  "paras": [
+   "One banner for an epic: its wave_status heartbeat line + child progress counts. The charter contract writes wave_status on every phase; no block renders it.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 wave_status passthrough missing from the row shape"
+  ],
+  "code": "{ \"type\": \"epic-heartbeat\",\n  \"task\": \"pd-block-wishlist-epic\",   // the epic task slug\n  \"show\"?: [\"wave_status\", \"children\", \"updated\"] }"
+ },
+ {
+  "id": "B036",
+  "name": "countdown",
+  "paras": [
+   "Deadline countdown to a datetime (launch, gate close). Client ticks; server paints the absolute date so the degrade is honest everywhere.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: static/degraded port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: absolute date (REAL text) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"countdown\",\n  \"to\": \"2026-08-01T12:00:00Z\",\n  \"label\"?: \"beta freeze\", \"done\"?: \"Shipped.\" }"
+ },
+ {
+  "id": "B037",
+  "name": "deploy-status",
+  "paras": [
+   "Live deploy slot card (blue/green, current rev, health) for an instance \u2014 runbooks that show the truth they describe. Plugin-domain data (cloud/instances).",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: needs block-registration seam (plugins cannot register block types today; D10 backlog)"
+  ],
+  "code": "{ \"type\": \"deploy-status\",\n  \"instance\": \"guerrilla\",\n  \"show\"?: [\"slot\", \"rev\", \"health\", \"last_deploy\"] }"
+ },
+ {
+  "id": "B038",
+  "name": "sheet-chart",
+  "paras": [
+   "Chart over a Sheets range \u2014 the spreadsheet plugin owns tabular data people already maintain; letting a paper chart a range closes the loop without copy-paste.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: needs block-registration seam (plugins cannot register block types today; D10 backlog)"
+  ],
+  "code": "{ \"type\": \"sheet-chart\",\n  \"sheet\": \"q3-budget\", \"range\": \"A1:C12\",\n  \"mark\"?: \"line\" | \"bar\" }"
+ },
+ {
+  "id": "B039",
+  "name": "paper-stats",
+  "paras": [
+   "Live corpus stats (papers count, block-type census like the 294-paper table in this paper) \u2014 the census that grounded THIS wishlist was hand-run SQL; a block makes it reproducible.",
+   "live-data & task-ops \u00b7 :widget \u00b7 cost: STATIC (rides the existing task resolver; D10 count-only) \u00b7 View: server-paint via the TaskResolver agg/rows path, fresh per page load \u00b7 Edit: E3 \u2014 query JSON island; live preview channel already exists \u00b7 TUI: pdrender port over the same resolved attrs \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: text rollup \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 content-source aggregate; the resolver is task-only by design"
+  ],
+  "code": "{ \"type\": \"paper-stats\",\n  \"query\": {\"source\": \"papers\", \"groupBy\": \"block_type\"},\n  \"top\"?: 12 }"
+ },
+ {
+  "id": "B040",
+  "name": "footnote",
+  "paras": [
+   "Numbered footnotes with backlinks \u2014 the reference apparatus long-form papers fake with parenthetical asides today. Inline marker + notes list, wired both ways.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"footnote\",\n  \"notes\": [{\"id\": \"fn1\", \"content\": [ ...inline spans... ]}] }\n// inline side: {\"type\": \"footnote-ref\", \"ref\": \"fn1\"} span"
+ },
+ {
+  "id": "B041",
+  "name": "sidenote",
+  "paras": [
+   "Margin note (Tufte-style): commentary beside the text column on wide screens, inline aside on narrow/email/TUI. The honest-degrade story is the whole design.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"sidenote\",\n  \"content\": [ ...inline spans... ],\n  \"align\"?: \"right\" }"
+ },
+ {
+  "id": "B042",
+  "name": "glossary-term",
+  "paras": [
+   "Inline term with an expandable definition (native <details>/<abbr>). Barkpark's own papers are jargon-dense \u2014 E-grades, I-tiers, seams \u2014 and every reader meets them cold.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: I0 \u2014 zero-JS (native <details>/CSS; collapsible-callout precedent walk.ex:1415-1434, D7) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: expanded-by-default port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (expanded state) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"glossary-term\",\n  \"term\": \"E3\", \"definition\": \"server-paint + JSON island\",\n  \"inline\"?: true }"
+ },
+ {
+  "id": "B043",
+  "name": "steps",
+  "paras": [
+   "Numbered procedure with substeps and per-step blocks \u2014 the docs staple (GitBook/ReadMe both ship it). Runbooks here hand-number headings and lose the semantics.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"steps\",\n  \"steps\": [{\"title\": \"Claim the task\", \"blocks\": [ ...child blocks... ]},\n            {\"title\": \"Stamp evidence\", \"blocks\": [...]}] }"
+ },
+ {
+  "id": "B044",
+  "name": "faq",
+  "paras": [
+   "Question/answer pairs as native details accordions. Support docs and launch pages want this shape; the tickets plugin gives it a real consumer.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: I0 \u2014 zero-JS (native <details>/CSS; collapsible-callout precedent walk.ex:1415-1434, D7) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: expanded-by-default port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (expanded state) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"faq\",\n  \"items\": [{\"q\": \"Is my data portable?\", \"a\": [ ...blocks... ], \"open\"?: false}] }"
+ },
+ {
+  "id": "B045",
+  "name": "definition-list",
+  "paras": [
+   "Semantic term/definition pairs (dl/dt/dd). table is overkill for glossaries and option references \u2014 207 ledger tables include many two-column definition tables that want this.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"definition-list\",\n  \"items\": [{\"term\": \"widget\", \"definition\": [ ...inline spans... ]}] }"
+ },
+ {
+  "id": "B046",
+  "name": "chronology",
+  "paras": [
+   "Editorial timeline of dated events (project history, incident postmortems) \u2014 vertical line + entries. Distinct from timeline-gantt: hand-authored narrative, not live task spans.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"chronology\",\n  \"events\": [{\"date\": \"2026-07-17\", \"title\": \"Charter ratified\", \"content\"?: [ ...spans... ]}] }"
+ },
+ {
+  "id": "B047",
+  "name": "changelog",
+  "paras": [
+   "Release-note entries with version, date, and change-kind badges (added/fixed/breaking). Every SDK release note here is hand-formatted headings + lists.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"changelog\",\n  \"entries\": [{\"version\": \"1.4.0\", \"date\": \"2026-07-10\",\n               \"changes\": [{\"kind\": \"added\", \"text\": \"...\"}]}] }"
+ },
+ {
+  "id": "B048",
+  "name": "citation-list",
+  "paras": [
+   "Bibliography with inline cite markers \u2014 the academic apparatus (Typst pull). Research papers in the corpus (perfect-plan verdicts) cite by bare URL today.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"citation-list\",\n  \"refs\": [{\"id\": \"c1\", \"title\": \"...\", \"url\"?: \"...\", \"authors\"?: [...], \"year\"?: 2026}] }"
+ },
+ {
+  "id": "B049",
+  "name": "pros-cons",
+  "paras": [
+   "Two-column verdict block (pros / cons / verdict line) \u2014 review and decision docs hand-roll this with columns + callouts; one purposeful widget reads better on every surface.",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"pros-cons\",\n  \"pros\": [ ...inline spans per item... ], \"cons\": [...],\n  \"verdict\"?: [ ...inline spans... ] }"
+ },
+ {
+  "id": "B050",
+  "name": "hero",
+  "paras": [
+   "Cover hero: background image + title/kicker overlay + action. The content-first doctrine gives papers title+featured-image; launch and template pages need the composed front door. Slots-native: element ARRAYS, never flat strings (the silent-empty trap).",
+   "editorial & structure \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"hero\",\n  \"slots\": {\"media\": [{\"type\": \"image\", \"src\": \"...\"}],\n            \"title\": [{\"type\": \"heading\", \"level\": 1, \"text\": \"...\"}],\n            \"action\"?: [{\"type\": \"action\", \"label\": \"Start\", \"href\": \"...\"}]} }"
+ },
+ {
+  "id": "B051",
+  "name": "page-break",
+  "paras": [
+   "Print/PDF pagination hint \u2014 an element like divider that browsers honor in print CSS. The paper-to-PDF path has no pagination control at all.",
+   "editorial & structure \u00b7 :element \u00b7 cost: STATIC (one CSS rule + no-op ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 a labeled marker line in the canvas \u00b7 TUI: no-op (honest) \u00b7 React: one-line port \u00b7 Email: no-op \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"page-break\" }"
+ },
+ {
+  "id": "B052",
+  "name": "tabs",
+  "paras": [
+   "Tabbed panels of child blocks \u2014 prior art is ALREADY in the repo: internal/pdrender/dashboard.go dashboardTabs renders {label, blocks} tab sets in the terminal. GitBook ships it; multi-audience docs (per-OS installs) need it.",
+   "interactive & disclosure \u00b7 :section (owns child layout, like columns) \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: already proven \u2014 the dashboard.go {label,blocks} renderer generalizes \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: stacked sections with tab-name headings \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"tabs\",\n  \"tabs\": [{\"label\": \"macOS\", \"blocks\": [ ...child blocks... ]},\n           {\"label\": \"Linux\", \"blocks\": [...]}],\n  \"active\"?: 0 }"
+ },
+ {
+  "id": "B053",
+  "name": "expandable",
+  "paras": [
+   "A generic collapsible container \u2014 D9 repriced: callout already ships native <details> (walk.ex:1415-1434); this is the same pattern minus the callout chrome. GitBook's 'expandable' by name.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I0 \u2014 zero-JS (native <details>/CSS; collapsible-callout precedent walk.ex:1415-1434, D7) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: expanded-by-default port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (expanded state) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"expandable\",\n  \"summary\": \"Show the full trace\",\n  \"blocks\": [ ...child blocks... ], \"open\"?: false }"
+ },
+ {
+  "id": "B054",
+  "name": "toggle-list",
+  "paras": [
+   "Craft's toggle list: list items that expand into block bodies \u2014 per-item <details>. The outline-first writing pattern Notion/Craft users expect on day one.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I0 \u2014 zero-JS (native <details>/CSS; collapsible-callout precedent walk.ex:1415-1434, D7) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: expanded-by-default port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (expanded state) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"toggle-list\",\n  \"items\": [{\"summary\": [ ...inline spans... ], \"blocks\": [ ...child blocks... ]}] }"
+ },
+ {
+  "id": "B055",
+  "name": "carousel",
+  "paras": [
+   "Slide sequence of child blocks with dots/arrows \u2014 product tours and screenshot walkthroughs. Email/TUI degrade to a stacked sequence, which stays honest.",
+   "interactive & disclosure \u00b7 :section (owns child layout) \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: static/degraded port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: static fallback \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"carousel\",\n  \"slides\": [{\"blocks\": [ ...child blocks... ], \"caption\"?: \"...\"}],\n  \"loop\"?: false }"
+ },
+ {
+  "id": "B056",
+  "name": "action-button",
+  "paras": [
+   "Coda's pull: a button that fires a declared mutation (close a task, trigger a webhook) with confirmation + result state. The first write-path block \u2014 its security surface IS the cost (D6 I2).",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"action-button\",\n  \"label\": \"Close task\",\n  \"action\": {\"kind\": \"task.close\", \"task\": \"slug\"} | {\"kind\": \"webhook\", \"url\": \"...\"},\n  \"confirm\"?: \"Really close?\" }"
+ },
+ {
+  "id": "B057",
+  "name": "template-button",
+  "paras": [
+   "Notion's template button: inserts a predefined block template into the doc (meeting notes row, decision record). Studio-edit-only by nature \u2014 readers never see it do anything.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 + STUDIO-EDIT (the whole feature lives in the canvas) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: hidden (edit-only block) \u00b7 React: port sharing the hydration core \u00b7 Email: hidden (edit-only block) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"template-button\",\n  \"label\": \"+ Decision record\",\n  \"template\": [ ...blocks to insert... ] }"
+ },
+ {
+  "id": "B058",
+  "name": "reactive-input",
+  "paras": [
+   "Observable's core move: a slider/select whose value feeds sibling query/chart blocks \u2014 documents that answer what-ifs. The biggest unlock in this family and honestly the most expensive (client dataflow graph).",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"reactive-input\",\n  \"name\": \"weeks\", \"kind\": \"range\", \"min\": 1, \"max\": 12, \"value\": 8 }\n// sibling blocks reference {\"$input\": \"weeks\"} in query params"
+ },
+ {
+  "id": "B059",
+  "name": "poll",
+  "paras": [
+   "Reader vote + live tally (team decisions, talk feedback). Backend-write with dedup per principal; tally renders as the existing bar vocabulary.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"poll\",\n  \"question\": \"Which S-tier block first?\",\n  \"options\": [\"tabs\", \"map\", \"toc\"], \"multi\"?: false }"
+ },
+ {
+  "id": "B060",
+  "name": "checklist",
+  "paras": [
+   "Persisted checkboxes (doc-state write) \u2014 onboarding and runbook progress that survives reload. Distinct from list's static checked marks: state belongs to the reader+doc pair.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"checklist\",\n  \"items\": [[ ...inline spans... ], ...],\n  \"scope\"?: \"reader\" | \"doc\" }"
+ },
+ {
+  "id": "B061",
+  "name": "quiz-embed",
+  "paras": [
+   "Embed a Hyperquiz question or deck inline \u2014 the quiz engine is LIVE as Plugins.Quiz on this very instance; papers cannot host it because plugins cannot register block types.",
+   "interactive & disclosure \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: needs block-registration seam (plugins cannot register block types today; D10 backlog)"
+  ],
+  "code": "{ \"type\": \"quiz-embed\",\n  \"quiz\": \"quiz-slug\", \"mode\"?: \"single\" | \"deck\" }"
+ },
+ {
+  "id": "B062",
+  "name": "video",
+  "paras": [
+   "Plain <video> file block (poster, captions, controls). The census shows ZERO video in 294 papers \u2014 because no block exists, not because nobody wants product demos in docs.",
+   "media \u00b7 :element \u00b7 cost: STATIC (native browser elements) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: poster / link \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"video\",\n  \"src\": \"https://.../demo.mp4\", \"poster\"?: \"...\",\n  \"captions\"?: [{\"lang\": \"en\", \"src\": \"...\"}], \"loop\"?: false }"
+ },
+ {
+  "id": "B063",
+  "name": "audio",
+  "paras": [
+   "Plain <audio> block with an optional transcript body \u2014 voice notes, podcast clips, pronunciation. Transcript doubles as the TUI/email degrade.",
+   "media \u00b7 :element \u00b7 cost: STATIC (native browser elements) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: poster / link \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"audio\",\n  \"src\": \"https://.../clip.mp3\",\n  \"transcript\"?: [ ...blocks... ] }"
+ },
+ {
+  "id": "B064",
+  "name": "gallery",
+  "paras": [
+   "Notion's gallery: an image grid with captions and a lightbox. figure is one image; screenshot-heavy release notes stack figures vertically today. Grid is I0; the lightbox is the I1 part.",
+   "media \u00b7 :widget \u00b7 cost: I0 grid; I1 with lightbox (D7 split) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: poster / link \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"gallery\",\n  \"images\": [{\"src\": \"...\", \"caption\"?: \"...\", \"alt\": \"...\"}],\n  \"columns\"?: 3, \"lightbox\"?: true }"
+ },
+ {
+  "id": "B065",
+  "name": "image-compare",
+  "paras": [
+   "Before/after slider over two images \u2014 design reviews and the view-edit-parity audits ship side-by-side screenshots that beg for this.",
+   "media \u00b7 :widget \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: static/degraded port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: both images stacked (REAL) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"image-compare\",\n  \"before\": {\"src\": \"...\", \"label\"?: \"before\"},\n  \"after\":  {\"src\": \"...\", \"label\"?: \"after\"}, \"start\"?: 0.5 }"
+ },
+ {
+  "id": "B066",
+  "name": "pdf-embed",
+  "paras": [
+   "Inline PDF viewer (object/iframe with a download fallback card). Contracts, invoices, and specs live as PDFs; today they leave the paper.",
+   "media \u00b7 :element \u00b7 cost: STATIC (native browser elements) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: poster / link \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"pdf-embed\",\n  \"src\": \"https://.../contract.pdf\", \"height\"?: 640,\n  \"title\": \"Q3 agreement\" }"
+ },
+ {
+  "id": "B067",
+  "name": "file-attachment",
+  "paras": [
+   "Download card: filename, size, type icon, checksum. The media plugin stores files; papers have no way to hand one to the reader.",
+   "media \u00b7 :element \u00b7 cost: STATIC (native browser elements) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: REAL render (a link is a link) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"file-attachment\",\n  \"src\": \"...\", \"name\": \"dataset.csv\", \"size\"?: 48123, \"sha256\"?: \"...\" }"
+ },
+ {
+  "id": "B068",
+  "name": "svg-inline",
+  "paras": [
+   "Sanitized inline SVG \u2014 diagrams exported from design tools render crisp and theme-tintable. The sanitizer IS the feature; without it this block is an XSS hole (honest security cost).",
+   "media \u00b7 :element \u00b7 cost: STATIC + sanitizer (security-reviewed allowlist) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: labeled box + path line (media precedent) \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: poster / link \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"svg-inline\",\n  \"svg\": \"<svg ...>...</svg>\",     // server-sanitized allowlist\n  \"caption\"?: \"...\" }"
+ },
+ {
+  "id": "B069",
+  "name": "icon",
+  "paras": [
+   "Inline icon element from the shipped Lucide set (Studio already bundles it) \u2014 status glyphs and nav affordances without image round-trips.",
+   "media \u00b7 :element \u00b7 cost: STATIC (native browser elements) \u00b7 View: native element render \u00b7 Edit: E2 \u2014 server-painted; E4a picker control = STUDIO-EDIT surcharge \u00b7 TUI: unicode glyph \u00b7 React: port of the View emitter \u00b7 Email: degrade badge: unicode fallback \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"icon\",\n  \"name\": \"check-circle\", \"size\"?: 20, \"label\"?: \"done\" }"
+ },
+ {
+  "id": "B070",
+  "name": "map",
+  "paras": [
+   "Marker map \u2014 the strongest dedup-by-demand case in the wishlist: the SAME dep-free Canvas2D map is duplicated in web/components/listings-map.tsx AND apps/hundesteder/components/places-map.tsx. One block retires two forks.",
+   "geo & map \u00b7 :widget \u00b7 cost: I1 \u2014 canvas hydration (dep-free Canvas2D precedent already duplicated in web/ + hundesteder) \u00b7 View: server-paints frame; client draws Canvas2D \u00b7 Edit: E3 \u2014 server-paint + JSON island \u00b7 TUI: coordinate scatter / labeled box \u00b7 React: port of the SHARED Canvas2D core (the dedup win) \u00b7 Email: degrade badge: address / coordinate list \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"map\",\n  \"center\": [59.91, 10.75], \"zoom\": 12,\n  \"markers\": [{\"at\": [59.91, 10.75], \"label\": \"Oslo\", \"href\"?: \"...\"}] }"
+ },
+ {
+  "id": "B071",
+  "name": "map-route",
+  "paras": [
+   "Polyline route with waypoints (trail guides, delivery runs, race courses) \u2014 the hundesteder domain (dog places) is literally routes and places.",
+   "geo & map \u00b7 :widget \u00b7 cost: I1 \u2014 canvas hydration (dep-free Canvas2D precedent already duplicated in web/ + hundesteder) \u00b7 View: server-paints frame; client draws Canvas2D \u00b7 Edit: E3 \u2014 server-paint + JSON island \u00b7 TUI: coordinate scatter / labeled box \u00b7 React: port of the SHARED Canvas2D core (the dedup win) \u00b7 Email: degrade badge: address / coordinate list \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"map-route\",\n  \"path\": [[59.91, 10.75], [59.93, 10.71]],\n  \"waypoints\"?: [{\"at\": [59.92, 10.73], \"label\": \"rest\"}] }"
+ },
+ {
+  "id": "B072",
+  "name": "choropleth",
+  "paras": [
+   "Region-shaded map from inline GeoJSON + values (sales by region, coverage by country). Honest cost: geometry payloads are big; the block must own simplification discipline.",
+   "geo & map \u00b7 :widget \u00b7 cost: I1 \u2014 canvas hydration (dep-free Canvas2D precedent already duplicated in web/ + hundesteder) \u00b7 View: server-paints frame; client draws Canvas2D \u00b7 Edit: E3 \u2014 server-paint + JSON island \u00b7 TUI: coordinate scatter / labeled box \u00b7 React: port of the SHARED Canvas2D core (the dedup win) \u00b7 Email: degrade badge: address / coordinate list \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"choropleth\",\n  \"regions\": {\"type\": \"FeatureCollection\", ...},\n  \"values\": {\"NO-03\": 42, \"NO-50\": 17}, \"ramp\"?: \"shade\" }"
+ },
+ {
+  "id": "B073",
+  "name": "location-card",
+  "paras": [
+   "Single place card: mini-map + address + hours + link \u2014 the hundesteder place-page pattern as a reusable block for contact pages and event papers.",
+   "geo & map \u00b7 :widget \u00b7 cost: I1 \u2014 canvas hydration (dep-free Canvas2D precedent already duplicated in web/ + hundesteder) \u00b7 View: server-paints frame; client draws Canvas2D \u00b7 Edit: E3 \u2014 server-paint + JSON island \u00b7 TUI: coordinate scatter / labeled box \u00b7 React: port of the SHARED Canvas2D core (the dedup win) \u00b7 Email: degrade badge: address text (REAL enough) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"location-card\",\n  \"at\": [59.91, 10.75], \"name\": \"HQ\",\n  \"address\": \"...\", \"hours\"?: [...], \"href\"?: \"...\" }"
+ },
+ {
+  "id": "B074",
+  "name": "geojson-map",
+  "paras": [
+   "Arbitrary GeoJSON feature render \u2014 the power-user escape hatch when markers/routes/regions compose (survey plots, territory maps).",
+   "geo & map \u00b7 :widget \u00b7 cost: I1 \u2014 canvas hydration (dep-free Canvas2D precedent already duplicated in web/ + hundesteder) \u00b7 View: server-paints frame; client draws Canvas2D \u00b7 Edit: E3 \u2014 server-paint + JSON island \u00b7 TUI: coordinate scatter / labeled box \u00b7 React: port of the SHARED Canvas2D core (the dedup win) \u00b7 Email: degrade badge: address / coordinate list \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"geojson-map\",\n  \"features\": {\"type\": \"FeatureCollection\", ...},\n  \"fit\"?: \"bounds\" }"
+ },
+ {
+  "id": "B075",
+  "name": "api-endpoint",
+  "paras": [
+   "Endpoint doc card: method chip + path + params + response table \u2014 the docs staple. docs/api-v1.md hand-formats dozens of these; the block makes them consistent and greppable.",
+   "dev & code \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"api-endpoint\",\n  \"method\": \"POST\", \"path\": \"/v1/data/mutate\",\n  \"params\": [{\"name\": \"dataset\", \"in\": \"path\", \"type\": \"string\", \"required\": true}],\n  \"responses\"?: [{\"status\": 200, \"note\": \"...\"}] }"
+ },
+ {
+  "id": "B076",
+  "name": "openapi-console",
+  "paras": [
+   "GitBook's try-it console driven by an OpenAPI operation \u2014 live request builder + real response. The repo already maintains docs/openapi.json; this block makes it executable.",
+   "dev & code \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"openapi-console\",\n  \"spec\": \"/docs/openapi.json\", \"operationId\": \"mutateData\",\n  \"auth\"?: \"token-prompt\" }"
+ },
+ {
+  "id": "B077",
+  "name": "code-tabs",
+  "paras": [
+   "One snippet per language with a synced switcher (choose npm once, every code-tabs block follows). SDK docs across Go/JS/HTTP need it on nearly every page.",
+   "dev & code \u00b7 :widget \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: static/degraded port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: static fallback \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"code-tabs\",\n  \"tabs\": [{\"label\": \"JS\", \"language\": \"js\", \"value\": \"...\"},\n           {\"label\": \"Go\", \"language\": \"go\", \"value\": \"...\"}],\n  \"syncKey\"?: \"lang\" }"
+ },
+ {
+  "id": "B078",
+  "name": "json-viewer",
+  "paras": [
+   "Collapsible JSON tree (native details per node) \u2014 API payload docs beyond code's flat text. The capabilities manifest and task docs in this repo are exactly this shape.",
+   "dev & code \u00b7 :widget \u00b7 cost: I0 \u2014 zero-JS (native <details>/CSS; collapsible-callout precedent walk.ex:1415-1434, D7) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: expanded-by-default port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (expanded state) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"json-viewer\",\n  \"value\": { ...literal JSON... },\n  \"open\"?: 2                    // expand depth }"
+ },
+ {
+  "id": "B079",
+  "name": "csv-table",
+  "paras": [
+   "Paste CSV/TSV, render a table \u2014 removes the hand-conversion between spreadsheets and the 207 ledger tables. Element-simple, sheet-plugin-free.",
+   "dev & code \u00b7 :element \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"csv-table\",\n  \"csv\": \"name,count\\nparagraph,4969\",\n  \"header\"?: true, \"align\"?: [\"l\", \"r\"] }"
+ },
+ {
+  "id": "B080",
+  "name": "commit-card",
+  "paras": [
+   "Git commit card (sha, message, stats, author) resolved via the github plugin (source EXACTLY \"github\") \u2014 postmortems and release notes cite commits as bare hashes today.",
+   "dev & code \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: needs block-registration seam (plugins cannot register block types today; D10 backlog)"
+  ],
+  "code": "{ \"type\": \"commit-card\",\n  \"repo\": \"FRIKKern/barkpark\", \"sha\": \"42e2caffe\" }"
+ },
+ {
+  "id": "B081",
+  "name": "pr-status",
+  "paras": [
+   "Live PR card: state, checks, review status \u2014 wave papers narrate PRs by number and go stale the moment a gate flips. The github plugin owns the data.",
+   "dev & code \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: needs block-registration seam (plugins cannot register block types today; D10 backlog)"
+  ],
+  "code": "{ \"type\": \"pr-status\",\n  \"repo\": \"FRIKKern/barkpark\", \"pr\": 4008,\n  \"show\"?: [\"checks\", \"reviews\", \"mergeable\"] }"
+ },
+ {
+  "id": "B082",
+  "name": "kbd",
+  "paras": [
+   "Keyboard-shortcut caps (kbd chips with plus separators) \u2014 TUI docs and the keybindings guide describe chords in prose; every docs platform renders them as caps.",
+   "dev & code \u00b7 :element \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"kbd\",\n  \"keys\": [\"cmd\", \"shift\", \"p\"], \"label\"?: \"command palette\" }"
+ },
+ {
+  "id": "B083",
+  "name": "badge-row",
+  "paras": [
+   "Status badge row (build passing, version, license) \u2014 READMEs get shields.io; papers get nothing. Static chips with tone + optional link, no external image dependency.",
+   "dev & code \u00b7 :element \u00b7 cost: STATIC (compose.ex emitter + ports) \u00b7 View: compose.ex emitter, article typography \u00b7 Edit: E2 \u2014 server-painted, no island; E4b in-canvas = STUDIO-EDIT surcharge (D6) \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static HTML, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"badge-row\",\n  \"badges\": [{\"label\": \"gate\", \"value\": \"green\", \"tone\": \"success\", \"href\"?: \"...\"}] }"
+ },
+ {
+  "id": "B084",
+  "name": "package-install",
+  "paras": [
+   "Install snippet with a package-manager switcher (npm/pnpm/yarn/go get) \u2014 the first block of every SDK quickstart, synced with code-tabs' syncKey.",
+   "dev & code \u00b7 :widget \u00b7 cost: I1 \u2014 dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40 files, D6) \u00b7 View: server-paints shell; framework-free DOM-scan hydration (D7 pattern) \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: static/degraded port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: static fallback \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"package-install\",\n  \"package\": \"@barkpark/react\",\n  \"managers\"?: [\"npm\", \"pnpm\", \"yarn\"] }"
+ },
+ {
+  "id": "B085",
+  "name": "field-number",
+  "paras": [
+   "The MISSING numeric field atom \u2014 string/slug/text/boolean/select/datetime/color/image/reference all exist; number does not. Every schema with a price, count, or weight hits this wall first.",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-number\",\n  \"name\": \"price\", \"label\"?: \"Price\",\n  \"min\"?: 0, \"max\"?: 10000, \"step\"?: 0.01, \"unit\"?: \"NOK\" }"
+ },
+ {
+  "id": "B086",
+  "name": "field-url",
+  "paras": [
+   "URL field atom with validation and a link-preview affordance (pairs with the link-preview block and the shipped OG manifest).",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-url\",\n  \"name\": \"website\", \"label\"?: \"Website\",\n  \"allow\"?: [\"https\"] }"
+ },
+ {
+  "id": "B087",
+  "name": "field-file",
+  "paras": [
+   "File/attachment field storing through the media plugin \u2014 schemas model downloads (spec PDFs, firmware) with a string URL hack today.",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-file\",\n  \"name\": \"manual\", \"accept\"?: [\".pdf\", \".zip\"], \"maxSize\"?: 10485760 }"
+ },
+ {
+  "id": "B088",
+  "name": "field-geopoint",
+  "paras": [
+   "Lat/lng picker atom \u2014 the schema-side twin of the map family; hundesteder's places store coordinates as two floats with no picker.",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-geopoint\",\n  \"name\": \"location\", \"label\"?: \"Location\",\n  \"default\"?: [59.91, 10.75] }"
+ },
+ {
+  "id": "B089",
+  "name": "field-json",
+  "paras": [
+   "Raw JSON field atom with syntax validation \u2014 escape hatch for structured config values (webhook payload templates, feature flags).",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-json\",\n  \"name\": \"config\", \"schema\"?: { ...JSON-schema subset... } }"
+ },
+ {
+  "id": "B090",
+  "name": "field-rating",
+  "paras": [
+   "Bounded rating atom (stars / 1-N scale) \u2014 reviews, quiz scoring, the Cody-style graded dimensions as schema data.",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-rating\",\n  \"name\": \"score\", \"max\": 5, \"style\"?: \"stars\" | \"number\" }"
+ },
+ {
+  "id": "B091",
+  "name": "field-tags",
+  "paras": [
+   "Weighted-tag editor atom \u2014 Barkpark's OWN tag contract ({tag, strength, rationale}, distinct strengths) has no field control; every paper publish wall depends on hand-typed JSON.",
+   "fields & schema \u00b7 :element \u00b7 cost: STATIC + STUDIO-EDIT (a field atom's canvas control IS the block) \u00b7 View: read-only value render \u00b7 Edit: E4a \u2014 control atom (the point of the block) \u00b7 TUI: read-only line \u00b7 React: form-control port \u00b7 Email: degrade badge: value as text \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"field-tags\",\n  \"name\": \"tags\", \"registry\": \"tag\",   // registered tag docs\n  \"distinctStrengths\": true }"
+ },
+ {
+  "id": "B092",
+  "name": "schema-card",
+  "paras": [
+   "Live render of a schema type's field table (name, type, required, description) \u2014 SDK and API docs re-type schemas by hand and drift from the source of truth.",
+   "fields & schema \u00b7 :widget \u00b7 cost: STATIC (server has the schema) \u00b7 View: server-painted table \u00b7 Edit: E3 \u2014 reference + options island \u00b7 TUI: table port \u00b7 React: port \u00b7 Email: REAL render (static table) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 needs a schema-source resolver for blocks"
+  ],
+  "code": "{ \"type\": \"schema-card\",\n  \"schema\": \"post\", \"dataset\"?: \"production\",\n  \"show\"?: [\"types\", \"required\"] }"
+ },
+ {
+  "id": "B093",
+  "name": "toc",
+  "paras": [
+   "Heading-derived table of contents with anchor links \u2014 a confirmed Notion gap, a GitBook standard, and painfully absent from THIS 500-block paper. Server walks the blocks; zero client JS.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"toc\",\n  \"depth\"?: 2, \"numbered\"?: false,\n  \"sticky\"?: true               // viewport affordance, View-only }"
+ },
+ {
+  "id": "B094",
+  "name": "breadcrumb",
+  "paras": [
+   "Ancestor trail (workspace / project / collection / paper) \u2014 the Notion gap; readers landing deep from search have no sense of place.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 needs the doc-graph ancestors exposed to blocks"
+  ],
+  "code": "{ \"type\": \"breadcrumb\",\n  \"show\"?: [\"project\", \"collection\"] }"
+ },
+ {
+  "id": "B095",
+  "name": "backlinks",
+  "paras": [
+   "Papers that reference THIS paper \u2014 the server capability already exists (reverse_referencers); no block surfaces it. The knowledge-graph payoff for free.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 block-level plumbing to reverse_referencers"
+  ],
+  "code": "{ \"type\": \"backlinks\",\n  \"limit\"?: 10, \"kinds\"?: [\"paper\", \"task\"] }"
+ },
+ {
+  "id": "B096",
+  "name": "related-papers",
+  "paras": [
+   "Related papers by shared weighted tags \u2014 the registered-tag system (strengths, rationale) is a similarity signal nothing reads yet.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 needs a content-query resolver"
+  ],
+  "code": "{ \"type\": \"related-papers\",\n  \"by\"?: \"tags\", \"limit\"?: 5 }"
+ },
+ {
+  "id": "B097",
+  "name": "synced-block",
+  "paras": [
+   "Notion's synced block: one fragment mirrored live across papers, edited anywhere. embed (![[note]]) covers whole-note transclusion; this is block-granular with write-back \u2014 honest: the consistency semantics are the hard 80%.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: I2 \u2014 I1 + API route + resolver + security surface (D6) \u00b7 View: server-paints shell; hydrated client calls a new write route \u00b7 Edit: E3 \u2014 server-paint + island \u00b7 TUI: read-only port \u00b7 React: port sharing the hydration core \u00b7 Email: degrade badge: link out \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"synced-block\",\n  \"source\": {\"paper\": \"policies\", \"blockId\": \"sec-3\"},\n  \"editable\"?: false }"
+ },
+ {
+  "id": "B098",
+  "name": "link-preview",
+  "paras": [
+   "Craft's card-link: a rich URL preview card \u2014 and the repo ALREADY ships the machinery: the OG preview manifest (preview-contract, no-oEmbed law). Fetch at save, render static, never iframe.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC + save-time fetch (OG manifest precedent) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"link-preview\",\n  \"href\": \"https://...\",\n  \"fetched\"?: {\"title\": \"...\", \"description\": \"...\", \"image\": \"...\"}  // snapshot at save }"
+ },
+ {
+  "id": "B099",
+  "name": "paper-list",
+  "paras": [
+   "Query-driven list of papers (by tag/type/recency) \u2014 index pages and team homepages hand-curate link lists that go stale weekly.",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) \u2014 needs a content-query resolver"
+  ],
+  "code": "{ \"type\": \"paper-list\",\n  \"filter\": {\"tags\": [\"portabledoc\"]}, \"sort\"?: \"-updatedAt\",\n  \"limit\"?: 10, \"show\"?: [\"description\", \"date\"] }"
+ },
+ {
+  "id": "B100",
+  "name": "freshness-badge",
+  "paras": [
+   "Slite's verification badge: verified-by + last-verified + stale-after-N-days \u2014 docs rot silently; this block makes staleness a visible, gateable state (the distrust-vacuous-green culture, applied to prose).",
+   "navigation & meta \u00b7 :widget \u00b7 cost: STATIC (compose.ex emitter) \u00b7 View: compose.ex emitter \u00b7 Edit: E2 \u2014 server-painted, no island \u00b7 TUI: box-drawing port \u00b7 React: port of the View emitter \u00b7 Email: REAL render (static links, D4) \u00b7 Flags: none"
+  ],
+  "code": "{ \"type\": \"freshness-badge\",\n  \"verifiedBy\": \"pelle\", \"verifiedAt\": \"2026-07-17\",\n  \"staleAfterDays\"?: 90 }"
+ }
+]
