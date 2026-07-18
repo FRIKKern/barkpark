@@ -47,6 +47,17 @@ const LIVE_ENABLED = Boolean(WS_URL && WS_TOKEN);
 /** Same content-type allowlist the server route scopes to (keeps both consistent
  * and private config schemas out of browse/facets). */
 const CONTENT_TYPES_CSV = DOC_TYPES.map((t) => t.type).join(",");
+
+// The scalar hit fields the finder consumes (normalizeHit/derive*) — pushed as
+// the channel's `fields` allowlist so a per-keystroke live frame ships ~20KB of
+// projected hits, not full envelopes. Live-caught: without it the socket reply
+// carried EVERY matched document whole — 9-15MB PER FRAME on a papers corpus
+// (the browser froze for seconds per keystroke) — because the HTTP path's
+// ?fields= projection (Envelope.project) never applied to the channel. The
+// server channel honors the same allowlist; snippets degrade to description +
+// server highlights, the ratified 40ms-goal tradeoff.
+const HIT_FIELDS =
+  "title,name,excerpt,description,bio,slug,publishedAt,status,author,category";
 // WS_SCOPE (the `<ws>:<proj>` topic segment) is imported from lib/config so it
 // stays in lock-step with find-search's `/w/:ws/p/:proj` HTTP scope.
 const MAX_HITS = 100;
@@ -122,6 +133,7 @@ export function useLiveSearch(): UseLiveSearch {
             engine,
             types: CONTENT_TYPES_CSV,
             limit: MAX_HITS,
+            fields: HIT_FIELDS,
             seq,
           })
           .receive("ok", (reply: UpstreamSearchJson & { seq?: number }) => {
