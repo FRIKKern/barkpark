@@ -1135,6 +1135,140 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     end
   end
 
+  describe "field-reference / codelist resolution on the public reader (pbw-w1)" do
+    # The anonymous reader mount/refetch wires the SAME `:ref_resolver` /
+    # `:codelist_resolver` closures Studio and the body_html cache use, so a
+    # `field-reference` block shows the referenced doc's TITLE and a `codelist`
+    # block its human LABEL instead of leaking the raw slug/code (live bug:
+    # /papers/portabledoc-showcase rendered `terminal-mermaid-diagrams` raw).
+    # Tenant scope + published_only flow through unchanged (D2, fail-closed).
+
+    test "a published field-reference renders the referenced doc's TITLE, not the raw id",
+         %{conn: conn} do
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      dataset = Content.paper_default_dataset()
+
+      # A PUBLISHED referenced doc in the reader's tenant — created THEN
+      # published so a real published projection exists (the exact row shape the
+      # published_only gate admits: status "published", bare doc_id).
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "pbw-ref-target", "title" => "The Referenced Title"},
+          dataset,
+          workspace_id: ws.id
+        )
+
+      {:ok, _} =
+        Content.publish_document("pbw-ref-target", "post", dataset, workspace_id: ws.id)
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-ref-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Reference Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-ref",
+                "type" => "field-reference",
+                "label" => "Related",
+                "value" => "pbw-ref-target"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-ref-paper")
+
+      # The referenced doc's TITLE is resolved and rendered…
+      assert html =~ "The Referenced Title"
+      # …and the raw id never leaks in the field-reference row (regression: the
+      # reader used to render the raw slug because it wired no `:ref_resolver`).
+      refute html =~ "pbw-ref-target"
+    end
+
+    test "a codelist block with a REGISTERED code renders its human LABEL", %{conn: conn} do
+      _ = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+      {:ok, _} =
+        Barkpark.Content.Codelists.register("onixedit", "pbw:contributor_role", %{
+          issue: "1",
+          name: "PBW Contributor Role",
+          values: [%{code: "A01", translations: [%{language: "eng", label: "By (author)"}]}]
+        })
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-codelist-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Codelist Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-code",
+                "type" => "codelist",
+                "label" => "Role",
+                "plugin" => "onixedit",
+                "codelistId" => "pbw:contributor_role",
+                "value" => "A01"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-codelist-paper")
+
+      # The registered code's LABEL renders instead of the raw code.
+      assert html =~ "By (author)"
+    end
+
+    test "a field-reference to a DRAFT-ONLY doc still renders the raw value (fail-closed)",
+         %{conn: conn} do
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      dataset = Content.paper_default_dataset()
+
+      # A doc that was NEVER published — only its draft exists. The anonymous
+      # reader threads `published_only: true`, so `reference_title` drops the
+      # `drafts.` twin and the reference degrades to the raw id: a draft title
+      # must NEVER leak on the public surface.
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "pbw-draft-target", "title" => "Secret Draft Title"},
+          dataset,
+          workspace_id: ws.id
+        )
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-draft-ref-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Draft Reference Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-draft-ref",
+                "type" => "field-reference",
+                "label" => "Related",
+                "value" => "pbw-draft-target"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-draft-ref-paper")
+
+      # The raw id renders (the reference is unresolved) and the draft title is
+      # nowhere on the page.
+      assert html =~ "pbw-draft-target"
+      refute html =~ "Secret Draft Title"
+    end
+  end
+
   # Byte offset of the first occurrence of `needle` in `html` (or a large
   # sentinel when absent), for ordering assertions.
   defp byte_index(html, needle) do
