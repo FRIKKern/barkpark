@@ -98,10 +98,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert updated =~ ~s(data-slug="#{@slug}")
     end
 
-    test "renders an empty-state when no paper is stored for the slug", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/papers/never-saved")
-      assert html =~ ~s(id="paper-empty")
-      assert html =~ "No paper saved yet"
+    test "returns an explicit 404 when no published paper is stored for the slug", %{conn: conn} do
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        live(conn, "/papers/never-saved")
+      end
     end
 
     test "renders a historical paper whose blocks exist only under content.body", %{conn: conn} do
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ "Nested body blocks are visible."
     end
 
-    test "block-backed public reader ignores a stale current-version body_html cache", %{
+    test "block-backed public reader rejects a conflicting body_html cache", %{
       conn: conn
     } do
       slug = "2026-07-16-public-block-authority"
@@ -162,10 +162,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       |> Ecto.Changeset.change(content: stale_content)
       |> Barkpark.Repo.update!()
 
-      {:ok, _view, html} = live(conn, "/papers/#{slug}")
-
-      assert html =~ "Public blocks are authoritative."
-      refute html =~ "STALE PUBLIC CACHE"
+      assert_raise BarkparkWeb.BulldocsLive.InvalidSource, fn ->
+        live(conn, "/papers/#{slug}")
+      end
     end
   end
 

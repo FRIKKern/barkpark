@@ -12,7 +12,10 @@
 package pdrender
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Block is the decoded wire block: a type discriminator plus raw fields.
@@ -196,7 +199,25 @@ func (r *Registry) Render(b Block, ctx RenderCtx) []string {
 	if !ok {
 		rend = r.fallback
 	}
-	return rend.Render(b, ctx)
+	return boundDisplayLines(rend.Render(b, ctx), ctx.Width)
+}
+
+// boundDisplayLines is the shared final display boundary for both direct Render
+// callers and RenderDoc. Individual renderers still own their semantic layout;
+// this backstop only touches lines that actually overflow, so already-bounded
+// code/literal output remains byte-identical. ansi.Wrap preserves ANSI/OSC8
+// sequences while measuring visible terminal cells.
+func boundDisplayLines(lines []string, width int) []string {
+	width = clampWidth(width)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if ansi.StringWidth(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		out = append(out, strings.Split(ansi.Wrap(line, width, " "), "\n")...)
+	}
+	return out
 }
 
 // RenderDoc stacks every top-level block with one blank line between them,

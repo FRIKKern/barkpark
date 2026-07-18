@@ -27,9 +27,19 @@ defmodule Barkpark.Content.Papers do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, SchemaDefinition}
-  alias Barkpark.Content.Papers.BlockOps
-  alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
+
+  alias Barkpark.Content.{
+    Broadcast,
+    CallerContext,
+    Document,
+    DraftId,
+    Envelope,
+    Labels,
+    SchemaDefinition
+  }
+
+  alias Barkpark.Content.Papers.{BlockOps, Hollow}
+  alias Barkpark.PortableDoc.{BodyWalk, Projection, Render, Synthesis}
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -65,23 +75,79 @@ defmodule Barkpark.Content.Papers do
     # redacted legacy `body` here would bypass a private `blocks` field.
     case Map.get(envelope, "blocks") do
       blocks when is_list(blocks) ->
-        {:blocks, blocks}
+        classify_reader_blocks(paper, blocks, envelope, dataset)
 
       _ when had_structured_source? ->
         # A structured source existed but disappeared at the Envelope boundary,
         # so visibility redaction removed it. `body_html` is a derived cache of
         # that same prose; falling through would disclose what was just hidden.
-        :empty
+        {:error, :redacted_source}
 
       _ ->
         case envelope["body_html"] do
-          html when is_binary(html) and html != "" -> {:html, HtmlSanitizer.sanitize(html)}
-          _ -> :empty
+          html when is_binary(html) ->
+            if semantic_html?(html), do: {:html, html}, else: {:error, :semantic_empty}
+
+          _ ->
+            {:error, :semantic_empty}
         end
     end
   end
 
-  def reader_source(_, _dataset, _scope_opts), do: :empty
+  def reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
+
+  defp classify_reader_blocks(paper, blocks, envelope, dataset) do
+    cond do
+      not valid_reader_blocks?(blocks) ->
+        {:error, :invalid_blocks}
+
+      Hollow.hollow?(blocks) ->
+        {:error, :semantic_empty}
+
+      conflicting_html_cache?(paper, blocks, envelope["body_html"], dataset) ->
+        {:error, :ambiguous_source}
+
+      true ->
+        {:blocks, blocks}
+    end
+  end
+
+  defp valid_reader_blocks?(blocks) do
+    Enum.all?(blocks, fn
+      %{"type" => type} when is_binary(type) -> String.trim(type) != ""
+      _ -> false
+    end)
+  end
+
+  # A mixed record is safe only when the alternate HTML is demonstrably the
+  # cache derived from the selected blocks. Never choose the richer branch:
+  # stale/conflicting HTML is an explicit provenance error.
+  defp conflicting_html_cache?(_paper, _blocks, html, _dataset)
+       when not is_binary(html) or html == "",
+       do: false
+
+  defp conflicting_html_cache?(paper, blocks, html, dataset) do
+    style = get_in(paper.content || %{}, ["style"])
+    scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+    rendered = Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
+    rendered != html
+  end
+
+  # Semantic validity is deliberately not a byte/length floor: intentionally
+  # short prose passes. Tags alone do not; visible text or accessible media
+  # naming must survive after markup is removed.
+  defp semantic_html?(html) do
+    text =
+      html
+      |> String.replace(~r/<[^>]*>/s, " ")
+      |> String.replace(~r/&(?:nbsp|#160|#xA0);/i, " ")
+      |> String.trim()
+
+    accessible_name =
+      Regex.match?(~r/\b(?:alt|aria-label|title)\s*=\s*(?:"[^"]+"|'[^']+')/i, html)
+
+    text != "" or accessible_name
+  end
 
   defp reader_schema_scope(paper, scope_opts) do
     scope_opts

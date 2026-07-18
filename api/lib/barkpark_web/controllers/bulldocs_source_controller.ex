@@ -29,11 +29,19 @@ defmodule BarkparkWeb.BulldocsSourceController do
             {:html, html} ->
               %{"kind" => "html", "html" => html}
 
-            :empty ->
-              %{"kind" => "empty"}
+            {:error, reason} ->
+              {:error, reason}
           end
 
-        json(conn, %{"title" => paper.title, "source" => source})
+        case source do
+          {:error, reason} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => %{"code" => to_string(reason)}})
+
+          source ->
+            json(conn, %{"title" => paper.title, "source" => source})
+        end
     end
   end
 

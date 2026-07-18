@@ -7,15 +7,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/termenv"
+	"golang.org/x/net/html"
 	"golang.org/x/term"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -204,6 +205,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 
+	// Width is a property of every terminal representation, including the
+	// legacy body_html adapter below. Resolve it before selecting the source
+	// path so HTML-only Papers cannot bypass the same display boundary as blocks.
+	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
+	width := paperResolveWidth(opt, stdoutTTY)
+
 	// Decode the matched doc's block tree through the apiclient.Doc seam, then via
 	// pdrender.Decode → []pdrender.Block.
 	var doc apiclient.Doc
@@ -218,7 +225,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 		// misreport the paper as having no content. Only when body_html is ALSO
 		// empty is the paper genuinely blank.
 		if text := htmlToPlainText(doc.BodyHTML); text != "" {
-			out.outf("%s", text)
+			out.outf("%s", wrapPaperPlainText(text, width))
 			return exitOK
 		}
 		return paperError(out, jsonOut, "empty",
@@ -232,8 +239,6 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// Resolve width + theme + profile from stdout's nature. The theme IDENTITY
 	// (which emitted skin) comes from BP_THEME/config via ResolveThemeID; the
 	// --theme flag (opt.theme) still selects the light/dark MODE this wave (D30).
-	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
-	width := paperResolveWidth(opt, stdoutTTY)
 	cfg, _ := LoadConfig() // missing/unreadable config → nil → env/default theme id
 	theme := paperResolveTheme(opt.theme, ResolveThemeID(cfg))
 	profile := paperResolveProfile(opt.profile, stdoutTTY)
@@ -1192,20 +1197,12 @@ var paperHTMLEntities = strings.NewReplacer(
 	"&#39;", "'", "&apos;", "'", "&nbsp;", " ", "&mdash;", "—", "&ndash;", "–",
 )
 
-// paperBlockTagBreak matches the block-level tag boundaries whose visible effect
-// is a line break: paragraph/heading/list-item/table-row/div closes and <br>.
-// Rendered to "\n" so the dump keeps paragraph structure a naive tag-strip would
-// collapse into one run-on line. Only CLOSING tags break (plus the void <br>) —
-// breaking on opens too would double-space every list item.
-var paperBlockTagBreak = regexp.MustCompile(`(?i)</(p|h[1-6]|li|tr|div|blockquote|ul|ol|table|section|article|pre)>|<br\s*/?>`)
-
-// paperTagStrip matches any remaining HTML tag (inline formatting, attributes),
-// dropped to leave the visible text.
-var paperTagStrip = regexp.MustCompile(`(?s)<[^>]*>`)
-
-// paperBlankRuns collapses three-or-more consecutive newlines to two, so the
-// dump never carries large vertical gaps from stacked block closes.
-var paperBlankRuns = regexp.MustCompile(`\n{3,}`)
+var paperBlockBreakTags = map[string]bool{
+	"p": true, "h1": true, "h2": true, "h3": true, "h4": true,
+	"h5": true, "h6": true, "li": true, "tr": true, "div": true,
+	"blockquote": true, "ul": true, "ol": true, "table": true,
+	"section": true, "article": true, "pre": true,
+}
 
 // htmlToPlainText renders a paper's body_html to a readable plain-text dump: it
 // turns block-level tag boundaries into line breaks, strips every remaining tag,
@@ -1214,21 +1211,78 @@ var paperBlankRuns = regexp.MustCompile(`\n{3,}`)
 // — the goal is legible content in the terminal, not fidelity. Returns "" for
 // empty/whitespace-only or all-tag input, so the caller can distinguish a truly
 // empty paper from one that renders.
-func htmlToPlainText(html string) string {
-	if strings.TrimSpace(html) == "" {
+func htmlToPlainText(source string) string {
+	if strings.TrimSpace(source) == "" {
 		return ""
 	}
-	s := paperBlockTagBreak.ReplaceAllString(html, "\n")
-	s = paperTagStrip.ReplaceAllString(s, "")
-	s = paperHTMLEntities.Replace(s)
-	// Trim trailing spaces on each line, then collapse blank runs.
-	lines := strings.Split(s, "\n")
-	for i, ln := range lines {
-		lines[i] = strings.TrimRight(ln, " \t")
+
+	// Tokenize rather than globally replacing entities after stripping tags.
+	// Raw text inside code/pre is authored literal data and must remain byte-
+	// faithful; semantic prose gets the finite decoder exactly once. Using Raw
+	// also avoids the tokenizer's full HTML entity decoder widening this policy.
+	z := html.NewTokenizer(strings.NewReader(source))
+	var b strings.Builder
+	literalDepth := 0
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			s := b.String()
+			lines := strings.Split(s, "\n")
+			for i, ln := range lines {
+				lines[i] = strings.TrimRight(ln, " \t")
+			}
+			s = strings.Join(lines, "\n")
+			for strings.Contains(s, "\n\n\n") {
+				s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+			}
+			return strings.TrimSpace(s)
+		case html.TextToken:
+			raw := string(z.Raw())
+			if literalDepth == 0 {
+				raw = paperHTMLEntities.Replace(raw)
+			}
+			b.WriteString(raw)
+		case html.StartTagToken:
+			tok := z.Token()
+			if tok.Data == "code" || tok.Data == "pre" {
+				literalDepth++
+			}
+			if tok.Data == "br" {
+				b.WriteByte('\n')
+			}
+		case html.SelfClosingTagToken:
+			if z.Token().Data == "br" {
+				b.WriteByte('\n')
+			}
+		case html.EndTagToken:
+			tok := z.Token()
+			if tok.Data == "code" || tok.Data == "pre" {
+				if literalDepth > 0 {
+					literalDepth--
+				}
+			}
+			if paperBlockBreakTags[tok.Data] {
+				b.WriteByte('\n')
+			}
+		}
 	}
-	s = strings.Join(lines, "\n")
-	s = paperBlankRuns.ReplaceAllString(s, "\n\n")
-	return strings.TrimSpace(s)
+}
+
+// wrapPaperPlainText applies the resolved terminal width without flattening the
+// explicit paragraph boundaries produced by htmlToPlainText. ansi.Wrap counts
+// display cells (wide runes included) and hard-breaks overlong tokens.
+func wrapPaperPlainText(text string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Wrap(line, width, " ")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // usagePaper prints the `bp paper` noun usage (its single verb). An explicit

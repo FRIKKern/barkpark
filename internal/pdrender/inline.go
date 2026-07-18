@@ -32,7 +32,7 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 	switch v := n.(type) {
 	case string:
 		// Bare string → a text node with no marks.
-		return sanitizeText(v)
+		return sanitizeDisplayText(v)
 	case float64, int, int64, bool:
 		return toStr(v)
 	case fmt.Stringer:
@@ -48,8 +48,11 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool) string {
 	switch attrStr(n, "type") {
 	case "text":
-		value := sanitizeText(attrStr(n, "value"))
 		marks := attrSlice(n, "marks")
+		value := sanitizeDisplayText(attrStr(n, "value"))
+		if hasCodeMark(marks) {
+			value = sanitizeText(attrStr(n, "value"))
+		}
 		if len(marks) == 0 {
 			return value
 		}
@@ -311,6 +314,26 @@ func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
 		return "\x1b]8;;" + href + "\x1b\\" + styled + "\x1b]8;;\x1b\\"
 	}
 	return styled + ir.theme.Dim.Render(" ("+href+")")
+}
+
+// displayHTMLEntities is intentionally finite and single-pass. Ordering ampersand
+// first means "&amp;amp;" becomes the literal "&amp;", never "&" in the same call.
+var displayHTMLEntities = strings.NewReplacer(
+	"&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`,
+	"&#39;", "'", "&apos;", "'", "&nbsp;", " ", "&mdash;", "—", "&ndash;", "–",
+)
+
+func sanitizeDisplayText(s string) string {
+	return sanitizeText(displayHTMLEntities.Replace(s))
+}
+
+func hasCodeMark(marks []any) bool {
+	for _, mark := range marks {
+		if markType(mark) == "code" {
+			return true
+		}
+	}
+	return false
 }
 
 // allowedURLScheme is the set of URI schemes safe to hand a terminal's OSC 8

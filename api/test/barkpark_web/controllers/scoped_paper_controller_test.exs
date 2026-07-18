@@ -73,7 +73,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert body =~ "scoped body"
     end
 
-    test "block-backed scoped reader ignores a stale current-version body_html cache", %{
+    test "block-backed scoped reader rejects a conflicting body_html cache", %{
       conn: conn,
       ws: ws,
       project: project
@@ -111,11 +111,9 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       |> Ecto.Changeset.change(content: stale_content)
       |> Barkpark.Repo.update!()
 
-      conn = get(conn, paper_path(ws, project, "shared-paper"))
-      body = html_response(conn, 200)
-
-      assert body =~ "Scoped blocks are authoritative."
-      refute body =~ "STALE SCOPED CACHE"
+      assert_raise BarkparkWeb.BulldocsLive.InvalidSource, fn ->
+        get(conn, paper_path(ws, project, "shared-paper"))
+      end
     end
   end
 
@@ -172,21 +170,16 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
   end
 
   describe "GET /w/:ws/p/:project/papers/:slug — (d) shared scope, missing slug" do
-    test "a non-existent slug in a shared scope renders the pending shell, leaking nothing", %{
+    test "a non-existent slug in a shared scope returns the canonical 404", %{
       conn: conn,
       ws: ws,
       project: project
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
-      conn = get(conn, paper_path(ws, project, "does-not-exist"))
-
-      # P4: the scoped reader is the LIVE BulldocsLive — a missing slug
-      # renders the empty live shell (200) and streams the paper in if it
-      # is published later (the flat reader's contract, now shared). The
-      # no-leak property is about CONTENT, which stays absent.
-      assert conn.status == 200
-      refute conn.resp_body =~ "Hello Shared Paper"
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        get(conn, paper_path(ws, project, "does-not-exist"))
+      end
     end
   end
 
@@ -347,14 +340,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert body =~ "default body"
     end
 
-    test "a missing slug in the Default scope renders the pending shell, leaking nothing",
+    test "a missing slug in the Default scope returns the canonical 404",
          %{conn: conn, default_ws: default_ws, default_project: default_project} do
-      conn = get(conn, paper_path(default_ws, default_project, "no-such-paper-xyz"))
-
-      # Same contract as the flat reader / shared-scope reader: live shell 200,
-      # no content, no existence oracle.
-      assert conn.status == 200
-      refute conn.resp_body =~ "Default Public Paper"
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        get(conn, paper_path(default_ws, default_project, "no-such-paper-xyz"))
+      end
     end
 
     test "the allowance is ANONYMOUS-only: a token that is not a Default member still 403s",
