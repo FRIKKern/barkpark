@@ -72,7 +72,17 @@ defmodule Barkpark.Application do
     # intermediate supervisors. The volatile plugin + Indx tiers churn under
     # their OWN budgets (see child_specs/4), so their crash-loops can no longer
     # breach this shared intensity and take the whole app down.
-    opts = [strategy: :one_for_one, name: Barkpark.Supervisor, max_restarts: 3, max_seconds: 5]
+    # Starting this supervisor includes the deliberately synchronous
+    # SchemaBootstrap child. Production plugin/schema inventories can take
+    # longer than GenServer's default five-second start deadline, so the root
+    # caller must wait for the ordered boot sequence instead of killing it.
+    opts = [
+      strategy: :one_for_one,
+      name: Barkpark.Supervisor,
+      max_restarts: 3,
+      max_seconds: 5,
+      timeout: :infinity
+    ]
 
     case Supervisor.start_link(children, opts) do
       {:ok, _pid} = ok ->
