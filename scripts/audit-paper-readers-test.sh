@@ -8,6 +8,9 @@ trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 cat >"$tmp/fake-bp" <<'FAKE_BP'
 #!/usr/bin/env bash
 if [[ " $* " == *" search query "* ]]; then
+  if [[ -n "${BP_FIXTURE_INVENTORY_ARGS_FILE:-}" ]]; then
+    printf '%s\n' "$*" >"$BP_FIXTURE_INVENTORY_ARGS_FILE"
+  fi
   if [[ "${BP_FIXTURE_EMPTY:-}" == "1" ]]; then
     printf '%s\n' '{"documents":[]}'
   else
@@ -76,8 +79,20 @@ printf '200'
 FAKE_CURL
 
 chmod +x "$tmp/fake-bp" "$tmp/curl"
-PATH="$tmp:$PATH" BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+PATH="$tmp:$PATH" BP_FIXTURE_INVENTORY_ARGS_FILE="$tmp/inventory-args" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
   "$repo/scripts/audit-paper-readers.sh" >"$tmp/result.json"
+
+inventory_args="$(<"$tmp/inventory-args")"
+if [[ " $inventory_args " == *" -w "* || " $inventory_args " == *" -p "* ]]; then
+  printf 'default public inventory unexpectedly used the authenticated scoped route: %s\n' \
+    "$inventory_args" >&2
+  exit 1
+fi
+if [[ " $inventory_args " != *" -s guerrilla "* || " $inventory_args " != *" -d production "* ]]; then
+  printf 'default public inventory lost its explicit server/dataset: %s\n' "$inventory_args" >&2
+  exit 1
+fi
 
 jq -e '
   .ok and .inventory == 2 and .audited == 2 and .passed == 2 and .failed == 0 and
