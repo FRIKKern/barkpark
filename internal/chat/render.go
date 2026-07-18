@@ -1390,7 +1390,8 @@ func (m Model) renderChat() string {
 }
 
 // chatHeader is the two-line title band: session title (or "untitled") + a live
-// status glyph, then a rule.
+// status glyph on the left, the mode/model/effort badge cluster right-aligned,
+// then a rule.
 func (m Model) chatHeader() string {
 	title := strings.TrimSpace(m.st.Title)
 	if title == "" {
@@ -1404,8 +1405,84 @@ func (m Model) chatHeader() string {
 		status = noticeStyle.Render(" · interrupting…")
 	}
 	line := titleStyle.Render(truncate(title, clamp(m.width-16, 8, 72))) + status
+	// Right-align the badge cluster, dropping detail (effort → model → mode)
+	// before ever letting the title band wrap onto a second line.
+	for _, badges := range m.chatHeaderBadges() {
+		gap := m.width - lipgloss.Width(line) - lipgloss.Width(badges)
+		if badges != "" && gap >= 2 {
+			line += strings.Repeat(" ", gap) + badges
+			break
+		}
+	}
 	rule := dimStyle.Render(strings.Repeat("─", clamp(m.width, 8, 100)))
 	return line + "\n" + rule
+}
+
+// chatHeaderBadges is the right-aligned status cluster, returned as
+// progressively smaller candidates (full → no effort → mode only → model only)
+// so the header keeps the most load-bearing fact when width is tight. Mode
+// truth prefers the reducer's observed value over the D14 continuity seed; the
+// model prefers the observed wire id over the intent alias.
+func (m Model) chatHeaderBadges() []string {
+	rawMode := m.st.Mode
+	if rawMode == "" {
+		rawMode = m.mode
+	}
+	mode := modeBadge(rawMode)
+	model := m.modelBadgeText()
+	effort := ""
+	if m.effortChoice != "" && m.effortChoice != "default" {
+		effort = m.effortChoice
+	}
+	sep := dimStyle.Render(" · ")
+
+	var out []string
+	if mode != "" && model != "" && effort != "" {
+		out = append(out, mode+sep+model+sep+dimStyle.Render(effort))
+	}
+	if mode != "" && model != "" {
+		out = append(out, mode+sep+model)
+	}
+	if mode != "" {
+		out = append(out, mode)
+	}
+	if mode == "" && model != "" {
+		// A provider without mode switching still gets its model badge.
+		out = append(out, model)
+	}
+	return out
+}
+
+// modeBadge renders the permission mode as the two-state product projection:
+// ◇ PLAN (plan + discuss, read-only) ⇄ ▶ AUTOPILOT ("auto"). An odd raw mode
+// (a resumed acceptEdits/manual/… row, or armed bypass) shows verbatim in the
+// warn tone — honest, never guessed. The glyphs carry the split even in the
+// NoColor profile (chatProfile).
+func modeBadge(mode string) string {
+	switch mode {
+	case "":
+		return ""
+	case "plan":
+		return focusBar.Render("◇ PLAN")
+	case "auto":
+		return allowStyle.Bold(true).Render("▶ AUTOPILOT")
+	default:
+		return badgeStyle.Render(mode)
+	}
+}
+
+// modelBadgeText is the header's model label: the observed answering model's
+// family when a turn has revealed it, else the picker intent ("Default" when
+// unset — the CLI chooses).
+func (m Model) modelBadgeText() string {
+	id := m.st.Model
+	if id == "" {
+		id = m.modelChoice
+	}
+	if id == "" || id == "default" {
+		return "Default"
+	}
+	return modelFamily(id)
 }
 
 // chatFooter is the three-line base: a notice/status line, the composer, and
@@ -1427,7 +1504,7 @@ func (m Model) chatFooter() string {
 	prompt := youStyle.Render("› ")
 	composer := prompt + m.composerView()
 
-	hints := "enter send · esc interrupt · ctrl+b sessions · ctrl+c quit"
+	hints := "enter send · esc interrupt · ctrl+p mode · ctrl+b sessions · ctrl+c quit"
 	if n := len(m.answerableCards()); n > 0 {
 		// A pending card is waiting — advertise the answer keys so the affordance
 		// is discoverable even when the card scrolled out of view.

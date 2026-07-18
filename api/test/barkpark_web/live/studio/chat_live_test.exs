@@ -1534,7 +1534,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute pid_before == nil
 
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       # the mode change is recorded honestly with the friendly label…
       assert html =~ "Permission mode → accept edits"
@@ -1548,7 +1548,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "mode change with no live session just updates the selector", %{view: view} do
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       refute html =~ "New session started"
       assert html =~ "accept edits"
@@ -1561,7 +1561,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "picking bypass opens the arm panel and never steers on the select alone",
          %{view: view} do
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{
+        render_change(view, "set-mode", %{
           "mode" => "bypassPermissions"
         })
 
@@ -1791,7 +1791,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
       spawn_silent_session(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid = pending_mode_req(view)
       # the CLI echoes back exactly the mode we asked for → confirmed
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "acceptEdits"}})
@@ -1811,7 +1811,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # optimistic switch to acceptEdits…
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       assert html =~ "accept edits"
       rid = pending_mode_req(view)
@@ -1821,7 +1821,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{}})
       html = render(view)
       assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert has_element?(view, ".mode-tab-plan.active")
       # revert persists too: the store never keeps a mode the CLI refused.
       assert StudioChat.get_session(store_id(view)).mode == "plan"
     end
@@ -1829,14 +1829,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a mismatched mode echo reverts to the prior mode", %{view: view} do
       spawn_silent_session(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid = pending_mode_req(view)
       # the CLI reports a DIFFERENT mode than we asked → the switch did not take
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "plan"}})
 
       html = render(view)
       assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert has_element?(view, ".mode-tab-plan.active")
     end
 
     test "a stale ack from a superseded rapid switch is ignored (no mis-revert)",
@@ -1844,9 +1844,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       spawn_silent_session(view)
 
       # rapid double switch: acceptEdits (req A) then auto (req B) before any ack
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid_a = pending_mode_req(view)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "auto"})
+      render_change(view, "set-mode", %{"mode" => "auto"})
       rid_b = pending_mode_req(view)
       refute rid_a == rid_b
 
@@ -1855,13 +1855,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # request_id it is stale (B superseded it) → ignored, mode stays auto.
       send(view.pid, {:claude_chat_control, :set_mode, rid_a, %{"mode" => "acceptEdits"}})
       html = render(view)
-      assert html =~ "auto-run"
+      assert has_element?(view, ".mode-tab-autopilot.active")
       refute html =~ "Couldn't switch permission mode"
 
       # req B's ack then confirms auto honestly.
       send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "auto"}})
       html = render(view)
-      assert html =~ "auto-run"
+      assert has_element?(view, ".mode-tab-autopilot.active")
       refute html =~ "Couldn't switch permission mode"
       assert lv_assigns(view)[:pending_mode] == nil
       assert StudioChat.get_session(store_id(view)).mode == "auto"
@@ -2414,7 +2414,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # reopen did NOT spawn — this is the no-live-session set-mode branch
       assert session_pid(view) == nil
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       # the store row carries the switch (not its stale creation mode)…
       assert StudioChat.get_session(sid).mode == "acceptEdits"
@@ -2830,14 +2830,17 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # v2.1.205): the post-plan init reports `"default"` — the D34 assumption is
     # PROVEN, not assumed. This test is now pinned to that measured value.
 
-    test "a system/init reporting a new permissionMode flips the mode + persists it + narrates it",
+    test "the CLI's post-plan default flip is INERT in the LiveView (the Recorder owns that seam)",
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
       assert StudioChat.get_session(sid).mode == "plan"
 
-      # the CLI flipped plan → default inside ExitPlanMode; we learn it here
-      # (the real-binary-proven value, charter D52)
+      # The CLI flipped plan → default inside ExitPlanMode (the real-binary-
+      # proven value, charter D52). The LiveView no longer adopts it — the
+      # Recorder observes the SAME init frame, engages Autopilot (steer +
+      # persist), and broadcasts; adopting here too would double-persist and
+      # race the steer.
       send(
         view.pid,
         {:claude_chat_event,
@@ -2845,16 +2848,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       html = render(view)
-      # the selector adopts the observed mode — the CLI's real post-plan mode is
-      # `default`, which now surfaces as the "ask (legacy)" option (charter D48:
-      # observe reflects CLI reality; a persisted default still spawns verbatim).
-      assert html =~ "ask (legacy)"
-      assert lv_assigns(view).mode == "default"
-      # …and it is PERSISTED, so a reopen and the next --resume carry it
-      assert StudioChat.get_session(sid).mode == "default"
-      # NO SILENT ESCALATION (charter D52): the CLI-initiated flip to a mode the
-      # user never picked surfaces as a visible system line.
-      assert html =~ "Permission mode is now ask (legacy) after plan approval"
+      assert lv_assigns(view).mode == "plan"
+      assert StudioChat.get_session(sid).mode == "plan"
+      refute html =~ "Permission mode is now"
+    end
+
+    test "the Recorder's adoption broadcast engages Autopilot in the toggle + narrates it",
+         %{view: view} do
+      spawn_silent_session(view)
+
+      # The Recorder engaged Autopilot (an approved plan) — steer + persist
+      # happened server-side; the LiveView renders only.
+      send(view.pid, {:studio_chat_mode_adopted, "auto", :plan_approved})
+
+      html = render(view)
+      assert lv_assigns(view).mode == "auto"
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert has_element?(view, ".mode-tab-autopilot.active")
+      # NO SILENT ESCALATION (charter D52): the flip surfaces as a system line.
+      assert html =~ "Plan approved — Autopilot engaged."
     end
 
     test "an unrecognized init permissionMode is surfaced but NEVER adopted (charter D52)",
@@ -2884,7 +2896,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = store_id(view)
 
       # persist bypass through the only legal road — the arm ceremony (D48)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       render_click(element(view, ~s(button[phx-click=arm-bypass])))
@@ -4986,13 +4998,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "the arm panel is hidden until bypass is picked", %{view: view} do
       refute has_element?(view, ~s(button[phx-click=arm-bypass]))
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
     end
 
     test "the Arm button is disabled until the exact word is typed", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass][disabled]))
 
@@ -5006,7 +5018,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
       sid = store_id(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       html = render_click(element(view, ~s(button[phx-click=arm-bypass])))
@@ -5021,7 +5033,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "cancel closes the panel and never arms", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
 
@@ -5034,7 +5046,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # native form submit that navigates the LiveView away — and the submit path
     # rides the SAME server-side exact-word guard as the button.
     test "Enter in the confirm input arms via phx-submit, word-guarded", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       # wrong word: submit never arms, panel stays open for another try
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "nope"})
@@ -5347,7 +5359,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
       # pick bypass → opens the arm panel (mode still plan, nothing persisted)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert lv_assigns(view)[:mode] == "plan"
 
@@ -5368,7 +5380,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
       # pick bypass but NEVER complete the ceremony
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "no arming"})
 
@@ -5383,7 +5395,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{conn: conn, marker: marker} do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "yes"})
       # the button is disabled client-side; a FORGED event by name still hits the
@@ -5658,9 +5670,34 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert html =~ ~s(id="chat-slash-menu")
       assert html =~ ~s(role="combobox")
-      # The two control builtins are the hard floor (charter D48 retired /default).
+      # The control-builtin floor (charter D48 retired /default; the toggle
+      # added /autopilot, and /bypass is the arm ceremony's entry point).
       assert html =~ "/plan"
+      assert html =~ "/autopilot"
+      assert html =~ "/bypass"
       assert html =~ "/model"
+    end
+
+    test "a /autopilot submit engages auto through the mode rail", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      assert lv_assigns(view)[:mode] == "plan"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/autopilot"})
+
+      assert lv_assigns(view)[:mode] == "auto"
+      assert has_element?(view, ".mode-tab-autopilot.active")
+    end
+
+    test "a /bypass submit opens the arm ceremony and changes NO mode (D48)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/bypass"})
+
+      assert lv_assigns(view)[:arming_bypass] == true
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+      # nothing armed, nothing announced — the typed confirm word is the gate
+      assert lv_assigns(view)[:mode] == "plan"
+      refute html =~ "Permission mode → bypass"
     end
 
     test "the retired /default builtin is gone from the floor", %{conn: conn} do

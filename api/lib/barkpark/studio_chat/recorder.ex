@@ -468,7 +468,22 @@ defmodule Barkpark.StudioChat.Recorder do
     }
 
     broadcast(state, msg)
+
+    # Autopilot safety net: an init reporting permissionMode "default" while the
+    # store says "plan" is the CLI's own post-plan flip observed WITHOUT the
+    # plan-approved fact having fired (e.g. an older CLI) — engage Autopilot
+    # here so the plan→autopilot promise holds on every wire shape.
+    state = observe_init_permission_mode(state, ev["permissionMode"] || ev["permission_mode"])
+
     {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
+  end
+
+  # The plan-approve fact (an allowed ExitPlanMode, reported by the session
+  # process AFTER its control_response hit the wire): apply the autopilot
+  # POLICY here — the Recorder is the permanent, surface-agnostic sink, so a
+  # TUI-driven approval engages Autopilot exactly like a Studio tab's.
+  def handle_info({:claude_chat_plan_approved, _request_id}, state) do
+    {:noreply, state |> engage_autopilot(:plan_approved) |> touch()}
   end
 
   # The CLI's answer to our `initialize` control_request (charter D36a): the
@@ -1618,6 +1633,47 @@ defmodule Barkpark.StudioChat.Recorder do
   defp broadcast_commands(state) do
     broadcast(state, {:chat_commands, state.session_id, advertised(state)})
   end
+
+  # ── autopilot policy (plan-approve auto-switch) ─────────────────────────────
+
+  # Approving a plan lands the session in Autopilot. "auto" is the product
+  # mapping (never bypassPermissions — that stays behind the armed ceremony,
+  # fail-closed like the chat_live adoption guard).
+  @autopilot_mode "auto"
+
+  # Steer the live CLI (it is in its self-flipped "default" after ExitPlanMode
+  # — stdio serialization puts this behind that flip), persist the adopted
+  # mode, and tell every viewer. Steer is best-effort: if it is lost, the next
+  # init frame's observation re-heals.
+  defp engage_autopilot(state, reason) do
+    if pid = state.session, do: Runtime.steer(state.provider, pid, %{mode: @autopilot_mode})
+    StudioChat.set_mode(state.session_id, @autopilot_mode)
+    broadcast(state, {:studio_chat_mode_adopted, @autopilot_mode, reason})
+    state
+  end
+
+  # The init-frame safety net. Only permissionMode "default" is meaningful
+  # here: the retired legacy mode is never offered, so observing it means the
+  # CLI flipped itself post-plan. Store says plan → the approve fact was
+  # missed, engage fully; store already says auto → a lost steer, silently
+  # re-steer; anything else (a genuine legacy-default session) stays untouched.
+  defp observe_init_permission_mode(state, "default") do
+    case StudioChat.get_session(state.session_id) do
+      %{mode: "plan"} ->
+        engage_autopilot(state, :plan_approved)
+
+      %{mode: @autopilot_mode} ->
+        if pid = state.session,
+          do: Runtime.steer(state.provider, pid, %{mode: @autopilot_mode})
+
+        state
+
+      _ ->
+        state
+    end
+  end
+
+  defp observe_init_permission_mode(state, _), do: state
 
   # ── frame plumbing ──────────────────────────────────────────────────────────
 
