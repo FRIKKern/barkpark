@@ -22,7 +22,20 @@ config :barkpark, Barkpark.Repo,
   # and starving concurrent tests' setups (same poisoning as the orphan-task
   # leak drained by DataCase.setup_sandbox). 45s stays under ExUnit's 60s
   # test timeout so a truly hung test still fails as a test, not a disconnect.
-  timeout: 45_000
+  timeout: 45_000,
+  # Checkout-queue tolerance. The pool is only schedulers_online()*2 (≈8 on the
+  # 4-core CI runner) yet the async suite fans out schedulers_online() concurrent
+  # tests, each spawning $callers-scoped Tasks that also check out. Under that
+  # contention — plus a service-container Postgres still warming at job start —
+  # a checkout can miss the default 50ms target / 1000ms interval and get DROPPED
+  # after ~5s ("connection not available and request was dropped from queue"),
+  # reddening the WHOLE gate: at boot it kills test_helper's first CREATE SCHEMA
+  # before a single test runs; mid-suite it fails a random test. Widen the wait
+  # so a transient spike QUEUES instead of dropping. This never masks a real hang
+  # (that still hits :timeout above / ExUnit's 60s) — it only stops declaring a
+  # busy-but-healthy pool dead. Ecto's own remedy #4 for this exact error.
+  queue_target: 5_000,
+  queue_interval: 30_000
 
 # Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.

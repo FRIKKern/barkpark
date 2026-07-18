@@ -861,7 +861,19 @@ defmodule Barkpark.Sites.DeployRunnerTest do
   defp start_fresh_runner do
     name = :"dr_reattach_#{System.unique_integer([:positive])}"
     {:ok, pid} = GenServer.start_link(DeployRunner, [], name: name)
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    # A bare `Process.alive?/1` guard is racy: the re-attach paths (e.g. the
+    # "terminal unit on boot" test) let the runner finalize and self-terminate,
+    # so the process can die BETWEEN the alive? check and GenServer.stop, which
+    # then exits :noproc and reds the whole suite from on_exit. Swallow that
+    # already-dead exit — a live runner still stops normally.
+    on_exit(fn ->
+      try do
+        GenServer.stop(pid)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
+
     pid
   end
 
