@@ -260,7 +260,17 @@ defmodule BarkparkWeb.TasksController do
             # against the post-write rev.
             json(
               conn,
-              with_rail_extras(%{ok: true, doc: Params.render_doc(doc)}, doc, nil, conn, params)
+              with_rail_extras(
+                %{
+                  ok: true,
+                  doc: Params.render_doc(doc),
+                  help: Params.mutation_help(:claim, doc, worker_id)
+                },
+                doc,
+                nil,
+                conn,
+                params
+              )
             )
 
           {:error, {:invalid_execution_policy, errors}} ->
@@ -364,7 +374,11 @@ defmodule BarkparkWeb.TasksController do
             json(
               conn,
               with_rail_extras(
-                %{ok: true, doc: Params.render_doc(doc)},
+                %{
+                  ok: true,
+                  doc: Params.render_doc(doc),
+                  help: Params.mutation_help(:claim_by_id, doc, worker_id)
+                },
                 doc,
                 baseline_rev,
                 conn,
@@ -425,7 +439,10 @@ defmodule BarkparkWeb.TasksController do
           # rail-l1: rail_rev + notices ride the same 2xx envelope — advisory,
           # the close has ALREADY committed even when blocked_while_claimed
           # fires (L1 notices are informational; refusal is the L4 task).
-          json(conn, with_rail_extras(close_response(doc), doc, baseline_rev, conn, params))
+          json(
+            conn,
+            with_rail_extras(close_response(doc, worker_id), doc, baseline_rev, conn, params)
+          )
 
         {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
           # Edited-under-you fence (rail-awareness L2): the task's work-defining
@@ -465,7 +482,11 @@ defmodule BarkparkWeb.TasksController do
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       case Tasks.release(task.id, worker_id, observed_epoch: observed_epoch) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(doc),
+            help: Params.mutation_help(:release, doc, worker_id)
+          })
 
         {:error, reason} ->
           conn
@@ -487,8 +508,14 @@ defmodule BarkparkWeb.TasksController do
   # gate. `cancelled`/`blocked` closes skip the warning (abandoning criteria
   # is the point of cancelling). Absent/empty criteria → no warning
   # (Criteria.progress/1 returns nil — omit, never "0/0").
-  defp close_response(%Document{} = doc) do
-    base = %{ok: true, doc: Params.render_doc(doc)}
+  # axi-s4 R5: the envelope also carries `help` (next-command templates —
+  # after a close that is `bp task next <worker>`), a sibling of `warnings`.
+  defp close_response(%Document{} = doc, worker_id) do
+    base = %{
+      ok: true,
+      doc: Params.render_doc(doc),
+      help: Params.mutation_help(:close, doc, worker_id)
+    }
 
     with "done" <- Map.get(doc.content || %{}, "lifecycle_status"),
          %{met: met, total: total} when met < total <- Tasks.criteria_progress(doc.content) do
@@ -523,7 +550,14 @@ defmodule BarkparkWeb.TasksController do
 
       case Tasks.stamp(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          # Stamp does NOT bump the epoch — help[] reuses the claim epoch the
+          # caller already holds (read from the fresh doc, same code path as
+          # pulse's bumped one).
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(doc),
+            help: Params.mutation_help(:stamp, doc, worker_id)
+          })
 
         {:error, reason} ->
           # Every failure here is a state conflict (not_holder / fenced_off /
@@ -589,7 +623,14 @@ defmodule BarkparkWeb.TasksController do
 
       case Tasks.pulse_by_id(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          # Pulse BUMPS the claim epoch — mutation_help reads the FRESH epoch
+          # off this post-write doc, so help[] never echoes the (now-stale)
+          # epoch the caller last saw.
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(doc),
+            help: Params.mutation_help(:pulse, doc, worker_id)
+          })
 
         {:error, reason} ->
           conn

@@ -2107,6 +2107,214 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "mutation help[] (axi-s4 R5 — every success TEACHES the next command)" do
+    # File + queue-claim a task as "helper-1"; return the decoded claim payload.
+    defp help_claim!(conn, scope, content_extra) do
+      phase = uniq("phase-help")
+      doc_id = uniq("help")
+      _task = mk_task!(doc_id, scope, Map.merge(%{"parent_id" => phase}, content_extra))
+
+      body = Jason.encode!(%{worker_id: "helper-1", phase_id: phase})
+      resp = conn |> authed() |> post("/v1/tasks/claim", body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      payload
+    end
+
+    # Templates carry the BARE doc_id (the `drafts.` prefix stripped) — the id
+    # a `bp task <verb>` invocation actually takes.
+    defp bare_id(payload), do: String.replace_prefix(payload["doc"]["doc_id"], "drafts.", "")
+
+    test "claim: help[] = pulse/stamp/close templates with the REAL doc_id, worker, and epoch",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = bare_id(payload)
+      epoch = payload["doc"]["claim"]["epoch"]
+      assert epoch == 1
+
+      assert [pulse_t, stamp_t, close_t] = payload["help"]
+      assert pulse_t =~ "bp task pulse #{doc_id} helper-1 --now"
+      assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{epoch} --criterion 0 --met"
+      assert stamp_t =~ "--criterion-text"
+      assert close_t =~ "bp task close #{doc_id} helper-1 #{epoch} done"
+      refute Enum.any?(payload["help"], &(&1 =~ "drafts."))
+    end
+
+    test "claim_by_id: help[] carries the same three templates with real values",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("help-byid"), scope)
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "helper-1"}))
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      epoch = payload["doc"]["claim"]["epoch"]
+      doc_id = bare_id(payload)
+
+      assert [pulse_t, stamp_t, close_t] = payload["help"]
+      assert pulse_t =~ "bp task pulse #{doc_id} helper-1 --now"
+      assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{epoch} --criterion 0 --met"
+      assert close_t =~ "bp task close #{doc_id} helper-1 #{epoch} done"
+    end
+
+    test "stamp: help[] reuses the SAME epoch (stamp does not bump) — next stamp or close",
+         %{conn: conn, scope: scope} do
+      payload =
+        help_claim!(conn, scope, %{
+          "acceptance_criteria" => [%{"criterion" => "gate green", "met" => false}]
+        })
+
+      doc_id = bare_id(payload)
+      epoch = payload["doc"]["claim"]["epoch"]
+
+      body = Jason.encode!(%{worker_id: "helper-1", observed_epoch: to_string(epoch)})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=gate+green&met=true&evidence=proof",
+          body
+        )
+
+      assert resp.status == 200
+      stamped = Jason.decode!(resp.resp_body)
+      assert stamped["ok"] == true
+      # Epoch untouched by stamp — help templates carry the epoch the caller
+      # already holds, the same one the fresh doc reports.
+      assert stamped["doc"]["claim"]["epoch"] == epoch
+
+      assert [stamp_t, close_t] = stamped["help"]
+      assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{epoch} --criterion <N> --met"
+      assert close_t =~ "bp task close #{doc_id} helper-1 #{epoch} done"
+    end
+
+    # The charter-pinned hazard (decision 6): pulse BUMPS the claim epoch —
+    # help[] must carry the FRESH response epoch, never the one the caller
+    # last saw. A help template echoing the stale epoch would teach the agent
+    # a stamp/close that 409s.
+    test "pulse: help[] carries the FRESH bumped epoch (= response claim.epoch = sent + 1), never the caller's",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = bare_id(payload)
+      claim_epoch = payload["doc"]["claim"]["epoch"]
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/pulse",
+          Jason.encode!(%{worker_id: "helper-1", now: "halfway through"})
+        )
+
+      assert resp.status == 200
+      pulsed = Jason.decode!(resp.resp_body)
+      assert pulsed["ok"] == true
+
+      fresh = pulsed["doc"]["claim"]["epoch"]
+      assert fresh == claim_epoch + 1
+
+      assert [stamp_t, close_t] = pulsed["help"]
+      assert stamp_t =~ "bp task stamp #{doc_id} helper-1 #{fresh} --criterion <N> --met"
+      assert close_t =~ "bp task close #{doc_id} helper-1 #{fresh} done"
+      # The stale epoch never rides a template.
+      refute stamp_t =~ "helper-1 #{claim_epoch} --criterion"
+      refute close_t =~ "helper-1 #{claim_epoch} done"
+    end
+
+    test "close: help[] = the next task (bp task next <worker>), riding beside warnings-capable envelope",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = payload["doc"]["doc_id"]
+      epoch = payload["doc"]["claim"]["epoch"]
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/close",
+          Jason.encode!(%{worker_id: "helper-1", observed_epoch: epoch})
+        )
+
+      assert resp.status == 200
+      closed = Jason.decode!(resp.resp_body)
+      assert closed["ok"] == true
+      assert closed["help"] == ["bp task next helper-1"]
+    end
+
+    test "release: help[] = the next task (bp task next <worker>)",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = payload["doc"]["doc_id"]
+      epoch = payload["doc"]["claim"]["epoch"]
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/release",
+          Jason.encode!(%{worker_id: "helper-1", observed_epoch: epoch})
+        )
+
+      assert resp.status == 200
+      released = Jason.decode!(resp.resp_body)
+      assert released["ok"] == true
+      assert released["help"] == ["bp task next helper-1"]
+    end
+
+    test "help[] rides ONLY mutation successes — never reads, no_ready, or 409s",
+         %{conn: conn, scope: scope} do
+      # no_ready claim failure: no help key.
+      empty_phase = uniq("phase-help-empty")
+
+      no_ready =
+        conn
+        |> authed()
+        |> post("/v1/tasks/claim", Jason.encode!(%{worker_id: "helper-1", phase_id: empty_phase}))
+        |> then(&Jason.decode!(&1.resp_body))
+
+      assert no_ready["ok"] == false
+      refute Map.has_key?(no_ready, "help")
+
+      # Read envelopes (ready + show): no help key.
+      task = mk_task!(uniq("help-read"), scope)
+
+      ready =
+        conn |> authed() |> get("/v1/tasks/ready") |> then(&Jason.decode!(&1.resp_body))
+
+      refute Map.has_key?(ready, "help")
+
+      shown =
+        conn
+        |> authed()
+        |> get("/v1/tasks/#{task.doc_id}")
+        |> then(&Jason.decode!(&1.resp_body))
+
+      refute Map.has_key?(shown, "help")
+
+      # A 409 stamp conflict (stale epoch): no help key.
+      payload = help_claim!(conn, scope, %{})
+      doc_id = payload["doc"]["doc_id"]
+
+      conflict_resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=x&criterion-text=y",
+          Jason.encode!(%{worker_id: "helper-1", observed_epoch: 999})
+        )
+
+      assert conflict_resp.status == 409
+      refute Map.has_key?(Jason.decode!(conflict_resp.resp_body), "help")
+    end
+  end
+
   defp event_document(doc_id, mutation) do
     import Ecto.Query, only: [from: 2]
 

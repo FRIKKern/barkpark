@@ -461,6 +461,64 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def criteria_hint(_reason, _surface), do: nil
 
+  # ─── Success help[] (axi-s4 R5 — a success TEACHES the next command) ──────
+  #
+  # Every mutation SUCCESS envelope carries a top-level `help` list: 1–3
+  # concrete `bp` command templates with the REAL doc_id / worker / epoch the
+  # server knows at mutation time. Placeholder convention (AXI): angle
+  # brackets mark ONLY values the agent must fill, `"..."` marks free text;
+  # fixed flags ride verbatim. The bp CLI prints these on stderr in every
+  # output mode (internal/cli/run.go emitHelpHints); MCP surfaces them for
+  # free via raw body passthrough. Vocabulary must stay consistent with the
+  # static tool descriptions in internal/cli/mcp_tasks.go (same epoch rules,
+  # same worker-must-match rule).
+  #
+  # CRITICAL: pulse BUMPS the claim epoch (Tasks.Pulse) — its templates carry
+  # the FRESH epoch read from the RESPONSE doc, never the epoch the caller
+  # sent. Stamp does NOT bump, so its templates reuse the same epoch. The
+  # epoch is always read from the fresh post-write doc, which makes both
+  # rules one code path.
+  #
+  # help[] is ADDITIVE — a sibling of the existing envelope fields (the
+  # `warnings:` precedent on close_response/1), never a rename or removal.
+  def mutation_help(verb, %Document{} = doc, worker) do
+    id = strip_draft_prefix(doc.doc_id)
+    epoch = get_in(doc.content || %{}, ["claim", "epoch"])
+    help_templates(verb, id, worker, epoch)
+  end
+
+  # After a claim the loop is: pulse (heartbeat), stamp-as-you-go, close.
+  defp help_templates(verb, id, worker, epoch) when verb in [:claim, :claim_by_id] do
+    [
+      ~s|bp task pulse #{id} #{worker} --now "<one line: what you are doing right now>"|,
+      stamp_template(id, worker, epoch, "0"),
+      close_template(id, worker, epoch)
+    ]
+  end
+
+  # After a stamp (epoch unchanged) or a pulse (epoch BUMPED — `epoch` here is
+  # already the fresh one): stamp the next criterion, or seal with close.
+  defp help_templates(verb, id, worker, epoch) when verb in [:stamp, :pulse] do
+    [
+      stamp_template(id, worker, epoch, "<N>"),
+      close_template(id, worker, epoch)
+    ]
+  end
+
+  # The claim is gone — the next command is the next task.
+  defp help_templates(verb, _id, worker, _epoch) when verb in [:close, :release] do
+    [~s|bp task next #{worker}|]
+  end
+
+  defp stamp_template(id, worker, epoch, index) do
+    ~s|bp task stamp #{id} #{worker} #{epoch} --criterion #{index} --met --evidence "..." | <>
+      ~s|--criterion-text "<acceptance_criteria[#{index}].criterion, verbatim>"|
+  end
+
+  defp close_template(id, worker, epoch) do
+    ~s|bp task close #{id} #{worker} #{epoch} done "<summary of what shipped>"|
+  end
+
   # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
 
   # Parses the optional close-body `criteria` list: each update targets one
