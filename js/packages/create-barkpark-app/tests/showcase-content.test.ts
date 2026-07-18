@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { renderPortableDocument } from '@barkpark/react'
 import { showcaseContent } from '../templates/blog-starter/seeds/showcase-content'
 
-// The blog-starter's flagship post body is the FULL 48-type PortableDocument
+// The blog-starter's flagship post body is the FULL 49-type PortableDocument
 // grammar, concatenated from `@barkpark/react`'s pd-golden parity fixtures (one
 // source of truth — see scripts/gen-showcase-content.mjs). This proves the
 // migrated blog renders every canonical block type through the canonical
@@ -55,17 +55,17 @@ function classesOf(nodes: ShapeNode[]): string[] {
 
 const goldens = loadGoldens()
 
-describe('blog-starter showcase seed (48-type PortableDocument grammar)', () => {
-  it('seeds exactly the 48 canonical block types, in sync with the pd-golden fixtures', () => {
+describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => {
+  it('seeds exactly the 49 canonical block types, in sync with the pd-golden fixtures', () => {
     // Guards against drift between the generated seed and the parity fixtures.
-    expect(goldens).toHaveLength(48)
+    expect(goldens).toHaveLength(49)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
-    expect(new Set(seedTypes).size).toBe(48)
+    expect(new Set(seedTypes).size).toBe(49)
   })
 
-  it('renders all 48 distinct types through renderPortableDocument, each with its golden class-markers', () => {
+  it('renders all 49 distinct types through renderPortableDocument, each with its golden class-markers', () => {
     const byType = new Map(goldens.map((g) => [g.type, g]))
     const markersSeen = new Set<string>()
 
@@ -90,12 +90,12 @@ describe('blog-starter showcase seed (48-type PortableDocument grammar)', () => 
         expect(html, `${block.type} missing class ${cls}`).toContain(cls)
       }
 
-      // Fingerprint the type by (root tag + its bp-classes) so the run proves 48
-      // DISTINCT renderings, not one repeated 48×.
+      // Fingerprint the type by (root tag + its bp-classes) so the run proves 49
+      // DISTINCT renderings, not one repeated 49×.
       markersSeen.add(`${block.type}:${rootTag}:${bpClasses.sort().join(',')}`)
     }
 
-    expect(markersSeen.size).toBe(48)
+    expect(markersSeen.size).toBe(49)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {
