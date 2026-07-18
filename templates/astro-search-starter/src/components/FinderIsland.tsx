@@ -16,6 +16,7 @@
 // channel carries both engines too — D39). No separate Postgres transport.
 import { useEffect, useState } from 'react'
 import { Finder } from '../finder/finder'
+import { FinderErrorBoundary } from './FinderErrorBoundary'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
@@ -241,16 +242,20 @@ export default function FinderIsland() {
     }
   }, [])
 
+  // Wrap the whole finder tree: a throw anywhere below degrades to the on-brand
+  // fallback instead of blanking the page (the island IS the page here).
   return (
-    <HoveredDocProvider>
-      <FinderNavProvider>
-        <Finder
-          variant="page"
-          initialData={seed.initialData}
-          initialSeed={seed.initialSeed}
-          initialEngine="indx"
-        />
-      </FinderNavProvider>
-    </HoveredDocProvider>
+    <FinderErrorBoundary>
+      <HoveredDocProvider>
+        <FinderNavProvider>
+          <Finder
+            variant="page"
+            initialData={seed.initialData}
+            initialSeed={seed.initialSeed}
+            initialEngine="indx"
+          />
+        </FinderNavProvider>
+      </HoveredDocProvider>
+    </FinderErrorBoundary>
   )
 }
