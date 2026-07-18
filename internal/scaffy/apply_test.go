@@ -278,7 +278,7 @@ func TestReanchorStaticK(t *testing.T) {
 		t.Fatal("cron op missing from report")
 		return OpResult{}
 	}
-	if op := cronOp(rep2); !op.Reanchored || op.Status != OpInjected {
+	if op := cronOp(rep2); !op.Reanchored || op.Status != OpReplaced {
 		t.Fatalf("run 2 cron op must reanchor: %+v", op)
 	}
 	if op := cronOp(rep3); !op.Reanchored {
@@ -401,7 +401,7 @@ func TestReplaceAnchorExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Ops[0].Status != OpInjected {
+	if rep.Ops[0].Status != OpReplaced {
 		t.Fatalf("op: %+v", rep.Ops[0])
 	}
 	if got := readTreeFile(t, root, "conf/settings.txt"); got != "before\nflag = on # MARK:flag-fast\nafter\n" {

@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/scaffy"
 )
 
 const (
@@ -779,5 +781,23 @@ func TestScaffyPureLocal(t *testing.T) {
 		if bytes.Contains(src, []byte(banned)) {
 			t.Errorf("scaffy_cmd.go calls %s — bp scaffy must stay pure-local (D31)", banned)
 		}
+	}
+}
+
+// TestScaffyOpLineReplaceVoice pins the apply transcript voice for
+// REPLACE-family ops: '○ replaced' (not '○ injected'), matching the
+// remove-side '● restored'. Dry-run speaks 'would replace'. The glyph
+// stays ○ — REPLACE is an in-file content edit, the inject family.
+func TestScaffyOpLineReplaceVoice(t *testing.T) {
+	op := scaffy.OpResult{Kind: "replace", Path: "api/config/config.exs", Status: scaffy.OpReplaced, Mark: "cron-timeline"}
+	if got, want := scaffyOpLine(op, false), "○ replaced api/config/config.exs @MARK:cron-timeline"; got != want {
+		t.Errorf("apply voice:\n got %q\nwant %q", got, want)
+	}
+	if got, want := scaffyOpLine(op, true), "○ would replace api/config/config.exs @MARK:cron-timeline"; got != want {
+		t.Errorf("dry-run voice:\n got %q\nwant %q", got, want)
+	}
+	// It must NOT regress to the inject wording.
+	if strings.Contains(scaffyOpLine(op, false), "injected") {
+		t.Error("REPLACE op still says 'injected'")
 	}
 }

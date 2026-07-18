@@ -35,6 +35,13 @@ type Receipt struct {
 	Vars           map[string]string `json:"vars"` // the resolved var map
 	Timestamp      string            `json:"timestamp"`
 	Ops            []ReceiptOp       `json:"ops"` // mutating ops only, in apply order
+	// CreatedDirs are the directories the apply's flush actually
+	// mkdir'd for CREATE ops (never pre-existing ones), repo-relative
+	// forward-slash, shallow→deep. Remove rmdirs them deepest-first when
+	// empty. Omitted (nil) on runs that created no new dirs, and absent
+	// entirely from receipts written before this field existed — a
+	// pre-field receipt simply prunes nothing (backward compatible).
+	CreatedDirs []string `json:"created_dirs,omitempty"`
 }
 
 // ReceiptOp is one applied op's fat record.
@@ -126,7 +133,7 @@ func kebabize(s string) string {
 // writeReceipt persists one mutating run's receipt. The caller only
 // invokes it when at least one op mutated (D35 — a no-op re-run never
 // clobbers the receipt of the run that did the work).
-func writeReceipt(opts RunOptions, cmd *Command, src []byte, ops []ReceiptOp) (string, error) {
+func writeReceipt(opts RunOptions, cmd *Command, src []byte, ops []ReceiptOp, createdDirs []string) (string, error) {
 	r := &Receipt{
 		ReceiptVersion: receiptVersion,
 		Command:        opts.CommandPath,
@@ -135,6 +142,7 @@ func writeReceipt(opts RunOptions, cmd *Command, src []byte, ops []ReceiptOp) (s
 		Vars:           opts.Vars,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		Ops:            ops,
+		CreatedDirs:    createdDirs,
 	}
 	path := receiptPath(opts.RepoRoot, cmd, opts.Vars)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

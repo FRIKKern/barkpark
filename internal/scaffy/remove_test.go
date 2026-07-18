@@ -9,6 +9,8 @@ package scaffy
 // (Elixir parses stray trailing commas) and appear nowhere here.
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -567,4 +569,130 @@ func TestRemoveAfterFailedAssertRun(t *testing.T) {
 		t.Fatalf("Remove after failed-assert run: %v", err)
 	}
 	assertTreesEqual(t, "after remove", before, snapshotSansReceipts(t, root))
+}
+
+const nestCreateSrc = `COMMAND "add-nest" DESCRIPTION "Create a file in a fresh nested dir." CONCEPT "nest" DIRECTION "add"
+
+VARIABLE 1 "NestName" TITLE "Nest" DESCRIPTION "Name of the nest." EXAMPLES "Alpha"
+
+CREATE FILE IF ABSENT "nest/{{.nest-name}}/deep/a.txt"
+::: nest file :::
+nest {{.nest-name}}
+::: nest file :::
+`
+
+var nestVars = map[string]string{"NestName": "Alpha"}
+
+func dirExists(t *testing.T, root, rel string) bool {
+	t.Helper()
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("stat %s: %v", rel, err)
+	}
+	return info.IsDir()
+}
+
+// TestRemovePrunesEmptyCreatedDirs — the D35 created_dirs cleanup. A
+// CREATE into a fresh nest/<name>/deep/ chain records those three dirs
+// in the receipt; remove rmdirs them deepest-first once the file is
+// gone, leaving no residue. A NON-empty created dir (a hand-added
+// sibling still inside it) is left untouched — never force-removed.
+func TestRemovePrunesEmptyCreatedDirs(t *testing.T) {
+	t.Run("empty dirs pruned deepest-first", func(t *testing.T) {
+		root := t.TempDir()
+		cmdPath := writeCommand(t, root, "add-nest.scaffy", nestCreateSrc)
+
+		rep, err := Run(RunOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The receipt records exactly the dirs the flush created.
+		rec, err := ReadReceipt(rep.Receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantDirs := []string{"nest", "nest/alpha", "nest/alpha/deep"}
+		if strings.Join(rec.CreatedDirs, ",") != strings.Join(wantDirs, ",") {
+			t.Fatalf("created_dirs = %v, want %v", rec.CreatedDirs, wantDirs)
+		}
+		if !dirExists(t, root, "nest/alpha/deep") {
+			t.Fatal("apply must have created the nested dir")
+		}
+
+		if _, err := Remove(RemoveOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root}); err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		for _, d := range wantDirs {
+			if dirExists(t, root, d) {
+				t.Errorf("empty created dir %s must be rmdir'd after remove", d)
+			}
+		}
+	})
+
+	t.Run("non-empty created dir left intact", func(t *testing.T) {
+		root := t.TempDir()
+		cmdPath := writeCommand(t, root, "add-nest.scaffy", nestCreateSrc)
+
+		if _, err := Run(RunOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root}); err != nil {
+			t.Fatal(err)
+		}
+		// A hand-added sibling inside one of the created dirs.
+		writeTreeFile(t, root, "nest/alpha/deep/manual.txt", "kept by hand\n")
+
+		if _, err := Remove(RemoveOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root}); err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		// The created file is gone, but the non-empty dir chain survives
+		// with the hand-added file intact.
+		if _, err := os.Stat(filepath.Join(root, "nest/alpha/deep/a.txt")); !errors.Is(err, fs.ErrNotExist) {
+			t.Error("the created file must be deleted by remove")
+		}
+		if !dirExists(t, root, "nest/alpha/deep") {
+			t.Error("a non-empty created dir must be left in place")
+		}
+		if got := readTreeFile(t, root, "nest/alpha/deep/manual.txt"); got != "kept by hand\n" {
+			t.Errorf("hand-added file clobbered: %q", got)
+		}
+	})
+}
+
+// TestRemoveBackCompatNoCreatedDirsField — a receipt written before the
+// created_dirs field existed (the field simply absent from the JSON)
+// removes cleanly: files retracted as always, no dirs pruned, no error.
+func TestRemoveBackCompatNoCreatedDirsField(t *testing.T) {
+	root := t.TempDir()
+	cmdPath := writeCommand(t, root, "add-nest.scaffy", nestCreateSrc)
+
+	rep, err := Run(RunOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the receipt as a pre-field one: created_dirs omitted.
+	rec, err := ReadReceipt(rep.Receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.CreatedDirs = nil
+	b, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte("created_dirs")) {
+		t.Fatal("test setup: created_dirs must be absent from a pre-field receipt")
+	}
+	if err := os.WriteFile(rep.Receipt, append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Remove(RemoveOptions{CommandPath: cmdPath, Vars: nestVars, RepoRoot: root}); err != nil {
+		t.Fatalf("remove of a pre-field receipt must succeed: %v", err)
+	}
+	// File retracted (old behavior); the empty dir residue is left (old
+	// behavior — nothing to prune without the field).
+	if _, err := os.Stat(filepath.Join(root, "nest/alpha/deep/a.txt")); !errors.Is(err, fs.ErrNotExist) {
+		t.Error("pre-field remove must still delete the created file")
+	}
 }
