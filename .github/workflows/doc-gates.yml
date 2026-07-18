@@ -108,6 +108,17 @@ on:
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
       - "api/test/support/fixtures/pd-parity/**"
+      # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
+      # command files themselves, plus the only two anchored target surfaces NOT
+      # already covered by a glob above: cloud/priv/static/app.js + __app.test.mjs
+      # (there is no **/*.js / **/*.mjs trigger, and app.css is triggered but the
+      # .js/.mjs pair is not). Every OTHER anchored surface in the corpus rides a
+      # trigger above (.ex/.exs/.go/.ts/.tsx/.md ride the code globs; root.html.heex
+      # rides api/lib/barkpark_web/**/*.heex; pd-parity-completeness.sh has its own
+      # trigger), so an anchor drift there already runs this job.
+      - "scaffy/commands/**"
+      - "cloud/priv/static/app.js"
+      - "cloud/priv/static/__app.test.mjs"
   pull_request:
     paths:
       - "**/*.md"
@@ -209,6 +220,17 @@ on:
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
       - "api/test/support/fixtures/pd-parity/**"
+      # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
+      # command files themselves, plus the only two anchored target surfaces NOT
+      # already covered by a glob above: cloud/priv/static/app.js + __app.test.mjs
+      # (there is no **/*.js / **/*.mjs trigger, and app.css is triggered but the
+      # .js/.mjs pair is not). Every OTHER anchored surface in the corpus rides a
+      # trigger above (.ex/.exs/.go/.ts/.tsx/.md ride the code globs; root.html.heex
+      # rides api/lib/barkpark_web/**/*.heex; pd-parity-completeness.sh has its own
+      # trigger), so an anchor drift there already runs this job.
+      - "scaffy/commands/**"
+      - "cloud/priv/static/app.js"
+      - "cloud/priv/static/__app.test.mjs"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -421,3 +443,58 @@ jobs:
       # bash (its shebang); under zsh the coverage loop word-splits vacuously.
       - name: PortableDoc render-parity completeness (blocking)
         run: bash scripts/pd-parity-completeness.sh
+
+      # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
+      # repo-aware validator (internal/scaffy/repocheck.go, opt-in via --repo)
+      # re-resolves EVERY command's structural anchor against its LIVE target
+      # file: it REDs (exit 5) when a hot file has moved out from under a
+      # raw-byte anchor (R-002 drift / R-003 ambiguity / R-001 missing target).
+      # Token-bearing anchors with no --var set are skipped-and-counted
+      # (anchors_skipped_token), never vacuously passed. Sub-100ms, no test suite.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Scaffy anchor-drift gate (blocking)
+        run: go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
+
+      # Durable tripwire (distrust vacuous green): prove the gate actually REDs
+      # on a drifted anchor. A mktemp fixture — a text-clean command whose fenced
+      # anchor is deliberately absent from its target file — must first pass the
+      # text validator (so RepoCheck even runs) and then make `validate --repo`
+      # exit non-zero with R-002. Plants nothing in the tree; guards RepoCheck
+      # against a future edit that silently stops resolving anchors.
+      - name: Scaffy anchor-drift gate self-test (tripwire)
+        run: |
+          set -u
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/repo" "$tmp/cmds"
+          printf 'first real line\nsecond real line\n' > "$tmp/repo/target.txt"
+          printf '%s\n' \
+            'COMMAND "Tripwire drift fixture" DESCRIPTION "A deliberately drifted anchor for the anchor-drift gate self-test: its fenced anchor is absent from target.txt, so RepoCheck must report R-002. Plants nothing in the real tree." LAST_UPDATED "18-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy" CONCEPT "tripwire-drift" VARIANT "text" DIRECTION "add" VARIABLES' \
+            '' \
+            'IN "target.txt"' \
+            '### drift the anchor on purpose' \
+            'INSERT AFTER FIRST' \
+            '::: deliberately absent anchor :::' \
+            'this anchor line is deliberately absent from target.txt' \
+            '::: deliberately absent anchor :::' \
+            'WITH' \
+            '::: tripwire injected block :::' \
+            'never planted MARK:tripwire-drift-block' \
+            '::: tripwire injected block :::' \
+            'MARK "tripwire-drift-block"' \
+            'ASLONG FILE DONT CONTAIN "never planted MARK:tripwire-drift-block"' \
+            > "$tmp/cmds/tripwire-drift.scaffy"
+          # 1. The fixture must be TEXT-clean, else RepoCheck never runs (validate-first).
+          if ! go run ./cmd/barkpark scaffy validate "$tmp/cmds/tripwire-drift.scaffy" >/dev/null 2>&1; then
+            echo "TRIPWIRE BROKEN: fixture is not text-clean — RepoCheck would never run"; exit 1
+          fi
+          # 2. Against the tree it MUST red (R-002 anchor-not-found → exit 5).
+          if go run ./cmd/barkpark scaffy validate --repo "$tmp/repo" "$tmp/cmds" >/dev/null 2>&1; then
+            echo "TRIPWIRE FAILED: validate --repo passed on a drifted anchor"; exit 1
+          fi
+          echo "tripwire OK: anchor-drift gate REDs on drift (R-002)"

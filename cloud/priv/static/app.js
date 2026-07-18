@@ -11795,6 +11795,16 @@
   }
   // <<< END coherence-helpers <<<
 
+  // scaffy:zone console-helpers (ensure-console-hook-zones) -- stable head
+  // anchor for NEW node-pinned pure helpers: declare your `function name(...)`
+  // DIRECTLY BELOW this comment. Position is semantics-free by construction:
+  // declarations are scoped to the enclosing IIFE and the __bpTestHook call
+  // below runs at eval tail, so a helper landing here is visible to the hook
+  // and to every earlier call site (hoisting). Keep helpers PURE (no DOM, no
+  // fetch, no EventSource) -- the house law stamped on every hook group: pure
+  // helpers node-pinned, DOM mounts browser-verified. Sweeps: move this
+  // comment only whole, on its own lines. MARK:zone-console-helpers
+
   // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
@@ -12044,6 +12054,13 @@
       paletteMoveIndex: paletteMoveIndex, paletteNavItems: paletteNavItems,
       paletteActionItems: paletteActionItems, paletteInstanceItems: paletteInstanceItems,
       paletteSiteItems: paletteSiteItems, paletteRegistry: paletteRegistry,
+      // scaffy:zone console-hook-map (ensure-console-hook-zones) -- stable
+      // tail anchor for NEW hook entries: add `name: name,` DIRECTLY BELOW
+      // this comment (trailing comma -- house style keeps one on every entry,
+      // so the append is separator-safe; object keys are order-free; a comment
+      // line is legal inside an object literal). Only reference helpers
+      // declared above -- this object is built once, at eval tail. Sweeps:
+      // move this comment only whole, on its own lines. MARK:zone-console-hook-map
     });
   }
 })();

@@ -77,6 +77,13 @@ vm.runInContext(
   sandbox,
 );
 
+// scaffy:zone console-tests (ensure-console-hook-zones) -- stable head anchor
+// for NEW test groups: add your `// ── name ──` header + test() blocks
+// DIRECTLY BELOW this comment. Registration order is semantics-free:
+// node:test runs callbacks after the whole module evaluates, so a group here
+// (above the older groups) sees the same populated `hooks` as a tail append.
+// Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
+
 test("the test hook exported the helpers under test", () => {
   assert.equal(typeof hooks.esc, "function");
   assert.equal(typeof hooks.safeDecode, "function");
