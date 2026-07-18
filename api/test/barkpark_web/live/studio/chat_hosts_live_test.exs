@@ -53,35 +53,27 @@ defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
     assert [%{name: "laptop"}] = ChatHosts.list_hosts(workspace.id)
   end
 
-  test "global admin without workspace-admin membership cannot enroll or revoke", %{
-    conn: conn,
-    workspace: workspace,
-    path: path,
-    outsider_raw: raw
-  } do
+  test "global admin without workspace-admin membership is REJECTED AT MOUNT (W26) — nothing enrolled, nothing revoked",
+       %{
+         conn: conn,
+         workspace: workspace,
+         path: path,
+         outsider_raw: raw
+       } do
     {:ok, issued} =
       ChatHosts.issue_enrollment(workspace.id, %{
         name: "existing",
         approved_roots: [System.tmp_dir!()]
       })
 
-    {:ok, view, _html} = live(as(conn, raw), path)
+    # Pre-W26 this principal mounted (flat global admin perm) and the per-write
+    # handlers refused it. The `:scoped_admin` mount gate now authorizes against
+    # THIS workspace's membership role — a member-only outsider never mounts.
+    assert {:error, {:redirect, %{to: "/studio"}}} = live(as(conn, raw), path)
 
-    html =
-      view
-      |> form("form[phx-submit=enroll]", %{
-        "host" => %{"name" => "forged", "approved_roots" => ["/"]}
-      })
-      |> render_submit()
-
-    assert html =~ "Only the workspace owner"
+    # The host list is byte-identical: nothing enrolled, nothing revoked.
     assert [host] = ChatHosts.list_hosts(workspace.id)
     assert host.id == issued.host.id
-
-    html = render_click(view, "revoke", %{"id" => host.id})
-    assert html =~ "Only the workspace owner"
-    assert [%{id: id}] = ChatHosts.list_hosts(workspace.id)
-    assert id == host.id
   end
 
   defp as(conn, raw), do: init_test_session(conn, %{"api_token" => raw})
