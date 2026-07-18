@@ -273,22 +273,21 @@ defmodule Barkpark.Search.Intelligence do
         :skipped
 
       {:reject, reason} ->
-        {:ok, _event} =
-          insert_event(
-            Map.merge(base, %{
-              query: "",
-              query_normalized: "",
-              filters: %{},
-              quality: "rejected",
-              reject_reason: Atom.to_string(reason)
-            })
-          )
+        submit_event(
+          Map.merge(base, %{
+            query: "",
+            query_normalized: "",
+            filters: %{},
+            quality: "rejected",
+            reject_reason: Atom.to_string(reason)
+          })
+        )
 
         {:rejected, reason}
 
       {:ok, query, query_normalized} ->
-        {:ok, event} =
-          insert_event(
+        {:ok, id} =
+          submit_event(
             Map.merge(base, %{
               query: query,
               query_normalized: query_normalized,
@@ -298,7 +297,7 @@ defmodule Barkpark.Search.Intelligence do
             })
           )
 
-        {:ok, event.id}
+        {:ok, id}
     end
   end
 
@@ -548,6 +547,36 @@ defmodule Barkpark.Search.Intelligence do
     %Event{}
     |> Ecto.Changeset.change(attrs)
     |> Repo.insert()
+  end
+
+  # Submit a search event WITHOUT stalling the caller's response. The record
+  # write sat synchronously inside every keystroke's request; normally ~free,
+  # but any DB contention (crystallizer roll-up, Oban, a checkpoint) stalled
+  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sometimes 450ms"
+  # spikes on an otherwise ~100ms path. The event id is PRE-GENERATED so the
+  # response's `searchEventId` contract (click attribution) is unchanged; the
+  # INSERT rides Barkpark.TaskSupervisor (Task.* propagates `$callers`, so the
+  # test sandbox and its DataCase drain still own the connection). Config
+  # `:search_intel_record_async` (default true; test.exs sets false so every
+  # existing assertion stays deterministic). Failures degrade exactly like the
+  # sync path: telemetry-only, never a caller error.
+  defp submit_event(attrs) do
+    id = Ecto.UUID.generate()
+    attrs = Map.put(attrs, :id, id)
+
+    if Application.get_env(:barkpark, :search_intel_record_async, true) do
+      {:ok, _pid} =
+        Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+          _ = insert_event(attrs)
+        end)
+
+      {:ok, id}
+    else
+      case insert_event(attrs) do
+        {:ok, event} -> {:ok, event.id}
+        error -> error
+      end
+    end
   end
 
   defp qualify_query(raw_query, filters) do
