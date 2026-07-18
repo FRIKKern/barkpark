@@ -29,9 +29,9 @@ defmodule Barkpark.Content.Document do
     # they are intentionally ABSENT from `changeset/2`'s cast list; the write path
     # never sets them, and any attempt would be rejected by Postgres. Loaded on
     # every read; populated for existing rows by the migration's table rewrite.
-    field :slug_text, :string
-    field :author_text, :string
-    field :category_text, :string
+    field :slug_text, :string, read_after_writes: true
+    field :author_text, :string, read_after_writes: true
+    field :category_text, :string, read_after_writes: true
 
     # Row/ownership ACL (Phase 4, core-auth). The user who owns this row on an
     # `owner_scoped: true` type. NULL = unowned (visible to everyone). Stamped on
