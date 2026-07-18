@@ -55,6 +55,19 @@ type State struct {
 	Messages  []Message
 	LastSeq   int
 
+	// Model is the OBSERVED wire model id ("claude-opus-4-8[1m]") off the
+	// system/init frame — fact, distinct from the shell's intent alias
+	// (Model.modelChoice, D14 continuity). Empty until the first turn streams;
+	// the header prefers it over the intent.
+	Model string
+
+	// Mode is the session's permission mode for DISPLAY (the Plan ⇄ Autopilot
+	// badge): seeded from the session GET, refreshed at every turn boundary
+	// (how the server-side plan→autopilot switch reaches this surface) and by
+	// the init frame's permissionMode. Continuity write-back stays on the
+	// shell's m.mode — this field never PATCHes.
+	Mode string
+
 	Phase    TurnPhase
 	Tail     string      // live streaming text (event:chat text deltas)
 	Settling bool        // result seen, tail refetch in flight
@@ -209,6 +222,17 @@ func reduceAnswer(st State, ev AnswerEvent) (State, []Effect) {
 	}
 	st.AnswerInFlight[ev.RequestID] = ev.Decision
 	st.Notice = answeringNotice(ev.Decision)
+	// An approved plan card is the autopilot promise: say so now — the server
+	// engages Autopilot (steer + persist) and the badge lands on truth at the
+	// turn boundary / next init frame.
+	if ev.Decision == "allow" {
+		for _, msg := range st.Messages {
+			if msg.RequestID() == ev.RequestID && msg.Role == "plan" {
+				st.Notice = "Plan approved — engaging ▶ Autopilot…"
+				break
+			}
+		}
+	}
 	return st, []Effect{AnswerEffect{RequestID: ev.RequestID, Decision: ev.Decision}}
 }
 
@@ -347,6 +371,8 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		} `json:"event"`
 		TerminalReason string `json:"terminal_reason"`
 		IsError        bool   `json:"is_error"`
+		Model          string `json:"model"`
+		PermissionMode string `json:"permissionMode"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
 		return st, nil
@@ -359,6 +385,17 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		// clear_queued_badges (charter D12).
 		for i := range st.Local {
 			st.Local[i].Queued = false
+		}
+		// The init frame carries the RESOLVED model and permission mode the CLI
+		// actually runs — capture both as observed fact (a frame missing either
+		// never blanks a known value). "default" is the CLI's own post-plan flip:
+		// the server redirects it to Autopilot ("auto") and this surface learns
+		// the truth at the turn boundary, so don't paint the transient here.
+		if frame.Model != "" {
+			st.Model = frame.Model
+		}
+		if frame.PermissionMode != "" && frame.PermissionMode != "default" {
+			st.Mode = frame.PermissionMode
 		}
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
@@ -448,6 +485,12 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 	}
 	if t := strings.TrimSpace(ev.Session.Title); t != "" {
 		st.Title = t
+	}
+	// Turn-boundary mode sync: the store row is where the server-side
+	// plan→autopilot switch lands, so the badge follows it here — no new SSE
+	// frame, the same freshness ceiling as the rail (charter D13).
+	if m := strings.TrimSpace(ev.Session.Mode); m != "" {
+		st.Mode = m
 	}
 	if st.Phase == TurnIdle {
 		st.Tail = ""

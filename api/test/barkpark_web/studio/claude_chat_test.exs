@@ -569,6 +569,53 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                      2_000
     end
 
+    test "an allowed ExitPlanMode reports the plan-approve fact to the sink" do
+      exit_plan =
+        ~s({"type":"control_request","request_id":"req-plan","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"# The plan"},"title":"Ready to code?"}})
+
+      script = ~s(printf '%s\n' '#{exit_plan}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-plan"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-plan", :allow)
+
+      # The fact fires AFTER the control_response is on the wire (stdio order:
+      # the CLI's own plan→default flip happens first, then any policy steer).
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      assert_receive {:claude_chat_plan_approved, "req-plan"}, 2_000
+    end
+
+    test "a denied ExitPlanMode (keep planning) reports NO plan-approve fact" do
+      exit_plan =
+        ~s({"type":"control_request","request_id":"req-plan","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"# The plan"}}})
+
+      script = ~s(printf '%s\n' '#{exit_plan}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-plan"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-plan", {:deny, "keep planning"})
+
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      refute_receive {:claude_chat_plan_approved, _}, 200
+    end
+
+    test "an allowed NON-plan tool reports NO plan-approve fact" do
+      script = ~s(printf '%s\n' '#{@can_use_tool}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-1"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-1", :allow)
+
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      refute_receive {:claude_chat_plan_approved, _}, 200
+    end
+
     test "an {:allow, updated} carries the CALLER's updatedInput (question answers, D32)" do
       put_chat_config(command: {"cat", []})
 

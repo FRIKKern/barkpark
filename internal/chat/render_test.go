@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
@@ -1232,5 +1234,75 @@ func TestVisibleAgentsPinsRunning(t *testing.T) {
 	erows := strings.Join(workflowAgentLines(60, je.Phases[0], je.EntryStatus, time.Now(), true), "\n")
 	if !strings.Contains(erows, "+4 more (2 running)") {
 		t.Fatalf("the overflow row must read '… +4 more (2 running)', got:\n%s", erows)
+	}
+}
+
+// TestChatHeaderShowsModeAndModelBadges proves the header's right-aligned truth
+// cluster: ◇ PLAN / ▶ AUTOPILOT carry the two-state projection (glyphs survive
+// the NoColor profile), the model renders as its family, and an odd raw mode
+// shows verbatim — honest, never guessed.
+func TestChatHeaderShowsModeAndModelBadges(t *testing.T) {
+	m := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		st: State{Title: "My session", Mode: "plan", Model: "claude-opus-4-8[1m]"}}
+	h := m.chatHeader()
+	for _, want := range []string{"◇ PLAN", "Opus"} {
+		if !strings.Contains(h, want) {
+			t.Fatalf("header must contain %q, got %q", want, h)
+		}
+	}
+
+	m.st.Mode = "auto"
+	if h := m.chatHeader(); !strings.Contains(h, "▶ AUTOPILOT") {
+		t.Fatalf("auto must render the AUTOPILOT badge, got %q", h)
+	}
+
+	m.st.Mode = "acceptEdits"
+	if h := m.chatHeader(); !strings.Contains(h, "acceptEdits") {
+		t.Fatalf("an odd raw mode must show verbatim, got %q", h)
+	}
+
+	// Effort rides the cluster when set (and not "default").
+	m.st.Mode = "plan"
+	m.effortChoice = "high"
+	if h := m.chatHeader(); !strings.Contains(h, "high") {
+		t.Fatalf("effort must ride the cluster, got %q", h)
+	}
+}
+
+// TestChatHeaderPrefersObservedOverIntent proves fact-over-intent: before a
+// turn reveals the answering model, the picker intent labels the badge; the
+// observed wire id wins once present.
+func TestChatHeaderPrefersObservedOverIntent(t *testing.T) {
+	m := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		modelChoice: "sonnet",
+		st:          State{Title: "s", Mode: "plan"}}
+	if h := m.chatHeader(); !strings.Contains(h, "Sonnet") {
+		t.Fatalf("intent must label the badge pre-turn, got %q", h)
+	}
+	m.st.Model = "claude-opus-4-8[1m]"
+	if h := m.chatHeader(); !strings.Contains(h, "Opus") {
+		t.Fatalf("observed model must win over intent, got %q", h)
+	}
+	// No intent, no observation → the honest "Default" (the CLI chooses).
+	m2 := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		st: State{Title: "s", Mode: "plan"}}
+	if h := m2.chatHeader(); !strings.Contains(h, "Default") {
+		t.Fatalf("unset model must read Default, got %q", h)
+	}
+}
+
+// TestChatHeaderDropsBadgesWhenNarrow proves the degrade order: a tight width
+// drops detail rather than ever wrapping the title band onto a second line.
+func TestChatHeaderDropsBadgesWhenNarrow(t *testing.T) {
+	m := Model{width: 20, height: 24, screen: screenChat, scroll: -1,
+		effortChoice: "high",
+		st: State{Title: strings.Repeat("x", 40), Mode: "plan",
+			Model: "claude-opus-4-8[1m]"}}
+	lines := strings.Split(m.chatHeader(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("header must stay two lines, got %d", len(lines))
+	}
+	if w := lipgloss.Width(lines[0]); w > m.width {
+		t.Fatalf("title band must never overflow width: %d > %d", w, m.width)
 	}
 }

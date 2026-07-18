@@ -1377,11 +1377,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def handle_cast({:respond_permission, request_id, decision}, state) do
-      # Consume the tracked ask input (charter D32): a plain `:allow` echoes it
+      # Consume the tracked ask (charter D32): a plain `:allow` echoes its input
       # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
       # map (question answers); a deny drops it. Pruned either way so the map
       # never grows unbounded across a long session.
-      {original, pending_asks} = Map.pop(state.pending_asks, request_id)
+      {ask, pending_asks} = Map.pop(state.pending_asks, request_id)
+      original = ask && ask.input
 
       payload =
         case decision do
@@ -1406,6 +1407,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+
+      # An allowed ExitPlanMode IS the plan-approve fact: report it to the sink
+      # AFTER the control_response is on the wire (stdio is serialized, so any
+      # follow-up steer lands behind the CLI's own internal mode flip). Fact
+      # only — the mode POLICY lives in the Recorder, never here.
+      if (ask && ask.tool_name == "ExitPlanMode") and
+           (decision == :allow or match?({:allow, _}, decision)) do
+        send(state.sink, {:claude_chat_plan_approved, request_id})
+      end
+
       {:noreply, %{state | pending_asks: pending_asks}}
     end
 
@@ -1793,8 +1804,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
       # Remember the ask's input so a plain `:allow` can echo it as
       # `updatedInput` (charter D32) — the answer seam never reconstructs it
-      # from an untrusted round-trip.
-      put_in(state.pending_asks[request_id], input)
+      # from an untrusted round-trip. The tool_name rides along so the answer
+      # seam can recognize an allowed ExitPlanMode (the plan-approve fact).
+      put_in(state.pending_asks[request_id], %{
+        input: input,
+        tool_name: Map.get(request, "tool_name", "tool")
+      })
     end
 
     defp dispatch_event(
