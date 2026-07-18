@@ -66,7 +66,10 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type Equation MARK:showcase-goldens-equation
     // scaffy:add-block-type CriteriaProgress MARK:showcase-goldens-criteria-progress
     // scaffy:add-block-type Video MARK:showcase-goldens-video
-    expect(goldens).toHaveLength(57)
+    // scaffy:add-block-type ApiEndpoint MARK:showcase-goldens-api-endpoint
+    // scaffy:add-block-type CodeTabs MARK:showcase-goldens-code-tabs
+    // scaffy:add-block-type Tabs MARK:showcase-goldens-tabs
+    expect(goldens).toHaveLength(60)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
@@ -78,7 +81,10 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type Equation MARK:showcase-seedset-equation
     // scaffy:add-block-type CriteriaProgress MARK:showcase-seedset-criteria-progress
     // scaffy:add-block-type Video MARK:showcase-seedset-video
-    expect(new Set(seedTypes).size).toBe(57)
+    // scaffy:add-block-type ApiEndpoint MARK:showcase-seedset-api-endpoint
+    // scaffy:add-block-type CodeTabs MARK:showcase-seedset-code-tabs
+    // scaffy:add-block-type Tabs MARK:showcase-seedset-tabs
+    expect(new Set(seedTypes).size).toBe(60)
   })
 
   it('renders all 49 distinct types through renderPortableDocument, each with its golden class-markers', () => {
@@ -119,7 +125,10 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type Equation MARK:showcase-markers-equation
     // scaffy:add-block-type CriteriaProgress MARK:showcase-markers-criteria-progress
     // scaffy:add-block-type Video MARK:showcase-markers-video
-    expect(markersSeen.size).toBe(57)
+    // scaffy:add-block-type ApiEndpoint MARK:showcase-markers-api-endpoint
+    // scaffy:add-block-type CodeTabs MARK:showcase-markers-code-tabs
+    // scaffy:add-block-type Tabs MARK:showcase-markers-tabs
+    expect(markersSeen.size).toBe(60)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {

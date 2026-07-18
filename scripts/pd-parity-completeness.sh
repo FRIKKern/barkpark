@@ -30,7 +30,10 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type Equation MARK:parity-count-script-equation
 # scaffy:add-block-type CriteriaProgress MARK:parity-count-script-criteria-progress
 # scaffy:add-block-type Video MARK:parity-count-script-video
-EXPECTED_COUNT=57
+# scaffy:add-block-type ApiEndpoint MARK:parity-count-script-api-endpoint
+# scaffy:add-block-type CodeTabs MARK:parity-count-script-code-tabs
+# scaffy:add-block-type Tabs MARK:parity-count-script-tabs
+EXPECTED_COUNT=60
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2
@@ -39,7 +42,7 @@ fi
 
 # The 14 excluded types (charter D7). Space-padded so a `case` glob matches whole
 # words only. This is the ONE lever a later wave edits to pull the field-* set in.
-EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image composite arrayOf codelist localizedText embed "
+EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed "
 
 # Dispatched types = `"type" => "X"` clause heads ∪ `t in [...]` guard members.
 DISPATCHED="$(

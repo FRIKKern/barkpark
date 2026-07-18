@@ -286,6 +286,12 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Tabs MARK:go-registry-tabs
+	r.blocks["tabs"] = tabsRenderer{reg: r}
+	// scaffy:add-block-type CodeTabs MARK:go-registry-code-tabs
+	r.blocks["code-tabs"] = codeTabsRenderer{reg: r}
+	// scaffy:add-block-type ApiEndpoint MARK:go-registry-api-endpoint
+	r.blocks["api-endpoint"] = apiEndpointRenderer{}
 	// scaffy:add-block-type Video MARK:go-registry-video
 	r.blocks["video"] = videoRenderer{}
 	// scaffy:add-block-type CriteriaProgress MARK:go-registry-criteria-progress
@@ -350,6 +356,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["field-color"] = fieldColorRenderer{}
 	r.blocks["field-reference"] = fieldReferenceRenderer{}
 	r.blocks["field-image"] = fieldImageRenderer{}
+	r.blocks["field-number"] = fieldNumberRenderer{}
 
 	// ── M2 hard blocks (honest, labeled, never-panic) ─────────────────────────
 	// No terminal draws mermaid, plays a cast, or paints inline graphics in a

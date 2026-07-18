@@ -46,6 +46,140 @@ const heading: Emit = (b) => {
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
+// scaffy:add-block-type Tabs MARK:js-emitter-tabs
+// Mirrors compose_block(tabs) (compose.ex, :article leg): a tab strip
+// (role=tablist) + every panel, each panel's `blocks` recursed through the
+// shared `renderBlocks` dispatcher (the columns/steps precedent). NO-JS
+// DEGRADE = every panel stays visible in this markup — the client.ts /
+// bulldocs.html.heex hydration legs add `hidden` to every non-active panel
+// post-mount (I1 dual hydration). Empty `tabs` renders nothing.
+interface TabEntry {
+  label: string
+  blocks: Block[]
+}
+
+function tabEntries(b: Block): TabEntry[] {
+  return asList(b.tabs)
+    .filter(isMap)
+    .map((t) => ({ label: str(t.label), blocks: asList<Block>(t.blocks) }))
+}
+
+const tabs: Emit = (b) => {
+  const entries = tabEntries(b)
+  if (entries.length === 0) return ''
+
+  const strip = entries
+    .map((t, i) => {
+      const activeClass = i === 0 ? ' bp-tabs__tab--active' : ''
+      return (
+        `<button type="button" class="bp-tabs__tab${activeClass}" role="tab" ` +
+        `aria-selected="${i === 0}" data-tab-index="${i}">${escapeHtml(t.label)}</button>`
+      )
+    })
+    .join('')
+
+  const panels = entries
+    .map((t, i) => `<div class="bp-tabs__panel" data-tab-index="${i}">${renderBlocks(t.blocks)}</div>`)
+    .join('')
+
+  return (
+    `<div class="bp-tabs"><div class="bp-tabs__strip" role="tablist">${strip}</div>` +
+    `<div class="bp-tabs__panels">${panels}</div></div>`
+  )
+}
+
+// scaffy:add-block-type CodeTabs MARK:js-emitter-code-tabs
+// Mirrors compose_block(code-tabs) (compose.ex, :article leg): a tab strip
+// (role=tablist) + every panel via the SAME inline-styled markup the `code`
+// emitter uses (byte-identical to Figures.code_block_html/1 — see the
+// `code` emitter below; codeBlockHtml factors it out so both share one
+// literal). NO-JS DEGRADE = every panel stays visible in this markup; the
+// client.ts / bulldocs.html.heex hydration legs are what add `hidden` to
+// every non-active panel post-mount (I1 dual hydration — this emitter only
+// paints the shell). Empty `tabs` renders nothing.
+interface CodeTabEntry {
+  label: string
+  language: string
+  value: string
+}
+
+function codeTabEntries(b: Block): CodeTabEntry[] {
+  return asList(b.tabs)
+    .filter(isMap)
+    .map((t) => ({
+      label: str(t.label),
+      language: str(t.language),
+      value: str(t.value ?? t.code),
+    }))
+}
+
+const codeTabs: Emit = (b) => {
+  const tabs = codeTabEntries(b)
+  if (tabs.length === 0) return ''
+
+  const syncKey = str(b.syncKey)
+  const syncAttr = syncKey === '' ? '' : ` data-sync-key="${escapeAttr(syncKey)}"`
+
+  const strip = tabs
+    .map((t, i) => {
+      const activeClass = i === 0 ? ' bp-code-tabs__tab--active' : ''
+      return (
+        `<button type="button" class="bp-code-tabs__tab${activeClass}" role="tab" ` +
+        `aria-selected="${i === 0}" data-lang="${escapeAttr(t.language)}">` +
+        `${escapeHtml(t.label)}</button>`
+      )
+    })
+    .join('')
+
+  const panels = tabs
+    .map(
+      (t) =>
+        `<div class="bp-code-tabs__panel" data-lang="${escapeAttr(t.language)}">${codeBlockHtml(t.value)}</div>`,
+    )
+    .join('')
+
+  return (
+    `<div class="bp-code-tabs"${syncAttr}>` +
+    `<div class="bp-code-tabs__strip" role="tablist">${strip}</div>` +
+    `<div class="bp-code-tabs__panels">${panels}</div></div>`
+  )
+}
+
+// scaffy:add-block-type ApiEndpoint MARK:js-emitter-api-endpoint
+// Mirrors compose_block(api-endpoint) (compose.ex): a method badge + path
+// line, then a params table (name/in/type/required) — byte-identical to
+// the Elixir _raw clause. No method and no path is the honest empty state.
+function apiEndpointParamRow(param: unknown): string {
+  if (!isMap(param)) return ''
+  const required = param.required === true || String(param.required).trim().toLowerCase() === 'true'
+  return (
+    `<tr><td>${escapeHtml(str(param.name))}</td><td>${escapeHtml(str(param.in))}</td>` +
+    `<td>${escapeHtml(str(param.type))}</td><td>${required ? 'Yes' : 'No'}</td></tr>`
+  )
+}
+
+const apiEndpoint: Emit = (b) => {
+  const method = str(b.method).toUpperCase()
+  const path = str(b.path)
+  if (method === '' && path === '') return ''
+
+  const head =
+    `<div class="bp-api-endpoint__head">` +
+    `<span class="bp-api-endpoint__method bp-api-endpoint__method--${method.toLowerCase()}">${escapeHtml(method)}</span>` +
+    `<code class="bp-api-endpoint__path">${escapeHtml(path)}</code>` +
+    `</div>`
+
+  const params = asList(b.params)
+  const paramsHtml =
+    params.length === 0
+      ? ''
+      : `<table class="bp-api-endpoint__params">` +
+        `<thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead>` +
+        `<tbody>${params.map(apiEndpointParamRow).join('')}</tbody></table>`
+
+  return `<div class="bp-api-endpoint">${head}${paramsHtml}</div>`
+}
+
 // scaffy:add-block-type Expandable MARK:js-emitter-expandable
 // Mirrors compose_block(expandable): starter emit — `text` escaped into
 // the bp-expandable wrapper, byte-identical to the Elixir _raw clause.
@@ -407,14 +541,18 @@ const callout: Emit = (b) => {
 const READING_ACCENT = 'var(--paper-reading-accent, #a23925)'
 const MONO = 'ui-monospace,Menlo,monospace'
 
-const code: Emit = (b) => {
-  const value = escapeHtml(str(b.value))
+// Shared with `codeTabs` (byte-identical to Figures.code_block_html/1) so a
+// code-tabs panel and a standalone `code` block render the same chrome.
+function codeBlockHtml(value: string): string {
+  const escaped = escapeHtml(value)
   return (
     `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid ${READING_ACCENT};color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
     `margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ${MONO});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);` +
-    `overflow-x:auto;white-space:pre">${value}</pre>`
+    `overflow-x:auto;white-space:pre">${escaped}</pre>`
   )
 }
+
+const code: Emit = (b) => codeBlockHtml(str(b.value))
 
 const divider: Emit = () =>
   `<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
@@ -1046,6 +1184,12 @@ export const coreEmitters: Record<string, Emit> = {
   stage,
   'task-detail': taskDetailEmit,
   roadmap,
+  // scaffy:add-block-type Tabs MARK:js-map-tabs
+  'tabs': tabs,
+  // scaffy:add-block-type CodeTabs MARK:js-map-code-tabs
+  'code-tabs': codeTabs,
+  // scaffy:add-block-type ApiEndpoint MARK:js-map-api-endpoint
+  'api-endpoint': apiEndpoint,
   // scaffy:add-block-type Video MARK:js-map-video
   'video': video,
   // scaffy:add-block-type Expandable MARK:js-map-expandable

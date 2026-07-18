@@ -681,6 +681,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     field_row(b, format_datetime(Map.get(b, "value", "")), style)
   end
 
+  # field-number (B085): the MISSING numeric field atom. `min`/`max`/`step`
+  # are Edit-mode control bounds (E4a, the STUDIO-EDIT surcharge, out of
+  # View's scope) — never read here. View renders the formatted `value` (an
+  # integer drops its decimal point, `Float.to_string/1` gives the shortest
+  # round-trip decimal for a fraction) plus an optional trailing `unit`; an
+  # absent/uncoercible value is the field-reference "—" precedent.
+  def compose_block(%{"type" => "field-number"} = b, style) do
+    field_row(b, field_number_text(b), style)
+  end
+
   def compose_block(%{"type" => "field-color"} = b, :article) do
     hex = field_value_text(b)
 
@@ -1212,6 +1222,152 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # scaffy:add-block-type Tabs MARK:ex-compose-tabs
+  # tabs (B052): tabbed panels of child blocks, switched in the browser — I1
+  # dual hydration (client.ts + the PaperMermaid-sibling hook in
+  # bulldocs.html.heex do the framework-free DOM-scan click wiring; this
+  # clause only paints the shell). Each tab's `blocks` recurse through the
+  # SAME `render_blocks/2` bridge terminal/columns use. NO-JS DEGRADE = every
+  # panel stacked and visible — the server HTML never hides a panel;
+  # hydration is what adds `hidden` to every non-active one post-mount.
+  # Article: tab strip (role=tablist) + every panel. Email/default: no dead
+  # tab strip — stacked panels under a plain label heading (same degrade
+  # shape as `code-tabs`). Empty `tabs` composes to "" (the `video`
+  # src-less precedent).
+  def compose_block(%{"type" => "tabs"} = b, :article) do
+    tabs = tab_entries(b)
+
+    if tabs == [] do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      strip =
+        tabs
+        |> Enum.with_index()
+        |> Enum.map_join(fn {t, i} ->
+          active_class = if i == 0, do: " bp-tabs__tab--active", else: ""
+
+          ~s(<button type="button" class="bp-tabs__tab#{active_class}" role="tab" ) <>
+            ~s(aria-selected="#{i == 0}" data-tab-index="#{i}">#{Util.escape_html(t.label)}</button>)
+        end)
+
+      panels =
+        tabs
+        |> Enum.with_index()
+        |> Enum.map_join(fn {t, i} ->
+          ~s(<div class="bp-tabs__panel" data-tab-index="#{i}">) <>
+            render_blocks(t.blocks, :article) <> ~s(</div>)
+        end)
+
+      %{
+        "kind" => "_raw",
+        "html" =>
+          ~s(<div class="bp-tabs"><div class="bp-tabs__strip" role="tablist">#{strip}</div>) <>
+            ~s(<div class="bp-tabs__panels">#{panels}</div></div>)
+      }
+    end
+  end
+
+  def compose_block(%{"type" => "tabs"} = b, style) do
+    tabs = tab_entries(b)
+
+    if tabs == [] do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      sections =
+        Enum.map_join(tabs, fn t ->
+          ~s(<div class="bp-tabs__section"><p class="bp-tabs__label">#{Util.escape_html(t.label)}</p>) <>
+            render_blocks(t.blocks, style) <> ~s(</div>)
+        end)
+
+      %{"kind" => "_raw", "html" => ~s(<div class="bp-tabs">#{sections}</div>)}
+    end
+  end
+
+  # scaffy:add-block-type CodeTabs MARK:ex-compose-code-tabs
+  # code-tabs (B077): one snippet per language, tab-switched in the browser —
+  # I1 dual hydration (client.ts + the PaperMermaid-sibling hook in
+  # bulldocs.html.heex do the framework-free DOM-scan click wiring; this
+  # clause only paints the shell). NO-JS DEGRADE = every panel stacked and
+  # visible — the server HTML never hides a panel; hydration is what adds
+  # `hidden` to every non-active one post-mount, so a JS-less client (or a
+  # client mid-hydration) reads every snippet, never a blank tab. `syncKey`
+  # (optional) rides a `data-sync-key` attribute the hook keys a localStorage
+  # choice on, so picking "Go" once switches every code-tabs block sharing
+  # the key (the "choose npm once" pitch) — inert here, read only client-side.
+  # Article: tab strip (role=tablist) + every panel via the SAME
+  # Figures.code_block_html/1 the standalone `code` block uses (inline-styled,
+  # so it needs no stylesheet — reused verbatim for the email leg too).
+  # Email/default: no dead tab strip (nothing would ever switch it) — stacked
+  # panels under a plain label heading, matching the `tabs` block's degrade.
+  # Empty `tabs` composes to "" (the `video` src-less precedent).
+  def compose_block(%{"type" => "code-tabs"} = b, :article) do
+    tabs = code_tab_entries(b)
+
+    if tabs == [] do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      sync_attr =
+        case b |> Map.get("syncKey", "") |> stringish() do
+          "" -> ""
+          key -> ~s( data-sync-key="#{Util.escape_attr(key)}")
+        end
+
+      strip =
+        tabs
+        |> Enum.with_index()
+        |> Enum.map_join(fn {t, i} ->
+          active_class = if i == 0, do: " bp-code-tabs__tab--active", else: ""
+
+          ~s(<button type="button" class="bp-code-tabs__tab#{active_class}" role="tab" ) <>
+            ~s(aria-selected="#{i == 0}" data-lang="#{Util.escape_attr(t.language)}">) <>
+            ~s(#{Util.escape_html(t.label)}</button>)
+        end)
+
+      panels =
+        Enum.map_join(tabs, fn t ->
+          ~s(<div class="bp-code-tabs__panel" data-lang="#{Util.escape_attr(t.language)}">) <>
+            Figures.code_block_html(t.value) <> ~s(</div>)
+        end)
+
+      %{
+        "kind" => "_raw",
+        "html" =>
+          ~s(<div class="bp-code-tabs"#{sync_attr}>) <>
+            ~s(<div class="bp-code-tabs__strip" role="tablist">#{strip}</div>) <>
+            ~s(<div class="bp-code-tabs__panels">#{panels}</div></div>)
+      }
+    end
+  end
+
+  def compose_block(%{"type" => "code-tabs"} = b, _style) do
+    tabs = code_tab_entries(b)
+
+    if tabs == [] do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      panels =
+        Enum.map_join(tabs, fn t ->
+          ~s(<div class="bp-code-tabs__panel">) <>
+            ~s(<p class="bp-code-tabs__label">#{Util.escape_html(t.label)}</p>) <>
+            Figures.code_block_html(t.value) <> ~s(</div>)
+        end)
+
+      %{"kind" => "_raw", "html" => ~s(<div class="bp-code-tabs">#{panels}</div>)}
+    end
+  end
+
+  # scaffy:add-block-type ApiEndpoint MARK:ex-compose-api-endpoint
+  # api-endpoint (B075): endpoint doc card — a method badge + path line, then
+  # a params table (name/in/type/required). STATIC across every style (dev &
+  # code cost tier, D4): the same `_raw` HTML serves View, article, and email
+  # alike — no client JS, no email degrade badge needed. An endpoint with no
+  # method and no path composes to "" (the `video` src-less precedent);
+  # method/path/param fields all flow through Util.escape_html so an author
+  # string can never break out of the wrapper.
+  def compose_block(%{"type" => "api-endpoint"} = b, _style) do
+    %{"kind" => "_raw", "html" => api_endpoint_html(b)}
+  end
+
   # scaffy:add-block-type Video MARK:ex-compose-video
   # video (B062): plain <video> file block — native browser element, zero
   # client JS. An asset-less video (no `src`) composes to "" (the `image`
@@ -1506,6 +1662,59 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => ~s(<div class="bp-unknown-block">) <> label <> "</div>"}
   end
 
+  # api-endpoint (B075) helpers — method badge + path + params table.
+  defp api_endpoint_html(b) do
+    method = b |> Map.get("method", "") |> stringish() |> String.upcase()
+    path = b |> Map.get("path", "") |> stringish()
+
+    if method == "" and path == "" do
+      ""
+    else
+      method_class = "bp-api-endpoint__method--" <> String.downcase(method)
+
+      head =
+        ~s(<div class="bp-api-endpoint__head">) <>
+          ~s(<span class="bp-api-endpoint__method #{method_class}">#{Util.escape_html(method)}</span>) <>
+          ~s(<code class="bp-api-endpoint__path">#{Util.escape_html(path)}</code>) <>
+          ~s(</div>)
+
+      ~s(<div class="bp-api-endpoint">) <> head <> api_endpoint_params_html(b) <> ~s(</div>)
+    end
+  end
+
+  defp api_endpoint_params_html(b) do
+    params = Map.get(b, "params", []) |> List.wrap()
+
+    if params == [] do
+      ""
+    else
+      rows = params |> Enum.map(&api_endpoint_param_row_html/1) |> Enum.join()
+
+      ~s(<table class="bp-api-endpoint__params">) <>
+        ~s(<thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead>) <>
+        ~s(<tbody>#{rows}</tbody></table>)
+    end
+  end
+
+  defp api_endpoint_param_row_html(param) when is_map(param) do
+    name = param |> Map.get("name", "") |> stringish()
+    in_ = param |> Map.get("in", "") |> stringish()
+    type = param |> Map.get("type", "") |> stringish()
+    required = api_endpoint_required?(Map.get(param, "required"))
+
+    ~s(<tr><td>#{Util.escape_html(name)}</td><td>#{Util.escape_html(in_)}</td>) <>
+      ~s(<td>#{Util.escape_html(type)}</td><td>#{if required, do: "Yes", else: "No"}</td></tr>)
+  end
+
+  defp api_endpoint_param_row_html(_), do: ""
+
+  defp api_endpoint_required?(true), do: true
+
+  defp api_endpoint_required?(v) when is_binary(v),
+    do: String.downcase(String.trim(v)) == "true"
+
+  defp api_endpoint_required?(_), do: false
+
   # Clamp a heading level to 1..3; default to 2 when absent/out of range.
   defp heading_level(l) when l in [1, 2, 3], do: l
   defp heading_level("1"), do: 1
@@ -1722,6 +1931,44 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp field_value_text(b), do: stringish(Map.get(b, "value", ""))
 
+  # field-number (B085) value text: the formatted number + optional unit
+  # suffix, or "—" for an absent/uncoercible value (the field-reference
+  # empty-value precedent).
+  defp field_number_text(b) do
+    case field_number_value(Map.get(b, "value")) do
+      nil -> "—"
+      n -> format_field_number(n) <> field_number_unit_suffix(b)
+    end
+  end
+
+  defp field_number_value(n) when is_number(n), do: n
+
+  defp field_number_value(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp field_number_value(_), do: nil
+
+  defp format_field_number(n) when is_integer(n), do: Integer.to_string(n)
+
+  defp format_field_number(n) when is_float(n) do
+    if n == Float.round(n, 0) do
+      n |> trunc() |> Integer.to_string()
+    else
+      Float.to_string(n)
+    end
+  end
+
+  defp field_number_unit_suffix(b) do
+    case b |> Map.get("unit", "") |> stringish() |> String.trim() do
+      "" -> ""
+      unit -> " " <> unit
+    end
+  end
+
   # field-color swatch (non-article). The swatch BORDER is the one baked colour
   # compose emits (was the compile-time @rule); it now resolves per theme
   # (charter D28). Evergreen keeps the byte-exact email rule.
@@ -1825,6 +2072,40 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # un-folded callout stays byte-identical even after a re-save).
   defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
   defp maybe_put_true(map, _key, _value), do: map
+
+  # tabs (B052) entries: {label, blocks} objects off the `tabs` array,
+  # non-object entries dropped. `blocks` stays a raw list — render_blocks/2
+  # (called at each compose_block/2 leg, article/email) does the recursion.
+  defp tab_entries(b) do
+    b
+    |> Map.get("tabs", [])
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn t ->
+      %{
+        label: t |> Map.get("label", "") |> stringish(),
+        blocks: t |> Map.get("blocks", []) |> List.wrap()
+      }
+    end)
+  end
+
+  # code-tabs (B077) tab entries: {label, language, value} objects off the
+  # `tabs` array, non-object entries dropped. `value` is the documented field
+  # name; `code` is tolerated too (the standalone `code` block's own
+  # value||code duality — a raw mutate authored either shape).
+  defp code_tab_entries(b) do
+    b
+    |> Map.get("tabs", [])
+    |> List.wrap()
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn t ->
+      %{
+        label: t |> Map.get("label", "") |> stringish(),
+        language: t |> Map.get("language", "") |> stringish(),
+        value: stringish(Map.get(t, "value") || Map.get(t, "code", ""))
+      }
+    end)
+  end
 
   # ── generic figure HTML emission (compose + walk bridge) ───────────────────
   # Generic figure: a composed child block + caption. nil child → caption only.

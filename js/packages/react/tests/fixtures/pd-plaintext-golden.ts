@@ -73,6 +73,9 @@ export const PROSE_GOLDEN: Record<string, string> = {
     '├── components.ex ● diff_html/1 + filetree_html/1\n' +
     '├── compose.ex ○ grew the diff + filetree clauses\n' +
     '└── starter_stub.ex ✕ removed',
+  // grown (pbw-stier-tabs): each tab's label + its nested blocks' prose, the
+  // `steps` precedent (a tab is a titled panel, same shape as a step)
+  tabs: 'macOS\n\nbrew install barkpark\n\nLinux\n\ncurl -fsSL install.sh | sh',
 }
 
 /**
@@ -88,6 +91,10 @@ export const PROSE_GOLDEN: Record<string, string> = {
  * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
  */
 export const TEXTLESS_SKIP: Record<string, string> = {
+  // scaffy:add-block-type CodeTabs MARK:plaintext-skip-code-tabs
+  'code-tabs': 'per-language code snippets behind a tab switcher — chrome/UI, no reading-flow prose (same textless family as code/terminal)',
+  // scaffy:add-block-type ApiEndpoint MARK:plaintext-skip-api-endpoint
+  'api-endpoint': 'structured endpoint card — method/path/params table, no reading-flow prose (same textless family as table/sheet)',
   // scaffy:add-block-type Video MARK:plaintext-skip-video
   'video': 'media embed — a native <video> file, no reading-flow prose (same textless family as image/asciicast)',
   // scaffy:add-block-type CriteriaProgress MARK:plaintext-skip-criteria-progress

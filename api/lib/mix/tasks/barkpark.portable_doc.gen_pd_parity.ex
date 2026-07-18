@@ -16,10 +16,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   ## The 46 in-scope types (charter D7)
 
-  `compose.ex` dispatches 60 distinct block types (incl. the 3 interactive chat
+  `compose.ex` dispatches 61 distinct block types (incl. the 3 interactive chat
   cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
-  #3670). The 14 schema-field/embed types
-  (`field-{string,slug,text,boolean,select,datetime,color,reference,image}`,
+  #3670). The 15 schema-field/embed types
+  (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
   `composite`, `arrayOf`, `codelist`, `localizedText`, `embed`) are OUT — they have
   zero web-fork seed, are schema-editor renderers not blog grammar, and are never
   named in the wish. The remaining 46 ARE the kitchen-sink array. BOTH members of
@@ -79,6 +79,48 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
+    # scaffy:add-block-type Tabs MARK:parity-input-tabs
+    "tabs" => %{
+      "type" => "tabs",
+      "tabs" => [
+        %{
+          "label" => "macOS",
+          "blocks" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "brew install barkpark"}]
+            }
+          ]
+        },
+        %{
+          "label" => "Linux",
+          "blocks" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "curl -fsSL install.sh | sh"}]
+            }
+          ]
+        }
+      ]
+    },
+    # scaffy:add-block-type CodeTabs MARK:parity-input-code-tabs
+    "code-tabs" => %{
+      "type" => "code-tabs",
+      "syncKey" => "lang",
+      "tabs" => [
+        %{"label" => "JS", "language" => "js", "value" => "console.log(1)"},
+        %{"label" => "Go", "language" => "go", "value" => "fmt.Println(1)"}
+      ]
+    },
+    # scaffy:add-block-type ApiEndpoint MARK:parity-input-api-endpoint
+    "api-endpoint" => %{
+      "type" => "api-endpoint",
+      "method" => "POST",
+      "path" => "/v1/data/mutate",
+      "params" => [
+        %{"name" => "dataset", "in" => "path", "type" => "string", "required" => true}
+      ]
+    },
     # scaffy:add-block-type Video MARK:parity-input-video
     "video" => %{
       "type" => "video",
@@ -554,12 +596,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "status-legend" => %{"type" => "status-legend"}
   }
 
-  # The 14 schema-field/embed types cut by charter D7 — the ONE lever a later wave
+  # The 15 schema-field/embed types cut by charter D7 — the ONE lever a later wave
   # edits to pull the field-* set back into scope. Kept here as the executable
   # counterpart of the bash guard's `excluded` list (asserted equal in the test).
   @excluded ~w(
     field-string field-slug field-text field-boolean field-select field-datetime
-    field-color field-reference field-image composite arrayOf codelist localizedText embed
+    field-color field-reference field-image field-number composite arrayOf codelist localizedText embed
   )
 
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.
