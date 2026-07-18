@@ -790,6 +790,11 @@ if [ "$MODE" = rollback ]; then
   do_rollback; rc=$?
   [ "$rc" -eq 0 ] || exit "$rc"
   do_retire
+  # Machine contract (see header): exit 0 prints TARGET_BUILD= so the CLI AND the
+  # systemd-mode runner finalizer (which has no exit code) can name the release now
+  # serving. The preflight already prints it; the real flip must too, or a
+  # successful rollback reports an EMPTY build_id up the chain.
+  echo "TARGET_BUILD=$(live_build)"
   log "ROLLED BACK — '$SITE_SLUG' now at $(live_build)"
   exit 0
 fi
