@@ -16,6 +16,10 @@ if [[ " $* " == *" search query "* ]]; then
   exit 0
 fi
 if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
+  if [[ "${BP_FIXTURE_WIDE:-}" == "1" ]]; then
+    printf '%081d\n' 0
+    exit 0
+  fi
   printf 'readable\n'
   exit 0
 fi
@@ -52,8 +56,26 @@ chmod +x "$tmp/fake-bp" "$tmp/curl"
 PATH="$tmp:$PATH" BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
   "$repo/scripts/audit-paper-readers.sh" >"$tmp/result.json"
 
-jq -e '.ok and .inventory == 2 and .audited == 2 and .passed == 2 and .failed == 0' \
+jq -e '
+  .ok and .inventory == 2 and .audited == 2 and .passed == 2 and .failed == 0 and
+  .inventory_ids == ["blocks-paper", "html-paper"] and
+  (.inventory_digest | test("^[0-9a-f]{64}$")) and
+  (.results | length == 2) and
+  all(.results[]; .tui.max_display_width <= 80 and .tui.overflow_lines == 0)
+' \
   "$tmp/result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_WIDE=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/wide-result.json"; then
+  printf 'wide TUI output unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[]; .tui.max_display_width == 81 and .tui.overflow_lines == 1)
+' "$tmp/wide-result.json" >/dev/null
 
 if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \

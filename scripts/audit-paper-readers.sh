@@ -10,7 +10,7 @@ project="${BP_AUDIT_PROJECT:-default}"
 dataset="${BP_AUDIT_DATASET:-production}"
 bp_bin="${BP_AUDIT_BIN:-bp}"
 
-for required in jq curl "$bp_bin"; do
+for required in jq curl go shasum "$bp_bin"; do
   command -v "$required" >/dev/null || {
     jq -n --arg tool "$required" '{ok:false,error:"missing required command",tool:$tool}'
     exit 2
@@ -22,6 +22,11 @@ trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 inventory="$tmp/inventory.json"
 results="$tmp/results.jsonl"
 touch "$results"
+
+if ! go build -o "$tmp/widthcheck" ./internal/pdrender/cmd/widthcheck; then
+  jq -n '{ok:false,error:"terminal width checker build failed"}'
+  exit 2
+fi
 
 if ! "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
   search query '*' --type paper --perspective published --all -o json >"$inventory"; then
@@ -38,6 +43,9 @@ if ! jq -e '
 fi
 
 inventory_count="$(jq '.documents | length' "$inventory")"
+inventory_ids="$tmp/inventory-ids.json"
+jq -c '[.documents[]._id] | sort' "$inventory" >"$inventory_ids"
+inventory_digest="$(shasum -a 256 "$inventory_ids" | awk '{print $1}')"
 if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
   if ! [[ "$BP_AUDIT_EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || ((inventory_count != BP_AUDIT_EXPECTED_COUNT)); then
     jq -n \
@@ -76,9 +84,18 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     fi
   fi
 
-  cli_ok=false
+  cli_reader_ok=false
   "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && cli_ok=true
+    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && \
+    [[ -s "$tmp/cli" ]] && cli_reader_ok=true
+
+  tui_metrics="$("$tmp/widthcheck" "$tmp/cli" 80)"
+  tui_max_display_width="$(jq -r '.max_display_width' <<<"$tui_metrics")"
+  tui_overflow_lines="$(jq -r '.overflow_lines' <<<"$tui_metrics")"
+  cli_ok=false
+  if [[ "$cli_reader_ok" == true && "$tui_overflow_lines" == "0" ]]; then
+    cli_ok=true
+  fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
   ok=false
@@ -95,21 +112,27 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     --argjson email_bytes "$email_bytes" \
     --argjson source_ok "$source_ok" \
     --argjson cli_ok "$cli_ok" \
+    --argjson tui_max_display_width "$tui_max_display_width" \
+    --argjson tui_overflow_lines "$tui_overflow_lines" \
     --argjson ok "$ok" \
-    '{id:$id,ok:$ok,gui:{status:$gui_code},email:{status:$email_code,bytes:$email_bytes},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok}}' \
+    '{id:$id,ok:$ok,gui:{status:$gui_code},email:{status:$email_code,bytes:$email_bytes},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
     >>"$results"
 done
 
-jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" '
+jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" \
+  --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" '
   {
     ok: (length == $inventory and all(.[]; .ok)),
     server: $server,
     base_url: $base,
     inventory: $inventory,
+    inventory_ids: $inventory_ids[0],
+    inventory_digest: $inventory_digest,
     audited: length,
     passed: map(select(.ok)) | length,
     failed: map(select(.ok | not)) | length,
-    failures: map(select(.ok | not))
+    failures: map(select(.ok | not)),
+    results: .
   }
 ' "$results"
 
