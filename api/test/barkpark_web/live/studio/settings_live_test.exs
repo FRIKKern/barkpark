@@ -745,16 +745,14 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     })
   end
 
-  # ── Chat execution profile toggle (connectors W23-2, D207/D211) ─────────
+  # ── Chat execution profile toggle (connectors W23-2, D207/D211 → W26) ────
   #
-  # The write surface for the per-workspace chat execution profile. The point
-  # of this slice is the PER-WRITE `workspace_admin?/2` re-gate: D207 proved the
-  # mount gate is a GLOBAL-permission admin check that does NOT enforce admin OF
-  # THE TARGET workspace, so a read-member holding the flat global admin perm
-  # mounts the panel — and must still be REFUSED the write. These tests never
-  # name a case after "admin of the target workspace" being enforced at mount
-  # (D207 naming ban) and never re-clone the vacuous forged-ws SCOPE tests (those
-  # are caught by `guard_bound_ws/3` before the re-gate ever runs).
+  # The write surface for the per-workspace chat execution profile. W23-2
+  # added the PER-WRITE `workspace_admin?/2` re-gate because the mount gate was
+  # a GLOBAL-permission admin check (D207). W26 fixed the mount gate itself
+  # (`LiveAuth.:scoped_admin` authorizes against the TARGET workspace), so the
+  # flat-global-admin read-member is now rejected AT MOUNT — the per-write
+  # re-gate stays in the LV as belt-and-suspenders behind it.
   describe "chat execution profile toggle (W23-2)" do
     setup do
       # Two tokens, BOTH holding the flat global admin permission so BOTH clear
@@ -799,23 +797,19 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ ~s(data-execution-profile="self_hosted")
     end
 
-    test "REFUSED: a mount-gate-passing read-member (not an owner/admin of the workspace) cannot flip the profile — nothing is written",
+    test "REJECTED AT MOUNT (W26): a flat-global-admin read-member of the target workspace never reaches the panel — nothing is written",
          %{conn: conn, ws: ws, proj: proj} do
-      # The outsider holds the flat global admin perm (mount gate passes) and is
-      # a read-member of the target (LiveScope resolves), and fires the toggle
-      # with the CORRECT bound ws id — so `guard_bound_ws/3` PASSES too. The only
-      # thing standing between it and the write is the per-write re-gate; remove
-      # the re-gate and this test writes "cloud" and the unchanged-assertion reds.
+      # The outsider holds the flat global admin perm — the shape that mounted
+      # this panel pre-W26 and was only stopped by the per-write re-gate. The
+      # `:scoped_admin` mount gate now refuses it outright: no view exists to
+      # fire the toggle at, and nothing is ever written.
       conn = init_test_session(conn, %{"api_token" => "ep-outsider-raw"})
-      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
 
-      html = render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
-
-      assert html =~ "owner or admin of this workspace"
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, ep_settings_url(ws, proj))
 
       assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id)) ==
                %{},
-             "a non-admin toggle must not persist any chat settings"
+             "a non-admin mount must not persist any chat settings"
     end
 
     test "happy path: an owner/admin of the workspace flips to cloud, it persists, and theme + plugin keys survive the merge",
