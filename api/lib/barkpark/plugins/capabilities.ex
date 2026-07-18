@@ -230,6 +230,7 @@ defmodule Barkpark.Plugins.Capabilities do
       "commands" => core_commands ++ plugin_commands
     }
     |> maybe_put_build(caller_tier, opts)
+    |> maybe_gate_views(opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
   end
 
@@ -247,6 +248,47 @@ defmodule Barkpark.Plugins.Capabilities do
     else
       manifest
     end
+  end
+
+  # The frozen command-level `views` descriptor (wave axi-brief-views): the
+  # commands that support a token-thrifty brief projection (task.ready,
+  # task.prime, search.query) DECLARE it inline in their command maps, but the
+  # key is STRICTLY OPT-IN on the wire (`include_views: true`, wired from
+  # `?views=1`) for the same reason `build` is: every released bp binary parses
+  # the manifest with DisallowUnknownFields, which recurses into each Command,
+  # so an unconditional new command-level key would brick every CLI already in
+  # the wild. Without the opt-in we strip every declared `views` key back out,
+  # yielding a body byte-identical to the pre-views contract (etag included).
+  # The descriptor shape (`supported`/`default`/`default_for_agents`) is frozen
+  # for this wave — see `agent_views_descriptor/0`.
+  defp maybe_gate_views(manifest, opts) do
+    if Keyword.get(opts, :include_views, false) do
+      manifest
+    else
+      Map.update(manifest, "commands", [], fn commands ->
+        Enum.map(commands, &Map.delete(&1, "views"))
+      end)
+    end
+  end
+
+  @doc """
+  The frozen command-level `views` descriptor a command declares when it
+  supports the brief/full projection (wave axi-brief-views): brief is the
+  token-thrifty card an agent gets by default; full is the escape hatch a human
+  gets by default. Commands WITHOUT this descriptor are full-only forever
+  (task.get / `bp task show` intentionally omit it — they ARE the escape hatch).
+
+  Kept as a single source of truth so the tasks plugin (`task.ready`,
+  `task.prime`) and the core `search.query` command declare the byte-identical
+  shape; the contract test pins all three to this map.
+  """
+  @spec agent_views_descriptor() :: map()
+  def agent_views_descriptor do
+    %{
+      "supported" => ["brief", "full"],
+      "default" => "full",
+      "default_for_agents" => "brief"
+    }
   end
 
   # Map each plugin's declared noun(s) → plugin name, for provenance stamping.
@@ -1188,6 +1230,10 @@ defmodule Barkpark.Plugins.Capabilities do
         ],
         paginated: true,
         default_output: "table",
+        # Supports the brief/full projection (R3): agents get token-thrifty hit
+        # cards by default, humans get the full envelope. Emitted only under
+        # ?views=1 (maybe_gate_views strips it otherwise).
+        views: agent_views_descriptor(),
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -2173,6 +2219,12 @@ defmodule Barkpark.Plugins.Capabilities do
     base =
       case Keyword.fetch(opts, :set_key) do
         {:ok, key} -> Map.put(base, "set_key", key)
+        :error -> base
+      end
+
+    base =
+      case Keyword.fetch(opts, :views) do
+        {:ok, views} -> Map.put(base, "views", views)
         :error -> base
       end
 

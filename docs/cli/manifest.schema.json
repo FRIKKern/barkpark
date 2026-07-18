@@ -280,6 +280,41 @@
           "type": "string",
           "minLength": 1,
           "description": "OPTIONAL (additive). The manifest/api version in which this command first appeared — used for version gating so a CLI can tell when a command is too new for the server it is pointed at. Free string, NOT in the required list."
+        },
+        "views": {
+          "$ref": "#/$defs/views",
+          "description": "OPTIONAL (additive). Present ONLY when this command supports a brief/full projection (a token-thrifty card vs the full envelope) AND the caller opted in via ?views=1. Absence means the command is full-only. NOT in the required list — released CLIs that predate views still validate because the server withholds the key unless ?views=1 is sent (opt-in, mirroring `build`)."
+        }
+      }
+    },
+    "views": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "default",
+        "default_for_agents"
+      ],
+      "description": "A command's brief/full projection descriptor. The server emits this ONLY under ?views=1 (opt-in), so a stale CLI that strict-decodes each command never sees an unknown key. A consuming client picks `default_for_agents` when it is an automated caller (bp resolving a piped/JSON default, the MCP bridge), else `default`; it appends the chosen name as ?view=<name> on the command's request.",
+      "properties": {
+        "supported": {
+          "type": "array",
+          "description": "The view names this command accepts on ?view=. Frozen for the axi-brief-views wave as [\"brief\",\"full\"].",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The view a human/default caller gets when no ?view= is sent (\"full\")."
+        },
+        "default_for_agents": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The view an automated caller SHOULD request (\"brief\") — the token-thrifty projection."
         }
       }
     },

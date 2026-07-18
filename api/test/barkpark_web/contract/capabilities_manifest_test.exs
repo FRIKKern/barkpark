@@ -45,6 +45,14 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     manifest["commands"] |> Enum.find(&(&1["id"] == id))
   end
 
+  # Raw request → the conn, so a test can read both the decoded body and the
+  # `etag` response header / raw bytes off the same response.
+  defp caps_conn(conn, query \\ "") do
+    conn
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> get("/v1/capabilities" <> query)
+  end
+
   describe "doc.query manifest contract (BUG 1)" do
     test "doc.query flag is named 'filter', not 'query'", %{conn: conn} do
       manifest = capabilities(conn)
@@ -941,6 +949,153 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert manifest["server"] |> Map.keys() |> Enum.sort() == @server_keys,
              "server envelope keys drifted: #{inspect(Map.keys(manifest["server"]))}"
+    end
+  end
+
+  describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
+    # The commands that support the brief/full projection.
+    @views_commands ~w(task.ready task.prime search.query)
+    @frozen_views %{
+      "supported" => ["brief", "full"],
+      "default" => "full",
+      "default_for_agents" => "brief"
+    }
+
+    # Opt-in by contract, exactly like ?build=1: released bp binaries
+    # strict-decode the manifest with DisallowUnknownFields, which recurses
+    # into each Command — so the DEFAULT response must NEVER grow a new
+    # command-level key. ?views=1 is the escape hatch new clients use.
+    test "default manifest declares NO `views` key on ANY command (old-CLI compatibility)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      leaked =
+        manifest["commands"]
+        |> Enum.filter(&Map.has_key?(&1, "views"))
+        |> Enum.map(& &1["id"])
+
+      assert leaked == [],
+             "default manifest leaked a command-level `views` key on: #{inspect(leaked)} — " <>
+               "it must be withheld unless ?views=1 is sent"
+    end
+
+    test "?views=1 declares the frozen `views` descriptor on exactly the three brief-capable commands",
+         %{conn: conn} do
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      for id <- @views_commands do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+
+        assert cmd["views"] == @frozen_views,
+               "#{id} views descriptor drifted from the frozen shape; got: #{inspect(cmd["views"])}"
+      end
+
+      # No OTHER command grows a views key — the three are the whole set.
+      declaring =
+        manifest["commands"]
+        |> Enum.filter(&Map.has_key?(&1, "views"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert declaring == Enum.sort(@views_commands),
+             "views key appeared on unexpected commands: #{inspect(declaring)}"
+    end
+
+    test "task.get NEVER declares `views` — it is the full-only escape hatch", %{conn: conn} do
+      # Both with and without the opt-in, task.get must stay views-free.
+      default = capabilities(conn)
+
+      opted =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      for manifest <- [default, opted] do
+        cmd = find_cmd(manifest, "task.get")
+        assert cmd != nil, "task.get not found in manifest"
+        refute Map.has_key?(cmd, "views"), "task.get must never declare a views key"
+      end
+    end
+
+    test "views and non-views bodies get DISTINCT etags (no 304 cross-contamination)",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      with_views = caps_conn(conn, "?views=1")
+
+      plain_etag = plain |> get_resp_header("etag") |> List.first()
+      views_etag = with_views |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and plain_etag != ""
+      assert is_binary(views_etag) and views_etag != ""
+
+      assert plain_etag != views_etag,
+             "views and non-views manifests must have distinct etags (content-addressed body)"
+
+      # The body echoes the same etag the header carries.
+      assert json_response(plain, 200)["etag"] == plain_etag
+      assert json_response(with_views, 200)["etag"] == views_etag
+    end
+
+    test "manifest.schema.json wires `views` as an ADDITIVE optional command-level $def", %{
+      conn: conn
+    } do
+      # The CLI manifest schema is JSON-Schema draft 2020-12, which the pinned
+      # ex_json_schema (draft 4/6/7 only) cannot resolve — so this grounds the
+      # contract STRUCTURALLY: the additive `views` $def exists with the frozen
+      # required keys, the `command` object references it as a property, and it
+      # is NOT in the command required[] (so a views-ABSENT manifest still
+      # validates while a views-PRESENT one is modeled).
+      schema_path =
+        Path.expand(Path.join([File.cwd!(), "..", "docs", "cli", "manifest.schema.json"]))
+
+      schema = schema_path |> File.read!() |> Jason.decode!()
+
+      views_def = get_in(schema, ["$defs", "views"])
+      assert is_map(views_def), "manifest.schema.json is missing the $defs.views definition"
+      assert views_def["additionalProperties"] == false, "views $def must be strict"
+
+      assert Enum.sort(views_def["required"]) == ["default", "default_for_agents", "supported"],
+             "views $def required keys drifted: #{inspect(views_def["required"])}"
+
+      command = get_in(schema, ["$defs", "command"])
+
+      assert get_in(command, ["properties", "views", "$ref"]) == "#/$defs/views",
+             "command object must reference #/$defs/views as a property"
+
+      refute "views" in command["required"],
+             "`views` must NOT be in command.required[] — it is opt-in additive"
+
+      # Runtime cross-check: a views-PRESENT command matches the $def's frozen
+      # required-key set exactly (strict additionalProperties:false).
+      with_views =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      views = find_cmd(with_views, "task.ready")["views"]
+      assert Enum.sort(Map.keys(views)) == ["default", "default_for_agents", "supported"]
+    end
+
+    test "an If-None-Match with the NON-views etag does NOT 304 the ?views=1 body", %{conn: conn} do
+      plain_etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      # Presenting the plain etag against the views request must re-render (200),
+      # never short-circuit to 304 — the bodies differ.
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", plain_etag)
+        |> get("/v1/capabilities?views=1")
+
+      assert resp.status == 200,
+             "the non-views etag must not 304 the views body; got status #{resp.status}"
     end
   end
 end

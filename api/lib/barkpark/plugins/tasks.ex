@@ -510,6 +510,11 @@ defmodule Barkpark.Plugins.Tasks do
         paginated: true,
         dry_run: false,
         default_output: "table",
+        # Supports the brief/full projection (wave axi-brief-views): agents get
+        # a token-thrifty card list by default, humans the full envelope.
+        # Emitted only under ?views=1 — Capabilities.maybe_gate_views strips it
+        # otherwise, so the default wire shape is byte-identical to today.
+        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
         scoped_prefix: nil
       },
       %{
@@ -534,6 +539,10 @@ defmodule Barkpark.Plugins.Tasks do
         paginated: false,
         dry_run: false,
         default_output: "json",
+        # Supports the brief/full projection (wave axi-brief-views): the brief
+        # prime response is the ≤5 KB resume card an agent gets by default.
+        # Emitted only under ?views=1 (Capabilities.maybe_gate_views).
+        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
         scoped_prefix: nil
       },
       %{

@@ -26,6 +26,14 @@ defmodule BarkparkWeb.CapabilitiesController do
     # root keys, so old clients must keep receiving the exact old shape.
     include_build = params["build"] in ["1", "true"]
 
+    # ?views=1 opts in to the command-level "views" descriptor on the commands
+    # that support the brief/full projection (task.ready, task.prime,
+    # search.query). Same opt-in discipline as ?build=1: DisallowUnknownFields
+    # recurses into each Command, so a stale bp would reject an unconditional
+    # command-level key. Without the param the body stays byte-identical to the
+    # pre-views contract (maybe_gate_views strips the declared key).
+    include_views = params["views"] in ["1", "true"]
+
     # base_url must be the host the caller ACTUALLY dialed, not the frozen
     # boot-time PHX_HOST scalar — a custom instance hostname and the canonical
     # FQDN each get their own host back (D4 server-side: one instance, many
@@ -36,7 +44,11 @@ defmodule BarkparkWeb.CapabilitiesController do
     server = %{Capabilities.default_server() | "base_url" => host_base(conn)}
 
     manifest =
-      Capabilities.manifest(caller_tier, include_build: include_build, server: server)
+      Capabilities.manifest(caller_tier,
+        include_build: include_build,
+        include_views: include_views,
+        server: server
+      )
 
     etag = manifest["etag"]
 
