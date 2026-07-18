@@ -117,9 +117,10 @@ MODE=deploy
 case "${1:-}" in
   --rollback)           MODE=rollback ;;
   --rollback-preflight) MODE=preflight ;;
+  --teardown)           MODE=teardown ;;
   --self-test)          MODE=selftest ;;
   "")                   MODE=deploy ;;
-  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight, --self-test)"; exit 2 ;;
+  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight, --teardown, --self-test)"; exit 2 ;;
 esac
 
 # ---------------------------------------------------------------------------
@@ -462,6 +463,54 @@ if [ "$MODE" = selftest ]; then
   check "minified: first marker"             [ "$(meta_value "$MV" bp-build-id)" = x1 ]
   check "minified: middle marker"            [ "$(meta_value "$MV" bp-content-rev)" = x2 ]
   check "minified: last marker"              [ "$(meta_value "$MV" bp-doc-id)" = x3 ]
+
+  # -------------------------------------------------------------------------
+  # TEARDOWN — --teardown excises ONLY this slug's marker-guarded Caddy block
+  # (leaving neighbours + the slot proxy untouched) and deletes its release tree.
+  # Fake caddy/systemctl (validate + reload always OK); real disarm awk + rm.
+  # -------------------------------------------------------------------------
+  echo "[selftest] --teardown removes ONE site's Caddy block + release tree, spares neighbours"
+  TB="$TD/teardown"; mkdir -p "$TB/bin" "$TB/sites/gone/releases/b1"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TB/bin/caddy"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TB/bin/systemctl"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TB/bin/flock"
+  chmod +x "$TB/bin/"*
+  ln -sfn releases/b1 "$TB/sites/gone/current"
+  cat > "$TB/Caddyfile" <<'TCF'
+example.com {
+	# BARKPARK_SITE_ROUTE:keep — static site 'keep'.
+	handle_path /sites/keep/* {
+		root * /x/keep/current
+		file_server
+	}
+	# BARKPARK_SITE_ROUTE:gone — static site 'gone'.
+	handle_path /sites/gone/* {
+		root * /x/gone/current
+		file_server
+	}
+	reverse_proxy localhost:4000
+}
+TCF
+  absent() { ! grep -q "$1" "$2"; }
+  env PATH="$TB/bin:$PATH" SITE_SLUG=gone BARKPARK_SITES_DIR="$TB/sites" \
+    BARKPARK_CADDYFILE="$TB/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TB/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TB/cflock" \
+    bash "$SELF" --teardown > "$TB/out" 2>&1; tdrc=$?
+  check "teardown exit 0"                        [ "$tdrc" = 0 ]
+  check "teardown printed TORN_DOWN=gone"        grep -q '^TORN_DOWN=gone' "$TB/out"
+  check "teardown deleted the release tree"      [ ! -d "$TB/sites/gone" ]
+  check "teardown removed the 'gone' Caddy block" absent 'BARKPARK_SITE_ROUTE:gone' "$TB/Caddyfile"
+  check "teardown removed gone's handle_path"    absent '/sites/gone/\*' "$TB/Caddyfile"
+  check "teardown KEPT the neighbour 'keep'"     grep -q 'BARKPARK_SITE_ROUTE:keep' "$TB/Caddyfile"
+  check "teardown KEPT the slot reverse_proxy"   grep -q 'reverse_proxy localhost:4000' "$TB/Caddyfile"
+  check "teardown left the Caddyfile brace-balanced" \
+    bash -c "[ \$(grep -c '{' '$TB/Caddyfile') = \$(grep -c '}' '$TB/Caddyfile') ]"
+  echo "[selftest] --teardown is idempotent (a second run finds nothing to do)"
+  env PATH="$TB/bin:$PATH" SITE_SLUG=gone BARKPARK_SITES_DIR="$TB/sites" \
+    BARKPARK_CADDYFILE="$TB/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TB/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TB/cflock" \
+    bash "$SELF" --teardown > "$TB/out2" 2>&1; tdrc2=$?
+  check "second teardown still exit 0 (idempotent)" [ "$tdrc2" = 0 ]
 
   # -------------------------------------------------------------------------
   # HEALTH finder integrity — the gate must refuse a finder build whose seed is
@@ -837,6 +886,63 @@ if [ "$MODE" = rollback ]; then
   # the release now serving (the preflight already prints it; the real flip must too).
   echo "TARGET_BUILD=$(live_build)"
   log "ROLLED BACK — '$SITE_SLUG' now at $(live_build)"
+  exit 0
+fi
+
+# ===========================================================================
+# TEARDOWN (the inverse of a spawn): disarm the site's Caddy route, then delete
+# its release tree — so a `bp cloud site delete` (and every live-proof) can leave
+# NOTHING behind. Idempotent: a missing route or dir is not an error.
+# ===========================================================================
+# Remove THIS slug's marker-guarded Caddy block (the inverse of
+# arm_caddy_site_route): drop every line from the `BARKPARK_SITE_ROUTE:<slug>`
+# marker comment through the closing brace of the `handle[_path]` it introduces —
+# which covers the static `file_server` form AND the node `@matcher`/`redir`/
+# `reverse_proxy` form (all of it sits between the marker and that brace). Same
+# safety as arm: backup + `caddy validate` + reload-or-revert, so a botched
+# removal is REVERTED (the site stays) and never breaks the live FQDN block.
+# Runs under with_caddy_lock (the caller wraps it) — the marker read + rewrite is
+# a read-modify-write another writer must not interleave.
+disarm_caddy_site_route() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
+  local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
+  grep -q "$marker" "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
+  local bak; bak="${CADDYFILE}.bak.teardown.${SITE_SLUG}.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  local tmp; tmp="$(mktemp)"
+  # brace-counted block excision, anchored on the marker (never a global grep).
+  BP_MARK="$marker" awk '
+    BEGIN { m = ENVIRON["BP_MARK"] }
+    !inb && index($0, m) { inb = 1; depth = 0; opened = 0; next }
+    inb {
+      o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
+      if (o > 0) opened = 1
+      if (opened && depth <= 0) inb = 0
+      next
+    }
+    { print }
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+  chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
+  if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+    if systemctl reload caddy 2>/dev/null; then log "disarmed caddy /sites/$SITE_SLUG route"; else log "caddy reload failed (config valid) — /sites/$SITE_SLUG route drops on next reload"; fi
+    rm -f "$bak"
+  else
+    log "caddy validate rejected the /sites/$SITE_SLUG disarm — reverting, Caddy untouched"
+    mv "$bak" "$CADDYFILE"
+  fi
+}
+
+if [ "$MODE" = teardown ]; then
+  setup_caddy_lock   # resolve CADDY_LOCK before with_caddy_lock (deploy does this later)
+  with_caddy_lock disarm_caddy_site_route || true
+  if [ -d "$ROOT" ]; then
+    rm -rf "$ROOT" && log "TORE DOWN — removed release tree $ROOT"
+  else
+    log "teardown: no site dir at $ROOT (already gone)"
+  fi
+  echo "TORN_DOWN=$SITE_SLUG"
   exit 0
 fi
 
