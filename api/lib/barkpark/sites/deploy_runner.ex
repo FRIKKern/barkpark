@@ -100,6 +100,11 @@ defmodule Barkpark.Sites.DeployRunner do
   # probes + Caddy-upstream-flips a node port instead of swapping a symlink.
   @default_node_command {"bash", ["deploy/site-deploy-node.sh"]}
   @default_node_rollback_command {"bash", ["deploy/site-deploy-node.sh", "--rollback"]}
+  # Teardown (the inverse of a spawn): disarm the Caddy route + delete the tree
+  # (node also stops the slots). The engine emits no BPSTAGE — success is a
+  # `TORN_DOWN=<slug>` line in the durable log, finalized like a rollback.
+  @default_teardown_command {"bash", ["deploy/site-deploy.sh", "--teardown"]}
+  @default_node_teardown_command {"bash", ["deploy/site-deploy-node.sh", "--teardown"]}
 
   # The transient-unit launcher + the status/liveness probes. All config-
   # injectable so a test on a systemd-less host can stub the whole path.
@@ -693,6 +698,7 @@ defmodule Barkpark.Sites.DeployRunner do
   # itself with its first BPSTAGE (the fold); a ROLLBACK emits no BPSTAGE, so for
   # it the signal is an empty LOG. Mode-aware so the deploy grace is byte-unchanged.
   defp no_output_yet?(%{mode: :rollback} = manifest), do: empty_log?(manifest)
+  defp no_output_yet?(%{mode: :teardown} = manifest), do: empty_log?(manifest)
   defp no_output_yet?(manifest), do: empty_fold?(manifest)
 
   defp empty_log?(manifest), do: read_log_tail(manifest.log_file) == []
@@ -709,7 +715,18 @@ defmodule Barkpark.Sites.DeployRunner do
   # through the deploy path mislabels every SUCCESSFUL rollback as `stages == []`
   # → `-1` abnormal death, which the CP then reports as `rollback_failed`.
   defp terminal_outcome(:rollback, _stages, log), do: rollback_outcome(log)
+  defp terminal_outcome(:teardown, _stages, log), do: teardown_outcome(log)
   defp terminal_outcome(_deploy, stages, log), do: deploy_outcome(stages, log)
+
+  # TEARDOWN: like a rollback it emits no BPSTAGE — the engine prints a
+  # `TORN_DOWN=<slug>` line to the durable log on success (the disarm/rm is
+  # idempotent, so there is no typed-failure vocabulary). Its presence is exit 0;
+  # a non-empty log without it, or an empty log, is an abnormal end (-1).
+  defp teardown_outcome(log) do
+    if Enum.any?(log, &String.contains?(&1, "TORN_DOWN=")),
+      do: {0, nil},
+      else: {-1, terminal_reason(-1, nil, log)}
+  end
 
   # DEPLOY: a `failed` stage names its typed exit + carries its detail; a clean run
   # that reached SWITCH/RETIRE ok is exit 0; a unit that vanished without emitting a
@@ -909,6 +926,12 @@ defmodule Barkpark.Sites.DeployRunner do
 
   defp command_for(:rollback, _static),
     do: Keyword.get(config(), :rollback_command, @default_rollback_command)
+
+  defp command_for(:teardown, :node),
+    do: Keyword.get(config(), :node_teardown_command, @default_node_teardown_command)
+
+  defp command_for(:teardown, _static),
+    do: Keyword.get(config(), :teardown_command, @default_teardown_command)
 
   defp command_for(_deploy, :node),
     do: Keyword.get(config(), :node_command, @default_node_command)
@@ -1233,7 +1256,7 @@ defmodule Barkpark.Sites.DeployRunner do
       slug: slug,
       build_id: j["build_id"],
       content_rev: j["content_rev"],
-      mode: safe_atom(j["mode"], [:deploy, :rollback], :deploy),
+      mode: safe_atom(j["mode"], [:deploy, :rollback, :teardown], :deploy),
       runtime_target: safe_atom(j["runtime_target"], [:static, :node], :static),
       unit_name: unit,
       status_file: j["status_file"],

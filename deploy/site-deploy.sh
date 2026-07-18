@@ -942,6 +942,9 @@ if [ "$MODE" = teardown ]; then
   else
     log "teardown: no site dir at $ROOT (already gone)"
   fi
+  # Record the outcome where the systemd-mode DeployRunner reads it (no exit code;
+  # a teardown emits no BPSTAGE) so a CP-driven delete finalizes as exit 0.
+  [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf 'TORN_DOWN=%s\n' "$SITE_SLUG" >> "$BARKPARK_SITE_LOG_FILE"
   echo "TORN_DOWN=$SITE_SLUG"
   exit 0
 fi
