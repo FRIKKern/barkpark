@@ -195,6 +195,11 @@ defmodule Barkpark.StudioChat do
       title: s.title,
       title_source: s.title_source,
       status: s.status,
+      # The herd column pair (charter D38/D40): the pill and the needs-you
+      # strip derive from `agent_state`, so omitting it here would silently
+      # feed them the schema default ("idle") for every row.
+      agent_state: s.agent_state,
+      agent_state_at: s.agent_state_at,
       summary: s.summary,
       message_count: s.message_count,
       pending_approvals: s.pending_approvals,
@@ -523,6 +528,36 @@ defmodule Barkpark.StudioChat do
     else
       nil -> {:error, :not_found}
     end
+  end
+
+  @doc """
+  Persist the herd-layer agent state (chat-tui charter D38): the Recorder's
+  flips-only write at its `publish_activity` seam. Its OWN single-round-trip
+  `Repo.update_all` (the `bump_on_append` pattern) — deliberately NEVER part of
+  `append_message`'s transaction, because most flips have no message insert to
+  piggyback on (offline ×3, working-on-init, idle-on-result). A flip is always
+  a fresh heartbeat, so `agent_state_at` stamps alongside (D41h). Returns the
+  `Repo.update_all` result (`{count, nil}`).
+  """
+  @spec set_agent_state(String.t(), String.t(), DateTime.t()) :: {non_neg_integer(), nil}
+  def set_agent_state(session_id, agent_state, now \\ DateTime.utc_now())
+      when agent_state in ["working", "blocked", "idle", "unknown"] do
+    Session
+    |> where([s], s.id == ^session_id)
+    |> Repo.update_all(set: [agent_state: agent_state, agent_state_at: now, updated_at: now])
+  end
+
+  @doc """
+  Heartbeat bump (chat-tui charter D41h): refresh `agent_state_at` WITHOUT
+  touching `agent_state` — no flip happened, the session is just provably
+  alive, so the D42h staleness sweep can tell a long tool call from a dead
+  BEAM. At most every 60s (the Recorder owns the timer), never per-delta.
+  """
+  @spec touch_agent_state_at(String.t(), DateTime.t()) :: {non_neg_integer(), nil}
+  def touch_agent_state_at(session_id, now \\ DateTime.utc_now()) do
+    Session
+    |> where([s], s.id == ^session_id)
+    |> Repo.update_all(set: [agent_state_at: now])
   end
 
   @doc "Persist the opaque provider-native session id once; later changes are rejected."
@@ -1737,6 +1772,7 @@ defmodule Barkpark.StudioChat do
             message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
 
           dec_pending(session_id)
+          unblock_if_resolved(session_id)
           updated
       end
     end)
@@ -1904,6 +1940,24 @@ defmodule Barkpark.StudioChat do
     |> Repo.update_all(inc: [pending_approvals: -1], set: [updated_at: DateTime.utc_now()])
   end
 
+  # The LAST pending ask just resolved: nothing needs the human anymore, so the
+  # persisted herd state flips blocked→working in the SAME transaction (both
+  # Studio's resolve_permission and the /v1/chat approval route funnel through
+  # `update_approval_status/3`). The turn WAS paused mid-flight on the ask, so
+  # "working" is the honest post-answer state; the Recorder's next
+  # `publish_activity` write remains the authority for every later transition
+  # (it re-asserts working idempotently on the next frame). Guarded twice:
+  # only a `blocked` row, and only once the pending counter reaches zero — a
+  # session with a second ask still pending stays honestly blocked.
+  defp unblock_if_resolved(session_id) do
+    now = DateTime.utc_now()
+
+    Session
+    |> where([s], s.id == ^session_id)
+    |> where([s], s.pending_approvals == 0 and s.agent_state == "blocked")
+    |> Repo.update_all(set: [agent_state: "working", agent_state_at: now, updated_at: now])
+  end
+
   # ---------------------------------------------------------------------------
   # the needs-you strip (wave 12 — sidebar inbox; kinds documented in @moduledoc)
   # ---------------------------------------------------------------------------
@@ -2020,18 +2074,18 @@ defmodule Barkpark.StudioChat do
 
   `pending_roles` is this session's pending ask roles (`pending_ask_roles/1`);
   `activity` is its live overlay entry or nil. The overlay only ADDS liveness
-  (`:working`/`:needs_you` between store writes) — the persisted row alone
-  yields the same kinds on a cold mount.
+  (`:working`/`:needs_you` between store reads) — the persisted `agent_state`
+  column (herd wave 1, charter D38/D40) alone yields the same kinds on a cold
+  mount: the Recorder writes it at every flip, so store and overlay are the
+  SAME derivation at two freshnesses, never two parallel ones.
   """
   @spec strip_kind(Session.t(), [String.t()], map() | nil) :: atom() | nil
   def strip_kind(session, pending_roles, activity) do
-    pending = is_integer(session.pending_approvals) and session.pending_approvals > 0
-
     cond do
-      pending or activity_state(activity) == :needs_you ->
+      session.agent_state == "blocked" or activity_state(activity) == :needs_you ->
         needs_you_kind(pending_roles)
 
-      activity_state(activity) == :working or session.status == "working" ->
+      session.agent_state == "working" or activity_state(activity) == :working ->
         :working
 
       finished_while_away?(session) ->
