@@ -1321,43 +1321,110 @@ func (m Model) renderPicker() string {
 		}
 	}
 
-	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · enter open · n new · r refresh · q quit"))
+	// The fleet stream's terminal give-up (D54h) degrades to one honest notice
+	// line — the cold list keeps the herd usable, states just stop moving.
+	if m.fleetNotice != "" {
+		b.WriteString("\n" + noticeStyle.Render(m.fleetNotice))
+	}
+
+	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · enter attach · n new · r refresh · q quit"))
 	return b.String()
 }
 
-// pickerRows is the picker's navigable line list: a "+ new session" row (index
-// 0) followed by one row per session summary. The cursor indexes this slice, so
-// the shell and the paint can never disagree (the taskboard spine discipline) —
-// a workflow row is ONE navigable entry that happens to span extra lines, so
-// arrow keys still stop once per session, not once per sub-line.
+// pickerRows is the herd home's navigable line list (herd charter D50h/D52h):
+// a "+ new session" row (index 0) followed by one row per session in ATTENTION
+// order (orderedSessions — blocked > stalled > working > idle). The cursor
+// indexes this slice, so the shell and the paint can never disagree (the
+// taskboard spine discipline) — a workflow row is ONE navigable entry that
+// happens to span extra lines, so arrow keys still stop once per session.
 //
-// A session running an epic cycle grows the same two lines the Studio card shows
-// (wsc D3/D12): the phase ticks + settled/total counter, then the epic-goal line
-// when the wire carries it — appended to the row's own multi-line string so the
-// picker expands in height and the fleet progress (13/17) is visible at a glance.
-// A plain session carries no workflow summary, so its row string is UNCHANGED —
-// byte-identical to today (the minimalism contract).
+// Every session row wears the four-state pill, an honest RELATIVE age (frame
+// ts / agent_state_at — NEVER a live now-line: the fleet wire carries no
+// activity line by the never-content law, D50h) and the session's cost. A
+// plain (workflow-less) row stays ONE physical line; a session running an epic
+// cycle grows the same two wsc card lines the Studio sidebar shows (wsc
+// D3/D12, UNCHANGED by the herd layer).
 func (m Model) pickerRows() []string {
 	rows := []string{"+ new session"}
-	for _, s := range m.sessions {
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			title = "untitled session"
-		}
-		meta := fmt.Sprintf("%d msg", s.MessageCount)
-		if s.PendingApprovals > 0 {
-			meta += fmt.Sprintf(" · %d pending", s.PendingApprovals)
-		}
-		if age := relTime(s.LastActiveAt); age != "" {
-			meta += " · " + age
-		}
-		row := fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
+	now := m.clock()
+	for _, s := range m.orderedSessions() {
+		row := m.herdRowLine(s, now)
 		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic, s.PendingApprovals); len(extra) > 0 {
 			row += "\n" + strings.Join(extra, "\n")
 		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// herdRowLine paints one session's herd row — one physical line: the
+// four-state pill (+ stall badge), the title, and the dim meta tail
+// (messages · pending · cost · relative age).
+func (m Model) herdRowLine(s SessionSummary, now time.Time) string {
+	row := m.herd.herdRowFor(s.ID)
+	title := strings.TrimSpace(s.Title)
+	if title == "" {
+		title = "untitled session"
+	}
+	meta := fmt.Sprintf("%d msg", s.MessageCount)
+	if s.PendingApprovals > 0 {
+		meta += fmt.Sprintf(" · %d pending", s.PendingApprovals)
+	}
+	if c := formatCost(s.TotalCostUSD); c != "" {
+		meta += " · " + c
+	}
+	if age := m.herdAge(row, s, now); age != "" {
+		meta += " · " + age
+	}
+	return fmt.Sprintf("%s %-40s %s", herdPill(row, now), truncate(title, 40), dimStyle.Render(meta))
+}
+
+// herdPill is the four-state pill (working|blocked|idle|unknown), padded to a
+// fixed cell width so titles align down the list. A stalled working session
+// (D53h: no frame past herdStallAfter, computed FRESH at render time) wears
+// the warn badge in place of the plain working word — the honest "it may be
+// wedged" signal the sort also keys on.
+func herdPill(row HerdRow, now time.Time) string {
+	const w = 11
+	switch {
+	case row.AgentState == "blocked":
+		return padCell(warnStyle.Render("⏸ blocked"), w)
+	case row.AgentState == "working" && herdStalled(row, now):
+		return padCell(warnStyle.Render("⚠ stalled"), w)
+	case row.AgentState == "working":
+		return padCell(tickActiveStyle.Render("● working"), w)
+	case row.AgentState == "idle":
+		return padCell(dimStyle.Render("○ idle"), w)
+	}
+	return padCell(dimStyle.Render("? unknown"), w)
+}
+
+// herdAge is the row's honest relative liveness age — the last frame the herd
+// actually saw (flip or heartbeat), else the cold list's last_active_at.
+// NEVER a live now-line (the fleet wire carries none by design, D50h).
+func (m Model) herdAge(row HerdRow, s SessionSummary, now time.Time) string {
+	if !row.LastFrameAt.IsZero() {
+		return relAge(row.LastFrameAt, now)
+	}
+	return relAge(parseHerdTime(s.LastActiveAt), now)
+}
+
+// formatCost renders the session's cumulative spend; "" when the wire carries
+// none (never a fabricated $0.00).
+func formatCost(usd float64) string {
+	if usd <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("$%.2f", usd)
+}
+
+// padCell right-pads s to w terminal cells (ANSI-aware — styled pills carry
+// escape codes fmt's %-*s would count as width).
+func padCell(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
 }
 
 // ── the conversation screen ──────────────────────────────────────────────────
@@ -1427,7 +1494,13 @@ func (m Model) chatFooter() string {
 	prompt := youStyle.Render("› ")
 	composer := prompt + m.composerView()
 
-	hints := "enter send · esc interrupt · ctrl+b sessions · ctrl+c quit"
+	// Esc is contextual (D51h): mid-turn it interrupts; idle it detaches back
+	// to the herd — the hints say which, honestly, per frame.
+	escHint := "esc interrupt"
+	if m.st.Phase == TurnIdle {
+		escHint = "esc herd"
+	}
+	hints := "enter send · " + escHint + " · ctrl+b sessions · ctrl+c quit"
 	if n := len(m.answerableCards()); n > 0 {
 		// A pending card is waiting — advertise the answer keys so the affordance
 		// is discoverable even when the card scrolled out of view.
@@ -1674,14 +1747,19 @@ func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 // relTime renders an ISO8601 timestamp as a compact "3m"/"2h"/"5d" age, or ""
 // when it cannot be parsed (honest blank, never a crash).
 func relTime(iso string) string {
-	if iso == "" {
+	return relAge(parseHerdTime(iso), time.Now())
+}
+
+// relAge is relTime's pure core with an injected clock (the herd rows render
+// under the shell's frozen test clock).
+func relAge(t, now time.Time) string {
+	if t.IsZero() {
 		return ""
 	}
-	t, err := time.Parse(time.RFC3339, iso)
-	if err != nil {
-		return ""
+	d := now.Sub(t)
+	if d < 0 {
+		d = 0
 	}
-	d := time.Since(t)
 	switch {
 	case d < time.Minute:
 		return "just now"

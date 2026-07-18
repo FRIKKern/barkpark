@@ -95,7 +95,25 @@ func Run(cfg Config) error {
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	stream.program = p // the goroutine's p.Send seam, set before Run starts the loop
 
+	// The herd fleet stream: ONE life-of-process goroutine (herd charter D54h,
+	// the taskboard wireLive pattern), started beside the program and NEVER
+	// paused on attach — the herd keeps reducing while a conversation is
+	// foregrounded, so detaching shows current truth with zero flash/refetch.
+	// apiclient.FleetEvents owns reconnect/backoff; its terminal give-up
+	// degrades to a notice (fleetErrMsg), never a crash.
+	fleetCtx, stopFleet := context.WithCancel(context.Background())
+	go func() {
+		err := tr.FleetEvents(fleetCtx, "", func(event string, data []byte) {
+			cp := append([]byte(nil), data...)
+			p.Send(fleetFrameMsg{event: event, data: cp})
+		})
+		if err != nil && fleetCtx.Err() == nil {
+			p.Send(fleetErrMsg{err: err})
+		}
+	}()
+
 	_, err := p.Run()
+	stopFleet()
 	stream.stop()
 	return err
 }

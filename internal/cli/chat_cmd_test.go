@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -46,7 +49,9 @@ func TestChatHelp(t *testing.T) {
 	}
 }
 
-// A stray positional is rejected, not silently ignored.
+// `ls` is the one accepted verb (herd charter D55h) — peeled BEFORE the
+// stray-args reject and the TTY gate; any other positional is rejected, not
+// silently ignored.
 func TestChatRejectsArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
@@ -57,5 +62,101 @@ func TestChatRejectsArgs(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "takes no arguments") {
 		t.Fatalf("stray-arg error should explain: %q", stderr.String())
+	}
+
+	// `ls` is ACCEPTED and non-TTY-safe: against a live server it exits 0 (the
+	// roster prints), proving it routes AROUND both the reject and the TTY gate.
+	srv := chatLsTestServer(t)
+	defer srv.Close()
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	code = runChat(w, globals{}, manifest.Context{Server: srv.URL, Token: "tok"}, []string{"ls"})
+	if code != exitOK {
+		t.Fatalf("bp chat ls exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "blocked") || !strings.Contains(stdout.String(), "fix the auth bug") {
+		t.Fatalf("ls must print the roster with states, got %q", stdout.String())
+	}
+
+	// an unknown ls flag still fails loudly
+	stderr.Reset()
+	code = runChat(w, globals{}, manifest.Context{Server: srv.URL}, []string{"ls", "--bogus"})
+	if code != exitUsage {
+		t.Fatalf("unknown ls flag exit code = %d, want %d", code, exitUsage)
+	}
+}
+
+// chatLsTestServer serves the widened sidebar wire (agent_state / cost) for
+// the ls tests.
+func chatLsTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/sessions" {
+			http.NotFound(rw, r)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		_, _ = rw.Write([]byte(`{"sessions":[
+			{"id":"11111111-1111-1111-1111-111111111111","title":"fix the auth bug",
+			 "agent_state":"blocked","agent_state_at":"2026-07-18T11:55:00Z",
+			 "message_count":4,"total_cost_usd":0.42},
+			{"id":"22222222-2222-2222-2222-222222222222","title":"",
+			 "agent_state":"idle","message_count":1}
+		]}`))
+	}))
+}
+
+// TestChatLsOneShotJSON proves -o json emits the raw sidebar rows (the machine
+// seam scripts consume) instead of the human table.
+func TestChatLsOneShotJSON(t *testing.T) {
+	srv := chatLsTestServer(t)
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.applyGlobals(globals{output: "json", outputSet: true})
+
+	code := runChat(w, globals{output: "json", outputSet: true},
+		manifest.Context{Server: srv.URL, Token: "tok"}, []string{"ls"})
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	var payload struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("-o json must emit one parseable document, got %q: %v", stdout.String(), err)
+	}
+	if len(payload.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(payload.Sessions))
+	}
+	if payload.Sessions[0]["agent_state"] != "blocked" || payload.Sessions[0]["total_cost_usd"] != 0.42 {
+		t.Fatalf("the widened fields must ride the JSON, got %+v", payload.Sessions[0])
+	}
+}
+
+// TestFleetWatchLineFlipsOnly proves the --watch line law (D55h): one line per
+// STATE flip carrying id + state (+ title when the frame has one); snapshots,
+// heartbeats, and junk print nothing.
+func TestFleetWatchLineFlipsOnly(t *testing.T) {
+	line, ok := fleetWatchLine("state",
+		[]byte(`{"session_id":"abc","agent_state":"blocked","ts":"2026-07-18T12:00:00Z","title":null}`))
+	if !ok || line != "abc  blocked" {
+		t.Fatalf("a null-title flip must print id+state, got %q ok=%v", line, ok)
+	}
+	line, ok = fleetWatchLine("state",
+		[]byte(`{"session_id":"abc","agent_state":"working","title":"fix auth"}`))
+	if !ok || line != "abc  working  fix auth" {
+		t.Fatalf("a titled flip must carry the title, got %q ok=%v", line, ok)
+	}
+	for name, ev := range map[string][2]string{
+		"snapshot":  {"snapshot", `{"sessions":[]}`},
+		"heartbeat": {"heartbeat", `{"session_id":"abc","ts":"2026-07-18T12:00:00Z"}`},
+		"junk":      {"state", `{not json`},
+	} {
+		if _, ok := fleetWatchLine(ev[0], []byte(ev[1])); ok {
+			t.Fatalf("%s must print nothing", name)
+		}
 	}
 }

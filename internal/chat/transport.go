@@ -47,6 +47,12 @@ type Transport interface {
 	// live frames as "chat"/"permission"/"exit". Blocks until ctx is cancelled
 	// or the stream fails.
 	Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte)) error
+	// FleetEvents opens the ONE herd fleet stream (GET /v1/chat/events, herd
+	// charter D45h/D54h): snapshot-then-live four-state frames for the whole
+	// in-scope fleet. It is a thin wrap over apiclient.FleetEvents — the SAME
+	// scanListenFrames parser as Events, no fork — and blocks until ctx is
+	// cancelled or the transport's own reconnect/backoff gives up terminally.
+	FleetEvents(ctx context.Context, lastEventID string, onFrame func(event string, data []byte)) error
 }
 
 // clientTransport implements Transport over the shared internal/apiclient chat
@@ -110,6 +116,16 @@ func (t *clientTransport) Events(ctx context.Context, id string, lastSeq int, on
 		last = strconv.Itoa(lastSeq)
 	}
 	return t.c.ChatEvents(ctx, id, last, func(event, data string) error {
+		onFrame(event, []byte(data))
+		return nil
+	}, nil)
+}
+
+func (t *clientTransport) FleetEvents(ctx context.Context, lastEventID string, onFrame func(event string, data []byte)) error {
+	// The opaque epoch:seq cursor is threaded verbatim (D45h) and advanced by
+	// the shared parser; onReconnect stays nil — the herd resets off the next
+	// event:snapshot, never on reconnect (D49h).
+	return t.c.FleetEvents(ctx, lastEventID, func(event, data string) error {
 		onFrame(event, []byte(data))
 		return nil
 	}, nil)

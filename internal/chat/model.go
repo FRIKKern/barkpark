@@ -52,11 +52,18 @@ type Model struct {
 	width, height int
 	screen        screen
 
-	// picker
-	sessions   []SessionSummary
-	pickCursor int
-	pickErr    string
-	loading    bool
+	// picker — the herd multiplexer home (herd charter D50h/D52h). sessions is
+	// the cold list-sourced roster (titles, counters, cost, workflow cards);
+	// herd is the pure fleet-state overlay the ONE life-of-process stream
+	// feeds. pickCursor stays the DISPLAY index over [new]+orderedSessions();
+	// herd.Cursor is the session-ID truth it re-derives from after every
+	// resort, so the cursor follows its session, never its row number.
+	sessions    []SessionSummary
+	pickCursor  int
+	pickErr     string
+	loading     bool
+	herd        HerdState
+	fleetNotice string // the fleet stream's terminal give-up (D54h: a notice, never a crash)
 
 	// conversation
 	st         State  // the pure reducer's state
@@ -138,9 +145,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.pickErr = ""
 		m.sessions = msg.sessions
+		// Cold-mount the herd from the widened list (D50h) — live flips that
+		// already arrived stay authoritative (herdSeed never regresses them).
+		m.herd = herdSeed(m.herd, msg.sessions)
 		if m.pickCursor > len(m.sessions) {
 			m.pickCursor = len(m.sessions)
 		}
+		m = m.syncCursorFromHerd()
+		return m, nil
+	case fleetFrameMsg:
+		// The fleet stream is NEVER paused on attach (D54h): the herd reduces
+		// every frame regardless of screen, so a detach shows current truth with
+		// zero flash/refetch. m.screen gates rendering only.
+		if h, ok := applyFleetFrame(m.herd, msg.event, msg.data); ok {
+			m.herd = h
+			m = m.syncCursorFromHerd()
+		}
+		return m, nil
+	case fleetErrMsg:
+		// Terminal stream give-up (the transport already exhausted its own
+		// reconnect/backoff) degrades to a notice — never a crash, never an
+		// error screen; the cold list keeps the herd usable.
+		m.fleetNotice = "herd stream lost — " + msg.err.Error()
 		return m, nil
 	case sessionOpenedMsg:
 		if msg.err != nil {
@@ -374,6 +400,71 @@ func (m Model) patchContinuityCmd() tea.Cmd {
 	return func() tea.Msg { _ = tr.PatchSession(id, fields); return patchedMsg{} }
 }
 
+// ── the herd home (charter D50h/D52h) ────────────────────────────────────────
+
+// clock is the injected clock, nil-safe for bare Model literals in tests.
+func (m Model) clock() time.Time {
+	if m.now == nil {
+		return time.Now()
+	}
+	return m.now()
+}
+
+// orderedSessions is the herd home's display order: the cold roster sorted by
+// attention (blocked > stalled > working > idle — herdOrder). The picker rows,
+// the cursor math, and openPickerRow ALL read this one projection, so what is
+// painted, what is highlighted, and what Enter opens can never disagree.
+func (m Model) orderedSessions() []SessionSummary {
+	if len(m.sessions) == 0 {
+		return nil
+	}
+	byID := make(map[string]SessionSummary, len(m.sessions))
+	roster := make([]string, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		byID[s.ID] = s
+		roster = append(roster, s.ID)
+	}
+	out := make([]SessionSummary, 0, len(roster))
+	for _, id := range herdOrder(m.herd, roster, m.clock()) {
+		out = append(out, byID[id])
+	}
+	return out
+}
+
+// syncCursorFromHerd re-derives the display index from the session-ID cursor
+// after anything that can resort the herd (a fleet frame, a list reload) — the
+// D52h law: the cursor follows the SESSION, not the row number. A cursor whose
+// session left the roster falls back to the clamped display index (and adopts
+// whatever session now sits there).
+func (m Model) syncCursorFromHerd() Model {
+	order := m.orderedSessions()
+	if m.herd.Cursor != "" {
+		for i, s := range order {
+			if s.ID == m.herd.Cursor {
+				m.pickCursor = i + 1
+				return m
+			}
+		}
+	}
+	if m.pickCursor > len(order) {
+		m.pickCursor = len(order)
+	}
+	return m.syncHerdCursorFromIndex()
+}
+
+// syncHerdCursorFromIndex records which session the display index sits on —
+// called after every cursor keystroke so the NEXT resort knows which session
+// to follow. Index 0 is the "+ new session" row (cursor id "").
+func (m Model) syncHerdCursorFromIndex() Model {
+	order := m.orderedSessions()
+	if m.pickCursor <= 0 || m.pickCursor > len(order) {
+		m.herd.Cursor = ""
+		return m
+	}
+	m.herd.Cursor = order[m.pickCursor-1].ID
+	return m
+}
+
 // ── commands + messages ──────────────────────────────────────────────────────
 
 // tickMsg is one 100ms heartbeat.
@@ -410,6 +501,16 @@ type streamFrameMsg struct {
 
 // streamErrMsg is the stream goroutine's terminal give-up.
 type streamErrMsg struct{ err error }
+
+// fleetFrameMsg is one herd fleet frame (snapshot/state/heartbeat) pushed from
+// the life-of-process fleet goroutine (charter D54h).
+type fleetFrameMsg struct {
+	event string
+	data  []byte
+}
+
+// fleetErrMsg is the fleet stream's terminal give-up (degrades to a notice).
+type fleetErrMsg struct{ err error }
 
 // sendDoneMsg / interruptDoneMsg / patchedMsg are verb-call completions (their
 // only job is to surface a transport error honestly; the truth is elsewhere).

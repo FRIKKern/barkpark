@@ -69,6 +69,10 @@ func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFr
 	<-ctx.Done()
 	return nil
 }
+func (f *fakeTransport) FleetEvents(ctx context.Context, lastEventID string, onFrame func(string, []byte)) error {
+	<-ctx.Done()
+	return nil
+}
 
 func newTestModel(f *fakeTransport) Model {
 	return newModel(f, &streamer{tr: f}, Config{BaseURL: "http://localhost:4000", Token: "tok"})
@@ -935,5 +939,160 @@ func TestNeedsYouEnterAheadOfExpand(t *testing.T) {
 	nm2, _ := m2.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !nm2.(Model).wfExpanded {
 		t.Fatal("without a pending gate, Enter must still expand the detail")
+	}
+}
+
+// TestIdleEscDetachesLikeCtrlB is the D51h contextual-Esc proof at the SHELL:
+// with NO active turn, Esc takes the EXACT Ctrl+B leaveSession path — same
+// screen flip, same cleared conversation, same continuity PATCH — with the
+// server session left running (no Interrupt POST is ever made). Mid-turn Esc
+// still interrupts (D11 unchanged).
+func TestIdleEscDetachesLikeCtrlB(t *testing.T) {
+	open := func(f *fakeTransport) Model {
+		m := newTestModel(f)
+		m = m.openSession(Session{ID: "s1", Title: "T", Mode: "plan"})
+		m.input = "held draft"
+		return m
+	}
+
+	fEsc := &fakeTransport{}
+	nm, escCmd := open(fEsc).handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	esc := nm.(Model)
+
+	fB := &fakeTransport{}
+	nm, bCmd := open(fB).handleChatKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	ctrlB := nm.(Model)
+
+	// identical transition: back on the picker, conversation state cleared.
+	if esc.screen != screenPicker || ctrlB.screen != screenPicker {
+		t.Fatalf("idle Esc and Ctrl+B must both land on the herd, esc=%v ctrl+b=%v", esc.screen, ctrlB.screen)
+	}
+	if esc.st.SessionID != ctrlB.st.SessionID || esc.input != ctrlB.input ||
+		esc.loading != ctrlB.loading || esc.focus != ctrlB.focus {
+		t.Fatalf("idle Esc must match Ctrl+B's transition verbatim:\n esc    %+v input=%q\n ctrl+b %+v input=%q",
+			esc.st, esc.input, ctrlB.st, ctrlB.input)
+	}
+
+	// both fire the SAME side effects: a continuity PATCH (the held draft) and
+	// NO interrupt — the server session keeps running.
+	runAllCmds(t, escCmd)
+	runAllCmds(t, bCmd)
+	if fEsc.patched["draft"] != "held draft" || fB.patched["draft"] != "held draft" {
+		t.Fatalf("both paths must PATCH the draft, esc=%v ctrl+b=%v", fEsc.patched, fB.patched)
+	}
+	if fEsc.interrupted || fB.interrupted {
+		t.Fatal("detach must never interrupt — the session stays running")
+	}
+
+	// mid-turn Esc still interrupts (D11): no detach, phase flips.
+	fMid := &fakeTransport{}
+	m := open(fMid)
+	m.st.Phase = TurnStreaming
+	nm, _ = m.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	mid := nm.(Model)
+	if mid.screen != screenChat {
+		t.Fatal("mid-turn Esc must NOT detach")
+	}
+	if mid.st.Phase != TurnInterrupting {
+		t.Fatalf("mid-turn Esc must interrupt, got phase %v", mid.st.Phase)
+	}
+}
+
+// runAllCmds executes a (possibly batched/sequenced) tea.Cmd tree so every
+// side-effecting command actually fires against the fake transport.
+func runAllCmds(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	switch batch := msg.(type) {
+	case tea.BatchMsg:
+		for _, c := range batch {
+			runAllCmds(t, c)
+		}
+	case tea.MouseMsg, tea.KeyMsg:
+	}
+}
+
+// TestHerdShellCursorFollowsResort proves the D52h cursor law THROUGH the
+// shell: the picker cursor names a session id, so when a fleet flip resorts
+// the herd, the display index moves WITH the session instead of staying on a
+// row number.
+func TestHerdShellCursorFollowsResort(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	m := newTestModel(&fakeTransport{})
+	m.now = func() time.Time { return now }
+
+	nm, _ := m.Update(sessionsLoadedMsg{sessions: []SessionSummary{
+		{ID: "a", Title: "A", AgentState: "working", AgentStateAt: now.Add(-time.Minute).Format(time.RFC3339)},
+		{ID: "b", Title: "B", AgentState: "idle", AgentStateAt: now.Add(-2 * time.Minute).Format(time.RFC3339)},
+	}})
+	m = nm.(Model)
+
+	// put the cursor on b (last row while idle)
+	m.pickCursor = 2
+	m = m.syncHerdCursorFromIndex()
+	if m.herd.Cursor != "b" {
+		t.Fatalf("cursor must record the session id, got %q", m.herd.Cursor)
+	}
+
+	// b flips blocked → resorts to the top; the cursor FOLLOWS b to index 1.
+	nm, _ = m.Update(fleetFrameMsg{event: "state",
+		data: []byte(`{"session_id":"b","agent_state":"blocked","ts":"` + now.Format(time.RFC3339) + `","title":null}`)})
+	m = nm.(Model)
+	if m.herd.Cursor != "b" {
+		t.Fatalf("the cursor must still name b, got %q", m.herd.Cursor)
+	}
+	if m.pickCursor != 1 {
+		t.Fatalf("the display index must follow b to the top (1), got %d", m.pickCursor)
+	}
+	// and Enter opens exactly the session under the cursor.
+	f := &fakeTransport{}
+	m.tr = f
+	_, cmd := m.openPickerRow()
+	runAllCmds(t, cmd)
+	if len(f.getCalls) != 1 || f.getCalls[0].id != "b" {
+		t.Fatalf("Enter must open the followed session, got %+v", f.getCalls)
+	}
+}
+
+// TestFleetErrDegradesToNotice proves the D54h give-up law: a terminal fleet
+// stream failure lands one honest notice — never an error screen, never a
+// wiped roster.
+func TestFleetErrDegradesToNotice(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	nm, _ := m.Update(sessionsLoadedMsg{sessions: []SessionSummary{{ID: "a", Title: "A"}}})
+	m = nm.(Model)
+	nm, _ = m.Update(fleetErrMsg{err: errString("boom")})
+	m = nm.(Model)
+	if m.fleetNotice == "" || !strings.Contains(m.fleetNotice, "boom") {
+		t.Fatalf("the give-up must surface as a notice, got %q", m.fleetNotice)
+	}
+	if len(m.sessions) != 1 || m.pickErr != "" {
+		t.Fatal("the give-up must not wipe the roster or fake a load error")
+	}
+	if !strings.Contains(m.renderPicker(), "herd stream lost") {
+		t.Fatal("the notice must actually paint on the herd home")
+	}
+}
+
+// TestFleetFrameReducesWhileAttached is the D54h never-paused law: a fleet
+// frame arriving while a conversation is foregrounded STILL reduces the herd
+// (m.screen gates rendering only), so a detach shows current truth with zero
+// flash or refetch.
+func TestFleetFrameReducesWhileAttached(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	nm, _ := m.Update(sessionsLoadedMsg{sessions: []SessionSummary{{ID: "a", Title: "A", AgentState: "working"}}})
+	m = nm.(Model)
+	m = m.openSession(Session{ID: "other", Title: "attached"})
+	if m.screen != screenChat {
+		t.Fatal("precondition: attached")
+	}
+	nm, _ = m.Update(fleetFrameMsg{event: "state",
+		data: []byte(`{"session_id":"a","agent_state":"blocked","ts":"2026-07-18T12:00:00Z","title":null}`)})
+	m = nm.(Model)
+	if m.herd.Rows["a"].AgentState != "blocked" {
+		t.Fatalf("the herd must keep reducing while attached, got %+v", m.herd.Rows["a"])
 	}
 }

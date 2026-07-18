@@ -1083,6 +1083,12 @@ defmodule BarkparkWeb.ChatController do
       input_tokens: s.input_tokens,
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
+      # Herd cold-mount (herd charter D50h): the wave-5 agent_state substrate
+      # rides the sidebar so `bp chat`'s herd home sorts/badges before the
+      # fleet stream's first frame. Additive — the Ecto select always loaded
+      # these; the projection just stopped dropping them.
+      agent_state: s.agent_state,
+      agent_state_at: s.agent_state_at,
       last_active_at: s.last_active_at,
       last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,

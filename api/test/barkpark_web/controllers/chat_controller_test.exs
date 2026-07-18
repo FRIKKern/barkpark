@@ -503,6 +503,25 @@ defmodule BarkparkWeb.ChatControllerTest do
       refute Map.has_key?(entry, "rail_snapshot")
     end
 
+    # ── herd cold-mount widen (herd charter D50h) ────────────────────────────
+
+    test "carries agent_state/agent_state_at so the herd home cold-mounts (D50h)",
+         %{admin: a1, sid: sid} do
+      # a fresh session wears the column default honestly
+      entry = sidebar_entry(a1, sid)
+      assert entry["agent_state"] == "idle"
+      assert Map.has_key?(entry, "agent_state_at")
+
+      # a persisted flip rides the same projection, timestamp included
+      now = DateTime.utc_now()
+      StudioChat.set_agent_state(sid, "working", now)
+      entry = sidebar_entry(a1, sid)
+      assert entry["agent_state"] == "working"
+
+      assert {:ok, at, 0} = DateTime.from_iso8601(entry["agent_state_at"])
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [:eq, :gt]
+    end
+
     # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────
 
     test "a workflow rail earns the compact `workflow` key; the raw rail stays off the wire",
