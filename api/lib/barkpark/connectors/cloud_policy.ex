@@ -68,6 +68,30 @@ defmodule Barkpark.Connectors.CloudPolicy do
   LIVE enforcement observation — a real sandbox actually DENYING a real host-touch
   — rides the human gate `connectors-hg-live-isolated-cloud-turn`; it is never
   fabricated here. This module proves only what the launch contract REQUESTS.
+
+  ## Knob 6 — the per-connector egress allowlist (D237/D238/D239, W29)
+
+  The cloud sandbox runs deny-all egress (the W12 isolation wall). A connector's
+  credential (W25) is useless if the MCP server inside the sandbox cannot reach
+  its API host, so `cloud_egress_hosts/2` derives the MINIMAL widening: the
+  workspace's INSTALLED tool connectors ∩ the host-fetched bridge descriptors,
+  reduced to the sorted-unique set of each surviving descriptor's SANITIZED MCP
+  host (`api.githubcopilot.com`, `mcp.linear.app` …). Egress hosts are a property
+  of the connector TYPE (declared on its descriptor url), never of the install —
+  a per-workspace list would be needless complexity for the same set. The wiring
+  onto the shim argv (repeated `--egress-host <host>` pairs, pre-`--`) is
+  `ClaudeChat.cloud_build_args/2`'s; this module only derives the set.
+
+  Fail-closed by construction: NO tool install ⇒ `[]` (deny-all preserved, the
+  isolation wall untouched); a connector with no INSTALL ⇒ contributes nothing (no
+  cross-connector leak); a descriptor whose url fails the D239 shape sanitizer ⇒
+  that connector contributes NO host (never a blanket, never `api.anthropic.com` —
+  the shim's own env base, which is never a descriptor and so can never appear).
+  The sanitizer is the SafeOutbound SHAPE half ONLY (https-only, non-blank host,
+  userinfo-reject, ASCII DNS shape, IP-literal reject, default-port-only) with NO
+  DNS resolution — pure over the descriptor string. LIVE egress enforcement is
+  Vercel-Sandbox behavior riding `connectors-hg-live-isolated-cloud-turn`; this
+  module proves only the ALLOWLIST DERIVATION the launch contract REQUESTS.
   """
 
   alias Barkpark.Connectors.Catalog
@@ -195,4 +219,116 @@ defmodule Barkpark.Connectors.CloudPolicy do
   end
 
   defp cloud_tool_server_entry(_descriptor, _installed), do: :skip
+
+  @https_default_port 443
+
+  @doc """
+  The per-connector egress allowlist for a Cloud turn — knob 6's derivation half
+  (D237/D238). The SAME `installs ∩ descriptors` fold as `cloud_mcp_servers/2`,
+  reduced to the SORTED, UNIQUE set of each surviving descriptor's SANITIZED MCP
+  host. A workspace with a GitHub install and a github descriptor yields exactly
+  `["api.githubcopilot.com"]`; github+linear yields the two-host sorted set.
+
+  Fail-closed, mirroring `cloud_mcp_servers/2`: a descriptor whose provider has no
+  live tool-direction install for `workspace`, a non-http transport, the reserved
+  `barkpark` name, a blank/absent url, OR a url that fails the D239 shape sanitizer
+  contributes NO host (degrades the allowlist, never poisons it). An empty
+  descriptor list or a garbage/nil workspace yields `[]` — NO widening, so the
+  deny-all wall stays whole. NEVER a blanket allow, NEVER another connector's host,
+  NEVER `api.anthropic.com` (which is not a descriptor and cannot appear).
+
+  Pure over `(workspace-installs, descriptors)` and unit-testable by INJECTING
+  descriptors; the sanitizer does ZERO DNS (SafeOutbound SHAPE half only). The
+  WIRING of these hosts onto the sandbox argv (`--egress-host` pairs) lives in
+  `ClaudeChat.cloud_build_args/2` and the shim; this module only derives the set.
+  """
+  @spec cloud_egress_hosts(term(), [map()]) :: [String.t()]
+  def cloud_egress_hosts(_workspace, []), do: []
+
+  def cloud_egress_hosts(workspace, descriptors) when is_list(descriptors) do
+    installed =
+      workspace
+      |> connector_tool_providers()
+      |> MapSet.new(& &1.provider)
+
+    descriptors
+    |> Enum.flat_map(fn descriptor ->
+      case cloud_egress_host(descriptor, installed) do
+        host when is_binary(host) -> [host]
+        :skip -> []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  def cloud_egress_hosts(_workspace, _descriptors), do: []
+
+  # One bridge descriptor -> one sanitized egress host, or `:skip`. Reuses the
+  # `cloud_tool_server_entry/2` gate (installed, http-transport, non-reserved
+  # provider) then sanitizes the url's host per D239. Any failure = `:skip`.
+  defp cloud_egress_host(
+         %{"provider" => provider, "type" => "http", "url" => url},
+         installed
+       )
+       when is_binary(provider) and provider != "" and provider != "barkpark" and
+              is_binary(url) and url != "" do
+    if MapSet.member?(installed, provider) do
+      sanitize_egress_host(url)
+    else
+      :skip
+    end
+  end
+
+  defp cloud_egress_host(_descriptor, _installed), do: :skip
+
+  # D239 host sanitizer — the SafeOutbound SHAPE half ONLY, ZERO DNS (pure over the
+  # string). `URI.new/1` strict-parse; REQUIRE scheme `https`; REQUIRE a non-blank
+  # host; REJECT userinfo (refuse the whole descriptor); downcase; strip ONE
+  # trailing dot; REQUIRE the ASCII DNS shape `^[a-z0-9.-]+$` (rejects IPv6
+  # literals and any userinfo/port that leaked through); REJECT IPv4/IPv6 literals
+  # (`:inet.parse_address` — a string parse, never a lookup); REJECT any non-default
+  # port. On any rejection returns `:skip` so the connector contributes no host.
+  defp sanitize_egress_host(url) when is_binary(url) do
+    case URI.new(url) do
+      {:ok, %URI{scheme: "https", userinfo: nil, host: host, port: port}}
+      when is_binary(host) and host != "" ->
+        normalized = host |> String.downcase() |> strip_one_trailing_dot()
+
+        if valid_dns_host?(normalized) and default_https_port?(port) do
+          normalized
+        else
+          :skip
+        end
+
+      _ ->
+        :skip
+    end
+  end
+
+  defp sanitize_egress_host(_), do: :skip
+
+  defp strip_one_trailing_dot(host) do
+    if String.ends_with?(host, "."),
+      do: binary_part(host, 0, byte_size(host) - 1),
+      else: host
+  end
+
+  # An ASCII DNS-shaped host that is NOT an IP literal. The shape regex already
+  # rejects colons (IPv6) and userinfo; `:inet.parse_address` additionally rejects
+  # a dotted-quad IPv4 that would otherwise pass the shape (both are pure parses).
+  defp valid_dns_host?(host) do
+    Regex.match?(~r/^[a-z0-9.-]+$/, host) and not ip_literal?(host)
+  end
+
+  defp ip_literal?(host) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, _} -> true
+      _ -> false
+    end
+  end
+
+  # Only the https default port (443) — anything else is a non-default port and is
+  # rejected. `URI.new/1` fills 443 for a portless https url; `nil` is defensive.
+  defp default_https_port?(port), do: port in [nil, @https_default_port]
 end
