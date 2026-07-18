@@ -44,7 +44,13 @@ defmodule BarkparkWeb.SearchController do
             perspective: parse_perspective(params["perspective"]),
             limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
             offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
-            engine: params["engine"] || "postgres"
+            engine: params["engine"] || "postgres",
+            # Retrieval column projection (search-latency slice a). The SAME
+            # `fields=` allowlist the response is projected to below — threaded
+            # to the retriever so heavy content blobs are dropped at the DB, not
+            # shipped-then-discarded. Envelope.project stays the authoritative
+            # response filter; this only spares the wire+decode.
+            fields: bin(params["fields"])
           ]
           |> maybe_put_opt(:workspace_id, params["workspace_id"])
           |> maybe_put_opt(:project_id, params["project_id"])
@@ -104,7 +110,11 @@ defmodule BarkparkWeb.SearchController do
             perspective: AnonPerspective.resolve(conn, params),
             limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
             offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
-            engine: params["engine"] || "postgres"
+            engine: params["engine"] || "postgres",
+            # Retrieval column projection (search-latency slice a) — see
+            # search_local/2. Threads the response's `fields=` allowlist to the
+            # retriever so heavy content is dropped at the DB.
+            fields: bin(params["fields"])
           ] ++ scope_opts(conn)
 
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
