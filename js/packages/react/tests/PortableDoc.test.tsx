@@ -13,6 +13,43 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 // expected wrapper. Count via Object.keys(DISPATCH) — never trust a literal.
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
+  // scaffy:add-block-type Video MARK:js-case-video
+  {
+    type: 'video',
+    block: {
+      type: 'video',
+      src: 'https://ex.com/demo.mp4',
+      poster: 'https://ex.com/demo-poster.jpg',
+      captions: [{ lang: 'en', src: 'https://ex.com/en.vtt' }],
+    },
+    marker: '<video',
+  },
+  // scaffy:add-block-type CriteriaProgress MARK:js-case-criteria-progress
+  {
+    type: 'criteria-progress',
+    block: {
+      type: 'criteria-progress',
+      rows: [
+        { label: 'Survey every corpus chapter', met: 2, total: 5 },
+        { label: 'File child tasks', met: 5, total: 5 },
+      ],
+    },
+    marker: 'bp-criteria-progress',
+  },
+  // scaffy:add-block-type Equation MARK:js-case-equation
+  { type: 'equation', block: { type: 'equation', tex: 'E = mc^2' }, marker: 'bp-equation' },
+  // scaffy:add-block-type BarChart MARK:js-case-bar-chart
+  {
+    type: 'bar-chart',
+    block: {
+      type: 'bar-chart',
+      bars: [
+        { label: 'paragraph', value: 4969 },
+        { label: 'heading', value: 3232 },
+      ],
+    },
+    marker: 'bp-bar-chart',
+  },
   // scaffy:add-block-type Expandable MARK:js-case-expandable
   {
     type: 'expandable',
@@ -448,7 +485,11 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type Steps MARK:js-count-steps
     // scaffy:add-block-type Footnote MARK:js-count-footnote
     // scaffy:add-block-type Expandable MARK:js-count-expandable
-    expect(registered).toHaveLength(59)
+    // scaffy:add-block-type BarChart MARK:js-count-bar-chart
+    // scaffy:add-block-type Equation MARK:js-count-equation
+    // scaffy:add-block-type CriteriaProgress MARK:js-count-criteria-progress
+    // scaffy:add-block-type Video MARK:js-count-video
+    expect(registered).toHaveLength(63)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

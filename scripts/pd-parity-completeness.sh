@@ -26,7 +26,11 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type Steps MARK:parity-count-script-steps
 # scaffy:add-block-type Footnote MARK:parity-count-script-footnote
 # scaffy:add-block-type Expandable MARK:parity-count-script-expandable
-EXPECTED_COUNT=53
+# scaffy:add-block-type BarChart MARK:parity-count-script-bar-chart
+# scaffy:add-block-type Equation MARK:parity-count-script-equation
+# scaffy:add-block-type CriteriaProgress MARK:parity-count-script-criteria-progress
+# scaffy:add-block-type Video MARK:parity-count-script-video
+EXPECTED_COUNT=57
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2

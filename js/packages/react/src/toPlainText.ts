@@ -252,6 +252,9 @@ function blockText(b: Block): string {
     // Footnote: each note's text, in order.
     case 'footnote':
       return joinBlocks(asList(b.notes).map((n) => (isMap(n) ? str(n.text) : '')))
+    // Equation: the tex source is reading content (the `code` precedent).
+    case 'equation':
+      return str(b.tex)
     // ── data-viz / forms / chat / media / structural → textless ───────────
     default:
       return ''

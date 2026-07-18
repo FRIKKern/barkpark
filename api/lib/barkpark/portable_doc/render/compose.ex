@@ -1212,6 +1212,75 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # scaffy:add-block-type Video MARK:ex-compose-video
+  # video (B062): plain <video> file block — native browser element, zero
+  # client JS. An asset-less video (no `src`) composes to "" (the `image`
+  # precedent — editor scaffolding, skipped on the public /papers render).
+  # Article gets the real <video controls> render; every other style (email)
+  # gets the poster/link degrade badge (the `asciicast` precedent).
+  def compose_block(%{"type" => "video"} = b, style) do
+    case String.trim(stringish(Map.get(b, "src", ""))) do
+      "" ->
+        %{"kind" => "_raw", "html" => ""}
+
+      src ->
+        poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
+
+        captions =
+          case Map.get(b, "captions") do
+            l when is_list(l) -> Enum.filter(l, &is_map/1)
+            _ -> []
+          end
+
+        loop = Map.get(b, "loop") == true
+
+        %{
+          "kind" => "_raw",
+          "html" => Figures.video_html(src, poster, captions, loop, style)
+        }
+    end
+  end
+
+  # scaffy:add-block-type CriteriaProgress MARK:ex-compose-criteria-progress
+  # criteria-progress (B034): acceptance-criteria met/total rolled up per row
+  # (or aggregated). Article gets the real proportional-bar render
+  # (DataViz.criteria_progress_html); every other style (email) gets the
+  # text-summary degrade badge (the `bar-chart`/`chart` precedent — D4).
+  def compose_block(%{"type" => "criteria-progress"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.criteria_progress_html(b)}
+  end
+
+  def compose_block(%{"type" => "criteria-progress"} = b, _style) do
+    %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.DataViz.criteria_progress_email_html(b)
+    }
+  end
+
+  # scaffy:add-block-type Equation MARK:ex-compose-equation
+  # equation (B025): server-side TeX -> MathML, zero client JS. Article gets
+  # the real MathML render (Math.equation_html); every other style (email)
+  # gets the raw-TeX-source degrade badge (Math.equation_email_html).
+  def compose_block(%{"type" => "equation"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Math.equation_html(b)}
+  end
+
+  def compose_block(%{"type" => "equation"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Math.equation_email_html(b)}
+  end
+
+  # scaffy:add-block-type BarChart MARK:ex-compose-bar-chart
+  # bar-chart (B003): horizontal bars for categorical counts. Article gets the
+  # real bar render (DataViz.bar_chart_html); every other style (email) gets
+  # the text-summary degrade badge (the `chart` precedent — D4).
+  def compose_block(%{"type" => "bar-chart"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.bar_chart_html(b)}
+  end
+
+  def compose_block(%{"type" => "bar-chart"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.bar_chart_email_html(b)}
+  end
+
   # scaffy:add-block-type Expandable MARK:ex-compose-expandable
   # Starter compose for `expandable`: the block's `text` attr escaped into
   # its bp-expandable wrapper through the `_raw` pre-rendered-HTML hatch

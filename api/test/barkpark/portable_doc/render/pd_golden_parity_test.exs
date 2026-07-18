@@ -40,7 +40,11 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type Steps MARK:parity-count-test-steps
     # scaffy:add-block-type Footnote MARK:parity-count-test-footnote
     # scaffy:add-block-type Expandable MARK:parity-count-test-expandable
-    assert length(GenPdParity.types()) == 53
+    # scaffy:add-block-type BarChart MARK:parity-count-test-bar-chart
+    # scaffy:add-block-type Equation MARK:parity-count-test-equation
+    # scaffy:add-block-type CriteriaProgress MARK:parity-count-test-criteria-progress
+    # scaffy:add-block-type Video MARK:parity-count-test-video
+    assert length(GenPdParity.types()) == 57
   end
 
   test "both members of all 3 alias pairs are present" do
