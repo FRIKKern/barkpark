@@ -688,6 +688,34 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert body["title_source"] == "human"
     end
 
+    test "a mode PATCH with a LIVE runtime steers it best-effort and persists",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, :claude_chat)
+      Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end)
+
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      body =
+        json_conn(a1)
+        |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{mode: "auto"}))
+        |> json_response(200)
+
+      assert body["mode"] == "auto"
+      # The steer is fire-and-forget into the live session (the TUI toggle's
+      # mid-session effect); the runtime must survive it — a lost steer
+      # self-heals off the next init frame's observation.
+      assert Process.alive?(recorder)
+
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
     test "rejects bypassPermissions, unknown keys, and archived (list-only, not a write)",
          %{admin: a1, sid: sid} do
       for body <- [

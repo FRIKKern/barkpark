@@ -850,6 +850,30 @@
     .perspective-tab:hover { color: var(--fg); }
     .perspective-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
 
+    /* ── Chat mode toggle (Plan ⇄ Autopilot) ──────────────────────────────
+       The .perspective-tabs treatment sized to the 24px cockpit chip row,
+       with tone-tinted active segments: Plan = info (calm read-only),
+       Autopilot = ok (running green), transient odd-mode = warn, armed
+       bypass = danger. Same soft-bg + tone-fg pairing as the .badge-* family. */
+    .mode-toggle {
+      display: inline-flex; background: var(--bg-muted);
+      border-radius: 999px; padding: 2px; gap: 2px;
+    }
+    .mode-tab {
+      height: 20px; padding: 0 10px; border: none;
+      border-radius: 999px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.02em; line-height: 1;
+      display: inline-flex; align-items: center;
+      background: transparent; color: var(--fg-muted); cursor: pointer;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .mode-tab:hover { color: var(--fg); }
+    .mode-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
+    .mode-tab-plan.active { background: var(--info-soft); color: var(--info); }
+    .mode-tab-autopilot.active { background: var(--ok-soft); color: var(--ok); }
+    .mode-tab-other.active { background: var(--warn-soft); color: var(--warn); cursor: default; }
+    .mode-tab-bypass.active { background: var(--danger-soft); color: var(--danger); cursor: default; }
+
     /* ── Media grid ───────────────────────────────────────────────────── */
     .media-grid {
       display: grid;

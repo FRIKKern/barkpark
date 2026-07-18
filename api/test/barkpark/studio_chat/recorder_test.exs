@@ -1871,6 +1871,63 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "autopilot policy (plan-approve auto-switch)" do
+    test "the plan-approved fact engages Autopilot: persist + broadcast",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(recorder, {:claude_chat_plan_approved, "req-plan"})
+
+      # Persisted: the next lazy --resume spawns in Autopilot.
+      assert StudioChat.get_session(sid).mode == "auto"
+      # Broadcast: every live viewer (Studio tab, SSE forwarder) flips now.
+      assert_receive {:studio_chat_mode_adopted, "auto", :plan_approved}, 1_000
+    end
+
+    test "init reporting permissionMode default while the store says plan engages (safety net)",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "auto"
+      assert_receive {:studio_chat_mode_adopted, "auto", :plan_approved}, 1_000
+    end
+
+    test "a routine init (mode matching the store) adopts nothing",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "plan"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "plan"
+      refute_receive {:studio_chat_mode_adopted, _, _}, 200
+    end
+
+    test "a genuine legacy-default session stays untouched (no silent escalation)",
+         %{sid: sid, recorder: recorder} do
+      StudioChat.set_mode(sid, "default")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "default"
+      refute_receive {:studio_chat_mode_adopted, _, _}, 200
+    end
+  end
+
   describe "agent_state heartbeat (charter D41h)" do
     setup %{sid: sid} do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())

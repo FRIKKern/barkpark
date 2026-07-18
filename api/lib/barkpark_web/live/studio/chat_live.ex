@@ -445,6 +445,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:set_model, choice} ->
         {:noreply, socket |> clear_persisted_draft() |> change_model(choice) |> clear_composer()}
 
+      :arm_bypass ->
+        # Open the arm ceremony — the SAME assigns as the set-mode bypass road;
+        # nothing is armed until the exact typed confirm word (charter D48).
+        {:noreply,
+         socket
+         |> clear_persisted_draft()
+         |> assign(arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)
+         |> clear_composer()}
+
       :model_usage ->
         {:noreply,
          socket
@@ -656,17 +665,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("set-mode", %{"mode" => mode}, socket) do
-    # Steering to any non-bypass mode drops the live arming token (charter D55):
-    # the next resume of what was a bypass session can never fail open.
-    {:noreply,
-     socket
-     |> assign(
-       arming_bypass: false,
-       bypass_confirm: "",
-       bypass_disarmed: false,
-       bypass_live_armed: false
-     )
-     |> change_mode(Runtime.normalize_mode(socket.assigns.provider, mode))}
+    normalized = Runtime.normalize_mode(socket.assigns.provider, mode)
+
+    # The toggle's active segment stays clickable — a same-mode click (with no
+    # switch in flight) is a no-op, never a redundant steer + transcript line.
+    if normalized == socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
+      {:noreply, socket}
+    else
+      # Steering to any non-bypass mode drops the live arming token (charter D55):
+      # the next resume of what was a bypass session can never fail open.
+      {:noreply,
+       socket
+       |> assign(
+         arming_bypass: false,
+         bypass_confirm: "",
+         bypass_disarmed: false,
+         bypass_live_armed: false
+       )
+       |> change_mode(normalized)}
+    end
   end
 
   # Track the confirm word as it's typed so the Arm button only enables on an
@@ -1027,13 +1044,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Classify a submitted composer line as a BUILTIN slash command (charter D36b)
   # or `:none` (send it to the model as-is). Only EXACT builtins route — a
   # `/plan` with trailing prose is ambiguous, so it falls through as user text.
-  # The floor is /plan · /model (the retired /default builtin is gone, charter
-  # D48 — `default` is no longer an offered mode); session-mutating CLI commands
-  # (/compact, /clear) are NOT builtins — they ride through as plain user text
-  # so the CLI handles them itself, and our store identity is pinned by
-  # `--session-id`/`--resume` regardless of what a slash-turn result echoes (D8;
-  # spot-check assumption per D36b — we never scrape ids off frames).
+  # The floor is /plan · /autopilot · /bypass · /model (the retired /default
+  # builtin is gone, charter D48 — `default` is no longer an offered mode);
+  # session-mutating CLI commands (/compact, /clear) are NOT builtins — they
+  # ride through as plain user text so the CLI handles them itself, and our
+  # store identity is pinned by `--session-id`/`--resume` regardless of what a
+  # slash-turn result echoes (D8; spot-check assumption per D36b — we never
+  # scrape ids off frames).
   defp builtin_command("/plan"), do: {:set_mode, "plan"}
+  defp builtin_command("/autopilot"), do: {:set_mode, "auto"}
+  # The toggle never offers bypass (charter D48) — this builtin is the arm
+  # ceremony's entry point now that the raw six-mode select is gone.
+  defp builtin_command("/bypass"), do: :arm_bypass
   defp builtin_command("/model"), do: :model_usage
 
   # /task builtins (hand-task surface): both expand to a doctrine prompt the
@@ -1515,6 +1537,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # them so they never fall to the noisy catch-all.
   def handle_info({:claude_chat_control, _kind, _request_id, _response}, socket),
     do: {:noreply, socket}
+
+  # The Recorder engaged Autopilot (an approved plan — steer + persist already
+  # done server-side, surface-agnostic). Render only: flip the toggle, drop any
+  # in-flight user switch (the adoption supersedes it), tell the transcript.
+  def handle_info({:studio_chat_mode_adopted, mode, :plan_approved}, socket) do
+    {:noreply,
+     socket
+     |> assign(mode: mode, pending_mode: nil)
+     |> append_message(:system, "Plan approved — #{mode_label(mode)} engaged.")}
+  end
 
   # A permission ask (charter D31). The SAME wire message routes to one of three
   # cards by its tool_name: AskUserQuestion → an answer FORM, ExitPlanMode → the
@@ -3138,24 +3170,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   </select>
                 </span>
               </form>
-              <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
-                <span class="bp-select bp-select-chip">
-                <select
-                  name="mode"
-                  aria-label="Permission mode"
+              <%!-- Session mode: a two-state projection over the raw permission
+                    modes — ◇ Plan (plan + discuss, read-only) ⇄ ▶ Autopilot
+                    ("auto"). An odd raw mode (a resumed acceptEdits/manual/…
+                    row, or an armed bypass) surfaces honestly as a transient
+                    third segment until the user picks a side; the bypass arm
+                    ceremony itself is reachable via /bypass (charter D48 — the
+                    toggle never offers it). --%>
+              <%!-- Map.get, not strict access: test/fake provider capability
+                    maps may omit :mode_switch — an absent key means no toggle,
+                    never a render crash. --%>
+              <div
+                :if={Map.get(Runtime.capabilities(@provider), :mode_switch, false)}
+                class="mode-toggle"
+                role="tablist"
+                aria-label="Session mode"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={to_string(mode_segment(@mode) == :plan)}
+                  class={["mode-tab mode-tab-plan", mode_segment(@mode) == :plan && "active"]}
+                  phx-click="set-mode"
+                  phx-value-mode="plan"
                 >
-                  <%!-- The retired middle mode surfaces ONLY while THIS session still
-                        carries it (charter D48) — a legacy row keeps spawning it
-                        verbatim, but it is never an offered choice for a fresh pick. --%>
-                  <option :if={@mode == "default"} value="default" selected>
-                    <%= mode_label("default") %>
-                  </option>
-                  <option :for={m <- Runtime.capabilities(@provider).modes} value={m} selected={m == @mode}>
-                    <%= mode_label(m) %>
-                  </option>
-                </select>
-                </span>
-              </form>
+                  ◇ Plan
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={to_string(mode_segment(@mode) == :autopilot)}
+                  class={["mode-tab mode-tab-autopilot", mode_segment(@mode) == :autopilot && "active"]}
+                  phx-click="set-mode"
+                  phx-value-mode="auto"
+                >
+                  ▶ Autopilot
+                </button>
+                <button
+                  :if={mode_segment(@mode) in [:other, :bypass]}
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  disabled
+                  class={[
+                    "mode-tab active",
+                    (mode_segment(@mode) == :bypass && "mode-tab-bypass") || "mode-tab-other"
+                  ]}
+                >
+                  <%= mode_label(@mode) %>
+                </button>
+              </div>
               <%!-- Model picker (wave 5): the choice is intent — it rides the next
                     spawn as `--model` and steers a live session via the set_model
                     control frame; the dim mono suffix is FACT (the answering model
@@ -4566,13 +4630,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # carry the post-plan mode. Skipped while a user-initiated switch is in flight
   # (its ack owns the mode, charter D17/D23) and for any unknown/echoed-same
   # value, so a routine init never churns the selector.
-  # Adopt the mode the CLI actually reports off an init frame. `default` STAYS
-  # adoptable here (charter D34: approving a plan flips the CLI's OWN mode plan →
-  # default — observe reflects that REALITY, and a persisted `default` spawns
-  # verbatim). Only bypassPermissions is excluded — the fail-closed law (D48):
-  # an echoed frame is an untrusted string and must never arm dangerous bypass.
+  # Adopt the mode the CLI actually reports off an init frame. `default` is NOT
+  # handled here anymore: the post-plan flip (plan → default, charter D34/D52)
+  # is now the Recorder's seam — it observes the same init frame, engages
+  # Autopilot (steer + persist), and broadcasts `{:studio_chat_mode_adopted, …}`
+  # which this LiveView renders. Only bypassPermissions stays excluded — the
+  # fail-closed law (D48): an echoed frame is an untrusted string and must
+  # never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
-       when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
+       when is_binary(mode) and mode in ~w(plan acceptEdits auto dontAsk manual) do
     cond do
       mode == socket.assigns.mode or not is_nil(socket.assigns[:pending_mode]) ->
         socket
@@ -4604,6 +4670,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # The CLI's own post-plan flip: inert HERE — the Recorder owns this seam
+  # (engage Autopilot + `{:studio_chat_mode_adopted, …}` broadcast); adopting it
+  # locally too would double-persist and race the steer.
+  defp observe_permission_mode(socket, "default"), do: socket
+
   # A permissionMode OUTSIDE the six-value guard (a future/unknown CLI mode) is
   # NOT silently adopted (charter D52): the stored mode is left ALONE (never
   # widen the guard to admit an untrusted string), but the divergence is surfaced
@@ -4623,12 +4694,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp observe_permission_mode(socket, _mode), do: socket
 
-  # The proven ExitPlanMode signature (plan → default, charter D52) gets the
-  # specific story; any other CLI-side divergence is narrated without inventing
-  # a cause — "after plan approval" on a flip that wasn't one would be a lie.
-  defp observed_mode_line("plan", "default"),
-    do: "Permission mode is now #{mode_label("default")} after plan approval."
-
+  # A CLI-side divergence is narrated without inventing a cause. (The proven
+  # ExitPlanMode signature — plan → default, charter D52 — no longer lands
+  # here: the Recorder adopts it into Autopilot and its broadcast carries the
+  # story.)
   defp observed_mode_line(_from, mode),
     do: "Permission mode is now #{mode_label(mode)} (reported by the agent)."
 
@@ -6260,15 +6329,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp model_label("fable"), do: "Fable"
   defp model_label(m), do: m
 
-  defp mode_label("plan"), do: "plan (read-only)"
+  # The two toggle states carry their product names; the rest keep their raw
+  # stories (they still label odd resumed sessions and transcript lines).
+  defp mode_label("plan"), do: "Plan"
   defp mode_label("acceptEdits"), do: "accept edits"
-  defp mode_label("auto"), do: "auto-run"
+  defp mode_label("auto"), do: "Autopilot"
   defp mode_label("dontAsk"), do: "don't ask"
   defp mode_label("manual"), do: "manual approve"
   defp mode_label("bypassPermissions"), do: "bypass · dangerous"
   # The retired middle mode: shown ONLY while a legacy session still carries it.
   defp mode_label("default"), do: "ask (legacy)"
   defp mode_label(other), do: other
+
+  # Which toggle segment a raw permission mode lights up (the presentation
+  # projection — the raw vocabulary/wire/DB stay untouched): plan ⇒ Plan,
+  # auto ⇒ Autopilot, armed bypass ⇒ the danger segment, anything else (a
+  # resumed acceptEdits/manual/dontAsk/legacy-default row) ⇒ the transient
+  # third segment until the user picks a side.
+  defp mode_segment("plan"), do: :plan
+  defp mode_segment("auto"), do: :autopilot
+  defp mode_segment("bypassPermissions"), do: :bypass
+  defp mode_segment(_), do: :other
 
   # Effort tiers render verbatim in the picker (charter D48 — "Fable · high").
   defp effort_label(nil), do: "default"
@@ -6327,18 +6408,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
   # The builtin floor — always offered, even with no live runtime. `builtin:
-  # true` marks the three that route to a control path on submit (the JS just
+  # true` marks the ones that route to a control path on submit (the JS just
   # inserts their text; `handle_event("send")` does the routing).
   @slash_builtins [
     %{
       "name" => "/plan",
-      "description" => "Plan mode — read-only; the agent proposes before acting",
+      "description" => "Plan mode — read-only; discuss and propose before acting",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
+    %{
+      "name" => "/autopilot",
+      "description" => "Autopilot — the agent runs without asking (auto-run)",
       "argumentHint" => nil,
       "builtin" => true
     },
     # The /default builtin is RETIRED (charter D48) — `default` is no longer an
-    # offered mode; the picker's six modes + the armed bypass ceremony are the
-    # surface. /plan is the only mode builtin left.
+    # offered mode. The toggle surfaces Plan ⇄ Autopilot; /bypass is the armed
+    # ceremony's only entry point now that the raw six-mode select is gone.
+    %{
+      "name" => "/bypass",
+      "description" => "Open the bypass arm ceremony (dangerous — skips permissions)",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
     %{
       "name" => "/model",
       "description" => "Switch the model for this session",

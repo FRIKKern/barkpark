@@ -259,6 +259,12 @@ func (m Model) openSession(s Session) Model {
 		Title:     s.Title,
 		Messages:  s.Messages,
 		LastSeq:   last,
+		// The mode badge starts from the store row (Plan ⇄ Autopilot header);
+		// init frames and turn-boundary refetches keep it honest from there.
+		Mode: s.Mode,
+		// The observed answering model, when the row carries one — the header
+		// falls back to the intent alias until a turn reveals the fact.
+		Model: s.Model,
 		// Law-2: hydrate the agents rail from the resumed session's snapshot so a
 		// surface switch lands on the same mission control Studio last showed.
 		Rail: decodeRail(s.RailSnapshot),
@@ -372,6 +378,38 @@ func (m Model) patchContinuityCmd() tea.Cmd {
 		fields["effort_choice"] = m.effortChoice
 	}
 	return func() tea.Msg { _ = tr.PatchSession(id, fields); return patchedMsg{} }
+}
+
+// toggleMode flips the session between Plan and Autopilot (ctrl+p). An odd raw
+// mode (a resumed acceptEdits/manual/… row, or armed bypass) lands on plan
+// first — the safe direction; the next press engages Autopilot. Optimistic:
+// the badge flips now, the PATCH persists AND steers a live runtime
+// server-side, and the turn-boundary refetch re-asserts truth.
+func (m Model) toggleMode() (Model, tea.Cmd) {
+	if m.st.SessionID == "" {
+		return m, nil
+	}
+	current := m.st.Mode
+	if current == "" {
+		current = m.mode
+	}
+	target := "plan"
+	notice := "Mode → ◇ Plan"
+	if current == "plan" {
+		target = "auto"
+		notice = "Mode → ▶ Autopilot"
+	}
+	m.st.Mode = target
+	// Keep the D14 continuity field in step so the leave-PATCH never reverts
+	// the toggle.
+	m.mode = target
+	m.st.Notice = notice
+	tr := m.tr
+	id := m.st.SessionID
+	return m, func() tea.Msg {
+		_ = tr.PatchSession(id, map[string]any{"mode": target})
+		return patchedMsg{}
+	}
 }
 
 // ── commands + messages ──────────────────────────────────────────────────────
