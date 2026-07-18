@@ -84,6 +84,19 @@ const ALLOW_PREFIXES = [
   "tlv-badge tlv-badge--",      // tlvRowHtml(): + variant (event | verify | verify-fail | audit)
   "vf-chip vf-chip--",          // verifyChipHtml(): + role (pass | fail | unknown)
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
+  // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
+  // rules in app.css today — verified via `.<family>` grep before allowing.
+  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
+  "notice",                     // noticeHtml(): + (tone ? " notice-"+esc(tone) : "") (.notice / .notice-ok|warn|error)
+  "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
+  "dep-current",                // + (rolledBack ? " dep-current--restored" : "") (.dep-current[--restored])
+  "prov-overall",               // + state (.prov-overall rules)
+  "usage-bar usage-bar--",      // + d.bar.tone (.usage-bar-- rules)
+  "fleet-usage-metric-v",       // + (unmetered ? " dim" : "") (.fleet-usage-metric-v / .dim)
+  "fleet-usage-cell",           // + toneCls (.fleet-usage-cell rules)
+  "metric-card metric--",       // + esc(m.role) (.metric-card / .metric-- rules)
+  "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -190,6 +203,10 @@ const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 
 const definedTokens = new Set();
 for (const m of css.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) definedTokens.add(m[1]);
+// @property --x { … } registers a custom property just as a `--x:` declaration
+// does (the animated conic-ring fill --p at app.css:1717). The name is followed
+// by `{`, not `:`, so the declaration scan above misses it — register it here.
+for (const m of css.matchAll(/@property\s+(--[A-Za-z0-9_-]+)/g)) definedTokens.add(m[1]);
 
 /** var(--x) consumption sites across all three files. */
 function consumedTokens(src, file) {
@@ -389,6 +406,37 @@ const lightTokens = parseTokenBlocks(/^:root\s*\{([\s\S]*?)\}/gm);
 const darkOverrides = parseTokenBlocks(/^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm);
 const darkTokens = { ...lightTokens, ...darkOverrides };
 
+// Identity ramps (charter GR5): each `html[data-bp-theme="X"] { … }` block is a
+// full accent+surface token set; its `[data-theme="dark"]` sibling is the dark
+// variant. Per CSS specificity `html[data-bp-theme="X"]` (0,1,1) overrides the
+// base dark block (0,1,0), and `html[data-bp-theme="X"][data-theme="dark"]`
+// (0,2,1) overrides everything — so a dark identity state is
+// base-light ∪ base-dark ∪ identity-light ∪ identity-dark, later spread wins.
+const IDENTITY_RAMPS = ["evergreen", "charple", "ember", "fjord"];
+const identityTokens = {}; // id -> { light, dark }
+for (const id of IDENTITY_RAMPS) {
+  identityTokens[id] = {
+    light: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+    dark: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\[data-theme="dark"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+  };
+}
+
+// THE 10 theme states the SPA actually renders (charter GR5): base light/dark
+// plus each identity light/dark. Every CONTRAST_PAIRS entry is resolved against
+// all ten — the contrast manifest fans from 2 states to 10 (34 pairs → 340
+// evaluations) so an identity ramp cannot ship an unreadable pairing unseen.
+const THEME_STATES = [
+  ["base-light", lightTokens],
+  ["base-dark", darkTokens],
+];
+for (const id of IDENTITY_RAMPS) {
+  THEME_STATES.push([`${id}-light`, { ...lightTokens, ...identityTokens[id].light }]);
+  THEME_STATES.push([
+    `${id}-dark`,
+    { ...lightTokens, ...darkOverrides, ...identityTokens[id].light, ...identityTokens[id].dark },
+  ]);
+}
+
 /** Substitute var(--x) references until the value is literal. */
 function resolveValue(name, map, seen = new Set()) {
   if (seen.has(name)) throw new Error(`token cycle at ${name}`);
@@ -460,7 +508,7 @@ function resolveColor(token, map, theme, errs) {
 
 const contrastResults = []; // { theme, fg, bg, ratio, min, why }
 function runContrast(errs) {
-  for (const [theme, map] of [["light", lightTokens], ["dark", darkTokens]]) {
+  for (const [theme, map] of THEME_STATES) {
     for (const p of CONTRAST_PAIRS) {
       const fg = resolveColor(p.fg, map, theme, errs);
       let bg = resolveColor(p.bg, map, theme, errs);
@@ -576,8 +624,14 @@ const pxFontSizes = []; // R4
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Anchored: `[data-theme="dark"] .foo {` is a scoped RULE, not a token
-    // block — only the bare block selectors mark token territory.
-    if (depth === 0 && /^\s*(?::root|\[data-theme="dark"\])\s*\{\s*$/.test(line)) inTokenBlock = true;
+    // block — only the bare block selectors mark token territory. The identity
+    // ramps `html[data-bp-theme="X"] {` and `…[data-theme="dark"] {` (charter
+    // GR5) are token blocks too, so their raw ramp values are contract, not E6.
+    if (
+      depth === 0 &&
+      /^\s*(?::root|\[data-theme="dark"\]|html\[data-bp-theme="[a-z]+"\](?:\[data-theme="dark"\])?)\s*\{\s*$/.test(line)
+    )
+      inTokenBlock = true;
     for (const ch of line) {
       if (ch === "{") depth++;
       else if (ch === "}") {
@@ -641,8 +695,9 @@ for (const s of staleRawAllows) {
   console.log(`stale  ALLOW_RAW_COLORS entry no longer matches any line — prune it: ${s}`);
 }
 
-// E5 summary: worst pair per theme, so drift toward the threshold is visible.
-for (const theme of ["light", "dark"]) {
+// E5 summary: worst pair per theme state, so drift toward the threshold is
+// visible across all ten (base + 4 identities × light/dark).
+for (const [theme] of THEME_STATES) {
   const rows = contrastResults.filter((r) => r.theme === theme);
   if (!rows.length) continue;
   const worst = rows.reduce((a, b) => (a.ratio / a.min < b.ratio / b.min ? a : b));
