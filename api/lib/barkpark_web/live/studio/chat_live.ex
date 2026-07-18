@@ -1920,6 +1920,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, socket}
   end
 
+  # Herd-layer liveness ticks (charter D41h) ride the same activity topic so
+  # the fleet wire can badge stalls; the Studio sidebar keys off flips only —
+  # explicitly ignored here so the tick is documented, not merely swallowed by
+  # the catch-all below.
+  def handle_info({:chat_heartbeat, _sid, _ts}, socket), do: {:noreply, socket}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # The async readiness probe landed (chat-task-hands, charter decision 4).
@@ -6418,12 +6424,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp strip_label(:working), do: "running"
   defp strip_label(:finished_while_away), do: "done"
 
-  # Session → tokenized pill. Precedence (charter D14): PendingApproval > Working
-  # > Exited > Idle. A session with a persisted pending approval outranks every
-  # status — it is the one row that needs the admin RIGHT NOW, so it wears the
-  # warn-toned "needs you" pill even mid-turn.
-  # The live overlay wins over the stored row (wave 5): a Recorder that says
-  # "working" right now beats a store status that flips only on frame writes.
+  # Session → tokenized pill. The live overlay wins over the stored row (wave
+  # 5): a Recorder that says "working" right now beats a row the sidebar has
+  # not re-read yet. The cold half reads `session.agent_state` (herd wave 1) —
+  # see session_pill/1 below.
   # ── wave-session-card lines (wsc charter D8/D11) ──────────────────────────
   # One tick per D3 `ticks` status, straight off the journey truth table (D1 —
   # never re-derived positionally): done settles evergreen (--life-done), the
@@ -6477,14 +6481,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp session_pill(_s, %{state: :offline}), do: {"badge-chat-offline", "offline"}
   defp session_pill(s, _act), do: session_pill(s)
 
-  defp session_pill(%{pending_approvals: n}) when is_integer(n) and n > 0,
-    do: {"badge-chat-approval", "needs you"}
+  # The COLD half reads the persisted herd column (herd wave 1, charter
+  # D38/D40): `agent_state` is the four-state truth the Recorder writes at
+  # every flip, so the pill, the needs-you strip, and the fleet wire agree by
+  # construction — the old parallel derivation (pending_approvals + status) is
+  # gone. `blocked` wears the warn-toned "needs you"; a mid-turn death reads
+  # `unknown` and wears "offline"; everything else is honestly idle.
+  defp session_pill(%{agent_state: agent_state}), do: session_pill_by_state(agent_state)
 
-  defp session_pill(%{status: status}), do: session_pill_by_status(status)
-
-  defp session_pill_by_status("working"), do: {"badge-chat-working", "working"}
-  defp session_pill_by_status("exited"), do: {"badge-chat-offline", "offline"}
-  defp session_pill_by_status(_), do: {"badge-chat-idle", "idle"}
+  defp session_pill_by_state("working"), do: {"badge-chat-working", "working"}
+  defp session_pill_by_state("blocked"), do: {"badge-chat-approval", "needs you"}
+  defp session_pill_by_state("unknown"), do: {"badge-chat-offline", "offline"}
+  defp session_pill_by_state(_idle), do: {"badge-chat-idle", "idle"}
 
   # The active row wears the evergreen accent; the rest are transparent (hover
   # tint lives in the render <style>). All colours are emitted tokens.

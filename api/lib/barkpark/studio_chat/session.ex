@@ -35,6 +35,12 @@ defmodule Barkpark.StudioChat.Session do
   # it (a legacy-`default` select re-pick normalizes to plan).
   @modes ~w(plan acceptEdits auto dontAsk manual bypassPermissions)
 
+  # The herd-layer semantic axis (chat-tui charter D38/D40): what the AGENT is
+  # doing, persisted by the Recorder at its publish_activity seam. Four states
+  # ONLY — `needs_you` maps to `blocked`, `done` deliberately does not exist,
+  # and a stall is a VIEW-side badge off `agent_state_at`, never a fifth state.
+  @agent_states ~w(working blocked idle unknown)
+
   @primary_key {:id, Ecto.UUID, autogenerate: false}
   @foreign_key_type Ecto.UUID
 
@@ -81,6 +87,19 @@ defmodule Barkpark.StudioChat.Session do
     # FULL struct — `list_sessions` deliberately omits it), cleared on send.
     field :draft, :string
     field :status, :string, default: "active"
+
+    # The persisted herd state (chat-tui charter D38–D42h): the Recorder's
+    # wave-5 activity derivation as cold truth — `working | blocked | idle |
+    # unknown`. Written flips-only via `StudioChat.set_agent_state/3` (its own
+    # `Repo.update_all`, never inside `append_message`'s transaction); the
+    # sidebar pill, the needs-you strip, and the fleet wire all read THIS
+    # column so every surface agrees by construction. `agent_state_at` is the
+    # liveness stamp: bumped on every flip and at most every 60s while
+    # working/blocked (D41h) — `AgentStateSweeper` flips a stale working/
+    # blocked row to `unknown` (D42h). Nullable stamp: a pre-migration row has
+    # no heartbeat and reads NULL.
+    field :agent_state, :string, default: "idle"
+    field :agent_state_at, :utc_datetime_usec
 
     field :last_active_at, :utc_datetime_usec
 
@@ -156,6 +175,9 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Legal permission modes OFFERED in the picker (mirrors ClaudeChat.modes/0)."
   def modes, do: @modes
 
+  @doc "The four herd agent states (chat-tui charter D40) — never more."
+  def agent_states, do: @agent_states
+
   # Modes that may be PERSISTED — the offered six PLUS the grandfathered `default`.
   # `default` is not an offered choice, but the CLI still reports it as its own
   # post-plan mode (charter D34), so `set_mode/2` must accept it when observed and
@@ -194,6 +216,8 @@ defmodule Barkpark.StudioChat.Session do
     |> check_constraint(:provider_session_id, name: :chat_sessions_provider_session_id_check)
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:title_source, @title_sources)
+    |> validate_inclusion(:agent_state, @agent_states)
+    |> check_constraint(:agent_state, name: :chat_sessions_agent_state_check)
   end
 
   defp put_legacy_identity_defaults(changeset) do

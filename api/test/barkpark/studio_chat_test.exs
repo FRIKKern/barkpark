@@ -2655,10 +2655,13 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
-  describe "strip_kind/3 — per-session derivation (wave 12)" do
+  describe "strip_kind/3 — per-session derivation (wave 12, re-based on agent_state herd wave 1)" do
     test "pending ask roles map to kinds with approval > question > plan precedence" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
+      # the Recorder persists "blocked" when the ask flips needs_you (D38) —
+      # the strip reads the COLUMN, not the pending counter
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["plan", "question", "approval"], nil) ==
@@ -2666,7 +2669,7 @@ defmodule Barkpark.StudioChatTest do
 
       assert StudioChat.strip_kind(s, ["plan", "question"], nil) == :awaiting_input
       assert StudioChat.strip_kind(s, ["plan"], nil) == :plan_ready
-      # an overlay :needs_you racing the store read degrades to the generic
+      # a blocked row with no known pending roles degrades to the generic
       # kind — never dropped
       assert StudioChat.strip_kind(s, [], nil) == :pending_approval
     end
@@ -2682,21 +2685,21 @@ defmodule Barkpark.StudioChatTest do
                :awaiting_input
     end
 
-    test "working: live overlay OR persisted status — and it beats finished-while-away" do
+    test "working: live overlay OR persisted agent_state — and it beats finished-while-away" do
       s = new_session()
       assert StudioChat.strip_kind(s, [], %{state: :working, line: "writing…"}) == :working
 
-      # persisted "working" alone (cold mount) is enough — even with an unseen
+      # the persisted column alone (cold mount) is enough — even with an unseen
       # last_active_at, a running turn is :working, never :finished_while_away
-      {:ok, _} = StudioChat.update_status(s.id, "working")
+      {1, _} = StudioChat.set_agent_state(s.id, "working")
       s = set_times(s.id, minutes_ago(1), minutes_ago(10))
       assert StudioChat.strip_kind(s, [], nil) == :working
     end
 
-    test "a pending ask outranks a running turn" do
+    test "a blocked row (pending ask) outranks a running-turn overlay" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
-      {:ok, _} = StudioChat.update_status(s.id, "working")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["approval"], %{state: :working, line: "writing…"}) ==
@@ -2729,18 +2732,22 @@ defmodule Barkpark.StudioChatTest do
       # done (settled after last visit)
       done = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
 
-      # working (persisted status — no overlay)
+      # working (persisted herd column — no overlay)
       working = new_session()
-      {:ok, _} = StudioChat.update_status(working.id, "working")
+      {1, _} = StudioChat.set_agent_state(working.id, "working")
       working = StudioChat.get_session(working.id)
 
-      # plan ready / awaiting input / pending approval (pending rows + counter)
+      # plan ready / awaiting input / pending approval: the pending ask rows
+      # carry the KIND detail; the persisted "blocked" column carries the state
       plan = new_session()
       seed_pending_ask(plan, "plan", "rp")
+      {1, _} = StudioChat.set_agent_state(plan.id, "blocked")
       question = new_session()
       seed_pending_ask(question, "question", "rq")
+      {1, _} = StudioChat.set_agent_state(question.id, "blocked")
       approval = new_session()
       seed_pending_ask(approval, "approval", "rap")
+      {1, _} = StudioChat.set_agent_state(approval.id, "blocked")
 
       # quiet: visited after settling — no entry
       quiet = set_times(new_session().id, minutes_ago(20), minutes_ago(2))
@@ -2769,6 +2776,7 @@ defmodule Barkpark.StudioChatTest do
     test "the on-screen session is never 'away' — excluded even mid-ask" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.needs_you_strip([s],
@@ -2820,11 +2828,86 @@ defmodule Barkpark.StudioChatTest do
       listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
       assert %DateTime{} = listed.last_visited_at
       assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([listed])
+
+      # the herd column rides the sidebar select (herd wave 1): a select that
+      # omitted it would feed the schema default ("idle") to every pill/strip
+      {1, _} = StudioChat.set_agent_state(s.id, "working")
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert listed.agent_state == "working"
+      assert %DateTime{} = listed.agent_state_at
+      assert [%{kind: :working}] = StudioChat.needs_you_strip([listed])
     end
 
     test "strip_kinds/0 IS the priority order (S7's notification vocabulary)" do
       assert StudioChat.strip_kinds() ==
                [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+    end
+  end
+
+  describe "agent_state store writes (herd wave 1, charter D38–D41h)" do
+    test "set_agent_state persists state + stamp in one update_all; the vocabulary is guarded" do
+      s = new_session()
+      assert s.agent_state == "idle"
+      assert s.agent_state_at == nil
+
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "working")
+
+      updated = StudioChat.get_session(s.id)
+      assert updated.agent_state == "working"
+      assert %DateTime{} = updated.agent_state_at
+
+      # four states ONLY — "done" does not exist (herd doctrine)
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "done")
+      end
+    end
+
+    test "touch_agent_state_at bumps ONLY the liveness stamp — never the state" do
+      s = new_session()
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      %{agent_state_at: at0} = StudioChat.get_session(s.id)
+
+      {1, _} = StudioChat.touch_agent_state_at(s.id)
+
+      touched = StudioChat.get_session(s.id)
+      assert touched.agent_state == "blocked"
+      assert DateTime.compare(touched.agent_state_at, at0) == :gt
+    end
+
+    test "the DB CHECK mirrors the four-state vocabulary (constraint, not just code)" do
+      s = new_session()
+
+      assert_raise Postgrex.Error, ~r/chat_sessions_agent_state_check/, fn ->
+        Repo.update_all(
+          from(x in Session, where: x.id == ^s.id),
+          set: [agent_state: "done"]
+        )
+      end
+    end
+
+    test "resolving the LAST pending ask flips blocked→working; an earlier resolve keeps blocked" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "ub-1")
+      seed_pending_ask(s, "question", "ub-2")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+
+      # one ask down, one still pending — the human is still needed
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-1", "allowed")
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+
+      # the LAST ask resolves: the turn resumes, the persisted state unblocks
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-2", "denied")
+      assert StudioChat.get_session(s.id).agent_state == "working"
+    end
+
+    test "resolution never resurrects a non-blocked row (a dangling cancel after death)" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "ub-3")
+      # the Recorder already died mid-turn: the offline rule wrote "unknown"
+      {1, _} = StudioChat.set_agent_state(s.id, "unknown")
+
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-3", "canceled")
+      assert StudioChat.get_session(s.id).agent_state == "unknown"
     end
   end
 

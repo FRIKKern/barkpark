@@ -90,9 +90,14 @@ defmodule Barkpark.StudioChat.Recorder do
   @doc """
   The GLOBAL live-activity topic (wave 5). Every Recorder broadcasts
   `{:chat_activity, session_id, %{state: :working | :needs_you | :idle |
-  :offline, line: String.t() | nil}}` here whenever its derived activity
-  CHANGES — the sidebar renders what each session is doing right now (the
-  current tool line, writing/thinking) without polling the store.
+  :offline, line: String.t() | nil, owner_workspace_id: String.t() | nil}}`
+  here whenever its derived activity CHANGES — the sidebar renders what each
+  session is doing right now (the current tool line, writing/thinking) without
+  polling the store. The `:owner_workspace_id` key is the herd-layer fleet
+  scope stamp (charter D43h) — a MAP key, never a 4th tuple element. The topic
+  also carries `{:chat_heartbeat, session_id, ts}` liveness ticks at most every
+  60s while a session is working/blocked (charter D41h) — subscribers that only
+  care about flips ignore them.
   """
   @spec activity_topic() :: String.t()
   def activity_topic, do: "studio_chat:activity"
@@ -174,7 +179,8 @@ defmodule Barkpark.StudioChat.Recorder do
                admission,
                runtime_attempt,
                runtime_ingress_token,
-               cloud_sandbox_id
+               cloud_sandbox_id,
+               Map.get(opts, :workspace_id)
              )}
 
           {:error, {:already_started, session}} ->
@@ -193,7 +199,8 @@ defmodule Barkpark.StudioChat.Recorder do
                admission,
                runtime_attempt,
                runtime_ingress_token,
-               cloud_sandbox_id
+               cloud_sandbox_id,
+               Map.get(opts, :workspace_id)
              )}
 
           {:error, reason} ->
@@ -234,7 +241,8 @@ defmodule Barkpark.StudioChat.Recorder do
          admission,
          runtime_attempt,
          runtime_ingress_token,
-         cloud_sandbox_id
+         cloud_sandbox_id,
+         owner_workspace_id
        ) do
     %{
       session_id: id,
@@ -251,6 +259,19 @@ defmodule Barkpark.StudioChat.Recorder do
       monitor_pid: Runtime.runtime_pid(session),
       timer: arm_idle(nil),
       activity: nil,
+      # The herd substrate (charter D38–D43h). `owner_workspace_id` is the
+      # fleet scope stamp captured ONCE from opts at init (both ensure/1 call
+      # sites pass it; the column is immutable post-create) — stamped onto
+      # every {:chat_activity} broadcast MAP, never stored back into
+      # `state.activity`. `agent_state` is the last PERSISTED four-state value
+      # (working|blocked|idle|unknown, nil until the first write): the
+      # flips-only write gate compares the MAPPED value here, so a
+      # line-text-only activity change never touches the row. The heartbeat
+      # timer is its OWN field — NEVER `:timer`, which touch/1 cancels on
+      # every frame (D41h).
+      owner_workspace_id: owner_workspace_id,
+      agent_state: nil,
+      agent_state_timer: nil,
       runtime_text: "",
       # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
       # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
@@ -619,6 +640,32 @@ defmodule Barkpark.StudioChat.Recorder do
     broadcast(state, {:claude_chat_exit, :idle_reaped, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
+  end
+
+  # The 60s liveness tick (charter D41h): while working/blocked, bump
+  # agent_state_at (never the state — no flip happened) and broadcast a
+  # {:chat_heartbeat} tick on the activity topic so the fleet wire can tell a
+  # long tool call from a dead BEAM (pure flips-only on the wire would make
+  # every long call look stalled). Deliberately NO touch/1 here — a
+  # self-generated tick must never defeat the frame-silence idle reaper.
+  def handle_info(:agent_state_heartbeat, state) do
+    if state.agent_state in ["working", "blocked"] do
+      ts = DateTime.utc_now()
+      StudioChat.touch_agent_state_at(state.session_id, ts)
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        activity_topic(),
+        {:chat_heartbeat, state.session_id, ts}
+      )
+
+      timer = Process.send_after(self(), :agent_state_heartbeat, agent_heartbeat_ms())
+      {:noreply, %{state | agent_state_timer: timer}}
+    else
+      # A stale tick that raced a flip out of working/blocked: the flip already
+      # canceled/re-based the timer — do not re-arm off this message.
+      {:noreply, state}
+    end
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -1353,19 +1400,81 @@ defmodule Barkpark.StudioChat.Recorder do
   defp assistant_activity(_blocks, previous), do: previous
 
   # Broadcast on CHANGE only — a hundred stream deltas collapse into one
-  # "writing…" event, so the sidebar never gets spammed.
+  # "writing…" event, so the sidebar never gets spammed. This seam is ALSO
+  # where the herd column persists (charter D38): all 13 activity call sites
+  # funnel here, so the flips-only store write lives here too — never inside
+  # append_message's transaction. The broadcast map carries the session's
+  # owner_workspace_id (D43h, a MAP key — the tuple stays a 3-tuple), stamped
+  # AFTER the change-detect compare; state stores the UNSTAMPED map, else the
+  # extra key would defeat the change-only gate and re-broadcast spuriously.
   defp publish_activity(state, activity) do
     if activity != state.activity and activity != nil do
+      state = persist_agent_state(state, activity)
+
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
         activity_topic(),
-        {:chat_activity, state.session_id, activity}
+        {:chat_activity, state.session_id,
+         Map.put(activity, :owner_workspace_id, state.owner_workspace_id)}
       )
 
       %{state | activity: activity}
     else
       state
     end
+  end
+
+  # ── agent_state persistence (herd wave 1, charter D38–D42h) ────────────────
+
+  # Map the wave-5 activity vocabulary onto the persisted four-state column:
+  # needs_you → "blocked" (the human is the blocker). :offline applies the ONE
+  # uniform prior-state rule (D39) for all four :offline call sites — exit,
+  # crash-DOWN, idle_reap, and the codex error path: a mid-turn death (prior
+  # working/needs_you) is "unknown" (possibly wedged), while a reaped RESTING
+  # session (prior idle/nil) stays honestly "idle" — never wedged-looking.
+  defp map_agent_state(%{state: :working}, _prior), do: "working"
+  defp map_agent_state(%{state: :needs_you}, _prior), do: "blocked"
+  defp map_agent_state(%{state: :idle}, _prior), do: "idle"
+
+  defp map_agent_state(%{state: :offline}, %{state: prior})
+       when prior in [:working, :needs_you],
+       do: "unknown"
+
+  defp map_agent_state(%{state: :offline}, _prior), do: "idle"
+
+  # Flips-only persistence (D38): gate on the MAPPED value, never the raw
+  # {state, line} pair — "Bash — x" → "Bash — y" IS an activity change but NOT
+  # a state flip, and must not write. The write is its own Repo.update_all
+  # (StudioChat.set_agent_state, the bump_on_append pattern); a real flip
+  # stamps agent_state_at immediately and re-bases the 60s heartbeat (D41h).
+  defp persist_agent_state(state, activity) do
+    mapped = map_agent_state(activity, state.activity)
+
+    if mapped == state.agent_state do
+      state
+    else
+      StudioChat.set_agent_state(state.session_id, mapped)
+      rearm_agent_heartbeat(%{state | agent_state: mapped})
+    end
+  end
+
+  # The heartbeat runs ONLY while working or blocked — blocked included so the
+  # D42h staleness sweep never falsely reaps a session waiting on a human.
+  # Re-armed on every flip (the flip itself just stamped agent_state_at), so
+  # ticks stay a full interval away from the last write.
+  defp rearm_agent_heartbeat(state) do
+    if state.agent_state_timer, do: Process.cancel_timer(state.agent_state_timer)
+
+    timer =
+      if state.agent_state in ["working", "blocked"] do
+        Process.send_after(self(), :agent_state_heartbeat, agent_heartbeat_ms())
+      end
+
+    %{state | agent_state_timer: timer}
+  end
+
+  defp agent_heartbeat_ms do
+    Application.get_env(:barkpark, :studio_chat_agent_heartbeat_ms, 60_000)
   end
 
   # ── slash-command vocabulary (charter D36a) ────────────────────────────────

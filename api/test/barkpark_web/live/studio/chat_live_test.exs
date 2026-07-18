@@ -299,6 +299,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
     StudioChat.rename(id, title)
     if status = opts[:status], do: StudioChat.update_status(id, status)
+    # the herd column (charter D38/D40) — what the sidebar pill actually reads
+    if agent_state = opts[:agent_state], do: StudioChat.set_agent_state(id, agent_state)
     id
   end
 
@@ -2249,7 +2251,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # nudge recency so the ordering is deterministic
       StudioChat.update_status(older, "active")
       Process.sleep(5)
-      _newer = seed_session("Newer chat", status: "working")
+      _newer = seed_session("Newer chat", status: "working", agent_state: "working")
 
       {:ok, _view, html} = live(conn, "/studio/chat")
 
@@ -2262,6 +2264,35 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # tokenized lifecycle pills (never the undefined .bp-pill)
       assert html =~ "badge-chat-working"
       refute html =~ "bp-pill"
+    end
+
+    test "cold pills read the persisted agent_state (herd wave 1): blocked → needs you, unknown → offline",
+         %{conn: conn} do
+      seed_session("Blocked chat", agent_state: "blocked")
+      seed_session("Unknown chat", agent_state: "unknown")
+      seed_session("Idle chat")
+
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      # blocked wears the warn-toned needs-you pill straight off the column
+      assert html =~ "badge-chat-approval"
+      assert html =~ "needs you"
+      # a mid-turn death (unknown) reads as offline
+      assert html =~ "badge-chat-offline"
+      assert html =~ "offline"
+      # a plain resting session stays the idle pill
+      assert html =~ "badge-chat-idle"
+    end
+
+    test "a {:chat_heartbeat} liveness tick is explicitly ignored (charter D41h)",
+         %{conn: conn} do
+      sid = seed_session("Quiet chat")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      send(view.pid, {:chat_heartbeat, sid, DateTime.utc_now()})
+
+      assert render(view) =~ "Quiet chat"
+      assert Process.alive?(view.pid)
     end
 
     test "reopening a stored session replays its history with NO spawn", %{conn: conn} do
