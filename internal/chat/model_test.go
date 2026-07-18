@@ -697,3 +697,91 @@ func TestTailRefetchRehydratesWorkflow(t *testing.T) {
 		t.Fatalf("the turn-boundary refetch must hydrate the workflow, got %+v", st.Workflow)
 	}
 }
+
+// TestWorkflowExpandRefetchOnce is the D42 proof: the collapse→expand Enter
+// edge fires exactly ONE FetchTailEffect (since=LastSeq) through execEffect —
+// the drill and collapse edges fire none, and no polling/cadence exists (D13
+// holds). A re-expand is a NEW edge and re-arms.
+func TestWorkflowExpandRefetchOnce(t *testing.T) {
+	f := &fakeTransport{}
+	m := newTestModel(f)
+	m.screen = screenChat
+	m.width, m.height = 80, 24
+	m.scroll = -1
+	m.st = liveWorkflowState(t)
+	m.st.LastSeq = 41
+	m.now = func() time.Time { return time.UnixMilli(1782767557221).Add(90 * time.Second) }
+	m.focus = focusWorkflow
+
+	// the expand edge → exactly one tail fetch at the current cursor
+	nm, cmd := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if !got.wfExpanded {
+		t.Fatal("Enter must expand")
+	}
+	runCmd(cmd)
+	if len(f.getCalls) != 1 || f.getCalls[0].since != 41 {
+		t.Fatalf("the expand edge must refetch ONCE with since=LastSeq, got %+v", f.getCalls)
+	}
+
+	// the drill edge → none
+	nm, cmd = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got = nm.(Model)
+	runCmd(cmd)
+	if !got.wfAgentDetail {
+		t.Fatal("second Enter must drill")
+	}
+	if len(f.getCalls) != 1 {
+		t.Fatalf("the drill edge must never refetch, got %+v", f.getCalls)
+	}
+
+	// the collapse edges → none
+	nm, cmd = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got = nm.(Model)
+	runCmd(cmd)
+	nm, cmd = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got = nm.(Model)
+	runCmd(cmd)
+	if got.wfExpanded {
+		t.Fatal("Esc twice must collapse")
+	}
+	if len(f.getCalls) != 1 {
+		t.Fatalf("collapse edges must never refetch, got %+v", f.getCalls)
+	}
+
+	// a re-expand is a NEW edge — it re-arms
+	got.focus = focusWorkflow
+	nm, cmd = got.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	runCmd(cmd)
+	if len(f.getCalls) != 2 {
+		t.Fatalf("a re-expand edge must refetch again, got %+v", f.getCalls)
+	}
+	_ = nm
+}
+
+// TestWorkflowCursorReachesPinnedRunning is the D44 cursor-clamp proof on the
+// synthetic 18-agent phase: the Up/Down range is the visibleAgents projection,
+// so the pinned running agent at wire 17 (visible position 7) is reachable —
+// before D44 the clamp stopped inside the first 8 WIRE agents and wire 9/17
+// were unreachable. The detail pane at the landed cursor names the same agent.
+func TestWorkflowCursorReachesPinnedRunning(t *testing.T) {
+	m := wfTestModel(t, State{SessionID: "s1", Workflow: synthetic18Workflow()})
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	m.wfPhase = 0
+	m.wfAgentDetail = true
+	m.wfAgent = 0
+
+	got := m
+	for i := 0; i < 20; i++ {
+		nm, _ := got.handleChatKey(tea.KeyMsg{Type: tea.KeyDown})
+		got = nm.(Model)
+	}
+	if got.wfAgent != 7 {
+		t.Fatalf("the cursor must clamp at the projection's last row (7), got %d", got.wfAgent)
+	}
+	pane := strings.Join(renderWorkflowAgentDetail(80, journeyOf(got.st.Workflow), got.now(), 0, got.wfAgent, true), "\n")
+	if !strings.Contains(pane, "agent-17") {
+		t.Fatalf("the landed cursor must name the pinned running agent at wire 17, got:\n%s", pane)
+	}
+}
