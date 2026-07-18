@@ -46,7 +46,7 @@ defmodule BarkparkWeb.SearchChannel do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Content.CallerContext
-  alias Barkpark.Content.Envelope
+  alias Barkpark.Search.HitEnvelope
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -109,20 +109,23 @@ defmodule BarkparkWeb.SearchChannel do
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = build_reply(seq, query, docs, count, meta, socket, params["fields"])
+        reply =
+          build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
 
         # Cache the latest query parameters so a downstream
         # `{:document_changed, _}` PubSub message can re-run the SAME search
         # without the client re-pushing. `opts_base` excludes the tenancy scope
         # — that is re-derived from the socket on each re-run via `scope_opts/1`
         # so a workspace move (today purely defensive) cannot stale-pin the old
-        # tenant filter.
+        # tenant filter. `view` rides along so a brief subscriber's live pushes
+        # stay brief.
         socket =
           assign(socket, :last_query, %{
             seq: seq,
             query: query,
             opts_base: opts_base,
-            fields: params["fields"]
+            fields: params["fields"],
+            view: params["view"]
           })
 
         {:reply, {:ok, reply}, socket}
@@ -144,7 +147,7 @@ defmodule BarkparkWeb.SearchChannel do
         push(
           socket,
           "results",
-          build_reply(seq, query, docs, count, meta, socket, last[:fields])
+          build_reply(seq, query, docs, count, meta, socket, last[:fields], last[:view])
         )
 
         {:noreply, socket}
@@ -157,30 +160,24 @@ defmodule BarkparkWeb.SearchChannel do
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp build_reply(seq, query, docs, count, meta, socket, fields) do
+  # ONE shared envelope builder (AXI R3) — the same `HitEnvelope.build/5` the
+  # HTTP routes consume, so the client renders identically whether the hit came
+  # over HTTP or the socket. BOTH call sites (the "query" reply and the P5
+  # live-push) go through this function. Per-type schema resolution drops a
+  # non-encrypted private/owner_only/readable_by field for a non-authorized
+  # subscriber; `fields` mirrors the HTTP `?fields=` allowlist; `view: "brief"`
+  # returns brief hit cards (id/type/title/slug/snippet/highlights).
+  defp build_reply(seq, query, docs, count, meta, socket, fields, view) do
     caller_context = CallerContext.from_conn(socket)
 
-    %{
-      seq: seq,
-      # Multi-type live search => resolve each doc's schema by type so a
-      # non-encrypted private/owner_only/readable_by field is dropped for a
-      # non-authorized subscriber (the schema-free guard only catches ciphertext).
-      # `fields` mirrors the HTTP route's ?fields= allowlist (Envelope.project —
-      # pure subtraction): a per-keystroke live frame must not ship ~37KB of
-      # body_html per hit the finder never reads.
-      documents:
-        docs
-        |> Envelope.render_many_by_type(schema_resolver(socket), caller_context)
-        |> Envelope.project(fields),
-      count: count,
-      query: query,
-      parsedQuery: meta[:parsed],
-      highlights: meta[:highlights] || %{},
-      recovery: meta[:recovery],
-      correctedTo: meta[:corrected_to],
-      facets: meta[:facets],
-      truncation: meta[:truncation]
-    }
+    docs
+    |> HitEnvelope.build(count, query, meta,
+      caller_context: caller_context,
+      schema_resolver: schema_resolver(socket),
+      fields: fields,
+      view: view
+    )
+    |> Map.put(:seq, seq)
   end
 
   # Per-type schema resolver memoised by `Envelope.render_many_by_type` across

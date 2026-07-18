@@ -2,8 +2,8 @@ defmodule BarkparkWeb.SearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Envelope, SearchIntelligence}
-  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
+  alias Barkpark.Content.{CallerContext, SearchIntelligence}
+  alias Barkpark.Search.{HitEnvelope, SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{AnonPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -60,21 +60,17 @@ defmodule BarkparkWeb.SearchController do
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-        json(conn, %{
-          documents:
-            docs
-            |> Envelope.render_many_by_type(schema_resolver(conn, dataset), caller_context)
-            |> Envelope.project(params["fields"]),
-          count: count,
-          query: query,
-          parsedQuery: meta[:parsed],
-          highlights: meta[:highlights] || %{},
-          recovery: meta[:recovery],
-          correctedTo: meta[:corrected_to],
-          facets: meta[:facets],
-          truncation: meta[:truncation],
-          ms: ms
-        })
+        # ONE shared envelope builder (AXI R3) — same function REST/loopback/WS
+        # all consume. `?view=brief` returns brief hit cards; default stays full.
+        envelope =
+          HitEnvelope.build(docs, count, query, meta,
+            caller_context: caller_context,
+            schema_resolver: schema_resolver(conn, dataset),
+            fields: params["fields"],
+            view: params["view"]
+          )
+
+        json(conn, Map.put(envelope, :ms, ms))
     end
   end
 
@@ -134,26 +130,25 @@ defmodule BarkparkWeb.SearchController do
 
         caller_context = CallerContext.from_conn(conn)
 
-        json(conn, %{
-          documents:
-            docs
-            |> Envelope.render_many_by_type(schema_resolver(conn, dataset), caller_context)
-            |> Envelope.project(params["fields"]),
-          count: count,
-          query: query,
-          parsedQuery: meta[:parsed],
-          highlights: meta[:highlights] || %{},
-          recovery: meta[:recovery],
-          # Canonical corrected term when a learned/synonym correction fired
-          # for the query (null otherwise) — drives "Showing results for …".
-          correctedTo: meta[:corrected_to],
-          # Indx-only (null for Postgres): dataset-wide facet buckets +
-          # coverage truncation boundary.
-          facets: meta[:facets],
-          truncation: meta[:truncation],
-          searchEventId: search_event_id,
-          ms: ms
-        })
+        # ONE shared envelope builder (AXI R3): documents/count/query/
+        # parsedQuery/highlights/recovery/correctedTo/facets/truncation come
+        # from `HitEnvelope.build/5` — the same function the loopback route and
+        # the WS channel consume — with this route's extras (searchEventId, ms)
+        # put on top. `?view=brief` returns brief hit cards; default stays full.
+        envelope =
+          HitEnvelope.build(docs, count, query, meta,
+            caller_context: caller_context,
+            schema_resolver: schema_resolver(conn, dataset),
+            fields: params["fields"],
+            view: params["view"]
+          )
+
+        json(
+          conn,
+          envelope
+          |> Map.put(:searchEventId, search_event_id)
+          |> Map.put(:ms, ms)
+        )
     end
   end
 

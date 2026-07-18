@@ -143,6 +143,89 @@ defmodule BarkparkWeb.SearchChannelTest do
   end
 
   # ---------------------------------------------------------------------------
+  # AXI R3 — view=brief in the query message returns brief hit cards, and the
+  # P5 live-push keeps the caller's view (both call sites ride build_reply →
+  # the shared HitEnvelope builder).
+  # ---------------------------------------------------------------------------
+
+  describe ~s|handle_in "query" with view=brief| do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      topic = "search:#{ws.slug}:#{proj.slug}:test"
+      {:ok, _reply, joined} = Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+      %{joined: joined}
+    end
+
+    test "reply carries brief hit cards; the live-push stays brief",
+         %{ws: ws, proj: proj, joined: joined} do
+      # create_document_in! always lands a `drafts.`-prefixed draft; the channel
+      # searches perspective :published, so publish (scope-inheriting) first.
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "brief-ch-doc", "title" => "Briefbeacon post"},
+          "test"
+        )
+
+      {:ok, _pub} =
+        Barkpark.Content.publish_document("brief-ch-doc", "post", "test",
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      ref =
+        push(joined, "query", %{
+          "q" => "briefbeacon",
+          "seq" => 21,
+          "engine" => "postgres",
+          "types" => "post",
+          "view" => "brief"
+        })
+
+      assert_reply ref, :ok, reply
+
+      assert reply.seq == 21
+      assert [card | _] = reply.documents
+
+      assert card |> Map.keys() |> Enum.sort() == [
+               :highlights,
+               :id,
+               :slug,
+               :snippet,
+               :title,
+               :type
+             ]
+
+      assert card.id == "brief-ch-doc"
+      assert card.type == "post"
+      assert card.snippet =~ "Briefbeacon"
+      # Envelope key parity with the full reply shape.
+      for k <- [:count, :highlights, :parsedQuery, :facets, :truncation] do
+        assert Map.has_key?(reply, k)
+      end
+
+      # Mutate in the same workspace+dataset → the cached query re-runs and the
+      # live-push must render through the SAME builder with the SAME view.
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "brief-ch-doc-2", "title" => "Briefbeacon second"},
+          "test"
+        )
+
+      assert_push "results", live, 1_000
+      assert live.seq == 21
+      assert [live_card | _] = live.documents
+
+      assert live_card |> Map.keys() |> Enum.sort() ==
+               [:highlights, :id, :slug, :snippet, :title, :type]
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # P5 — live push on document mutation
   # ---------------------------------------------------------------------------
 

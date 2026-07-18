@@ -107,4 +107,37 @@ defmodule BarkparkWeb.Contract.FederatedSearchTest do
     # Belt-and-braces: the secret value must not appear ANYWHERE in the payload.
     refute body |> Jason.encode!() |> String.contains?("SSN-999")
   end
+
+  # AXI R3: the federated DOCUMENTS surface adopts the shared HitEnvelope
+  # builder via the re-keying adapter (documents→hits, count→total), so
+  # ?view=brief yields the same brief cards as REST/loopback/WS. The media
+  # surface is out of scope (AssetResponse renders, not documents).
+  test "?view=brief re-keys brief hit cards onto the documents surface; media is untouched",
+       %{conn: conn} do
+    resp =
+      get(conn, "/v1/search/test", %{
+        "q" => "phoenix",
+        "surfaces" => "documents,media",
+        "view" => "brief"
+      })
+
+    assert resp.status == 200
+    body = json_response(resp, 200)
+
+    docs_payload = body["results"]["documents"]
+    assert docs_payload["total"] >= 1
+    # Surface payload keeps its historical key set (no correctedTo/facets/
+    # truncation/query — those never existed on this surface).
+    assert Enum.sort(Map.keys(docs_payload)) ==
+             ~w(highlights hits parsedQuery recovery total)
+
+    [card | _] = docs_payload["hits"]
+    assert Enum.sort(Map.keys(card)) == ~w(highlights id slug snippet title type)
+    assert card["type"] == "post"
+    assert card["snippet"] =~ "Phoenix"
+    refute Map.has_key?(card, "_id")
+
+    # Media surface unchanged by the view param.
+    assert is_map(body["results"]["media"])
+  end
 end
