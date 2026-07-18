@@ -1213,7 +1213,12 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # `next build` dies "Please install typescript, @types/react, @types/node" →
   # "build worker exited with code: 1". The RUNTIME stays lean: Next's standalone
   # output bundles only what serving needs, so the release never ships devDeps.
-  NODE_ENV=production CI=1 bash -euo pipefail -c 'npm ci --no-audit --no-fund --include=dev && npm run build' 2>&1 | tee "$BUILD_LOG"
+  # nice -n 19 (+ ionice idle-class when present) — same contract as the static
+  # engine: a build must never starve the live API on a small box (see
+  # site-deploy.sh; measured 500ms→3-5.6s search under un-niced build storms).
+  BP_NICE="nice -n 19"
+  command -v ionice >/dev/null 2>&1 && BP_NICE="nice -n 19 ionice -c3"
+  NODE_ENV=production CI=1 $BP_NICE bash -euo pipefail -c 'npm ci --no-audit --no-fund --include=dev && npm run build' 2>&1 | tee "$BUILD_LOG"
   build_rc="${PIPESTATUS[0]}"
   if [ "$build_rc" -ne 0 ]; then
     reason="$(build_failure_reason "$BUILD_LOG")"

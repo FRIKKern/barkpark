@@ -1063,7 +1063,15 @@ if [ "$SKIP_BUILD" = 0 ]; then
   else
     BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/site-build.XXXXXX")"; BUILD_LOG_KEEP=0
   fi
-  NODE_ENV=production CI=1 bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
+  # nice -n 19 (+ ionice idle-class when present): a site build must NEVER starve
+  # the live API on a small box. Measured on guerrilla (2 cores): search engine
+  # ms is ~500-600 calm but 3000-5600 while un-niced builds run — and every
+  # content publish can storm several builds at once. Best-effort ionice: absent
+  # on some boxes (and a no-op on non-CFQ schedulers); nice alone still yields
+  # the CPU, which is the scarce resource here.
+  BP_NICE="nice -n 19"
+  command -v ionice >/dev/null 2>&1 && BP_NICE="nice -n 19 ionice -c3"
+  NODE_ENV=production CI=1 $BP_NICE bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
   build_rc="${PIPESTATUS[0]}"
   if [ "$build_rc" -ne 0 ]; then
     reason="$(build_failure_reason "$BUILD_LOG")"
