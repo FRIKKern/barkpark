@@ -61,6 +61,11 @@ add-site-template after them) were frequency-mined from twelve months of git his
 every entry answers a proven repetition. Every command lives at
 `scaffy/commands/<name>.scaffy`.
 
+**Recipes** (`scaffy/recipes/`) are documented shell sequences over these commands —
+the ratified composition surface (charter D80; chain primitives rejected). Start with
+`recipes/feature-pack.md`: a complete plugin+schema+route+CLI+SDK feature in six proven
+steps, zero hand-bridged registrations.
+
 | Command | What it does |
 |---|---|
 | **add-block-type** | Flagship. Scaffolds a new PortableDoc block across **3 code surfaces** — Go renderer + `DefaultRegistry` map entry, an Elixir `compose_block/2` clause before the catch-all, and the JS fail-closed 4-edit (emitter fn + `coreEmitters` entry + `CASES` fixture + `toHaveLength` count bump) — plus optional CSS/classification. Parity at birth. |
