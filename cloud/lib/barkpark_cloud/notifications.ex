@@ -367,14 +367,26 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  # The platform-operator recipient set. There is NO platform-admin flag on a
-  # User today (roles are strictly per-team — owner/admin/member), so the operator
-  # names the admin account(s) `mix barkpark_cloud.create_admin` minted via the
-  # `:platform_admin_emails` config allowlist. Each configured address is resolved
-  # to a REGISTERED user (a typo or a gone account is dropped, never mailed) and
-  # de-duped; the canonical stored email is returned. Empty/unconfigured → `[]`,
-  # which callers treat as a no-op.
-  defp platform_admin_emails do
+  @doc """
+  The platform-operator recipient set — the canonical stored emails of the
+  configured admin account(s).
+
+  There is NO platform-admin flag on a User today (roles are strictly per-team —
+  owner/admin/member), so the operator names the admin account(s)
+  `mix barkpark_cloud.create_admin` minted via the `:platform_admin_emails`
+  config allowlist. Each configured address is resolved to a REGISTERED user (a
+  typo or a gone account is dropped, never mailed) and de-duped; the canonical
+  stored email is returned. Empty/unconfigured → `[]`, which callers treat as a
+  no-op — and which the `/v1/me` `platform_operator` boolean reads as
+  fail-closed `false`.
+
+  Public because `GET /v1/me` derives its `platform_operator` boolean from this
+  allowlist (membership by email, never a team role — the Authz law keeps
+  authority per-membership-row). This is the DECLARED interim operator principal
+  per charter GR9: `isu-backlog-operator-principal` inherits/reconciles this
+  boolean when a first-class platform-operator principal lands.
+  """
+  def platform_admin_emails do
     :barkpark_cloud
     |> Application.get_env(:platform_admin_emails, [])
     |> List.wrap()
