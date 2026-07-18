@@ -293,6 +293,31 @@ func (m Model) answerableCards() []Message {
 	return out
 }
 
+// needsYou is the needs-you cockpit state (wsc-needs-you): a LIVE workflow whose
+// session is ALSO blocked on a pending answerable card. It is pure truth the TUI
+// already tracks — the workflow strip's own liveness (workflowStripVisible) ∩ a
+// non-empty answer ring (answerableCards) — so it flips to the warn banner and
+// clears the moment the card is answered (the ring empties on the refetch), with
+// zero new wire. The strip, the expanded banner, and the Enter-jump all key off
+// this one predicate so they can never disagree.
+func (m Model) needsYou() bool {
+	return m.workflowStripVisible() && len(m.answerableCards()) > 0
+}
+
+// workflowLabel is the open session's workflow label from whichever source is
+// live — the compact SSE summary first (freshest), else the rail fold. "" when
+// neither carries one. The needs-you strip keeps the label so the operator still
+// sees WHICH run is waiting on them.
+func (m Model) workflowLabel() string {
+	if lw := m.st.LiveWorkflow; lw != nil {
+		return lw.Label
+	}
+	if m.st.Workflow != nil {
+		return m.st.Workflow.Label
+	}
+	return ""
+}
+
 // focusedCard resolves the currently focused pending card. The cursor clamps
 // into range (a resolved card shrinks the ring), so it is always the oldest
 // pending card when the cursor drifts past the end.

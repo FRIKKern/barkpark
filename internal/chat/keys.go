@@ -184,6 +184,14 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyEnter:
+		// Needs-you jump WINS over expand (wsc-needs-you): when a live workflow is
+		// blocked on a pending card, Enter on the strip/banner jumps the viewport to
+		// that card so it can be answered with the existing card interaction, then
+		// hands focus back to the composer. This branch sits AHEAD of the expand
+		// branch — a pending gate is the more urgent verb than reading phase detail.
+		if m.needsYou() {
+			return m.jumpToPendingCard(), nil, true
+		}
 		if !m.wfExpanded {
 			// D42: the collapse→expand edge fires exactly ONE turn-boundary refetch
 			// (execEffect is the designated dispatch site; the response lands in the
@@ -286,14 +294,45 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 // answerFocused answers the currently focused pending card with the given
 // decision ("allow"/"deny"). A no-op when no card is focused (the keys are safe
 // to press any time). It re-follows so the card's flip stays in view, and the
-// reducer owns the POST + the pending → resolved refetch.
+// reducer owns the POST + the pending → resolved refetch. Answering also returns
+// focus to the composer and collapses the panel levels (wsc-needs-you: the same
+// sane reset the needs-you Enter-jump performs) — closing the asymmetry where the
+// jump reset focus but a direct answer left it stranded on the workflow zone.
 func (m Model) answerFocused(decision string) (tea.Model, tea.Cmd) {
 	card, ok := m.focusedCard()
 	if !ok {
 		return m, nil
 	}
 	m.scroll = -1
+	m.focus = focusComposer
+	m.wfExpanded = false
+	m.wfAgentDetail = false
 	return m.apply(AnswerEvent{RequestID: card.RequestID(), Decision: decision})
+}
+
+// jumpToPendingCard pins the transcript viewport to the focused pending card's
+// block (wsc-needs-you): it reads the block's start line from the ONE shared
+// transcript accumulator (transcriptBuild — no forked walk), sets a Home-style
+// pinned-top scroll clamped to [0, maxScrollTop], then hands focus back to the
+// composer and collapses the panel so the next Enter sends the composer. A no-op
+// when no card is focused (the caller only reaches here in the needs-you state).
+func (m Model) jumpToPendingCard() Model {
+	card, ok := m.focusedCard()
+	if !ok {
+		return m
+	}
+	_, start := m.transcriptBuild(m.width, card.RequestID())
+	if start < 0 {
+		start = 0
+	}
+	if maxTop := m.maxScrollTop(); start > maxTop {
+		start = maxTop
+	}
+	m.scroll = start
+	m.focus = focusComposer
+	m.wfExpanded = false
+	m.wfAgentDetail = false
+	return m
 }
 
 // scrollBy moves the manual viewport by delta lines. Scrolling up leaves follow

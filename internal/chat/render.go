@@ -44,6 +44,7 @@ var (
 	titleStyle  = lipgloss.NewStyle().Bold(true)
 	youStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	badgeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	warnStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
 	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	cardBar     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 	focusBar    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -113,8 +114,22 @@ func bodyWidth(width int) int {
 // (render.go window()); this function is width-pure and clock-free so the
 // golden harness can diff it against the Studio projection.
 func (m Model) transcriptLines(width int) []string {
+	lines, _ := m.transcriptBuild(width, "")
+	return lines
+}
+
+// transcriptBuild is the ONE conversation accumulator (wsc-needs-you): it walks
+// the messages exactly once and, alongside the flat line slice, records the line
+// index where the card whose request_id == targetRID begins (its first content
+// line, after the block separator). startLine is -1 when targetRID is "" or the
+// target card is not present/answerable — so the needs-you Enter-jump pins the
+// viewport straight to the pending card off this SAME walk, never a forked second
+// pass over the transcript. transcriptLines is the width-pure/clock-free façade
+// the golden harness diffs against the Studio projection.
+func (m Model) transcriptBuild(width int, targetRID string) ([]string, int) {
 	w := bodyWidth(width)
 	var lines []string
+	startLine := -1
 	push := func(ls ...string) {
 		if len(lines) > 0 && len(ls) > 0 {
 			lines = append(lines, "")
@@ -130,9 +145,20 @@ func (m Model) transcriptLines(width int) []string {
 	for _, msg := range m.st.Messages {
 		focused := focusRID != "" && msg.RequestID() == focusRID && answerable(msg)
 		inflight := m.st.AnswerInFlight[msg.RequestID()]
-		if r := renderMessage(width, msg, focused, inflight); len(r) > 0 {
-			push(r...)
+		r := renderMessage(width, msg, focused, inflight)
+		if len(r) == 0 {
+			continue
 		}
+		// Capture the target card's block start BEFORE the push, accounting for the
+		// blank separator push prepends once the slice is non-empty.
+		if targetRID != "" && startLine < 0 && msg.RequestID() == targetRID && answerable(msg) {
+			sep := 0
+			if len(lines) > 0 {
+				sep = 1
+			}
+			startLine = len(lines) + sep
+		}
+		push(r...)
 	}
 	for _, ls := range m.st.Local {
 		push(renderLocalSend(w, ls)...)
@@ -143,7 +169,7 @@ func (m Model) transcriptLines(width int) []string {
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
 	}
-	return lines
+	return lines, startLine
 }
 
 // renderMessage renders one settled Postgres row (charter D8). Assistant rows
@@ -445,17 +471,26 @@ func (m Model) workflowPanelLines() []string {
 		return nil
 	}
 	focused := m.focus == focusWorkflow
+	needsYou := m.needsYou()
 	// D41: a pending answerable card suppresses EVERY stall badge — a fleet
 	// waiting on the operator is never stalled (the wait is the operator's).
+	// needsYou implies !stallOK, so the warn banner and stall badges can never
+	// render together (one urgent state at a time).
 	stallOK := len(m.answerableCards()) == 0
-	// The collapsed strip prefers the live compact summary (wsc-bl-workflow-sse):
-	// its counters/elapsed advance mid-turn off the SSE `event: workflow` delta,
-	// no rail refetch. Fall back to the rail fold when no summary has arrived yet
-	// (resume, or a pre-SSE server).
+	// The collapsed strip: the needs-you cockpit state (a live workflow blocked on
+	// a pending answerable card) WINS — it flips to the warn banner so someone
+	// watching the workflow strip sees the session is waiting on them (Enter jumps
+	// to the card). Otherwise the strip prefers the live compact summary
+	// (wsc-bl-workflow-sse) — its counters/elapsed advance mid-turn off the SSE
+	// `event: workflow` delta, no rail refetch — falling back to the rail fold when
+	// no summary has arrived yet (resume, or a pre-SSE server).
 	var strip string
-	if lw := m.st.LiveWorkflow; lw != nil {
-		strip = renderWorkflowStripSummary(m.width, lw, m.now(), focused)
-	} else {
+	switch {
+	case needsYou:
+		strip = renderWorkflowNeedsYouStrip(m.width, m.workflowLabel(), focused)
+	case m.st.LiveWorkflow != nil:
+		strip = renderWorkflowStripSummary(m.width, m.st.LiveWorkflow, m.now(), focused)
+	default:
 		strip = renderWorkflowStrip(m.width, m.st.Workflow, journeyOf(m.st.Workflow), m.now(), focused)
 	}
 	lines := []string{strip}
@@ -467,6 +502,12 @@ func (m Model) workflowPanelLines() []string {
 		// (the accepted ceiling, backlogged wsc-bl-workflow-sse-detail). Guard on
 		// Workflow because a summary-only strip can be up before the rail hydrated.
 		if m.wfExpanded {
+			// The needs-you banner also rides ABOVE the phase panes in the expanded
+			// panel — the same warn phrase as the collapsed strip, so the pending gate
+			// stays visible while the operator reads the detail.
+			if needsYou {
+				lines = append(lines, warnStyle.Render(needsYouBanner))
+			}
 			lines = append(lines, renderWorkflowDetail(m.width, wf, j, m.now(), m.wfPhase, stallOK)...)
 			// The THIRD focus level (wave session-card charter D30/D39): the selected
 			// agent's detail pane, appended INSIDE this one function so bodyHeight
@@ -673,7 +714,7 @@ func renderWorkflowStrip(width int, wf *Workflow, j WorkflowJourney, now time.Ti
 	if j.HasTokens {
 		right += " · ↓" + formatTokens(j.Tokens)
 	}
-	return workflowStripLine(width, wf.Label, right, focused)
+	return workflowStripLine(width, badgeStyle.Render("○"), wf.Label, right, focused)
 }
 
 // renderWorkflowStripSummary paints the collapsed strip from the COMPACT live
@@ -690,15 +731,32 @@ func renderWorkflowStripSummary(width int, wf *SessionWorkflow, now time.Time, f
 	if wf.Tokens > 0 {
 		right += " · ↓" + formatTokens(wf.Tokens)
 	}
-	return workflowStripLine(width, wf.Label, right, focused)
+	return workflowStripLine(width, badgeStyle.Render("○"), wf.Label, right, focused)
+}
+
+// needsYouBanner is the warn-token needs-you phrase shared by the collapsed strip
+// (its right cluster) and the expanded panel's banner line, so the two can never
+// drift: '⏸ needs you — approval pending'. The pending gate is truth the TUI
+// already tracks (answerableCards ∩ a live workflow) — zero new wire.
+const needsYouBanner = "⏸ needs you — approval pending"
+
+// renderWorkflowNeedsYouStrip is the collapsed strip in the needs-you cockpit
+// state (wsc-needs-you): a live workflow whose session is blocked on a pending
+// answerable card. The counter cluster is REPLACED by the warn needs-you banner —
+// a single, unmissable state, never a counter shown alongside a pending gate. The
+// focus glyph still wins when the strip owns the arrows (the operator sees which
+// zone Enter drives — Enter here jumps to the card).
+func renderWorkflowNeedsYouStrip(width int, label string, focused bool) string {
+	return workflowStripLine(width, warnStyle.Render("⏸"), label, warnStyle.Render(needsYouBanner), focused)
 }
 
 // workflowStripLine lays out the collapsed one-liner: a focus-aware glyph +
-// truncated label on the left, the dim counter cluster right-aligned. The label
-// yields columns first so the counters always keep their right-edge seat. Shared
-// by the live-summary path and the rail-fold fallback so the two can never drift.
-func workflowStripLine(width int, label, right string, focused bool) string {
-	glyph := badgeStyle.Render("○")
+// truncated label on the left, the styled cluster right-aligned. The label yields
+// columns first so the cluster always keeps its right-edge seat. Shared by the
+// live-summary path, the rail-fold fallback, and the needs-you banner so they can
+// never drift. The caller supplies the base glyph; a focused strip always swaps it
+// for the bold ❯ so the operator sees which zone the arrows drive.
+func workflowStripLine(width int, glyph, label, right string, focused bool) string {
 	if focused {
 		glyph = focusBar.Render("❯")
 	}
@@ -1119,11 +1177,11 @@ func cardBody(msg Message) string {
 // carries the SIBLING epic goal, wsc D9): the epic title + slices-done/total +
 // wave_status. Returns nil for a nil summary — the caller adds nothing, so a
 // non-workflow row is byte-identical to today.
-func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal) []string {
+func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal, pending int) []string {
 	if wf == nil {
 		return nil
 	}
-	out := []string{"  " + workflowTickLine(w-2, wf)}
+	out := []string{"  " + workflowTickLine(w-2, wf, pending)}
 	if epic != nil {
 		out = append(out, "  "+workflowGoalLine(w-2, epic))
 	}
@@ -1133,22 +1191,30 @@ func workflowCardLines(w int, wf *SessionWorkflow, epic *EpicGoal) []string {
 // workflowTickLine paints the phase ticks + phase/outcome + settled/total counter
 // (+ tokens when present). Elapsed is deliberately omitted on list rows (D15 —
 // there is no per-row clock in the picker); tokens render only when Tokens > 0
-// (never synthesised).
-func workflowTickLine(w int, wf *SessionWorkflow) string {
+// (never synthesised). When the session is blocked on a pending gate (pending>0)
+// and the run is still live, the needs-you pill REPLACES the live status word —
+// needs-you > working, a single badge in the word slot (never a new line, never
+// side-by-side) — so the picker surfaces "this session is waiting on you" at a
+// glance. A terminal wave is never needs-you: its lifecycle word still wins.
+func workflowTickLine(w int, wf *SessionWorkflow, pending int) string {
 	var ticks strings.Builder
 	for _, s := range phaseTicks(wf) {
 		ticks.WriteString(tickGlyph(s))
 	}
 	counter := fmt.Sprintf("%d/%d", wf.AgentsDone, wf.AgentsTotal)
 	word := wf.Phase
-	if wf.Terminal {
+	switch {
+	case wf.Terminal:
 		// the wire's lifecycle word verbatim ("completed"/"interrupted") — an
 		// honest settle, never a stuck phase word
 		word = wf.Outcome
 		if word == "" {
 			word = "completed"
 		}
-	} else if word == "" {
+	case pending > 0:
+		// the needs-you pill supersedes the live phase word (needs-you > working)
+		word = warnStyle.Render("⏸ needs you")
+	case word == "":
 		word = "working"
 	}
 	line := ticks.String() + dimStyle.Render(" · ") + word + dimStyle.Render(" · ") + counter
@@ -1286,7 +1352,7 @@ func (m Model) pickerRows() []string {
 			meta += " · " + age
 		}
 		row := fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
-		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic); len(extra) > 0 {
+		if extra := workflowCardLines(clamp(m.width, 8, 100), s.Workflow, s.Epic, s.PendingApprovals); len(extra) > 0 {
 			row += "\n" + strings.Join(extra, "\n")
 		}
 		rows = append(rows, row)
