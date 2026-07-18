@@ -10,6 +10,7 @@ package cli
 //	bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node]
 //	bp cloud site deploy    <site> [--no-follow]   (alias: build)
 //	bp cloud site rollback  <site>
+//	bp cloud site delete    <site> [--yes]         (alias: rm)
 //	bp cloud site status    <site>
 //	bp cloud site open      <site> [--print-only]
 //
@@ -83,6 +84,8 @@ func runCloudSite(out *writer, g globals, args []string) int {
 		return runCloudSiteDeploy(out, g, rest)
 	case "rollback":
 		return runCloudSiteRollback(out, g, rest)
+	case "delete", "rm":
+		return runCloudSiteDelete(out, g, rest)
 	case "status":
 		return runCloudSiteStatus(out, g, rest)
 	case "open":
@@ -587,6 +590,54 @@ func siteIsNode(kind, runtimeTarget string) bool {
 // runCloudSiteStatus is `bp cloud site status <site>` — the current deployment +
 // its stage. Honest empty state when the site has never deployed.
 // runCloudSiteSettings is `bp cloud site settings <site> [--theme <p>]
+// runCloudSiteDelete is `bp cloud site delete <site>`: the inverse of a spawn.
+// It tears the site down on its box (stop slots + disarm the Caddy route + delete
+// the tree) and deregisters the row — the CP does both, box-first, so a failed
+// teardown never orphans a still-serving box. IRREVERSIBLE, so a TTY confirms the
+// site name unless --yes; a non-TTY (script / `-o json`) skips the prompt.
+func runCloudSiteDelete(out *writer, g globals, args []string) int {
+	const usage = "bp cloud site delete <site> [--yes]"
+	a, err := parseHzArgs(args, nil, []string{"yes"}, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) != 1 {
+		return useError(out, "usage", fmt.Sprintf("want exactly one <site> (usage: %s)", usage), exitUsage)
+	}
+	ref := a.pos[0]
+
+	cfg, ok := siteCloudConfig(out, "delete a site")
+	if !ok {
+		return exitAuth
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "site (teardown + deregister — unrecoverable)", ref, g.yes || a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
+	}
+	id, rerr := resolveOpenSiteID(cfg, ref)
+	if rerr != nil {
+		return openResolveFail(out, rerr)
+	}
+	res, derr := cfg.CloudClient().DeleteSpawnSite(cloudCtx(), id)
+	if derr != nil {
+		return cloudFail(out, "delete site", derr)
+	}
+
+	if out.output == "json" {
+		fmt.Fprintln(out.stdout, strings.TrimRight(string(res.Raw), "\n"))
+		return exitOK
+	}
+	if out.output == "yaml" {
+		out.renderRaw(res.Raw)
+		return exitOK
+	}
+	slug := strings.TrimSpace(res.Slug)
+	if slug == "" {
+		slug = ref
+	}
+	out.outf("✓ site deleted — %s is torn down on its box and deregistered.", sanitizeCell(slug))
+	return exitOK
+}
+
 // [--doc-type <t>]` — PATCH the between-deploys-safe fields. Infrastructural
 // fields stay immutable (name/slug/kind/framework/template/ports); an empty
 // change is an honest usage error. The new values take effect on the NEXT

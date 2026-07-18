@@ -45,6 +45,7 @@ type siteCP struct {
 	pollResp   fakeResp
 	getResp    fakeResp
 	rollResp   fakeResp
+	deleteResp fakeResp
 }
 
 type fakeResp struct {
@@ -75,6 +76,8 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.pollResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/rollback":
 			cp.write(w, cp.rollResp)
+		case r.Method == "DELETE" && path == "/v1/sites/"+testSiteID:
+			cp.write(w, cp.deleteResp)
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID:
 			cp.write(w, cp.getResp)
 		default:
@@ -932,6 +935,63 @@ func TestRunCloudSiteRollbackJSON(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout) != rollbackEnvelope {
 		t.Fatalf("json must re-emit the CP envelope verbatim:\n got %q\nwant %q", stdout, rollbackEnvelope)
+	}
+}
+
+// --- delete ------------------------------------------------------------------
+
+const deleteEnvelope = `{"ok":true,"status":"deleted","slug":"blog"}`
+
+func TestRunCloudSiteDelete(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{200, deleteEnvelope}
+	cp.serve()
+	// --yes skips the TTY confirm deterministically.
+	stdout, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "deleted") || !strings.Contains(stdout, "blog") {
+		t.Fatalf("delete receipt must confirm the site is gone:\n%s", stdout)
+	}
+}
+
+func TestRunCloudSiteDeleteJSON(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{200, deleteEnvelope}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "delete", testSiteID, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if strings.TrimSpace(stdout) != deleteEnvelope {
+		t.Fatalf("json must re-emit the CP envelope verbatim:\n got %q\nwant %q", stdout, deleteEnvelope)
+	}
+}
+
+// A teardown the box refused is a non-2xx from the CP → the CLI must exit
+// non-zero and NEVER print a false "deleted".
+func TestRunCloudSiteDeleteTeardownRefused(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{422, `{"ok":false,"error":"teardown_failed","detail":"caddy validate rejected the disarm"}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code == exitOK {
+		t.Fatalf("a refused teardown must not exit 0:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "deleted") {
+		t.Fatalf("a refused teardown must NOT print a deleted receipt:\n%s", stdout)
+	}
+}
+
+// The alias `rm` reaches the same verb.
+func TestRunCloudSiteDeleteRmAlias(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{200, deleteEnvelope}
+	cp.serve()
+	_, _, code := runSite(t, "table", "rm", testSiteID, "--yes")
+	if code != exitOK {
+		t.Fatalf("`rm` alias must reach delete, got exit=%d", code)
 	}
 }
 
