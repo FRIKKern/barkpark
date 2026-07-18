@@ -45,7 +45,7 @@ Build `planned` may exceed 15 and must equal the Scale profile's evaluated formu
 
 ## Ledger-backed Build and Review gate
 
-Build and Review preflight requires `--fleet-ledger-json PATH` pointing to the exact canonical `barkpark-epic-benchmark-v1` bytes emitted by `mix barkpark.epic_fleet.export`. The validator verifies canonical encoding, exact shape, component and ledger digests, replacement ancestry, redaction, every typed cost, and the all-attempt summary. A complete-looking Paper is never sufficient by itself.
+Build and Review preflight requires `--fleet-ledger-json PATH` pointing to the exact canonical `barkpark-epic-benchmark-v1` bytes emitted by `scripts/cycle/export_cyclefleet_b1.py`. The exporter resolves the canonical project-scoped `bp cycle show` authority before writing; a Paper is a reader projection, never the export source. The validator verifies canonical encoding, exact shape, component and ledger digests, replacement ancestry, redaction, every typed cost, the all-attempt summary, and the live Cycle scope fence. A complete-looking Paper is never sufficient by itself.
 
 Legendary scope requires `experiment.phase: legendary`, `protocol_version: 1`, the Task parent id in `experiment.epic_id`, and the Paper id in `experiment.wave_id`. The manifest contains exactly this reconciliation scope beneath `fleet_contract`:
 
@@ -55,7 +55,40 @@ Legendary scope requires `experiment.phase: legendary`, `protocol_version: 1`, t
 
 Only the fleet object is digested; unrelated PortableDoc blocks remain reader-owned and may change without invalidating the fleet export.
 
+The manifest also carries the exact sibling `cycle_scope_fence`. `fleet_contract`
+remains byte-compatible v1; the fence is additive and separately versioned:
+
+```json
+{
+  "fleet_contract": {"version":1,"paper_fleet_digest":"<canonical fleet sha256>"},
+  "cycle_scope_fence": {
+    "version":"b1-scope-fence-v1",
+    "workspace_id":"<live workspace id>",
+    "project_id":"<live project id>",
+    "epic_id":"<live epic id>",
+    "wave_id":"<live wave id>",
+    "wave_revision":"<physical live wave revision>",
+    "inventory_digest":"<live inventory sha256>",
+    "plan_digest":"<live plan sha256>",
+    "reconciliation_digest":"<live reconciliation sha256>",
+    "fleet_digest":"<canonical live fleet sha256>",
+    "receipt_digest":"<canonical sha256 of this fence without receipt_digest>"
+  }
+}
+```
+
+Legendary Build and Review fail closed when the fence is absent, malformed, or
+does not exactly match the already-resolved live authority and Cycle ledger.
+The B1 experiment workspace, epic, and wave must match the same authority.
+Foreign projects, stale physical revisions, inventory or plan drift, and a
+re-signed but foreign B1 are rejected before the artifact can satisfy preflight.
+
 Every attempt carries `payload.fleet_assignment` with exactly `phase`, `assignment_id`, `agent_type`, `evidence`, and `model_reasoning_effort`. The phase and type must match this contract. All Legendary Build and Review attempts use `model_reasoning_effort: high`, including attempts that fail or are later replaced; the validator does not coerce a role's ordinary default into proof of high effort.
+
+Every attempt provenance also carries `scope_receipt_digest` and
+`wave_revision`, exactly matching the verified `cycle_scope_fence`. Re-signing
+an attempt or the complete B1 cannot move its evidence to another Cycle scope
+or physical wave revision.
 
 Retries remain append-only. Attempt ordinals are unique and contiguous from 1. Multiple attempts for one phase and assignment id form exactly one linear replacement chain ending in one terminal leaf; replacements point to an existing lower ordinal and preserve logical assignment identity. Only unreplaced completed leaves count; `started` is the unique logical assignment count, `completed` is the completed terminal-leaf count, and `failed` includes every failed, timeout, contaminated, or cancelled attempt even when a later replacement succeeds. Every attempt stays in cost and outcome denominators. Cost states are exhaustively `observed` with a numeric value or `unsupported`, `missing`, or `invalid` with a reason. Paper-only inflation, stale fleet digests, missing or forked replacements, unknown cost states, untyped assignments, and non-high Build or Review attempts fail closed.
 

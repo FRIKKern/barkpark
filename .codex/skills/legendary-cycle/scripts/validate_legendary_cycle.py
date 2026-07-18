@@ -105,6 +105,20 @@ EPIC.CYCLE_PHASE = "legendary"
 
 CLAIM_TTL_SECONDS = EPIC.CLAIM_TTL_SECONDS
 EXPERIMENT_ROUNDS = ("baseline", "diverge", "attack", "converge", "pilot")
+B1_SCOPE_FENCE_VERSION = "b1-scope-fence-v1"
+B1_SCOPE_FENCE_KEYS = {
+    "version",
+    "workspace_id",
+    "project_id",
+    "epic_id",
+    "wave_id",
+    "wave_revision",
+    "inventory_digest",
+    "plan_digest",
+    "reconciliation_digest",
+    "fleet_digest",
+    "receipt_digest",
+}
 
 
 def _scale_profile(paper: dict[str, Any]) -> dict[str, Any] | None:
@@ -138,31 +152,135 @@ def _paper_fleet(paper: dict[str, Any]) -> dict[str, Any] | None:
 
 def _live_cycle_projection(
     args: Any, paper_ledger: dict[str, Any]
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
     if getattr(args, "cycle_json", None):
         payload = EPIC.load_json(args.cycle_json)
     else:
         scope = paper_ledger.get("scope")
         if not isinstance(scope, dict):
-            return None, None
+            return None, None, None
         epic_id = scope.get("epic_id")
         wave_id = scope.get("wave_id")
         if not EPIC.nonempty_string(epic_id) or not EPIC.nonempty_string(wave_id):
-            return None, None
+            return None, None, None
         workspace = getattr(args, "workspace", None)
         project = getattr(args, "project", None)
         if not EPIC.nonempty_string(workspace) or not EPIC.nonempty_string(project):
-            return None, None
+            return None, None, None
         payload = EPIC.command_json(
             "bp", "--workspace", workspace, "--project", project,
             "cycle", "show", epic_id, wave_id, "-o", "json"
         )
     ledger = payload.get("cycle_ledger") if isinstance(payload, dict) else None
     fleet = payload.get("fleet") if isinstance(payload, dict) else None
+    authority = payload.get("authority") if isinstance(payload, dict) else None
     return (
         ledger if isinstance(ledger, dict) else None,
         fleet if isinstance(fleet, dict) else None,
+        authority if isinstance(authority, dict) else None,
     )
+
+
+def validate_b1_scope_fence(
+    args: Any,
+    live_ledger: dict[str, Any] | None,
+    live_fleet: dict[str, Any] | None,
+    live_authority: dict[str, Any] | None,
+) -> list[str]:
+    """Bind Legendary B1 bytes to the already-resolved live Cycle authority."""
+    if args.phase not in {"build", "review"}:
+        return []
+    ledger_path = getattr(args, "fleet_ledger_json", None)
+    if ledger_path is None:
+        return []
+    try:
+        b1 = EPIC.load_canonical_ledger(ledger_path)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        # The shared validator owns canonical-byte/shape diagnostics.
+        return []
+
+    if live_ledger is None or live_fleet is None or live_authority is None:
+        return ["cannot validate B1 scope fence without the live Cycle authority"]
+
+    manifest = b1.get("manifest")
+    fence = manifest.get("cycle_scope_fence") if isinstance(manifest, dict) else None
+    if not isinstance(fence, dict):
+        return ["Legendary B1 manifest has no cycle_scope_fence"]
+    if set(fence) != B1_SCOPE_FENCE_KEYS:
+        return ["Legendary B1 cycle_scope_fence has an invalid exact shape"]
+
+    errors: list[str] = []
+    unsigned = {key: value for key, value in fence.items() if key != "receipt_digest"}
+    if fence.get("version") != B1_SCOPE_FENCE_VERSION:
+        errors.append(f"Legendary B1 cycle_scope_fence version is not {B1_SCOPE_FENCE_VERSION}")
+    if fence.get("receipt_digest") != EPIC.canonical_digest(unsigned):
+        errors.append("Legendary B1 cycle_scope_fence receipt_digest mismatch")
+
+    if live_authority.get("kind") != "barkpark_cycle_fleet":
+        errors.append("live Cycle authority kind is not barkpark_cycle_fleet")
+
+    authority_scope = {
+        "workspace_id": live_authority.get("workspace_id"),
+        "project_id": live_authority.get("project_id"),
+        "epic_id": live_authority.get("epic_id"),
+        "wave_id": live_authority.get("wave_id"),
+        "wave_revision": live_authority.get("wave_revision"),
+    }
+    ledger_scope = live_ledger.get("scope")
+    if not isinstance(ledger_scope, dict):
+        errors.append("live Cycle ledger has no scope for the B1 fence")
+        ledger_scope = {}
+    expected = {
+        **authority_scope,
+        "inventory_digest": live_ledger.get("inventory_digest"),
+        "plan_digest": live_ledger.get("plan_digest"),
+        "reconciliation_digest": live_ledger.get("reconciliation_digest"),
+        "fleet_digest": EPIC.canonical_digest(live_fleet),
+    }
+    for field, expected_value in expected.items():
+        if not EPIC.nonempty_string(expected_value):
+            errors.append(f"live Cycle authority {field} is empty or invalid for the B1 fence")
+        elif fence.get(field) != expected_value:
+            errors.append(f"Legendary B1 cycle_scope_fence {field} does not match live Cycle authority")
+
+    for field in ("workspace_id", "project_id", "epic_id", "wave_id"):
+        if ledger_scope.get(field) != authority_scope[field]:
+            errors.append(f"live Cycle authority and ledger scope disagree on {field}")
+    if live_ledger.get("wave_revision") != authority_scope["wave_revision"]:
+        errors.append("live Cycle authority and ledger disagree on wave_revision")
+
+    experiment = b1.get("experiment")
+    if not isinstance(experiment, dict):
+        return errors
+    for field in ("workspace_id", "epic_id", "wave_id"):
+        if experiment.get(field) != authority_scope[field]:
+            errors.append(f"Legendary B1 experiment {field} does not match live Cycle authority")
+
+    attempts = b1.get("attempts")
+    if isinstance(attempts, list):
+        for index, attempt in enumerate(attempts, start=1):
+            attempt_id = attempt.get("attempt_id") if isinstance(attempt, dict) else None
+            label = attempt_id if EPIC.nonempty_string(attempt_id) else f"#{index}"
+            provenance = attempt.get("provenance") if isinstance(attempt, dict) else None
+            if not isinstance(provenance, dict) or provenance.get("scope_receipt_digest") != fence.get(
+                "receipt_digest"
+            ):
+                errors.append(
+                    f"Legendary B1 attempt {label} provenance scope_receipt_digest "
+                    "does not match the Cycle scope fence"
+                )
+            if not isinstance(provenance, dict) or provenance.get("wave_revision") != fence.get(
+                "wave_revision"
+            ):
+                errors.append(
+                    f"Legendary B1 attempt {label} provenance wave_revision "
+                    "does not match the Cycle scope fence"
+                )
+    return errors
 
 
 def validate_cycle_ledger(
@@ -473,8 +591,8 @@ def validate(args: Any) -> list[str]:
     )
     errors.extend(validate_scale(paper))
     paper_ledger = _cycle_ledger(paper)
-    live_ledger, live_fleet = (
-        _live_cycle_projection(args, paper_ledger) if paper_ledger else (None, None)
+    live_ledger, live_fleet, live_authority = (
+        _live_cycle_projection(args, paper_ledger) if paper_ledger else (None, None, None)
     )
     errors.extend(
         validate_cycle_ledger(
@@ -485,6 +603,7 @@ def validate(args: Any) -> list[str]:
             args.require_debrief,
         )
     )
+    errors.extend(validate_b1_scope_fence(args, live_ledger, live_fleet, live_authority))
     return errors
 
 

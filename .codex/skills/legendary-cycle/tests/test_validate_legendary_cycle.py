@@ -31,7 +31,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                     "parent_id": "legendary-1",
                     "labels": ["proj:legendary-1", "phase:build", "files:papers-1-20"],
                     "acceptance_criteria": [{"criterion": "batch gate passes", "met": False}],
-                    "wave_paper": "legendary-paper-1",
+                    "wave_paper": "wave-1",
                     "claim": {
                         "worker": "legendary-lead",
                         "epoch": 2,
@@ -77,7 +77,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                 "invalid_assignments": 0,
             }
         self.paper = {
-            "_id": "legendary-paper-1",
+            "_id": "wave-1",
             "_draft": False,
             "body": {
                 "version": 1,
@@ -120,6 +120,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                             "profile": "legendary",
                             "scope": {
                                 "workspace_id": "workspace-1",
+                                "project_id": "project-1",
                                 "epic_id": "legendary-1",
                                 "wave_id": "wave-1",
                             },
@@ -221,6 +222,20 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         paper = MODULE.EPIC.paper_doc(paper or self.paper)
         fields = MODULE.EPIC.task_fields(MODULE.EPIC.task_doc(task))
         fleet = MODULE.EPIC.paper_fleet(paper)
+        cycle_ledger = next(
+            (
+                block["cycle_ledger"]
+                for block in MODULE.EPIC.paper_blocks(paper)
+                if "cycle_ledger" in block
+            ),
+            next(
+                block["cycle_ledger"]
+                for block in MODULE.EPIC.paper_blocks(self.paper)
+                if "cycle_ledger" in block
+            ),
+        )
+        scope = cycle_ledger["scope"]
+        fence = self.scope_fence(cycle_ledger, fleet)
         attempts = []
         ordinal = 0
         for phase, record in fleet.items():
@@ -239,7 +254,11 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                             "context_bytes": {"state": "missing", "reason": "fixture absent"},
                             "cpu_percent": {"state": "invalid", "reason": "fixture reset"},
                         },
-                        "provenance": {"source": "legendary validator fixture"},
+                        "provenance": {
+                            "source": "legendary validator fixture",
+                            "scope_receipt_digest": fence["receipt_digest"],
+                            "wave_revision": fence["wave_revision"],
+                        },
                         "payload": {
                             "fleet_assignment": {
                                 "phase": phase,
@@ -256,7 +275,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         ledger = {
             "format": MODULE.EPIC.LEDGER_FORMAT,
             "experiment": {
-                "workspace_id": "workspace-fixture",
+                "workspace_id": scope["workspace_id"],
                 "epic_id": fields.get("parent_id"),
                 "wave_id": paper["_id"],
                 "experiment_id": "legendary-fleet-fixture",
@@ -267,7 +286,8 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
                 "fleet_contract": {
                     "version": 1,
                     "paper_fleet_digest": MODULE.EPIC.canonical_digest(fleet),
-                }
+                },
+                "cycle_scope_fence": fence,
             },
             "manifest_digest": "",
             "attempts": attempts,
@@ -277,6 +297,31 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             "ledger_digest": "",
         }
         return self.resign_ledger(ledger)
+
+    def authority(self, cycle_ledger):
+        scope = cycle_ledger["scope"]
+        return {
+            "kind": "barkpark_cycle_fleet",
+            "workspace_id": scope["workspace_id"],
+            "project_id": scope["project_id"],
+            "epic_id": scope["epic_id"],
+            "wave_id": scope["wave_id"],
+            "wave_revision": cycle_ledger["wave_revision"],
+        }
+
+    def scope_fence(self, cycle_ledger, fleet):
+        authority = self.authority(cycle_ledger)
+        unsigned = {
+            "version": MODULE.B1_SCOPE_FENCE_VERSION,
+            **{key: authority[key] for key in (
+                "workspace_id", "project_id", "epic_id", "wave_id", "wave_revision"
+            )},
+            "inventory_digest": cycle_ledger["inventory_digest"],
+            "plan_digest": cycle_ledger["plan_digest"],
+            "reconciliation_digest": cycle_ledger["reconciliation_digest"],
+            "fleet_digest": MODULE.EPIC.canonical_digest(fleet),
+        }
+        return {**unsigned, "receipt_digest": MODULE.EPIC.canonical_digest(unsigned)}
 
     def args(
         self,
@@ -294,6 +339,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             (block["cycle_ledger"] for block in paper["body"]["blocks"] if "cycle_ledger" in block),
             {},
         )
+        authority = self.authority(cycle_ledger) if isinstance(cycle_ledger.get("scope"), dict) else {}
         return argparse.Namespace(
             task=None,
             task_json=self.write("task.json", task),
@@ -301,7 +347,11 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             paper_json=self.write("paper.json", paper),
             cycle_json=self.write(
                 "cycle.json",
-                {"cycle_ledger": cycle_ledger, "fleet": self.fleet(paper)},
+                {
+                    "cycle_ledger": cycle_ledger,
+                    "fleet": self.fleet(paper),
+                    "authority": authority,
+                },
             ),
             worker="legendary-lead",
             phase=phase,
@@ -342,6 +392,123 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         self.assertIn(
             "build/review preflight requires --fleet-ledger-json",
             MODULE.validate(self.args(include_ledger=False)),
+        )
+
+    def test_legendary_build_and_review_reject_unfenced_b1(self):
+        for phase in ("build", "review"):
+            with self.subTest(phase=phase):
+                ledger = self.ledger()
+                del ledger["manifest"]["cycle_scope_fence"]
+                self.resign_ledger(ledger)
+                self.assertIn(
+                    "Legendary B1 manifest has no cycle_scope_fence",
+                    MODULE.validate(self.args(phase=phase, ledger=ledger)),
+                )
+
+    def test_legendary_b1_scope_fence_matches_every_live_authority_pin(self):
+        drift = {
+            "workspace_id": "foreign-workspace",
+            "project_id": "foreign-project",
+            "epic_id": "foreign-epic",
+            "wave_id": "foreign-wave",
+            "wave_revision": "stale-wave-revision",
+            "inventory_digest": "d" * 64,
+            "plan_digest": "e" * 64,
+            "reconciliation_digest": "f" * 64,
+            "fleet_digest": "0" * 64,
+        }
+        for field, value in drift.items():
+            with self.subTest(field=field):
+                ledger = self.ledger()
+                fence = ledger["manifest"]["cycle_scope_fence"]
+                fence[field] = value
+                unsigned = {key: item for key, item in fence.items() if key != "receipt_digest"}
+                fence["receipt_digest"] = MODULE.EPIC.canonical_digest(unsigned)
+                self.resign_ledger(ledger)
+                self.assertIn(
+                    f"Legendary B1 cycle_scope_fence {field} does not match live Cycle authority",
+                    MODULE.validate(self.args(ledger=ledger)),
+                )
+
+    def test_legendary_b1_scope_fence_receipt_digest_is_verified(self):
+        ledger = self.ledger()
+        ledger["manifest"]["cycle_scope_fence"]["receipt_digest"] = "0" * 64
+        self.resign_ledger(ledger)
+        self.assertIn(
+            "Legendary B1 cycle_scope_fence receipt_digest mismatch",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_legendary_b1_scope_fence_requires_exact_versioned_shape(self):
+        mutations = (
+            ("version", lambda fence: fence.__setitem__("version", "future-fence-v2")),
+            ("shape", lambda fence: fence.__setitem__("unexpected", True)),
+        )
+        for case, mutate in mutations:
+            with self.subTest(case=case):
+                ledger = self.ledger()
+                fence = ledger["manifest"]["cycle_scope_fence"]
+                mutate(fence)
+                unsigned = {key: item for key, item in fence.items() if key != "receipt_digest"}
+                fence["receipt_digest"] = MODULE.EPIC.canonical_digest(unsigned)
+                self.resign_ledger(ledger)
+                expected = (
+                    f"Legendary B1 cycle_scope_fence version is not {MODULE.B1_SCOPE_FENCE_VERSION}"
+                    if case == "version"
+                    else "Legendary B1 cycle_scope_fence has an invalid exact shape"
+                )
+                self.assertIn(expected, MODULE.validate(self.args(ledger=ledger)))
+
+    def test_legendary_b1_scope_fence_requires_cycle_authority_kind(self):
+        args = self.args()
+        payload = json.loads(Path(args.cycle_json).read_text())
+        payload["authority"]["kind"] = "paper_projection"
+        args.cycle_json = self.write("wrong-authority-kind.json", payload)
+        self.assertIn(
+            "live Cycle authority kind is not barkpark_cycle_fleet",
+            MODULE.validate(args),
+        )
+
+    def test_legendary_b1_attempt_rejects_missing_scope_receipt_after_resign(self):
+        ledger = self.ledger()
+        attempt = ledger["attempts"][0]
+        del attempt["provenance"]["scope_receipt_digest"]
+        self.resign_ledger(ledger)
+        self.assertIn(
+            f"Legendary B1 attempt {attempt['attempt_id']} provenance scope_receipt_digest "
+            "does not match the Cycle scope fence",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_legendary_b1_attempt_rejects_forged_scope_receipt_after_full_resign(self):
+        ledger = self.ledger()
+        attempt = ledger["attempts"][0]
+        attempt["provenance"]["scope_receipt_digest"] = "f" * 64
+        self.resign_ledger(ledger)
+        self.assertIn(
+            f"Legendary B1 attempt {attempt['attempt_id']} provenance scope_receipt_digest "
+            "does not match the Cycle scope fence",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_legendary_b1_attempt_rejects_wrong_wave_revision_after_resign(self):
+        ledger = self.ledger()
+        attempt = ledger["attempts"][0]
+        attempt["provenance"]["wave_revision"] = "stale-wave-revision"
+        self.resign_ledger(ledger)
+        self.assertIn(
+            f"Legendary B1 attempt {attempt['attempt_id']} provenance wave_revision "
+            "does not match the Cycle scope fence",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_legendary_b1_experiment_workspace_matches_live_authority(self):
+        ledger = self.ledger()
+        ledger["experiment"]["workspace_id"] = "foreign-workspace"
+        self.resign_ledger(ledger)
+        self.assertIn(
+            "Legendary B1 experiment workspace_id does not match live Cycle authority",
+            MODULE.validate(self.args(ledger=ledger)),
         )
 
     def test_legendary_exporter_to_validator_rejects_paper_only_inflation(self):
@@ -462,9 +629,16 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         with mock.patch.object(
             MODULE.EPIC,
             "command_json",
-            return_value={"cycle_ledger": ledger, "fleet": fleet},
+            return_value={
+                "cycle_ledger": ledger,
+                "fleet": fleet,
+                "authority": self.authority(ledger),
+            },
         ) as command:
-            self.assertEqual((ledger, fleet), MODULE._live_cycle_projection(args, ledger))
+            self.assertEqual(
+                (ledger, fleet, self.authority(ledger)),
+                MODULE._live_cycle_projection(args, ledger),
+            )
 
         command.assert_called_once_with(
             "bp", "--workspace", "default", "--project", "default",
