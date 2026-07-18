@@ -540,10 +540,13 @@ defmodule Barkpark.Sites.DeployRunner do
 
       _terminal ->
         # Grace: right after launch systemd may report `inactive` for a beat
-        # before the unit goes active. Do not serve a false `:done` off an empty
-        # fold inside the spawn grace — keep it `:running` until the fold shows
-        # something or the grace elapses.
-        if empty_fold?(manifest) and within_spawn_grace?(manifest) do
+        # before the unit goes active. Do not serve a false `:done` off NO output
+        # yet — keep it `:running` until the run shows something or the grace
+        # elapses. A DEPLOY announces itself with its first BPSTAGE (the fold); a
+        # ROLLBACK emits no BPSTAGE ever (its output is the log), so gating its
+        # grace on an empty FOLD would hold every FINISHED rollback `:running`
+        # for the whole grace and then mislabel it. `no_output_yet?` is mode-aware.
+        if no_output_yet?(manifest) and within_spawn_grace?(manifest) do
           {:reply, reconstruct(manifest, :running), state}
         else
           render = reconstruct(manifest, :terminal)
@@ -637,12 +640,13 @@ defmodule Barkpark.Sites.DeployRunner do
         Map.merge(base, %{state: :running, exit_code: nil, failure_reason: nil, finished_at: nil})
 
       :terminal ->
-        {code, reason} = terminal_outcome(stages, log)
+        {code, reason} = terminal_outcome(manifest.mode, stages, log)
 
         Map.merge(base, %{
           state: :done,
           exit_code: code,
           failure_reason: reason,
+          build_id: terminal_build_id(manifest, code, log),
           finished_at: file_mtime(manifest.status_file) || DateTime.utc_now()
         })
     end
@@ -684,15 +688,33 @@ defmodule Barkpark.Sites.DeployRunner do
   defp empty_fold?(manifest),
     do: fold_status_file(manifest.status_file, manifest.build_id) == []
 
+  # "No durable output yet" — the signal that a unit reporting `inactive` may just
+  # be in the post-launch beat rather than genuinely finished. A DEPLOY announces
+  # itself with its first BPSTAGE (the fold); a ROLLBACK emits no BPSTAGE, so for
+  # it the signal is an empty LOG. Mode-aware so the deploy grace is byte-unchanged.
+  defp no_output_yet?(%{mode: :rollback} = manifest), do: empty_log?(manifest)
+  defp no_output_yet?(manifest), do: empty_fold?(manifest)
+
+  defp empty_log?(manifest), do: read_log_tail(manifest.log_file) == []
+
   defp within_spawn_grace?(manifest),
     do: DateTime.diff(DateTime.utc_now(), manifest.started_at, :millisecond) < @spawn_grace_ms
 
-  # A terminal unit exposes no exit code (`--collect` sweeps it), so the outcome
-  # is derived from the durable fold + the raw log tail — the same signals the
-  # Port path exits on. A `failed` stage names its typed exit + carries its detail;
-  # a clean run that reached SWITCH/RETIRE ok is exit 0; a unit that vanished
-  # without emitting a stage is an abnormal death.
-  defp terminal_outcome(stages, log) do
+  # A terminal unit exposes no exit code (`--collect` sweeps it), so the outcome is
+  # derived from the durable signals the child left behind. The signal set differs
+  # by MODE, and conflating them is the rollback-finalizer bug: a DEPLOY reads its
+  # BPSTAGE fold + log tail; a ROLLBACK emits NO BPSTAGE (it is a pointer flip, not
+  # a deploy — see `deploy/site-deploy.sh` header: the machine contract is the
+  # TARGET_BUILD= line + the typed exits, NOT BPSTAGE), so folding its empty stages
+  # through the deploy path mislabels every SUCCESSFUL rollback as `stages == []`
+  # → `-1` abnormal death, which the CP then reports as `rollback_failed`.
+  defp terminal_outcome(:rollback, _stages, log), do: rollback_outcome(log)
+  defp terminal_outcome(_deploy, stages, log), do: deploy_outcome(stages, log)
+
+  # DEPLOY: a `failed` stage names its typed exit + carries its detail; a clean run
+  # that reached SWITCH/RETIRE ok is exit 0; a unit that vanished without emitting a
+  # stage is an abnormal death.
+  defp deploy_outcome(stages, log) do
     failed = stages |> Enum.reverse() |> Enum.find(&(&1.status == "failed"))
 
     cond do
@@ -710,6 +732,64 @@ defmodule Barkpark.Sites.DeployRunner do
         # the unit is gone; treat as an abnormal end with the log's own tail.
         {-1, terminal_reason(-1, nil, log)}
     end
+  end
+
+  # ROLLBACK: no stages exist, so the verdict comes from the log the engine typed.
+  # A recognized typed failure wins first (`(no_previous)` → 21, `(not_supported)`
+  # → 22). Otherwise a success marker (`ROLLED BACK` / `TARGET_BUILD=`, emitted by
+  # both the real flip AND the "previous == current, nothing to do" path) is exit 0.
+  # Neither — including a flip failure (24), which logs no distinct marker — falls
+  # through to an abnormal death: still non-zero, still fail-closed, so the CP renders
+  # a 422 refusal, never a false `rolled_back`.
+  defp rollback_outcome(log) do
+    case rollback_failure_code(log) do
+      nil ->
+        if rollback_succeeded?(log),
+          do: {0, nil},
+          else: {-1, terminal_reason(-1, nil, log)}
+
+      code ->
+        {code, terminal_reason(code, nil, log)}
+    end
+  end
+
+  # The typed rollback failures name themselves in the log with a parenthetical
+  # marker (`deploy/site-deploy.sh`): "(no_previous)" → 21, "(not_supported)" → 22.
+  defp rollback_failure_code(log) do
+    text = Enum.join(log, "\n")
+
+    cond do
+      String.contains?(text, "(no_previous)") -> 21
+      String.contains?(text, "(not_supported)") -> 22
+      true -> nil
+    end
+  end
+
+  defp rollback_succeeded?(log) do
+    Enum.any?(log, fn line ->
+      String.contains?(line, "ROLLED BACK") or target_build_line?(line)
+    end)
+  end
+
+  defp target_build_line?(line), do: Regex.match?(~r/^\s*TARGET_BUILD=\S/, line)
+
+  # The build a deploy went live on is its manifest build_id; a SUCCESSFUL rollback
+  # flips to a DIFFERENT build (its manifest build_id is empty — a rollback names no
+  # build), so the now-live build is parsed from the engine's `TARGET_BUILD=<id>`
+  # line, reusing the CP's parse (box_relay.target_build/1). Everything else keeps
+  # the manifest build_id verbatim.
+  defp terminal_build_id(%{mode: :rollback, build_id: fallback}, 0, log),
+    do: parse_target_build(log) || fallback
+
+  defp terminal_build_id(%{build_id: build_id}, _code, _log), do: build_id
+
+  defp parse_target_build(log) do
+    Enum.find_value(log, fn line ->
+      case Regex.run(~r/^TARGET_BUILD=(\S+)/, String.trim(to_string(line))) do
+        [_, id] -> id
+        _ -> nil
+      end
+    end)
   end
 
   defp terminal_reason(code, failed_stage, log) do

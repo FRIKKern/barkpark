@@ -993,6 +993,71 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.failure_reason =~ "401 Unauthorized - the site read token is invalid"
       assert [%{name: "BUILD", status: "failed"}] = status.stages
     end
+
+    test "a successful rollback finalizes exit 0 + the flipped-to build, not an abnormal death" do
+      dir = run_dir()
+
+      # A rollback is a pointer flip, NOT a deploy: it emits NO BPSTAGE — only the
+      # human/machine lines the engine prints (`ROLLED BACK` + `TARGET_BUILD=<id>`).
+      # The old finalizer folded its empty stages through the deploy path and read
+      # `stages == []` as `-1` abnormal death — reporting every SUCCESSFUL rollback
+      # as a failure. The mode-aware path must read the rollback's own contract.
+      engine =
+        stub("""
+        echo 'ROLLED BACK: current -> releases/b2 (was b7)' >> "$BARKPARK_SITE_LOG_FILE"
+        echo 'TARGET_BUILD=b2' >> "$BARKPARK_SITE_LOG_FILE"
+        echo "ROLLED BACK — 'unitrb' now at b2" >> "$BARKPARK_SITE_LOG_FILE"
+        exit 0
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        rollback_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unitrb", mode: "rollback")) == {:ok, :started}
+
+      status = DeployRunner.status("unitrb")
+      assert status.state == :done
+      assert status.exit_code == 0
+      assert status.failure_reason == nil
+      # The reply names the release now serving, parsed from `TARGET_BUILD=`.
+      assert status.build_id == "b2"
+      # A rollback emits no BPSTAGE — the finalizer must NOT read that as death.
+      assert status.stages == []
+    end
+
+    test "a no_previous rollback finalizes its typed 21, not an abnormal death" do
+      dir = run_dir()
+
+      # Unit mode has no exit code (`--collect` sweeps it), so the typed rollback
+      # failure is derived from the engine's own `(no_previous)` log marker.
+      engine =
+        stub("""
+        echo "no previous release recorded for 'unitrb21' (no_previous)" >> "$BARKPARK_SITE_LOG_FILE"
+        exit 21
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        rollback_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unitrb21", mode: "rollback")) == {:ok, :started}
+
+      status = DeployRunner.status("unitrb21")
+      assert status.state == :done
+      assert status.exit_code == 21
+      assert status.failure_reason =~ "no previous release (exit 21)"
+    end
   end
 
   describe "systemd unit path — re-attach on init (D32)" do
