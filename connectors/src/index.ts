@@ -178,8 +178,10 @@ export function registerBuiltinConnectors(
     }
   }
 
-  // Discord — credential-bound BYO-bot, Gateway socket, no webhook (D41). A
-  // shared app would mean ONE bot token serving every tenant: the headline bug.
+  // Discord — credential-bound BYO-bot (D41): a shared app would mean ONE bot
+  // token serving every tenant, the headline bug. TWO additive transports (D225):
+  // a Gateway socket for DMs/mentions AND a path-keyed Ed25519 webhook for
+  // slash-command interactions (D228), both served by the one registry entry.
   if (!registry.has(DISCORD_PROVIDER)) {
     registry.register(createDiscordConnector());
   }
@@ -297,9 +299,10 @@ export interface MountedInstall {
 
 /**
  * Build one Chat for one install, with the core loop wired to every inbound
- * shape the SDK routes (DM, new mention, follow-up in a subscribed thread).
+ * shape the SDK routes (DM, new mention, follow-up in a subscribed thread, and
+ * slash-command interaction).
  *
- * The handlers are three thin wrappers around the SAME dispatchInbound call —
+ * The handlers are four thin wrappers around the SAME dispatchInbound call —
  * so a channel's routing quirks never leak into the core loop.
  */
 export function mountInstall(
@@ -392,6 +395,35 @@ export function mountInstall(
 
   chat.onSubscribedMessage(async (thread, message) => {
     await handle(thread.id, message.text, (out) => thread.post(out), message);
+  });
+
+  // Slash commands (D228/D229) — the FOURTH wrapper around the SAME handle
+  // closure, so a Discord interaction funnels into the identical turn loop the
+  // message handlers use, with ZERO core-loop change. The event has no thread
+  // (it is not a subscribed conversation), so the reply targets event.channel.id
+  // directly — the vendor adapter routes channel.post to the interaction
+  // follow-up (PATCH /webhooks/{appId}/{token}/messages/@original) via
+  // AsyncLocalStorage. FOUR vendor-contract laws hold here:
+  //   - event.channel.id is passed VERBATIM (the vendor's namespaced
+  //     "discord:{guild}:{chan}" id — the ALS store keys on it; unwrapping it
+  //     silently drops the reply off the interaction);
+  //   - dispatch text is `${event.command} ${event.text}`.trim() (D232), NEVER
+  //     event.text alone — the vendor text is option-values-only, so a bare
+  //     no-option command (/status) has text:"" and core/dispatch.ts drops empty
+  //     text as dropped_empty_input BEFORE tenant resolution: a silent no-op that
+  //     surfaces to the user as "The application did not respond" after the
+  //     15-min interaction-token TTL;
+  //   - the reply stays channel.post-shaped (the adapter, not the bridge, knows
+  //     the interaction token);
+  //   - the dispatch runs inside the vendor's requestContext.run (it rides
+  //     waitUntil, not a fresh macrotask, so the ALS store survives).
+  chat.onSlashCommand(async (event) => {
+    await handle(
+      event.channel.id,
+      `${event.command} ${event.text}`.trim(),
+      (out) => event.channel.post(out),
+      event.raw,
+    );
   });
 
   return { connector, install, chat, adapter };

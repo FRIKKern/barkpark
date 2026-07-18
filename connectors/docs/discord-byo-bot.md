@@ -51,18 +51,95 @@ leave out — in a multi-tenant bridge that fallback is a **cross-tenant leak**,
 `parseDiscordCredential()` refuses an incomplete credential rather than letting a process-wide token
 stand in for a workspace's own. A test poisons those env vars and proves the leak is unreachable.
 
-`publicKey` verifies Ed25519 webhook signatures, which v1 does not use — it is required anyway, not
-defaulted to a sentinel, so that the day slash commands land every existing install already carries
-a real key.
+`publicKey` verifies the Ed25519 signature on Discord's HTTP **interactions** (slash commands). It is
+required from the start — not defaulted to a sentinel — precisely so that the day slash commands
+landed, every existing install already carried a real key.
 
-## Gateway-only in v1
+## Two transports, one handler
 
-The bot connects over the **Gateway websocket**. It needs **no public URL**, no tunnel, and no
-inbound HTTP at all — DMs and mentions (everything the turn loop needs) arrive over the socket.
+Discord speaks to the bridge over **two inbound transports, and they run side by side** (charter
+D225/D228) — never an either/or at the bridge:
 
-**Slash commands are out of v1.** They require Discord's Ed25519-signed HTTP interaction endpoint,
-which is a webhook seam this connector deliberately does not depend on. Filed as
-`connectors-discord-slash-commands`.
+| Transport | Carries | Needs |
+|---|---|---|
+| **Gateway websocket** (`listen()`) | DMs and @-mentions | no public URL — nothing inbound |
+| **Ed25519-signed HTTP webhook** | slash-command **interactions** | a public HTTPS endpoint |
+
+DMs and mentions keep flowing over the socket with no inbound URL at all. Slash commands ride the
+generic webhook seam: the vendor `DiscordAdapter.handleWebhook` already ships the whole interaction
+protocol — raw-body Ed25519 verify, PING→PONG, the synchronous deferred ack, and background
+dispatch — so the bridge adds zero protocol code. The connector declares `webhook: { keySource:
+"path" }` and the same `chat.onSlashCommand` handler funnels a command into the identical turn loop
+DMs and mentions use.
+
+> **Discord's own either/or.** *Delivery* of interactions is mutually exclusive per application:
+> once you set the portal **Interactions Endpoint URL**, Discord stops sending `INTERACTION_CREATE`
+> over the Gateway and sends every interaction to the webhook instead. `MESSAGE_CREATE` (DMs,
+> mentions) is unaffected and keeps flowing on the socket. So "two transports" means *socket for
+> messages, webhook for interactions* — the same registered handler serves whichever delivers.
+
+## Turning on slash commands (ops runbook)
+
+Slash commands are BYO-bot too: three ops steps, each with a failure mode Discord surfaces quietly.
+
+### 1. Deploy the webhook route BEFORE you save the URL
+
+Your interactions endpoint is, per install (the install key is the **Application ID**):
+
+```
+https://<your-public-host>/connectors/webhooks/discord/<applicationId>
+```
+
+Concrete example against the reference host:
+
+```
+https://guerrilla.barkpark.cloud/connectors/webhooks/discord/111111111111111111
+```
+
+Paste it into **General Information → Interactions Endpoint URL** in the Developer Portal and Save.
+**The route must already be live and reachable.** Discord PING-validates at save time: it sends a
+signed `type: 1` PING and refuses the save unless it gets a `type: 1` PONG back. If the bridge is
+not deployed, or the endpoint is behind auth, or the install's `publicKey` is wrong, the portal
+rejects the URL and will not save it. There is **no** "copy this URL from Studio" — Studio surfaces
+no webhook URL for any provider; you construct it from your public host + the Application ID above.
+
+### 2. Named failure mode — a failing endpoint is SILENTLY removed
+
+After the URL is saved, Discord runs **ongoing invalid-signature probes**. If your endpoint starts
+failing verification (an expired/rotated `publicKey`, a bridge regression on the Ed25519 path),
+Discord **silently removes the Interactions Endpoint URL** and notifies only by email / a System DM
+to the app owner — there is **no** error in the bridge logs. The symptom reads as *"slash commands
+reverted to unconfigured"* with zero bridge-side signal. If commands stop arriving over the webhook
+but DMs still work (they are on the socket), check the portal: the Interactions Endpoint URL is
+probably blank. Fix the `publicKey`/signature path, then re-save the URL (step 1 re-runs the PING).
+
+### 3. Register the commands (guild-scoped for dev, global for prod)
+
+Registering the command *definitions* is a Discord REST call, not something the bridge does — it is
+an ops step, run once per command shape. **Guild-scoped** registration updates **instantly** and is
+what you want while developing; **global** registration takes up to **~1 hour** to propagate.
+
+```bash
+# Guild-scoped (instant) — dev loop:
+curl -X PUT \
+  "https://discord.com/api/v10/applications/<applicationId>/guilds/<guildId>/commands" \
+  -H "Authorization: Bot <botToken>" \
+  -H "Content-Type: application/json" \
+  -d '[{"name":"ask","description":"Ask the agent","type":1,"options":[{"name":"q","description":"your question","type":3,"required":true}]}]'
+
+# Global (all guilds, ~1h propagation) — production:
+curl -X PUT \
+  "https://discord.com/api/v10/applications/<applicationId>/commands" \
+  -H "Authorization: Bot <botToken>" \
+  -H "Content-Type: application/json" \
+  -d '[{"name":"status","description":"Bridge status","type":1}]'
+```
+
+A command with no `options` (like `/status`) arrives with empty argument text — the bridge funnels
+the command name itself (`/status`) into the turn loop, so a bare command still reaches the agent.
+
+**Interaction tokens live 15 minutes.** The synchronous deferred ack buys the turn that long to
+produce its reply; a turn that runs past 15 minutes can no longer edit the interaction.
 
 ## Three vendor traps, handled once
 
