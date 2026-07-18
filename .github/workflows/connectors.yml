@@ -99,6 +99,19 @@ jobs:
           shellcheck -S error scripts/connectors/w25-credential-embed-proof.sh
           bash scripts/connectors/w25-credential-embed-proof.sh
 
+      # The Wave-29 per-connector egress-allowlist proof (D238/D240/D241/D242):
+      # repeated `--egress-host` shim flags union with the ALLOWED_DOMAIN base
+      # into repeated `--allowed-domain` pairs on the SNAPSHOT create path —
+      # proven by SET-EQUALITY (never containment) on the create argv: a github
+      # install widens to exactly base+github, no installs preserves exactly the
+      # deny-all-except-anthropic base, and a repeated base dedupes to one pair.
+      # Also pins --network-policy never co-emitted and no comma-joined hosts.
+      # Same fake-vercel technique; no real Vercel, no real egress.
+      - name: Egress-allowlist union proof (W29, D238-D242)
+        run: |
+          shellcheck -S error scripts/connectors/w29-egress-allowlist-proof.sh
+          bash scripts/connectors/w29-egress-allowlist-proof.sh
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest

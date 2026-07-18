@@ -225,6 +225,125 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
     end
   end
 
+  # Knob 6 (D237/D238/D239, W29): the per-connector egress allowlist — the SAME
+  # `installs ∩ descriptors` fold as cloud_mcp_servers/2, reduced to the sorted,
+  # unique set of each surviving descriptor's D239-SANITIZED host. Fail-closed: no
+  # install ⇒ no widening (deny-all preserved); a non-installed connector's host
+  # never leaks; a shape-invalid url contributes nothing. Reuses insert_install/3
+  # and gh_descriptor/0/linear_descriptor/0 (module-scope privates above).
+  describe "cloud_egress_hosts/2 — knob 6 egress allowlist derivation (D237/D238/D239)" do
+    setup do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "cloud-egress-ws", name: "Cloud Egress WS"})
+      {:ok, ws: ws}
+    end
+
+    test "empty descriptors ⇒ [] (no widening, deny-all wall untouched)" do
+      assert CloudPolicy.cloud_egress_hosts("any-workspace", []) == []
+    end
+
+    test "a descriptor with no matching install ⇒ [] (no cross-connector leak)", %{ws: ws} do
+      assert CloudPolicy.cloud_egress_hosts(ws, [gh_descriptor()]) == []
+    end
+
+    test "1 github install ⇒ EXACTLY [\"api.githubcopilot.com\"] (set-equality)", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      assert CloudPolicy.cloud_egress_hosts(ws, [gh_descriptor(), linear_descriptor()]) ==
+               ["api.githubcopilot.com"]
+    end
+
+    test "github + linear installs ⇒ the two-host SORTED UNIQUE set", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("linear", "team-x", ws.id)
+
+      assert CloudPolicy.cloud_egress_hosts(ws, [gh_descriptor(), linear_descriptor()]) ==
+               ["api.githubcopilot.com", "mcp.linear.app"]
+    end
+
+    test "the allowlist NEVER contains a host not declared by an INSTALLED connector", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      # linear descriptor present but NOT installed for this ws ⇒ its host is absent.
+      hosts = CloudPolicy.cloud_egress_hosts(ws, [gh_descriptor(), linear_descriptor()])
+      assert hosts == ["api.githubcopilot.com"]
+      refute "mcp.linear.app" in hosts
+      refute "api.anthropic.com" in hosts
+    end
+
+    test "duplicate descriptors for the same installed host collapse to one", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      assert CloudPolicy.cloud_egress_hosts(ws, [gh_descriptor(), gh_descriptor()]) ==
+               ["api.githubcopilot.com"]
+    end
+
+    # D239 sanitizer exercised with FIXED descriptor strings (zero DNS/network).
+    # Each malformed github url ⇒ that connector contributes NO host (fail-closed).
+    test "D239 sanitizer rejects http/userinfo/IP-literal/non-default-port/blank/underscore — fixed strings",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      for bad_url <- [
+            # not https
+            "http://api.githubcopilot.com/mcp/",
+            # userinfo (whole descriptor refused)
+            "https://user@api.githubcopilot.com/mcp/",
+            "https://user:pw@api.githubcopilot.com/mcp/",
+            # IPv4 literal
+            "https://192.168.1.1/mcp",
+            # IPv6 literal
+            "https://[::1]/mcp",
+            # non-default port
+            "https://api.githubcopilot.com:8443/mcp",
+            # underscore — not the ASCII DNS shape
+            "https://api_githubcopilot.com/mcp",
+            # blank host
+            "https:///mcp",
+            # unparseable / no scheme
+            "not-a-url"
+          ] do
+        d = %{"provider" => "github", "type" => "http", "url" => bad_url}
+
+        assert CloudPolicy.cloud_egress_hosts(ws, [d]) == [],
+               "expected [] (fail-closed) for #{inspect(bad_url)}"
+      end
+    end
+
+    test "sanitizer downcases the host and strips one trailing dot", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      d = %{
+        "provider" => "github",
+        "type" => "http",
+        "url" => "https://API.GithubCopilot.com./mcp"
+      }
+
+      assert CloudPolicy.cloud_egress_hosts(ws, [d]) == ["api.githubcopilot.com"]
+    end
+
+    test "non-http transport / reserved barkpark / channel install contribute no host", %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("telegram", "111:aaa", ws.id)
+
+      descriptors = [
+        %{
+          "provider" => "github",
+          "type" => "stdio",
+          "url" => "https://api.githubcopilot.com/mcp/"
+        },
+        %{"provider" => "barkpark", "type" => "http", "url" => "https://x.test/mcp"},
+        %{"provider" => "telegram", "type" => "http", "url" => "https://example.test/mcp"}
+      ]
+
+      assert CloudPolicy.cloud_egress_hosts(ws, descriptors) == []
+    end
+
+    test "a garbage/nil workspace yields [] (fail-safe, never a CastError 500)" do
+      assert CloudPolicy.cloud_egress_hosts("not-a-uuid", [gh_descriptor()]) == []
+      assert CloudPolicy.cloud_egress_hosts(nil, [gh_descriptor()]) == []
+    end
+  end
+
   # The D130 argv table: `ClaudeChat.cloud_build_args/2` over 0/1/2 tool installs,
   # asserting in EVERY row that W12's FULL deny belt (--tools "" + --disallowedTools
   # + --settings deny JSON) is still present alongside the new `--mcp-config-b64`

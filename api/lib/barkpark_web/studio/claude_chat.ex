@@ -224,6 +224,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       ["--workspace", <workspace_id>,
        ("--mcp-config-b64", <b64>)?,
        ("--sandbox-id", <id>)?, "--keep-sandbox",
+       ("--egress-host", <host>)*,
        "--" | <claude args>]
 
   The shim buffers the first user frame from its stdin, creates (or, with
@@ -281,8 +282,28 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     ["--workspace", workspace_id] ++
       cloud_mcp_config_args(session_opts) ++
       cloud_sandbox_args(session_opts) ++
+      cloud_egress_args(session_opts) ++
       ["--"] ++
       cloud_claude_args(mode, session_opts)
+  end
+
+  # The shim-own per-connector egress allowlist (knob 6's WIRING, D238/D240 — W29)
+  # — repeated `--egress-host <host>` pairs emitted AFTER the sandbox-lifecycle
+  # flags and BEFORE the `--` separator, so the SHIM (never claude) owns them and
+  # can widen the sandbox's deny-all egress to EXACTLY the workspace's installed
+  # tool connectors' declared MCP hosts. Derived from the SAME `installs ∩
+  # descriptors` truth as `--mcp-config-b64` via `CloudPolicy.cloud_egress_hosts/2`
+  # (sorted, unique, D239-sanitized). With 0 surviving hosts this is `[]` and the
+  # argv is BYTE-IDENTICAL to W25 (deny-all preserved). Each host rides its OWN
+  # `--egress-host` pair — NEVER comma-joined, and `api.anthropic.com` (the shim's
+  # env base, never a connector descriptor) never appears.
+  defp cloud_egress_args(session_opts) do
+    workspace = Map.get(session_opts, :workspace_id)
+    descriptors = Map.get(session_opts, :tool_descriptors, [])
+
+    workspace
+    |> CloudPolicy.cloud_egress_hosts(descriptors)
+    |> Enum.flat_map(fn host -> ["--egress-host", host] end)
   end
 
   # The shim-own sandbox-lifecycle flags (connectors D137/D138), emitted pre-`--`
