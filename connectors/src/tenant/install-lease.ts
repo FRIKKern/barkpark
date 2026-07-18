@@ -63,16 +63,22 @@
  * HONEST SCOPE (D95) — say exactly what this covers, and what it does not
  * ─────────────────────────────────────────────────────────────────────────────
  * COVERED: Discord (Gateway socket — silent double-POST) and Telegram
- * (getUpdates — 409 Conflict), the two socket/poll channels in the tree, selected
- * as the exact COMPLEMENT of mount-reconcile's `webhook !== undefined` filter.
+ * (getUpdates — 409 Conflict), the two socket/poll channels in the tree — every
+ * channel connector carrying a `listen()`. Since D225 this set is INDEPENDENT
+ * of mount-reconcile's `webhook !== undefined` set — the two OVERLAP on
+ * dual-transport connectors (Discord: Gateway socket + interactions webhook),
+ * whose webhook side mounts replica-safe on every replica while the socket side
+ * is leased here.
  *
  * NOT COVERED, and named so no one mistakes silence for safety:
  *   · iMessage — the same socket-ish code shape, but a self-hosted ONE-Mac
  *     operator profile (D3/D44), never Cloud multi-tenant. If it is ever
  *     registered it rides this same lease path unchanged, but it is not built-for
  *     and not tested here.
- *   · Webhook channels (Slack / Teams / WhatsApp) — already replica-safe via W8
- *     mount-reconcile; they carry `webhook` and are excluded by construction.
+ *   · Webhook-ONLY channels (Slack / Teams / WhatsApp) — already replica-safe
+ *     via W8 mount-reconcile; with no `listen()` they never appear here. A
+ *     `webhook` block alone no longer excludes a connector (D225) — only the
+ *     absence of a leased transport does.
  *
  * And the D93 LAW: `connector_install_leases` is BRIDGE-INTERNAL — no Elixir ever
  * reads it (mirroring the D54 discipline), so it needs no `test_helper.exs`
@@ -267,17 +273,20 @@ export function createInstallLease(
   // The complement of "the DB says another replica holds it". Keyed like the map.
   const served = new Map<string, ConnectorInstall>();
 
-  // The exact COMPLEMENT of mount-reconcile's `webhook !== undefined` filter: a
-  // channel connector whose transport is NOT an HTTP request, i.e. one that starts
-  // a poll/socket in `listen()`. Webhook channels are excluded (replica-safe via
-  // mount-reconcile); tool connectors never appear in `channels()`.
+  // Every channel connector carrying a LEASED transport — a `listen()` that
+  // opens a poll/socket needing single-replica ownership. INDEPENDENT of
+  // mount-reconcile's `webhook !== undefined` set since D225 — the two overlap
+  // on dual-transport connectors (Discord keeps its Gateway lease here while
+  // its interactions webhook mounts on every replica). Tool connectors never
+  // appear in `channels()`.
+  //
+  // LOCKSTEP (D226): this inlines `isLeaseManaged` from src/index.ts — it
+  // CANNOT import it (index.ts imports this file; importing back is circular).
+  // Any edit to the predicate there MUST be mirrored here in the same diff.
   const socketPollConnectors = (): Connector[] =>
     deps.registry
       .channels()
-      .filter(
-        (connector) =>
-          connector.webhook === undefined && typeof connector.listen === "function",
-      );
+      .filter((connector) => typeof connector.listen === "function");
 
   const reconcileOnce = async (): Promise<LeaseSummary> => {
     const summary: LeaseSummary = {
