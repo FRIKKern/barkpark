@@ -235,17 +235,25 @@ export function registerBuiltinConnectors(
 }
 
 /**
- * A SOCKET/POLL channel (charter D93): its transport is a long-lived `listen()`
- * (a Discord Gateway socket, a Telegram getUpdates poll), NOT an inbound HTTP
- * request. Such a transport must be single-owner across replicas — two of them
+ * Does this connector carry a LEASED transport (charter D93/D225)? A `listen()`
+ * opens a long-lived socket/poll (a Discord Gateway socket, a Telegram
+ * getUpdates poll) that must be single-owner across replicas — two of them
  * against one bot double-POST (Discord) or 409-Conflict (Telegram) — so the
- * install-lease coordinator, not boot, starts it. The exact COMPLEMENT of a
- * webhook channel (whose HTTP transport any replica may serve, W8 mount-reconcile).
+ * install-lease coordinator, not boot, starts it.
+ *
+ * Transports are ADDITIVE (D225): a `webhook` block on the same connector does
+ * NOT exclude it — Discord runs a Gateway socket AND an interactions webhook,
+ * and the pre-D225 `webhook === undefined` clause here was an XOR that would
+ * have silently killed the Gateway the moment the webhook block landed.
+ *
+ * LOCKSTEP (D226): `socketPollConnectors()` in tenant/install-lease.ts inlines
+ * this exact predicate — it CANNOT import this function (index.ts imports
+ * install-lease.ts; importing back is circular). Any edit here MUST be
+ * mirrored there in the same diff.
  */
 export function isLeaseManaged(connector: Connector): boolean {
   return (
     (connector.direction === "channel" || connector.direction === "both") &&
-    connector.webhook === undefined &&
     typeof connector.listen === "function"
   );
 }
@@ -600,31 +608,35 @@ export async function startBridge(
   ): Promise<MountedInstall> => {
     const entry = mountInstall(connector, install, deps);
     await entry.chat.initialize();
-    // The core never learns the channel. Three transports, three fates:
+    // The core never learns the channel. Transports are ADDITIVE (D225): each
+    // check is INDEPENDENT, so a dual-transport connector (Discord: Gateway
+    // socket + interactions webhook) runs BOTH — never an if/else ladder, whose
+    // pre-D225 XOR would have evicted the socket the moment a webhook landed.
     if (connector.webhook) {
-      // Webhook channel: its transport IS the inbound HTTP request. Mount into the
-      // index; any replica may serve it (W8 mount-reconcile keeps that safe).
+      // Webhook transport: an inbound HTTP request. Mount into the index; any
+      // replica may serve it (W8 mount-reconcile keeps that safe).
       mounts.mount({ connector, install, chat: entry.chat });
-    } else if (isLeaseManaged(connector)) {
-      // Socket/poll channel: its listen() opens a long-lived Gateway socket /
+    }
+    if (isLeaseManaged(connector)) {
+      // Socket/poll transport: its listen() opens a long-lived Gateway socket /
       // getUpdates poll that MUST be single-owner across replicas (D93). The
       // Chat is mounted here, but the TRANSPORT is started by the install-lease
       // coordinator's onAcquire — only on the replica that holds this install's
       // lease. Starting it here would double-serve on every scaled-out replica.
-    } else {
-      // A channel with neither a webhook nor a listen() (none exists today): the
-      // optional-chained call is a no-op, kept so the shape stays total.
-      await connector.listen?.(entry.adapter);
+    } else if (typeof connector.listen === "function") {
+      // A listen() outside lease management (a non-channel direction — none
+      // exists today): direct start, preserving the pre-lease fallback.
+      await connector.listen(entry.adapter);
     }
     mounted.push(entry);
+    const transports = [
+      ...(connector.webhook ? ["webhook"] : []),
+      ...(isLeaseManaged(connector) ? ["socket/poll — transport lease-gated"] : []),
+    ];
     console.log(
       `[bridge] mounted: ${connector.id} install=${install.installKey} ` +
         `workspace=${install.workspaceId}` +
-        (connector.webhook
-          ? " (webhook)"
-          : isLeaseManaged(connector)
-            ? " (socket/poll — transport lease-gated)"
-            : ""),
+        (transports.length > 0 ? ` (${transports.join(" + ")})` : ""),
     );
     return entry;
   };
