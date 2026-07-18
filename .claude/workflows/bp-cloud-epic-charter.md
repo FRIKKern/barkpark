@@ -650,3 +650,33 @@ Dispatch freshness: origin/main green (04893e486); all three slices unclaimed; t
 LAPSED (epoch 12, steward-adtui-fin) — RE-CLAIM before any PR opens or pr-task-gate fails.
 Backlog: `wsc-bl-workflow-sse-detail` CLOSED (resolved by D42); NEW `wsc-bl-epic-on-session-json`.
 Review appends the debrief.
+
+
+**Outcome (Review 2026-07-18): ALL THREE slices GREEN — grade A.** Zero code defects found; the
+reviewer's only hands-on work was the cross-slice integration the plan already mandated.
+- **wsc-map-inline** `task-85306c724906c02d` → branch `loop-epic/wsc-map-inline-tui-panel-becomes-an-exec-0`
+  (d98510eb8) reviewed AS-IS, no fixes. D40 extractor adversarially checked (escape-pair handling,
+  dangling-backslash clip, RE2 unterminated tail) — sound; the 820-preview corpus test + synthetic
+  whole-parse fixture + the mandated 18-agent D44 fixture all pin real behavior (cursor==paint==detail
+  proven, running at wire 0/9/17 never folded). Gate + gofmt + vet green. MERGE FIRST.
+- **wsc-needs-you** `task-8596bfb8188aa880` → **final branch `loop-epic/wsc-needs-you-workflow-strip-panel-surfa-1-r`**
+  (5011ba668): the reviewer performed the mandated rebase onto map-inline and resolved the two
+  render.go/model_test.go conflicts — the combined tree is PROVEN coherent (needsYou ⇒ stall badges
+  suppressed by construction; banner and badges can never co-render; full gate -count=1 green on the
+  merged tree). Lead merges map-inline, then this -r branch lands needs-you conflict-free.
+- **wsc-steer-design** `task-b399a1068ea742f6` → paper `wsc-steer-fleet-design` published/linked;
+  gate re-run GATE_PASS. Reviewer re-verified the ONE citation the builder inherited unverified:
+  `Capabilities.codex()` DOES advertise `modes: []`/`models: []` (capabilities.ex:146-164) — the
+  mode/model crossover branch is confirmed unreachable. Migration CHECKs, claude closed-enum steer,
+  codex turn/steer injection all re-confirmed at cited lines. Follow-ups real: `wsc-steer-open-session-managed`
+  filed+published, `wsc-bl-agent-task-join` perfected, ruling recorded on `wsc-bl-epic-on-session-json`.
+  Branch is an --allow-empty marker — lead may merge or discard it (the gate reads Barkpark, not git).
+Ledger: honest end-to-end — all proof criteria stamped with evidence mid-build, lifecycle
+in_progress, merge criteria left open for the lead (map-inline C6, needs-you C4, steer C4). No fixes
+needed. Known accepted ceilings (not defects): D43 result box is short-lived (visible only while the
+strip stands on a fresher live summary — the geometry byte-locks forbid a persistent post-settle
+panel); stall badge has no entry-lifecycle gate (an interrupted wave's frozen agent wears it —
+factually true); HH:MM is operator-local. Next: lead merges (map-inline → needs-you-r → this charter
+branch), closes the three merge criteria + wsc-bl-workflow-sse-detail (D42), then the epic returns to
+DESIGNED COMPLETION with the D46 build slices (`wsc-bl-agent-task-join` → `wsc-steer-open-session-managed`,
+`wsc-bl-epic-on-session-json` riding the join) as the visible backlog.
