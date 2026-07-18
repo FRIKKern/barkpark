@@ -191,25 +191,27 @@ A(para("rv-atier",
        "is the unlock); pr-status 3.75 and quiz-embed 3.60 wait on the plugin block-registration seam."))
 A(head("rv-h-btier", 2, "B tier (43) - worthy, not yet"))
 A(para("rv-btier",
-       "The B band is real but outranked: the data-viz long tail (sparkline and pie-chart at the top of it narrowly missed "
-       "A; histogram, area, scatter, calendar-heatmap, radar, funnel, waterfall, treemap, sankey, scientific-plot), the "
-       "field-atom siblings (url, file, json, rating, geopoint), the remaining media embeds (audio, pdf-embed, svg-inline, "
-       "image-compare, icon), geo composition members (map-route, location-card), editorial support (sidenote, chronology, "
-       "citation-list), and the heavier interactive pieces (carousel, poll, template-button, openapi-console, synced-block). "
-       "Wave 2+ should re-score B after the S wave ships - several (sparkline, pie-chart, csv-table siblings) get cheaper "
-       "once the DataViz emitter family exists."))
+       "The B band is real but outranked: the data-viz long tail (radial-dial, histogram, area-chart, scatter-plot, "
+       "calendar-heatmap and scientific-plot lead it at 3.15; radar, funnel, waterfall, treemap and sankey sit behind), "
+       "the live-data middle (burndown-chart and claim-monitor at 3.25, then sheet-chart, task-calendar, deploy-status, "
+       "paper-stats - all but burndown prerequisite-flagged), the field-atom siblings (url, file, json, rating, geopoint), "
+       "the remaining media embeds (audio, pdf-embed, svg-inline, image-compare, icon), geo composition members (map-route, "
+       "location-card), editorial support (sidenote, chronology, citation-list), and the heavier interactive pieces "
+       "(carousel, poll, template-button, openapi-console, synced-block). "
+       "Wave 2+ should re-score B after the S wave ships - the data-viz tail gets cheaper "
+       "once bar-chart births the DataViz emitter family."))
 A(head("rv-h-ctier", 2, "C tier (13) - low or capped"))
 A(para("rv-ctier",
        "Seven D22-capped parity entries (B018-B024) - legitimate terminal-mermaid work, wrong ledger for it. Six genuinely "
-       "low scores: box-plot 2.55, choropleth 2.55, geojson-map 2.55, countdown 2.40, page-break 2.00 and chemfig 1.55 - "
+       "low scores: box-plot 2.55, choropleth 2.40, geojson-map 2.40, countdown 2.40, page-break 2.00 and chemfig 1.55 - "
        "the wishlist itself predicted chemfig's rank; honesty kept it there."))
 
 A({"id": "rv-next-callout", "type": "callout", "tone": "success", "title": "What happens next",
    "content": [T("Wave 2 builds the S tier: eight STATIC candidates ride scaffy add-block-type (live count pins per D18), "
                  "tabs/code-tabs ride the I1 hydration pattern, field-number lands with its Studio control, and "
-                 "criteria-progress rides the existing task resolver. tr-agg-resolver-wave unblocks the six resolver-capped "
+                 "criteria-progress rides the existing task resolver. tr-agg-resolver-wave unblocks the eight resolver-capped "
                  "A candidates; the plugin block-registration seam (pbw-backlog-plugin-block-seam) unblocks the five "
-                 "seam-flagged ones. Each pbw-stier-* task carries its full brief.")]})
+                 "seam-flagged candidates (two of them A-tier). Each pbw-stier-* task carries its full brief.")]})
 A({"id": "rv-div-end", "type": "divider"})
 A(para("rv-colophon",
        "Written in the product it reviews. Input: Paper block-wishlist-100 (100 candidates, live-verified). Rubric: charter "
