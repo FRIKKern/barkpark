@@ -731,6 +731,16 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireWritePermission)
   end
 
+  # scaffy:zone router-pipelines (ensure-router-zones) -- stable head anchor
+  # for NEW pipeline definitions: add your `pipeline :name do ... end` block
+  # DIRECTLY BELOW this comment. Pipeline definitions are POSITION-FREE --
+  # each compiles to a named private plug referenced by name from
+  # `pipe_through`, so a block landing here can never change route matching
+  # (proof in-tree: :media_processing_callback is defined mid-scopes far
+  # below and works). Ordering INSIDE a pipeline (plug order) is that
+  # pipeline's own documented contract -- read its comments. Sweeps: move
+  # this comment only whole, on its own lines. MARK:zone-router-pipelines
+
   # Bare /studio and / redirect to the session-resolved SCOPED Studio
   # (P3 cutover — see PageController.redirect_to_studio for the
   # resolution rule). The :soft_token pipeline supplies the optional
@@ -1052,6 +1062,20 @@ defmodule BarkparkWeb.Router do
 
     plugin_routes(scope: :github_webhook)
   end
+
+  # scaffy:zone plugin-buckets (ensure-router-zones) -- stable head anchor
+  # for NEW plugin auth-bucket wrappers (`scope ... plugin_routes(scope:
+  # :x)`; the matching `pipeline` goes in the router-pipelines zone above):
+  # add the wrapper DIRECTLY BELOW this comment. Ordering contract this
+  # position guards: /v1/plugins-mounted wrappers are order-free among
+  # themselves (plugin paths are slug-disjoint), and a ROOT-mounted
+  # (`scope "/v1"`) wrapper landing here sits BEFORE the :token_root /
+  # :session_token_root / :ticket_key run below, so :ticket_key's submitter
+  # dynamic `/tickets/:id` stays the LAST root-mounted match and operator
+  # statics keep winning (the static-before-dynamic pin in those blocks'
+  # comments). NEVER declare a bucket after :ticket_key. Per-route plugin
+  # adds do NOT belong here -- they auto-fold via register_routes/1. Sweeps:
+  # move this comment only whole, on its own lines. MARK:zone-plugin-buckets
 
   # ── Plugin-contributed routes — token-gated, ROOT-mounted (`auth: :token_root`) ─
   # Root-mounted sibling of the `:token` bucket above: same `[:api, :require_token]`
@@ -2282,6 +2306,21 @@ defmodule BarkparkWeb.Router do
     patch("/v1/media/:dataset/:id", V1.MediaController, :update)
     delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
   end
+
+  # scaffy:zone scoped-mirrors (ensure-router-zones) -- stable tail anchor
+  # for NEW workspace-scoped mirror scopes: add your
+  # `scope "/w/:workspace_slug/p/:project_slug" ...` block DIRECTLY BELOW
+  # this comment. Ordering contract this position guards: every mirror above
+  # owns a disjoint `/v1/<noun>` suffix, so a new mirror is order-neutral
+  # here PROVIDED (a) its suffix starts `/v1/` with a NOVEL noun -- a route
+  # under a noun an existing block already serves belongs INSIDE that owning
+  # block, statics before dynamic `:param` segments (the /graph and
+  # /access/mine idiom), because an earlier dynamic like `/v1/media/:dataset`
+  # swallows a later literal -- and (b) it is NEVER a `/studio`-suffixed
+  # scope: the `/w/:ws/p/:proj/studio/:dataset` back-compat wildcard far
+  # above swallows those, so studio scopes are declared BEFORE that wildcard,
+  # beside the scoped plugin scopes. Sweeps: move this comment only whole,
+  # on its own lines. MARK:zone-scoped-mirrors
 
   # ── Workspace / project switcher — membership-scoped LIST ───────────────
   # The web switcher's read surface: which workspaces (and their projects) the
