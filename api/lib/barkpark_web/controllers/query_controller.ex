@@ -171,13 +171,18 @@ defmodule BarkparkWeb.QueryController do
   # /papers reader already exposes on the same paper. Underneath, the fetcher
   # (Tasks.Query.rows_for_query → Scope.scope_to_workspace) stays fail-closed:
   # a nil workspace resolves to zero rows, never to a cross-tenant leak.
-  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks"}) when is_list(rendered) do
+  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset})
+       when is_list(rendered) do
     scope = api_task_scope(conn)
 
     Enum.map(rendered, fn doc ->
       case doc do
         %{"blocks" => blocks} when is_list(blocks) ->
-          Map.put(doc, "blocks", Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, scope))
+          Map.put(
+            doc,
+            "blocks",
+            Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset)
+          )
 
         _ ->
           doc

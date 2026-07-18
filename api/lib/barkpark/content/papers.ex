@@ -39,7 +39,7 @@ defmodule Barkpark.Content.Papers do
   }
 
   alias Barkpark.Content.Papers.{BlockOps, Hollow}
-  alias Barkpark.PortableDoc.{BodyWalk, Projection, Render, Synthesis}
+  alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -86,7 +86,11 @@ defmodule Barkpark.Content.Papers do
       _ ->
         case envelope["body_html"] do
           html when is_binary(html) ->
-            if semantic_html?(html), do: {:html, html}, else: {:error, :semantic_empty}
+            sanitized = HtmlSanitizer.sanitize(html)
+
+            if semantic_html?(sanitized),
+              do: {:html, sanitized},
+              else: {:error, :semantic_empty}
 
           _ ->
             {:error, :semantic_empty}
@@ -851,12 +855,35 @@ defmodule Barkpark.Content.Papers do
     # no schema query.
     Barkpark.PortableDoc.TaskResolver.resolve(
       blocks,
-      fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
-      fn query -> Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: dataset) end
+      fn query ->
+        query
+        |> task_query_dataset(dataset)
+        |> Barkpark.Tasks.Query.rows_for_query(scope)
+      end,
+      fn query ->
+        query
+        |> task_query_dataset(dataset)
+        |> Barkpark.Tasks.Query.agg_for_query(scope, dataset: dataset)
+      end
     )
   end
 
   def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks
+
+  # A reader's dataset is the implicit task-query dataset. Explicit authoring
+  # stays authoritative: row queries keep a top-level `dataset`, while
+  # aggregate queries keep `filter.dataset`. Stamping both harmlessly lets the
+  # two closed query shapes share one fail-closed defaulting seam.
+  defp task_query_dataset(query, dataset) when is_map(query) and is_binary(dataset) do
+    query
+    |> Map.put_new("dataset", dataset)
+    |> Map.update("filter", %{"dataset" => dataset}, fn
+      filter when is_map(filter) -> Map.put_new(filter, "dataset", dataset)
+      other -> other
+    end)
+  end
+
+  defp task_query_dataset(query, _dataset), do: query
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the

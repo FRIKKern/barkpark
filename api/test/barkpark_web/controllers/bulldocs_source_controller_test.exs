@@ -45,4 +45,38 @@ defmodule BarkparkWeb.BulldocsSourceControllerTest do
              |> get("/papers/#{mixed_slug}/source")
              |> json_response(422)
   end
+
+  test "historical body_html is sanitized before the public source response", %{conn: conn} do
+    slug = "source-poisoned-html-#{System.unique_integer([:positive])}"
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          body_html: "<p>Safe original</p>"
+        })
+      )
+
+    poisoned_html =
+      ~s|<p>Meaningful history</p><script>steal()</script><a href="javascript:steal()">link</a>|
+
+    paper
+    |> Ecto.Changeset.change(content: Map.put(paper.content, "body_html", poisoned_html))
+    |> Repo.update!()
+
+    assert %{
+             "source" => %{
+               "kind" => "html",
+               "html" => sanitized
+             }
+           } =
+             conn
+             |> get("/papers/#{slug}/source")
+             |> json_response(200)
+
+    assert sanitized =~ "<p>Meaningful history</p>"
+    assert sanitized =~ ~s|<a href="#">link</a>|
+    refute sanitized =~ "<script"
+    refute sanitized =~ "javascript:"
+  end
 end

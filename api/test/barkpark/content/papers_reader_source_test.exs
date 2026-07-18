@@ -100,7 +100,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     assert {:blocks, ^labeled} = Content.Papers.reader_source(paper, "test", [])
   end
 
-  test "HTML-only source is returned byte-for-byte and conflicting mixed provenance fails" do
+  test "HTML-only source is sanitized at the read boundary and conflicting mixed provenance fails" do
     html = "<h1>Exact &amp; authored</h1>\n<p>two spaces  stay</p>"
 
     legacy = %Document{
@@ -112,6 +112,30 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     }
 
     assert {:html, ^html} = Content.Papers.reader_source(legacy, "test", [])
+
+    poisoned = %{
+      legacy
+      | doc_id: "poisoned-legacy",
+        content: %{
+          "body_html" =>
+            ~s|<h1>Still meaningful</h1><script>steal()</script><img src="x" onerror="steal()">|
+        }
+    }
+
+    assert {:html, sanitized} = Content.Papers.reader_source(poisoned, "test", [])
+    assert sanitized =~ "<h1>Still meaningful</h1>"
+    assert sanitized =~ ~s|<img src="x">|
+    refute sanitized =~ "<script"
+    refute sanitized =~ "onerror"
+
+    script_only = %{
+      legacy
+      | doc_id: "script-only-legacy",
+        content: %{"body_html" => "<script>steal()</script>"}
+    }
+
+    assert {:error, :semantic_empty} =
+             Content.Papers.reader_source(script_only, "test", [])
 
     blocks = [
       %{

@@ -811,6 +811,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ [])
       when is_binary(doc_id) and is_binary(type) and is_map(op) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         :ok <- reject_implicit_html_conversion(doc),
          {blocks, _synth?} = Papers.resolve_blocks_for_edit(doc, type, dataset),
          {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do

@@ -660,7 +660,7 @@ defmodule BarkparkWeb.BulldocsLive do
   defp assign_block_mode(socket, paper, reader_source) do
     case source_blocks(reader_source) do
       blocks when is_list(blocks) ->
-        resolved = with_live_tasks(blocks, paper)
+        resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
 
         socket
         |> assign(:block_mode, true)
@@ -738,11 +738,11 @@ defmodule BarkparkWeb.BulldocsLive do
   # Visibility note: this surfaces the paper's-tenant task data (titles /
   # statuses) to whoever can read the paper — the author opts in by embedding a
   # query. Cross-tenant leakage is impossible (workspace fail-closed).
-  defp with_live_tasks(blocks, paper) when is_list(blocks) do
-    Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper))
+  defp with_live_tasks(blocks, paper, dataset) when is_list(blocks) do
+    Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper), dataset)
   end
 
-  defp with_live_tasks(blocks, _paper), do: blocks
+  defp with_live_tasks(blocks, _paper, _dataset), do: blocks
 
   defp reader_task_scope(paper) do
     ws_id =
@@ -912,7 +912,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
         case source_blocks(reader_source) do
           blocks when is_list(blocks) ->
-            resolved = with_live_tasks(blocks, paper)
+            resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
 
             socket
             |> stream(

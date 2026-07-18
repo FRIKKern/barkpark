@@ -51,7 +51,11 @@ defmodule BarkparkWeb.BulldocsEmailController do
               case source do
                 {:blocks, blocks} ->
                   resolved_blocks =
-                    Content.Papers.resolve_tasks_in_blocks(blocks, email_task_scope(paper))
+                    Content.Papers.resolve_tasks_in_blocks(
+                      blocks,
+                      email_task_scope(paper),
+                      dataset
+                    )
                     |> BulldocsEmailHTML.prepare_blocks(trusted_paper_uri)
 
                   blocks_with_name =

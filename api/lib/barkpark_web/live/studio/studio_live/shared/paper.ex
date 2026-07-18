@@ -762,7 +762,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # against) stay UNresolved, so a save right after a view never freezes a stale
     # snapshot into the doc (D3 byte-stability). An author-pinned literal snapshot
     # (no `query`) is left untouched, so plugin-off papers still render.
-    blocks = Content.Papers.resolve_tasks_in_blocks(blocks, scope)
+    blocks = Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset)
 
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 

@@ -2024,6 +2024,7 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:shared_paper_browser, :paper_reader_csp])
 
+    get("/d/:dataset/papers/:slug/source", BulldocsSourceController, :show)
     get("/papers/:slug/source", BulldocsSourceController, :show)
     get("/papers/:slug/email", BulldocsEmailController, :show)
 
