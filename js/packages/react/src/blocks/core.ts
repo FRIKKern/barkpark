@@ -46,6 +46,126 @@ const heading: Emit = (b) => {
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
 
+// scaffy:add-block-type Expandable MARK:js-emitter-expandable
+// Mirrors compose_block(expandable): starter emit — `text` escaped into
+// the bp-expandable wrapper, byte-identical to the Elixir _raw clause.
+// Mirrors compose_block(expandable): a generic collapsible container — the
+// same native-<details> pattern `callout` ships, minus the callout chrome
+// (I0: zero-JS). `open` reflects the block's own state (this emitter only
+// ever renders the :article View surface). Empty (no summary, no children)
+// renders nothing.
+const expandable: Emit = (b) => {
+  const summary = str(b.summary)
+  const blocks = asList(b.blocks ?? b.children)
+  if (summary === '' && blocks.length === 0) return ''
+
+  const inner = renderBlocks(blocks)
+  const openAttr = b.open === true ? ' open' : ''
+  return `<details${openAttr} class="bp-expandable"><summary>${escapeHtml(summary)}</summary><div class="bp-expandable__body">${inner}</div></details>`
+}
+
+// scaffy:add-block-type Footnote MARK:js-emitter-footnote
+// Mirrors compose_block(footnote): starter emit — `text` escaped into
+// the bp-footnote wrapper, byte-identical to the Elixir _raw clause.
+// Mirrors compose_block(footnote): a numbered reference apparatus — `notes` is
+// a list of {id, text}. Each shown note carries an `id="fn-<id>"` anchor (the
+// backlink target an inline marker elsewhere could point at); a semantic
+// `<ol>` numbers natively, like `steps`. A note with no text is dropped.
+function footnoteRowHtml(note: unknown): string {
+  if (!isMap(note)) return ''
+  const text = str(note.text)
+  if (text === '') return ''
+  const id = str(note.id)
+  const idAttr = id === '' ? '' : ` id="fn-${escapeAttr(id)}"`
+  return `<li${idAttr} class="bp-footnote__note">${escapeHtml(text)}</li>`
+}
+
+const footnote: Emit = (b) => {
+  const rows = asList(b.notes).map(footnoteRowHtml).join('')
+  return rows === '' ? '' : `<ol class="bp-footnote">${rows}</ol>`
+}
+
+// scaffy:add-block-type Steps MARK:js-emitter-steps
+// Mirrors compose_block(steps): starter emit — `text` escaped into
+// the bp-steps wrapper, byte-identical to the Elixir _raw clause.
+// Mirrors compose_block(steps): a numbered procedure — `steps` is a list of
+// {title, blocks}, each recursed through the shared `renderBlocks` dispatcher
+// (the columns/terminal precedent). A semantic `<ol>` carries the numbering
+// natively; a step with neither a title nor any blocks contributes nothing.
+function stepRowHtml(step: unknown): string {
+  if (!isMap(step)) return ''
+  const title = str(step.title)
+  const blocks = asList(step.blocks ?? step.children)
+  if (title === '' && blocks.length === 0) return ''
+
+  const body = renderBlocks(blocks)
+  const titleHtml = title === '' ? '' : `<div class="bp-steps__title">${escapeHtml(title)}</div>`
+  return `<li class="bp-steps__step">${titleHtml}<div class="bp-steps__body">${body}</div></li>`
+}
+
+const steps: Emit = (b) => {
+  const rows = asList(b.steps).map(stepRowHtml).join('')
+  return rows === '' ? '' : `<ol class="bp-steps">${rows}</ol>`
+}
+
+// scaffy:add-block-type Toc MARK:js-emitter-toc
+// Mirrors compose_block(toc): a static, author-supplied outline — `items` is a
+// flat list of {text, level, anchor}, never derived by walking sibling blocks
+// (this emitter, like compose_block/2, only ever sees ONE block). `depth` caps
+// how many RELATIVE levels show, counted from the shallowest level present
+// (default 2); `numbered` prefixes each item with a hierarchical counter
+// (1, 1.1, 1.2, 2, …); `sticky` adds the View-only CSS affordance class.
+interface TocItem {
+  text: string
+  level: number
+  anchor: string
+}
+
+function tocItems(raw: unknown): TocItem[] {
+  const out: TocItem[] = []
+  for (const it of asList(raw)) {
+    if (!isMap(it)) continue
+    const text = str(it.text)
+    if (text === '') continue
+    const n = num(it.level)
+    const level = n != null && n > 0 ? n : 1
+    out.push({ text, level, anchor: str(it.anchor) })
+  }
+  return out
+}
+
+const toc: Emit = (b) => {
+  const items = tocItems(b.items)
+  if (items.length === 0) return ''
+
+  const depthNum = num(b.depth)
+  const depth = depthNum != null && depthNum > 0 ? depthNum : 2
+  const numbered = b.numbered === true
+  const minLevel = Math.min(...items.map((i) => i.level))
+  const counters = new Array(depth + 1).fill(0)
+
+  const rows: string[] = []
+  for (const item of items) {
+    const rel = item.level - minLevel + 1
+    if (rel > depth) continue
+    counters[rel] += 1
+    for (let lvl = rel + 1; lvl <= depth; lvl++) counters[lvl] = 0
+
+    let label = escapeHtml(item.text)
+    if (numbered) {
+      const numStr = counters.slice(1, rel + 1).join('.')
+      label = `${numStr}. ${label}`
+    }
+    const inner =
+      item.anchor !== '' ? `<a href="#${escapeAttr(item.anchor)}">${label}</a>` : label
+    rows.push(`<li class="bp-toc__item" data-level="${rel}">${inner}</li>`)
+  }
+
+  const sticky = b.sticky === true
+  const navClass = sticky ? 'bp-toc bp-toc--sticky' : 'bp-toc'
+  return `<nav class="${navClass}"><ol class="bp-toc__list">${rows.join('')}</ol></nav>`
+}
+
 // scaffy:add-block-type Blockquote MARK:js-emitter-blockquote
 // Mirrors compose_block(blockquote) + walk.ex blockquote/3 (:article): a
 // semantic `<blockquote class="bp-blockquote">` wrapping a `<p>` body, with an
@@ -895,6 +1015,14 @@ export const coreEmitters: Record<string, Emit> = {
   stage,
   'task-detail': taskDetailEmit,
   roadmap,
+  // scaffy:add-block-type Expandable MARK:js-map-expandable
+  'expandable': expandable,
+  // scaffy:add-block-type Footnote MARK:js-map-footnote
+  'footnote': footnote,
+  // scaffy:add-block-type Steps MARK:js-map-steps
+  'steps': steps,
+  // scaffy:add-block-type Toc MARK:js-map-toc
+  'toc': toc,
   // scaffy:add-block-type Blockquote MARK:js-map-blockquote
   'blockquote': blockquote,
   // scaffy:add-block-type Filetree MARK:js-map-filetree

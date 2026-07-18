@@ -46,7 +46,11 @@ const cases: GoldenFixture[] = existsSync(FIXTURE_DIR)
 
 describe('toPlainText — type-keyed grammar coverage', () => {
   it('the pd-golden fixture corpus is the expected 49 types', () => {
-    expect(cases.length).toBe(49)
+    // scaffy:add-block-type Toc MARK:typekeyed-corpus-toc
+    // scaffy:add-block-type Steps MARK:typekeyed-corpus-steps
+    // scaffy:add-block-type Footnote MARK:typekeyed-corpus-footnote
+    // scaffy:add-block-type Expandable MARK:typekeyed-corpus-expandable
+    expect(cases.length).toBe(53)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -72,8 +76,12 @@ describe('toPlainText — type-keyed grammar coverage', () => {
   })
 
   it('the partition is 21 prose + 28 textless = 49', () => {
-    expect(Object.keys(PROSE_GOLDEN).length).toBe(21)
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(28)
+    expect(Object.keys(PROSE_GOLDEN).length).toBe(23)
+    // scaffy:add-block-type Toc MARK:typekeyed-textless-toc
+    // scaffy:add-block-type Steps MARK:typekeyed-textless-steps
+    // scaffy:add-block-type Footnote MARK:typekeyed-textless-footnote
+    // scaffy:add-block-type Expandable MARK:typekeyed-textless-expandable
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(30)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

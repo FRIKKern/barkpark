@@ -79,6 +79,53 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
+    # scaffy:add-block-type Expandable MARK:parity-input-expandable
+    "expandable" => %{
+      "type" => "expandable",
+      "summary" => "Show the full trace",
+      "open" => false,
+      "blocks" => [
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Hidden detail."}]
+        }
+      ]
+    },
+    # scaffy:add-block-type Footnote MARK:parity-input-footnote
+    "footnote" => %{
+      "type" => "footnote",
+      "notes" => [
+        %{"id" => "fn1", "text" => "The board updates live."},
+        %{"id" => "fn2", "text" => "You always feel progress."}
+      ]
+    },
+    # scaffy:add-block-type Steps MARK:parity-input-steps
+    "steps" => %{
+      "type" => "steps",
+      "steps" => [
+        %{
+          "title" => "Claim the task",
+          "blocks" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Run bp task next."}]
+            }
+          ]
+        },
+        %{"title" => "Stamp evidence"}
+      ]
+    },
+    # scaffy:add-block-type Toc MARK:parity-input-toc
+    "toc" => %{
+      "type" => "toc",
+      "items" => [
+        %{"text" => "Getting started", "level" => 2, "anchor" => "getting-started"},
+        %{"text" => "Installation", "level" => 3, "anchor" => "installation"},
+        %{"text" => "Advanced usage", "level" => 2, "anchor" => "advanced-usage"}
+      ],
+      "depth" => 2,
+      "numbered" => true
+    },
     # scaffy:add-block-type Blockquote MARK:parity-input-blockquote
     # Grown (pbw-w1): a semantic attributed quotation — `content` inline array +
     # `cite`. Exercises the PdBlockquote article path (`<blockquote><p>…</p><cite>`)

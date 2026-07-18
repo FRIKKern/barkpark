@@ -13,6 +13,44 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 // expected wrapper. Count via Object.keys(DISPATCH) — never trust a literal.
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
+  // scaffy:add-block-type Expandable MARK:js-case-expandable
+  {
+    type: 'expandable',
+    block: {
+      type: 'expandable',
+      summary: 'Show the full trace',
+      open: false,
+      blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'Hidden detail.' }] }],
+    },
+    marker: 'bp-expandable',
+  },
+  // scaffy:add-block-type Footnote MARK:js-case-footnote
+  {
+    type: 'footnote',
+    block: { type: 'footnote', notes: [{ id: 'fn1', text: 'A reference note.' }] },
+    marker: 'bp-footnote',
+  },
+  // scaffy:add-block-type Steps MARK:js-case-steps
+  {
+    type: 'steps',
+    block: {
+      type: 'steps',
+      steps: [
+        { title: 'Claim the task', blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'Run bp task next.' }] }] },
+        { title: 'Stamp evidence' },
+      ],
+    },
+    marker: 'bp-steps',
+  },
+  // scaffy:add-block-type Toc MARK:js-case-toc
+  {
+    type: 'toc',
+    block: {
+      type: 'toc',
+      items: [{ text: 'Getting started', level: 2, anchor: 'getting-started' }],
+    },
+    marker: 'bp-toc',
+  },
   // scaffy:add-block-type Blockquote MARK:js-case-blockquote
   {
     type: 'blockquote',
@@ -406,7 +444,11 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // 49 canonical/aliased emitters from the scaffy census + 6 authoring-drift
     // aliases (bulletList / bullet_list / bulleted-list / bulleted_list /
     // numbered_list / quote) added by pbw-w1 = 55.
-    expect(registered).toHaveLength(55)
+    // scaffy:add-block-type Toc MARK:js-count-toc
+    // scaffy:add-block-type Steps MARK:js-count-steps
+    // scaffy:add-block-type Footnote MARK:js-count-footnote
+    // scaffy:add-block-type Expandable MARK:js-count-expandable
+    expect(registered).toHaveLength(59)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

@@ -1212,6 +1212,158 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # scaffy:add-block-type Expandable MARK:ex-compose-expandable
+  # Starter compose for `expandable`: the block's `text` attr escaped into
+  # its bp-expandable wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # A generic collapsible container — the same native-<details> pattern
+  # `callout` ships (walk.ex collapsible_callout/3), minus the callout chrome
+  # (I0: zero-JS, D9/D7). `open` is honored only in :article (the screen
+  # disclosure affordance); every other style (email) ALWAYS renders expanded
+  # — email clients don't reliably support interactive <details>, so a reader
+  # must see the body regardless (the callout precedent, REAL render D4).
+  # Empty (no summary, no children) renders nothing.
+  def compose_block(%{"type" => "expandable"} = b, style) do
+    summary = stringish(Map.get(b, "summary", ""))
+    children = container_children(b)
+
+    html =
+      if summary == "" and children == [] do
+        ""
+      else
+        inner = children |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+
+        open_attr =
+          cond do
+            style != :article -> " open"
+            Map.get(b, "open") == true -> " open"
+            true -> ""
+          end
+
+        ~s(<details#{open_attr} class="bp-expandable">) <>
+          ~s(<summary>#{Util.escape_html(summary)}</summary>) <>
+          ~s(<div class="bp-expandable__body">#{inner}</div></details>)
+      end
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
+  # scaffy:add-block-type Footnote MARK:ex-compose-footnote
+  # Starter compose for `footnote`: the block's `text` attr escaped into
+  # its bp-footnote wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # A numbered reference apparatus: `notes` is a list of `{id, text}`. Each
+  # shown note carries an `id="fn-<id>"` anchor (the backlink target a caller
+  # can point an inline marker at); a semantic `<ol>` numbers natively, like
+  # `steps`. A note with no text is dropped; empty/missing `notes` renders
+  # nothing. Every style gets the same real markup (REAL email render, D4).
+  def compose_block(%{"type" => "footnote"} = b, _style) do
+    notes = Map.get(b, "notes")
+
+    html =
+      if is_list(notes) and notes != [] do
+        rows = notes |> Enum.map(&footnote_row_html/1) |> Enum.join()
+        if rows == "", do: "", else: ~s(<ol class="bp-footnote">) <> rows <> ~s(</ol>)
+      else
+        ""
+      end
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
+  # scaffy:add-block-type Steps MARK:ex-compose-steps
+  # Starter compose for `steps`: the block's `text` attr escaped into
+  # its bp-steps wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # A numbered procedure: `steps` is a list of `{title, blocks}` — each step's
+  # title plus its nested child blocks (recursed the same way `figure`/`card`
+  # recurse a single child, via `block_to_html/2`). A semantic `<ol>` carries
+  # the numbering natively (no hand-authored "1."/"2." text to keep in sync
+  # across surfaces); a step with neither a title nor any blocks contributes
+  # nothing. Every style (:article, :email) gets the same real markup — REAL
+  # email render, D4.
+  def compose_block(%{"type" => "steps"} = b, style) do
+    steps = Map.get(b, "steps")
+
+    html =
+      if is_list(steps) and steps != [] do
+        rows = steps |> Enum.map(&steps_row_html(&1, style)) |> Enum.join()
+        if rows == "", do: "", else: ~s(<ol class="bp-steps">) <> rows <> ~s(</ol>)
+      else
+        ""
+      end
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
+  # scaffy:add-block-type Toc MARK:ex-compose-toc
+  # Starter compose for `toc`: the block's `text` attr escaped into
+  # its bp-toc wrapper through the `_raw` pre-rendered-HTML hatch
+  # (walk.ex passes `_raw` through verbatim — the same hatch ~68 sibling
+  # clauses use). Every style gets the same div for now; replace with a real
+  # Pd-node composition (see the `callout` clause for the PdCallout exemplar)
+  # as the block grows semantics. `text` goes through the tolerant stringish/1
+  # and Util.escape_html/1 so a raw API/SDK/CLI mutate can never break out of
+  # the wrapper (papers are schemaless — same defense as the catch-all below).
+  # A static, author-supplied outline: `items` is a flat list of
+  # {text, level, anchor} — never derived by walking sibling blocks.
+  # compose_block/2 dispatches ONE block at a time with no document-wide
+  # context, so real heading-derived auto-population is a separate, later
+  # change needing a document-level compose pass (not this clause). `depth`
+  # caps how many RELATIVE levels show, counted from the shallowest level
+  # present (default 2); `numbered` prefixes each item with a hierarchical
+  # counter (1, 1.1, 1.2, 2, …). `sticky` is a View-only viewport affordance
+  # (position:sticky in article CSS) — dropped for email, where every other
+  # attribute renders identically (a REAL list of anchor links, D4).
+  def compose_block(%{"type" => "toc"} = b, style) do
+    items = toc_items(Map.get(b, "items"))
+    depth = toc_depth(Map.get(b, "depth"))
+
+    html =
+      if items == [] do
+        ""
+      else
+        numbered = Map.get(b, "numbered") == true
+        min_level = items |> Enum.map(& &1.level) |> Enum.min()
+        counters = List.duplicate(0, depth + 1)
+
+        {rows, _} =
+          Enum.reduce(items, {[], counters}, fn item, {acc, counters} ->
+            rel = item.level - min_level + 1
+
+            if rel > depth do
+              {acc, counters}
+            else
+              counters = toc_bump_counters(counters, rel)
+              {[toc_row_html(item, rel, numbered, counters) | acc], counters}
+            end
+          end)
+
+        sticky = style == :article and Map.get(b, "sticky") == true
+        nav_class = if sticky, do: "bp-toc bp-toc--sticky", else: "bp-toc"
+
+        ~s(<nav class="#{nav_class}"><ol class="bp-toc__list">) <>
+          Enum.join(Enum.reverse(rows)) <> ~s(</ol></nav>)
+      end
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
   # scaffy:add-block-type Blockquote MARK:ex-compose-blockquote
   # Blockquote — a semantic, attributed quotation. Distinct from `pullquote`
   # (a styled editorial LEAD-quote paragraph): a blockquote is a plain quoted
@@ -1331,6 +1483,108 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp stringish(nil), do: ""
   defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)
   defp stringish(_), do: ""
+
+  # ── footnote helpers ─────────────────────────────────────────────────────
+  defp footnote_row_html(%{} = note) do
+    text = stringish(Map.get(note, "text", ""))
+
+    if text == "" do
+      ""
+    else
+      id = stringish(Map.get(note, "id", ""))
+      id_attr = if id == "", do: "", else: ~s( id="fn-#{Util.escape_html(id)}")
+      ~s(<li#{id_attr} class="bp-footnote__note">) <> Util.escape_html(text) <> ~s(</li>)
+    end
+  end
+
+  defp footnote_row_html(_), do: ""
+
+  # ── steps helpers ────────────────────────────────────────────────────────
+  defp steps_row_html(%{} = step, style) do
+    title = stringish(Map.get(step, "title", ""))
+    blocks = container_children(step)
+
+    if title == "" and blocks == [] do
+      ""
+    else
+      body = blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+
+      title_html =
+        if title == "",
+          do: "",
+          else: ~s(<div class="bp-steps__title">) <> Util.escape_html(title) <> ~s(</div>)
+
+      ~s(<li class="bp-steps__step">) <>
+        title_html <> ~s(<div class="bp-steps__body">) <> body <> ~s(</div></li>)
+    end
+  end
+
+  defp steps_row_html(_, _style), do: ""
+
+  # ── toc helpers ──────────────────────────────────────────────────────────
+  # `toc_items/1` normalizes the authored outline: text-less entries are
+  # dropped (an item with no label renders nothing worth linking to).
+  defp toc_items(items) when is_list(items) do
+    items
+    |> Enum.map(fn
+      %{} = it ->
+        text = stringish(Map.get(it, "text", ""))
+
+        if text == "" do
+          nil
+        else
+          %{text: text, level: toc_level(Map.get(it, "level")), anchor: stringish(Map.get(it, "anchor", ""))}
+        end
+
+      _ ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp toc_items(_), do: []
+
+  defp toc_level(level) when is_integer(level) and level > 0, do: level
+
+  defp toc_level(level) when is_binary(level) do
+    case Integer.parse(level) do
+      {n, _} when n > 0 -> n
+      _ -> 1
+    end
+  end
+
+  defp toc_level(_), do: 1
+
+  defp toc_depth(depth) when is_integer(depth) and depth > 0, do: depth
+  defp toc_depth(_), do: 2
+
+  # Bumps the counter at `rel` (1-indexed) and resets every deeper counter —
+  # the hierarchical-numbering invariant ("1.2" never survives past its "2").
+  defp toc_bump_counters(counters, rel) do
+    counters
+    |> List.update_at(rel, &(&1 + 1))
+    |> Enum.with_index()
+    |> Enum.map(fn {c, idx} -> if idx > rel, do: 0, else: c end)
+  end
+
+  defp toc_row_html(item, rel, numbered, counters) do
+    label =
+      if numbered do
+        num = counters |> Enum.slice(1..rel) |> Enum.join(".")
+        num <> ". " <> Util.escape_html(item.text)
+      else
+        Util.escape_html(item.text)
+      end
+
+    inner =
+      if item.anchor != "" do
+        ~s(<a href="##{Util.escape_html(item.anchor)}">) <> label <> ~s(</a>)
+      else
+        label
+      end
+
+    ~s(<li class="bp-toc__item" data-level="#{rel}">) <> inner <> ~s(</li>)
+  end
 
   # Optional attribution for a blockquote — `cite` preferred, `attribution` the
   # accepted alias. A non-blank BINARY only: a non-string cite (a raw mutate may

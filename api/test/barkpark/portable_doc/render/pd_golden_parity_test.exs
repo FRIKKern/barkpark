@@ -36,7 +36,11 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type Diff MARK:parity-count-test-diff
     # scaffy:add-block-type Filetree MARK:parity-count-test-filetree
     # scaffy:add-block-type Blockquote MARK:parity-count-test-blockquote
-    assert length(GenPdParity.types()) == 49
+    # scaffy:add-block-type Toc MARK:parity-count-test-toc
+    # scaffy:add-block-type Steps MARK:parity-count-test-steps
+    # scaffy:add-block-type Footnote MARK:parity-count-test-footnote
+    # scaffy:add-block-type Expandable MARK:parity-count-test-expandable
+    assert length(GenPdParity.types()) == 53
   end
 
   test "both members of all 3 alias pairs are present" do
