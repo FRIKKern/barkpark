@@ -652,6 +652,7 @@ FAKENPM
     echo $?
   }
   e2e_rollback() {
+    : > "$TD/rblog"   # BARKPARK_SITE_LOG_FILE — the durable log the runner finalizes from
     env PATH="$FAKEBIN:$PATH" \
       SITE_SLUG=selftest SITE_PORT_A="$T_PORT_A" SITE_PORT_B="$T_PORT_B" \
       BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
@@ -659,7 +660,7 @@ FAKENPM
       BARKPARK_SITE_DEPLOY_LOCK="$TD/deploy.lock" \
       BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
       BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" \
-      BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_NO_CAP=1 BARKPARK_SITE_LOG_FILE="$TD/rblog" \
       bash "$SELF" --rollback > "$TD/out.log" 2> "$TD/err.log"
     echo $?
   }
@@ -717,6 +718,11 @@ FAKENPM
   check "Caddy flipped back to :A"       [ "$(cf_port)" = "$T_PORT_A" ]
   check "rollback did NOT rebuild"       [ ! -f "$SRC/.rollback-built" ]
   check ".previous now points at slot b n2" grep -q "^b $T_PORT_B n2$" "$N_SITE/.previous"
+  # systemd-mode DeployRunner finalizes a rollback from BARKPARK_SITE_LOG_FILE (no
+  # exit code; no BPSTAGE). A rollback that leaves that log empty is the "died
+  # abnormally" bug — assert the flip's markers land where the runner reads them.
+  check "rollback wrote ROLLED BACK to the durable log"   grep -q 'ROLLED BACK' "$TD/rblog"
+  check "rollback wrote TARGET_BUILD=n1 to the durable log" grep -qx 'TARGET_BUILD=n1' "$TD/rblog"
 
   echo "[selftest] e2e: a LYING build fails HEALTH (14), never flips, is PURGED, live slot untouched"
   before_port="$(cf_port)"
@@ -985,24 +991,33 @@ if [ "$MODE" = preflight ]; then
 fi
 
 if [ "$MODE" = rollback ]; then
+  # systemd-mode DeployRunner finalizes a rollback from the durable LOG FILE — it
+  # has no exit code (the transient unit's is swept) and a rollback emits no
+  # BPSTAGE fold. A DEPLOY fills that log via BUILD's tee; a rollback has no
+  # BUILD, so record each outcome here in the exact markers
+  # `DeployRunner.rollback_outcome/1` reads — a `TARGET_BUILD=`+`ROLLED BACK`
+  # success pair, or a typed `(no_previous)`/`(not_supported)` refusal. Direct
+  # append (not a tee) so it is on disk before the unit exits. Same contract as
+  # the static engine (deploy/site-deploy.sh).
+  rb_mark() { [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$*" >> "$BARKPARK_SITE_LOG_FILE"; return 0; }
   cur_slot="$(active_slot)"
-  if [ -z "$cur_slot" ]; then log "no live route for '$SITE_SLUG' (not_supported)"; exit 22; fi
+  if [ -z "$cur_slot" ]; then log "no live route for '$SITE_SLUG' (not_supported)"; rb_mark "rollback refused: (not_supported)"; exit 22; fi
   if [ ! -f "$ROOT/.previous" ] || [ -z "$(cat "$ROOT/.previous" 2>/dev/null)" ]; then
-    log "no previous slot recorded (no_previous)"; exit 21
+    log "no previous slot recorded (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21
   fi
   read -r p_slot p_port p_build < "$ROOT/.previous"
-  if [ -z "$p_build" ] || [ ! -d "$RELEASES/$p_build" ]; then log "previous release '$p_build' is gone (no_previous)"; exit 21; fi
+  if [ -z "$p_build" ] || [ ! -d "$RELEASES/$p_build" ]; then log "previous release '$p_build' is gone (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21; fi
   if [ -f "$RELEASES/$p_build/$HEALTH_FAIL_MARK" ]; then
-    log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"; exit 21
+    log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21
   fi
-  if [ "$p_slot" = "$cur_slot" ]; then log "rollback: previous slot == current ($cur_slot) — nothing to do"; exit 0; fi
+  if [ "$p_slot" = "$cur_slot" ]; then log "rollback: previous slot == current ($cur_slot) — nothing to do"; rb_mark "ROLLED BACK: $SITE_SLUG now on slot $cur_slot ($(read_slot_build "$cur_slot"))"; rb_mark "TARGET_BUILD=$(read_slot_build "$cur_slot")"; exit 0; fi
 
   cur_port="$(slot_port "$cur_slot")"; cur_build="$(read_slot_build "$cur_slot")"
   if slot_running "$p_slot" && [ "$(read_slot_build "$p_slot")" = "$p_build" ]; then
     # WARM: the previous slot is still up on $p_build — pure Caddy flip back (<1s).
     log "ROLLBACK (warm): flip Caddy $cur_slot :$cur_port -> $p_slot :$p_port ($p_build)"
     if ! with_caddy_lock flip_caddy_node_port "$p_port"; then
-      log "rollback flip failed — Caddy untouched, still on $cur_slot (fail closed)"; exit 24
+      log "rollback flip failed — Caddy untouched, still on $cur_slot (fail closed)"; rb_mark "rollback failed (exit 24)"; exit 24
     fi
   else
     # COLD: reboot the idle slot onto $p_build, gate it, then flip.
@@ -1010,16 +1025,21 @@ if [ "$MODE" = rollback ]; then
     ensure_node_link
     BUILD_ID="$p_build"
     if ! health_gate_node "$p_slot" "$p_build"; then
-      log "rollback: slot $p_slot failed HEALTH at $p_build — Caddy untouched, still on $cur_slot (fail closed): $HEALTH_DETAIL"; exit 24
+      log "rollback: slot $p_slot failed HEALTH at $p_build — Caddy untouched, still on $cur_slot (fail closed): $HEALTH_DETAIL"; rb_mark "rollback failed (exit 24)"; exit 24
     fi
     if ! with_caddy_lock flip_caddy_node_port "$p_port"; then
       stop_slot "$p_slot"
-      log "rollback flip failed — Caddy untouched, still on $cur_slot (fail closed)"; exit 24
+      log "rollback flip failed — Caddy untouched, still on $cur_slot (fail closed)"; rb_mark "rollback failed (exit 24)"; exit 24
     fi
   fi
   # A subsequent --rollback flips forward again — record where we came from.
   printf '%s %s %s\n' "$cur_slot" "$cur_port" "$cur_build" > "$ROOT/.previous"
   do_retire_node "$p_slot"
+  # Record the outcome where the systemd-mode runner reads it, and print
+  # TARGET_BUILD= on stdout for the CLI (machine contract, mirrors the preflight).
+  rb_mark "ROLLED BACK: $SITE_SLUG now on slot $p_slot ($p_build)"
+  rb_mark "TARGET_BUILD=$p_build"
+  echo "TARGET_BUILD=$p_build"
   log "ROLLED BACK — '$SITE_SLUG' now on slot $p_slot ($p_build)"
   exit 0
 fi
