@@ -66,6 +66,21 @@ const scaffyCommandsDir = "scaffy/commands"
 // scaffyProvenanceVersion is the sidecar schema version (D49).
 const scaffyProvenanceVersion = 1
 
+// Provenance-drift rule IDs for `bp scaffy pull --check`. They EXTEND the
+// R-00x repo/provenance family (scaffy.RuleRepo* is R-001..R-003) but live
+// CLI-side, not in the pure engine package: drift detection re-fetches the
+// served doc, and the engine (internal/scaffy) is network-free by law (D31).
+// Two axes, one rule each — the repocheck precedent of one ID per condition:
+//
+//	R-004  the local .scaffy no longer matches the sidecar's source_sha256 —
+//	       a hand-edit since pull (or the pulled file went missing);
+//	R-005  the server's current command doc has drifted from the sidecar —
+//	       its source bytes or _rev moved, or it is no longer served.
+const (
+	RuleProvenanceLocalEdit   = "R-004"
+	RuleProvenanceServerDrift = "R-005"
+)
+
 // scaffyRemotePageLimit is the query page size — the server's max limit clamp
 // (mirrors paperPageSize), so the catalog drains in one round-trip today and
 // the pagination loop still holds past 1000 commands.
@@ -169,11 +184,24 @@ func runScaffyLsRemote(out *writer, g globals) int {
 // exits 2 (D48); pull itself never executes anything.
 func runScaffyPull(out *writer, g globals, args []string) int {
 	var positionals []string
+	check := false
 	for _, a := range args {
-		if strings.HasPrefix(a, "-") && a != "-" {
+		switch {
+		case a == "--check":
+			check = true
+		case strings.HasPrefix(a, "-") && a != "-":
 			return usageErrf(out, func() { printScaffyPullHelp(out) }, "unknown pull flag %q", a)
+		default:
+			positionals = append(positionals, a)
 		}
-		positionals = append(positionals, a)
+	}
+	if check {
+		if len(positionals) != 0 {
+			return usageErrf(out, func() { printScaffyPullHelp(out) },
+				"pull --check takes no target — it audits every pulled command under %s (got %q)",
+				scaffyCommandsDir, strings.Join(positionals, " "))
+		}
+		return runScaffyPullCheck(out, g)
 	}
 	if len(positionals) != 1 {
 		return usageErrf(out, func() { printScaffyPullHelp(out) },
@@ -555,8 +583,194 @@ func scaffyRunConsent(out *writer, g globals, path string, vars map[string]strin
 	return false, exitUsage
 }
 
+// ---- pull --check: provenance drift detection (D49 follow-up) --------------
+
+// runScaffyPullCheck audits every pulled command under scaffy/commands/ for
+// drift against its committed provenance sidecar, on BOTH axes:
+//
+//	R-004 local hand-edit  — sha256(local .scaffy) ≠ sidecar.source_sha256
+//	                         (or the .scaffy went missing since it was pulled);
+//	R-005 server-side drift — the server's CURRENT command doc no longer
+//	                         matches the sidecar's recorded source_sha256 / rev,
+//	                         or the doc is gone from the catalog entirely.
+//
+// Any mismatch is a loud NAMED finding in the compiler "file:line: RULE msg"
+// house style (scaffy.Finding.String), exit 5 — never silent (D34). A clean
+// audit prints a one-line summary of what was verified and exits 0. Honors
+// -o json like its siblings: {ok, checked, findings}.
+func runScaffyPullCheck(out *writer, g globals) int {
+	dir := filepath.FromSlash(scaffyCommandsDir)
+	pulled, err := scaffyPulledSidecars(dir)
+	if err != nil {
+		return useError(out, "io", "scaffy pull --check: "+err.Error(), exitNotFound)
+	}
+	if len(pulled) == 0 {
+		if out.machineOut() {
+			out.emitStructured(map[string]any{"ok": true, "checked": 0, "findings": []any{}})
+			return exitOK
+		}
+		out.outf("clean: no pulled commands under %s to check", scaffyCommandsDir)
+		return exitOK
+	}
+
+	// Axis (b) needs the current server catalog. A pulled command that can't
+	// be re-verified against its source is an incomplete check — fetch first
+	// and fail loudly (like ls/pull) rather than skip the server axis silently.
+	ctx := resolveContext(g)
+	docs, err := scaffyFetchCommandDocs(ctx)
+	if err != nil {
+		return useError(out, "network", "scaffy pull --check: "+err.Error(), exitGeneric)
+	}
+	byID := make(map[string]scaffyCommandDoc, len(docs))
+	for _, d := range docs {
+		byID[d.ID] = d
+	}
+
+	var findings []scaffy.Finding
+	for _, p := range pulled {
+		findings = append(findings, scaffyCheckOne(p, ctx.Server, byID)...)
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].File != findings[j].File {
+			return findings[i].File < findings[j].File
+		}
+		return findings[i].Rule < findings[j].Rule
+	})
+
+	if out.machineOut() {
+		out.emitStructured(map[string]any{
+			"ok":       len(findings) == 0,
+			"checked":  len(pulled),
+			"findings": scaffyFindingsJSON(findings),
+		})
+		if len(findings) > 0 {
+			return exitValidation
+		}
+		return exitOK
+	}
+
+	for _, f := range findings {
+		out.outf("%s", f.String())
+		if f.Hint != "" {
+			out.outf("  hint: %s", f.Hint)
+		}
+	}
+	if len(findings) == 0 {
+		out.outf("clean: %d pulled command(s) match their provenance (local sha + server rev/sha) against %s",
+			len(pulled), ctx.Server)
+		return exitOK
+	}
+	out.outf("%d drift finding(s) across %d pulled command(s) — re-pull to refresh, or revert the local edit",
+		len(findings), len(pulled))
+	return exitValidation
+}
+
+// scaffyPulledCommand pairs a provenance sidecar with the source file it
+// vouches for.
+type scaffyPulledCommand struct {
+	SourcePath  string // scaffy/commands/<id>.scaffy
+	SidecarPath string // scaffy/commands/<id>.provenance.json
+}
+
+// scaffyPulledSidecars lists the pulled commands under dir — one per committed
+// *.provenance.json — sorted for deterministic reporting. A missing dir is not
+// an error (nothing pulled yet); it yields an empty slice.
+func scaffyPulledSidecars(dir string) ([]scaffyPulledCommand, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []scaffyPulledCommand
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".provenance.json") {
+			continue
+		}
+		sidecar := filepath.Join(dir, e.Name())
+		source := strings.TrimSuffix(sidecar, ".provenance.json") + ".scaffy"
+		out = append(out, scaffyPulledCommand{SourcePath: source, SidecarPath: sidecar})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SidecarPath < out[j].SidecarPath })
+	return out, nil
+}
+
+// scaffyCheckOne audits one pulled command on both drift axes. Findings point
+// at the .scaffy source (the artifact a user reasons about) at its header line.
+// A sidecar that won't even parse is itself R-004 drift — the provenance is
+// unreadable, so nothing can be vouched for.
+func scaffyCheckOne(p scaffyPulledCommand, server string, byID map[string]scaffyCommandDoc) []scaffy.Finding {
+	rel := filepath.ToSlash(p.SourcePath)
+	raw, err := os.ReadFile(p.SidecarPath)
+	if err != nil {
+		return []scaffy.Finding{{File: rel, Line: 1, Rule: RuleProvenanceLocalEdit,
+			Msg: fmt.Sprintf("provenance sidecar unreadable (%s): %v", filepath.ToSlash(p.SidecarPath), err)}}
+	}
+	var prov scaffyProvenance
+	if jerr := json.Unmarshal(raw, &prov); jerr != nil {
+		return []scaffy.Finding{{File: rel, Line: 1, Rule: RuleProvenanceLocalEdit,
+			Msg: fmt.Sprintf("provenance sidecar is not valid JSON (%s): %v", filepath.ToSlash(p.SidecarPath), jerr)}}
+	}
+
+	var findings []scaffy.Finding
+
+	// Axis (a): local hand-edit. sha256 of the on-disk bytes vs the recorded one.
+	src, serr := os.ReadFile(p.SourcePath)
+	switch {
+	case serr != nil:
+		findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceLocalEdit,
+			Msg:  fmt.Sprintf("pulled source is missing (%v) — the sidecar records it as pulled from %s", serr, orDash(prov.Server)),
+			Hint: "re-pull the command, or delete the orphaned sidecar"})
+	default:
+		sum := sha256.Sum256(src)
+		local := hex.EncodeToString(sum[:])
+		if prov.SourceSHA256 != "" && local != prov.SourceSHA256 {
+			findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceLocalEdit,
+				Msg:  fmt.Sprintf("local edit since pull: sha256 %s ≠ recorded %s", scaffyShort(local), scaffyShort(prov.SourceSHA256)),
+				Hint: "revert the file, or re-pull to accept the change"})
+		}
+	}
+
+	// Axis (b): server-side drift. Re-fetched doc vs the sidecar's rev + sha.
+	doc, ok := byID[prov.DocID]
+	switch {
+	case !ok:
+		findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+			Msg:  fmt.Sprintf("command doc %q no longer served by %s", prov.DocID, orDash(server)),
+			Hint: "the upstream command was removed or renamed — verify before relying on it"})
+	default:
+		srvSum := sha256.Sum256([]byte(doc.Source))
+		srvSHA := hex.EncodeToString(srvSum[:])
+		switch {
+		case prov.SourceSHA256 != "" && srvSHA != prov.SourceSHA256:
+			findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+				Msg: fmt.Sprintf("server source changed: doc %s now sha256 %s ≠ recorded %s (rev %s → %s)",
+					prov.DocID, scaffyShort(srvSHA), scaffyShort(prov.SourceSHA256), orDash(prov.Rev), orDash(doc.Rev)),
+				Hint: "re-pull to adopt the server's current source"})
+		case prov.Rev != "" && doc.Rev != "" && doc.Rev != prov.Rev:
+			// Bytes identical, only the rev advanced (a metadata-only edit).
+			findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+				Msg: fmt.Sprintf("server rev advanced %s → %s for doc %s (source bytes unchanged)",
+					prov.Rev, doc.Rev, prov.DocID),
+				Hint: "re-pull to refresh the sidecar rev"})
+		}
+	}
+	return findings
+}
+
+// scaffyShort trims a hex digest to its first 12 chars for readable findings —
+// enough to disambiguate, the full value lives in the sidecar.
+func scaffyShort(sha string) string {
+	if len(sha) <= 12 {
+		return sha
+	}
+	return sha[:12] + "…"
+}
+
 func printScaffyPullHelp(out *writer) {
 	out.outf(`usage: bp scaffy pull <concept>[/<variant>]
+       bp scaffy pull --check
 
 Fetch ONE command document from the connected server and land it locally —
 never executing anything. The pipeline (D49):
@@ -577,19 +791,30 @@ A concept matching several variants lists them and exits 2 — pull
 gated: bp scaffy run enumerates the substituted CMDs first and requires
 --yes or an interactive confirmation.
 
+--check audits every pulled command under scaffy/commands/ for drift against
+its provenance sidecar, on both axes — a loud named finding per mismatch
+(file:line: RULE msg), exit 5; a clean audit is a one-line summary, exit 0:
+
+  R-004  local hand-edit: sha256(local .scaffy) no longer matches the
+         sidecar's source_sha256 (or the source file went missing);
+  R-005  server drift: the server's current doc source/rev has moved from the
+         sidecar's recorded values, or the doc is no longer served.
+
 -o json|-o yaml emits {ok, doc_id, rev, server, concept, variant, domain,
-direction, path, provenance, source_sha256, assert_cmds}.
+direction, path, provenance, source_sha256, assert_cmds} on a pull, or
+{ok, checked, findings} on --check.
 
 examples:
   bp scaffy pull oban-worker
   bp scaffy pull docs-card/add
   bp scaffy pull note -s https://guerrilla.barkpark.cloud
+  bp scaffy pull --check
 
 exit codes:
-  0  pulled — source + sidecar written
+  0  pulled — source + sidecar written; or --check found no drift
   2  usage error, or an ambiguous concept (variants listed)
   4  no such concept/variant on the server, or an unwritable destination
-  5  fetched source failed validation — nothing written`)
+  5  fetched source failed validation (nothing written); or --check found drift`)
 }
 
 func printScaffyLsHelp(out *writer) {

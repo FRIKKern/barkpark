@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -489,12 +490,265 @@ func TestScaffyRunSidecarlessKeepsW3Behavior(t *testing.T) {
 	}
 }
 
+// pullNoteAgainst pulls the note fixture from srv into the cwd (source +
+// sidecar), asserting the pull itself succeeded — the shared setup for the
+// --check drift tests below.
+func pullNoteAgainst(t *testing.T, srvURL string) {
+	t.Helper()
+	code, stdout, stderr := runScaffyTest(t, globals{server: srvURL}, "", "pull", "note")
+	if code != exitOK {
+		t.Fatalf("setup pull exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+}
+
+const scaffyPulledNoteDest = "scaffy/commands/docs--note--default.scaffy"
+
+// TestScaffyPullCheckCleanExitsZero: a freshly pulled command, unchanged on
+// both disk and server, audits clean with a summary line and exit 0.
+func TestScaffyPullCheckClean(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitOK {
+		t.Fatalf("clean --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "clean:") || !strings.Contains(stdout, "1 pulled command") {
+		t.Errorf("clean --check missing summary line:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "R-004") || strings.Contains(stdout, "R-005") {
+		t.Errorf("clean --check must emit no drift finding:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckLocalEditRedsR004: a one-byte hand-edit of the pulled
+// .scaffy trips R-004, exit 5, with the compiler-style named finding.
+func TestScaffyPullCheckLocalEditRedsR004(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+
+	// Hand-edit one byte of the landed source — server is untouched.
+	edited := scaffyRemoteNoteSrc + "\n# hand-edited\n"
+	if err := os.WriteFile(scaffyPulledNoteDest, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("local-edit --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	// Compiler-style "file:line: R-004 message", pointing at the edited source.
+	lineRe := regexp.MustCompile(regexp.QuoteMeta(filepath.ToSlash(scaffyPulledNoteDest)) + `:\d+: R-004 `)
+	if !lineRe.MatchString(stdout) {
+		t.Errorf("no R-004 compiler-style finding on the edited source:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "local edit since pull") {
+		t.Errorf("R-004 message should name the local edit:\n%s", stdout)
+	}
+	// Server axis is clean — no R-005 for an untouched server.
+	if strings.Contains(stdout, "R-005") {
+		t.Errorf("untouched server must not red R-005:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckServerDriftRedsR005: the sidecar is pulled against one
+// server state, then a DIFFERENT mocked server serves changed source (new sha
+// + rev) for the same doc id — R-005, exit 5.
+func TestScaffyPullCheckServerDriftRedsR005(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	origin := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, origin.URL)
+
+	// The server's source drifts: a byte appended AND the rev advances.
+	drifted := scaffyRemoteNoteSrc + "\nASSERT FILE \"docs/{{.note-name}}.txt\" CONTAINS \"note\"\n"
+	moved := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "9", "note", "default", "docs", drifted),
+	})
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: moved.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("server-drift --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	lineRe := regexp.MustCompile(regexp.QuoteMeta(filepath.ToSlash(scaffyPulledNoteDest)) + `:\d+: R-005 `)
+	if !lineRe.MatchString(stdout) {
+		t.Errorf("no R-005 compiler-style finding for the drifted server source:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "server source changed") {
+		t.Errorf("R-005 message should name the server source change:\n%s", stdout)
+	}
+	// The local file was never touched — no R-004.
+	if strings.Contains(stdout, "R-004") {
+		t.Errorf("untouched local file must not red R-004:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckServerDocGoneRedsR005: the doc vanishes from the catalog
+// entirely — still R-005 (no longer served), exit 5.
+func TestScaffyPullCheckServerDocGoneRedsR005(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	origin := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, origin.URL)
+
+	empty := scaffyMockCommandServer(t, []map[string]any{})
+	code, stdout, _ := runScaffyTest(t, globals{server: empty.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("gone-doc --check exit = %d, want %d\n%s", code, exitValidation, stdout)
+	}
+	if !strings.Contains(stdout, "R-005") || !strings.Contains(stdout, "no longer served") {
+		t.Errorf("a vanished doc should red R-005 'no longer served':\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckBothAxesTogether: a file edited locally AND drifted on the
+// server yields both R-004 and R-005 in one audit, exit 5.
+func TestScaffyPullCheckBothAxesTogether(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	origin := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, origin.URL)
+
+	if err := os.WriteFile(scaffyPulledNoteDest, []byte(scaffyRemoteNoteSrc+"\n# local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moved := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "9", "note", "default", "docs", scaffyRemoteNoteSrc+"\n# server\n"),
+	})
+
+	code, stdout, _ := runScaffyTest(t, globals{server: moved.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("both-axes --check exit = %d, want %d\n%s", code, exitValidation, stdout)
+	}
+	if !strings.Contains(stdout, "R-004") || !strings.Contains(stdout, "R-005") {
+		t.Errorf("both axes should red together:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckNoPulledCommands: nothing under scaffy/commands/ is a
+// clean, network-free exit 0 (the fetch is never attempted).
+func TestScaffyPullCheckNoPulledCommands(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	// A server that fails any request — proves --check never touches it when
+	// there is nothing to audit.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitOK {
+		t.Fatalf("empty --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "no pulled commands") {
+		t.Errorf("empty --check should say so:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckJSONEnvelope: --check honors -o json like its siblings —
+// {ok, checked, findings}, ok=false + a R-004 finding on a local edit.
+func TestScaffyPullCheckJSONEnvelope(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+
+	// Clean first: ok=true, checked=1, no findings.
+	code, stdout, _ := runScaffyTest(t, globals{server: srv.URL}, "json", "pull", "--check")
+	if code != exitOK {
+		t.Fatalf("clean json --check exit = %d, want %d\n%s", code, exitOK, stdout)
+	}
+	var clean struct {
+		Ok       bool             `json:"ok"`
+		Checked  int              `json:"checked"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &clean); err != nil {
+		t.Fatalf("clean stdout is not one JSON envelope: %v\n%s", err, stdout)
+	}
+	if !clean.Ok || clean.Checked != 1 || len(clean.Findings) != 0 {
+		t.Errorf("clean envelope = %+v, want ok/checked=1/no findings", clean)
+	}
+
+	// Now edit and re-check under json: ok=false with the R-004 finding.
+	if err := os.WriteFile(scaffyPulledNoteDest, []byte(scaffyRemoteNoteSrc+"\n# edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = runScaffyTest(t, globals{server: srv.URL}, "json", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("drift json --check exit = %d, want %d\n%s", code, exitValidation, stdout)
+	}
+	var drift struct {
+		Ok       bool `json:"ok"`
+		Checked  int  `json:"checked"`
+		Findings []struct {
+			File string `json:"file"`
+			Rule string `json:"rule"`
+			Msg  string `json:"message"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &drift); err != nil {
+		t.Fatalf("drift stdout is not one JSON envelope: %v\n%s", err, stdout)
+	}
+	if drift.Ok || len(drift.Findings) != 1 || drift.Findings[0].Rule != "R-004" {
+		t.Errorf("drift envelope = %+v, want ok=false + one R-004 finding", drift)
+	}
+}
+
+// TestScaffyPullCheckNetworkFailureIsHardError: with a pulled command present
+// but the server unreachable, --check cannot complete axis (b) and fails loud
+// (exitGeneric), never a false-clean.
+func TestScaffyPullCheckNetworkFailureIsHardError(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+	srv.Close() // now unreachable
+
+	code, _, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitGeneric {
+		t.Fatalf("unreachable --check exit = %d, want %d\nstderr:\n%s", code, exitGeneric, stderr)
+	}
+}
+
+// TestScaffyPullCheckRejectsTarget: --check takes no positional.
+func TestScaffyPullCheckRejectsTarget(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	code, _, stderr := runScaffyTest(t, globals{}, "", "pull", "--check", "note")
+	if code != exitUsage {
+		t.Fatalf("pull --check note exit = %d, want %d\nstderr:\n%s", code, exitUsage, stderr)
+	}
+	if !strings.Contains(stderr, "takes no target") {
+		t.Errorf("usage error should explain --check takes no target:\n%s", stderr)
+	}
+}
+
 func TestScaffyPullAndLsHelp(t *testing.T) {
 	for _, c := range []struct {
 		verb string
 		want []string
 	}{
-		{"pull", []string{"usage: bp scaffy pull <concept>[/<variant>]", "BYTE-IDENTICAL", "provenance", "exit codes:", "5  fetched source failed validation"}},
+		{"pull", []string{"usage: bp scaffy pull <concept>[/<variant>]", "bp scaffy pull --check", "BYTE-IDENTICAL", "provenance", "R-004", "R-005", "exit codes:"}},
 		{"ls", []string{"usage: bp scaffy ls --remote", "--remote", "exit codes:"}},
 	} {
 		code, stdout, _ := runScaffyTest(t, globals{help: true}, "", c.verb)
