@@ -53,7 +53,10 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # (not on `use Oban.Worker`) on purpose: the macro form warns that dropping
   # :executing "may break uniqueness" — but here that drop IS the design, and the
   # cloud CI compiles --warnings-as-errors.
-  @unique [keys: [:site_id], states: [:available, :scheduled], period: 60]
+  # period must comfortably cover the debounce window (60s default) so a publish
+  # near the window's end still finds the scheduled job — 300 is window-agnostic
+  # headroom; the [:available, :scheduled] state filter is what actually gates.
+  @unique [keys: [:site_id], states: [:available, :scheduled], period: 300]
 
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Site}
@@ -63,7 +66,31 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
   # The debounce window (seconds). A burst of publishes within this window before
   # the job starts all collapse onto the single :scheduled job.
-  @schedule_in 5
+  #
+  # DEFAULT 60, was 5 (D44 amendment, measured 2026-07-18): on a 2-core box a
+  # site build takes 2-4 MINUTES, and a steady publish stream (agents filing
+  # tasks into the content dataset every minute or two) re-triggered faster than
+  # builds completed — the box built CONTINUOUSLY for hours (observed 2-4
+  # concurrent `astro build`s, search latency 600ms→3-5.6s before the builds
+  # were niced). With builds queued behind builds, effective publish-to-live was
+  # already minutes, so a 5s window bought no real freshness — it only minted
+  # wasted intermediate builds. 60s coalesces a publishing session into ~one
+  # build per site per minute; override per deployment with AUTODEPLOY_DEBOUNCE_S.
+  @schedule_in_default 60
+
+  defp schedule_in do
+    case System.get_env("AUTODEPLOY_DEBOUNCE_S") do
+      nil ->
+        @schedule_in_default
+
+      raw ->
+        case Integer.parse(raw) do
+          # Floor 5: the pre-amendment value — never LESS debounced than D44.
+          {n, ""} when n >= 5 -> n
+          _ -> @schedule_in_default
+        end
+    end
+  end
 
   @doc """
   Enqueue (or coalesce onto) the debounced auto-deploy for `site_id`. Returns
@@ -73,7 +100,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   @spec enqueue(binary()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(site_id) when is_binary(site_id) do
     %{site_id: site_id}
-    |> new(schedule_in: @schedule_in, unique: @unique)
+    |> new(schedule_in: schedule_in(), unique: @unique)
     |> Oban.insert()
   end
 
