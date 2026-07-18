@@ -44,14 +44,14 @@ func TestLoadFailureAdviceRemoteNamesURLAndDoctor(t *testing.T) {
 
 func TestIsLocalTarget(t *testing.T) {
 	cases := map[string]bool{
-		"http://localhost:4000":              true,
-		"http://127.0.0.1:4000":              true,
-		"http://[::1]:4000":                  true,
-		"http://0.0.0.0:4000":                true,
-		"":                                   true,
-		"https://guerrilla.barkpark.cloud":   false,
-		"http://89.167.28.206":               false,
-		"https://api.barkpark.cloud/v1":      false,
+		"http://localhost:4000":            true,
+		"http://127.0.0.1:4000":            true,
+		"http://[::1]:4000":                true,
+		"http://0.0.0.0:4000":              true,
+		"":                                 true,
+		"https://guerrilla.barkpark.cloud": false,
+		"http://89.167.28.206":             false,
+		"https://api.barkpark.cloud/v1":    false,
 	}
 	for base, want := range cases {
 		if got := isLocalTarget(base); got != want {
