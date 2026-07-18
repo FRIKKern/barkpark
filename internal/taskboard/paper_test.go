@@ -34,11 +34,14 @@ const fixtureBlocks = `[
   {"type":"code","code":"go test ./internal/taskboard/...","language":"bash"}
 ]`
 
-// paperServer answers the scoped paper-doc GET with the given result object.
-func paperServer(t *testing.T, resultJSON string) *httptest.Server {
+// paperServer answers the scoped canonical-source GET with the given payload.
+func paperServer(t *testing.T, payload string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":` + resultJSON + `}`))
+		if !strings.Contains(r.URL.Path, "/papers/") || !strings.HasSuffix(r.URL.Path, "/source") {
+			t.Errorf("FetchPaper used non-canonical path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(payload))
 	}))
 }
 
@@ -57,7 +60,7 @@ func resetPaperCache() {
 }
 
 func TestFetchPaperHydratesBlocks(t *testing.T) {
-	srv := paperServer(t, `{"_id":"drafts.the-paper","title":"The Charter","_rev":"rev-7","blocks":`+fixtureBlocks+`}`)
+	srv := paperServer(t, `{"id":"drafts.the-paper","title":"The Charter","_rev":"rev-7","source":{"kind":"blocks","blocks":`+fixtureBlocks+`}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "drafts.the-paper")
@@ -80,7 +83,7 @@ func TestFetchPaperHydratesBlocks(t *testing.T) {
 
 // A block-less paper that carries body_html is the honest browser-handoff state.
 func TestFetchPaperHTMLOnly(t *testing.T) {
-	srv := paperServer(t, `{"_id":"p","title":"Legacy","_rev":"r1","blocks":[],"body_html":"<h1>hi</h1>"}`)
+	srv := paperServer(t, `{"id":"p","title":"Legacy","_rev":"r1","source":{"kind":"html","html":"<h1>hi</h1>"}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "p")
@@ -238,7 +241,7 @@ func drivenFixture() []Task {
 // rail), strips ANSI, and compares to the golden.
 func TestRenderPaperFrameGolden80(t *testing.T) {
 	resetPaperCache()
-	srv := paperServer(t, `{"_id":"drafts.the-paper","title":"Paper frame charter","_rev":"rev-7","blocks":`+fixtureBlocks+`}`)
+	srv := paperServer(t, `{"id":"drafts.the-paper","title":"Paper frame charter","_rev":"rev-7","source":{"kind":"blocks","blocks":`+fixtureBlocks+`}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "drafts.the-paper")

@@ -183,16 +183,24 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Perspective: perspective,
 	})
 
-	// A Paper link already names canonical document identity. Read that one
-	// document directly so a successful `bp paper view` remains O(1) as the
-	// corpus grows. PaperDoc preserves workspace/project scope and asks the API
-	// to resolve task blocks before rendering.
+	// A Paper link already names canonical document identity. Read its narrow,
+	// fail-closed source projection so the CLI cannot render a mixed blocks +
+	// body_html document that the browser/email readers reject.
 	var raw []byte
 	var qerr error
 	if target.share != "" {
 		raw, qerr = fetchSharedPaper(ctx.Server, target)
-	} else {
+	} else if jsonOut {
+		// Machine output is a compatibility surface: preserve the complete raw
+		// PaperDoc envelope consumers already parse. Only rendered output needs
+		// the narrow canonical-source authority.
 		raw, qerr = client.PaperDoc(ctx.Dataset, opt.slug, perspective)
+	} else {
+		var source apiclient.PaperSource
+		source, qerr = client.PaperSource(ctx.Dataset, opt.slug, perspective)
+		if qerr == nil {
+			raw, qerr = source.DocumentJSON(opt.slug)
+		}
 	}
 	if qerr != nil {
 		return paperError(out, jsonOut, "not_found", fmt.Sprintf("read paper %q failed: %v", opt.slug, qerr), exitNotFound)

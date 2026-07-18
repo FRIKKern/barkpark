@@ -168,7 +168,7 @@ func TestRunPaperViewUsesPastedURLOriginAndTenantPath(t *testing.T) {
 		requested = r.URL.RequestURI()
 		authorization = r.Header.Get("Authorization")
 		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"result":{"_id":"launch-plan","_type":"paper","title":"Launch","blocks":[]}}`))
+		_, _ = w.Write([]byte(`{"result":{"_id":"launch-plan","_type":"paper","title":"Launch","blocks":[],"custom":"preserved"}}`))
 	}))
 	defer srv.Close()
 
@@ -189,6 +189,9 @@ func TestRunPaperViewUsesPastedURLOriginAndTenantPath(t *testing.T) {
 	}
 	if authorization != "" {
 		t.Fatalf("unknown pasted origin received active Authorization header %q", authorization)
+	}
+	if !strings.Contains(stdout.String(), `"custom": "preserved"`) {
+		t.Fatalf("raw PaperDoc field lost from json output: %s", stdout.String())
 	}
 }
 

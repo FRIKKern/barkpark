@@ -82,7 +82,7 @@ func TestRunPaperViewWrapsLegacyHTMLAtExplicitWidth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.RequestURI())
 		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"_id":"legacy-width","_type":"paper","body_html":"<h1>Legacy &amp;amp; width</h1><p>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</p>"}`))
+		_, _ = w.Write([]byte(`{"id":"legacy-width","title":"Legacy","source":{"kind":"html","html":"<h1>Legacy &amp;amp; width</h1><p>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</p>"}}`))
 	}))
 	defer srv.Close()
 
@@ -103,6 +103,9 @@ func TestRunPaperViewWrapsLegacyHTMLAtExplicitWidth(t *testing.T) {
 	}
 	if !strings.Contains(got, "alpha") || !strings.Contains(got, "lambda") {
 		t.Errorf("legacy wrapping lost authored tokens: %q", got)
+	}
+	if len(requests) != 1 || !strings.Contains(requests[0], "/d/production/papers/legacy-width/source") {
+		t.Fatalf("rendered mode did not use canonical source: requests=%v", requests)
 	}
 }
 

@@ -820,6 +820,121 @@ func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error) {
 	return body, nil
 }
 
+// PaperSource is the fail-closed reader projection returned by the canonical
+// Paper source endpoint. Exactly one source arm is populated: Blocks for
+// kind=blocks or HTML for kind=html. Broad document fields and derived caches
+// never cross this boundary.
+type PaperSource struct {
+	ID     string
+	Title  string
+	Rev    string
+	Kind   string
+	Blocks json.RawMessage
+	HTML   string
+}
+
+// PaperSource fetches the canonical reader projection for one Paper. The
+// dataset is part of the path so a staging reader cannot silently fall back to
+// production. Authenticated/non-default callers use the membership-gated
+// workspace/project route; a tokenless Default-scope caller uses the public
+// flat route, preserving `bp paper view` for ordinary published Papers.
+//
+// GET /w/:workspace/p/:project/d/:dataset/papers/:slug/source
+// GET /d/:dataset/papers/:slug/source (public Default scope)
+func (c *Client) PaperSource(dataset, slug, perspective string) (PaperSource, error) {
+	path := "/d/" + url.PathEscape(dataset) + "/papers/" + url.PathEscape(slug) + "/source"
+	endpoint := c.scopedURL(path)
+	if c.token == "" && c.Workspace == "default" && c.Project == "default" {
+		endpoint = c.flatURL(path)
+	}
+	if perspective != "" {
+		params := url.Values{}
+		params.Set("perspective", perspective)
+		endpoint += "?" + params.Encode()
+	}
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return PaperSource{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return PaperSource{}, fmt.Errorf("paper %s source: status %d: %s", slug, resp.StatusCode, bodyPreview(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))
+	if err != nil {
+		return PaperSource{}, fmt.Errorf("paper %s source: read body: %w", slug, err)
+	}
+	if int64(len(body)) > maxDocBytes {
+		return PaperSource{}, fmt.Errorf("paper %s source: body exceeds %d bytes", slug, maxDocBytes)
+	}
+
+	var payload struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Rev    string `json:"_rev"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return PaperSource{}, fmt.Errorf("paper %s source: decode: %w", slug, err)
+	}
+
+	source := PaperSource{
+		ID: payload.ID, Title: payload.Title, Rev: payload.Rev,
+		Kind: payload.Source.Kind, Blocks: payload.Source.Blocks, HTML: payload.Source.HTML,
+	}
+	switch source.Kind {
+	case "blocks":
+		if len(bytes.TrimSpace(source.Blocks)) == 0 || !json.Valid(source.Blocks) {
+			return PaperSource{}, fmt.Errorf("paper %s source: invalid blocks", slug)
+		}
+	case "html":
+		// The server owns semantic-empty validation and sanitization. An empty
+		// string in a nominal html arm is nevertheless an invalid wire shape.
+		if strings.TrimSpace(source.HTML) == "" {
+			return PaperSource{}, fmt.Errorf("paper %s source: empty html", slug)
+		}
+	default:
+		return PaperSource{}, fmt.Errorf("paper %s source: unknown kind %q", slug, source.Kind)
+	}
+	return source, nil
+}
+
+// DocumentJSON adapts the narrow reader projection to the established minimal
+// Paper document shape consumed by pdrender and `bp paper view -o json`.
+func (s PaperSource) DocumentJSON(fallbackID string) ([]byte, error) {
+	id := s.ID
+	if id == "" {
+		id = fallbackID
+	}
+	doc := map[string]any{
+		"_id": id, "_type": "paper", "title": s.Title,
+	}
+	if s.Rev != "" {
+		doc["_rev"] = s.Rev
+	}
+	switch s.Kind {
+	case "blocks":
+		var blocks any
+		if err := json.Unmarshal(s.Blocks, &blocks); err != nil {
+			return nil, err
+		}
+		doc["blocks"] = blocks
+	case "html":
+		doc["body_html"] = s.HTML
+	default:
+		return nil, fmt.Errorf("unknown Paper source kind %q", s.Kind)
+	}
+	return json.Marshal(doc)
+}
+
 // bodyPreview trims an error-body to a short single-line preview so a non-2xx
 // status surfaces the server's reason without dumping a whole HTML error page.
 func bodyPreview(body []byte) string {
