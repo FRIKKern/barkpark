@@ -207,6 +207,21 @@ func Execute(args []string) int {
 		if verb == "ready" && !g.help && !out.machineOut() {
 			printReadyFrontierHeader(out, ctx)
 		}
+		// `bp task` bare (a noun with no verb) — prepend ONE live counts line above
+		// the verb list so the incomplete-usage view still answers "what's the state
+		// of the board?" instead of only listing verbs (AXI R7). Sourced from GET
+		// /v1/tasks/prime `counts`; best-effort and human-only: an offline server or
+		// any fetch error simply drops the line, the usage block still prints, and the
+		// exit stays exitUsage. Machine output (-o json|yaml) is left byte-identical.
+		// Then FALL THROUGH (no return) to the manifest usage path below.
+		if verb == "" && !g.help && !out.machineOut() {
+			if counts, err := fetchTaskCounts(ctx); err == nil {
+				if line := formatTaskCountsLine(counts); line != "" {
+					out.errf("%s", line)
+					out.errf("")
+				}
+			}
+		}
 	case "cmux":
 		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
 		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
