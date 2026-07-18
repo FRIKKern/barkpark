@@ -79,9 +79,7 @@ defmodule Barkpark.StudioChat.AgentStateSweeper do
     sweep()
   rescue
     error ->
-      Logger.warning(
-        "studio chat agent-state sweeper: sweep failed: #{Exception.message(error)}"
-      )
+      Logger.warning("studio chat agent-state sweeper: sweep failed: #{Exception.message(error)}")
 
       0
   end

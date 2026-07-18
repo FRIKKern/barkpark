@@ -1777,8 +1777,12 @@ defmodule Barkpark.StudioChat.RecorderTest do
       # (it broadcasts) but both map to "working" — never a store write
       frame(recorder, tool_frame("mix test a"))
       frame(recorder, tool_frame("mix test b"))
-      assert_receive {:chat_activity, ^sid, %{state: :working, line: "Bash — command: mix test a"}}
-      assert_receive {:chat_activity, ^sid, %{state: :working, line: "Bash — command: mix test b"}}
+
+      assert_receive {:chat_activity, ^sid,
+                      %{state: :working, line: "Bash — command: mix test a"}}
+
+      assert_receive {:chat_activity, ^sid,
+                      %{state: :working, line: "Bash — command: mix test b"}}
 
       # every set_agent_state write refreshes agent_state_at, so an unchanged
       # stamp PROVES zero writes since the single init flip (the write-count)
