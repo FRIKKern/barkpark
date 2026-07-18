@@ -1058,6 +1058,62 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.exit_code == 21
       assert status.failure_reason =~ "no previous release (exit 21)"
     end
+
+    test "a successful teardown finalizes exit 0, not an abnormal death" do
+      dir = run_dir()
+
+      # A teardown emits no BPSTAGE (like a rollback) — the engine prints a
+      # `TORN_DOWN=<slug>` line to the durable log on success. The finalizer must
+      # read that as exit 0, not fold its empty stages into a `-1` abnormal death.
+      engine =
+        stub("""
+        echo 'disarmed caddy /sites/gone route' >> "$BARKPARK_SITE_LOG_FILE"
+        echo 'TORN_DOWN=gone' >> "$BARKPARK_SITE_LOG_FILE"
+        exit 0
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        teardown_command: engine
+      )
+
+      assert DeployRunner.trigger(req("gone", mode: "teardown")) == {:ok, :started}
+
+      status = DeployRunner.status("gone")
+      assert status.state == :done
+      assert status.exit_code == 0
+      assert status.failure_reason == nil
+      assert status.stages == []
+    end
+
+    test "a teardown whose log carries no TORN_DOWN= is an abnormal end (-1)" do
+      dir = run_dir()
+
+      engine =
+        stub("""
+        echo 'caddy validate rejected the disarm — reverting' >> "$BARKPARK_SITE_LOG_FILE"
+        exit 1
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        teardown_command: engine
+      )
+
+      assert DeployRunner.trigger(req("halfgone", mode: "teardown")) == {:ok, :started}
+
+      status = DeployRunner.status("halfgone")
+      assert status.state == :done
+      assert status.exit_code == -1
+    end
   end
 
   describe "systemd unit path — re-attach on init (D32)" do

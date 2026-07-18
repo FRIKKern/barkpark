@@ -104,6 +104,8 @@ defmodule Barkpark.Sites.Provisioner do
   """
   @spec provision(DeployRequest.t()) :: :ok | {:error, {:provision_failed, term()}}
   def provision(%DeployRequest{mode: :rollback}), do: :ok
+  # A teardown deletes the site — there is nothing to materialize (like a rollback).
+  def provision(%DeployRequest{mode: :teardown}), do: :ok
 
   def provision(%DeployRequest{
         mode: :deploy,

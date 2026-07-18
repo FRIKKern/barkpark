@@ -16,7 +16,7 @@ defmodule Barkpark.Sites.DeployRequest do
         "slug"           => "my-blog",        # ^[a-z0-9][a-z0-9-]{0,62}$
         "build_id"       => "a1b2c3d4",       # ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ (deploy only)
         "content_rev"    => "1f2e...",        # optional, baked as bp-content-rev
-        "mode"           => "deploy" | "rollback",
+        "mode"           => "deploy" | "rollback" | "teardown",
         "runtime_target" => "static" | "node",# where the artifact runs (default "static")
         "template"       => "astro-starter" | "next-starter" | "search-starter" | "astro-search-starter", # which starter (optional)
         "env"            => %{"BARKPARK_API_URL" => _, "BARKPARK_TOKEN" => _, ...}
@@ -57,9 +57,10 @@ defmodule Barkpark.Sites.DeployRequest do
           slug: String.t(),
           build_id: String.t() | nil,
           content_rev: String.t() | nil,
-          mode: :deploy | :rollback,
+          mode: :deploy | :rollback | :teardown,
           runtime_target: :static | :node,
-          template: :astro_starter | :next_starter | :search_starter | :astro_search_starter | nil,
+          template:
+            :astro_starter | :next_starter | :search_starter | :astro_search_starter | nil,
           env: %{optional(String.t()) => String.t()}
         }
 
@@ -143,7 +144,10 @@ defmodule Barkpark.Sites.DeployRequest do
   defp validate_mode(nil), do: {:ok, :deploy}
   defp validate_mode("deploy"), do: {:ok, :deploy}
   defp validate_mode("rollback"), do: {:ok, :rollback}
-  defp validate_mode(_mode), do: {:error, "invalid_mode", ~s(mode must be "deploy" or "rollback")}
+  defp validate_mode("teardown"), do: {:ok, :teardown}
+
+  defp validate_mode(_mode),
+    do: {:error, "invalid_mode", ~s(mode must be "deploy", "rollback", or "teardown")}
 
   # Runtime target is a CLOSED enum, validated EXACTLY like mode (charter D63):
   # it picks which engine script reaches argv — and later a systemd slot unit
@@ -179,6 +183,7 @@ defmodule Barkpark.Sites.DeployRequest do
   # build_id — so we drop any build_id passed with one rather than feed the
   # child an argument its mode ignores.
   defp validate_build_id(:rollback, _build_id), do: {:ok, nil}
+  defp validate_build_id(:teardown, _build_id), do: {:ok, nil}
 
   defp validate_build_id(:deploy, build_id) when is_binary(build_id) do
     if Regex.match?(@build_id_re, build_id),
