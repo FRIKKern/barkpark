@@ -144,13 +144,16 @@ defmodule Barkpark.Content.Papers do
     text =
       html
       |> String.replace(~r/<[^>]*>/s, " ")
-      |> String.replace(~r/&(?:nbsp|#160|#xA0);/i, " ")
+      |> String.replace(~r/&(?:#[0-9]+;?|#x[0-9a-f]+;?|[a-z][a-z0-9]+;)/i, " ")
       |> String.trim()
 
     accessible_name =
-      Regex.match?(~r/\b(?:alt|aria-label|title)\s*=\s*(?:"[^"]+"|'[^']+')/i, html)
+      ~r/\b(?:alt|aria-label|title)\s*=\s*(?:"([^"]*)"|'([^']*)')/i
+      |> Regex.scan(html, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.any?(&Hollow.semantic_text?/1)
 
-    text != "" or accessible_name
+    Hollow.semantic_text?(text) or accessible_name
   end
 
   defp reader_schema_scope(paper, scope_opts) do

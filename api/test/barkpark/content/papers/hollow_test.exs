@@ -58,6 +58,13 @@ defmodule Barkpark.Content.Papers.HollowTest do
       assert Hollow.hollow?([locked_title(), para("   \n\t ")])
     end
 
+    test "punctuation-only prose is hollow while language, numbers, and symbols count" do
+      assert Hollow.hollow?([locked_title(), para(" / — ")])
+      refute Hollow.hollow?([locked_title(), para("I")])
+      refute Hollow.hollow?([locked_title(), para("2")])
+      refute Hollow.hollow?([locked_title(), para("∑")])
+    end
+
     test "an image-only paper is NOT hollow (real payload, no text needed)" do
       refute Hollow.hollow?([%{"id" => "i1", "type" => "image", "src" => "/hero.jpg"}])
     end

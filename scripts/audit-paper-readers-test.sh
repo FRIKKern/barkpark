@@ -20,6 +20,10 @@ if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
     printf '%081d\n' 0
     exit 0
   fi
+  if [[ "${BP_FIXTURE_PUNCTUATION_BODY:-}" == "1" ]]; then
+    printf '/\n'
+    exit 0
+  fi
   printf 'readable\n'
   exit 0
 fi
@@ -45,9 +49,21 @@ if [[ "$url" == */source ]]; then
     printf '%s' '{"source":{"kind":"blocks","blocks":[]}}' >"$out"
   fi
 elif [[ "$url" == */email ]]; then
-  printf '%s' '<!doctype html><p>mail</p>' >"$out"
+  if [[ "${BP_FIXTURE_EMPTY_BODY:-}" == "1" ]]; then
+    printf '%s' '<!doctype html><body class="bp-paper-surface"></body>' >"$out"
+  elif [[ "${BP_FIXTURE_PUNCTUATION_BODY:-}" == "1" ]]; then
+    printf '%s' '<!doctype html><body class="bp-paper-surface"><p>/</p></body>' >"$out"
+  else
+    printf '%s' '<!doctype html><body class="bp-paper-surface"><p>mail</p></body>' >"$out"
+  fi
 else
-  printf '%s' '<!doctype html><p>reader</p>' >"$out"
+  if [[ "${BP_FIXTURE_EMPTY_BODY:-}" == "1" ]]; then
+    printf '%s' '<!doctype html><article id="paper-body"></article>' >"$out"
+  elif [[ "${BP_FIXTURE_PUNCTUATION_BODY:-}" == "1" ]]; then
+    printf '%s' '<!doctype html><article id="paper-body"><p>/</p></article>' >"$out"
+  else
+    printf '%s' '<!doctype html><article id="paper-body"><p>reader</p></article>' >"$out"
+  fi
 fi
 printf '200'
 FAKE_CURL
@@ -61,7 +77,11 @@ jq -e '
   .inventory_ids == ["blocks-paper", "html-paper"] and
   (.inventory_digest | test("^[0-9a-f]{64}$")) and
   (.results | length == 2) and
-  all(.results[]; .tui.max_display_width <= 80 and .tui.overflow_lines == 0)
+  all(.results[];
+    .tui.max_display_width <= 80 and .tui.overflow_lines == 0 and
+    .gui.content.body_found and .gui.content.meaningful and
+    .email.content.body_found and .email.content.meaningful
+  )
 ' \
   "$tmp/result.json" >/dev/null
 
@@ -76,6 +96,36 @@ jq -e '
   .ok == false and .failed == 2 and
   all(.failures[]; .tui.max_display_width == 81 and .tui.overflow_lines == 1)
 ' "$tmp/wide-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY_BODY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/empty-body-result.json"; then
+  printf 'empty GUI/email Paper bodies unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    (.gui.content.body_found and (.gui.content.meaningful | not)) and
+    (.email.content.body_found and (.email.content.meaningful | not))
+  )
+' "$tmp/empty-body-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_PUNCTUATION_BODY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/punctuation-body-result.json"; then
+  printf 'punctuation-only GUI/email Paper bodies unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    (.gui.content.visible_chars == 1 and (.gui.content.meaningful | not)) and
+    (.email.content.visible_chars == 1 and (.email.content.meaningful | not))
+  )
+' "$tmp/punctuation-body-result.json" >/dev/null
 
 if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \

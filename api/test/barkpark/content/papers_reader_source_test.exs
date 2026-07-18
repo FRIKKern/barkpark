@@ -156,6 +156,35 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     assert {:error, :ambiguous_source} = Content.Papers.reader_source(mixed, "test", [])
   end
 
+  test "reader source rejects punctuation-only block and HTML bodies" do
+    punctuation_blocks = [
+      %{
+        "id" => "body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => " / — "}]
+      }
+    ]
+
+    block_paper = %Document{
+      doc_id: "punctuation-blocks",
+      dataset: "test",
+      type: "paper",
+      title: "Punctuation blocks",
+      content: %{"blocks" => punctuation_blocks}
+    }
+
+    html_paper = %Document{
+      doc_id: "punctuation-html",
+      dataset: "test",
+      type: "paper",
+      title: "Punctuation HTML",
+      content: %{"body_html" => ~s(<p> / &mdash; </p><img alt="/">)}
+    }
+
+    assert {:error, :semantic_empty} = Content.Papers.reader_source(block_paper, "test", [])
+    assert {:error, :semantic_empty} = Content.Papers.reader_source(html_paper, "test", [])
+  end
+
   test "first BlockOp against HTML-only source fails closed without changing bytes or revision" do
     slug = "html-blockop-fence-#{System.unique_integer([:positive])}"
     html = "<h1>Immutable</h1>\n<p>Authored &amp; byte-significant.</p>"

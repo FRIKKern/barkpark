@@ -27,6 +27,10 @@ if ! go build -o "$tmp/widthcheck" ./internal/pdrender/cmd/widthcheck; then
   jq -n '{ok:false,error:"terminal width checker build failed"}'
   exit 2
 fi
+if ! go build -o "$tmp/htmlcheck" ./internal/pdrender/cmd/htmlcheck; then
+  jq -n '{ok:false,error:"HTML Paper body checker build failed"}'
+  exit 2
+fi
 
 if ! "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
   search query '*' --type paper --perspective published --all -o json >"$inventory"; then
@@ -98,8 +102,20 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
   fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
+  gui_content='{"body_found":false,"meaningful":false,"visible_chars":0,"visible_words":0,"heading_count":0,"text_sha256":""}'
+  email_content="$gui_content"
+  if [[ "$gui_code" == "200" ]]; then
+    checked_gui_content="$("$tmp/htmlcheck" gui "$tmp/gui" 2>/dev/null)" && gui_content="$checked_gui_content"
+  fi
+  if [[ "$email_code" == "200" ]]; then
+    checked_email_content="$("$tmp/htmlcheck" email "$tmp/email" 2>/dev/null)" && email_content="$checked_email_content"
+  fi
+  gui_content_ok="$(jq -r '.body_found and .meaningful' <<<"$gui_content")"
+  email_content_ok="$(jq -r '.body_found and .meaningful' <<<"$email_content")"
   ok=false
-  if [[ "$gui_code" == "200" && "$email_code" == "200" && "$source_ok" == true && "$cli_ok" == true ]]; then
+  if [[ "$gui_code" == "200" && "$email_code" == "200" && \
+    "$gui_content_ok" == true && "$email_content_ok" == true && \
+    "$source_ok" == true && "$cli_ok" == true ]]; then
     ok=true
   fi
 
@@ -112,10 +128,12 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     --argjson email_bytes "$email_bytes" \
     --argjson source_ok "$source_ok" \
     --argjson cli_ok "$cli_ok" \
+    --argjson gui_content "$gui_content" \
+    --argjson email_content "$email_content" \
     --argjson tui_max_display_width "$tui_max_display_width" \
     --argjson tui_overflow_lines "$tui_overflow_lines" \
     --argjson ok "$ok" \
-    '{id:$id,ok:$ok,gui:{status:$gui_code},email:{status:$email_code,bytes:$email_bytes},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
+    '{id:$id,ok:$ok,gui:{status:$gui_code,content:$gui_content},email:{status:$email_code,bytes:$email_bytes,content:$email_content},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
     >>"$results"
 done
 
