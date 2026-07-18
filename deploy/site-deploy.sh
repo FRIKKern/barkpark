@@ -687,6 +687,32 @@ FAKENPM
     check "retain=1 deploy exit 0"             [ "$rc" = 0 ]
     check "RETIRE names a real removal"        grep -qE '^BPSTAGE name=RETIRE status=ok build_id=e5 detail="removed [1-9]' "$E2E/out.log"
 
+    echo "[selftest] e2e: a rollback records its outcome markers in the durable LOG"
+    # systemd-mode DeployRunner finalizes a rollback from BARKPARK_SITE_LOG_FILE
+    # (no exit code; a rollback emits no BPSTAGE). A rollback that leaves that log
+    # empty is the "died abnormally" bug — the runner reads no success marker and
+    # reports -1. Assert the flip lands its markers where the runner reads them.
+    e2e_deploy e6 >/dev/null; e2e_deploy e7 >/dev/null   # current=e7, .previous=e6
+    RB_LOG="$E2E/rollback.log"; : > "$RB_LOG"
+    env PATH="$FAKEBIN:$PATH" \
+      SITE_SLUG=selftest BARKPARK_SITES_DIR="$E2E/sites" \
+      BARKPARK_CADDYFILE="$E2E/absent-caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$E2E/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_LOG_FILE="$RB_LOG" \
+      bash "$SELF" --rollback > "$E2E/rb.out" 2>&1
+    check "rollback flipped to e6"                    [ "$(livenow)" = releases/e6 ]
+    check "rollback wrote ROLLED BACK to the log"     grep -q 'ROLLED BACK' "$RB_LOG"
+    check "rollback wrote TARGET_BUILD=e6 to the log" grep -qx 'TARGET_BUILD=e6' "$RB_LOG"
+    # A no_previous refusal writes its typed marker too (current now e6, .previous e7).
+    rm -f "$E2E_SITE/.previous"; RB_LOG2="$E2E/rollback2.log"; : > "$RB_LOG2"
+    env PATH="$FAKEBIN:$PATH" \
+      SITE_SLUG=selftest BARKPARK_SITES_DIR="$E2E/sites" \
+      BARKPARK_CADDYFILE="$E2E/absent-caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$E2E/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_LOG_FILE="$RB_LOG2" \
+      bash "$SELF" --rollback > "$E2E/rb2.out" 2>&1
+    check "no_previous rollback wrote (no_previous) to the log" grep -q '(no_previous)' "$RB_LOG2"
+
     echo "[selftest] e2e: an ORPHANED build survives a mid-build kill (durable file contract)"
     # The re-attach contract: DeployRunner names a persistent status fold + a raw
     # build log; emit() appends every BPSTAGE line to the fold, and BUILD tees the
@@ -788,12 +814,27 @@ fi
 
 if [ "$MODE" = rollback ]; then
   do_rollback; rc=$?
+  # systemd-mode DeployRunner finalizes a rollback from the durable LOG FILE — it
+  # has no exit code (the transient unit's is swept) and a rollback emits no
+  # BPSTAGE fold. A DEPLOY fills that log via BUILD's tee; a rollback has no
+  # BUILD, so its stdout (below) never reaches the log and the runner reads an
+  # EMPTY log → `-1` "died abnormally" even on success. Record the outcome here
+  # in the exact markers `DeployRunner.rollback_outcome/1` reads: a `TARGET_BUILD=`
+  # + `ROLLED BACK` success pair, or a typed `(no_previous)`/`(not_supported)`
+  # refusal. Direct append (not a tee) so it is on disk before the unit exits.
+  if [ -n "${BARKPARK_SITE_LOG_FILE:-}" ]; then
+    case "$rc" in
+      0)  printf 'ROLLED BACK: %s now at %s\nTARGET_BUILD=%s\n' \
+            "$SITE_SLUG" "$(live_build)" "$(live_build)" >> "$BARKPARK_SITE_LOG_FILE" ;;
+      21) printf 'rollback refused: (no_previous)\n'   >> "$BARKPARK_SITE_LOG_FILE" ;;
+      22) printf 'rollback refused: (not_supported)\n' >> "$BARKPARK_SITE_LOG_FILE" ;;
+      *)  printf 'rollback failed (exit %s)\n' "$rc"   >> "$BARKPARK_SITE_LOG_FILE" ;;
+    esac
+  fi
   [ "$rc" -eq 0 ] || exit "$rc"
   do_retire
-  # Machine contract (see header): exit 0 prints TARGET_BUILD= so the CLI AND the
-  # systemd-mode runner finalizer (which has no exit code) can name the release now
-  # serving. The preflight already prints it; the real flip must too, or a
-  # successful rollback reports an EMPTY build_id up the chain.
+  # Machine contract (see header): exit 0 prints TARGET_BUILD= so the CLI can name
+  # the release now serving (the preflight already prints it; the real flip must too).
   echo "TARGET_BUILD=$(live_build)"
   log "ROLLED BACK — '$SITE_SLUG' now at $(live_build)"
   exit 0
