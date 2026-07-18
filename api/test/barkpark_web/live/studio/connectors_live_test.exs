@@ -311,10 +311,14 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
     end
   end
 
-  # ── THE GATE DELTA (D49) ───────────────────────────────────────────────────
+  # ── THE GATE DELTA (D49 → W26/D219) ────────────────────────────────────────
+  # W24 kept this principal out of the MINT (per-write re-gate); W26 closes the
+  # hole one layer earlier: the `:scoped_admin` mount gate authorizes against
+  # the TARGET workspace's membership role, so the outsider never mounts at
+  # all. The per-write re-gate stays in the LV as belt-and-suspenders.
 
-  describe "the mount gate is NOT the mint gate (D49)" do
-    test "a principal that MOUNTS the catalog but is not workspace-admin CANNOT connect", %{
+  describe "the mount gate is the TARGET-workspace admin gate (W26/D219)" do
+    test "a flat-global-admin that is only a MEMBER of this workspace is REJECTED AT MOUNT", %{
       conn: conn,
       path: path,
       outsider_raw: raw,
@@ -322,23 +326,14 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
     } do
       script(ws, %{})
 
-      # It mounts — this is the whole point. Global `admin` satisfies LiveAuth.
-      {:ok, view, html} = live(as(conn, raw), path)
-      assert html =~ ~s(data-test-id="connector-card-telegram")
-
-      # …and it is NOT a workspace admin, which is what the mint actually needs.
+      # The W24 escalation shape: global `admin` permission, member-only role.
       token = Auth.verify_token(raw) |> elem(1)
       assert Auth.has_permission?(token, "admin")
       refute TenancyAuth.workspace_admin?(token, ws.id)
 
-      # Every state-changing handler refuses — including a hand-forged event that
-      # skips the (absent) button entirely.
-      html = render_click(view, "open_connect", %{"provider" => "telegram"})
-      assert html =~ "owner or admin of this workspace"
-      refute html =~ ~s(data-test-id="connectors-connect-modal")
-
-      render_click(view, "confirm_connect", %{})
-      render_click(view, "confirm_disconnect", %{})
+      # Pre-W26 this mounted the catalog. Now the mount itself is refused —
+      # there is no view to fire events at.
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(conn, raw), path)
 
       assert Stub.calls() == []
       assert live_tokens(ws, "telegram", @telegram_key) == []
@@ -690,13 +685,14 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
                live_tokens(ws, "slack", "oauth")
     end
 
-    test "a non-admin gets NO Add-to-Slack link and NOTHING is minted or staged (D49)",
+    test "a non-admin never mounts the catalog — NOTHING is minted or staged (D49 → W26)",
          %{conn: conn, path: path, outsider_raw: raw, ws: ws} do
       script_slack(ws)
 
-      {:ok, _view, html} = live(as(conn, raw), path)
+      # W26: the target-workspace mount gate refuses the member-only principal
+      # before the OAuth machinery (token mint + stage) can even run.
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(conn, raw), path)
 
-      refute html =~ ~s(data-test-id="connector-add-to-slack-slack")
       assert Stub.calls() == []
       assert live_tokens(ws, "slack", "oauth") == []
     end

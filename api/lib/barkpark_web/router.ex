@@ -1212,7 +1212,7 @@ defmodule BarkparkWeb.Router do
 
     live_session :scoped_plugin_admin,
       on_mount: [
-        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :scoped_admin},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
@@ -1236,7 +1236,7 @@ defmodule BarkparkWeb.Router do
 
     live_session :scoped_admin_studio,
       on_mount: [
-        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :scoped_admin},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.LiveScope, :resolve},
         {BarkparkWeb.StudioChrome, :default}

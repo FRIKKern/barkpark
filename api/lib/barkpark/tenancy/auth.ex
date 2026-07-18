@@ -332,6 +332,7 @@ defmodule Barkpark.Tenancy.Auth do
   `member` of B — even one holding global `admin` perms — is NOT a workspace
   admin of B. A non-member is never an admin.
   """
+  # @canonical capability:workspace-admin-authority aka:is_admin,workspace_admin,mount_gate,scoped_admin doc:docs/contracts/tenancy.md
   @spec workspace_admin?(principal(), binary()) :: boolean()
   def workspace_admin?(token_or_principal_id, workspace_id) do
     membership_role(token_or_principal_id, workspace_id) in @admin_roles
