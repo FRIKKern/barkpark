@@ -554,12 +554,12 @@ func renderScaffyReport(out *writer, verb string, rep *scaffy.RunReport) int {
 }
 
 // scaffyOpLine is one op's status line (D39 vocabulary: ● created ·
-// ○ injected @MARK · = skipped + reason · ✕ deleted/removed · ● restored).
-// Dry-run speaks in would-form.
+// ○ injected @MARK · ○ replaced @MARK · = skipped + reason ·
+// ✕ deleted/removed · ● restored). Dry-run speaks in would-form.
 func scaffyOpLine(op scaffy.OpResult, dry bool) string {
 	glyph, word := "●", op.Status
 	switch op.Status {
-	case scaffy.OpInjected:
+	case scaffy.OpInjected, scaffy.OpReplaced:
 		glyph = "○"
 	case scaffy.OpSkipped:
 		glyph = "="
@@ -569,7 +569,8 @@ func scaffyOpLine(op scaffy.OpResult, dry bool) string {
 	if dry {
 		would := map[string]string{
 			scaffy.OpCreated: "would create", scaffy.OpInjected: "would inject",
-			scaffy.OpDeleted: "would delete", scaffy.OpRemoved: "would remove",
+			scaffy.OpReplaced: "would replace",
+			scaffy.OpDeleted:  "would delete", scaffy.OpRemoved: "would remove",
 			scaffy.OpRestored: "would restore", scaffy.OpSkipped: "would skip",
 		}
 		if w, ok := would[op.Status]; ok {
@@ -637,7 +638,7 @@ func scaffySummaryLine(verb string, rep *scaffy.RunReport) string {
 		}
 	}
 	var parts []string
-	for _, s := range []string{scaffy.OpCreated, scaffy.OpInjected, scaffy.OpRestored, scaffy.OpRemoved, scaffy.OpDeleted} {
+	for _, s := range []string{scaffy.OpCreated, scaffy.OpInjected, scaffy.OpReplaced, scaffy.OpRestored, scaffy.OpRemoved, scaffy.OpDeleted} {
 		if counts[s] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[s], s))
 		}

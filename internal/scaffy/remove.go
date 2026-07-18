@@ -44,6 +44,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -191,10 +193,18 @@ func Remove(opts RemoveOptions) (*RunReport, error) {
 		if err != nil {
 			return nil, err
 		}
-	} else if report.Mutated {
-		if err := tr.flush(); err != nil {
-			return nil, err
+	} else {
+		if report.Mutated {
+			if err := tr.flush(); err != nil {
+				return nil, err
+			}
 		}
+		// Retract the now-empty directories the apply created (D35
+		// created_dirs). Best-effort cosmetic cleanup: deepest-first so a
+		// child empties its parent, rmdir ONLY when the dir is empty, and
+		// never a hard failure — a non-empty or vanished dir is left as
+		// found. A pre-field receipt carries none and prunes nothing.
+		pruneCreatedDirs(opts.RepoRoot, rec.CreatedDirs)
 	}
 	// The receipt file stays — a second remove skips clean on every op.
 
@@ -340,6 +350,32 @@ func invertOp(tr *tree, rpath string, idx int, op ReceiptOp) (*OpResult, bool, *
 
 	default:
 		return nil, false, nil, fmt.Errorf("%s: op %d has unknown kind %q", rpath, idx, op.Kind)
+	}
+}
+
+// pruneCreatedDirs rmdirs the apply-created directories that are empty
+// after file deletion (D35). Deepest-first (most path separators first)
+// so removing a child leaves its parent empty and thus prunable in the
+// same pass. Best-effort: a non-empty dir (still holds a sibling or a
+// hand-added file) or an already-vanished one is silently left — never
+// force-removed, never a remove failure.
+func pruneCreatedDirs(root string, dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	sorted := append([]string(nil), dirs...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return strings.Count(sorted[i], "/") > strings.Count(sorted[j], "/")
+	})
+	for _, d := range sorted {
+		abs := filepath.Join(root, filepath.FromSlash(d))
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			continue // already gone, or unreadable — leave it
+		}
+		if len(entries) == 0 {
+			_ = os.Remove(abs) // rmdir; only ever succeeds on an empty dir
+		}
 	}
 }
 

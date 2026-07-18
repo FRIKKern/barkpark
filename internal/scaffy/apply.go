@@ -55,11 +55,12 @@ type RunReport struct {
 	DurationMS int64             `json:"duration_ms"`
 }
 
-// Op statuses (D39 vocabulary: ● created · ○ injected · = skipped ·
-// ✕ deleted; REMOVE-verb retractions report "removed").
+// Op statuses (D39 vocabulary: ● created · ○ injected · ○ replaced ·
+// = skipped · ✕ deleted; REMOVE-verb retractions report "removed").
 const (
 	OpCreated  = "created"
 	OpInjected = "injected"
+	OpReplaced = "replaced"
 	OpRemoved  = "removed"
 	OpDeleted  = "deleted"
 	OpSkipped  = "skipped"
@@ -151,10 +152,17 @@ type tree struct {
 	files   map[string][]byte // rel → current bytes (overlay)
 	deleted map[string]bool
 	touched []string // mutation order, deduped
+
+	// createdDirs are the directories flush actually mkdir'd (never
+	// pre-existing ones), repo-relative forward-slash, deduped in
+	// creation order — the D35 receipt records them so remove can rmdir
+	// the now-empty residue a CREATE left behind.
+	createdDirs    []string
+	createdDirSeen map[string]bool
 }
 
 func newTree(root string) *tree {
-	return &tree{root: root, files: map[string][]byte{}, deleted: map[string]bool{}}
+	return &tree{root: root, files: map[string][]byte{}, deleted: map[string]bool{}, createdDirSeen: map[string]bool{}}
 }
 
 // resolve confines a repo-relative path to the root (a scaffold must
@@ -226,6 +234,11 @@ func (t *tree) flush() error {
 			}
 			continue
 		}
+		// Record the ancestor dirs this CREATE is about to bring into
+		// being (computed BEFORE the mkdir, while they are still absent)
+		// so remove can retract them; writes to an existing file's dir
+		// yield nothing here.
+		t.noteCreatedDirs(dirsToCreate(t.root, abs))
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return err
 		}
@@ -238,6 +251,53 @@ func (t *tree) flush() error {
 		}
 	}
 	return nil
+}
+
+// noteCreatedDirs appends the given repo-relative dirs to the tree's
+// created-dir ledger, deduped, preserving first-seen (shallow→deep)
+// order. Sequential flush means a dir a prior file already created
+// re-tests as existing in dirsToCreate and never reaches here twice.
+func (t *tree) noteCreatedDirs(dirs []string) {
+	for _, d := range dirs {
+		if !t.createdDirSeen[d] {
+			t.createdDirSeen[d] = true
+			t.createdDirs = append(t.createdDirs, d)
+		}
+	}
+}
+
+// dirsToCreate returns the ancestor directories of file fileAbs that do
+// not yet exist, bounded strictly below root (root itself is never
+// returned), ordered shallow→deep — exactly the dirs an os.MkdirAll for
+// fileAbs will bring into being. The first existing ancestor stops the
+// walk: its own parents necessarily exist too. Paths are repo-relative
+// forward-slash to match ReceiptOp.Path.
+func dirsToCreate(root, fileAbs string) []string {
+	var missing []string
+	dir := filepath.Dir(fileAbs)
+	for {
+		if dir == root || !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			break
+		}
+		if _, err := os.Stat(dir); err == nil {
+			break // exists — and so do all its ancestors
+		}
+		rel, err := filepath.Rel(root, dir)
+		if err != nil {
+			break
+		}
+		missing = append(missing, filepath.ToSlash(rel))
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	// Reverse deep→shallow into shallow→deep (creation order).
+	for i, j := 0, len(missing)-1; i < j; i, j = i+1, j-1 {
+		missing[i], missing[j] = missing[j], missing[i]
+	}
+	return missing
 }
 
 // Run executes one .scaffy command's forward path (D40 seam).
@@ -296,7 +356,7 @@ func Run(opts RunOptions) (*RunReport, error) {
 		}
 		// A full-no-op re-run never reaches here — an existing receipt
 		// is only ever replaced by a run that actually mutated (D35).
-		rp, err := writeReceipt(opts, cmd, src, receiptOps)
+		rp, err := writeReceipt(opts, cmd, src, receiptOps, tr.createdDirs)
 		if err != nil {
 			return nil, err
 		}
@@ -581,7 +641,7 @@ func applyReplace(cmd *Command, sub *substituter, tr *tree, o *InOp, res *OpResu
 	}
 	next := bytes.Replace(content, target, payload, 1)
 	tr.write(rel, next)
-	res.Status = OpInjected
+	res.Status = OpReplaced
 	return res, &ReceiptOp{
 		Kind: res.Kind, Path: rel, Mark: markName,
 		PreImage: target, PreSHA256: sha256Hex(target),
@@ -669,7 +729,7 @@ func reanchorSplice(cmd *Command, sub *substituter, tr *tree, o *InOp, res *OpRe
 	tr.write(rel, next)
 
 	postImage := append([]byte(newTail), joinLines(newLines)...)
-	res.Status = OpInjected
+	res.Status = OpReplaced
 	res.Reanchored = true
 	return res, &ReceiptOp{
 		Kind: res.Kind, Path: rel, Mark: res.Mark, Reanchored: true,
