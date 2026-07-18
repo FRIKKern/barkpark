@@ -1411,8 +1411,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       # An allowed ExitPlanMode IS the plan-approve fact: report it to the sink
       # AFTER the control_response is on the wire (stdio is serialized, so any
       # follow-up steer lands behind the CLI's own internal mode flip). Fact
-      # only — the mode POLICY lives in the Recorder, never here.
-      if (ask && ask.tool_name == "ExitPlanMode") and
+      # only — the mode POLICY lives in the Recorder, never here. `ask` is nil
+      # for an untracked request_id (a bare answer with no pending ask) — the
+      # strict-boolean `and` needs the explicit nil check, never truthiness.
+      if ask != nil and ask.tool_name == "ExitPlanMode" and
            (decision == :allow or match?({:allow, _}, decision)) do
         send(state.sink, {:claude_chat_plan_approved, request_id})
       end

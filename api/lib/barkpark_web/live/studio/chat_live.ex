@@ -3177,8 +3177,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     third segment until the user picks a side; the bypass arm
                     ceremony itself is reachable via /bypass (charter D48 — the
                     toggle never offers it). --%>
+              <%!-- Map.get, not strict access: test/fake provider capability
+                    maps may omit :mode_switch — an absent key means no toggle,
+                    never a render crash. --%>
               <div
-                :if={Runtime.capabilities(@provider).mode_switch}
+                :if={Map.get(Runtime.capabilities(@provider), :mode_switch, false)}
                 class="mode-toggle"
                 role="tablist"
                 aria-label="Session mode"
