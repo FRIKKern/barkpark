@@ -52,6 +52,27 @@ defmodule BarkparkWeb.SearchLocalTest do
     end
   end
 
+  test "?fields= projects each hit to the allowlist + system keys (finder-latency fix)", %{
+    conn: conn
+  } do
+    resp =
+      conn
+      |> get("/v1/data/local/search/#{@ds}", q: "localuniqalphagrid", fields: "title")
+
+    assert resp.status == 200
+    body = Jason.decode!(resp.resp_body)
+    assert body["count"] >= 1
+    [doc | _] = body["documents"]
+    assert doc["title"] == "LocalUniqAlphagrid Doc"
+    assert doc["_id"]
+    assert doc["_type"]
+    # Everything outside the allowlist + system keys is gone.
+    for k <- Map.keys(doc) do
+      assert k in ~w(_id _type _draft _publishedId _rev _createdAt _updatedAt title),
+             "unexpected key #{k} survived projection"
+    end
+  end
+
   test "missing q → 400 (matches the standard endpoint's missing_q shape)", %{conn: conn} do
     resp = conn |> get("/v1/data/local/search/#{@ds}")
     assert resp.status == 400

@@ -117,6 +117,10 @@ export async function browseSeed(): Promise<BrowseSeed> {
     types: env.docType,
     perspective: 'published',
     limit: '100',
+    // Same ?fields= allowlist the island requests per keystroke — the baked
+    // browse must not weigh megabytes (papers' body_html is 97% of a full hit).
+    fields:
+      'title,name,excerpt,description,bio,slug,content,body,blocks,publishedAt,status,author,category',
   })
   const url = `${new URL(env.apiUrl).origin}/v1/data/search/${encodeURIComponent(env.dataset)}?${params}`
   let initialData: unknown = null

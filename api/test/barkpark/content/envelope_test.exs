@@ -316,4 +316,46 @@ defmodule Barkpark.Content.EnvelopeTest do
     # Two "post" docs => the resolver is invoked once, not twice.
     assert Agent.get(agent, & &1) == ["post"]
   end
+
+  describe "project/2 — the ?fields= allowlist (finder-latency fix)" do
+    @rendered %{
+      "_id" => "p1",
+      "_type" => "paper",
+      "_draft" => false,
+      "_publishedId" => "p1",
+      "_rev" => "r1",
+      "_createdAt" => "2026-01-01T00:00:00Z",
+      "_updatedAt" => "2026-01-02T00:00:00Z",
+      "title" => "T",
+      "description" => "D",
+      "body_html" => String.duplicate("x", 40_000),
+      "tags" => [%{"tag" => "a"}]
+    }
+
+    test "keeps only the requested fields plus the system identity keys" do
+      [doc] = Envelope.project([@rendered], "title,description")
+
+      assert doc["title"] == "T"
+      assert doc["description"] == "D"
+      # The 37KB nobody asked for is GONE — the whole point.
+      refute Map.has_key?(doc, "body_html")
+      refute Map.has_key?(doc, "tags")
+      # System keys always ride along (addressable + cache-comparable hits).
+      for k <- ~w(_id _type _draft _publishedId _rev _createdAt _updatedAt) do
+        assert Map.has_key?(doc, k), "system key #{k} must survive projection"
+      end
+    end
+
+    test "nil / empty / whitespace-only field lists are a byte-identical no-op" do
+      assert Envelope.project([@rendered], nil) == [@rendered]
+      assert Envelope.project([@rendered], "") == [@rendered]
+      assert Envelope.project([@rendered], " , ,") == [@rendered]
+    end
+
+    test "unknown requested fields are simply absent — never an error" do
+      [doc] = Envelope.project([@rendered], "title,not_a_field")
+      assert doc["title"] == "T"
+      refute Map.has_key?(doc, "not_a_field")
+    end
+  end
 end

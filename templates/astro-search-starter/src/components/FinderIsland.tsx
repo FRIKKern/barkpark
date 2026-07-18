@@ -42,6 +42,13 @@ const ORIGIN = (() => {
 // The type allowlist the finder scopes to — D45 pins it to the single built type.
 const TYPES = DOC_TYPES.map((t) => t.type).join(',')
 const MAX_HITS = 100
+// The exact fields normalizeHit/derive* consume (find.ts) — requested via the
+// route's ?fields= allowlist so a hit ships ~1KB, not ~38KB. Live-caught: a
+// limit=100 keystroke returned 15MB of JSON (papers' body_html — 97% of the
+// payload — which the finder never reads); wall time seconds instead of ms.
+// System keys (_id/_type/_draft/…) always ride along server-side.
+const HIT_FIELDS =
+  'title,name,excerpt,description,bio,slug,content,body,blocks,publishedAt,status,author,category'
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify(data), {
@@ -102,6 +109,7 @@ async function handleFind(reqUrl: URL): Promise<Response> {
     types: TYPES,
     perspective: 'published',
     limit: String(MAX_HITS),
+    fields: HIT_FIELDS,
   })
   const headers: Record<string, string> = {}
   // Attribute the query to this browser session (anti-gaming key) — NO token.

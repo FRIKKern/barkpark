@@ -62,7 +62,9 @@ defmodule BarkparkWeb.SearchController do
 
         json(conn, %{
           documents:
-            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
+            docs
+            |> Envelope.render_many_by_type(schema_resolver(conn, dataset), caller_context)
+            |> Envelope.project(params["fields"]),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -134,7 +136,9 @@ defmodule BarkparkWeb.SearchController do
 
         json(conn, %{
           documents:
-            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
+            docs
+            |> Envelope.render_many_by_type(schema_resolver(conn, dataset), caller_context)
+            |> Envelope.project(params["fields"]),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
