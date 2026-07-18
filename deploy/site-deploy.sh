@@ -294,6 +294,53 @@ health_gate() { # 0 healthy, 1 not
   if [ -z "${CONTENT_REV:-}" ]; then
     log "HEALTH: no CONTENT_REV supplied — asserting bp-content-rev is non-empty only (nothing to cross-check against)"
   fi
+
+  # Finder integrity (only when the build ships a finder — a `search-seed.json`).
+  # Plain content templates have no seed and skip this entirely. Two regressions
+  # that the content-truth markers above CANNOT see, but that break the finder as
+  # badly as an empty corpus does, so the deploy must refuse to switch to them:
+  #
+  #   (a) a corrupt or wrong-shaped seed. The build bakes `initialSeed` as a
+  #       ranked `SeedDoc[]` (or null when there is nothing to seed); the island
+  #       turns it into its prefix index. A seed that is invalid JSON, or whose
+  #       `initialSeed` is neither an array nor null, is the #4020 class — the
+  #       finder throws on the first keystroke and blanks the page.
+  #   (b) an island that lost its error boundary. `getDerivedStateFromError` is
+  #       the React mechanism that turns a render throw into the graceful
+  #       fallback instead of a blank page (#4047). It survives minification (a
+  #       static method React looks up by name), so its ABSENCE means the safety
+  #       net regressed — ship that and any future render throw blanks the page.
+  local seed="$RELDIR/search-seed.json"
+  if [ -f "$seed" ]; then
+    local seed_shape
+    seed_shape="$(python3 - "$seed" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("BADJSON"); raise SystemExit
+s = d.get("initialSeed")
+print("OK" if (s is None or isinstance(s, list)) else "BADSHAPE")
+PY
+)"
+    if [ "$seed_shape" = BADJSON ]; then
+      HEALTH_DETAIL="search-seed.json is not valid JSON — the finder seed is corrupt"
+      log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+    fi
+    if [ "$seed_shape" = BADSHAPE ]; then
+      HEALTH_DETAIL="search-seed.json initialSeed is neither an array nor null — the finder would throw on the first keystroke (the #4020 class)"
+      log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+    fi
+    # shellcheck disable=SC2012  # first island bundle by name; release dir is ours
+    local island
+    island="$(ls "$RELDIR"/_astro/FinderIsland*.js 2>/dev/null | head -1)"
+    if [ -n "$island" ] && ! grep -q 'getDerivedStateFromError' "$island"; then
+      HEALTH_DETAIL="the finder island lost its error boundary — a render throw would blank the page (regressed #4047)"
+      log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+    fi
+    log "HEALTH: finder integrity OK — seed shape ${seed_shape:-<none>}, error boundary $([ -n "$island" ] && echo present || echo 'n/a (no island bundle)')"
+  fi
+
   HEALTH_DETAIL="200 + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc"
   log "HEALTH: $HEALTH_DETAIL (build $BUILD_ID)"
   return 0
@@ -415,6 +462,39 @@ if [ "$MODE" = selftest ]; then
   check "minified: first marker"             [ "$(meta_value "$MV" bp-build-id)" = x1 ]
   check "minified: middle marker"            [ "$(meta_value "$MV" bp-content-rev)" = x2 ]
   check "minified: last marker"              [ "$(meta_value "$MV" bp-doc-id)" = x3 ]
+
+  # -------------------------------------------------------------------------
+  # HEALTH finder integrity — the gate must refuse a finder build whose seed is
+  # corrupt (the #4020 class) or whose island lost its error boundary (#4047),
+  # while leaving plain (seedless) templates untouched. Drives the REAL
+  # health_gate against hand-built release dirs (needs the throwaway server).
+  # -------------------------------------------------------------------------
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    echo "[selftest] SKIP HEALTH finder integrity — needs python3 + curl"
+  else
+    echo "[selftest] HEALTH refuses a corrupt seed / a boundary-less island; spares seedless sites"
+    mkrel() { # <dir> <seed|none> <island-js|none>
+      local d="$1"; mkdir -p "$d/_astro"
+      printf '<meta name="bp-build-id" content="fb"><meta name="bp-content-rev" content="fr"><meta name="bp-doc-id" content="fd">' > "$d/index.html"
+      [ "$2" != none ] && printf '%s' "$2" > "$d/search-seed.json"
+      [ "$3" != none ] && printf '%s' "$3" > "$d/_astro/FinderIsland.abc123.js"
+      return 0
+    }
+    gate() { RELDIR="$1"; BUILD_ID=fb; CONTENT_REV=fr; health_gate >/dev/null 2>&1; }
+    not() { ! "$@"; }
+    ISL_OK='class E{static getDerivedStateFromError(e){return{error:e}}}'
+    ISL_BAD='var x=1;/* no boundary here */'
+    SEED_OK='{"initialData":null,"initialSeed":[{"id":"a","title":"A","slug":"a","type":"paper"}]}'
+    SEED_NULL='{"initialData":null,"initialSeed":null}'
+    SEED_OBJ='{"initialData":null,"initialSeed":{"index":{},"docs":[]}}'
+    SEED_BADJSON='not json {'
+    mkrel "$TD/h_good"    "$SEED_OK"      "$ISL_OK";  check "finder OK (array seed + boundary) passes"       gate "$TD/h_good"
+    mkrel "$TD/h_null"    "$SEED_NULL"    "$ISL_OK";  check "null seed (empty corpus) passes"                gate "$TD/h_null"
+    mkrel "$TD/h_obj"     "$SEED_OBJ"     "$ISL_OK";  check "object-shaped seed (the #4020 class) FAILS"     not gate "$TD/h_obj"
+    mkrel "$TD/h_badjson" "$SEED_BADJSON" "$ISL_OK";  check "corrupt-JSON seed FAILS"                        not gate "$TD/h_badjson"
+    mkrel "$TD/h_noeb"    "$SEED_OK"      "$ISL_BAD"; check "island without error boundary (#4047) FAILS"    not gate "$TD/h_noeb"
+    mkrel "$TD/h_plain"   none            none;       check "seedless plain template passes (finder n/a)"    gate "$TD/h_plain"
+  fi
 
   # -------------------------------------------------------------------------
   # ENGINE E2E — drive the REAL script as a subprocess against a fake npm/flock.
