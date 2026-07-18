@@ -109,7 +109,7 @@ defmodule BarkparkWeb.SearchChannel do
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = build_reply(seq, query, docs, count, meta, socket)
+        reply = build_reply(seq, query, docs, count, meta, socket, params["fields"])
 
         # Cache the latest query parameters so a downstream
         # `{:document_changed, _}` PubSub message can re-run the SAME search
@@ -121,7 +121,8 @@ defmodule BarkparkWeb.SearchChannel do
           assign(socket, :last_query, %{
             seq: seq,
             query: query,
-            opts_base: opts_base
+            opts_base: opts_base,
+            fields: params["fields"]
           })
 
         {:reply, {:ok, reply}, socket}
@@ -134,7 +135,7 @@ defmodule BarkparkWeb.SearchChannel do
       nil ->
         {:noreply, socket}
 
-      %{seq: seq, query: query, opts_base: opts_base} ->
+      %{seq: seq, query: query, opts_base: opts_base} = last ->
         opts = opts_base ++ scope_opts(socket)
 
         {docs, count, meta} =
@@ -143,7 +144,7 @@ defmodule BarkparkWeb.SearchChannel do
         push(
           socket,
           "results",
-          build_reply(seq, query, docs, count, meta, socket)
+          build_reply(seq, query, docs, count, meta, socket, last[:fields])
         )
 
         {:noreply, socket}
@@ -156,7 +157,7 @@ defmodule BarkparkWeb.SearchChannel do
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp build_reply(seq, query, docs, count, meta, socket) do
+  defp build_reply(seq, query, docs, count, meta, socket, fields) do
     caller_context = CallerContext.from_conn(socket)
 
     %{
@@ -164,7 +165,13 @@ defmodule BarkparkWeb.SearchChannel do
       # Multi-type live search => resolve each doc's schema by type so a
       # non-encrypted private/owner_only/readable_by field is dropped for a
       # non-authorized subscriber (the schema-free guard only catches ciphertext).
-      documents: Envelope.render_many_by_type(docs, schema_resolver(socket), caller_context),
+      # `fields` mirrors the HTTP route's ?fields= allowlist (Envelope.project —
+      # pure subtraction): a per-keystroke live frame must not ship ~37KB of
+      # body_html per hit the finder never reads.
+      documents:
+        docs
+        |> Envelope.render_many_by_type(schema_resolver(socket), caller_context)
+        |> Envelope.project(fields),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],

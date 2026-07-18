@@ -332,4 +332,42 @@ defmodule Barkpark.Content.Envelope do
   end
 
   defp to_iso8601(nil), do: nil
+
+  # ── field projection ──────────────────────────────────────────────────────
+  # The system identity/versioning keys every projected hit keeps regardless of
+  # the allowlist — a hit must stay addressable and cache-comparable.
+  @projection_always ~w(_id _type _draft _publishedId _rev _createdAt _updatedAt)
+
+  @doc """
+  Project rendered documents down to a caller-supplied comma-separated field
+  ALLOWLIST (plus the system keys) — pure SUBTRACTION after `render`, so it can
+  never expose anything the render itself did not.
+
+  Why: the finder surfaces request `limit=100` per keystroke, and a rendered
+  paper envelope carries ~37KB of `body_html` the finder never reads — 15MB of
+  JSON per keystroke (seconds of wall time; live-caught at 10s on a slow link).
+  `?fields=title,description,slug,…` cuts the same reply to ~100KB.
+
+  `nil`/empty/whitespace-only field lists are a no-op (the full envelopes), so
+  every existing caller is byte-identical without the param.
+  """
+  @spec project([map()], String.t() | nil) :: [map()]
+  def project(docs, fields) when is_binary(fields) do
+    keys =
+      fields
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    case keys do
+      [] ->
+        docs
+
+      keys ->
+        take = MapSet.new(keys ++ @projection_always)
+        Enum.map(docs, &Map.filter(&1, fn {k, _v} -> MapSet.member?(take, k) end))
+    end
+  end
+
+  def project(docs, _fields), do: docs
 end
