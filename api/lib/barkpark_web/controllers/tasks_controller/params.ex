@@ -134,11 +134,33 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # ─── Render / shape ─────────────────────────────────────────────────────
 
+  # axi-s1 (R1): parse the optional `?view=` request param into a render view.
+  # ONLY the exact string "brief" opts in; absent, unknown, or non-string
+  # values (Phoenix array/map params) all fall back to :full — the server
+  # default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  def parse_view("brief"), do: :brief
+  def parse_view(_), do: :full
+
   # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
   # Keep the field set tight enough that it still maps cleanly onto the
   # bd-compatible `show` JSON shape, broad enough that list callers don't
   # lose information (priority, assignee, content.kind for filtering).
-  def render_doc(%Document{} = doc) do
+  #
+  # axi-s1 (R1/R2): grows a `view` argument.
+  #
+  #   * `:full` (default) — the historical shape, with ONE de-dup: the
+  #     `content` echo drops its `"claim"` key. The top-level `claim` is the
+  #     single wire copy (every Go consumer + `TaskResolver.worker_of/1` read
+  #     top-level; `content.claim` had zero HTTP-envelope readers). DB storage
+  #     `content["claim"]` is untouched — it stays the write-path source of
+  #     truth; only the response echo is de-duplicated.
+  #   * `:brief` — the frozen AXI brief card (charter decision 3): no content
+  #     echo, no work digests, claim cut to {worker, epoch, now}. `child_count`
+  #     is NOT set here — list callers add it via `render_brief/2` from one
+  #     batched query.
+  def render_doc(doc, view \\ :full)
+
+  def render_doc(%Document{} = doc, :full) do
     content = doc.content || %{}
 
     %{
@@ -163,7 +185,7 @@ defmodule BarkparkWeb.TasksController.Params do
       # Phase A: surface content.papers at the top level the same way labels
       # are, so callers can read `doc.papers[]` without digging into content.
       papers: papers_of(content),
-      content: content,
+      content: Map.delete(content, "claim"),
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
@@ -171,6 +193,40 @@ defmodule BarkparkWeb.TasksController.Params do
     # single canonical owner (Barkpark.Tasks.Criteria). Key OMITTED when
     # criteria are absent/empty (wire §4: omit the segment, never "0/0").
     |> put_criteria_progress(content)
+  end
+
+  def render_doc(%Document{} = doc, :brief) do
+    content = doc.content || %{}
+    progress = Criteria.progress(content) || %{met: 0, total: 0}
+
+    %{
+      id: doc.id,
+      doc_id: doc.doc_id,
+      title: doc.title,
+      status: doc.status,
+      lifecycle_status: Map.get(content, "lifecycle_status"),
+      priority: Map.get(content, "priority"),
+      assignee: Map.get(content, "assignee"),
+      claim: brief_claim(Map.get(content, "claim")),
+      criteria_met: progress.met,
+      criteria_total: progress.total,
+      parent_id: Map.get(content, "parent_id"),
+      updated_at: doc.updated_at
+    }
+  end
+
+  # Brief claim = {worker, epoch, now} only — the identity + fencing + now-line
+  # a board or resuming agent needs. work_digest / work_field_digests /
+  # ts_iso / execution_policy are full-view (and `task get`) detail.
+  defp brief_claim(%{} = claim), do: Map.take(claim, ["worker", "epoch", "now"])
+  defp brief_claim(_), do: nil
+
+  # axi-s1: the frozen brief LIST card = brief render_doc + `child_count` from
+  # one batched grouped query (`batch_child_counts/2`) — never per-row.
+  def render_brief(%Document{} = doc, child_counts) do
+    doc
+    |> render_doc(:brief)
+    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
   end
 
   defp put_criteria_progress(map, content) do
@@ -218,6 +274,57 @@ defmodule BarkparkWeb.TasksController.Params do
       {d.id, {Map.get(out_counts, d.id, 0), Map.get(in_counts, d.id, 0)}}
     end)
   end
+
+  # axi-s1 (R1): batch child-count map for brief list cards, mirroring
+  # batch_edge_counts/1 — ONE grouped query over `type:"task"` rows keyed by
+  # the drafts-stripped `content->>'parent_id'` (the SAME prefix-agnostic
+  # match `maybe_filter_parent_id/2` / show's child rail use), so a list
+  # response never N+1s the children lookup.
+  #
+  # Tenancy: the CHILD rows are filtered by the caller's workspace/project
+  # scope — the same filters `show`'s child_tasks/2 applies. An unscoped copy
+  # would count another tenant's children under a shared parent slug: a
+  # cross-tenant existence-count leak.
+  #
+  # Returns %{drafts-stripped parent doc_id => child_count}; parents with no
+  # children are simply absent (callers default to 0).
+  def batch_child_counts(docs, scope \\ [])
+  def batch_child_counts([], _scope), do: %{}
+
+  def batch_child_counts(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(&1.doc_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where:
+            fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
+          group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+          select:
+            {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+             count(d.id)}
+        )
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  # The prefix-agnostic doc_id key the parent-edge queries group on — the
+  # Elixir-side twin of the SQL `regexp_replace(…, '^drafts\.', '')`.
+  def strip_draft_prefix(nil), do: nil
+
+  def strip_draft_prefix(doc_id) when is_binary(doc_id),
+    do: String.replace_prefix(doc_id, "drafts.", "")
 
   # Augment the base render_doc map with the three count fields the
   # `bp task` list/ready shapes carry (dependency_count + dependent_count
