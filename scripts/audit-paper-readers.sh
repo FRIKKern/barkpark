@@ -9,8 +9,10 @@ workspace="${BP_AUDIT_WORKSPACE:-default}"
 project="${BP_AUDIT_PROJECT:-default}"
 dataset="${BP_AUDIT_DATASET:-production}"
 bp_bin="${BP_AUDIT_BIN:-bp}"
+curl_connect_timeout="${BP_AUDIT_CONNECT_TIMEOUT:-5}"
+curl_max_time="${BP_AUDIT_MAX_TIME:-30}"
 
-for required in jq curl "$bp_bin"; do
+for required in jq curl go shasum "$bp_bin"; do
   command -v "$required" >/dev/null || {
     jq -n --arg tool "$required" '{ok:false,error:"missing required command",tool:$tool}'
     exit 2
@@ -22,6 +24,15 @@ trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 inventory="$tmp/inventory.json"
 results="$tmp/results.jsonl"
 touch "$results"
+
+if ! go build -o "$tmp/widthcheck" ./internal/pdrender/cmd/widthcheck; then
+  jq -n '{ok:false,error:"terminal width checker build failed"}'
+  exit 2
+fi
+if ! go build -o "$tmp/htmlcheck" ./internal/pdrender/cmd/htmlcheck; then
+  jq -n '{ok:false,error:"HTML Paper body checker build failed"}'
+  exit 2
+fi
 
 if ! "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
   search query '*' --type paper --perspective published --all -o json >"$inventory"; then
@@ -38,6 +49,9 @@ if ! jq -e '
 fi
 
 inventory_count="$(jq '.documents | length' "$inventory")"
+inventory_ids="$tmp/inventory-ids.json"
+jq -c '[.documents[]._id] | sort' "$inventory" >"$inventory_ids"
+inventory_digest="$(shasum -a 256 "$inventory_ids" | awk '{print $1}')"
 if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
   if ! [[ "$BP_AUDIT_EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || ((inventory_count != BP_AUDIT_EXPECTED_COUNT)); then
     jq -n \
@@ -61,9 +75,19 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     public_url="$base/w/$encoded_ws/p/$encoded_project/papers/$encoded"
   fi
 
-  gui_code="$(curl -L -sS -o "$tmp/gui" -w '%{http_code}' "$public_url")"
-  email_code="$(curl -L -sS -o "$tmp/email" -w '%{http_code}' "$public_url/email")"
-  source_code="$(curl -L -sS -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source")"
+  : >"$tmp/gui"
+  : >"$tmp/email"
+  : >"$tmp/source"
+  gui_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/gui" -w '%{http_code}' "$public_url" || true)"
+  email_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/email" -w '%{http_code}' "$public_url/email" || true)"
+  source_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source" || true)"
+
+  [[ "$gui_code" =~ ^[0-9]{3}$ ]] || gui_code=0
+  [[ "$email_code" =~ ^[0-9]{3}$ ]] || email_code=0
+  [[ "$source_code" =~ ^[0-9]{3}$ ]] || source_code=0
+  [[ "$gui_code" == "000" ]] && gui_code=0
+  [[ "$email_code" == "000" ]] && email_code=0
+  [[ "$source_code" == "000" ]] && source_code=0
 
   source_ok=false
   source_kind="unavailable"
@@ -76,13 +100,35 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     fi
   fi
 
-  cli_ok=false
+  cli_reader_ok=false
   "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && cli_ok=true
+    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && \
+    [[ -s "$tmp/cli" ]] && cli_reader_ok=true
+
+  tui_metrics="$("$tmp/widthcheck" "$tmp/cli" 80)"
+  tui_max_display_width="$(jq -r '.max_display_width' <<<"$tui_metrics")"
+  tui_overflow_lines="$(jq -r '.overflow_lines' <<<"$tui_metrics")"
+  cli_ok=false
+  if [[ "$cli_reader_ok" == true && "$tui_overflow_lines" == "0" ]]; then
+    cli_ok=true
+  fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
+  gui_content='{"body_found":false,"meaningful":false,"visible_chars":0,"visible_words":0,"heading_count":0,"text_sha256":"","link_count":0,"invalid_links":0,"links_valid":false}'
+  email_content="$gui_content"
+  if [[ "$gui_code" == "200" ]]; then
+    checked_gui_content="$("$tmp/htmlcheck" gui "$tmp/gui" 2>/dev/null)" && gui_content="$checked_gui_content"
+  fi
+  if [[ "$email_code" == "200" ]]; then
+    checked_email_content="$("$tmp/htmlcheck" email "$tmp/email" 2>/dev/null)" && email_content="$checked_email_content"
+  fi
+  gui_content_ok="$(jq -r '.body_found and .meaningful' <<<"$gui_content")"
+  email_content_ok="$(jq -r '.body_found and .meaningful' <<<"$email_content")"
+  email_links_ok="$(jq -r '.links_valid' <<<"$email_content")"
   ok=false
-  if [[ "$gui_code" == "200" && "$email_code" == "200" && "$source_ok" == true && "$cli_ok" == true ]]; then
+  if [[ "$gui_code" == "200" && "$email_code" == "200" && \
+    "$gui_content_ok" == true && "$email_content_ok" == true && "$email_links_ok" == true && \
+    "$source_ok" == true && "$cli_ok" == true ]]; then
     ok=true
   fi
 
@@ -95,21 +141,29 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     --argjson email_bytes "$email_bytes" \
     --argjson source_ok "$source_ok" \
     --argjson cli_ok "$cli_ok" \
+    --argjson gui_content "$gui_content" \
+    --argjson email_content "$email_content" \
+    --argjson tui_max_display_width "$tui_max_display_width" \
+    --argjson tui_overflow_lines "$tui_overflow_lines" \
     --argjson ok "$ok" \
-    '{id:$id,ok:$ok,gui:{status:$gui_code},email:{status:$email_code,bytes:$email_bytes},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok}}' \
+    '{id:$id,ok:$ok,gui:{status:$gui_code,content:$gui_content},email:{status:$email_code,bytes:$email_bytes,content:$email_content},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
     >>"$results"
 done
 
-jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" '
+jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" \
+  --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" '
   {
     ok: (length == $inventory and all(.[]; .ok)),
     server: $server,
     base_url: $base,
     inventory: $inventory,
+    inventory_ids: $inventory_ids[0],
+    inventory_digest: $inventory_digest,
     audited: length,
     passed: map(select(.ok)) | length,
     failed: map(select(.ok | not)) | length,
-    failures: map(select(.ok | not))
+    failures: map(select(.ok | not)),
+    results: .
   }
 ' "$results"
 

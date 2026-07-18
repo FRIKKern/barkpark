@@ -63,3 +63,26 @@ func TestDisplayEntitiesDecodeOnceWithoutChangingLiteralCode(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderDocHardBoundsRealCorpusParagraphAfterWordWrap(t *testing.T) {
+	reg := testRegistry()
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+	text := "Ledger evidence (the strongest signal class): the 294-paper census behind the wishlist counts 23 stat uses, 207 hand-typed tables, and ZERO video blocks - absence-by-missing-block, not absence of appetite. The broken-block drift is cited per charter D14 in its only citable form: the storage-path COALESCE census - coalesce(content->'blocks', content->'body'->'blocks') over published papers -> 77 placeholders (bulleted-list 27, bullet_list 22, bulleted_list 15, quote 8, numbered_list 3, bulletList 2), triple-confirmed; a naive single-path query undercounts to 51 and is not citable."
+	block := Block{Type: "paragraph", Attrs: map[string]any{
+		"type":    "paragraph",
+		"content": []any{map[string]any{"type": "text", "value": text}},
+	}}
+
+	got := reg.RenderDoc([]Block{block}, ctx)
+	for i, line := range strings.Split(got, "\n") {
+		if width := ansi.StringWidth(line); width > ctx.Width {
+			t.Errorf("line %d width %d > %d: %q", i, width, ctx.Width, ansi.Strip(line))
+		}
+	}
+	plain := ansi.Strip(got)
+	for _, token := range []string{"Ledger evidence", "storage-path", "triple-confirmed", "not citable"} {
+		if !strings.Contains(plain, token) {
+			t.Errorf("hard boundary lost authored token %q in %q", token, plain)
+		}
+	}
+}

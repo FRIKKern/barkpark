@@ -137,20 +137,117 @@ defmodule Barkpark.Content.Papers do
     rendered != html
   end
 
-  # Semantic validity is deliberately not a byte/length floor: intentionally
-  # short prose passes. Tags alone do not; visible text or accessible media
-  # naming must survive after markup is removed.
+  # Semantic validity mirrors the reader audit: hidden nodes and non-image
+  # accessibility metadata are not authored visible content; visible text and
+  # image alt text are. Numeric entities are decoded, and common named entities
+  # are normalized before applying the shared letter/number/symbol predicate.
   defp semantic_html?(html) do
+    visible_html = strip_hidden_html(html)
+
     text =
-      html
+      visible_html
+      |> then(
+        &Regex.replace(
+          ~r/<img\b[^>]*\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/i,
+          &1,
+          fn _full, double, single, bare -> " " <> (double <> single <> bare) <> " " end
+        )
+      )
       |> String.replace(~r/<[^>]*>/s, " ")
-      |> String.replace(~r/&(?:nbsp|#160|#xA0);/i, " ")
+      |> decode_visible_entities()
       |> String.trim()
 
-    accessible_name =
-      Regex.match?(~r/\b(?:alt|aria-label|title)\s*=\s*(?:"[^"]+"|'[^']+')/i, html)
+    Hollow.semantic_text?(text)
+  end
 
-    text != "" or accessible_name
+  defp strip_hidden_html(html) do
+    {_stack, visible} =
+      ~r/<[^>]*>|[^<]+/s
+      |> Regex.scan(html)
+      |> List.flatten()
+      |> Enum.reduce({[], []}, &strip_hidden_token/2)
+
+    visible
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+  end
+
+  @html_void_elements ~w(area base br col embed hr img input link meta param source track wbr)
+
+  defp strip_hidden_token(token, {stack, visible}) do
+    cond do
+      closing_html_tag?(token) ->
+        [_, tag] = Regex.run(~r/^<\s*\/\s*([a-z][a-z0-9:-]*)[^>]*>$/is, token)
+        hidden? = hidden_stack?(stack)
+        next_stack = close_html_tag(stack, String.downcase(tag))
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      opening_html_tag?(token) ->
+        [_, tag, attrs] = Regex.run(~r/^<\s*([a-z][a-z0-9:-]*)\b(.*)>$/is, token)
+        tag = String.downcase(tag)
+        hidden? = hidden_stack?(stack) or hidden_html_attrs?(attrs)
+        void? = tag in @html_void_elements or Regex.match?(~r/\/\s*>$/, token)
+        next_stack = if void?, do: stack, else: [{tag, hidden?} | stack]
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      hidden_stack?(stack) ->
+        {stack, visible}
+
+      true ->
+        {stack, [token | visible]}
+    end
+  end
+
+  defp closing_html_tag?(token),
+    do: Regex.match?(~r/^<\s*\/\s*[a-z][a-z0-9:-]*[^>]*>$/is, token)
+
+  defp opening_html_tag?(token),
+    do: Regex.match?(~r/^<\s*[a-z][a-z0-9:-]*\b.*>$/is, token)
+
+  defp hidden_stack?([{_tag, hidden?} | _]), do: hidden?
+  defp hidden_stack?([]), do: false
+
+  defp hidden_html_attrs?(attrs) do
+    Regex.match?(~r/(?:^|\s)hidden(?:\s|=|$)/i, attrs) or
+      Regex.match?(~r/(?:^|\s)aria-hidden\s*=\s*(?:"true"|'true'|true)(?:\s|$)/i, attrs)
+  end
+
+  defp close_html_tag(stack, tag) do
+    case Enum.split_while(stack, fn {open_tag, _hidden?} -> open_tag != tag end) do
+      {_unclosed, []} -> stack
+      {_unclosed, [_matched | rest]} -> rest
+    end
+  end
+
+  defp decode_visible_entities(text) do
+    text
+    |> then(
+      &Regex.replace(~r/&#x([0-9a-f]+);?/i, &1, fn _full, hex ->
+        html_codepoint(hex, 16)
+      end)
+    )
+    |> then(&Regex.replace(~r/&#([0-9]+);?/, &1, fn _full, dec -> html_codepoint(dec, 10) end))
+    |> String.replace(~r/&(?:amp|lt|gt|quot|apos);/i, fn entity ->
+      case String.downcase(entity) do
+        "&amp;" -> "&"
+        "&lt;" -> "<"
+        "&gt;" -> ">"
+        "&quot;" -> "\""
+        "&apos;" -> "'"
+      end
+    end)
+    |> String.replace(~r/&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|lrm|rlm|shy);/i, " ")
+    |> String.replace(~r/&(?:mdash|ndash|hellip|middot|bull|laquo|raquo);/i, " — ")
+    # Remaining named entities represent a visible authored glyph. A semantic
+    # marker preserves that fact without pretending to implement an HTML parser.
+    |> String.replace(~r/&[a-z][a-z0-9]+;/i, " ∑ ")
+  end
+
+  defp html_codepoint(digits, base) do
+    case Integer.parse(digits, base) do
+      {cp, ""} when cp in 0..0xD7FF or cp in 0xE000..0x10FFFF -> <<cp::utf8>>
+      _ -> ""
+    end
   end
 
   defp reader_schema_scope(paper, scope_opts) do

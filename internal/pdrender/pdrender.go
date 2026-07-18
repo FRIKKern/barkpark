@@ -220,6 +220,23 @@ func boundDisplayLines(lines []string, width int) []string {
 	return out
 }
 
+func hardBoundDisplayLines(lines []string, width int) []string {
+	width = clampWidth(width)
+	out := make([]string, 0, len(lines))
+	for _, line := range boundDisplayLines(lines, width) {
+		if ansi.StringWidth(line) > width {
+			// ansi.Wrap v0.8 can leave punctuation-heavy prose one or two cells
+			// over its limit. At the final document boundary there is no parent
+			// layout left to degrade, so a grapheme-aware hard wrap is safe and
+			// preserves every authored byte plus ANSI/OSC sequence.
+			out = append(out, strings.Split(ansi.Hardwrap(line, width, false), "\n")...)
+		} else {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 // RenderDoc stacks every top-level block with one blank line between them,
 // joined into a single string via lipgloss.JoinVertical. A shared figure
 // counter is seeded here so "Figure N." numbering is document-global.
@@ -248,7 +265,8 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 		parts = append(parts, r.Render(blocks[i], ctx)...)
 		i++
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return strings.Join(hardBoundDisplayLines(strings.Split(joined, "\n"), ctx.Width), "\n")
 }
 
 // Inline is a thin pass-through so callers (and the demo) can render a run of

@@ -149,6 +149,7 @@ defmodule BarkparkWeb.BulldocsLive do
       socket
       |> assign(:slug, slug)
       |> assign(:found, not is_nil(paper))
+      |> assign(:source_error, nil)
       |> assign(:rev, paper_rev(paper))
       # `:article?` is the per-doc style marker (`content["style"] == "article"`).
       # The root `:paper` layout reads it to switch on article page chrome; the
@@ -827,15 +828,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # ── whole-HTML frame (Wave 3 fallback) ────────────────────────────────────
 
-  def handle_info({:paper_updated, %{html: html} = msg}, socket) do
-    # Re-assign only. No remount, no navigate — LiveView diffs the DOM.
-    {:noreply,
-     socket
-     |> assign(:html, html)
-     |> assign(:found, true)
-     |> assign(:block_mode, false)
-     |> assign(:rev, msg[:rev] || socket.assigns.rev)}
-  end
+  def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
 
   # Live-plan push: a task moved in this paper's tenant → re-resolve the
   # embedded task blocks (resolve-at-read) and re-stream. Only reacts to
@@ -899,6 +892,11 @@ defmodule BarkparkWeb.BulldocsLive do
     case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset]) do
       nil ->
         socket
+        |> stream(:blocks, [], reset: true)
+        |> assign(:html, "")
+        |> assign(:block_mode, false)
+        |> assign(:found, false)
+        |> assign(:source_error, nil)
 
       paper ->
         article? = paper_article?(paper)
@@ -910,8 +908,8 @@ defmodule BarkparkWeb.BulldocsLive do
             socket.assigns[:reader_scope]
           )
 
-        case source_blocks(reader_source) do
-          blocks when is_list(blocks) ->
+        case reader_source do
+          {:blocks, blocks} ->
             resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
 
             socket
@@ -928,15 +926,27 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:article?, article?)
             |> assign(:block_mode, true)
             |> assign(:found, true)
+            |> assign(:source_error, nil)
 
-          _ ->
+          {:html, html} ->
             # Refetched a paper that has reverted to HTML-only — fall back.
             socket
-            |> assign(:html, source_html(reader_source))
+            |> assign(:html, html)
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
             |> assign(:block_mode, false)
             |> assign(:found, true)
+            |> assign(:source_error, nil)
+
+          {:error, reason} ->
+            socket
+            |> stream(:blocks, [], reset: true)
+            |> assign(:html, "")
+            |> assign(:rev, paper_rev(paper))
+            |> assign(:article?, article?)
+            |> assign(:block_mode, false)
+            |> assign(:found, false)
+            |> assign(:source_error, reason)
         end
     end
   end
@@ -1026,6 +1036,10 @@ defmodule BarkparkWeb.BulldocsLive do
       </div>
 
       <%= cond do %>
+        <% @source_error -> %>
+          <article id="paper-body" data-rev={@rev} data-source-error={@source_error}>
+            <p id="paper-invalid">This paper has no safe, unambiguous reader source.</p>
+          </article>
         <% not @found -> %>
           <article id="paper-body" data-rev={@rev}>
             <p id="paper-empty">No paper saved yet for <code>{@slug}</code>.</p>

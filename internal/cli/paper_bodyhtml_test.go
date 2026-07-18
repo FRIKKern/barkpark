@@ -127,6 +127,20 @@ func TestWrapPaperPlainTextResolvedWidths(t *testing.T) {
 	}
 }
 
+func TestWrapPaperPlainTextHardBoundsPunctuationHeavyLegacyLine(t *testing.T) {
+	text := "One follow-up commit on stw6-deployrunner-reattach's -r branch: added .bp-site-deploy-runs/ to .gitignore. The DeployRunner run-state dir defaults under the repo root so init/1 re-attaches across a restart — but on a prod box the repo root IS the deploy checkout's git tree, and git pull is the deploy. Without the ignore, every run leaves untracked manifests/status/logs (and, transiently, 0600 token env files) littering that tree. Not a correctness bug; a hygiene/safety tidy on the owning slice. Slice-2 gate re-run green (42/0) after the change; the -r branch is pushed."
+	got := wrapPaperPlainText(text, 80)
+	for i, line := range strings.Split(got, "\n") {
+		if width := ansi.StringWidth(line); width > 80 {
+			t.Errorf("line %d width %d > 80: %q", i, width, line)
+		}
+	}
+	plain := strings.ReplaceAll(got, "\n", " ")
+	if !strings.Contains(plain, "Slice-2 gate re-run green (42/0)") || !strings.HasSuffix(plain, "branch is pushed.") {
+		t.Errorf("legacy hard boundary lost authored text: %q", got)
+	}
+}
+
 // A real-shaped body_html fragment must render without run-on lines and without
 // stray tags surviving into the output.
 func TestHTMLToPlainTextNoResidualTags(t *testing.T) {

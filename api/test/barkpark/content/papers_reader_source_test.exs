@@ -100,7 +100,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     assert {:blocks, ^labeled} = Content.Papers.reader_source(paper, "test", [])
   end
 
-  test "HTML-only source is sanitized at the read boundary and conflicting mixed provenance fails" do
+  test "HTML-only source is sanitized without changing safe bytes and conflicting mixed provenance fails" do
     html = "<h1>Exact &amp; authored</h1>\n<p>two spaces  stay</p>"
 
     legacy = %Document{
@@ -113,22 +113,19 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
 
     assert {:html, ^html} = Content.Papers.reader_source(legacy, "test", [])
 
-    poisoned = %{
+    poisoned = %Document{
       legacy
       | doc_id: "poisoned-legacy",
         content: %{
           "body_html" =>
-            ~s|<h1>Still meaningful</h1><script>steal()</script><img src="x" onerror="steal()">|
+            ~s|<form action="https://evil.example"><input name="token"></form><script>alert(1)</script><p>Readable</p>|
         }
     }
 
-    assert {:html, sanitized} = Content.Papers.reader_source(poisoned, "test", [])
-    assert sanitized =~ "<h1>Still meaningful</h1>"
-    assert sanitized =~ ~s|<img src="x">|
-    refute sanitized =~ "<script"
-    refute sanitized =~ "onerror"
+    assert {:html, "<p>Readable</p>"} =
+             Content.Papers.reader_source(poisoned, "test", [])
 
-    script_only = %{
+    script_only = %Document{
       legacy
       | doc_id: "script-only-legacy",
         content: %{"body_html" => "<script>steal()</script>"}
@@ -154,6 +151,54 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     }
 
     assert {:error, :ambiguous_source} = Content.Papers.reader_source(mixed, "test", [])
+  end
+
+  test "reader source rejects punctuation-only block and HTML bodies" do
+    punctuation_blocks = [
+      %{
+        "id" => "body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => " / — "}]
+      }
+    ]
+
+    block_paper = %Document{
+      doc_id: "punctuation-blocks",
+      dataset: "test",
+      type: "paper",
+      title: "Punctuation blocks",
+      content: %{"blocks" => punctuation_blocks}
+    }
+
+    html_paper = %Document{
+      doc_id: "punctuation-html",
+      dataset: "test",
+      type: "paper",
+      title: "Punctuation HTML",
+      content: %{"body_html" => ~s(<p> / &mdash; </p><img alt="/">)}
+    }
+
+    assert {:error, :semantic_empty} = Content.Papers.reader_source(block_paper, "test", [])
+    assert {:error, :semantic_empty} = Content.Papers.reader_source(html_paper, "test", [])
+
+    for body <- [
+          ~s(<p hidden>Invisible prose</p>),
+          ~s(<p aria-hidden="true">Invisible prose</p>),
+          ~s(<div hidden><div>nested</div><p>still hidden</p></div>),
+          ~s(<span aria-label="Metadata only"></span>),
+          ~s(<span title="Metadata only"></span>),
+          ~s(<img hidden alt="Invisible diagram">),
+          ~s(<img aria-hidden="true" alt="Invisible diagram">),
+          ~s(<p>&mdash;</p>)
+        ] do
+      hidden = %Document{html_paper | doc_id: "hidden", content: %{"body_html" => body}}
+      assert {:error, :semantic_empty} = Content.Papers.reader_source(hidden, "test", [])
+    end
+
+    for body <- [~s(<p>&#x49;</p>), ~s(<p>&copy;</p>), ~s(<img alt="Diagram">)] do
+      visible = %Document{html_paper | doc_id: "visible", content: %{"body_html" => body}}
+      assert {:html, ^body} = Content.Papers.reader_source(visible, "test", [])
+    end
   end
 
   test "first BlockOp against HTML-only source fails closed without changing bytes or revision" do

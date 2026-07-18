@@ -4,7 +4,7 @@ defmodule BarkparkWeb.BulldocsEmailHTML do
   alias Barkpark.PortableDoc.Render
 
   @absolute_scheme ~r/^(?:https?|mailto|tel):/i
-  @href ~r/\s+href=(["'])(.*?)\1/i
+  @href ~r/\s+href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
   @unsafe_link_sentinel "https://email.invalid/.barkpark-unsafe-link"
 
   def authored_heading?(value), do: contains_heading?(value)
@@ -58,10 +58,12 @@ defmodule BarkparkWeb.BulldocsEmailHTML do
   end
 
   defp absolutize_links(html, trusted_paper_uri) do
-    Regex.replace(@href, html, fn _match, quote, encoded_href ->
+    Regex.replace(@href, html, fn _match, double, single, bare ->
+      encoded_href = double <> single <> bare
+
       case email_href(encoded_href, trusted_paper_uri) do
         nil -> ""
-        href -> ~s( href=#{quote}#{Render.escape_attr(href)}#{quote})
+        href -> ~s( href="#{Render.escape_attr(href)}")
       end
     end)
   end

@@ -1287,7 +1287,13 @@ func wrapPaperPlainText(text string, width int) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if ansi.StringWidth(line) > width {
-			lines[i] = ansi.Wrap(line, width, " ")
+			wrapped := strings.Split(ansi.Wrap(line, width, " "), "\n")
+			for j, segment := range wrapped {
+				if ansi.StringWidth(segment) > width {
+					wrapped[j] = ansi.Hardwrap(segment, width, false)
+				}
+			}
+			lines[i] = strings.Join(wrapped, "\n")
 		}
 	}
 	return strings.Join(lines, "\n")

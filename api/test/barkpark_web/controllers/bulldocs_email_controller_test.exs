@@ -250,4 +250,17 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     refute rendered =~ "evil.example"
     assert rendered =~ "<a>Unsafe</a>"
   end
+
+  test "email finalizer normalizes sanitizer-valid spaced and bare href grammar", %{} do
+    html =
+      ~s(<!doctype html><html><head><meta charset="utf-8"></head><body><a href = "./quoted">Quoted</a><a href=./bare>Bare</a><a href = "//evil.example/x">Unsafe</a></body></html>)
+
+    trusted_reader = URI.parse("https://trusted.example/papers/current")
+    rendered = BarkparkWeb.BulldocsEmailHTML.finalize(html, "Links", trusted_reader)
+
+    assert rendered =~ ~s(href="https://trusted.example/papers/quoted")
+    assert rendered =~ ~s(href="https://trusted.example/papers/bare")
+    refute rendered =~ "evil.example"
+    assert rendered =~ "<a>Unsafe</a>"
+  end
 end
