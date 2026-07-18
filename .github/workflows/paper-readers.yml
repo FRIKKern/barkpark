@@ -1,0 +1,55 @@
+name: paper-readers
+
+# Production can add or republish Papers without touching this repository, so
+# pull-request tests alone cannot protect the reader contract. This standing
+# gate inventories the public production corpus from a clean runner, proves
+# every GUI/email/source/CLI/TUI edge, and retains its JSON witness even when a
+# single Paper fails.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-readers-production
+  cancel-in-progress: false
+
+jobs:
+  full-corpus:
+    name: Full production Paper reader audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build clean Barkpark CLI
+        run: go build -o "$RUNNER_TEMP/bp" ./cmd/barkpark
+
+      - name: Audit every published Paper
+        env:
+          BP_AUDIT_BIN: ${{ runner.temp }}/bp
+          BP_AUDIT_SERVER: https://guerrilla.barkpark.cloud
+          BP_AUDIT_BASE_URL: https://guerrilla.barkpark.cloud
+          BP_AUDIT_WORKSPACE: default
+          BP_AUDIT_PROJECT: default
+          BP_AUDIT_DATASET: production
+        run: |
+          set -o pipefail
+          scripts/audit-paper-readers.sh | tee "$RUNNER_TEMP/paper-reader-audit.json"
+
+      - name: Upload exact reader evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-reader-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/paper-reader-audit.json
+          if-no-files-found: warn
+          retention-days: 30
