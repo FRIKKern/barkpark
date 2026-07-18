@@ -33,6 +33,21 @@ defmodule Barkpark.Content.Document do
     field :author_text, :string, read_after_writes: true
     field :category_text, :string, read_after_writes: true
 
+    # DB-GENERATED STORED jsonb mirroring the doc's `content.tags` array for the
+    # ranking ORDER BY's weighted-tag boost (search-latency slice d, migration
+    # 20260718100000). It is the VERBATIM `CASE WHEN jsonb_typeof(content->'tags')
+    # = 'array' THEN content->'tags' ELSE '[]'::jsonb END` the boost subquery used
+    # to evaluate inline — materializing it lets the per-candidate boost read a
+    # KB-sized array instead of DETOASTing the ~8.5KB–88KB `content` per matched
+    # row (prod: 2,126 → 0 SubPlan buffers, 47 → 1.6 ms).
+    #
+    # `virtual: true` — like `search_vector` (also GENERATED STORED), it is a real
+    # DB column that Ecto NEVER SELECTs into the struct: it is read ONLY through
+    # the ORDER BY `fragment("?.tags_meta", d)`. So it ships zero payload bytes and
+    # cannot trip the struct-equality parity that forced `read_after_writes` on the
+    # scalar facet columns above.
+    field :tags_meta, :any, virtual: true
+
     # Row/ownership ACL (Phase 4, core-auth). The user who owns this row on an
     # `owner_scoped: true` type. NULL = unowned (visible to everyone). Stamped on
     # the write path ONLY for owner_scoped types from the acting user's id; a
