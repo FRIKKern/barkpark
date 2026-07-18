@@ -22,6 +22,7 @@ done
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/bp-paper-audit.XXXXXX")"
 trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 inventory="$tmp/inventory.json"
+inventory_stderr="$tmp/inventory.stderr"
 results="$tmp/results.jsonl"
 touch "$results"
 
@@ -34,9 +35,18 @@ if ! go build -o "$tmp/htmlcheck" ./internal/pdrender/cmd/htmlcheck; then
   exit 2
 fi
 
-if ! "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-  search query '*' --type paper --perspective published --all -o json >"$inventory"; then
-  jq -n --arg server "$server" '{ok:false,error:"paper inventory query failed",server:$server}'
+# The flat query route is the anonymous published-read contract for the Default
+# workspace/project. The equivalent explicitly-scoped route intentionally
+# requires membership, so forcing -w default -p default makes a clean runner
+# look private even though every Paper reader below is public.
+inventory_scope=(-s "$server" -d "$dataset")
+if [[ "$workspace" != "default" || "$project" != "default" ]]; then
+  inventory_scope+=(-w "$workspace" -p "$project")
+fi
+if ! "$bp_bin" "${inventory_scope[@]}" search query '*' --type paper \
+  --perspective published --all -o json >"$inventory" 2>"$inventory_stderr"; then
+  jq -n --arg server "$server" --rawfile detail "$inventory_stderr" \
+    '{ok:false,error:"paper inventory query failed",server:$server,detail:($detail|gsub("[[:space:]]+$"; ""))}'
   exit 2
 fi
 
