@@ -272,6 +272,17 @@ defmodule Barkpark.StudioChat.Recorder do
       owner_workspace_id: owner_workspace_id,
       agent_state: nil,
       agent_state_timer: nil,
+      # The blocked-truth guard (charter D56h). request_ids of asks THIS
+      # Recorder surfaced that are still pending: set on the honest-ask paths
+      # ({:claude_chat_permission, ask} + the codex :approval_requested
+      # branch), cleared at turn boundaries (init/result — a new or settled
+      # turn is past the ask) and re-checked against the store's
+      # pending_approvals counter ONLY when an activity-derived :working
+      # would overwrite :needs_you (resolution happens outside this process —
+      # Studio and /v1/chat both funnel through update_approval_status). A
+      # non-empty set is what keeps a 2ms-late assistant tool_use frame from
+      # clobbering blocked while the ask is genuinely pending.
+      pending_asks: MapSet.new(),
       runtime_text: "",
       # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
       # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
@@ -416,7 +427,9 @@ defmodule Barkpark.StudioChat.Recorder do
     state = flush_thinking(state)
     record_result(state.session_id, ev)
     broadcast(state, msg)
-    {:noreply, state |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+    # The turn settled — nothing can still be waiting on an ask from it (D56h).
+    {:noreply,
+     state |> clear_pending_asks() |> publish_activity(%{state: :idle, line: nil}) |> touch()}
   end
 
   # The extended-thinking pulse (charter D41). The wire never carries thinking
@@ -443,12 +456,15 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       ) do
     StudioChat.update_status(state.session_id, "working")
-    # A new turn begins: forget the previous turn's todo row (D39) and drop any
-    # unflushed thinking count from a prior turn (D41) — both are per-turn state.
+    # A new turn begins: forget the previous turn's todo row (D39), drop any
+    # unflushed thinking count from a prior turn (D41), and clear tracked
+    # pending asks (D56h — a fresh turn means the CLI is past them; the init's
+    # own :working below is the honest turn-boundary flip, never a clobber).
     state = %{
       maybe_capture_slash_commands(state, ev)
       | todo_tool_use_id: nil,
-        pending_thinking: nil
+        pending_thinking: nil,
+        pending_asks: MapSet.new()
     }
 
     broadcast(state, msg)
@@ -593,6 +609,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
       {:noreply,
        state
+       |> track_pending_ask(ask)
        |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
        |> touch()}
     end
@@ -932,7 +949,10 @@ defmodule Barkpark.StudioChat.Recorder do
 
       :turn_started ->
         StudioChat.update_status(state.session_id, "working")
-        %{state | runtime_text: ""} |> publish_activity(%{state: :working, line: "thinking…"})
+
+        %{state | runtime_text: ""}
+        |> clear_pending_asks()
+        |> publish_activity(%{state: :working, line: "thinking…"})
 
       :text_delta ->
         %{state | runtime_text: state.runtime_text <> runtime_delta(event)}
@@ -942,12 +962,18 @@ defmodule Barkpark.StudioChat.Recorder do
         ask = runtime_approval(event)
         persist_approval_ask(state.session_id, ask)
         broadcast(state, {:claude_chat_permission, ask})
-        publish_activity(state, %{state: :needs_you, line: needs_you_line(ask.tool_name)})
+
+        state
+        |> track_pending_ask(ask)
+        |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
 
       :turn_completed ->
         persist_runtime_text(state)
         StudioChat.update_status(state.session_id, "active")
-        %{state | runtime_text: ""} |> publish_activity(%{state: :idle, line: nil})
+
+        %{state | runtime_text: ""}
+        |> clear_pending_asks()
+        |> publish_activity(%{state: :idle, line: nil})
 
       :control_completed ->
         state
@@ -960,7 +986,10 @@ defmodule Barkpark.StudioChat.Recorder do
       kind when kind in [:error, :process_failed, :protocol_error] ->
         persist_runtime_text(state)
         StudioChat.update_status(state.session_id, "exited")
-        publish_activity(state, %{state: :offline, line: nil})
+        # Clear AFTER the offline publish: the D39 prior-state mapping must
+        # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
+        # the offline rule untouched).
+        state |> publish_activity(%{state: :offline, line: nil}) |> clear_pending_asks()
 
       _ ->
         state
@@ -1408,6 +1437,8 @@ defmodule Barkpark.StudioChat.Recorder do
   # AFTER the change-detect compare; state stores the UNSTAMPED map, else the
   # extra key would defeat the change-only gate and re-broadcast spuriously.
   defp publish_activity(state, activity) do
+    {state, activity} = enforce_blocked_truth(state, activity)
+
     if activity != state.activity and activity != nil do
       state = persist_agent_state(state, activity)
 
@@ -1421,6 +1452,59 @@ defmodule Barkpark.StudioChat.Recorder do
       %{state | activity: activity}
     else
       state
+    end
+  end
+
+  # ── blocked-truth guard (charter D56h) ──────────────────────────────────────
+
+  # An activity-derived :working must NEVER overwrite :needs_you while any ask
+  # this Recorder surfaced is still pending — the live clobber was a trailing
+  # assistant tool_use frame re-deriving :working 1.3–2.7ms after the ask fired,
+  # leaving "blocked" observable for milliseconds only. Resolution happens
+  # OUTSIDE this process (Studio's resolve_permission and the /v1/chat approval
+  # route both funnel through `StudioChat.update_approval_status/3`), so when a
+  # :working transition contests a held :needs_you we re-read the store's
+  # denormalised `pending_approvals` counter: still pending → suppress (return
+  # the CURRENT activity, so the change-only gate below no-ops — zero writes,
+  # zero broadcasts); resolved/canceled → drop the tracked set and let the flip
+  # through (the same pending==0 truth `unblock_if_resolved/1` keys on, so a
+  # second ask keeps blocked until the LAST resolves). The store read fires
+  # ONLY on that contested transition — never per delta in the steady state —
+  # and turn boundaries (init/result/turn_*) clear the set wholesale.
+  defp enforce_blocked_truth(
+         %{activity: %{state: :needs_you}} = state,
+         %{state: :working} = activity
+       ) do
+    cond do
+      MapSet.size(state.pending_asks) == 0 ->
+        {state, activity}
+
+      pending_asks_resolved?(state.session_id) ->
+        {clear_pending_asks(state), activity}
+
+      true ->
+        {state, state.activity}
+    end
+  end
+
+  defp enforce_blocked_truth(state, activity), do: {state, activity}
+
+  defp track_pending_ask(state, %{request_id: request_id}) when is_binary(request_id) do
+    %{state | pending_asks: MapSet.put(state.pending_asks, request_id)}
+  end
+
+  defp track_pending_ask(state, _ask), do: state
+
+  defp clear_pending_asks(state), do: %{state | pending_asks: MapSet.new()}
+
+  # Store truth for the contested transition: `pending_approvals` is maintained
+  # transactionally by append/resolve/cancel (`update_approval_status/3`,
+  # `cancel_pending_approvals/1`). A vanished session row has nothing left to
+  # guard, so it reads as resolved.
+  defp pending_asks_resolved?(session_id) do
+    case StudioChat.get_session(session_id) do
+      %{pending_approvals: pending} when is_integer(pending) and pending > 0 -> false
+      _ -> true
     end
   end
 
