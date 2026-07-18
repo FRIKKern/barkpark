@@ -22,10 +22,16 @@ defmodule BarkparkWeb.CycleFleetController do
     with_scope(conn, params, :write, fn scope ->
       attrs =
         scope
-        |> Map.merge(select(params, ~w(profile inventory experiment_contract scale_contract)))
+        |> Map.merge(
+          select(
+            params,
+            ~w(profile inventory experiment_contract scale_contract correction_of correction_of_digest)
+          )
+        )
         |> maybe_decode_json(:inventory, params["inventory_json"])
         |> maybe_decode_json(:experiment_contract, params["experiment_contract_json"])
         |> maybe_decode_json(:scale_contract, params["scale_contract_json"])
+        |> maybe_decode_json(:correction_of, params["correction_of_json"])
 
       case CycleFleet.open_wave(attrs) do
         {:ok, _wave} ->

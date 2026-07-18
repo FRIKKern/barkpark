@@ -29,6 +29,14 @@ defmodule Barkpark.CycleFleet do
 
   @spec open_wave(map()) :: {:ok, Wave.t()} | {:error, Ecto.Changeset.t() | atom()}
   def open_wave(attrs) when is_map(attrs) do
+    if is_nil(value(attrs, :correction_of)) do
+      open_standard_wave(attrs)
+    else
+      open_correction_wave(attrs)
+    end
+  end
+
+  defp open_standard_wave(attrs) do
     with {:ok, scope} <- normalize_scope(attrs),
          {:ok, profile} <- Profile.normalize(value(attrs, :profile, "epic")),
          {:ok, inventory} <- normalize_inventory(value(attrs, :inventory, [])),
@@ -53,6 +61,465 @@ defmodule Barkpark.CycleFleet do
       |> Repo.insert()
       |> reconcile_wave_insert(wave_attrs)
     end
+  end
+
+  defp open_correction_wave(attrs) do
+    Repo.transaction(fn ->
+      with :ok <- reject_ambiguous_correction_attrs(attrs),
+           {:ok, scope} <- normalize_scope(attrs),
+           correction when is_map(correction) <- value(attrs, :correction_of),
+           correction_digest when is_binary(correction_digest) <-
+             value(attrs, :correction_of_digest),
+           true <-
+             correction_digest == digest(stringify_keys(correction)) ||
+               {:error, :correction_digest_mismatch},
+           {:ok, prior, canonical} <- validate_correction(scope, correction, attrs, true) do
+        wave_attrs =
+          Map.merge(scope, %{
+            profile: prior.profile,
+            inventory: prior.inventory,
+            inventory_digest: prior.inventory_digest,
+            plan: effective_plan(prior),
+            plan_digest: effective_plan_digest(prior),
+            experiment_contract: prior.experiment_contract,
+            scale_contract: prior.scale_contract,
+            correction_of_wave_id: prior.id,
+            correction_of: canonical,
+            correction_of_digest: digest(canonical)
+          })
+
+        case Repo.insert(Wave.insert_changeset(wave_attrs), on_conflict: :nothing) do
+          {:ok, _candidate} ->
+            case get_wave_by_scope(scope) do
+              %Wave{} = wave ->
+                if wave_replay?(wave, wave_attrs),
+                  do: wave,
+                  else: Repo.rollback(:wave_conflict)
+
+              nil ->
+                Repo.rollback(:wave_conflict)
+            end
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      else
+        {:error, reason} -> Repo.rollback(reason)
+        _ -> Repo.rollback(:invalid_correction_of)
+      end
+    end)
+  end
+
+  defp validate_correction(scope, submitted, launch_attrs, lock?) do
+    submitted = stringify_keys(submitted)
+    prior_pin = value(submitted, :prior, %{})
+
+    with true <-
+           value(submitted, :version) == "correction_of-v1" || {:error, :invalid_correction_of},
+         prior_revision when is_binary(prior_revision) <- value(prior_pin, :wave_revision),
+         %Wave{} = prior <- correction_parent(prior_revision, lock?),
+         :ok <- validate_correction_scope(scope, prior, prior_pin),
+         :ok <- validate_supplied_successor_attrs(prior, launch_attrs),
+         {:ok, ancestry} <- correction_ancestry(prior),
+         {:ok, prior_summary} <- reconcile(Map.take(prior, @scope_fields)),
+         :ok <- validate_prior_repairability(prior_summary),
+         :ok <- validate_prior_pins(prior, prior_summary, prior_pin),
+         {:ok, targets, outcomes} <- correction_targets(prior, prior_summary),
+         true <- value(submitted, :targets) == targets || {:error, :stale_correction_targets},
+         {:ok, changes} <- correction_changes(value(submitted, :changes), targets, outcomes),
+         {:ok, arithmetic} <- correction_arithmetic(prior, outcomes, changes) do
+      canonical = %{
+        "version" => "correction_of-v1",
+        "prior" => %{
+          "workspace_id" => prior.workspace_id,
+          "project_id" => prior.project_id,
+          "epic_id" => prior.epic_id,
+          "wave_id" => prior.wave_id,
+          "wave_revision" => prior.id,
+          "inventory_digest" => prior.inventory_digest,
+          "effective_plan_digest" => effective_plan_digest(prior),
+          "reconciliation_digest" => prior_summary.reconciliation_digest
+        },
+        "ancestry" => ancestry,
+        "targets" => targets,
+        "changes" => changes,
+        "inventory_count" => arithmetic.inventory_count,
+        "before_counts" => arithmetic.before_counts,
+        "delta" => arithmetic.delta,
+        "after_counts" => arithmetic.after_counts
+      }
+
+      if submitted == canonical,
+        do: {:ok, prior, canonical},
+        else: {:error, :correction_digest_mismatch}
+    else
+      nil -> {:error, :correction_prior_not_found}
+      false -> {:error, :invalid_correction_of}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_correction_of}
+    end
+  end
+
+  defp correction_parent(id, true), do: locked_wave(id)
+  defp correction_parent(id, false), do: Repo.get(Wave, id)
+
+  defp validate_persisted_correction(%Wave{correction_of_wave_id: nil}), do: :ok
+
+  defp validate_persisted_correction(%Wave{} = wave) do
+    scope = Map.take(wave, @scope_fields)
+
+    with true <- wave.correction_of_digest == digest(wave.correction_of),
+         {:ok, %Wave{id: parent_id}, canonical} <-
+           validate_correction(scope, wave.correction_of, %{}, false),
+         true <- parent_id == wave.correction_of_wave_id,
+         true <- canonical == wave.correction_of do
+      :ok
+    else
+      _ -> {:error, :invalid_persisted_correction}
+    end
+  end
+
+  defp locked_wave(id) do
+    Repo.one(from(w in Wave, where: w.id == ^id, lock: "FOR UPDATE"))
+  end
+
+  defp reject_ambiguous_correction_attrs(attrs) do
+    correction = value(attrs, :correction_of)
+
+    if Enum.any?([:correction_of, :correction_of_digest], fn key ->
+         Map.has_key?(attrs, key) and Map.has_key?(attrs, to_string(key))
+       end) or ambiguous_normalized_keys?(correction) do
+      {:error, :ambiguous_correction_attrs}
+    else
+      :ok
+    end
+  end
+
+  defp ambiguous_normalized_keys?(map) when is_map(map) do
+    normalized = Enum.map(Map.keys(map), &to_string/1)
+
+    length(normalized) != MapSet.size(MapSet.new(normalized)) or
+      Enum.any?(Map.values(map), &ambiguous_normalized_keys?/1)
+  end
+
+  defp ambiguous_normalized_keys?(list) when is_list(list),
+    do: Enum.any?(list, &ambiguous_normalized_keys?/1)
+
+  defp ambiguous_normalized_keys?(_value), do: false
+
+  defp validate_supplied_successor_attrs(prior, attrs) do
+    checks = [
+      {:profile, prior.profile, & &1},
+      {:inventory, prior.inventory,
+       fn inventory ->
+         case normalize_inventory(inventory) do
+           {:ok, normalized} -> normalized
+           _ -> :invalid
+         end
+       end},
+      {:experiment_contract, prior.experiment_contract, &stringify_keys/1},
+      {:scale_contract, prior.scale_contract, &stringify_keys/1}
+    ]
+
+    if Enum.all?(checks, fn {key, expected, normalize} ->
+         not correction_attr_present?(attrs, key) or normalize.(value(attrs, key)) == expected
+       end) do
+      :ok
+    else
+      {:error, :conflicting_correction_contract}
+    end
+  end
+
+  defp correction_attr_present?(attrs, key),
+    do: Map.has_key?(attrs, key) or Map.has_key?(attrs, to_string(key))
+
+  defp validate_prior_repairability(summary) do
+    empty_fields = [
+      :duplicate_assignment_unit_ids,
+      :unknown_assignment_unit_ids,
+      :unknown_outcome_unit_ids,
+      :outcome_overlap_unit_ids,
+      :outcome_ownership_violation_unit_ids,
+      :invalid_build_assignment_ids,
+      :unassigned_unit_ids,
+      :unaccounted_unit_ids
+    ]
+
+    structurally_clean? =
+      Enum.all?(empty_fields, &(Map.fetch!(summary, &1) == [])) and summary.experiment.complete? and
+        summary.fleet_complete
+
+    repair_target? =
+      summary.invalid_build_result_assignment_ids != [] or
+        (not is_nil(summary.correction_of) and summary.exact)
+
+    if structurally_clean? and repair_target? do
+      :ok
+    else
+      {:error, :correction_prior_not_repairable}
+    end
+  end
+
+  defp validate_correction_scope(scope, prior, prior_pin) do
+    cond do
+      prior.workspace_id != scope.workspace_id or prior.project_id != scope.project_id or
+          prior.epic_id != scope.epic_id ->
+        {:error, :foreign_correction_prior}
+
+      prior.wave_id == scope.wave_id ->
+        {:error, :same_wave_correction}
+
+      value(prior_pin, :workspace_id) != prior.workspace_id or
+        value(prior_pin, :project_id) != prior.project_id or
+        value(prior_pin, :epic_id) != prior.epic_id or
+          value(prior_pin, :wave_id) != prior.wave_id ->
+        {:error, :stale_correction_prior}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_prior_pins(prior, summary, prior_pin) do
+    if value(prior_pin, :inventory_digest) == prior.inventory_digest and
+         value(prior_pin, :effective_plan_digest) == effective_plan_digest(prior) and
+         value(prior_pin, :reconciliation_digest) == summary.reconciliation_digest do
+      :ok
+    else
+      {:error, :stale_correction_prior}
+    end
+  end
+
+  defp correction_ancestry(prior), do: correction_ancestry(prior, MapSet.new(), [])
+
+  defp correction_ancestry(%Wave{} = wave, seen, ancestry) do
+    if MapSet.member?(seen, wave.id) do
+      {:error, :circular_correction_ancestry}
+    else
+      entry = %{"wave_id" => wave.wave_id, "wave_revision" => wave.id}
+      seen = MapSet.put(seen, wave.id)
+
+      case wave.correction_of_wave_id do
+        nil ->
+          {:ok, [entry | ancestry]}
+
+        prior_id ->
+          case Repo.get(Wave, prior_id) do
+            %Wave{} = parent ->
+              if parent.workspace_id == wave.workspace_id and parent.project_id == wave.project_id and
+                   parent.epic_id == wave.epic_id do
+                correction_ancestry(parent, seen, [entry | ancestry])
+              else
+                {:error, :foreign_correction_ancestry}
+              end
+
+            nil ->
+              {:error, :correction_prior_not_found}
+          end
+      end
+    end
+  end
+
+  defp correction_targets(prior, prior_summary) do
+    invalid_ids = MapSet.new(prior_summary.invalid_build_result_assignment_ids)
+
+    if MapSet.size(invalid_ids) == 0 and not is_nil(prior.correction_of) do
+      targets = Map.fetch!(prior.correction_of, "targets")
+      {:ok, outcomes} = effective_outcomes(prior)
+      target_revisions = MapSet.new(targets, & &1["assignment_revision"])
+
+      target_outcomes =
+        Map.new(outcomes, fn {unit_id, outcome} -> {unit_id, outcome} end)
+        |> Map.filter(fn {_unit_id, outcome} ->
+          MapSet.member?(target_revisions, outcome.assignment.id)
+        end)
+
+      {:ok, targets, target_outcomes}
+    else
+      correction_targets_from_invalid(prior, invalid_ids)
+    end
+  end
+
+  defp correction_targets_from_invalid(prior, invalid_ids) do
+    rows =
+      prior
+      |> Map.take(@scope_fields)
+      |> list_assignments()
+      |> Enum.map(&{&1, EpicFleet.get_result(&1)})
+      |> exclude_replaced_rows()
+      |> Enum.filter(fn {assignment, _result} ->
+        assignment.phase == "build" and MapSet.member?(invalid_ids, assignment.assignment_id)
+      end)
+
+    raw_targets =
+      rows
+      |> Enum.map(fn {assignment, result} -> correction_target(assignment, result) end)
+
+    targets =
+      raw_targets
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort_by(&{&1["assignment_id"], &1["assignment_revision"]})
+
+    target_ids = MapSet.new(targets, & &1["assignment_id"])
+
+    cond do
+      MapSet.size(invalid_ids) == 0 ->
+        {:error, :correction_targets_required}
+
+      target_ids != invalid_ids ->
+        {:error, :partial_correction_targets}
+
+      length(raw_targets) != length(targets) ->
+        {:error, :stale_correction_targets}
+
+      true ->
+        outcomes =
+          Enum.reduce(rows, %{}, fn {assignment, %Result{payload: payload}}, acc ->
+            {:ok, row_outcomes} = build_outcomes(payload)
+
+            Map.merge(
+              acc,
+              Map.new(row_outcomes, fn {unit_id, disposition} ->
+                {unit_id, %{assignment: assignment, disposition: disposition}}
+              end)
+            )
+          end)
+
+        {:ok, targets, outcomes}
+    end
+  end
+
+  defp effective_outcomes(%Wave{} = wave) do
+    base_wave =
+      case wave.correction_of_wave_id do
+        nil -> wave
+        parent_id -> Repo.get!(Wave, parent_id)
+      end
+
+    base =
+      if is_nil(wave.correction_of_wave_id) do
+        wave
+        |> Map.take(@scope_fields)
+        |> list_assignments()
+        |> Enum.map(&{&1, EpicFleet.get_result(&1)})
+        |> exclude_replaced_rows()
+        |> Enum.reduce(%{}, fn
+          {%Assignment{phase: "build"} = assignment,
+           %Result{status: "completed", payload: payload}},
+          acc ->
+            case build_outcomes(payload) do
+              {:ok, outcomes} ->
+                Map.merge(
+                  acc,
+                  Map.new(outcomes, fn {unit_id, disposition} ->
+                    {unit_id, %{assignment: assignment, disposition: disposition}}
+                  end)
+                )
+
+              _ ->
+                acc
+            end
+
+          _, acc ->
+            acc
+        end)
+      else
+        {:ok, outcomes} = effective_outcomes(base_wave)
+        outcomes
+      end
+
+    corrected =
+      Enum.reduce((wave.correction_of || %{})["changes"] || [], base, fn change, acc ->
+        update_in(acc, [change["unit_id"], :disposition], fn _ -> change["after"] end)
+      end)
+
+    {:ok, corrected}
+  end
+
+  defp correction_target(%Assignment{} = assignment, %Result{} = result) do
+    %{
+      "assignment_id" => assignment.assignment_id,
+      "assignment_revision" => assignment.id,
+      "snapshot_digest" => assignment.snapshot_digest,
+      "result_revision" => result.id,
+      "payload_digest" => result.payload_digest,
+      "evidence_revision" => result.evidence_revision,
+      "semantic_status" => "invalid",
+      "semantic_receipt_index_hash" => value(result.payload, :semantic_receipt_index_hash)
+    }
+  end
+
+  defp correction_target(_assignment, _result), do: nil
+
+  defp correction_changes(changes, targets, outcomes) when is_list(changes) do
+    target_revisions = MapSet.new(targets, & &1["assignment_revision"])
+    normalized = changes |> Enum.map(&stringify_keys/1) |> Enum.sort_by(& &1["unit_id"])
+    unit_ids = Enum.map(normalized, & &1["unit_id"])
+
+    valid? =
+      normalized != [] and length(unit_ids) == MapSet.size(MapSet.new(unit_ids)) and
+        Enum.all?(normalized, fn change ->
+          case Map.get(outcomes, change["unit_id"]) do
+            %{assignment: assignment, disposition: before} ->
+              change["assignment_id"] == assignment.assignment_id and
+                change["assignment_revision"] == assignment.id and
+                MapSet.member?(target_revisions, assignment.id) and
+                change["before"] == before and change["after"] in ~w(shipped stalled excluded) and
+                change["after"] != before and
+                Enum.sort(Map.keys(change)) ==
+                  ~w(after assignment_id assignment_revision before unit_id)
+
+            nil ->
+              false
+          end
+        end)
+
+    if valid?, do: {:ok, normalized}, else: {:error, :invalid_correction_changes}
+  end
+
+  defp correction_changes(_changes, _targets, _outcomes),
+    do: {:error, :invalid_correction_changes}
+
+  defp correction_arithmetic(prior, target_outcomes, changes) do
+    {:ok, effective} = effective_outcomes(prior)
+    all_outcomes = Map.new(effective, fn {unit_id, row} -> {unit_id, row.disposition} end)
+
+    after_outcomes =
+      Enum.reduce(changes, all_outcomes, fn change, acc ->
+        Map.put(acc, change["unit_id"], change["after"])
+      end)
+
+    before_counts = disposition_counts(all_outcomes)
+    after_counts = disposition_counts(after_outcomes)
+    inventory_count = length(prior.inventory)
+
+    delta =
+      Map.new(~w(shipped stalled excluded), fn key ->
+        {key, Map.fetch!(after_counts, key) - Map.fetch!(before_counts, key)}
+      end)
+
+    changed_units = MapSet.new(changes, & &1["unit_id"])
+
+    if map_size(all_outcomes) == inventory_count and map_size(after_outcomes) == inventory_count and
+         MapSet.subset?(changed_units, MapSet.new(Map.keys(target_outcomes))) and
+         Enum.sum(Map.values(before_counts)) == inventory_count and
+         Enum.sum(Map.values(after_counts)) == inventory_count and
+         Enum.sum(Map.values(delta)) == 0 do
+      {:ok,
+       %{
+         inventory_count: inventory_count,
+         before_counts: before_counts,
+         delta: delta,
+         after_counts: after_counts
+       }}
+    else
+      {:error, :correction_inventory_invariant}
+    end
+  end
+
+  defp disposition_counts(outcomes) do
+    frequencies = outcomes |> Map.values() |> Enum.frequencies()
+    Map.new(~w(shipped stalled excluded), &{&1, Map.get(frequencies, &1, 0)})
   end
 
   @spec get_wave(map()) :: Wave.t() | nil
@@ -360,7 +827,8 @@ defmodule Barkpark.CycleFleet do
   @doc "Reduce exact unit, experiment, shard, capacity, and retry accounting."
   @spec reconcile(map()) :: {:ok, map()} | {:error, atom()}
   def reconcile(scope) when is_map(scope) do
-    with %Wave{} = wave <- get_wave(scope) do
+    with %Wave{} = wave <- get_wave(scope),
+         :ok <- validate_persisted_correction(wave) do
       rows = scope |> list_assignments() |> Enum.map(&{&1, EpicFleet.get_result(&1)})
       live_rows = exclude_replaced_rows(rows)
       inventory_ids = wave.inventory |> Enum.map(&unit_id/1) |> MapSet.new()
@@ -409,6 +877,8 @@ defmodule Barkpark.CycleFleet do
         ) and experiment.complete? and fleet_complete? and
           (wave.profile == "epic" or not is_nil(build_plan))
 
+      correction_receipt = correction_receipt(wave)
+
       summary = %{
         profile: wave.profile,
         scope: Map.take(wave, @scope_fields),
@@ -444,13 +914,93 @@ defmodule Barkpark.CycleFleet do
           golden_fixtures: build_plan && build_plan.golden_fixtures,
           quality_rubric: build_plan && build_plan.quality_rubric
         },
+        correction_of_wave_revision: wave.correction_of_wave_id,
+        correction_of: wave.correction_of,
+        correction_of_digest: wave.correction_of_digest,
+        correction_ancestry: reconciliation_ancestry(wave),
+        correction_receipt: correction_receipt,
+        correction_receipt_digest:
+          correction_receipt && EpicFleet.canonical_digest(correction_receipt),
         exact: exact?
       }
 
+      summary = correction_summary(wave, rows, summary)
       {:ok, Map.put(summary, :reconciliation_digest, digest(summary))}
     else
       nil -> {:error, :wave_not_found}
+      {:error, :invalid_persisted_correction} -> {:error, :invalid_persisted_correction}
     end
+  end
+
+  defp correction_summary(%Wave{correction_of_wave_id: nil}, _rows, summary), do: summary
+
+  defp correction_summary(%Wave{} = wave, _rows, summary) do
+    correction = wave.correction_of
+    prior = Repo.get!(Wave, wave.correction_of_wave_id)
+    {:ok, inherited} = reconcile(Map.take(prior, @scope_fields))
+    after_counts = Map.fetch!(correction, "after_counts")
+    inventory_count = Map.fetch!(correction, "inventory_count")
+
+    {:ok, inherited_fleet} = canonical_fleet(prior)
+
+    own_fleet = %{
+      assigned_count: summary.assigned_count,
+      assigned_occurrences: summary.assigned_occurrences,
+      shipped_count: summary.shipped_count,
+      stalled_count: summary.stalled_count,
+      excluded_count: summary.excluded_count,
+      fleet_complete: summary.fleet_complete,
+      fleet_counts: summary.fleet_counts,
+      exact: summary.exact
+    }
+
+    summary
+    |> Map.merge(%{
+      assigned_count: inventory_count,
+      assigned_occurrences: inventory_count,
+      shipped_count: Map.fetch!(after_counts, "shipped"),
+      stalled_count: Map.fetch!(after_counts, "stalled"),
+      excluded_count: Map.fetch!(after_counts, "excluded"),
+      duplicate_assignment_unit_ids: [],
+      unknown_assignment_unit_ids: [],
+      unknown_outcome_unit_ids: [],
+      outcome_overlap_unit_ids: [],
+      outcome_ownership_violation_unit_ids: [],
+      invalid_build_assignment_ids: [],
+      invalid_build_result_assignment_ids: [],
+      unassigned_unit_ids: [],
+      unaccounted_unit_ids: [],
+      experiment: inherited.experiment,
+      fleet_complete: inherited.fleet_complete,
+      fleet_counts: inherited.fleet_counts,
+      capacity: inherited.capacity,
+      exact: inherited.fleet_complete and inherited.experiment.complete?,
+      canonical_fleet: inherited_fleet,
+      own_fleet: own_fleet
+    })
+  end
+
+  defp canonical_fleet(%Wave{correction_of_wave_id: nil} = wave) do
+    with {:ok, reduced} <- reduce(Map.take(wave, @scope_fields)), do: {:ok, reduced.fleet}
+  end
+
+  defp canonical_fleet(%Wave{} = wave) do
+    with {:ok, reconciliation} <- reconcile(Map.take(wave, @scope_fields)),
+         fleet when is_map(fleet) <- reconciliation.canonical_fleet do
+      {:ok, fleet}
+    end
+  end
+
+  defp correction_receipt(%Wave{correction_of_wave_id: nil}), do: nil
+
+  defp correction_receipt(%Wave{} = wave) do
+    %{
+      "version" => "correction_receipt-v1",
+      "successor_wave_revision" => wave.id,
+      "parent_wave_revision" => wave.correction_of_wave_id,
+      "correction_of_digest" => wave.correction_of_digest,
+      "targets" => Map.fetch!(wave.correction_of, "targets")
+    }
   end
 
   @doc "Return the canonical reader/validator projection for one cycle wave."
@@ -461,7 +1011,8 @@ defmodule Barkpark.CycleFleet do
       {:ok,
        %{
          cycle_ledger: reconciliation,
-         fleet: fleet.fleet,
+         fleet: Map.get(reconciliation, :canonical_fleet, fleet.fleet),
+         own_fleet: fleet.fleet,
          assignment_attributions: assignment_attributions(scope),
          authority: %{
            kind: "barkpark_cycle_fleet",
@@ -469,7 +1020,9 @@ defmodule Barkpark.CycleFleet do
            project_id: reconciliation.scope.project_id,
            epic_id: reconciliation.scope.epic_id,
            wave_id: reconciliation.scope.wave_id,
-           wave_revision: reconciliation.wave_revision
+           wave_revision: reconciliation.wave_revision,
+           correction_of_wave_revision: reconciliation.correction_of_wave_revision,
+           correction_of_digest: reconciliation.correction_of_digest
          }
        }}
     end
@@ -549,7 +1102,19 @@ defmodule Barkpark.CycleFleet do
     wave.profile == attrs.profile and wave.inventory_digest == attrs.inventory_digest and
       wave.plan_digest == attrs.plan_digest and
       wave.experiment_contract == attrs.experiment_contract and
-      wave.scale_contract == attrs.scale_contract
+      wave.scale_contract == attrs.scale_contract and
+      wave.correction_of_wave_id == Map.get(attrs, :correction_of_wave_id) and
+      wave.correction_of == Map.get(attrs, :correction_of) and
+      wave.correction_of_digest == Map.get(attrs, :correction_of_digest)
+  end
+
+  defp reconciliation_ancestry(%Wave{correction_of_wave_id: nil}), do: []
+
+  defp reconciliation_ancestry(%Wave{} = wave) do
+    case correction_ancestry(wave) do
+      {:ok, ancestry} -> ancestry
+      {:error, _} -> [%{"wave_id" => wave.wave_id, "wave_revision" => wave.id}]
+    end
   end
 
   defp build_plan_replay?(plan, attrs) do

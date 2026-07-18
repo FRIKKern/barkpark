@@ -1946,13 +1946,23 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [
           arg("epic_id", true, "string", "Epic id."),
           arg("wave_id", true, "string", "Wave id."),
-          arg("profile", true, "string", "epic | legendary"),
-          arg("inventory_json", true, "string", "JSON array of immutable inventory units."),
+          arg(
+            "profile",
+            false,
+            "string",
+            "Standard open only: epic | legendary. Omit when opening a correction wave."
+          ),
+          arg(
+            "inventory_json",
+            false,
+            "string",
+            "Standard open only: JSON array of immutable inventory units. Omit for corrections."
+          ),
           arg(
             "scale_contract_json",
-            true,
+            false,
             "string",
-            "Complete Legendary scale contract JSON; use {} for profile=epic."
+            "Standard open only: complete Legendary scale contract JSON; use {} for profile=epic."
           )
         ],
         flags: [
@@ -1960,6 +1970,16 @@ defmodule Barkpark.Plugins.Capabilities do
             "experiment_contract_json",
             "string",
             "Optional JSON experiment contract; Legendary accepts the canonical five-round contract."
+          ),
+          flag(
+            "correction_of_json",
+            "string",
+            "Correction open only: canonical correction_of-v1 JSON naming the prior wave and exact false claims."
+          ),
+          flag(
+            "correction_of_digest",
+            "string",
+            "Correction open only: SHA-256 digest of the canonical correction_of-v1 JSON."
           )
         ],
         writes: true,

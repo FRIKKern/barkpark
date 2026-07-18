@@ -79,6 +79,28 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     refute first_open["authority"]["wave_revision"] == second_open["authority"]["wave_revision"]
   end
 
+  test "correction fields reach the HTTP authority and reject a wrong digest", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "correction-http-#{System.unique_integer([:positive])}"
+    prefix = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}"
+    _opened = open_epic(prefix <> "/wave-1", token, ["unit-1"])
+
+    rejected =
+      build_conn()
+      |> bearer(token)
+      |> post(prefix <> "/wave-2/open", %{
+        "correction_of" => %{"version" => "correction_of-v1"},
+        "correction_of_digest" => String.duplicate("0", 64)
+      })
+      |> json_response(422)
+
+    assert rejected["error"]["code"] == "validation_failed"
+    assert rejected["error"]["details"]["reason"] =~ "correction_digest_mismatch"
+  end
+
   test "Legendary seal is refused before 15 experiments and freezes Pilot evidence after them", %{
     workspace: workspace,
     project: project,
@@ -204,7 +226,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open = Enum.find(commands, &(&1["id"] == "cycle.open"))
     seal = Enum.find(commands, &(&1["id"] == "cycle.seal"))
     assign = Enum.find(commands, &(&1["id"] == "cycle.assign"))
-    assert required_arg?(open, "scale_contract_json")
+    refute required_arg?(open, "scale_contract_json")
     assert required_arg?(seal, "golden_fixtures_json")
 
     assert Enum.any?(

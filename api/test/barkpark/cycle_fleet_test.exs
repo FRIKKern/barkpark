@@ -1332,6 +1332,521 @@ defmodule Barkpark.CycleFleetTest do
   end
 
   describe "whole-fleet reconciliation" do
+    test "correction_of-v1 immutably repairs generic per-unit arithmetic and replays exactly", %{
+      scope: scope
+    } do
+      inventory = Enum.map(1..503, &"unit-#{&1}")
+      assert {:ok, prior_wave} = CycleFleet.open_wave(epic_wave_attrs(scope, inventory))
+
+      stable_a_units = Enum.map(1..242, &"unit-#{&1}")
+      stable_b_units = Enum.map(243..485, &"unit-#{&1}")
+
+      assert {:ok, stable_a} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(
+                   scope,
+                   "build-stable-a",
+                   "build",
+                   "epic-builder",
+                   stable_a_units
+                 )
+               )
+
+      assert {:ok, _stable_a_result} =
+               complete_result(
+                 stable_a,
+                 "stable-a-503",
+                 "completed",
+                 typed_outcomes(
+                   Enum.map(1..42, &"unit-#{&1}"),
+                   Enum.map(43..242, &"unit-#{&1}"),
+                   []
+                 )
+               )
+
+      assert {:ok, stable_b} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(
+                   scope,
+                   "build-stable-b",
+                   "build",
+                   "epic-builder",
+                   stable_b_units
+                 )
+               )
+
+      assert {:ok, _stable_b_result} =
+               complete_result(
+                 stable_b,
+                 "stable-b-503",
+                 "completed",
+                 typed_outcomes(
+                   [],
+                   Enum.map(243..322, &"unit-#{&1}"),
+                   Enum.map(323..485, &"unit-#{&1}")
+                 )
+               )
+
+      build07_units = Enum.map(486..503, &"unit-#{&1}")
+
+      assert {:ok, build07} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(scope, "build-07", "build", "epic-builder", build07_units)
+               )
+
+      assert {:ok, _build07_terminal} =
+               complete_result(
+                 build07,
+                 "build07-structural-lie",
+                 "completed",
+                 typed_outcomes(
+                   Enum.map(486..496, &"unit-#{&1}"),
+                   [],
+                   Enum.map(497..503, &"unit-#{&1}")
+                 )
+               )
+
+      semantic_task = ensure_semantic_task!(build07)
+      semantic_task |> Ecto.Changeset.change(rev: Ecto.UUID.generate()) |> Repo.update!()
+
+      complete_phase(scope, "survey", "epic-surveyor", 12)
+      complete_phase(scope, "verify", "epic-verifier", 6)
+      complete_phase(scope, "review", "code-reviewer", 3)
+
+      build07_result = Repo.get_by!(Result, assignment_id: build07.id)
+      assert {:ok, before} = CycleFleet.reconcile(scope)
+      assert {before.shipped_count, before.stalled_count, before.excluded_count} == {53, 280, 170}
+      assert before.invalid_build_result_assignment_ids == ["build-07"]
+      assert before.fleet_complete, inspect(before.fleet_counts)
+      assert before.experiment.complete?
+      refute before.exact
+
+      targets = [
+        %{
+          "assignment_id" => "build-07",
+          "assignment_revision" => build07.id,
+          "snapshot_digest" => build07.snapshot_digest,
+          "result_revision" => build07_result.id,
+          "payload_digest" => build07_result.payload_digest,
+          "evidence_revision" => build07_result.evidence_revision,
+          "semantic_status" => "invalid",
+          "semantic_receipt_index_hash" => build07_result.payload["semantic_receipt_index_hash"]
+        }
+      ]
+
+      changes =
+        Enum.map(486..496, fn index ->
+          %{
+            "unit_id" => "unit-#{index}",
+            "assignment_id" => "build-07",
+            "assignment_revision" => build07.id,
+            "before" => "shipped",
+            "after" => "stalled"
+          }
+        end)
+
+      correction = %{
+        "version" => "correction_of-v1",
+        "prior" => %{
+          "workspace_id" => prior_wave.workspace_id,
+          "project_id" => prior_wave.project_id,
+          "epic_id" => prior_wave.epic_id,
+          "wave_id" => prior_wave.wave_id,
+          "wave_revision" => prior_wave.id,
+          "inventory_digest" => prior_wave.inventory_digest,
+          "effective_plan_digest" => before.plan_digest,
+          "reconciliation_digest" => before.reconciliation_digest
+        },
+        "ancestry" => [
+          %{"wave_id" => prior_wave.wave_id, "wave_revision" => prior_wave.id}
+        ],
+        "targets" => targets,
+        "changes" => changes,
+        "inventory_count" => 503,
+        "before_counts" => %{"shipped" => 53, "stalled" => 280, "excluded" => 170},
+        "delta" => %{"shipped" => -11, "stalled" => 11, "excluded" => 0},
+        "after_counts" => %{"shipped" => 42, "stalled" => 291, "excluded" => 170}
+      }
+
+      successor_scope = %{scope | wave_id: "wave-2"}
+
+      attrs =
+        Map.merge(successor_scope, %{
+          correction_of: correction,
+          correction_of_digest: CycleFleet.digest(correction)
+        })
+
+      raw_wrong_delta =
+        put_in(correction, ["delta"], %{
+          "shipped" => 0,
+          "stalled" => 0,
+          "excluded" => 0
+        })
+
+      assert_raise Postgrex.Error, ~r/correction parent pins are stale or foreign/, fn ->
+        raw_insert_correction_wave!(
+          prior_wave,
+          %{scope | wave_id: "raw-wrong-delta"},
+          raw_wrong_delta
+        )
+      end
+
+      forged_target =
+        put_in(
+          correction,
+          ["targets", Access.at(0), "payload_digest"],
+          String.duplicate("0", 64)
+        )
+
+      assert_raise Postgrex.Error, ~r/correction parent pins are stale or foreign/, fn ->
+        raw_insert_correction_wave!(
+          prior_wave,
+          %{scope | wave_id: "raw-forged-target"},
+          forged_target
+        )
+      end
+
+      assert {:ok, successor} = CycleFleet.open_wave(attrs)
+      assert {:ok, replay} = CycleFleet.open_wave(attrs)
+      assert replay.id == successor.id
+      assert successor.correction_of_wave_id == prior_wave.id
+      assert successor.correction_of == correction
+      assert successor.correction_of_digest == CycleFleet.digest(correction)
+
+      assert {:ok, projected} = CycleFleet.reconcile(successor_scope)
+      assert {projected.assigned_count, projected.assigned_occurrences} == {503, 503}
+
+      assert {projected.shipped_count, projected.stalled_count, projected.excluded_count} ==
+               {42, 291, 170}
+
+      assert projected.unassigned_unit_ids == []
+      assert projected.unaccounted_unit_ids == []
+      assert String.length(projected.correction_receipt_digest) == 64
+      assert projected.correction_of == correction
+      assert projected.correction_of_digest == CycleFleet.digest(correction)
+
+      assert projected.correction_ancestry ==
+               correction["ancestry"] ++
+                 [%{"wave_id" => successor.wave_id, "wave_revision" => successor.id}]
+
+      assert {:ok, successor_projection} = CycleFleet.projection(successor_scope)
+      assert successor_projection.fleet == projected.canonical_fleet
+      assert successor_projection.cycle_ledger.shipped_count == 42
+
+      assert Enum.all?(successor_projection.own_fleet, fn {_phase, phase} ->
+               phase.started == 0
+             end)
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_assignment!(prior_wave, scope, %{
+          assignment_id: "late-after-correction",
+          phase: "build",
+          agent_type: "epic-builder",
+          effort: "high",
+          snapshot: %{"unit_ids" => ["unit-1"]},
+          replaces_assignment_id: nil
+        })
+      end
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_assignment!(successor, successor_scope, %{
+          assignment_id: "late-on-correction",
+          phase: "build",
+          agent_type: "epic-builder",
+          effort: "high",
+          snapshot: %{"unit_ids" => ["unit-1"]},
+          replaces_assignment_id: nil
+        })
+      end
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_correction_wave!(prior_wave, %{scope | wave_id: "raw-missing-pins"}, %{
+          "version" => "correction_of-v1"
+        })
+      end
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_correction_wave!(
+          prior_wave,
+          %{scope | wave_id: "raw-conflicting-profile"},
+          correction,
+          profile: "legendary"
+        )
+      end
+
+      forged =
+        correction
+        |> put_in(["targets", Access.at(0), "assignment_id"], "forged-build")
+        |> put_in(["changes", Access.all(), "assignment_id"], "forged-build")
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_correction_wave!(
+          prior_wave,
+          %{scope | wave_id: "raw-forged-target"},
+          forged
+        )
+      end
+
+      assert_raise Postgrex.Error, fn ->
+        raw_insert_correction_wave!(
+          prior_wave,
+          %{scope | wave_id: "raw-competing-successor"},
+          correction
+        )
+      end
+
+      assert Repo.get!(Result, build07_result.id).payload == build07_result.payload
+      assert {:ok, unchanged_prior} = CycleFleet.reconcile(scope)
+      assert unchanged_prior.reconciliation_digest == before.reconciliation_digest
+
+      assert {:ok, chain_before} = CycleFleet.reconcile(successor_scope)
+
+      chain_change = %{
+        "unit_id" => "unit-486",
+        "assignment_id" => "build-07",
+        "assignment_revision" => build07.id,
+        "before" => "stalled",
+        "after" => "excluded"
+      }
+
+      chain_correction = %{
+        "version" => "correction_of-v1",
+        "prior" => %{
+          "workspace_id" => successor.workspace_id,
+          "project_id" => successor.project_id,
+          "epic_id" => successor.epic_id,
+          "wave_id" => successor.wave_id,
+          "wave_revision" => successor.id,
+          "inventory_digest" => successor.inventory_digest,
+          "effective_plan_digest" => chain_before.plan_digest,
+          "reconciliation_digest" => chain_before.reconciliation_digest
+        },
+        "ancestry" => projected.correction_ancestry,
+        "targets" => targets,
+        "changes" => [chain_change],
+        "inventory_count" => 503,
+        "before_counts" => %{"shipped" => 42, "stalled" => 291, "excluded" => 170},
+        "delta" => %{"shipped" => 0, "stalled" => -1, "excluded" => 1},
+        "after_counts" => %{"shipped" => 42, "stalled" => 290, "excluded" => 171}
+      }
+
+      wave3_scope = %{scope | wave_id: "wave-3"}
+
+      partial_chain =
+        put_in(chain_correction, ["ancestry"], [
+          %{"wave_id" => successor.wave_id, "wave_revision" => successor.id}
+        ])
+
+      assert_raise Postgrex.Error, ~r/correction parent pins are stale or foreign/, fn ->
+        raw_insert_correction_wave!(
+          successor,
+          %{scope | wave_id: "raw-partial-chain"},
+          partial_chain
+        )
+      end
+
+      assert {:ok, wave3} =
+               CycleFleet.open_wave(
+                 Map.merge(wave3_scope, %{
+                   correction_of: chain_correction,
+                   correction_of_digest: CycleFleet.digest(chain_correction)
+                 })
+               )
+
+      assert wave3.correction_of_wave_id == successor.id
+      assert {:ok, wave3_projection} = CycleFleet.reconcile(wave3_scope)
+
+      assert Enum.map(wave3_projection.correction_ancestry, & &1["wave_id"]) ==
+               ["wave-1", "wave-2", "wave-3"]
+
+      repeated_ancestry =
+        put_in(
+          chain_correction,
+          ["ancestry"],
+          chain_correction["ancestry"] ++ [hd(chain_correction["ancestry"])]
+        )
+
+      assert {:error, :correction_digest_mismatch} =
+               CycleFleet.open_wave(
+                 Map.merge(%{wave3_scope | wave_id: "repeated-chain"}, %{
+                   correction_of: repeated_ancestry,
+                   correction_of_digest: CycleFleet.digest(repeated_ancestry)
+                 })
+               )
+
+      assert {:error, :wave_conflict} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "competing-successor"}, %{
+                   correction_of: correction,
+                   correction_of_digest: CycleFleet.digest(correction)
+                 })
+               )
+
+      assert {:error, :conflicting_correction_contract} =
+               CycleFleet.open_wave(
+                 Map.put(%{attrs | wave_id: "conflicting-profile"}, :profile, "legendary")
+               )
+
+      for {wave_id, key, conflicting} <- [
+            {"conflicting-inventory", :inventory, ["foreign-unit"]},
+            {"conflicting-experiment", :experiment_contract, %{"unexpected" => true}},
+            {"conflicting-scale", :scale_contract, %{"unexpected" => true}}
+          ] do
+        assert {:error, :conflicting_correction_contract} =
+                 CycleFleet.open_wave(
+                   attrs
+                   |> Map.put(:wave_id, wave_id)
+                   |> Map.put(key, conflicting)
+                 )
+      end
+
+      assert {:error, :same_wave_correction} =
+               CycleFleet.open_wave(%{attrs | wave_id: prior_wave.wave_id})
+
+      workspace = Repo.get!(Barkpark.Tenancy.Workspace, scope.workspace_id)
+
+      {:ok, foreign_project} =
+        Tenancy.create_project(workspace, %{
+          slug: "correction-foreign-#{System.unique_integer([:positive])}",
+          name: "Correction foreign"
+        })
+
+      assert {:error, :foreign_correction_prior} =
+               CycleFleet.open_wave(%{attrs | wave_id: "foreign", project_id: foreign_project.id})
+
+      top_dual = Map.put(attrs, "correction_of", correction)
+      assert {:error, :ambiguous_correction_attrs} = CycleFleet.open_wave(top_dual)
+
+      nested_dual =
+        update_in(correction, ["changes", Access.at(0)], &Map.put(&1, :before, &1["before"]))
+
+      assert {:error, :ambiguous_correction_attrs} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "nested-dual"}, %{
+                   correction_of: nested_dual,
+                   correction_of_digest: CycleFleet.digest(nested_dual)
+                 })
+               )
+
+      missing_ancestry = Map.delete(correction, "ancestry")
+
+      assert {:error, :correction_digest_mismatch} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "missing-ancestry"}, %{
+                   correction_of: missing_ancestry,
+                   correction_of_digest: CycleFleet.digest(missing_ancestry)
+                 })
+               )
+
+      assert {:error, :correction_digest_mismatch} =
+               CycleFleet.open_wave(%{
+                 attrs
+                 | wave_id: "wrong-digest",
+                   correction_of_digest: String.duplicate("0", 64)
+               })
+
+      partial = put_in(correction, ["targets"], [])
+
+      assert {:error, :stale_correction_targets} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "partial"}, %{
+                   correction_of: partial,
+                   correction_of_digest: CycleFleet.digest(partial)
+                 })
+               )
+
+      wrong_pin =
+        put_in(correction, ["prior", "reconciliation_digest"], String.duplicate("f", 64))
+
+      assert {:error, :stale_correction_prior} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "stale"}, %{
+                   correction_of: wrong_pin,
+                   correction_of_digest: CycleFleet.digest(wrong_pin)
+                 })
+               )
+
+      wrong_delta = put_in(correction, ["delta", "shipped"], -10)
+
+      assert {:error, :correction_digest_mismatch} =
+               CycleFleet.open_wave(
+                 Map.merge(%{successor_scope | wave_id: "wrong-delta"}, %{
+                   correction_of: wrong_delta,
+                   correction_of_digest: CycleFleet.digest(wrong_delta)
+                 })
+               )
+
+      try do
+        Repo.query!("SET LOCAL session_replication_role = replica")
+
+        Repo.query!("UPDATE cycle_waves SET correction_of_digest = $1 WHERE id = $2", [
+          String.duplicate("0", 64),
+          Ecto.UUID.dump!(successor.id)
+        ])
+      after
+        Repo.query!("SET LOCAL session_replication_role = origin")
+      end
+
+      assert {:error, :invalid_persisted_correction} = CycleFleet.reconcile(successor_scope)
+    end
+
+    test "correction refuses structurally corrupt prior waves", %{scope: scope} do
+      assert {:ok, wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1", "unit-2"]))
+
+      for {id, units} <- [
+            {"build-invalid", ["unit-1"]},
+            {"build-duplicate", ["unit-1"]},
+            {"build-two", ["unit-2"]}
+          ] do
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "build", "epic-builder", units)
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(
+                   assignment,
+                   "terminal-#{id}",
+                   "completed",
+                   typed_outcomes(units, [], [])
+                 )
+
+        if id == "build-invalid" do
+          task = ensure_semantic_task!(assignment)
+          task |> Ecto.Changeset.change(rev: Ecto.UUID.generate()) |> Repo.update!()
+        end
+      end
+
+      complete_phase(scope, "survey", "epic-surveyor", 12)
+      complete_phase(scope, "verify", "epic-verifier", 6)
+      complete_phase(scope, "review", "code-reviewer", 3)
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.duplicate_assignment_unit_ids == ["unit-1"]
+      assert summary.invalid_build_result_assignment_ids == ["build-invalid"]
+
+      submitted = %{
+        "version" => "correction_of-v1",
+        "prior" => %{
+          "workspace_id" => wave.workspace_id,
+          "project_id" => wave.project_id,
+          "epic_id" => wave.epic_id,
+          "wave_id" => wave.wave_id,
+          "wave_revision" => wave.id,
+          "inventory_digest" => wave.inventory_digest,
+          "effective_plan_digest" => summary.plan_digest,
+          "reconciliation_digest" => summary.reconciliation_digest
+        }
+      }
+
+      assert {:error, :correction_prior_not_repairable} =
+               CycleFleet.open_wave(
+                 Map.merge(%{scope | wave_id: "structural-successor"}, %{
+                   correction_of: submitted,
+                   correction_of_digest: CycleFleet.digest(submitted)
+                 })
+               )
+    end
+
     test "Legendary becomes exact only after every planned phase is complete", %{scope: scope} do
       assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 30))
       complete_experiments(scope)
@@ -1549,6 +2064,40 @@ defmodule Barkpark.CycleFleetTest do
         CycleFleet.digest(inventory),
         plan,
         CycleFleet.digest(plan)
+      ]
+    )
+  end
+
+  defp raw_insert_correction_wave!(parent, scope, correction, opts \\ []) do
+    profile = Keyword.get(opts, :profile, parent.profile)
+    plan = parent.plan
+
+    Repo.query!(
+      """
+      INSERT INTO cycle_waves
+        (id, workspace_id, project_id, epic_id, wave_id, profile, inventory,
+         inventory_digest, plan, plan_digest, experiment_contract, scale_contract,
+         correction_of_wave_id, correction_of, correction_of_digest, inserted_at)
+      VALUES
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, $12::jsonb,
+         $13, $14::jsonb, $15, now())
+      """,
+      [
+        Ecto.UUID.dump!(Ecto.UUID.generate()),
+        Ecto.UUID.dump!(scope.workspace_id),
+        scope.project_id && Ecto.UUID.dump!(scope.project_id),
+        scope.epic_id,
+        scope.wave_id,
+        profile,
+        parent.inventory,
+        parent.inventory_digest,
+        plan,
+        parent.plan_digest,
+        parent.experiment_contract,
+        parent.scale_contract,
+        Ecto.UUID.dump!(parent.id),
+        correction,
+        CycleFleet.digest(correction)
       ]
     )
   end
