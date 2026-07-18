@@ -137,11 +137,15 @@ defmodule Barkpark.Plugins.Tickets do
         },
         %{
           "name" => "status",
-          "type" => "string",
+          "type" => "select",
           "title" => "Status",
           "group" => "thread",
           # Derived, never client-set — the turn indicator (Decision 3).
-          "options" => %{"list" => ["open", "answered", "closed"]},
+          # Flat option list is the canonical select shape (field_inputs.ex,
+          # seeds/demo.ex, tasks/schema.ex all ship `"options" => [..]`); the
+          # old object shape `%{"list" => [..]}` was the sole outlier among 22
+          # options-bearing fields and aborted strict client schema decoders.
+          "options" => ["open", "answered", "closed"],
           "readOnly" => true
         },
         %{
