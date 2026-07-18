@@ -216,11 +216,21 @@ function log(msg) {
 // Both are back-compat by construction: a flag-less invocation is byte-identical
 // to the pre-D137 shape (the W11/W12 proof scripts drive the shim flag-less and
 // must not notice), and unknown pre-`--` flags were already ignored below.
+//
+// Per-connector egress widening (Wave 29, D238/D240) — one more ADDITIVE
+// pre-`--` flag:
+//   `--egress-host <host>` — REPEATABLE; each occurrence accumulates one host
+//     DECLARED by an INSTALLED connector (a property of the connector TYPE,
+//     emitted by the Elixir side). createSandbox() unions these with the
+//     ALLOWED_DOMAIN base into repeated `--allowed-domain` pairs on the
+//     SNAPSHOT create path. Flag-less stays byte-identical (deny-all-except-
+//     anthropic preserved); an unknown connector emits no flag ⇒ no widening.
 function parseArgv(argv) {
   let workspace = null;
   let mcpConfigB64 = null;
   let sandboxId = null;
   let keepSandbox = false;
+  const egressHosts = [];
   const claudeArgs = [];
   let i = 0;
   for (; i < argv.length; i++) {
@@ -235,6 +245,8 @@ function parseArgv(argv) {
       mcpConfigB64 = argv[++i];
     } else if (a === "--sandbox-id") {
       sandboxId = argv[++i];
+    } else if (a === "--egress-host") {
+      egressHosts.push(argv[++i]);
     } else if (a === "--keep-sandbox") {
       keepSandbox = true;
     } else {
@@ -243,7 +255,7 @@ function parseArgv(argv) {
     }
   }
   for (; i < argv.length; i++) claudeArgs.push(argv[i]);
-  return { workspace, mcpConfigB64, sandboxId, keepSandbox, claudeArgs };
+  return { workspace, mcpConfigB64, sandboxId, keepSandbox, egressHosts, claudeArgs };
 }
 
 // ── POSIX single-quote a shell token (for the in-sandbox bash -lc command) ────
@@ -696,7 +708,7 @@ async function assertClaudeVersion(id) {
   log(`WARNING: ${msg}`);
 }
 
-async function createSandbox(workspace) {
+async function createSandbox(workspace, egressHosts = []) {
   const tags = ["--tag", "purpose=cloud-turn", "--tag", `workspace=${workspace}`];
   const timeout = ["--timeout", TIMEOUT];
 
@@ -714,11 +726,23 @@ async function createSandbox(workspace) {
   // fallback is the proof/dev convenience D113(c) names ("plain node24 +
   // npm-installed claude"); the real egress lock is a snapshot property, not this
   // path's.
+  //
+  // Per-connector egress widening (Wave 29, D238/D240/D241/D242): union the
+  // connector-declared `--egress-host` values with the ALLOWED_DOMAIN base,
+  // dedupe, and emit ONE repeated `--allowed-domain <host>` pair per host.
+  // NEVER comma-join (the CLI parses that as ONE malformed domain) and NEVER
+  // emit `--network-policy` alongside `--allowed-domain` (the CLI throws — an
+  // allowlist already means deny-all-except). With no `--egress-host` flags
+  // the shape is byte-identical to the pre-W29 single-base create, so the
+  // deny-all-except-anthropic baseline is preserved fail-closed; a connector
+  // that declares no egress host simply never widens anything.
   let createArgs;
   if (SNAPSHOT) {
-    const isolation = ALLOWED_DOMAIN
-      ? ["--allowed-domain", ALLOWED_DOMAIN]
-      : ["--network-policy", NETWORK_POLICY];
+    const hosts = [...new Set([ALLOWED_DOMAIN, ...egressHosts].filter(Boolean))];
+    const isolation =
+      hosts.length > 0
+        ? hosts.flatMap((h) => ["--allowed-domain", h])
+        : ["--network-policy", NETWORK_POLICY];
     createArgs = ["sandbox", "create", "--snapshot", SNAPSHOT, ...isolation, ...timeout, ...tags];
   } else {
     createArgs = ["sandbox", "create", "--runtime", RUNTIME, ...timeout, ...tags];
@@ -786,9 +810,8 @@ async function runTurn(id, claudeArgs, frame, mcp) {
 }
 
 async function main() {
-  const { workspace, mcpConfigB64, sandboxId: reuseSandboxId, keepSandbox, claudeArgs } = parseArgv(
-    process.argv.slice(2),
-  );
+  const { workspace, mcpConfigB64, sandboxId: reuseSandboxId, keepSandbox, egressHosts, claudeArgs } =
+    parseArgv(process.argv.slice(2));
   keepMode = keepSandbox; // decides the teardown verb (stop vs remove) in teardownSandbox
   if (!workspace || workspace === "global") {
     log(`FATAL: missing/invalid --workspace (got ${JSON.stringify(workspace)}) — refusing to run an unattributed cloud turn`);
@@ -845,7 +868,7 @@ async function main() {
       sandboxId = id;
       log(`reusing session sandbox ${id} (skipping create; auto-resumes from stop-snapshot)`);
     } else {
-      id = await createSandbox(workspace);
+      id = await createSandbox(workspace, egressHosts);
     }
     // Copy mode delivers the credential-BEARING config over the API body
     // (0600 tmpfile → in-VM MCP_CONFIG_FILE, D215) before the exec; embed mode
