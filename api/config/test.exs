@@ -22,7 +22,14 @@ config :barkpark, Barkpark.Repo,
   # and starving concurrent tests' setups (same poisoning as the orphan-task
   # leak drained by DataCase.setup_sandbox). 45s stays under ExUnit's 60s
   # test timeout so a truly hung test still fails as a test, not a disconnect.
-  timeout: 45_000
+  timeout: 45_000,
+  # Checkout-queue headroom (deflake, 2026-07-18): the DBConnection defaults
+  # (queue_target 50ms) drop queued checkouts after ~5s of pressure — on a
+  # degraded CI runner the heaviest migration (CreateCycleWaves) crossed that
+  # and `mix ecto.migrate` died with a pool ConnectionError before tests ran.
+  # Slow runners should degrade to SLOW, never to dead.
+  queue_target: 1_000,
+  queue_interval: 10_000
 
 # Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
