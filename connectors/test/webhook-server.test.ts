@@ -271,7 +271,9 @@ const slackConnector = fakeConnector("slack", {
   },
 });
 
-/** A poll/socket channel (Telegram, Discord): NO webhook block, so no HTTP route. */
+/** A poll-only channel (Telegram in polling mode): NO webhook block, so no HTTP
+ * route. (Discord is NOT one of these since D228 — it carries a path-keyed webhook
+ * for slash-command interactions alongside its Gateway socket.) */
 const pollingConnector = fakeConnector("telegram");
 
 // ---------------------------------------------------------------------------

@@ -94,12 +94,26 @@ defmodule Barkpark.Search.DocumentsRetriever do
     base = if is_list(types) and types != [], do: where(base, [d], d.type in ^types), else: base
     base = perspective_filter(base, perspective)
 
+    # Count + all four facet dimensions in ONE round trip over the match set
+    # (search-latency slice c). Runs BEFORE the retrieve so its exact `count`
+    # can gate the bounded-pool self-subquery below. Facets + count stay on the
+    # FULL match set (not the ranking pool): the user wants "this query matched
+    # 1.2k items across these facets", not "the top 500 break down this way".
+    {count, facets} = count_and_facets(base)
+
     # Bounded ranking pool: for real queries, narrow to a cheap-signal candidate
     # set BEFORE running the expensive ranking ORDER BY. Browse stays unbounded
-    # since its only ORDER BY is `updated_at DESC` — already cheap and the
-    # browse contract returns the whole scoped set in recency order.
+    # (its only ORDER BY is `updated_at DESC` — already cheap, and its contract
+    # returns the whole scoped set in recency order). ELIDE the pool when the
+    # match set already fits inside it (`count <= pool_size`): `bounded_pool`
+    # would then select EVERY matched id into the `id IN (...)` subquery, a
+    # no-op filter that only costs a second scan of the predicate. Skipping it
+    # is provably identical (|match| ≤ pool ⇒ {top pool by updated_at} ⊇ match ⇒
+    # the intersection IS the match set) and halves the retrieve's predicate
+    # evals on the common small-corpus path (prod: ≤335 matches < 500 pool). At
+    # `count > pool_size` the bound is load-bearing and stays.
     ranking_input =
-      if browse? do
+      if browse? or count <= pool_size do
         base
       else
         bounded_pool(base, pool_size)
@@ -113,13 +127,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> maybe_light_select(Keyword.get(opts, :fields))
       |> Repo.all()
 
-    count = base |> exclude(:order_by) |> select([d], count(d.id)) |> Repo.one() || 0
-    # Facet counts via GROUP BY over the matching set — Postgres's parity with
-    # Indx's native facets, surfaced through the same `meta.facets` channel.
-    # Facets stay on the FULL match set (not the ranking pool), because the
-    # user wants "this query matched 1.2k items across these facets", not
-    # "the top 500 break down this way".
-    {docs, count, %{facets: facet_counts(base)}}
+    {docs, count, %{facets: facets}}
   end
 
   # Apply the bounded ranking pool: filter the query to the `pool_size` rows
@@ -194,42 +202,99 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp maybe_light_select(query, _fields), do: query
 
-  # Dataset-wide (browse) / match-set (query) facet buckets per dimension, in
-  # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},
-  # empty-label buckets dropped, biggest first.
-  defp facet_counts(base) do
-    %{}
-    |> put_facet("type", group_column(base, :type))
-    |> put_facet("status", group_column(base, :status))
-    |> put_facet("author", group_content(base, "author"))
-    |> put_facet("category", group_content(base, "category"))
+  # Count + the four facet dimensions in ONE pass over the match set (slice c).
+  #
+  # WAS: five statements — a `count(id)` plus one `GROUP BY` per dimension
+  # (type / status / author_text / category_text) — each independently
+  # re-running the full match predicate. Now a single `GROUP BY GROUPING SETS`
+  # aggregates all five in one scan: the four single-column sets give the facet
+  # buckets, the empty set `()` gives the grand total (the old `count`). The
+  # `grouping(a,b,c,d)` bitmask tags which set each returned row belongs to, so
+  # NULL-because-not-grouped is never confused with NULL-as-a-real-facet-value.
+  #
+  # BYTE-IDENTICAL to the five-statement path by construction: the SAME columns,
+  # the SAME `count(id)` aggregate, the SAME `put_facet` shaping (nil/'' labels
+  # dropped, biggest-count first). GROUPING SETS is pure aggregation batching —
+  # it changes the number of round trips, not the buckets. Empty match set: the
+  # `()` set still emits its grand-total row (count 0) while the column sets emit
+  # nothing, so count=0 with empty facets — matching the old count/GROUP-BY pair.
+  #
+  # `grouping(type,status,author_text,category_text)` is a 4-bit mask, MSB first;
+  # a bit is 1 when that column is aggregated AWAY in the current set. So a set
+  # grouping ONLY `type` has status/author/category away → 0111 = 7; `()` (all
+  # away) → 1111 = 15.
+  @g_type 0b0111
+  @g_status 0b1011
+  @g_author 0b1101
+  @g_category 0b1110
+  @g_total 0b1111
+
+  defp count_and_facets(base) do
+    rows =
+      base
+      |> exclude(:order_by)
+      |> select([d], %{
+        g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+        type: d.type,
+        status: d.status,
+        author: d.author_text,
+        category: d.category_text,
+        count: count(d.id)
+      })
+      |> group_by(
+        [d],
+        fragment(
+          "GROUPING SETS ((?), (?), (?), (?), ())",
+          d.type,
+          d.status,
+          d.author_text,
+          d.category_text
+        )
+      )
+      |> Repo.all()
+
+    init = %{count: 0, type: [], status: [], author: [], category: []}
+
+    acc =
+      Enum.reduce(rows, init, fn row, acc ->
+        case row.g do
+          @g_total -> %{acc | count: row.count}
+          @g_type -> %{acc | type: [{row.type, row.count} | acc.type]}
+          @g_status -> %{acc | status: [{row.status, row.count} | acc.status]}
+          @g_author -> %{acc | author: [{row.author, row.count} | acc.author]}
+          @g_category -> %{acc | category: [{row.category, row.count} | acc.category]}
+          _ -> acc
+        end
+      end)
+
+    facets =
+      %{}
+      |> put_facet("type", acc.type)
+      |> put_facet("status", acc.status)
+      |> put_facet("author", acc.author)
+      |> put_facet("category", acc.category)
+
+    {acc.count, facets}
   end
 
-  defp group_column(base, field) do
-    base
-    |> exclude(:order_by)
-    |> group_by([d], field(d, ^field))
-    |> select([d], {field(d, ^field), count(d.id)})
-    |> Repo.all()
-  end
-
-  defp group_content(base, key) do
-    # `selected_as` so GROUP BY references the SELECT alias — a parameterized
-    # `content->>$1` in both clauses reads as two different params to Postgres
-    # ("must appear in GROUP BY"); grouping by the alias avoids that.
-    base
-    |> exclude(:order_by)
-    |> select([d], {selected_as(fragment("?->>?", d.content, ^key), :facet_val), count(d.id)})
-    |> group_by([d], selected_as(:facet_val))
-    |> Repo.all()
-  end
-
+  # Shape a dimension's `{label, count}` rows into the `meta.facets` bucket list:
+  # drop nil/'' labels, biggest count first, label ascending as the tiebreak.
+  #
+  # The label tiebreak makes the order TOTAL and deterministic. Without it, the
+  # sort key is `-count` alone: a STABLE sort over a planner-arbitrary GROUP BY
+  # emission order, so two equal-count buckets ("post"/"note" both matched 3x)
+  # came out in whichever order Postgres happened to emit — nondeterministic
+  # across identical queries (the standalone GROUP BY and the collapsed GROUPING
+  # SETS pass can emit the same rows in different orders). That surfaced as facet
+  # jitter in the finder and non-reproducible snapshots. `{-count, label}` pins a
+  # single canonical order; the biggest-first contract for DISTINCT counts is
+  # unchanged.
   defp put_facet(map, name, rows) do
     buckets =
       rows
       |> Enum.reject(fn {label, _} -> label in [nil, ""] end)
-      |> Enum.sort_by(fn {_, count} -> -count end)
       |> Enum.map(fn {label, count} -> %{"label" => to_string(label), "count" => count} end)
+      |> Enum.sort_by(fn %{"label" => label, "count" => count} -> {-count, label} end)
 
     if buckets == [], do: map, else: Map.put(map, name, buckets)
   end
@@ -288,23 +353,29 @@ defmodule Barkpark.Search.DocumentsRetriever do
             [d],
             fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
               ilike(d.title, ^pattern) or
-              ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern)
+              ilike(d.slug_text, ^pattern)
           )
 
         # Fuzzy title arm only for tokens long enough to be meaningful.
         #
         # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this). This
-        # `similarity(?, ?) > ?` arm is index-OPAQUE but rewriting it to the
-        # GIN-engaging `%` operator (the D46 idiom) buys NOTHING here: it is OR-d
-        # (`^clause or …`) with the UNINDEXED `coalesce(?->>'slug') ILIKE ?`
-        # sibling built into `clause` above. A BitmapOr can only form when EVERY
-        # branch is independently indexable, so the slug-ILIKE poisons the whole
-        # disjunction into a Seq Scan — PROVEN live: the full chain Seq-Scans even
-        # with the prod jsonb_path_ops slug index present, and dropping ONLY the
-        # slug arm restores a 3-way BitmapOr. A `%` rewrite here plans byte-
-        # identically to the Seq Scan; a full-path EXPLAIN "proving" a win is the
-        # vacuous-green trap. Un-poisoning needs a trgm expression index on
-        # content->>'slug' (backlog ae-search-or-arm-restructure). See D49(c).
+        # `similarity(?, ?) > ?` arm is index-OPAQUE, but rewriting it to the
+        # GIN-engaging `%` operator (the D46 idiom) still buys NOTHING: it is OR-d
+        # (`^clause or …`) with the UNINDEXED `slug_text ILIKE ?` sibling in
+        # `clause` above. A BitmapOr can only form when EVERY branch is
+        # independently indexable, so the slug-ILIKE keeps the whole disjunction a
+        # bitmap-filter scan — PROVEN live: even a trgm expression index on
+        # content->>'slug', created CONCURRENTLY, went EXPLAIN-unused (planner
+        # bitmap-scans documents_type_dataset_index then FILTERs the OR arms
+        # per row), and was dropped. The `%`-rewrite prohibition therefore stands.
+        #
+        # What slice b (migration 20260718090000) DID fix is the poison the D49
+        # note called out separately: the slug arm no longer reads
+        # `content->>'slug'` (a per-row detoast of the ~88KB `content` jsonb,
+        # measured +1,501 buffers on EVERY predicate eval — count + facets re-run
+        # it 4-5x/keystroke). It now reads the narrow `slug_text` GENERATED STORED
+        # column, so the filter is cheap without changing the plan shape or the
+        # matched set (slug_text = coalesce(content->>'slug','') by construction).
         clause =
           if String.length(term) >= min_fuzzy_len do
             dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
@@ -358,7 +429,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           [d],
           fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
             ilike(d.title, ^pattern) or
-            ilike(coalesce(fragment("?->>'slug'", d.content), ""), ^pattern) or
+            ilike(d.slug_text, ^pattern) or
             fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
         )
 
@@ -458,13 +529,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # without erroring: non-array `tags` → '[]'::jsonb, flat string elements fail
   # jsonb_typeof(e)='object', and a non-integer strength fails the digits guard
   # instead of blowing up the ::int cast mid-query. Untagged docs get +0.
+  #
+  # PERF (search-latency slice d, task-9faff63dd9199c7d): the source array is the
+  # `tags_meta` GENERATED STORED column (migration 20260718100000), NOT the inline
+  # `CASE WHEN jsonb_typeof(content->'tags')='array' THEN content->'tags' ELSE
+  # '[]'::jsonb END` this used to evaluate. `tags_meta` IS that exact CASE
+  # materialized at write time (the non-array → '[]' guard now lives in the
+  # generated expression), so `jsonb_array_elements(tags_meta)` is byte-identical
+  # to the old inline form — the boost computes the same value. The win: the ORDER
+  # BY no longer DETOASTs the ~8.5KB–88KB `content` jsonb per candidate row to
+  # reach `->'tags'` (prod EXPLAIN over a 200-row pool: SubPlan 2,126 → 0 buffers,
+  # 47 → 1.6 ms). Read via `?.tags_meta` on the row binding, mirroring how
+  # `?.search_vector` reads its own virtual/GENERATED column.
   defp tag_boost_key(tag_terms) do
     dynamic(
       [d],
       fragment(
-        "0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
-        d.content,
-        d.content,
+        "0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(?.tags_meta) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
+        d,
         type(^tag_terms, {:array, :string})
       )
     )
@@ -503,18 +585,54 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp field_similarity_term(path, weight, query) do
-    keys = content_keys(path)
+    case materialized_text_column(path) do
+      nil ->
+        keys = content_keys(path)
 
-    dynamic(
-      [d],
-      fragment(
-        "? * similarity(coalesce(?#>>?, ''), ?)",
-        ^(weight * 1.0),
-        d.content,
-        type(^keys, {:array, :string}),
-        ^query
-      )
-    )
+        dynamic(
+          [d],
+          fragment(
+            "? * similarity(coalesce(?#>>?, ''), ?)",
+            ^(weight * 1.0),
+            d.content,
+            type(^keys, {:array, :string}),
+            ^query
+          )
+        )
+
+      column ->
+        dynamic(
+          [d],
+          fragment(
+            "? * similarity(coalesce(?, ''), ?)",
+            ^(weight * 1.0),
+            field(d, ^column),
+            ^query
+          )
+        )
+    end
+  end
+
+  # A jsonb path already materialized as a GENERATED STORED text column (#4174 /
+  # slice b) → read the narrow column instead of the `content#>>{key}` detour, so
+  # the ORDER BY's per-candidate similarity input no longer DETOASTs `content`.
+  # BYTE-IDENTICAL by construction (a single-key `content#>>'{k}'` equals
+  # `content->>'k'`):
+  #   * ["slug"]     → slug_text     = coalesce(content->>'slug','') ; coalesce(slug_text,'')     ≡ coalesce(content#>>'{slug}','')
+  #   * ["author"]   → author_text   = content->>'author'           ; coalesce(author_text,'')   ≡ coalesce(content#>>'{author}','')
+  #   * ["category"] → category_text = content->>'category'         ; coalesce(category_text,'') ≡ coalesce(content#>>'{category}','')
+  # Only these single-key paths map; deeper/other config paths keep the
+  # `content#>>` fallback verbatim. The DEFAULT + live prod `documents` config's
+  # `content.slug` field (weight 3) is exactly this case — verified on prod
+  # (search_surface_config) — so the field-similarity content detoast is gone on
+  # the real path with NO new column and NO ranking change.
+  defp materialized_text_column(path) do
+    case content_keys(path) do
+      ["slug"] -> :slug_text
+      ["author"] -> :author_text
+      ["category"] -> :category_text
+      _ -> nil
+    end
   end
 
   defp content_keys("content." <> rest), do: String.split(rest, ".")

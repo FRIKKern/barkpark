@@ -319,9 +319,10 @@ export type WebhookKeySource = "path" | "payload";
  * and `core/dispatch.ts` / `tenant/resolve.ts` / `connector/registry.ts` /
  * `turn/turn-loop.ts` are untouched.
  *
- * Connectors with no `webhook` (Telegram polling, Discord's gateway socket) are
- * simply not routable over HTTP — their URLs 404, opaquely, like any other
- * unknown route.
+ * A connector with no `webhook` (Telegram in polling mode) is simply not routable
+ * over HTTP — its URLs 404, opaquely, like any other unknown route. (Discord runs
+ * BOTH transports since D228: a Gateway socket AND a path-keyed webhook for
+ * slash-command interactions, so it DOES carry a `webhook` block.)
  */
 export interface ConnectorWebhook {
   keySource: WebhookKeySource;

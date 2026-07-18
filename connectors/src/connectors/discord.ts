@@ -49,18 +49,29 @@ import {
  * `adapterFactory` passes all three EXPLICITLY — the env fallback is structurally
  * unreachable.
  *
- * `publicKey` is only used to verify Ed25519 webhook signatures, which v1 does
- * not use (Gateway-only). It is still required, not defaulted: the day
- * `connectors-discord-slash-commands` lands, every existing install already
- * carries a REAL key — rather than a sentinel someone later mistakes for one.
+ * `publicKey` verifies the Ed25519 signature on Discord's HTTP interactions —
+ * required from the start precisely so that the day slash commands landed, every
+ * existing install already carried a REAL key rather than a sentinel someone
+ * later mistakes for one. That day is here (see below).
  *
- * WHY GATEWAY-ONLY IN V1
- * ----------------------
- * Slash commands need Discord's Ed25519-signed HTTP interaction endpoint (a
- * public URL + `publicKey` verification). That is a webhook seam this slice
- * deliberately does not depend on. Filed as `connectors-discord-slash-commands`.
- * DMs and mentions — everything the turn loop needs — arrive over the Gateway
- * websocket, which needs no inbound URL at all.
+ * TWO TRANSPORTS, ONE HANDLER (charter D225/D228)
+ * ----------------------------------------------
+ * Discord speaks over TWO inbound transports, and they are ADDITIVE, never an
+ * XOR:
+ *   - the GATEWAY WEBSOCKET carries DMs and mentions — no inbound URL at all
+ *     (the {@link listen} socket, lease-owned across replicas);
+ *   - an ED25519-SIGNED HTTP WEBHOOK carries slash-command interactions once the
+ *     app's portal Interactions Endpoint URL is set.
+ * This connector declares `webhook: { keySource: "path" }` so the generic HTTP
+ * seam (D39) mounts `/connectors/webhooks/discord/:installKey` alongside the
+ * socket. The vendor `DiscordAdapter.handleWebhook` already ships the ENTIRE
+ * interaction protocol — raw-body Ed25519 verify, PING→PONG, the synchronous
+ * type-5 deferred ack, and `waitUntil`-backgrounded dispatch — so the bridge adds
+ * ZERO protocol code; the wiring is the handler registration in
+ * {@link mountInstall} (`chat.onSlashCommand`). `keySource: "path"` because
+ * Discord is BYO-bot (D41): each install has its OWN `publicKey`, so the body
+ * must not choose the key that verifies the body. See
+ * `connectors/docs/discord-byo-bot.md`.
  */
 
 export const DISCORD_PROVIDER = "discord";
@@ -305,6 +316,19 @@ export function createDiscordConnector(
     // guild id, but a guild does not own the bot — the APPLICATION does, and a
     // shared application would mean a shared credential (see the module note).
     tenantResolution: "credential-bound",
+
+    // The additive HTTP interactions transport (D228). Slash commands arrive over
+    // Discord's Ed25519-signed HTTP Interactions API, which rides the generic
+    // webhook seam (D39): the demux (webhook-server → lookupInstall →
+    // mounts.handlerFor → chat.webhooks.discord) serves it with ZERO seam changes,
+    // and the vendor adapter already ships the whole protocol (raw-body Ed25519
+    // verify, PING→PONG, type-5 deferred ack, waitUntil-backgrounded dispatch).
+    // keySource:"path" because Discord is BYO-bot (D41) — every install has its
+    // OWN publicKey, so the route is per-install (POST
+    // /connectors/webhooks/discord/:installKey, the WhatsApp precedent) and the
+    // body never chooses the key that verifies the body. ADDITIVE to the Gateway
+    // socket (D225), never an XOR.
+    webhook: { keySource: "path" },
 
     /**
      * BYO-bot paste (D41/D51). The credential is the JSON triple, not a bare

@@ -801,8 +801,9 @@ export function createWebhookRequestHandler(
 
       const connector = registry.get(route.provider);
       const spec = connector?.webhook;
-      // No connector, or a connector with no inbound HTTP transport (Telegram
-      // polling, Discord's gateway socket): not routable over HTTP. Same 404.
+      // No connector, or a connector with no inbound HTTP transport (Telegram in
+      // polling mode): not routable over HTTP. Same 404. (Discord DOES carry a
+      // webhook block since D228 — Gateway socket AND slash-command interactions.)
       if (!connector || !spec) {
         drain(req);
         notFound(res);
