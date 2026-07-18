@@ -1318,8 +1318,94 @@
             }, { once: true });
           }
         },
-        mounted() { this.runMermaid(); this.runAsciicast(); },
-        updated() { this.runMermaid(); this.runAsciicast(); }
+        // runCodeTabs / runTabs: the I1 dual-hydration twin of
+        // @barkpark/react/client's hydrateCodeTabs/hydrateTabs (client.ts) —
+        // the SAME framework-free DOM-scan shape, reimplemented here rather
+        // than shared (this hook has no npm dependency on @barkpark/react).
+        // `compose.ex`'s :article leg for both blocks paints EVERY panel
+        // visible (NO-JS DEGRADE); these two methods are what hide every
+        // non-active panel and wire the click-to-switch strip, guarded by
+        // `data-hydrated` so a stream `updated()` never re-wires a live tab
+        // strip. code-tabs additionally persists the picked language to
+        // localStorage under its `data-sync-key`, applying the stored choice
+        // to every OTHER hydrated code-tabs element sharing the key (the
+        // "choose npm once, every code-tabs block follows" pitch).
+        selectCodeTabsLang(container, lang) {
+          let panels = Array.from(container.querySelectorAll(".bp-code-tabs__panel"));
+          let buttons = Array.from(container.querySelectorAll(".bp-code-tabs__tab"));
+          let target = panels.some((p) => p.dataset.lang === lang)
+            ? lang
+            : (panels[0] ? panels[0].dataset.lang : "");
+          buttons.forEach((btn) => {
+            let active = btn.dataset.lang === target;
+            btn.setAttribute("aria-selected", String(active));
+            btn.classList.toggle("bp-code-tabs__tab--active", active);
+          });
+          panels.forEach((panel) => {
+            if (panel.dataset.lang === target) panel.removeAttribute("hidden");
+            else panel.setAttribute("hidden", "");
+          });
+        },
+        runCodeTabs() {
+          let containers = Array.from(
+            this.el.querySelectorAll('div.bp-code-tabs:not([data-hydrated="true"])')
+          );
+          containers.forEach((container) => {
+            let syncKey = container.dataset.syncKey || "";
+            let firstPanel = container.querySelector(".bp-code-tabs__panel");
+            let stored = null;
+            if (syncKey) {
+              try { stored = window.localStorage.getItem("bp-code-tabs:" + syncKey); } catch (e) { /* unavailable */ }
+            }
+            this.selectCodeTabsLang(container, stored || (firstPanel ? firstPanel.dataset.lang : ""));
+
+            Array.from(container.querySelectorAll(".bp-code-tabs__tab")).forEach((btn) => {
+              btn.addEventListener("click", () => {
+                let lang = btn.dataset.lang || "";
+                this.selectCodeTabsLang(container, lang);
+                if (!syncKey) return;
+                try { window.localStorage.setItem("bp-code-tabs:" + syncKey, lang); } catch (e) { /* unavailable */ }
+                Array.from(
+                  document.querySelectorAll('.bp-code-tabs[data-hydrated="true"]')
+                ).forEach((other) => {
+                  if (other !== container && other.dataset.syncKey === syncKey) {
+                    this.selectCodeTabsLang(other, lang);
+                  }
+                });
+              });
+            });
+            container.dataset.hydrated = "true";
+          });
+        },
+        selectTabIndex(container, index) {
+          let panels = Array.from(container.querySelectorAll(".bp-tabs__panel"));
+          let buttons = Array.from(container.querySelectorAll(".bp-tabs__tab"));
+          if (!panels.length) return;
+          let clamped = Math.max(0, Math.min(index, panels.length - 1));
+          buttons.forEach((btn, i) => {
+            let active = i === clamped;
+            btn.setAttribute("aria-selected", String(active));
+            btn.classList.toggle("bp-tabs__tab--active", active);
+          });
+          panels.forEach((panel, i) => {
+            if (i === clamped) panel.removeAttribute("hidden");
+            else panel.setAttribute("hidden", "");
+          });
+        },
+        runTabs() {
+          let containers = Array.from(
+            this.el.querySelectorAll('div.bp-tabs:not([data-hydrated="true"])')
+          );
+          containers.forEach((container) => {
+            this.selectTabIndex(container, 0);
+            Array.from(container.querySelectorAll(".bp-tabs__tab")).forEach((btn, i) => {
+              btn.addEventListener("click", () => this.selectTabIndex(container, i));
+            });
+            container.dataset.hydrated = "true";
+          });
+        },
+        mounted() { this.runMermaid(); this.runAsciicast(); this.runCodeTabs(); this.runTabs(); },
+        updated() { this.runMermaid(); this.runAsciicast(); this.runCodeTabs(); this.runTabs(); }
       },
 
       // P6.U3 RailDiffSelect: shift-click two rail event rows to open a

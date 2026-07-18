@@ -93,6 +93,7 @@ defmodule Barkpark.PortableDoc.Tiers do
     "field-color",
     "field-image",
     "field-reference",
+    "field-number",
     "composite",
     "arrayOf",
     "codelist",
@@ -110,6 +111,10 @@ defmodule Barkpark.PortableDoc.Tiers do
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
+    # scaffy:classify-block-type code-tabs MARK:tier-code-tabs--widget
+    "code-tabs",
+    # scaffy:classify-block-type api-endpoint MARK:tier-api-endpoint--widget
+    "api-endpoint",
     # scaffy:classify-block-type criteria-progress MARK:tier-criteria-progress--widget
     "criteria-progress",
     # scaffy:classify-block-type bar-chart MARK:tier-bar-chart--widget
@@ -160,7 +165,10 @@ defmodule Barkpark.PortableDoc.Tiers do
     "chat-plan"
   ]
 
-  @section ~w(section columns)
+  # tabs (pbw-stier-tabs, B052): owns its children's layout across tab panels,
+  # the same "owns LAYOUT" reason columns is :section — a hand edit per the
+  # comment above (a THIRD :section type, the rare case the ~w sigil expects).
+  @section ~w(section columns tabs)
 
   @by_tier %{element: @element, widget: @widget, section: @section}
   @tier_of (for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier})

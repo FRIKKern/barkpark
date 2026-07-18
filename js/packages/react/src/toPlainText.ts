@@ -242,6 +242,12 @@ function blockText(b: Block): string {
       return joinBlocks(asList(b.columns).map((col) => childrenText(col)))
     case 'section':
       return childrenText(b.blocks)
+    // Tabs: each tab's label + its nested blocks' prose, in order — the
+    // `steps` precedent (a tab is a titled panel, same shape as a step).
+    case 'tabs':
+      return joinBlocks(
+        asList(b.tabs).map((t) => (isMap(t) ? joinBlocks([str(t.label), childrenText(t.blocks)]) : '')),
+      )
     case 'terminal':
       return childrenText(b.children ?? b.blocks)
     // Steps: each step's title + its nested blocks' prose, in order.
