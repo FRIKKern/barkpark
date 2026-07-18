@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0b0e13;}
+a{color:#7fb4ff;text-decoration:none;}
+a:hover{color:#a8ccff;}
+*{box-sizing:border-box;}
+::selection{background:rgba(63,207,142,0.25);}
+input::placeholder{color:#4a5261;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+@keyframes toastin{from{opacity:0;transform:translate(-50%,8px);}to{opacity:1;transform:translate(-50%,0);}}
+@keyframes modalin{from{opacity:0;transform:translateY(10px) scale(0.98);}to{opacity:1;transform:translateY(0) scale(1);}}
+</style>
+</helmet>
+<div style="display:flex;min-height:100vh;background:#0b0e13;color:#e9edf3;font-family:'Schibsted Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased;">
+  <aside style="display:flex;flex-direction:column;gap:4px;padding:20px 12px;border-right:1px solid rgba(255,255,255,0.06);background:#0d1117;">
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 12px 22px 12px;">
+      <div style="width:28px;height:28px;border-radius:8px;background:rgba(63,207,142,0.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="14" height="14" viewBox="0 0 14 14"><polygon points="7,1 12,11 2,11" fill="#3fcf8e"></polygon></svg>
+      </div>
+      <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span style="font-size:15px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap;">Barkpark <span style="color:#8d96a5;font-weight:500;">Cloud</span></span></sc-if>
+    </div>
+    <div onClick="{{ goOverview }}" style-hover="background:rgba(255,255,255,0.05)" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:{{ nav.overviewFg }};background:{{ nav.overviewBg }};">
+      <svg width="15" height="15" viewBox="0 0 15 15"><rect x="1" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor"></rect><rect x="8.5" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"></rect><rect x="1" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"></rect><rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"></rect></svg>
+      <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Overview</span></sc-if>
+    </div>
+    <div onClick="{{ goFleet }}" style-hover="background:rgba(255,255,255,0.05)" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:{{ nav.fleetFg }};background:{{ nav.fleetBg }};">
+      <svg width="15" height="15" viewBox="0 0 15 15"><rect x="1" y="2" width="13" height="3.4" rx="1.5" fill="currentColor"></rect><rect x="1" y="9.6" width="13" height="3.4" rx="1.5" fill="currentColor" opacity="0.45"></rect></svg>
+      <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Fleet</span></sc-if>
+    </div>
+    <div onClick="{{ goSites }}" style-hover="background:rgba(255,255,255,0.05)" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:{{ nav.sitesFg }};background:{{ nav.sitesBg }};">
+      <svg width="15" height="15" viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><line x1="1.5" y1="7.5" x2="13.5" y2="7.5" stroke="currentColor" stroke-width="1.2" opacity="0.6"></line></svg>
+      <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Sites</span></sc-if>
+    </div>
+    <div onClick="{{ goActivity }}" style-hover="background:rgba(255,255,255,0.05)" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:{{ nav.activityFg }};background:{{ nav.activityBg }};">
+      <svg width="15" height="15" viewBox="0 0 15 15"><polyline points="1,8 4.5,8 6.5,3 9,12 10.8,8 14,8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></polyline></svg>
+      <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Activity</span></sc-if>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex;flex-direction:column;gap:2px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">
+      <div style-hover="color:#e9edf3" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13.5px;color:#8d96a5;">
+        <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5"></circle><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2.5"></circle></svg>
+        <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Settings</span></sc-if>
+      </div>
+      <div onClick="{{ goDocs }}" style-hover="background:rgba(255,255,255,0.05)" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13.5px;color:{{ nav.docsFg }};background:{{ nav.docsBg }};">
+        <svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="1.5" width="10" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"></rect><line x1="4.8" y1="5" x2="9.2" y2="5" stroke="currentColor" stroke-width="1.3"></line><line x1="4.8" y1="8" x2="9.2" y2="8" stroke="currentColor" stroke-width="1.3"></line></svg>
+        <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><span>Docs</span></sc-if>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 12px 4px 12px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.55 0.12 250);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">F</div>
+        <sc-if value="{{ showNavLabels }}" hint-placeholder-val="{{ true }}"><div style="display:flex;flex-direction:column;line-height:1.25;"><span style="font-size:13px;font-weight:600;">Fjord</span><span style="font-size:11.5px;color:#626c7c;">fjord@jarl.no</span></div></sc-if>
+      </div>
+    </div>
+  </aside>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0;">
+    <header style="display:flex;align-items:center;gap:16px;padding:14px 32px;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style-hover="border-color:rgba(255,255,255,0.2)" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:500;">
+        <div style="width:18px;height:18px;border-radius:5px;background:oklch(0.5 0.13 280);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;">B</div>
+        <span>Guerrilla</span>
+        <span style="color:#626c7c;font-size:12px;">owner</span>
+        <svg width="9" height="6" viewBox="0 0 9 6"><polyline points="1,1 4.5,4.5 8,1" fill="none" stroke="#8d96a5" stroke-width="1.5" stroke-linecap="round"></polyline></svg>
+      </div>
+      <div style="flex:1;"></div>
+      <div style="display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;background:rgba(63,207,142,0.09);font-size:12.5px;color:#3fcf8e;font-weight:600;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#3fcf8e;animation:pulse 2.4s ease-in-out infinite;"></span>
+        Live <span style="color:#5a8f75;font-weight:400;">10s ago</span>
+      </div>
+      <span onClick="{{ goDocs }}" style-hover="color:#e9edf3" style="font-size:13.5px;color:#8d96a5;cursor:pointer;">Help</span>
+      <span style-hover="color:#e9edf3" style="font-size:13.5px;color:#8d96a5;cursor:pointer;">Light</span>
+    </header>
+    <div style="flex:1;overflow-y:auto;">
+
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+      <div style="max-width:1120px;margin:0 auto;padding:44px 40px 72px 40px;display:flex;flex-direction:column;gap:36px;">
+        <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:240px;">
+            <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em;">Overview</h1>
+            <p style="margin:6px 0 0 0;font-size:14.5px;color:#8d96a5;">Your fleet at a glance — and what needs you.</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:8px 14px;border:1px solid rgba(255,255,255,0.07);border-radius:10px;background:#10141b;">
+            <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#c3cad5;"><span style="width:7px;height:7px;border-radius:50%;background:#3fcf8e;"></span>{{ healthyCount }} healthy</span>
+            <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#c3cad5;"><span style="width:7px;height:7px;border-radius:50%;background:#e8b45a;"></span>{{ degradedCount }} degraded</span>
+            <sc-if value="{{ hasInFlight }}" hint-placeholder-val="{{ false }}">
+            <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#c3cad5;"><span style="width:7px;height:7px;border-radius:50%;background:#7fb4ff;animation:pulse 1.6s ease-in-out infinite;"></span>{{ inFlightCount }} in flight</span>
+            </sc-if>
+            <span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#626c7c;">{{ slotsLabel }} slots</span>
+            <div style="width:56px;height:4px;border-radius:2px;background:rgba(255,255,255,0.08);overflow:hidden;"><div style="width:{{ slotsPct }};height:100%;background:#3fcf8e;border-radius:2px;"></div></div>
+          </div>
+          <button onClick="{{ openLaunch }}" style-hover="background:#45dd99" style="border:none;border-radius:9px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;">Launch instance</button>
+        </div>
+
+        <sc-if value="{{ showBanner }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border:1px solid rgba(232,180,90,0.3);border-radius:12px;background:rgba(232,180,90,0.06);">
+          <span style="width:9px;height:9px;border-radius:50%;background:#e8b45a;flex-shrink:0;animation:pulse 2s ease-in-out infinite;"></span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14.5px;font-weight:600;">Gyldendal needs attention</div>
+            <div style="font-size:13px;color:#8d96a5;margin-top:2px;">Health check failing since 09:02 — API answers, login and Studio unverified.</div>
+          </div>
+          <button onClick="{{ openGyldendal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#e9edf3;font-family:inherit;font-size:13px;font-weight:600;padding:8px 14px;cursor:pointer;">View instance</button>
+          <button onClick="{{ openStudioGyldendal }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:8px 14px;cursor:pointer;">Open Studio</button>
+        </div>
+        </sc-if>
+
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="display:flex;align-items:baseline;gap:10px;">
+            <h2 style="margin:0;font-size:16px;font-weight:600;">Instances</h2>
+            <span onClick="{{ goFleet }}" style-hover="color:#a8ccff" style="font-size:13px;color:#7fb4ff;cursor:pointer;">View fleet →</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:18px;">
+            <sc-for list="{{ fleet }}" as="inst" hint-placeholder-count="2">
+            <div onClick="{{ inst.onOpen }}" style-hover="border-color:rgba(255,255,255,0.18);transform:translateY(-1px)" style="display:flex;flex-direction:column;gap:14px;padding:20px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;cursor:pointer;transition:border-color 0.15s,transform 0.15s;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:17px;font-weight:700;letter-spacing:-0.01em;">{{ inst.name }}</span>
+                <span style="display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap;background:{{ inst.badgeBg }};color:{{ inst.badgeFg }};"><span style="width:6px;height:6px;border-radius:50%;background:{{ inst.badgeFg }};"></span>{{ inst.status }}</span>
+                <div style="flex:1;"></div>
+                <span style="font-size:12px;color:#626c7c;">{{ inst.provider }}</span>
+              </div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ inst.url }}</div>
+              <svg width="100%" height="42" viewBox="0 0 100 32" preserveAspectRatio="none" style="display:block;"><polyline points="{{ inst.spark }}" fill="none" stroke="{{ inst.sparkColor }}" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+                <sc-for list="{{ inst.stats }}" as="s" hint-placeholder-count="4">
+                <div style="display:flex;flex-direction:column;gap:3px;">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#626c7c;letter-spacing:0.08em;">{{ s.k }}</span>
+                  <span style="font-size:15px;font-weight:600;">{{ s.v }}</span>
+                </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;font-size:12px;color:#626c7c;">{{ inst.asOf }}<div style="flex:1;"></div><span style="color:#3fcf8e;font-weight:600;">Open Studio →</span></div>
+            </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="display:flex;align-items:baseline;gap:10px;">
+            <h2 style="margin:0;font-size:16px;font-weight:600;">Recent activity</h2>
+            <span onClick="{{ goActivity }}" style-hover="color:#a8ccff" style="font-size:13px;color:#7fb4ff;cursor:pointer;">View all →</span>
+          </div>
+          <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;overflow:hidden;">
+            <sc-for list="{{ recentActivity }}" as="ev" hint-placeholder-count="3">
+            <div onClick="{{ ev.onOpen }}" style-hover="background:rgba(255,255,255,0.03)" style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;">
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ ev.dot }};flex-shrink:0;"></span>
+              <span style="font-size:13.5px;">{{ ev.title }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#626c7c;">{{ ev.actor }}</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:12px;color:#626c7c;padding:2px 9px;border-radius:99px;border:1px solid rgba(255,255,255,0.08);">{{ ev.kind }}</span>
+              <span style="font-size:12.5px;color:#8d96a5;width:64px;text-align:right;">{{ ev.time }}</span>
+            </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isFleet }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1120px;margin:0 auto;padding:44px 40px 72px 40px;display:flex;flex-direction:column;gap:36px;">
+        <div style="display:flex;align-items:flex-end;gap:12px;">
+          <div style="flex:1;">
+            <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em;">Fleet</h1>
+            <p style="margin:6px 0 0 0;font-size:14.5px;color:#8d96a5;">Every Barkpark instance registered to your team.</p>
+          </div>
+          <button onClick="{{ doRefresh }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:9px;background:transparent;color:#c3cad5;font-family:inherit;font-size:14px;font-weight:500;padding:10px 16px;cursor:pointer;">Refresh</button>
+          <button onClick="{{ openLaunch }}" style-hover="background:#45dd99" style="border:none;border-radius:9px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;">Launch instance</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:18px;">
+          <sc-for list="{{ fleet }}" as="inst" hint-placeholder-count="2">
+          <div onClick="{{ inst.onOpen }}" style-hover="border-color:rgba(255,255,255,0.18);transform:translateY(-1px)" style="display:flex;flex-direction:column;gap:14px;padding:20px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;cursor:pointer;transition:border-color 0.15s,transform 0.15s;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:17px;font-weight:700;letter-spacing:-0.01em;">{{ inst.name }}</span>
+              <span style="display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap;background:{{ inst.badgeBg }};color:{{ inst.badgeFg }};"><span style="width:6px;height:6px;border-radius:50%;background:{{ inst.badgeFg }};"></span>{{ inst.status }}</span>
+              <span style="font-size:12px;color:#626c7c;">{{ inst.meta }}</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:12px;color:#626c7c;">{{ inst.provider }}</span>
+            </div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ inst.url }}</div>
+            <svg width="100%" height="42" viewBox="0 0 100 32" preserveAspectRatio="none" style="display:block;"><polyline points="{{ inst.spark }}" fill="none" stroke="{{ inst.sparkColor }}" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>
+            <div style="display:flex;align-items:center;font-size:12px;color:#626c7c;">{{ inst.asOf }}<div style="flex:1;"></div><span style="color:#3fcf8e;font-weight:600;">Open Studio →</span></div>
+          </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <h2 style="margin:0;font-size:16px;font-weight:600;">Archives</h2>
+            <p style="margin:5px 0 0 0;font-size:13.5px;color:#8d96a5;">Portable bundles you can resurrect on Hetzner or Azure.</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:18px 20px;border:1px dashed rgba(255,255,255,0.14);border-radius:12px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#e8b45a;flex-shrink:0;"></span>
+            <span style="flex:1;font-size:13.5px;color:#c3cad5;">Archive storage isn't configured for this deployment.</span>
+            <span onClick="{{ goDocsArchives }}" style-hover="color:#a8ccff" style="font-size:13px;color:#7fb4ff;cursor:pointer;">How archives work</span>
+            <button onClick="{{ doRetryArchive }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#e9edf3;font-family:inherit;font-size:13px;font-weight:600;padding:7px 14px;cursor:pointer;">Retry</button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isSites }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1120px;margin:0 auto;padding:44px 40px 72px 40px;display:flex;flex-direction:column;gap:28px;">
+        <div style="display:flex;align-items:flex-end;gap:12px;">
+          <div style="flex:1;">
+            <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em;">Sites</h1>
+            <p style="margin:6px 0 0 0;font-size:14.5px;color:#8d96a5;">Published sites across your instances.</p>
+          </div>
+          <button onClick="{{ openNewSite }}" style-hover="background:#45dd99" style="border:none;border-radius:9px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;">+ New site</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:18px;">
+          <sc-for list="{{ sites }}" as="site" hint-placeholder-count="3">
+          <div style-hover="border-color:rgba(255,255,255,0.18)" style="display:flex;flex-direction:column;gap:12px;padding:20px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;transition:border-color 0.15s;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:16px;font-weight:700;letter-spacing:-0.01em;">{{ site.name }}</span>
+              <span style="display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:{{ site.chipBg }};color:{{ site.chipFg }};"><span style="width:6px;height:6px;border-radius:50%;background:{{ site.chipFg }};"></span>{{ site.status }}</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:12px;color:#626c7c;">{{ site.template }}</span>
+            </div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ site.url }}</div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#626c7c;">
+              <span onClick="{{ site.onOpenInstance }}" style-hover="color:#a8ccff" style="color:#7fb4ff;cursor:pointer;">on {{ site.instance }}</span>
+              <span>· updated {{ site.updated }}</span>
+              <div style="flex:1;"></div>
+              <span style-hover="color:#e9edf3" style="cursor:pointer;">Visit ↗</span>
+            </div>
+          </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isActivity }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1120px;margin:0 auto;padding:44px 40px 72px 40px;display:flex;flex-direction:column;gap:24px;">
+        <div>
+          <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em;">Activity</h1>
+          <p style="margin:6px 0 0 0;font-size:14.5px;color:#8d96a5;">Everything that happened across the team. Click a row for the raw event.</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <sc-for list="{{ activityFilters }}" as="f" hint-placeholder-count="5">
+          <span onClick="{{ f.onClick }}" style="padding:6px 14px;border-radius:99px;border:1px solid {{ f.border }};background:{{ f.bg }};color:{{ f.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ f.label }}</span>
+          </sc-for>
+        </div>
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;overflow:hidden;">
+          <sc-for list="{{ filteredActivity }}" as="ev" hint-placeholder-count="6">
+          <div onClick="{{ ev.onOpen }}" style-hover="background:rgba(255,255,255,0.03)" style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ ev.dot }};flex-shrink:0;"></span>
+            <span style="font-size:13.5px;">{{ ev.title }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#626c7c;">{{ ev.actor }}</span>
+            <div style="flex:1;"></div>
+            <span style="font-size:12px;color:#626c7c;padding:2px 9px;border-radius:99px;border:1px solid rgba(255,255,255,0.08);">{{ ev.kind }}</span>
+            <span style="font-size:12.5px;color:#8d96a5;width:64px;text-align:right;">{{ ev.time }}</span>
+          </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDocs }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1120px;margin:0 auto;padding:44px 40px 72px 40px;display:grid;grid-template-columns:220px 1fr;gap:40px;align-items:start;">
+        <div style="display:flex;flex-direction:column;gap:4px;position:sticky;top:24px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.12em;color:#626c7c;padding:0 12px 8px 12px;">DOCUMENTATION</span>
+          <sc-for list="{{ docNav }}" as="d" hint-placeholder-count="4">
+          <div onClick="{{ d.onClick }}" style-hover="background:rgba(255,255,255,0.05)" style="padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:500;color:{{ d.fg }};background:{{ d.bg }};">{{ d.label }}</div>
+          </sc-for>
+        </div>
+        <div style="min-width:0;">
+          <sc-if value="{{ docQuickstart }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:18px;max-width:640px;">
+            <h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-0.02em;">Quickstart</h1>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">Barkpark Cloud manages your Barkpark instances on Hetzner or Azure — provisioning, health, updates and archives. Everything the dashboard does is also a <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e9edf3;">bp</span> command.</p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <sc-for list="{{ quickstartSteps }}" as="q" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:#10141b;">
+                <span style="width:22px;height:22px;border-radius:50%;background:rgba(63,207,142,0.12);color:#3fcf8e;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">{{ q.n }}</span>
+                <span style="width:160px;flex-shrink:0;font-size:13.5px;font-weight:600;">{{ q.label }}</span>
+                <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ q.cmd }}</span>
+                <span onClick="{{ q.onCopy }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;">{{ q.copyLabel }}</span>
+              </div>
+              </sc-for>
+            </div>
+            <p style="margin:0;font-size:13.5px;line-height:1.65;color:#8d96a5;">Once an instance is live it shows up in your <span onClick="{{ goFleet }}" style="color:#7fb4ff;cursor:pointer;">Fleet</span> with health, usage and update state within a minute.</p>
+          </div>
+          </sc-if>
+          <sc-if value="{{ docCli }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:18px;max-width:720px;">
+            <h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-0.02em;">CLI reference</h1>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">Instance lifecycle commands. All of them are safe to re-run; destructive ones ask for confirmation.</p>
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:12px;background:#10141b;overflow:hidden;">
+              <sc-for list="{{ cliRef }}" as="c" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:16px;padding:13px 18px;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="width:300px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#e9edf3;">{{ c.cmd }}</span>
+                <span style="flex:1;font-size:13px;color:#8d96a5;">{{ c.desc }}</span>
+                <span onClick="{{ c.onCopy }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;">{{ c.copyLabel }}</span>
+              </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ docArchives }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:18px;max-width:640px;">
+            <h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-0.02em;">Archives &amp; resurrection</h1>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">An archive is a portable bundle of an instance — database, documents, config — stored off the server. Archiving <strong>destroys the server</strong> so it stops billing; resurrecting provisions a fresh box and restores the bundle onto it, on Hetzner or Azure.</p>
+            <div style="display:flex;gap:14px;padding:16px 18px;border:1px solid rgba(232,180,90,0.3);border-radius:12px;background:rgba(232,180,90,0.06);">
+              <span style="width:8px;height:8px;border-radius:50%;background:#e8b45a;flex-shrink:0;margin-top:5px;"></span>
+              <span style="font-size:13.5px;line-height:1.6;color:#c3cad5;">Hetzner boxes can't be paused — a stopped server still bills. Archive to stop paying, resurrect when you need it again. Resurrection typically takes 3–5 minutes.</span>
+            </div>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">Archives require an S3-compatible bucket configured under Settings → Storage. Until then, the Fleet page shows archive storage as unconfigured.</p>
+          </div>
+          </sc-if>
+          <sc-if value="{{ docHealth }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:18px;max-width:640px;">
+            <h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-0.02em;">Health &amp; the golden path</h1>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">Every instance runs an agent that heartbeats once a minute. On top of that, the <strong>golden path</strong> is a three-step end-to-end probe that proves the instance is actually usable, not just up:</p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;gap:14px;padding:13px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:#10141b;"><span style="width:120px;flex-shrink:0;font-size:13.5px;font-weight:600;">API answers</span><span style="font-size:13px;color:#8d96a5;">The public API responds on :443 with a valid version payload.</span></div>
+              <div style="display:flex;gap:14px;padding:13px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:#10141b;"><span style="width:120px;flex-shrink:0;font-size:13.5px;font-weight:600;">Login responds</span><span style="font-size:13px;color:#8d96a5;">The auth flow issues a session for a probe account.</span></div>
+              <div style="display:flex;gap:14px;padding:13px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:#10141b;"><span style="width:120px;flex-shrink:0;font-size:13.5px;font-weight:600;">Studio renders</span><span style="font-size:13px;color:#8d96a5;">The Studio UI loads and hydrates within 5 seconds.</span></div>
+            </div>
+            <p style="margin:0;font-size:14.5px;line-height:1.65;color:#c3cad5;">An instance is <span style="color:#e8b45a;font-weight:600;">Degraded</span> when heartbeats arrive but a golden-path step fails, and <span style="color:#e57f7f;font-weight:600;">Down</span> when heartbeats stop for 3 minutes.</p>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1120px;margin:0 auto;padding:32px 40px 72px 40px;display:flex;flex-direction:column;gap:26px;">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
+          <span onClick="{{ goFleet }}" style-hover="color:#e9edf3" style="color:#8d96a5;cursor:pointer;">Fleet</span>
+          <span style="color:#3a4150;">/</span>
+          <span style="color:#e9edf3;font-weight:500;">{{ inst.name }}</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em;">{{ inst.name }}</h1>
+              <span style="display:flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;font-size:12.5px;font-weight:600;white-space:nowrap;flex-shrink:0;background:{{ inst.badgeBg }};color:{{ inst.badgeFg }};"><span style="width:6px;height:6px;border-radius:50%;background:{{ inst.badgeFg }};"></span>{{ inst.status }} · {{ inst.statusDetail }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#8d96a5;">{{ inst.url }}</span>
+              <span onClick="{{ copyUrl }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;">{{ copyUrlLabel }}</span>
+            </div>
+          </div>
+          <button onClick="{{ openStudioCurrent }}" style-hover="background:#45dd99" style="border:none;border-radius:9px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;">Open Studio</button>
+          <button onClick="{{ openDomain }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:9px;background:transparent;color:#c3cad5;font-family:inherit;font-size:14px;font-weight:500;padding:10px 16px;cursor:pointer;">Attach domain</button>
+          <button onClick="{{ toggleCli }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid {{ cliBtnBorder }};border-radius:9px;background:{{ cliBtnBg }};color:#c3cad5;font-family:'IBM Plex Mono',monospace;font-size:13px;padding:10px 14px;cursor:pointer;">bp CLI ▾</button>
+        </div>
+
+        <sc-if value="{{ cliOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:2px;border:1px solid rgba(255,255,255,0.1);border-radius:14px;background:#10141b;padding:18px 20px;">
+          <div style="display:flex;align-items:center;margin-bottom:10px;">
+            <span style="flex:1;font-size:13px;font-weight:600;color:#8d96a5;">Manage this instance via the bp CLI</span>
+            <span onClick="{{ goDocsCli }}" style-hover="color:#a8ccff" style="font-size:12.5px;color:#7fb4ff;cursor:pointer;">Full CLI reference →</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <sc-for list="{{ cliCommands }}" as="c" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(255,255,255,0.07);border-radius:9px;background:#0b0e13;">
+              <span style="font-size:12.5px;font-weight:600;width:68px;flex-shrink:0;">{{ c.label }}</span>
+              <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.cmd }}</span>
+              <span onClick="{{ c.onCopy }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;flex-shrink:0;">{{ c.copyLabel }}</span>
+            </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">
+            <span style="flex:1;font-size:12.5px;color:#626c7c;">Hetzner boxes can't be paused — a stopped server still bills. Archive to stop paying, resurrect later.</span>
+            <button onClick="{{ openDecom }}" style-hover="background:rgba(229,106,106,0.12)" style="border:1px solid rgba(229,106,106,0.4);border-radius:8px;background:transparent;color:#e57f7f;font-family:inherit;font-size:13px;font-weight:600;padding:7px 14px;cursor:pointer;">Decommission…</button>
+          </div>
+        </div>
+        </sc-if>
+
+        <div style="display:flex;gap:26px;border-bottom:1px solid rgba(255,255,255,0.07);">
+          <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="5">
+          <div onClick="{{ t.onClick }}" style-hover="color:#e9edf3" style="padding:10px 2px 12px 2px;font-size:14px;font-weight:500;cursor:pointer;color:{{ t.fg }};border-bottom:2px solid {{ t.line }};margin-bottom:-1px;">{{ t.label }}</div>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{ tabOverview }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px;align-items:start;">
+          <div style="display:flex;flex-direction:column;gap:22px;min-width:0;">
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;padding:22px 24px;display:flex;flex-direction:column;gap:16px;">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div style="flex:1;">
+                  <h3 style="margin:0;font-size:16px;font-weight:600;">Golden path</h3>
+                  <p style="margin:4px 0 0 0;font-size:13px;color:{{ goldenSubColor }};">{{ goldenSub }}</p>
+                </div>
+                <button onClick="{{ runChecks }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:8px 15px;cursor:pointer;">{{ goldenBtn }}</button>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <sc-for list="{{ goldenChips }}" as="g" hint-placeholder-count="3">
+                <span style="display:flex;align-items:center;gap:7px;padding:6px 13px;border-radius:99px;border:1px solid {{ g.border }};font-size:12.5px;color:{{ g.fg }};"><span style="width:7px;height:7px;border-radius:50%;background:{{ g.dotBg }};border:{{ g.dotBorder }};animation:{{ g.anim }};"></span>{{ g.label }}</span>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:#626c7c;">Checks run from Falkenstein every 5 minutes once enabled. <span onClick="{{ goDocsHealth }}" style-hover="color:#a8ccff" style="color:#7fb4ff;cursor:pointer;">How health works →</span></div>
+            </div>
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;padding:22px 24px;display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                <h3 style="margin:0;flex:1;font-size:16px;font-weight:600;">Updates</h3>
+                <span style="display:flex;align-items:center;gap:6px;padding:3px 11px;border-radius:99px;font-size:12px;font-weight:600;background:rgba(63,207,142,0.12);color:#3fcf8e;"><span style="width:6px;height:6px;border-radius:50%;background:#3fcf8e;"></span>Up to date</span>
+              </div>
+              <sc-for list="{{ updateRows }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="flex:1;font-size:13.5px;color:#8d96a5;">{{ r.k }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:{{ r.color }};">{{ r.v }}</span>
+              </div>
+              </sc-for>
+              <div style="display:flex;gap:20px;padding-top:14px;">
+                <span onClick="{{ doPauseUpdates }}" style-hover="color:#e9edf3" style="font-size:13px;font-weight:500;color:#8d96a5;cursor:pointer;">Pause autoupdate</span>
+                <span onClick="{{ doPinVersion }}" style-hover="color:#e9edf3" style="font-size:13px;font-weight:500;color:#8d96a5;cursor:pointer;">Pin version</span>
+                <span onClick="{{ openRollback }}" style-hover="color:#e9edf3" style="font-size:13px;font-weight:500;color:#8d96a5;cursor:pointer;">Roll back…</span>
+              </div>
+            </div>
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;padding:22px 24px;display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                <h3 style="margin:0;flex:1;font-size:16px;font-weight:600;">Sites</h3>
+                <span onClick="{{ openNewSiteHere }}" style-hover="color:#a8ccff" style="font-size:13px;color:#7fb4ff;cursor:pointer;font-weight:500;">+ New site</span>
+              </div>
+              <sc-if value="{{ hasInstSites }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ instSites }}" as="site" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="width:7px;height:7px;border-radius:50%;background:{{ site.chipFg }};flex-shrink:0;"></span>
+                <span style="font-size:13.5px;font-weight:600;">{{ site.name }}</span>
+                <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#626c7c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ site.url }}</span>
+                <span style="font-size:12px;color:#626c7c;">{{ site.updated }}</span>
+              </div>
+              </sc-for>
+              </sc-if>
+              <sc-if value="{{ noInstSites }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:13px;color:#626c7c;padding:6px 0;">No sites on this instance yet.</span>
+              </sc-if>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:22px;min-width:0;">
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;padding:20px 22px;display:flex;flex-direction:column;gap:2px;">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.12em;color:#626c7c;margin-bottom:8px;">IDENTITY</span>
+              <sc-for list="{{ identityRows }}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="width:52px;flex-shrink:0;font-size:13px;color:#8d96a5;">{{ r.k }}</span>
+                <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.v }}</span>
+                <span onClick="{{ r.onCopy }}" style-hover="color:#e9edf3" style="font-size:11.5px;color:#626c7c;cursor:pointer;flex-shrink:0;">{{ r.copyLabel }}</span>
+              </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;padding:20px 22px;display:flex;flex-direction:column;gap:2px;">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.12em;color:#626c7c;margin-bottom:8px;">RUNTIME</span>
+              <sc-for list="{{ runtimeRows }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                <span style="width:80px;flex-shrink:0;font-size:13px;color:#8d96a5;">{{ r.k }}</span>
+                <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;color:{{ r.color }};">{{ r.v }}</span>
+              </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ tabTimeline }}" hint-placeholder-val="{{ false }}">
+        <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;overflow:hidden;">
+          <sc-for list="{{ timelineRows }}" as="ev" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;padding:3px 9px;border-radius:6px;background:{{ ev.tagBg }};color:{{ ev.tagFg }};flex-shrink:0;">{{ ev.tag }}</span>
+            <span style="font-size:13.5px;font-weight:500;">{{ ev.title }}</span>
+            <span style="font-size:12.5px;color:#626c7c;">{{ ev.sub }}</span>
+            <div style="flex:1;"></div>
+            <sc-if value="{{ ev.onToggle }}" hint-placeholder-val="{{ false }}">
+            <span onClick="{{ ev.onToggle }}" style-hover="color:#a8ccff" style="font-size:12.5px;color:#7fb4ff;cursor:pointer;">{{ ev.toggleLabel }}</span>
+            </sc-if>
+            <span style="font-size:12.5px;color:#8d96a5;width:64px;text-align:right;">{{ ev.time }}</span>
+            <span onClick="{{ ev.onDetails }}" style-hover="color:#e9edf3" style="font-size:12.5px;color:#626c7c;cursor:pointer;">Details</span>
+          </div>
+          </sc-for>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ tabUsage }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;">
+          <sc-for list="{{ usageCards }}" as="c" hint-placeholder-count="8">
+          <div style="display:flex;flex-direction:column;gap:10px;padding:18px 20px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;">
+            <div style="display:flex;align-items:baseline;gap:8px;">
+              <span style="flex:1;font-size:14px;font-weight:600;">{{ c.title }}</span>
+              <span style="font-size:{{ c.valSize }};font-weight:700;color:{{ c.valColor }};">{{ c.value }}</span>
+            </div>
+            <span style="font-size:12px;color:#626c7c;">{{ c.sub }}</span>
+            <sc-if value="{{ c.spark }}" hint-placeholder-val="{{ false }}">
+            <svg width="100%" height="36" viewBox="0 0 100 32" preserveAspectRatio="none" style="display:block;margin-top:auto;"><polyline points="{{ c.spark }}" fill="none" stroke="{{ c.sparkColor }}" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>
+            </sc-if>
+            <sc-if value="{{ c.bar }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="height:4px;border-radius:2px;background:rgba(255,255,255,0.08);overflow:hidden;"><div style="width:{{ c.bar }};height:100%;background:{{ c.barColor }};border-radius:2px;"></div></div>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#626c7c;">{{ c.barLabel }}</span>
+            </div>
+            </sc-if>
+          </div>
+          </sc-for>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ tabWebhooks }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <sc-if value="{{ hasWebhooks }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;justify-content:flex-end;">
+            <button onClick="{{ openWebhook }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#e9edf3;font-family:inherit;font-size:13px;font-weight:600;padding:8px 15px;cursor:pointer;">Add webhook</button>
+          </div>
+          <div style="border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;overflow:hidden;">
+            <sc-for list="{{ webhooks }}" as="w" hint-placeholder-count="1">
+            <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05);">
+              <span style="width:7px;height:7px;border-radius:50%;background:#3fcf8e;flex-shrink:0;"></span>
+              <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ w.url }}</span>
+              <span style="font-size:12px;color:#626c7c;">{{ w.events }}</span>
+              <span onClick="{{ w.onTest }}" style-hover="color:#a8ccff" style="font-size:12.5px;color:#7fb4ff;cursor:pointer;">Send test</span>
+              <span onClick="{{ w.onRemove }}" style-hover="color:#e57f7f" style="font-size:12.5px;color:#626c7c;cursor:pointer;">Remove</span>
+            </div>
+            </sc-for>
+          </div>
+          </sc-if>
+          <sc-if value="{{ noWebhooks }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:64px 20px;border:1px dashed rgba(255,255,255,0.14);border-radius:14px;text-align:center;">
+            <span style="font-size:15px;font-weight:600;">No webhooks configured</span>
+            <span style="font-size:13.5px;color:#8d96a5;">Get notified when deploys, health changes or checks happen.</span>
+            <button onClick="{{ openWebhook }}" style-hover="border-color:rgba(255,255,255,0.25)" style="margin-top:8px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#e9edf3;font-family:inherit;font-size:13px;font-weight:600;padding:8px 15px;cursor:pointer;">Add webhook</button>
+          </div>
+          </sc-if>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ tabMetrics }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:18px;">
+          <div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border:1px solid rgba(127,180,255,0.25);border-radius:12px;background:rgba(127,180,255,0.05);">
+            <span style="width:8px;height:8px;border-radius:50%;background:#7fb4ff;flex-shrink:0;animation:pulse 2s ease-in-out infinite;"></span>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:600;">Metrics are warming up</div>
+              <div style="font-size:12.5px;color:#8d96a5;margin-top:2px;">Request-level metrics unlock after 24h of agent reports. CPU and RAM are live now.</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;width:180px;">
+              <div style="height:4px;border-radius:2px;background:rgba(255,255,255,0.08);overflow:hidden;"><div style="width:58%;height:100%;background:#7fb4ff;border-radius:2px;"></div></div>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#626c7c;">14h / 24h collected</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+            <div style="display:flex;flex-direction:column;gap:10px;padding:20px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;">
+              <div style="display:flex;align-items:baseline;"><span style="flex:1;font-size:14px;font-weight:600;">CPU</span><span style="font-size:22px;font-weight:700;">0%</span></div>
+              <span style="font-size:12px;color:#626c7c;">last 60 minutes · 1m resolution</span>
+              <svg width="100%" height="88" viewBox="0 0 100 32" preserveAspectRatio="none" style="display:block;"><polyline points="0,28 6,28 10,12 13,28 22,28 30,18 35,28 44,28 52,22 57,28 66,28 74,16 79,28 88,28 94,20 100,28" fill="none" stroke="#7fb4ff" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>
+              <div style="display:flex;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#626c7c;"><span>-60m</span><div style="flex:1;"></div><span>now</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding:20px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;background:#10141b;">
+              <div style="display:flex;align-items:baseline;"><span style="flex:1;font-size:14px;font-weight:600;">RAM</span><span style="font-size:22px;font-weight:700;">23%</span></div>
+              <span style="font-size:12px;color:#626c7c;">last 60 minutes · 1m resolution</span>
+              <svg width="100%" height="88" viewBox="0 0 100 32" preserveAspectRatio="none" style="display:block;"><polyline points="0,26 10,25 18,25 26,20 34,20 42,21 50,16 58,17 66,13 74,14 82,11 90,12 100,10" fill="none" stroke="#3fcf8e" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline></svg>
+              <div style="display:flex;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#626c7c;"><span>-60m</span><div style="flex:1;"></div><span>now</span></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;">
+            <div style="display:flex;align-items:baseline;gap:8px;padding:16px 20px;border:1px dashed rgba(255,255,255,0.12);border-radius:12px;"><span style="flex:1;font-size:13.5px;font-weight:600;">Req/s</span><span style="font-size:12.5px;color:#626c7c;">Not yet metered</span></div>
+            <div style="display:flex;align-items:baseline;gap:8px;padding:16px 20px;border:1px dashed rgba(255,255,255,0.12);border-radius:12px;"><span style="flex:1;font-size:13.5px;font-weight:600;">p95 latency</span><span style="font-size:12.5px;color:#626c7c;">Not yet metered</span></div>
+            <div style="display:flex;align-items:baseline;gap:8px;padding:16px 20px;border:1px dashed rgba(255,255,255,0.12);border-radius:12px;"><span style="flex:1;font-size:13.5px;font-weight:600;">API requests</span><span style="font-size:12.5px;color:#626c7c;">Not yet metered</span></div>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+    </div>
+  </main>
+
+  <sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeModal }}" style="position:fixed;inset:0;background:rgba(4,6,10,0.7);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:60;padding:24px;">
+    <div onClick="{{ stopProp }}" style="width:520px;max-width:100%;max-height:85vh;overflow-y:auto;background:#12161d;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:26px 28px;display:flex;flex-direction:column;gap:18px;animation:modalin 0.16s ease-out;box-shadow:0 24px 64px rgba(0,0,0,0.55);">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <h2 style="margin:0;flex:1;font-size:18px;font-weight:700;letter-spacing:-0.01em;">{{ modalTitle }}</h2>
+        <span onClick="{{ closeModal }}" style-hover="color:#e9edf3" style="font-size:18px;color:#626c7c;cursor:pointer;line-height:1;">✕</span>
+      </div>
+
+      <sc-if value="{{ mLaunch }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Instance name</span>
+          <input value="{{ launchName }}" onChange="{{ onLaunchName }}" placeholder="e.g. hugin" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#0b0e13;color:#e9edf3;font-family:inherit;font-size:14px;outline:none;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#626c7c;">{{ launchSlugPreview }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Provider</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ launchProviders }}" as="o" hint-placeholder-count="2">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Region</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ launchRegions }}" as="o" hint-placeholder-count="3">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Size</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ launchSizes }}" as="o" hint-placeholder-count="3">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Update channel</span>
+          <div style="display:flex;gap:8px;">
+            <sc-for list="{{ launchChannels }}" as="o" hint-placeholder-count="2">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding-top:6px;">
+          <span style="flex:1;font-size:12.5px;color:#626c7c;">Provisioning takes 2–4 minutes. Uses 1 of your remaining slots.</span>
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Cancel</button>
+          <button onClick="{{ doLaunch }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;">Launch instance</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mDecom }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;gap:12px;padding:14px 16px;border:1px solid rgba(229,106,106,0.35);border-radius:10px;background:rgba(229,106,106,0.06);">
+          <span style="width:8px;height:8px;border-radius:50%;background:#e57f7f;flex-shrink:0;margin-top:5px;"></span>
+          <span style="font-size:13.5px;line-height:1.55;color:#c3cad5;">This destroys the server and everything on it. <strong>{{ decomName }}</strong> has no archive — its 28 documents and database will be gone. Consider <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">bp cloud instance archive</span> first.</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Type <span style="font-family:'IBM Plex Mono',monospace;color:#e9edf3;">{{ decomName }}</span> to confirm</span>
+          <input value="{{ confirmText }}" onChange="{{ onConfirmText }}" placeholder="{{ decomName }}" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#0b0e13;color:#e9edf3;font-family:'IBM Plex Mono',monospace;font-size:13px;outline:none;">
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Keep instance</button>
+          <button onClick="{{ doDecom }}" style="border:none;border-radius:8px;background:{{ decomBtnBg }};color:{{ decomBtnFg }};font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:{{ decomCursor }};">Decommission forever</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mDomain }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Domain</span>
+          <input value="{{ domainInput }}" onChange="{{ onDomainInput }}" placeholder="app.gyldendal.no" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#0b0e13;color:#e9edf3;font-family:'IBM Plex Mono',monospace;font-size:13px;outline:none;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Add this DNS record at your registrar</span>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid rgba(255,255,255,0.08);border-radius:9px;background:#0b0e13;font-family:'IBM Plex Mono',monospace;font-size:12.5px;">
+            <span style="color:#8d96a5;">CNAME</span>
+            <span>{{ domainHost }}</span>
+            <span style="color:#626c7c;">→</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7fb4ff;">{{ domainTarget }}</span>
+            <span onClick="{{ copyDnsTarget }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;font-family:'Schibsted Grotesk',sans-serif;">{{ copyDnsLabel }}</span>
+          </div>
+          <span style="font-size:12.5px;color:#626c7c;line-height:1.55;">TLS is provisioned automatically once DNS resolves — usually within a few minutes, up to an hour with slow registrars.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Cancel</button>
+          <button onClick="{{ doVerifyDns }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;">Verify DNS</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mWebhook }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Endpoint URL</span>
+          <input value="{{ webhookUrl }}" onChange="{{ onWebhookUrl }}" placeholder="https://hooks.slack.com/services/…" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#0b0e13;color:#e9edf3;font-family:'IBM Plex Mono',monospace;font-size:13px;outline:none;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Send events</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ webhookEventOpts }}" as="o" hint-placeholder-count="4">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:99px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Signing secret</span>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid rgba(255,255,255,0.08);border-radius:9px;background:#0b0e13;">
+            <span style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#8d96a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ webhookSecret }}</span>
+            <span onClick="{{ copySecret }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;">{{ copySecretLabel }}</span>
+          </div>
+          <span style="font-size:12.5px;color:#626c7c;">Every delivery is signed with this secret — shown once, verify with the <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;">X-Barkpark-Signature</span> header.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Cancel</button>
+          <button onClick="{{ doAddWebhook }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;">Add webhook</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mNewSite }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Site name</span>
+          <input value="{{ siteName }}" onChange="{{ onSiteName }}" placeholder="e.g. press-kit" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#0b0e13;color:#e9edf3;font-family:inherit;font-size:14px;outline:none;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Instance</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ siteInstanceOpts }}" as="o" hint-placeholder-count="2">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:#8d96a5;font-weight:500;">Start from</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <sc-for list="{{ siteTemplateOpts }}" as="o" hint-placeholder-count="3">
+            <span onClick="{{ o.onClick }}" style="padding:7px 14px;border-radius:8px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }};font-size:13px;font-weight:500;cursor:pointer;">{{ o.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Cancel</button>
+          <button onClick="{{ doAddSite }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;">Create site</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mEvent }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <sc-for list="{{ eventMeta }}" as="r" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <span style="width:90px;flex-shrink:0;font-size:13px;color:#8d96a5;">{{ r.k }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">{{ r.v }}</span>
+          </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;">
+            <span style="flex:1;font-size:12.5px;color:#8d96a5;font-weight:500;">Payload</span>
+            <span onClick="{{ copyPayload }}" style-hover="color:#e9edf3" style="font-size:12px;color:#626c7c;cursor:pointer;">{{ copyPayloadLabel }}</span>
+          </div>
+          <pre style="margin:0;padding:14px 16px;border:1px solid rgba(255,255,255,0.08);border-radius:9px;background:#0b0e13;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;color:#c3cad5;white-space:pre-wrap;word-break:break-word;">{{ eventPayload }}</pre>
+        </div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Close</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ mRollback }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <span style="font-size:13.5px;color:#c3cad5;line-height:1.55;">Rolling back re-deploys a previous release. The database is <strong>not</strong> rolled back — migrations from newer versions stay applied.</span>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <sc-for list="{{ rollbackOpts }}" as="o" hint-placeholder-count="3">
+          <div onClick="{{ o.onClick }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid {{ o.border }};border-radius:10px;background:{{ o.bg }};cursor:pointer;">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ o.dot }};flex-shrink:0;"></span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;">{{ o.version }}</span>
+            <span style="font-size:12.5px;color:#8d96a5;">{{ o.note }}</span>
+            <div style="flex:1;"></div>
+            <span style="font-size:12px;color:#626c7c;">{{ o.date }}</span>
+          </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+          <button onClick="{{ closeModal }}" style-hover="border-color:rgba(255,255,255,0.25)" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:transparent;color:#c3cad5;font-family:inherit;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;">Cancel</button>
+          <button onClick="{{ doRollback }}" style-hover="background:#45dd99" style="border:none;border-radius:8px;background:#3fcf8e;color:#07130d;font-family:inherit;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;">Roll back</button>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#1a2029;border:1px solid rgba(255,255,255,0.14);border-radius:10px;padding:12px 20px;font-size:13.5px;font-family:'Schibsted Grotesk',sans-serif;color:#e9edf3;z-index:80;box-shadow:0 12px 32px rgba(0,0,0,0.5);animation:toastin 0.18s ease-out;white-space:nowrap;">{{ toast }}</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;compactSidebar&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Layout&quot;}, &quot;groupHealthReports&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Timeline&quot;}, &quot;attentionBanner&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Overview&quot;}}">
+class Component extends DCLogic {
+  state = {
+    page: 'overview', instKey: 'gyldendal', tab: 'overview', cliOpen: false, expandHealth: false, copied: '',
+    modal: null, modalData: null, toast: '', activityFilter: 'All', checkState: 'idle', docSection: 'quickstart',
+    launchName: '', launchProvider: 'Hetzner', launchRegion: 'Falkenstein', launchSize: 'S · 2 vCPU / 4 GB', launchChannel: 'prod',
+    confirmText: '', domainInput: '', webhookUrl: '', webhookEvents: ['deploy', 'health'], rbVersion: 'v0.2.24',
+    siteName: '', siteInstance: 'Gyldendal', siteTemplate: 'Blank',
+    extra: [],
+    webhooks: [],
+    sites: [
+      { name: 'gyldendal.no', instance: 'Gyldendal', url: 'https://gyldendal.no', status: 'Live', template: 'Marketing', updated: '2d ago' },
+      { name: 'press-kit', instance: 'Gyldendal', url: 'https://gyldendal-506f035e.barkpark.cloud/press', status: 'Draft', template: 'Docs', updated: '6d ago' },
+      { name: 'guerrilla.no', instance: 'Guerrilla', url: 'https://guerrilla.no', status: 'Live', template: 'Marketing', updated: '5h ago' }
+    ]
+  };
+
+  base = {
+    gyldendal: {
+      key: 'gyldendal', name: 'Gyldendal', url: 'https://gyldendal-506f035e.barkpark.cloud',
+      provider: 'Hetzner', status: 'Degraded', statusDetail: 'Health down', meta: 'v0.2.25 · prod', asOf: 'as of 4m ago',
+      badgeBg: 'rgba(232,180,90,0.13)', badgeFg: '#e8b45a', sparkColor: '#e8b45a',
+      spark: '0,27 8,27 14,10 18,27 26,27 34,25 42,27 50,13 55,27 64,27 72,23 80,27 88,20 94,27 100,26',
+      stats: [ {k:'DOCS', v:'28'}, {k:'DISK', v:'25%'}, {k:'CPU', v:'0%'}, {k:'RAM', v:'22%'} ]
+    },
+    guerrilla: {
+      key: 'guerrilla', name: 'Guerrilla', url: 'https://guerrilla.barkpark.cloud',
+      provider: 'Hetzner', status: 'Healthy', statusDetail: 'v0.1.0', meta: 'v0.1.0 · prod', asOf: 'as of 4m ago',
+      badgeBg: 'rgba(63,207,142,0.12)', badgeFg: '#3fcf8e', sparkColor: '#3fcf8e',
+      spark: '0,26 10,24 18,24 28,19 38,19 48,16 58,13 68,13 78,9 88,10 100,6',
+      stats: [ {k:'DOCS', v:'2542'}, {k:'DISK', v:'60%'}, {k:'CPU', v:'2%'}, {k:'RAM', v:'36%'} ]
+    }
+  };
+
+  activity = [
+    { title: 'Deploy requested', actor: 'frikk@guerrilla.no', kind: 'deployment', dot: '#7fb4ff', time: '09:02',
+      payload: { event: 'site.deploy_requested', instance: 'guerrilla', site: 'guerrilla.no', actor: 'frikk@guerrilla.no', ts: '2026-07-18T09:02:08Z' } },
+    { title: 'Health degraded on Gyldendal', actor: 'agent', kind: 'health', dot: '#e8b45a', time: '09:02',
+      payload: { event: 'health.degraded', instance: 'gyldendal', checks: { api: false, login: true, studio: true }, agent: 'v0.1.0', ts: '2026-07-18T09:02:01Z' } },
+    { title: 'Deploy requested', actor: 'frikk@guerrilla.no', kind: 'deployment', dot: '#7fb4ff', time: '08:41',
+      payload: { event: 'site.deploy_requested', instance: 'guerrilla', site: 'guerrilla.no', actor: 'frikk@guerrilla.no', ts: '2026-07-18T08:41:52Z' } },
+    { title: 'Instance launched — Guerrilla', actor: 'fjord@jarl.no', kind: 'lifecycle', dot: '#3fcf8e', time: 'Jul 16',
+      payload: { event: 'instance.launched', instance: 'guerrilla', provider: 'hetzner', region: 'fsn1', actor: 'fjord@jarl.no', ts: '2026-07-16T11:20:34Z' } },
+    { title: 'Autoupdate to v0.2.25', actor: 'agent', kind: 'update', dot: '#8d96a5', time: 'Jul 15',
+      payload: { event: 'instance.updated', instance: 'gyldendal', from: 'v0.2.24', to: 'v0.2.25', channel: 'prod', ts: '2026-07-15T03:12:09Z' } },
+    { title: 'Instance launched — Gyldendal', actor: 'fjord@jarl.no', kind: 'lifecycle', dot: '#3fcf8e', time: 'Jul 12',
+      payload: { event: 'instance.launched', instance: 'gyldendal', provider: 'hetzner', region: 'fsn1', actor: 'fjord@jarl.no', ts: '2026-07-12T14:03:11Z' } }
+  ];
+
+  copy(text, id) {
+    try { navigator.clipboard.writeText(text); } catch (e) {}
+    this.setState({ copied: id });
+    clearTimeout(this._ct);
+    this._ct = setTimeout(() => this.setState({ copied: '' }), 1400);
+  }
+  toastMsg(msg) {
+    this.setState({ toast: msg });
+    clearTimeout(this._tt);
+    this._tt = setTimeout(() => this.setState({ toast: '' }), 2800);
+  }
+  openModal(type, data) { this.setState({ modal: type, modalData: data || null, confirmText: '' }); }
+
+  renderVals() {
+    const s = this.state;
+    const groupHealth = this.props.groupHealthReports ?? true;
+    const showNavLabels = !(this.props.compactSidebar ?? false);
+    const allInstances = { ...this.base };
+    s.extra.forEach(i => { allInstances[i.key] = i; });
+    const inst = allInstances[s.instKey] || this.base.gyldendal;
+    const go = (page) => () => this.setState({ page, cliOpen: false });
+    const navOn = { fg: '#e9edf3', bg: 'rgba(255,255,255,0.07)' };
+    const navOff = { fg: '#8d96a5', bg: 'transparent' };
+    const st = (p) => (s.page === p ? navOn : navOff);
+    const fleetOn = s.page === 'fleet' || s.page === 'detail' ? navOn : navOff;
+    const docsOn = s.page === 'docs' ? navOn : navOff;
+
+    const fleetArr = Object.values(allInstances);
+    const fleet = fleetArr.map(i => ({
+      ...i,
+      onOpen: () => this.setState({ page: 'detail', instKey: i.key, tab: 'overview', cliOpen: false })
+    }));
+    const healthyCount = fleetArr.filter(i => i.status === 'Healthy').length;
+    const degradedCount = fleetArr.filter(i => i.status === 'Degraded').length;
+    const inFlightCount = fleetArr.filter(i => i.status === 'Provisioning').length;
+
+    const tabDefs = [ ['overview','Overview'], ['timeline','Timeline'], ['webhooks','Webhooks'], ['usage','Usage'], ['metrics','Metrics'] ];
+    const tabs = tabDefs.map(([id, label]) => ({
+      label, fg: s.tab === id ? '#e9edf3' : '#8d96a5',
+      line: s.tab === id ? '#3fcf8e' : 'transparent',
+      onClick: () => this.setState({ tab: id })
+    }));
+
+    const mkCmd = (label, verb) => {
+      const cmd = 'bp cloud instance ' + verb + ' ' + inst.name;
+      return { label, cmd, copyLabel: s.copied === verb ? 'Copied' : 'Copy', onCopy: () => this.copy(cmd, verb) };
+    };
+
+    // Timeline
+    const healthPayload = { event: 'health.report', instance: inst.key, health: 'down', checks: { api: false, login: true, studio: true }, agent: 'v0.1.0', ts: '2026-07-18T09:02:08Z' };
+    const openEvent = (title, meta, payload) => () => this.openModal('event', { title, meta, payload });
+    const healthDetails = openEvent('Health report', [
+      { k: 'Event', v: 'health.report' }, { k: 'Instance', v: inst.key }, { k: 'Source', v: 'agent v0.1.0' }, { k: 'Received', v: '2026-07-18 09:02:08 UTC' }
+    ], healthPayload);
+    const deployDetails = openEvent('Deploy requested', [
+      { k: 'Event', v: 'site.deploy_requested' }, { k: 'Instance', v: 'guerrilla' }, { k: 'Actor', v: 'frikk@guerrilla.no' }, { k: 'Received', v: '2026-07-18 09:02:08 UTC' }
+    ], this.activity[0].payload);
+    const healthRow = (time) => ({
+      tag: 'EVENT', tagBg: 'rgba(127,180,255,0.1)', tagFg: '#7fb4ff',
+      title: 'Health report', sub: 'agent heartbeat · health: down', time, onToggle: null, toggleLabel: '', onDetails: healthDetails
+    });
+    const healthTimes = ['just now','1m ago','2m ago','3m ago','4m ago','5m ago','6m ago','7m ago','8m ago','9m ago'];
+    const deployRow = {
+      tag: 'DEPLOY', tagBg: 'rgba(63,207,142,0.1)', tagFg: '#3fcf8e',
+      title: 'Deploy requested', sub: 'frikk@guerrilla.no · site.deploy_requested', time: '09:02', onToggle: null, toggleLabel: '', onDetails: deployDetails
+    };
+    let timelineRows;
+    if (groupHealth && !s.expandHealth) {
+      timelineRows = [
+        { tag: 'EVENT', tagBg: 'rgba(127,180,255,0.1)', tagFg: '#7fb4ff',
+          title: 'Health report × 10', sub: 'every ~1m for the last 10m · all reporting health: down',
+          time: 'just now', toggleLabel: 'Show all 10', onToggle: () => this.setState({ expandHealth: true }), onDetails: healthDetails },
+        deployRow
+      ];
+    } else {
+      timelineRows = healthTimes.map(healthRow).concat([deployRow]);
+      if (groupHealth) timelineRows[0] = { ...timelineRows[0], toggleLabel: 'Collapse', onToggle: () => this.setState({ expandHealth: false }) };
+    }
+
+    // Golden path
+    const cs = s.checkState;
+    const chip = (label, failed) => {
+      if (cs === 'idle') return { label, border: 'rgba(255,255,255,0.1)', fg: '#c3cad5', dotBg: 'transparent', dotBorder: '1.5px solid #626c7c', anim: 'none' };
+      if (cs === 'running') return { label, border: 'rgba(255,255,255,0.14)', fg: '#e9edf3', dotBg: '#8d96a5', dotBorder: 'none', anim: 'pulse 1s ease-in-out infinite' };
+      return failed
+        ? { label, border: 'rgba(229,106,106,0.4)', fg: '#e57f7f', dotBg: '#e57f7f', dotBorder: 'none', anim: 'none' }
+        : { label, border: 'rgba(63,207,142,0.35)', fg: '#3fcf8e', dotBg: '#3fcf8e', dotBorder: 'none', anim: 'none' };
+    };
+    const goldenChips = [ chip('API answers', true), chip('Login responds', false), chip('Studio renders', false) ];
+    const goldenSub = cs === 'idle' ? 'Never checked — run the first one to prove the golden path.'
+      : cs === 'running' ? 'Probing API, login and Studio from Falkenstein…'
+      : '1 of 3 failing — the API isn\u2019t answering on :443. Login and Studio respond.';
+    const goldenSubColor = cs === 'done' ? '#e8b45a' : '#8d96a5';
+    const goldenBtn = cs === 'idle' ? 'Run first check' : cs === 'running' ? 'Checking…' : 'Re-run checks';
+    const runChecks = () => {
+      if (cs === 'running') return;
+      this.setState({ checkState: 'running' });
+      clearTimeout(this._gt);
+      this._gt = setTimeout(() => { this.setState({ checkState: 'done' }); this.toastMsg('Golden path finished — 1 of 3 checks failing'); }, 1800);
+    };
+
+    // Usage
+    const usageCards = [
+      { title:'Instances', value:String(fleetArr.length), valSize:'22px', valColor:'#e8b45a', sub:'live', bar:(Math.round(fleetArr.length/3*100))+'%', barColor:'#e8b45a', barLabel:fleetArr.length+' / 3', spark:null },
+      { title:'Team members', value:'1', valSize:'22px', valColor:'#e9edf3', sub:'live', bar:null, spark:null },
+      { title:'Documents', value:'28', valSize:'22px', valColor:'#e9edf3', sub:'live', bar:null, spark:null },
+      { title:'Datasets', value:'1', valSize:'22px', valColor:'#e9edf3', sub:'live', bar:null, spark:null },
+      { title:'Webhooks', value:String(s.webhooks.length), valSize:'22px', valColor:'#e9edf3', sub:'live', bar:null, spark:null },
+      { title:'Database size', value:'Not yet metered', valSize:'13px', valColor:'#626c7c', sub:'—', bar:null, spark:null },
+      { title:'Disk used', value:'25%', valSize:'22px', valColor:'#e9edf3', sub:'as of just now', bar:'25%', barColor:'#3fcf8e', barLabel:'25% / 100%', spark:'0,28 14,28 26,27 38,20 50,20 62,19 74,11 86,10 100,9', sparkColor:'#5a6372' },
+      { title:'CPU', value:'0%', valSize:'22px', valColor:'#e9edf3', sub:'as of just now', bar:'2%', barColor:'#3fcf8e', barLabel:'0% / 100%', spark:'0,28 10,28 16,12 20,28 32,28 40,18 46,28 58,28 66,22 72,28 82,28 90,16 100,28', sparkColor:'#5a6372' },
+      { title:'RAM', value:'23%', valSize:'22px', valColor:'#e9edf3', sub:'as of just now', bar:'23%', barColor:'#3fcf8e', barLabel:'23% / 100%', spark:'0,26 12,24 22,24 32,18 42,18 50,20 58,15 66,17 76,12 86,13 100,10', sparkColor:'#5a6372' },
+      { title:'Req/s', value:'Not yet metered', valSize:'13px', valColor:'#626c7c', sub:'—', bar:null, spark:null },
+      { title:'p95 latency', value:'Not yet metered', valSize:'13px', valColor:'#626c7c', sub:'—', bar:null, spark:null },
+      { title:'API requests', value:'Not yet metered', valSize:'13px', valColor:'#626c7c', sub:'—', bar:null, spark:null }
+    ];
+
+    // Activity
+    const kindMap = { Deployments: 'deployment', Health: 'health', Lifecycle: 'lifecycle', Updates: 'update' };
+    const activityFilters = ['All','Deployments','Health','Lifecycle','Updates'].map(label => {
+      const on = s.activityFilter === label;
+      return { label, fg: on ? '#e9edf3' : '#8d96a5', bg: on ? 'rgba(255,255,255,0.07)' : 'transparent',
+        border: on ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)', onClick: () => this.setState({ activityFilter: label }) };
+    });
+    const withOpen = (ev) => ({ ...ev, onOpen: openEvent(ev.title, [
+      { k: 'Event', v: ev.payload.event }, { k: 'Actor', v: ev.actor }, { k: 'Kind', v: ev.kind }, { k: 'Time', v: ev.time }
+    ], ev.payload) });
+    const filteredActivity = this.activity.filter(ev => s.activityFilter === 'All' || ev.kind === kindMap[s.activityFilter]).map(withOpen);
+
+    // Sites
+    const chipFor = (status) => status === 'Live' ? { chipBg: 'rgba(63,207,142,0.12)', chipFg: '#3fcf8e' } : { chipBg: 'rgba(141,150,165,0.12)', chipFg: '#8d96a5' };
+    const sites = s.sites.map(site => ({
+      ...site, ...chipFor(site.status),
+      onOpenInstance: () => {
+        const k = Object.keys(allInstances).find(key => allInstances[key].name === site.instance);
+        if (k) this.setState({ page: 'detail', instKey: k, tab: 'overview' });
+      }
+    }));
+    const instSites = sites.filter(site => site.instance === inst.name);
+
+    // Docs
+    const docDefs = [ ['quickstart','Quickstart'], ['cli','CLI reference'], ['archives','Archives'], ['health','Health & checks'] ];
+    const docNav = docDefs.map(([id, label]) => ({
+      label, fg: s.docSection === id ? '#e9edf3' : '#8d96a5',
+      bg: s.docSection === id ? 'rgba(255,255,255,0.07)' : 'transparent',
+      onClick: () => this.setState({ docSection: id })
+    }));
+    const mkRef = (cmd, desc, id) => ({ cmd, desc, copyLabel: s.copied === id ? 'Copied' : 'Copy', onCopy: () => this.copy(cmd, id) });
+    const cliRef = [
+      mkRef('bp cloud instance launch <name>', 'Provision a new instance on Hetzner or Azure.', 'r1'),
+      mkRef('bp cloud instance archive <name>', 'Bundle the instance and destroy the server. Stops billing.', 'r2'),
+      mkRef('bp cloud instance resurrect <name>', 'Provision a fresh box and restore an archive onto it.', 'r3'),
+      mkRef('bp cloud instance adopt <name>', 'Bring an existing self-hosted instance under management.', 'r4'),
+      mkRef('bp cloud instance audit <name>', 'Dump config, versions and health history for review.', 'r5'),
+      mkRef('bp cloud instance decommission <name>', 'Destroy the server permanently. Asks for confirmation.', 'r6')
+    ];
+    const quickstartSteps = [
+      { n: '1', label: 'Install the CLI', cmd: 'curl -fsSL https://get.barkpark.cloud | sh', id: 'q1' },
+      { n: '2', label: 'Authenticate', cmd: 'bp login', id: 'q2' },
+      { n: '3', label: 'Launch an instance', cmd: 'bp cloud instance launch hugin', id: 'q3' }
+    ].map(q => ({ ...q, copyLabel: s.copied === q.id ? 'Copied' : 'Copy', onCopy: () => this.copy(q.cmd, q.id) }));
+
+    // Launch modal
+    const pill = (list, cur, key) => list.map(label => {
+      const on = cur === label;
+      return { label, fg: on ? '#3fcf8e' : '#c3cad5', bg: on ? 'rgba(63,207,142,0.1)' : 'transparent',
+        border: on ? 'rgba(63,207,142,0.45)' : 'rgba(255,255,255,0.12)', onClick: () => this.setState({ [key]: label }) };
+    });
+    const slug = (s.launchName.trim() || 'hugin').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const doLaunch = () => {
+      const name = s.launchName.trim() || 'Hugin';
+      const key = slug;
+      this.setState({
+        extra: [...s.extra, {
+          key, name, url: 'https://' + slug + '.barkpark.cloud', provider: s.launchProvider,
+          status: 'Provisioning', statusDetail: 'booting', meta: s.launchChannel, asOf: 'just now',
+          badgeBg: 'rgba(127,180,255,0.12)', badgeFg: '#7fb4ff', sparkColor: '#7fb4ff',
+          spark: '0,29 100,29', stats: [ {k:'DOCS', v:'—'}, {k:'DISK', v:'—'}, {k:'CPU', v:'—'}, {k:'RAM', v:'—'} ]
+        }],
+        modal: null, launchName: ''
+      });
+      this.toastMsg('Launching ' + name + ' on ' + s.launchProvider + ' · ' + s.launchRegion + ' — 2–4 min');
+    };
+
+    // Decommission
+    const canDecom = s.confirmText.trim() === inst.name;
+    const doDecom = () => {
+      if (!canDecom) return;
+      this.setState({ modal: null });
+      this.toastMsg('Decommission requested — ' + inst.name + ' will be destroyed');
+    };
+
+    // Webhooks
+    const webhookEventOpts = ['deploy','health','lifecycle','checks'].map(label => {
+      const on = s.webhookEvents.includes(label);
+      return { label, fg: on ? '#3fcf8e' : '#c3cad5', bg: on ? 'rgba(63,207,142,0.1)' : 'transparent',
+        border: on ? 'rgba(63,207,142,0.45)' : 'rgba(255,255,255,0.12)',
+        onClick: () => this.setState({ webhookEvents: on ? s.webhookEvents.filter(e => e !== label) : [...s.webhookEvents, label] }) };
+    });
+    if (!this._secret) this._secret = 'whsec_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    const doAddWebhook = () => {
+      const url = s.webhookUrl.trim() || 'https://hooks.example.com/barkpark';
+      this.setState({ webhooks: [...s.webhooks, { url, events: s.webhookEvents.join(', ') }], modal: null, webhookUrl: '' });
+      this.toastMsg('Webhook added — deliveries signed with your secret');
+    };
+    const webhooks = s.webhooks.map((w, idx) => ({
+      ...w,
+      onTest: () => this.toastMsg('Test event delivered · 200 OK in 84 ms'),
+      onRemove: () => this.setState({ webhooks: s.webhooks.filter((_, j) => j !== idx) })
+    }));
+
+    // New site
+    const doAddSite = () => {
+      const name = s.siteName.trim() || 'new-site';
+      const instName = s.siteInstance;
+      const host = allInstances[Object.keys(allInstances).find(k => allInstances[k].name === instName)];
+      this.setState({
+        sites: [...s.sites, { name, instance: instName, url: (host ? host.url : 'https://barkpark.cloud') + '/' + name, status: 'Draft', template: s.siteTemplate, updated: 'just now' }],
+        modal: null, siteName: ''
+      });
+      this.toastMsg('Site "' + name + '" created as a draft on ' + instName);
+    };
+
+    // Rollback
+    const rollbackOpts = [
+      { version: 'v0.2.25', note: 'current', date: 'Jul 15', disabled: true },
+      { version: 'v0.2.24', note: 'previous stable', date: 'Jul 8' },
+      { version: 'v0.2.23', note: '', date: 'Jun 30' }
+    ].map(o => {
+      const on = s.rbVersion === o.version;
+      return { ...o,
+        border: o.disabled ? 'rgba(255,255,255,0.05)' : on ? 'rgba(63,207,142,0.45)' : 'rgba(255,255,255,0.1)',
+        bg: on && !o.disabled ? 'rgba(63,207,142,0.07)' : 'transparent',
+        dot: o.disabled ? '#3a4150' : on ? '#3fcf8e' : '#626c7c',
+        onClick: () => { if (!o.disabled) this.setState({ rbVersion: o.version }); } };
+    });
+    const doRollback = () => { this.setState({ modal: null }); this.toastMsg('Rolling ' + inst.name + ' back to ' + s.rbVersion + '…'); };
+
+    // Event modal
+    const ed = s.modalData || {};
+    const modalTitles = { launch: 'Launch instance', decom: 'Decommission ' + inst.name, domain: 'Attach a domain', webhook: 'Add webhook', newsite: 'New site', event: ed.title || 'Event', rollback: 'Roll back ' + inst.name };
+    const domainHost = (s.domainInput.trim() || 'app.gyldendal.no').split('.')[0];
+
+    return {
+      showNavLabels,
+      nav: {
+        overviewFg: st('overview').fg, overviewBg: st('overview').bg,
+        fleetFg: fleetOn.fg, fleetBg: fleetOn.bg,
+        sitesFg: st('sites').fg, sitesBg: st('sites').bg,
+        activityFg: st('activity').fg, activityBg: st('activity').bg,
+        docsFg: docsOn.fg, docsBg: docsOn.bg
+      },
+      goOverview: go('overview'), goFleet: go('fleet'), goSites: go('sites'), goActivity: go('activity'), goDocs: go('docs'),
+      goDocsArchives: () => this.setState({ page: 'docs', docSection: 'archives' }),
+      goDocsCli: () => this.setState({ page: 'docs', docSection: 'cli', cliOpen: false }),
+      goDocsHealth: () => this.setState({ page: 'docs', docSection: 'health' }),
+      openGyldendal: () => this.setState({ page: 'detail', instKey: 'gyldendal', tab: 'overview' }),
+      openStudioGyldendal: () => this.toastMsg('Opening Studio for Gyldendal…'),
+      openStudioCurrent: () => this.toastMsg('Opening Studio for ' + inst.name + '…'),
+      doRefresh: () => this.toastMsg('Fleet refreshed — all agents reported'),
+      doRetryArchive: () => this.toastMsg('Still unconfigured — add a bucket under Settings → Storage'),
+      isOverview: s.page === 'overview', isFleet: s.page === 'fleet',
+      isSites: s.page === 'sites', isActivity: s.page === 'activity', isDetail: s.page === 'detail', isDocs: s.page === 'docs',
+      showBanner: (this.props.attentionBanner ?? true) && s.page === 'overview',
+      healthyCount, degradedCount, inFlightCount, hasInFlight: inFlightCount > 0,
+      slotsLabel: fleetArr.length + ' / 3', slotsPct: Math.round(fleetArr.length / 3 * 100) + '%',
+      fleet,
+      recentActivity: this.activity.slice(0, 3).map(withOpen),
+      activityFilters, filteredActivity,
+      sites, instSites, hasInstSites: instSites.length > 0, noInstSites: instSites.length === 0,
+      inst,
+      copyUrl: () => this.copy(inst.url, 'url'), copyUrlLabel: s.copied === 'url' ? 'Copied' : 'Copy',
+      toggleCli: () => this.setState({ cliOpen: !s.cliOpen }),
+      cliOpen: s.cliOpen,
+      cliBtnBorder: s.cliOpen ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)',
+      cliBtnBg: s.cliOpen ? 'rgba(255,255,255,0.06)' : 'transparent',
+      cliCommands: [ mkCmd('Archive','archive'), mkCmd('Resurrect','resurrect'), mkCmd('Adopt','adopt'), mkCmd('Audit','audit') ],
+      tabs,
+      tabOverview: s.tab === 'overview', tabTimeline: s.tab === 'timeline',
+      tabUsage: s.tab === 'usage', tabWebhooks: s.tab === 'webhooks', tabMetrics: s.tab === 'metrics',
+      goldenChips, goldenSub, goldenSubColor, goldenBtn, runChecks,
+      updateRows: [
+        { k:'Running', v:'v0.2.25', color:'#e9edf3' },
+        { k:'Latest', v:'v0.2.25', color:'#e9edf3' },
+        { k:'Channel', v:'prod', color:'#e9edf3' },
+        { k:'Last checked', v:'10m ago', color:'#8d96a5' },
+        { k:'Autoupdate', v:'● auto · prod', color:'#3fcf8e' }
+      ],
+      doPauseUpdates: () => this.toastMsg('Autoupdate paused for ' + inst.name + ' — resume any time'),
+      doPinVersion: () => this.toastMsg('Pinned to v0.2.25 — autoupdate will hold here'),
+      openRollback: () => this.openModal('rollback'),
+      identityRows: [
+        { k:'ID', v:'a9863194-b531-46eb-926d-cdacc504a1ca', id:'i1' },
+        { k:'Host', v:'5.75.169.183', id:'i2' },
+        { k:'Slug', v: inst.key, id:'i3' }
+      ].map(r => ({ ...r, copyLabel: s.copied === r.id ? 'Copied' : 'Copy', onCopy: () => this.copy(r.v, r.id) })),
+      runtimeRows: [
+        { k:'Mode', v:'managed', color:'#e9edf3' },
+        { k:'Health', v: inst.status === 'Healthy' ? 'ok' : 'down', color: inst.status === 'Healthy' ? '#3fcf8e' : '#e8b45a' },
+        { k:'Agent', v:'online', color:'#3fcf8e' },
+        { k:'Version', v:'v0.1.0', color:'#e9edf3' },
+        { k:'Git commit', v:'c801681', color:'#e9edf3' }
+      ],
+      timelineRows, usageCards,
+      webhooks, hasWebhooks: s.webhooks.length > 0, noWebhooks: s.webhooks.length === 0,
+      docNav, cliRef, quickstartSteps,
+      docQuickstart: s.docSection === 'quickstart', docCli: s.docSection === 'cli',
+      docArchives: s.docSection === 'archives', docHealth: s.docSection === 'health',
+      // Modals
+      modalOpen: !!s.modal, modalTitle: modalTitles[s.modal] || '',
+      mLaunch: s.modal === 'launch', mDecom: s.modal === 'decom', mDomain: s.modal === 'domain',
+      mWebhook: s.modal === 'webhook', mNewSite: s.modal === 'newsite', mEvent: s.modal === 'event', mRollback: s.modal === 'rollback',
+      closeModal: () => this.setState({ modal: null }),
+      stopProp: (e) => e.stopPropagation(),
+      openLaunch: () => this.openModal('launch'),
+      openDecom: () => this.openModal('decom'),
+      openDomain: () => this.openModal('domain'),
+      openWebhook: () => this.openModal('webhook'),
+      openNewSite: () => this.openModal('newsite'),
+      openNewSiteHere: () => { this.setState({ siteInstance: inst.name }); this.openModal('newsite'); },
+      launchName: s.launchName, onLaunchName: (e) => this.setState({ launchName: e.target.value }),
+      launchSlugPreview: slug + '.barkpark.cloud',
+      launchProviders: pill(['Hetzner','Azure'], s.launchProvider, 'launchProvider'),
+      launchRegions: pill(['Falkenstein','Helsinki','Oslo (soon)'], s.launchRegion, 'launchRegion'),
+      launchSizes: pill(['S · 2 vCPU / 4 GB','M · 4 vCPU / 8 GB','L · 8 vCPU / 16 GB'], s.launchSize, 'launchSize'),
+      launchChannels: pill(['prod','beta'], s.launchChannel, 'launchChannel'),
+      doLaunch,
+      decomName: inst.name,
+      confirmText: s.confirmText, onConfirmText: (e) => this.setState({ confirmText: e.target.value }),
+      decomBtnBg: canDecom ? '#e56a6a' : 'rgba(229,106,106,0.15)', decomBtnFg: canDecom ? '#1a0808' : 'rgba(229,127,127,0.5)',
+      decomCursor: canDecom ? 'pointer' : 'not-allowed', doDecom,
+      domainInput: s.domainInput, onDomainInput: (e) => this.setState({ domainInput: e.target.value }),
+      domainHost, domainTarget: inst.url.replace('https://',''),
+      copyDnsTarget: () => this.copy(inst.url.replace('https://',''), 'dns'), copyDnsLabel: s.copied === 'dns' ? 'Copied' : 'Copy',
+      doVerifyDns: () => { this.setState({ modal: null }); this.toastMsg('DNS verification queued — we\u2019ll email when TLS is live'); },
+      webhookUrl: s.webhookUrl, onWebhookUrl: (e) => this.setState({ webhookUrl: e.target.value }),
+      webhookEventOpts, webhookSecret: this._secret,
+      copySecret: () => this.copy(this._secret, 'sec'), copySecretLabel: s.copied === 'sec' ? 'Copied' : 'Copy',
+      doAddWebhook,
+      siteName: s.siteName, onSiteName: (e) => this.setState({ siteName: e.target.value }),
+      siteInstanceOpts: pill(fleetArr.map(i => i.name), s.siteInstance, 'siteInstance'),
+      siteTemplateOpts: pill(['Blank','Docs','Marketing'], s.siteTemplate, 'siteTemplate'),
+      doAddSite,
+      eventMeta: ed.meta || [], eventPayload: ed.payload ? JSON.stringify(ed.payload, null, 2) : '',
+      copyPayload: () => this.copy(ed.payload ? JSON.stringify(ed.payload, null, 2) : '', 'pl'),
+      copyPayloadLabel: s.copied === 'pl' ? 'Copied' : 'Copy',
+      rollbackOpts, doRollback,
+      toast: s.toast
+    };
+  }
+}
+</script>
+</body>
+</html>
