@@ -529,13 +529,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # without erroring: non-array `tags` → '[]'::jsonb, flat string elements fail
   # jsonb_typeof(e)='object', and a non-integer strength fails the digits guard
   # instead of blowing up the ::int cast mid-query. Untagged docs get +0.
+  #
+  # PERF (search-latency slice d, task-9faff63dd9199c7d): the source array is the
+  # `tags_meta` GENERATED STORED column (migration 20260718100000), NOT the inline
+  # `CASE WHEN jsonb_typeof(content->'tags')='array' THEN content->'tags' ELSE
+  # '[]'::jsonb END` this used to evaluate. `tags_meta` IS that exact CASE
+  # materialized at write time (the non-array → '[]' guard now lives in the
+  # generated expression), so `jsonb_array_elements(tags_meta)` is byte-identical
+  # to the old inline form — the boost computes the same value. The win: the ORDER
+  # BY no longer DETOASTs the ~8.5KB–88KB `content` jsonb per candidate row to
+  # reach `->'tags'` (prod EXPLAIN over a 200-row pool: SubPlan 2,126 → 0 buffers,
+  # 47 → 1.6 ms). Read via `?.tags_meta` on the row binding, mirroring how
+  # `?.search_vector` reads its own virtual/GENERATED column.
   defp tag_boost_key(tag_terms) do
     dynamic(
       [d],
       fragment(
-        "0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
-        d.content,
-        d.content,
+        "0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(?.tags_meta) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
+        d,
         type(^tag_terms, {:array, :string})
       )
     )
@@ -574,18 +585,54 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp field_similarity_term(path, weight, query) do
-    keys = content_keys(path)
+    case materialized_text_column(path) do
+      nil ->
+        keys = content_keys(path)
 
-    dynamic(
-      [d],
-      fragment(
-        "? * similarity(coalesce(?#>>?, ''), ?)",
-        ^(weight * 1.0),
-        d.content,
-        type(^keys, {:array, :string}),
-        ^query
-      )
-    )
+        dynamic(
+          [d],
+          fragment(
+            "? * similarity(coalesce(?#>>?, ''), ?)",
+            ^(weight * 1.0),
+            d.content,
+            type(^keys, {:array, :string}),
+            ^query
+          )
+        )
+
+      column ->
+        dynamic(
+          [d],
+          fragment(
+            "? * similarity(coalesce(?, ''), ?)",
+            ^(weight * 1.0),
+            field(d, ^column),
+            ^query
+          )
+        )
+    end
+  end
+
+  # A jsonb path already materialized as a GENERATED STORED text column (#4174 /
+  # slice b) → read the narrow column instead of the `content#>>{key}` detour, so
+  # the ORDER BY's per-candidate similarity input no longer DETOASTs `content`.
+  # BYTE-IDENTICAL by construction (a single-key `content#>>'{k}'` equals
+  # `content->>'k'`):
+  #   * ["slug"]     → slug_text     = coalesce(content->>'slug','') ; coalesce(slug_text,'')     ≡ coalesce(content#>>'{slug}','')
+  #   * ["author"]   → author_text   = content->>'author'           ; coalesce(author_text,'')   ≡ coalesce(content#>>'{author}','')
+  #   * ["category"] → category_text = content->>'category'         ; coalesce(category_text,'') ≡ coalesce(content#>>'{category}','')
+  # Only these single-key paths map; deeper/other config paths keep the
+  # `content#>>` fallback verbatim. The DEFAULT + live prod `documents` config's
+  # `content.slug` field (weight 3) is exactly this case — verified on prod
+  # (search_surface_config) — so the field-similarity content detoast is gone on
+  # the real path with NO new column and NO ranking change.
+  defp materialized_text_column(path) do
+    case content_keys(path) do
+      ["slug"] -> :slug_text
+      ["author"] -> :author_text
+      ["category"] -> :category_text
+      _ -> nil
+    end
   end
 
   defp content_keys("content." <> rest), do: String.split(rest, ".")
