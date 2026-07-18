@@ -15,7 +15,18 @@ config :barkpark, Barkpark.Repo,
   hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
   database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2,
+  # Flat, generous, env-overridable pool — was `System.schedulers_online() * 2`.
+  # On a cgroup-throttled CI runner schedulers_online() can report 1–2, giving a
+  # pool of only 2–4; a handful of legitimate boot-time holds (Indx monitor/
+  # recovery, the post-boot Sharing.refresh/check_pg_trgm probes, Postgrex
+  # reconnect churn) then starve it, and test_helper.exs's very first CREATE
+  # SCHEMA sits in the checkout queue until it is DROPPED — reddening the whole
+  # gate before a single test runs (run 29665467133: 89.7s in-queue, 0 tests).
+  # postgres:15's default max_connections is 100, so 20 is comfortably safe.
+  # DIAGNOSTIC VALUE: if the boot checkout STILL starves for ~90s at pool 20,
+  # the cause is a lock/held-connection or a wedged CI Postgres service — NOT
+  # pool math — and the fix belongs at the workflow/infra layer.
+  pool_size: String.to_integer(System.get_env("BARKPARK_TEST_POOL_SIZE", "20")),
   # Per-hold watchdog. At the 15s default, a legitimately long single hold
   # under saturated-suite CPU (the EDItEUR/Thema codelist seed's big JSONB
   # register) gets force-disconnected mid-query — killing a pool connection
