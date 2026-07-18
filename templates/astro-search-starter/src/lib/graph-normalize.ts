@@ -115,3 +115,23 @@ export function normalizeCorpusGraph(raw: unknown): CorpusGraph {
     .filter((e): e is GraphEdge => e !== null && present.has(e.from_id) && present.has(e.to_id))
   return { nodes, edges, rootId: computeRootId(nodes, edges) }
 }
+
+/**
+ * Mark nodes whose type is NOT prerendered as phantom — the STATIC edition's
+ * navigability truth. The Next edition's `/d/[type]/[slug]` is a dynamic route
+ * (any type renders on demand); this static site prerenders detail pages only
+ * for the built doc type, so a click on any other type's node lands on a
+ * missing page (live-caught: 999 task nodes 503'd). Phantom is exactly the
+ * renderer's "referenced-but-absent — never navigable" semantics: the node
+ * stays visible as corpus context (edges intact, phantom styling) but neither
+ * `bp-graph.js` nor GraphPane will navigate it. The root is re-chosen from the
+ * still-navigable nodes so the accent anchor is always a clickable document.
+ */
+export function markNonNavigable(g: CorpusGraph, navigableTypes: string[]): CorpusGraph {
+  const ok = new Set(navigableTypes)
+  const nodes = g.nodes.map((n) => (ok.has(n.type) || n.phantom ? n : { ...n, phantom: true }))
+  const navigable = nodes.filter((n) => !n.phantom)
+  const rootId =
+    navigable.length > 0 ? computeRootId(navigable, g.edges) : computeRootId(nodes, g.edges)
+  return { nodes, edges: g.edges, rootId }
+}

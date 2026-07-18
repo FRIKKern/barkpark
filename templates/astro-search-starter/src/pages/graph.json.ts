@@ -6,11 +6,14 @@
 // upstream drift and with the root (highest degree, "barkpark" preferred)
 // chosen once here rather than per visitor.
 import type { APIRoute } from 'astro'
-import { graphCorpus } from '../lib/bp'
-import { normalizeCorpusGraph } from '../lib/graph-normalize'
+import { env, graphCorpus } from '../lib/bp'
+import { normalizeCorpusGraph, markNonNavigable } from '../lib/graph-normalize'
 
 export const GET: APIRoute = async () => {
-  const corpus = normalizeCorpusGraph(await graphCorpus())
+  // Non-built types become phantom (visible context, never navigable) — the
+  // static site prerenders detail pages only for env.docType, and a click onto
+  // a page that does not exist is worse than a non-clickable node.
+  const corpus = markNonNavigable(normalizeCorpusGraph(await graphCorpus()), [env.docType])
   return new Response(JSON.stringify(corpus), {
     headers: { 'content-type': 'application/json' },
   })
