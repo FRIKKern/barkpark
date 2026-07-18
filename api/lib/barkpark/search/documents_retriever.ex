@@ -94,12 +94,26 @@ defmodule Barkpark.Search.DocumentsRetriever do
     base = if is_list(types) and types != [], do: where(base, [d], d.type in ^types), else: base
     base = perspective_filter(base, perspective)
 
+    # Count + all four facet dimensions in ONE round trip over the match set
+    # (search-latency slice c). Runs BEFORE the retrieve so its exact `count`
+    # can gate the bounded-pool self-subquery below. Facets + count stay on the
+    # FULL match set (not the ranking pool): the user wants "this query matched
+    # 1.2k items across these facets", not "the top 500 break down this way".
+    {count, facets} = count_and_facets(base)
+
     # Bounded ranking pool: for real queries, narrow to a cheap-signal candidate
     # set BEFORE running the expensive ranking ORDER BY. Browse stays unbounded
-    # since its only ORDER BY is `updated_at DESC` — already cheap and the
-    # browse contract returns the whole scoped set in recency order.
+    # (its only ORDER BY is `updated_at DESC` — already cheap, and its contract
+    # returns the whole scoped set in recency order). ELIDE the pool when the
+    # match set already fits inside it (`count <= pool_size`): `bounded_pool`
+    # would then select EVERY matched id into the `id IN (...)` subquery, a
+    # no-op filter that only costs a second scan of the predicate. Skipping it
+    # is provably identical (|match| ≤ pool ⇒ {top pool by updated_at} ⊇ match ⇒
+    # the intersection IS the match set) and halves the retrieve's predicate
+    # evals on the common small-corpus path (prod: ≤335 matches < 500 pool). At
+    # `count > pool_size` the bound is load-bearing and stays.
     ranking_input =
-      if browse? do
+      if browse? or count <= pool_size do
         base
       else
         bounded_pool(base, pool_size)
@@ -113,13 +127,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> maybe_light_select(Keyword.get(opts, :fields))
       |> Repo.all()
 
-    count = base |> exclude(:order_by) |> select([d], count(d.id)) |> Repo.one() || 0
-    # Facet counts via GROUP BY over the matching set — Postgres's parity with
-    # Indx's native facets, surfaced through the same `meta.facets` channel.
-    # Facets stay on the FULL match set (not the ranking pool), because the
-    # user wants "this query matched 1.2k items across these facets", not
-    # "the top 500 break down this way".
-    {docs, count, %{facets: facet_counts(base)}}
+    {docs, count, %{facets: facets}}
   end
 
   # Apply the bounded ranking pool: filter the query to the `pool_size` rows
@@ -194,37 +202,99 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp maybe_light_select(query, _fields), do: query
 
-  # Dataset-wide (browse) / match-set (query) facet buckets per dimension, in
-  # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},
-  # empty-label buckets dropped, biggest first.
-  defp facet_counts(base) do
-    # Every facet dimension now GROUPs BY a real column — `type`/`status` were
-    # always columns; `author`/`category` moved to the `author_text`/`category_text`
-    # GENERATED STORED columns (slice b), so the facet GROUP BYs no longer detoast
-    # `content` per matching row. The bucket labels stay "author"/"category" — the
-    # `meta.facets` shape is byte-identical (the columns mirror `content->>'author'`
-    # / `content->>'category'` exactly).
-    %{}
-    |> put_facet("type", group_column(base, :type))
-    |> put_facet("status", group_column(base, :status))
-    |> put_facet("author", group_column(base, :author_text))
-    |> put_facet("category", group_column(base, :category_text))
+  # Count + the four facet dimensions in ONE pass over the match set (slice c).
+  #
+  # WAS: five statements — a `count(id)` plus one `GROUP BY` per dimension
+  # (type / status / author_text / category_text) — each independently
+  # re-running the full match predicate. Now a single `GROUP BY GROUPING SETS`
+  # aggregates all five in one scan: the four single-column sets give the facet
+  # buckets, the empty set `()` gives the grand total (the old `count`). The
+  # `grouping(a,b,c,d)` bitmask tags which set each returned row belongs to, so
+  # NULL-because-not-grouped is never confused with NULL-as-a-real-facet-value.
+  #
+  # BYTE-IDENTICAL to the five-statement path by construction: the SAME columns,
+  # the SAME `count(id)` aggregate, the SAME `put_facet` shaping (nil/'' labels
+  # dropped, biggest-count first). GROUPING SETS is pure aggregation batching —
+  # it changes the number of round trips, not the buckets. Empty match set: the
+  # `()` set still emits its grand-total row (count 0) while the column sets emit
+  # nothing, so count=0 with empty facets — matching the old count/GROUP-BY pair.
+  #
+  # `grouping(type,status,author_text,category_text)` is a 4-bit mask, MSB first;
+  # a bit is 1 when that column is aggregated AWAY in the current set. So a set
+  # grouping ONLY `type` has status/author/category away → 0111 = 7; `()` (all
+  # away) → 1111 = 15.
+  @g_type 0b0111
+  @g_status 0b1011
+  @g_author 0b1101
+  @g_category 0b1110
+  @g_total 0b1111
+
+  defp count_and_facets(base) do
+    rows =
+      base
+      |> exclude(:order_by)
+      |> select([d], %{
+        g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+        type: d.type,
+        status: d.status,
+        author: d.author_text,
+        category: d.category_text,
+        count: count(d.id)
+      })
+      |> group_by(
+        [d],
+        fragment(
+          "GROUPING SETS ((?), (?), (?), (?), ())",
+          d.type,
+          d.status,
+          d.author_text,
+          d.category_text
+        )
+      )
+      |> Repo.all()
+
+    init = %{count: 0, type: [], status: [], author: [], category: []}
+
+    acc =
+      Enum.reduce(rows, init, fn row, acc ->
+        case row.g do
+          @g_total -> %{acc | count: row.count}
+          @g_type -> %{acc | type: [{row.type, row.count} | acc.type]}
+          @g_status -> %{acc | status: [{row.status, row.count} | acc.status]}
+          @g_author -> %{acc | author: [{row.author, row.count} | acc.author]}
+          @g_category -> %{acc | category: [{row.category, row.count} | acc.category]}
+          _ -> acc
+        end
+      end)
+
+    facets =
+      %{}
+      |> put_facet("type", acc.type)
+      |> put_facet("status", acc.status)
+      |> put_facet("author", acc.author)
+      |> put_facet("category", acc.category)
+
+    {acc.count, facets}
   end
 
-  defp group_column(base, field) do
-    base
-    |> exclude(:order_by)
-    |> group_by([d], field(d, ^field))
-    |> select([d], {field(d, ^field), count(d.id)})
-    |> Repo.all()
-  end
-
+  # Shape a dimension's `{label, count}` rows into the `meta.facets` bucket list:
+  # drop nil/'' labels, biggest count first, label ascending as the tiebreak.
+  #
+  # The label tiebreak makes the order TOTAL and deterministic. Without it, the
+  # sort key is `-count` alone: a STABLE sort over a planner-arbitrary GROUP BY
+  # emission order, so two equal-count buckets ("post"/"note" both matched 3x)
+  # came out in whichever order Postgres happened to emit — nondeterministic
+  # across identical queries (the standalone GROUP BY and the collapsed GROUPING
+  # SETS pass can emit the same rows in different orders). That surfaced as facet
+  # jitter in the finder and non-reproducible snapshots. `{-count, label}` pins a
+  # single canonical order; the biggest-first contract for DISTINCT counts is
+  # unchanged.
   defp put_facet(map, name, rows) do
     buckets =
       rows
       |> Enum.reject(fn {label, _} -> label in [nil, ""] end)
-      |> Enum.sort_by(fn {_, count} -> -count end)
       |> Enum.map(fn {label, count} -> %{"label" => to_string(label), "count" => count} end)
+      |> Enum.sort_by(fn %{"label" => label, "count" => count} -> {-count, label} end)
 
     if buckets == [], do: map, else: Map.put(map, name, buckets)
   end
