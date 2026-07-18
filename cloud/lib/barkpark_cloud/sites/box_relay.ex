@@ -52,6 +52,7 @@ defmodule BarkparkCloud.Sites.BoxRelay do
   that honestly.
   """
   @callback rollback(Barkpark.t(), map()) :: reply()
+  @callback teardown(Barkpark.t(), map()) :: reply()
 
   @doc """
   The configured relay implementation. Defaults to the real HTTP admin relay; the
@@ -69,6 +70,9 @@ defmodule BarkparkCloud.Sites.BoxRelay do
 
   @spec rollback(Barkpark.t(), map()) :: reply()
   def rollback(bp, payload), do: impl().rollback(bp, payload)
+
+  @spec teardown(Barkpark.t(), map()) :: reply()
+  def teardown(bp, payload), do: impl().teardown(bp, payload)
 end
 
 defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
@@ -110,6 +114,9 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
   # happened.
   @rollback_poll_ms 50
   @rollback_budget_ms 10_000
+  # A teardown stops the slots + disarms Caddy + deletes the tree — a few seconds,
+  # but a cold node slot stop can lag, so allow more headroom than a pointer flip.
+  @teardown_budget_ms 30_000
 
   @impl true
   def rollback(bp, payload) when is_map(payload) do
@@ -187,5 +194,58 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
         _ -> nil
       end
     end)
+  end
+
+  @impl true
+  def teardown(bp, payload) when is_map(payload) do
+    # mode: "teardown" → `site-deploy[.-node].sh --teardown` on the box: stop the
+    # slots, disarm the Caddy route, delete the tree. Like a rollback it runs
+    # ASYNC behind the runner and emits no BPSTAGE, so we wait for the run to
+    # finish (a `TORN_DOWN=` line finalizes it exit 0) before reporting success —
+    # otherwise the CP would deregister the row while the box still serves it.
+    slug = payload[:slug] || payload["slug"]
+
+    case Registry.relay_admin(bp, :post, @path, Map.put_new(payload, :mode, "teardown")) do
+      {:ok, status, _body} when status in 200..299 ->
+        await_teardown(bp, slug, @teardown_budget_ms)
+
+      other ->
+        other
+    end
+  end
+
+  defp await_teardown(_bp, _slug, left_ms) when left_ms <= 0 do
+    {:ok, 504,
+     %{
+       "error" =>
+         "the instance did not confirm the teardown in time — it may still be tearing down; " <>
+           "check `bp cloud site status`"
+     }}
+  end
+
+  defp await_teardown(bp, slug, left_ms) do
+    case poll_deploy(bp, slug, "") do
+      {:ok, status, body} when status in 200..299 ->
+        if to_string(body["state"]) == "done" do
+          settle_teardown(body)
+        else
+          Process.sleep(@rollback_poll_ms)
+          await_teardown(bp, slug, left_ms - @rollback_poll_ms)
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # exit_code 0 (the engine printed `TORN_DOWN=<slug>`) is a real teardown;
+  # anything else is an honest failure that must NOT read as deleted.
+  defp settle_teardown(body) do
+    if body["exit_code"] == 0 do
+      {:ok, 200, %{"status" => "torn_down"}}
+    else
+      {:ok, 422,
+       %{"error" => body["failure_reason"] || "the instance could not tear this site down"}}
+    end
   end
 end

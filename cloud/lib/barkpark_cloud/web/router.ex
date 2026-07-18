@@ -151,6 +151,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
       PATCH   /v1/sites/:id        user      update a site's settings (write ability)
+      DELETE  /v1/sites/:id        user      delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
@@ -4921,6 +4922,42 @@ defmodule BarkparkCloud.Web.Router do
           {:error, cs} ->
             json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
         end
+      end
+    end)
+  end
+
+  # DELETE /v1/sites/:id → 200 {ok, status:"deleted"} | error. The inverse of a
+  # spawn: tear the site down on its box (stop slots, disarm the Caddy route,
+  # delete the tree) THEN deregister the row. BOX FIRST — a failed teardown must
+  # not orphan a still-serving box behind a deleted registration. If the box is
+  # gone (its Barkpark was deleted), there is nothing to tear down: just
+  # deregister. Team-scoped, write ability (same as rollback).
+  delete "/v1/sites/:id" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      bp = Registry.get_barkpark(site.barkpark_id)
+      teardown_result = if is_nil(bp), do: :ok, else: Sites.Deploy.teardown(site, bp)
+
+      case teardown_result do
+        :ok ->
+          {:ok, _} = Registry.delete_site(site)
+
+          _ =
+            Accounts.record_audit(%{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "site.deleted",
+              target_type: "site",
+              target_id: site.id,
+              metadata: %{slug: site.slug, kind: site.kind, box_present: not is_nil(bp)}
+            })
+
+          push_event(site.team_id, "sites")
+          push_event(site.team_id, "audit")
+
+          json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
+
+        {:error, status, detail} ->
+          json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
       end
     end)
   end

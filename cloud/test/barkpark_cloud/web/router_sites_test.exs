@@ -1167,4 +1167,66 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert json_body(conn)["error"] == "nothing_to_update"
     end
   end
+
+  describe "DELETE /v1/sites/:id (site delete — tear down + deregister)" do
+    test "tears the site down on the box, THEN deregisters the row (deployments cascade)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      {:ok, _dep} = Registry.create_deployment(site, %{build_id: "somebuild0000001"})
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      body = json_body(conn)
+      assert body["ok"] == true
+      assert body["status"] == "deleted"
+      assert body["slug"] == site.slug
+
+      # The box was told to tear down BEFORE the row vanished.
+      assert Enum.any?(FakeBoxRelay.calls(), fn
+               {:teardown, p} -> p.slug == site.slug and p.mode == "teardown"
+               _ -> false
+             end)
+
+      # The row is gone, and its deployments cascaded (on_delete: :delete_all).
+      assert Registry.get_site(site.id) == nil
+      assert Registry.list_deployments(site, 10) == []
+    end
+
+    test "a box that could NOT tear down leaves the row in place (no orphaned registration)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        teardown: {:ok, 422, %{"error" => "caddy validate rejected the disarm"}}
+      )
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      refute conn.status in 200..299
+      assert json_body(conn)["ok"] == false
+      # The site is STILL registered — box-first means a failed teardown never
+      # deregisters a still-serving box.
+      refute Registry.get_site(site.id) == nil
+    end
+
+    test "another team's site is 404, never deleted (team-scoped)" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      {other_user, _other_team} = user_with_team()
+      token = login_token(other_user)
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 404
+      # Untouched.
+      refute Registry.get_site(site.id) == nil
+    end
+  end
 end

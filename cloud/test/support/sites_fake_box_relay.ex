@@ -63,6 +63,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
         start: Keyword.get(opts, :start, {:ok, 202, %{"status" => "started"}}),
         polls: Keyword.get(opts, :polls, []),
         rollback: Keyword.get(opts, :rollback, {:ok, 200, %{"status" => "rolled_back"}}),
+        teardown: Keyword.get(opts, :teardown, {:ok, 200, %{"status" => "torn_down"}}),
         calls: []
       })
     end)
@@ -143,6 +144,12 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   def rollback(_bp, payload) do
     record({:rollback, payload})
     fetch(:rollback, {:ok, 200, %{"status" => "rolled_back"}})
+  end
+
+  @impl true
+  def teardown(_bp, payload) do
+    record({:teardown, payload})
+    fetch(:teardown, {:ok, 200, %{"status" => "torn_down"}})
   end
 
   ## ---------------------------------------------------------------------------
