@@ -223,3 +223,32 @@ func TestRunPaperViewPreservesItemShareWithoutBearer(t *testing.T) {
 		t.Fatalf("share request Accept = %q, want */*", accept)
 	}
 }
+
+func TestRunPaperViewFailsClosedOnCanonicalSourceRejection(t *testing.T) {
+	for _, code := range []string{"semantic_empty", "ambiguous_source"} {
+		t.Run(code, func(t *testing.T) {
+			var requested string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requested = r.URL.RequestURI()
+				w.Header().Set("content-type", "application/json")
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"error":{"code":"` + code + `"}}`))
+			}))
+			defer srv.Close()
+
+			var stdout, stderr bytes.Buffer
+			out := newWriter(&stdout, &stderr)
+			got := runPaperView(out, globals{}, []string{srv.URL + "/papers/rejected", "--profile", "none"})
+			if got == exitOK {
+				t.Fatalf("runPaperView returned success for %s; stdout=%q", code, stdout.String())
+			}
+			if !strings.HasPrefix(requested, "/d/production/papers/rejected/source?") ||
+				!strings.Contains(requested, "perspective=published") {
+				t.Fatalf("request URI = %q, want canonical dataset source endpoint", requested)
+			}
+			if !strings.Contains(stderr.String(), "status 422") {
+				t.Fatalf("stderr = %q, want explicit 422 source rejection", stderr.String())
+			}
+		})
+	}
+}

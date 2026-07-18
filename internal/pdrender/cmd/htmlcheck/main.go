@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"unicode"
@@ -23,6 +24,9 @@ type metrics struct {
 	VisibleWords int    `json:"visible_words"`
 	HeadingCount int    `json:"heading_count"`
 	TextSHA256   string `json:"text_sha256"`
+	LinkCount    int    `json:"link_count"`
+	InvalidLinks int    `json:"invalid_links"`
+	LinksValid   bool   `json:"links_valid"`
 }
 
 func main() {
@@ -45,7 +49,7 @@ func main() {
 	}
 
 	target := findTarget(doc, os.Args[1])
-	result := metrics{BodyFound: target != nil}
+	result := metrics{BodyFound: target != nil, LinksValid: true}
 	if target != nil {
 		var parts []string
 		collectVisible(target, false, &parts, &result.HeadingCount)
@@ -55,11 +59,50 @@ func main() {
 		result.VisibleChars = utf8.RuneCountInString(text)
 		result.VisibleWords = len(strings.Fields(text))
 		result.TextSHA256 = hex.EncodeToString(sum[:])
+		if os.Args[1] == "email" {
+			result.LinkCount, result.InvalidLinks = linkMetrics(target, false)
+			result.LinksValid = result.InvalidLinks == 0
+		}
 	}
 
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+}
+
+func linkMetrics(n *html.Node, hidden bool) (total, invalid int) {
+	if n.Type == html.ElementNode {
+		hidden = hidden || isHiddenElement(n)
+		if !hidden && n.Data == "a" && hasAttribute(n, "href") {
+			total++
+			if !portableEmailHref(attribute(n, "href")) {
+				invalid++
+			}
+		}
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		childTotal, childInvalid := linkMetrics(child, hidden)
+		total += childTotal
+		invalid += childInvalid
+	}
+	return total, invalid
+}
+
+func portableEmailHref(raw string) bool {
+	href := strings.TrimSpace(raw)
+	if strings.HasPrefix(href, "#") {
+		return true
+	}
+	parsed, err := url.Parse(href)
+	if err != nil || parsed.Scheme == "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "mailto", "tel":
+		return true
+	default:
+		return false
 	}
 }
 

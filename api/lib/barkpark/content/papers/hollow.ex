@@ -108,6 +108,17 @@ defmodule Barkpark.Content.Papers.Hollow do
   # every other type counts on any substantive (non-structural) payload.
   defp substantive?(%{"type" => "divider"}), do: false
 
+  # Image dimensions and editor metadata are not reader content. The renderer
+  # deliberately emits nothing for an image without an asset, so the quality
+  # gate must require the same real `src` payload instead of accepting width,
+  # height, or booleans that never reach a reader.
+  defp substantive?(%{"type" => "image"} = block) do
+    case Map.get(block, "src") do
+      src when is_binary(src) -> String.trim(src) != ""
+      _ -> false
+    end
+  end
+
   defp substantive?(%{"type" => type} = block) when type in @text_types,
     do: any_text?(block)
 

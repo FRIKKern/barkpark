@@ -90,3 +90,33 @@ func TestHasSemanticText(t *testing.T) {
 		}
 	}
 }
+
+func TestEmailLinksMustBePortable(t *testing.T) {
+	doc, err := html.Parse(strings.NewReader(`<html><body>
+		<a href="https://example.com/x">absolute</a>
+		<a href="mailto:paper@example.com">mail</a>
+		<a href="#section">fragment</a>
+		<a href="./relative">relative</a>
+		<a href="//evil.example/x">protocol relative</a>
+		<a>stripped unsafe link</a>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := findTarget(doc, "email")
+	total, invalid := linkMetrics(target, false)
+	if total != 5 || invalid != 2 {
+		t.Fatalf("link metrics = %d total, %d invalid; want 5, 2", total, invalid)
+	}
+
+	for _, href := range []string{"https://example.com", "http://example.com", "mailto:a@b.test", "tel:+1", "#part", "#"} {
+		if !portableEmailHref(href) {
+			t.Errorf("portableEmailHref(%q) = false", href)
+		}
+	}
+	for _, href := range []string{"", "/root", "./next", "//evil.test/x", "javascript:alert(1)"} {
+		if portableEmailHref(href) {
+			t.Errorf("portableEmailHref(%q) = true", href)
+		}
+	}
+}

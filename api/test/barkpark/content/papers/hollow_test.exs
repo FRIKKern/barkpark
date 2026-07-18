@@ -71,6 +71,11 @@ defmodule Barkpark.Content.Papers.HollowTest do
 
     test "an image ghost with a blank src is NOT content" do
       assert Hollow.hollow?([locked_title(), %{"id" => "i1", "type" => "image", "src" => ""}])
+
+      assert Hollow.hollow?([
+               locked_title(),
+               %{"id" => "i2", "type" => "image", "width" => 640, "height" => 480}
+             ])
     end
 
     test "docs without a blocks list (body_html-only, pre-doctrine) are exempt" do

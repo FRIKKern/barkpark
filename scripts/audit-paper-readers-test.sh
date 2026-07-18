@@ -37,7 +37,7 @@ url=""
 while (($#)); do
   case "$1" in
     -o) out="$2"; shift 2 ;;
-    -w|-H) shift 2 ;;
+    -w|-H|--connect-timeout|--max-time) shift 2 ;;
     -L|-sS) shift ;;
     *) url="$1"; shift ;;
   esac
@@ -49,12 +49,19 @@ if [[ "$url" == */source ]]; then
     printf '%s' '{"source":{"kind":"blocks","blocks":[]}}' >"$out"
   fi
 elif [[ "$url" == */email ]]; then
-  if [[ "${BP_FIXTURE_EMPTY_BODY:-}" == "1" ]]; then
+  if [[ "${BP_FIXTURE_STALLED:-}" == "1" ]]; then
+    printf '000'
+    exit 28
+  elif [[ "${BP_FIXTURE_EMPTY_BODY:-}" == "1" ]]; then
     printf '%s' '<!doctype html><body class="bp-paper-surface"></body>' >"$out"
   elif [[ "${BP_FIXTURE_PUNCTUATION_BODY:-}" == "1" ]]; then
     printf '%s' '<!doctype html><body class="bp-paper-surface"><p>/</p></body>' >"$out"
   else
-    printf '%s' '<!doctype html><body class="bp-paper-surface"><p>mail</p></body>' >"$out"
+    if [[ "${BP_FIXTURE_BAD_EMAIL_LINK:-}" == "1" ]]; then
+      printf '%s' '<!doctype html><body class="bp-paper-surface"><p>mail</p><a href="./relative">bad</a></body>' >"$out"
+    else
+      printf '%s' '<!doctype html><body class="bp-paper-surface"><p>mail</p><a href="https://fixture.invalid/papers/next">next</a></body>' >"$out"
+    fi
   fi
 else
   if [[ "${BP_FIXTURE_EMPTY_BODY:-}" == "1" ]]; then
@@ -80,7 +87,8 @@ jq -e '
   all(.results[];
     .tui.max_display_width <= 80 and .tui.overflow_lines == 0 and
     .gui.content.body_found and .gui.content.meaningful and
-    .email.content.body_found and .email.content.meaningful
+    .email.content.body_found and .email.content.meaningful and
+    .email.content.links_valid and .email.content.invalid_links == 0
   )
 ' \
   "$tmp/result.json" >/dev/null
@@ -126,6 +134,30 @@ jq -e '
     (.email.content.visible_chars == 1 and (.email.content.meaningful | not))
   )
 ' "$tmp/punctuation-body-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_BAD_EMAIL_LINK=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/bad-link-result.json"; then
+  printf 'relative email link unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[]; .email.content.links_valid == false and .email.content.invalid_links == 1)
+' "$tmp/bad-link-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_STALLED=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/stalled-result.json"; then
+  printf 'failed/stalled email transfer unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[]; .email.status == 0 and .email.content.body_found == false)
+' "$tmp/stalled-result.json" >/dev/null
 
 if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \

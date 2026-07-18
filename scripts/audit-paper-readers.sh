@@ -9,6 +9,8 @@ workspace="${BP_AUDIT_WORKSPACE:-default}"
 project="${BP_AUDIT_PROJECT:-default}"
 dataset="${BP_AUDIT_DATASET:-production}"
 bp_bin="${BP_AUDIT_BIN:-bp}"
+curl_connect_timeout="${BP_AUDIT_CONNECT_TIMEOUT:-5}"
+curl_max_time="${BP_AUDIT_MAX_TIME:-30}"
 
 for required in jq curl go shasum "$bp_bin"; do
   command -v "$required" >/dev/null || {
@@ -73,9 +75,19 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
     public_url="$base/w/$encoded_ws/p/$encoded_project/papers/$encoded"
   fi
 
-  gui_code="$(curl -L -sS -o "$tmp/gui" -w '%{http_code}' "$public_url")"
-  email_code="$(curl -L -sS -o "$tmp/email" -w '%{http_code}' "$public_url/email")"
-  source_code="$(curl -L -sS -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source")"
+  : >"$tmp/gui"
+  : >"$tmp/email"
+  : >"$tmp/source"
+  gui_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/gui" -w '%{http_code}' "$public_url" || true)"
+  email_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/email" -w '%{http_code}' "$public_url/email" || true)"
+  source_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source" || true)"
+
+  [[ "$gui_code" =~ ^[0-9]{3}$ ]] || gui_code=0
+  [[ "$email_code" =~ ^[0-9]{3}$ ]] || email_code=0
+  [[ "$source_code" =~ ^[0-9]{3}$ ]] || source_code=0
+  [[ "$gui_code" == "000" ]] && gui_code=0
+  [[ "$email_code" == "000" ]] && email_code=0
+  [[ "$source_code" == "000" ]] && source_code=0
 
   source_ok=false
   source_kind="unavailable"
@@ -102,7 +114,7 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
   fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
-  gui_content='{"body_found":false,"meaningful":false,"visible_chars":0,"visible_words":0,"heading_count":0,"text_sha256":""}'
+  gui_content='{"body_found":false,"meaningful":false,"visible_chars":0,"visible_words":0,"heading_count":0,"text_sha256":"","link_count":0,"invalid_links":0,"links_valid":false}'
   email_content="$gui_content"
   if [[ "$gui_code" == "200" ]]; then
     checked_gui_content="$("$tmp/htmlcheck" gui "$tmp/gui" 2>/dev/null)" && gui_content="$checked_gui_content"
@@ -112,9 +124,10 @@ jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
   fi
   gui_content_ok="$(jq -r '.body_found and .meaningful' <<<"$gui_content")"
   email_content_ok="$(jq -r '.body_found and .meaningful' <<<"$email_content")"
+  email_links_ok="$(jq -r '.links_valid' <<<"$email_content")"
   ok=false
   if [[ "$gui_code" == "200" && "$email_code" == "200" && \
-    "$gui_content_ok" == true && "$email_content_ok" == true && \
+    "$gui_content_ok" == true && "$email_content_ok" == true && "$email_links_ok" == true && \
     "$source_ok" == true && "$cli_ok" == true ]]; then
     ok=true
   fi

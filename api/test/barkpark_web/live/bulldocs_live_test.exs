@@ -22,6 +22,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
+  alias Barkpark.Repo
 
   @slug "2026-05-23-convergence-demo"
 
@@ -601,6 +602,52 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # No remount on the fallback path either.
       assert view.pid == pid_before
       assert rendered =~ ~s(id="paper-sentinel")
+    end
+
+    test "whole-HTML broadcasts are advisory and cannot inject an unvalidated body", %{
+      conn: conn
+    } do
+      slug = "wave4-html-advisory"
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            body_html: "<p id=\"stored-safe\">Stored safe body</p>"
+          })
+        )
+
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+      send(view.pid, {:paper_updated, %{html: "<script>injected()</script>", rev: 999}})
+
+      rendered = render(view)
+      assert rendered =~ "Stored safe body"
+      assert rendered =~ ~s(id="stored-safe")
+      refute rendered =~ "injected()"
+    end
+
+    test "connected refetch exposes an explicit invalid-source state instead of an empty success",
+         %{conn: conn} do
+      slug = "wave4-invalid-refetch"
+      blocks = [%{"id" => "body", "type" => "paragraph", "text" => "Initially valid"}]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      {:ok, view, html} = live(conn, "/papers/#{slug}")
+      assert html =~ "Initially valid"
+
+      paper
+      |> Ecto.Changeset.change(content: Map.put(paper.content, "body_html", "<p>conflict</p>"))
+      |> Repo.update!()
+
+      send(view.pid, {:paper_updated, %{html: "<p>conflict</p>", rev: 999}})
+      rendered = render(view)
+
+      assert rendered =~ ~s(id="paper-invalid")
+      assert rendered =~ ~s(data-source-error="ambiguous_source")
+      refute rendered =~ "Initially valid"
+      refute rendered =~ "<p>conflict</p>"
     end
   end
 
