@@ -1459,6 +1459,14 @@ type SiteRollbackResult struct {
 	Port                 int    `json:"port"`
 }
 
+// SiteDeleteResult is the flat envelope `DELETE /v1/sites/:id` returns on success.
+type SiteDeleteResult struct {
+	Raw    []byte `json:"-"`
+	OK     bool   `json:"ok"`
+	Status string `json:"status"`
+	Slug   string `json:"slug"`
+}
+
 // CreateSpawnSite POSTs /v1/sites (Bearer) with the spawner body and returns the
 // new row. The dataset triple tells the control plane which content to build
 // from; kind distinguishes the row from a container-model site.
@@ -1597,6 +1605,24 @@ func (c *Client) RollbackSpawnSite(ctx context.Context, id string) (SiteRollback
 	res := SiteRollbackResult{Raw: raw}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return SiteRollbackResult{}, fmt.Errorf("decode rollback envelope: %w", err)
+	}
+	return res, nil
+}
+
+// DeleteSpawnSite tears a site down on its box and deregisters it (DELETE
+// /v1/sites/:id). Non-2xx (e.g. a teardown the box refused) is a cloudError, so
+// the caller never prints a false "deleted".
+func (c *Client) DeleteSpawnSite(ctx context.Context, id string) (SiteDeleteResult, error) {
+	status, raw, err := c.do(ctx, "DELETE", "/v1/sites/"+esc(id), true, nil)
+	if err != nil {
+		return SiteDeleteResult{}, err
+	}
+	if !ok(status) {
+		return SiteDeleteResult{}, cloudError(status, raw)
+	}
+	res := SiteDeleteResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return SiteDeleteResult{}, fmt.Errorf("decode delete envelope: %w", err)
 	}
 	return res, nil
 }
