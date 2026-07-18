@@ -13,7 +13,7 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Repo
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.Criteria
+  alias Barkpark.Tasks.{Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -177,6 +177,8 @@ defmodule BarkparkWeb.TasksController.Params do
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
       execution_policy: Map.get(content, "execution_policy"),
+      queue_gate: Map.get(content, "queue_gate"),
+      execution_class: QueueGate.execution_class(content),
       claim: Map.get(content, "claim"),
       # tt5: surface content.labels at the top level so a client's `.labels[]`
       # (e.g. `bp task show`'s label view + the `label=` list filter) works
@@ -349,6 +351,7 @@ defmodule BarkparkWeb.TasksController.Params do
       doc_id: doc.doc_id,
       title: doc.title,
       lifecycle_status: Map.get(content, "lifecycle_status"),
+      execution_class: QueueGate.execution_class(content),
       inserted_at: doc.inserted_at
     }
     # Same omit-when-absent contract as render_doc — a parent's rail shows

@@ -17,7 +17,7 @@ defmodule Barkpark.Tasks.Validation do
   @lifecycle_statuses ~w(open in_progress blocked done cancelled)
   @kinds ~w(task)
 
-  alias Barkpark.Tasks.ExecutionPolicy
+  alias Barkpark.Tasks.{ExecutionPolicy, QueueGate}
 
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
@@ -45,8 +45,9 @@ defmodule Barkpark.Tasks.Validation do
   `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
   (strings), `papers` / `attachments` (lists of strings), `labels` /
   `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
-  `worklog` / `acceptance_criteria` (lists of maps). Top-level shape only,
-  never sub-keys — the claim-map precedent.
+  `worklog` / `acceptance_criteria` (lists of maps). `execution_policy` and
+  `queue_gate` are the two strict nested versioned contracts; other dossier
+  composites retain top-level-only shape checks.
   """
   @spec validate_task_content(map() | nil) :: :ok | {:error, map()}
   def validate_task_content(content), do: validate_kind_content("task", content)
@@ -136,6 +137,7 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_map_list(content, "worklog")
     |> check_optional_map_list(content, "acceptance_criteria")
     |> check_execution_policy(content)
+    |> check_queue_gate(content)
   end
 
   # ─── Per-field micro-validators ────────────────────────────────────────────
@@ -245,6 +247,13 @@ defmodule Barkpark.Tasks.Validation do
     case ExecutionPolicy.validate(fetch(content, "execution_policy")) do
       :ok -> errors
       {:error, policy_errors} -> Map.put(errors, "execution_policy", policy_errors)
+    end
+  end
+
+  defp check_queue_gate(errors, content) do
+    case QueueGate.validate(fetch(content, "queue_gate")) do
+      :ok -> errors
+      {:error, gate_errors} -> Map.put(errors, "queue_gate", gate_errors)
     end
   end
 end
