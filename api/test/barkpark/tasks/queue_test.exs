@@ -165,6 +165,106 @@ defmodule Barkpark.Tasks.QueueTest do
     end
   end
 
+  describe "ready/1 — queue gate and campaign ordering" do
+    test "five non-executable classes never enter ready or atomic next", %{scope: scope} do
+      phase = "phase-gates-#{System.unique_integer([:positive])}"
+
+      for {name, gate} <- [
+            {"human", %{"version" => 1, "state" => "human_gated", "reason" => "approval"}},
+            {"parked", %{"version" => 1, "state" => "parked", "reason" => "later"}},
+            {"stalled",
+             %{
+               "version" => 1,
+               "state" => "evidence_stalled",
+               "reason" => "missing proof",
+               "evidence" => "attempt log"
+             }},
+            {"malformed", %{"version" => 2, "state" => "executable"}},
+            {"contradictory",
+             %{
+               "version" => 1,
+               "state" => "executable",
+               "reason" => "must not coexist"
+             }}
+          ] do
+        doc =
+          mk_task!("gate-#{name}-#{System.unique_integer([:positive])}", scope, @dataset, %{
+            "parent_id" => phase
+          })
+
+        Repo.update_all(
+          from(d in Document, where: d.id == ^doc.id),
+          set: [content: Map.put(doc.content, "queue_gate", gate)]
+        )
+      end
+
+      foreign =
+        mk_task!("gate-foreign-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase
+        })
+
+      Repo.update_all(
+        from(d in Document, where: d.id == ^foreign.id),
+        set: [content: Map.put(foreign.content, "claim", %{"worker" => "other-worker"})]
+      )
+
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase]) == []
+
+      assert {:ok, nil} =
+               Tasks.claim("gate-worker", scope ++ [dataset: @dataset, phase_id: phase])
+    end
+
+    test "closure_nearest sorts six executable tasks by unmet count, age, then doc_id", %{
+      scope: scope
+    } do
+      phase = "phase-closure-order-#{System.unique_integer([:positive])}"
+      base = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:microsecond)
+
+      specs = [
+        {"z-two", 2, 0},
+        {"z-one-new", 1, 30},
+        {"b-zero-tie", 0, 10},
+        {"a-zero-tie", 0, 10},
+        {"z-zero-old", 0, 0},
+        {"z-one-old", 1, 20}
+      ]
+
+      Enum.each(specs, fn {id, unmet, seconds} ->
+        criteria =
+          Enum.map(1..max(unmet, 1), fn i ->
+            %{"criterion" => "c#{i}", "met" => unmet == 0}
+          end)
+
+        doc =
+          mk_task!(id <> "-" <> phase, scope, @dataset, %{
+            "parent_id" => phase,
+            "acceptance_criteria" => criteria
+          })
+
+        Repo.update_all(
+          from(d in Document, where: d.id == ^doc.id),
+          set: [inserted_at: DateTime.add(base, seconds, :second)]
+        )
+      end)
+
+      ids =
+        Queue.ready(scope ++ [dataset: @dataset, phase_id: phase, order: :closure_nearest])
+        |> Enum.map(& &1.doc_id)
+
+      assert ids ==
+               Enum.map(
+                 ["z-zero-old", "a-zero-tie", "b-zero-tie", "z-one-old", "z-one-new", "z-two"],
+                 &("drafts." <> &1 <> "-" <> phase)
+               )
+    end
+
+    test "unknown internal order values are rejected", %{scope: scope} do
+      assert_raise ArgumentError, ~r/unsupported ready order/, fn ->
+        Queue.ready(scope ++ [dataset: @dataset, order: :closure_neerest])
+      end
+    end
+  end
+
   # ─── (5) draft/published twin collapse (published-wins) ──────────────────
 
   describe "ready/1 — draft/published twin collapse" do

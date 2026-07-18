@@ -54,15 +54,21 @@ defmodule BarkparkWeb.TasksController do
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
   def ready(conn, params) do
-    opts =
-      []
-      |> Params.put_opt(:phase_id, params["phase_id"])
-      |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
-      |> Params.put_opt(:offset, params["offset"] |> Params.parse_int(0) |> max(0))
-      |> Keyword.merge(scope_opts(conn))
+    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      opts =
+        []
+        |> Params.put_opt(:phase_id, params["phase_id"])
+        |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
+        |> Params.put_opt(:offset, params["offset"] |> Params.parse_int(0) |> max(0))
+        |> Params.put_opt(:order, order)
+        |> Keyword.merge(scope_opts(conn))
 
-    docs = Tasks.ready(opts)
-    json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
+      docs = Tasks.ready(opts)
+      json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
+    else
+      {:error, :invalid_ready_order} ->
+        bad_request(conn, "order must be closure_nearest when set")
+    end
   end
 
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
@@ -97,53 +103,58 @@ defmodule BarkparkWeb.TasksController do
   #   * `counts` — open/in_progress/blocked/done/cancelled totals for the
   #     scope, so "how big is the board?" needs no extra list call.
   def prime(conn, params) do
-    scope = scope_opts(conn)
-    worker = params["worker"]
-    limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
-    view = Params.parse_view(params["view"])
+    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      scope = scope_opts(conn)
+      worker = params["worker"]
+      limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
+      view = Params.parse_view(params["view"])
 
-    %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
-      Tasks.prime([worker: worker, limit: limit] ++ scope)
+      %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
+        Tasks.prime([worker: worker, limit: limit] ++ scope)
 
-    ready = Tasks.ready([limit: limit] ++ scope)
+      ready = Tasks.ready([limit: limit] |> Params.put_opt(:order, order) |> Kernel.++(scope))
 
-    # axi-s1: card render in the requested view — brief cards batch ONE
-    # child-count query over the union; full keeps the historical edge-count
-    # shape. Brief prime also trims recent_events to 5 rows (full keeps the
-    # limit default of 10) — orientation, not replay; required for the ≤5 KB
-    # brief-prime target (charter decision 12).
-    {in_progress_cards, ready_cards} =
-      case view do
-        :brief ->
-          child_counts = Params.batch_child_counts(in_progress ++ ready, scope)
+      # axi-s1: card render in the requested view — brief cards batch ONE
+      # child-count query over the union; full keeps the historical edge-count
+      # shape. Brief prime also trims recent_events to 5 rows (full keeps the
+      # limit default of 10) — orientation, not replay; required for the ≤5 KB
+      # brief-prime target (charter decision 12).
+      {in_progress_cards, ready_cards} =
+        case view do
+          :brief ->
+            child_counts = Params.batch_child_counts(in_progress ++ ready, scope)
 
-          {Enum.map(in_progress, &Params.render_brief(&1, child_counts)),
-           Enum.map(ready, &Params.render_brief(&1, child_counts))}
+            {Enum.map(in_progress, &Params.render_brief(&1, child_counts)),
+             Enum.map(ready, &Params.render_brief(&1, child_counts))}
 
-        :full ->
-          counts = Params.batch_edge_counts(in_progress ++ ready)
+          :full ->
+            counts = Params.batch_edge_counts(in_progress ++ ready)
 
-          {Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
-           Enum.map(ready, &Params.render_doc_with_counts(&1, counts))}
-      end
+            {Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
+             Enum.map(ready, &Params.render_doc_with_counts(&1, counts))}
+        end
 
-    events = if view == :brief, do: Enum.take(events, 5), else: events
+      events = if view == :brief, do: Enum.take(events, 5), else: events
 
-    # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
-    # distinct parent of its in-progress claims (rail_rev per rail, so a burst
-    # agent can diff after compaction) + blocked_while_claimed notices for any
-    # claim a second actor has since blocked.
-    base = %{
-      ok: true,
-      worker: worker,
-      in_progress: in_progress_cards,
-      ready: ready_cards,
-      recent_events: events,
-      counts: lifecycle_counts,
-      rails: prime_rails(in_progress, conn)
-    }
+      # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
+      # distinct parent of its in-progress claims (rail_rev per rail, so a burst
+      # agent can diff after compaction) + blocked_while_claimed notices for any
+      # claim a second actor has since blocked.
+      base = %{
+        ok: true,
+        worker: worker,
+        in_progress: in_progress_cards,
+        ready: ready_cards,
+        recent_events: events,
+        counts: lifecycle_counts,
+        rails: prime_rails(in_progress, conn)
+      }
 
-    json(conn, maybe_put_notices(base, prime_notices(in_progress)))
+      json(conn, maybe_put_notices(base, prime_notices(in_progress)))
+    else
+      {:error, :invalid_ready_order} ->
+        bad_request(conn, "order must be closure_nearest when set")
+    end
   end
 
   # ─── GET /v1/tasks/events ───────────────────────────────────────────────
@@ -241,45 +252,51 @@ defmodule BarkparkWeb.TasksController do
   def claim(conn, params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        opts =
-          []
-          |> Params.put_opt(:phase_id, params["phase_id"])
-          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Keyword.merge(Params.execution_policy_opts(params))
-          |> Keyword.merge(scope_opts(conn))
+        with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+          opts =
+            []
+            |> Params.put_opt(:phase_id, params["phase_id"])
+            |> Params.put_opt(:order, order)
+            |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Keyword.merge(Params.execution_policy_opts(params))
+            |> Keyword.merge(scope_opts(conn))
 
-        case Tasks.claim(worker_id, opts) do
-          {:ok, nil} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{ok: false, reason: "no_ready"})
+          case Tasks.claim(worker_id, opts) do
+            {:ok, nil} ->
+              conn
+              |> put_status(:ok)
+              |> json(%{ok: false, reason: "no_ready"})
 
-          {:ok, %Document{} = doc} ->
-            # Queue-claim: the subject is unknown pre-write, so no pre-write
-            # baseline — rail_changed (if observed_rail_rev is passed) compares
-            # against the post-write rev.
-            json(
-              conn,
-              with_rail_extras(
-                %{
-                  ok: true,
-                  doc: Params.render_doc(doc),
-                  help: Params.mutation_help(:claim, doc, worker_id)
-                },
-                doc,
-                nil,
+            {:ok, %Document{} = doc} ->
+              # Queue-claim: the subject is unknown pre-write, so no pre-write
+              # baseline — rail_changed (if observed_rail_rev is passed) compares
+              # against the post-write rev.
+              json(
                 conn,
-                params
+                with_rail_extras(
+                  %{
+                    ok: true,
+                    doc: Params.render_doc(doc),
+                    help: Params.mutation_help(:claim, doc, worker_id)
+                  },
+                  doc,
+                  nil,
+                  conn,
+                  params
+                )
               )
-            )
 
-          {:error, {:invalid_execution_policy, errors}} ->
-            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+            {:error, {:invalid_execution_policy, errors}} ->
+              bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
-          {:error, reason} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+            {:error, reason} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          end
+        else
+          {:error, :invalid_ready_order} ->
+            bad_request(conn, "order must be closure_nearest when set")
         end
 
       _ ->

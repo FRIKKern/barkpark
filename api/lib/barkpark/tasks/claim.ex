@@ -20,7 +20,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, WorkDigest}
+  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, WorkDigest}
 
   @event_task_claimed "task.claimed"
   @ready_lifecycle_statuses ~w(open blocked)
@@ -86,11 +86,13 @@ defmodule Barkpark.Tasks.Claim do
             # recovery path after a fence bump. A DIFFERENT worker falls through
             # to check_ready and still gets :not_ready.
             if renewal?(doc, worker_id) do
-              with :ok <- validate_renewal_execution_policy(doc, opts) do
+              with :ok <- check_executable_for_targeted_claim(doc, worker_id),
+                   :ok <- validate_renewal_execution_policy(doc, opts) do
                 do_renew(doc, worker_id, caller_token_id)
               end
             else
-              with :ok <- check_ready_for_targeted_claim(doc),
+              with :ok <- check_executable_for_targeted_claim(doc, worker_id),
+                   :ok <- check_ready_for_targeted_claim(doc),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
                 do_claim(doc, worker_id, resources, opts)
@@ -156,6 +158,10 @@ defmodule Barkpark.Tasks.Claim do
       s when s in @ready_lifecycle_statuses -> :ok
       _ -> {:error, :not_ready}
     end
+  end
+
+  defp check_executable_for_targeted_claim(%Document{content: content}, worker_id) do
+    if QueueGate.executable?(content, worker_id), do: :ok, else: {:error, :not_ready}
   end
 
   defp check_deps_satisfied(%Document{} = doc) do

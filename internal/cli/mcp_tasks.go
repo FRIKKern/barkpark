@@ -114,7 +114,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_ready",
 		Title:       "List ready tasks",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "List the READY tasks — unblocked work available to claim, in priority order (priority 0 is highest). This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
+		Description: "List the READY tasks — executable, unblocked work available to claim. Priority order (priority 0 is highest) is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -124,12 +124,18 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "minimum": 1,
       "maximum": 200,
       "description": "Max tasks to return (default server page size)."
+    },
+    "order": {
+      "type": "string",
+      "enum": ["closure_nearest"],
+      "description": "Optional campaign order: fewest unmet criteria, then oldest, then logical task id."
     }
   }
 }`),
 	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in struct {
-			Limit *int `json:"limit"`
+			Limit *int   `json:"limit"`
+			Order string `json:"order"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -146,7 +152,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			gq.limit = *in.Limit
 			gq.limitSet = true
 		}
-		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, nil)), nil
+		tail := []string{}
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
+		}
+		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, tail)), nil
 	})
 
 	// task_next — atomically claim the NEXT ready task. Claim-first: the claim IS
@@ -157,7 +167,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_next",
 		Title:       "Claim the next ready task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "Atomically CLAIM the next ready task (priority order) for worker_id, and return its brief. Claim FIRST — the claim is what hands you the task's full description + acceptance_criteria AND the epoch you need to close it. Pick one worker_id and keep it (e.g. \"cursor-<your-name-or-branch>\") so claim/close stay symmetric. An empty queue returns 200 with {\"ok\":false,\"reason\":\"no_ready\"} — that means 'no work available', NOT an error; do not retry in a tight loop. On success the response carries the claimed doc and its claim.epoch — remember that epoch to close.",
+		Description: "Atomically CLAIM the next executable task for worker_id, and return its brief. Priority order is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. Claim FIRST — the claim is what hands you the task's full description + acceptance_criteria AND the epoch you need to close it. Pick one worker_id and keep it (e.g. \"cursor-<your-name-or-branch>\") so claim/close stay symmetric. An empty queue returns 200 with {\"ok\":false,\"reason\":\"no_ready\"} — that means 'no work available', NOT an error; do not retry in a tight loop. On success the response carries the claimed doc and its claim.epoch — remember that epoch to close.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -170,6 +180,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	    "phase_id": {
 	      "type": "string",
 	      "description": "Optional: restrict the claim to tasks under this phase/goal slug."
+	    },
+	    "order": {
+	      "type": "string",
+	      "enum": ["closure_nearest"],
+	      "description": "Optional campaign order: fewest unmet criteria, then oldest, then logical task id."
 	    },
 	    "execution_policy_override": {
 	      "type": "object",
@@ -190,6 +205,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		var in struct {
 			WorkerID                string          `json:"worker_id"`
 			PhaseID                 string          `json:"phase_id"`
+			Order                   string          `json:"order"`
 			ExecutionPolicyOverride json.RawMessage `json:"execution_policy_override"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
@@ -203,6 +219,9 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		tail := []string{in.WorkerID}
 		if in.PhaseID != "" {
 			tail = append(tail, in.PhaseID)
+		}
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
 		}
 		var policy map[string]any
 		if len(in.ExecutionPolicyOverride) > 0 && string(in.ExecutionPolicyOverride) != "null" {
@@ -494,6 +513,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "minimum": 1,
       "maximum": 100,
       "description": "Ready-head and event-window size (default 10)."
+    },
+    "order": {
+      "type": "string",
+      "enum": ["closure_nearest"],
+      "description": "Optional campaign order for the ready head."
     }
   }
 }`),
@@ -501,6 +525,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		var in struct {
 			WorkerID string `json:"worker_id"`
 			Limit    *int   `json:"limit"`
+			Order    string `json:"order"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -514,6 +539,9 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		}
 		if in.Limit != nil {
 			tail = append(tail, "--limit", strconv.Itoa(*in.Limit))
+		}
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
 		}
 		// Agent surface → brief view (AXI R1): the rehydration read keeps its
 		// claim epochs and counts but drops the content echoes. Inert on old

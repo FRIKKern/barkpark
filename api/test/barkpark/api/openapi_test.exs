@@ -165,6 +165,15 @@ defmodule Barkpark.Api.OpenApiTest do
     assert offset["schema"]["type"] == "integer"
   end
 
+  test "task.ready exposes an optional closure order query parameter", %{spec: spec} do
+    parameters = get_in(spec, ["paths", "/v1/tasks/ready", "get", "parameters"])
+    order = Enum.find(parameters, &(&1["in"] == "query" and &1["name"] == "order"))
+
+    assert order
+    assert order["required"] == false
+    assert order["schema"]["type"] == "string"
+  end
+
   test "anon (none-tier) ops carry empty security; gated ops require bearer", %{spec: spec} do
     get_doc = get_in(spec, ["paths", "/v1/data/doc/{dataset}/{type}/{doc_id}", "get"])
     mutate = get_in(spec, ["paths", "/v1/data/mutate/{dataset}", "post"])

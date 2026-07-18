@@ -17,6 +17,8 @@ defmodule Barkpark.Tasks.QueueGate do
 
   @type gate :: %{String.t() => term()}
 
+  import Ecto.Query, only: [dynamic: 2]
+
   @doc "Persistable queue gate states. `foreign_claimed` is derived only."
   @spec persisted_states() :: [String.t()]
   def persisted_states, do: @persisted_states
@@ -76,6 +78,33 @@ defmodule Barkpark.Tasks.QueueGate do
   end
 
   def execution_class(_content, _worker_id), do: "executable"
+
+  @doc "True only when persisted gate state is valid and executable for the worker."
+  @spec executable?(map() | nil, String.t() | nil) :: boolean()
+  def executable?(content, worker_id \\ nil)
+
+  def executable?(content, worker_id) when is_map(content) do
+    execution_class(content, worker_id) == "executable" and
+      case fetch_optional(content, "queue_gate") do
+        :absent -> true
+        {:present, nil} -> true
+        {:present, gate} -> sanitize(gate) == {:ok, %{"version" => 1, "state" => "executable"}}
+      end
+  end
+
+  def executable?(_content, _worker_id), do: false
+
+  @doc "Fail-closed SQL predicate matching executable?/2 for unclaimed ready rows."
+  def executable_query do
+    dynamic(
+      [doc: d],
+      fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) and
+        (not fragment("jsonb_exists(?, 'queue_gate')", d.content) or
+           fragment("?->'queue_gate'", d.content) == fragment("'null'::jsonb") or
+           fragment("?->'queue_gate'", d.content) ==
+             fragment("'{\"version\": 1, \"state\": \"executable\"}'::jsonb"))
+    )
+  end
 
   defp normalize_keys(gate) do
     Enum.reduce_while(gate, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
@@ -214,6 +243,14 @@ defmodule Barkpark.Tasks.QueueGate do
     case Map.fetch(map, key) do
       {:ok, value} -> value
       :error -> Map.get(map, String.to_atom(key))
+    end
+  end
+
+  defp fetch_optional(map, key) do
+    cond do
+      Map.has_key?(map, key) -> {:present, Map.get(map, key)}
+      Map.has_key?(map, String.to_atom(key)) -> {:present, Map.get(map, String.to_atom(key))}
+      true -> :absent
     end
   end
 

@@ -238,6 +238,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert next_worker.required
       refute next_phase.required
       refute Enum.any?(next.args, &(&1.name == "doc_id"))
+
+      for command <- [Enum.find(cmds, &(&1.id == "task.ready")), next] do
+        order = Enum.find(command.flags, &(&1.name == "order"))
+        assert order.type == "string"
+        refute Map.has_key?(order, :default)
+      end
     end
 
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do

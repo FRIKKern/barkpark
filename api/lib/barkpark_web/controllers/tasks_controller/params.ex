@@ -364,6 +364,11 @@ defmodule BarkparkWeb.TasksController.Params do
   def put_opt(opts, _key, nil), do: opts
   def put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
+  def parse_ready_order(nil), do: {:ok, nil}
+  def parse_ready_order(""), do: {:ok, nil}
+  def parse_ready_order("closure_nearest"), do: {:ok, :closure_nearest}
+  def parse_ready_order(_), do: {:error, :invalid_ready_order}
+
   # Public claim requests may supply only the highest-precedence explicit
   # override. Session/user/provider defaults are trusted server-side Claim opts,
   # not client-asserted provenance.

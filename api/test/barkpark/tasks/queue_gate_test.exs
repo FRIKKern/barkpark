@@ -91,6 +91,27 @@ defmodule Barkpark.Tasks.QueueGateTest do
     assert Tasks.execution_class(legacy_claimed, "worker-a") == "executable"
   end
 
+  test "executable predicate admits only absent, null, or exact executable v1 gates" do
+    assert QueueGate.executable?(%{})
+    assert QueueGate.executable?(%{"queue_gate" => nil})
+    assert QueueGate.executable?(%{"queue_gate" => %{"version" => 1, "state" => "executable"}})
+
+    refute QueueGate.executable?(%{
+             "queue_gate" => %{"version" => 1, "state" => "human_gated", "reason" => "approval"}
+           })
+
+    refute QueueGate.executable?(%{"queue_gate" => %{"version" => 2, "state" => "executable"}})
+    refute QueueGate.executable?(nil)
+
+    content = %{
+      "queue_gate" => %{"version" => 1, "state" => "executable"},
+      "claim" => %{"worker" => "holder"}
+    }
+
+    assert QueueGate.executable?(content, "holder")
+    refute QueueGate.executable?(content, "contender")
+  end
+
   test "Task API projection round trips the stored gate and derived execution class" do
     gate = %{"version" => 1, "state" => "human_gated", "reason" => "needs approval"}
 
