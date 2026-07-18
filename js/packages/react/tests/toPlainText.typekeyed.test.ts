@@ -44,9 +44,9 @@ const cases: GoldenFixture[] = existsSync(FIXTURE_DIR)
       .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as GoldenFixture)
   : []
 
-describe('toPlainText — type-keyed 48-grammar coverage', () => {
-  it('the pd-golden fixture corpus is the expected 48 types', () => {
-    expect(cases.length).toBe(48)
+describe('toPlainText — type-keyed grammar coverage', () => {
+  it('the pd-golden fixture corpus is the expected 49 types', () => {
+    expect(cases.length).toBe(49)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -71,8 +71,8 @@ describe('toPlainText — type-keyed 48-grammar coverage', () => {
     }
   })
 
-  it('the partition is 20 prose + 28 textless = 48', () => {
-    expect(Object.keys(PROSE_GOLDEN).length).toBe(20)
+  it('the partition is 21 prose + 28 textless = 49', () => {
+    expect(Object.keys(PROSE_GOLDEN).length).toBe(21)
     expect(Object.keys(TEXTLESS_SKIP).length).toBe(28)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })

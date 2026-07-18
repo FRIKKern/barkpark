@@ -144,6 +144,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdCallout"} = n, width, pal), do: callout(n, width, pal)
   def walk(%{"kind" => "PdList"} = n, width, pal), do: list(n, width, pal)
   def walk(%{"kind" => "PdListItem"} = n, width, pal), do: list_item(n, width, pal)
+  def walk(%{"kind" => "PdBlockquote"} = n, width, pal), do: blockquote(n, width, pal)
 
   # `_raw` is a pre-rendered HTML escape hatch. The diagram / figure compose
   # clauses emit it because their `<figure>` / `<pre class="mermaid">` markup
@@ -1483,11 +1484,69 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ~s(<li style="margin:4pt 0 0">) <> inner <> "</li>"
   end
 
+  # PdBlockquote — a semantic quotation (compose_block(blockquote)). Article emits
+  # a bare `<blockquote class="bp-blockquote">` wrapping a `<p>` body: the
+  # `.bp-paper-surface .bp-blockquote` rule owns the left-rule + italic + muted
+  # styling (theme-keyed, the same theme-vs-data contract as list/heading), and
+  # the `<cite class="bp-blockquote__cite">` carries the optional attribution.
+  # The inner is built the PARAGRAPH way (bare escaped text + `<span>` only for
+  # marks) so it stays SHAPE-equal to the JS `blockquote` emitter the parity
+  # harness compares against. Email/default self-styles inline (Outlook has no
+  # stylesheet) — a left-border + italic + muted `<blockquote>`, cite on its own
+  # muted line prefixed with an em-dash.
+  defp blockquote(n, width, %{style: :article} = pal) do
+    inner = paragraph_inner(Map.get(n, "children", []), width, pal)
+    cite = blockquote_cite_html(n, pal)
+    ~s(<blockquote class="bp-blockquote"><p>) <> inner <> "</p>" <> cite <> "</blockquote>"
+  end
+
+  defp blockquote(n, width, pal) do
+    inner = paragraph_inner(Map.get(n, "children", []), width, pal)
+    cite = blockquote_cite_html(n, pal)
+
+    ~s(<blockquote style="margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid #{pal.rule};color:#{pal.muted};font-style:italic;font-family:#{pal.font_body}">) <>
+      inner <> cite <> "</blockquote>"
+  end
+
+  defp blockquote_cite_html(n, %{style: :article}) do
+    case Map.get(n, "cite") do
+      c when is_binary(c) and c != "" ->
+        ~s(<cite class="bp-blockquote__cite">) <> escape_html(c) <> "</cite>"
+
+      _ ->
+        ""
+    end
+  end
+
+  defp blockquote_cite_html(n, pal) do
+    case Map.get(n, "cite") do
+      c when is_binary(c) and c != "" ->
+        ~s(<cite style="display:block;margin-top:6px;font-style:normal;font-size:14px;color:#{pal.muted}">— ) <>
+          escape_html(c) <> "</cite>"
+
+      _ ->
+        ""
+    end
+  end
+
   # ── shared helpers ──────────────────────────────────────────────────────────
 
   defp render_children(children, width, pal) do
     children
     |> Enum.map(&walk(&1, width, pal))
+    |> Enum.join("")
+  end
+
+  # Inline inner the PARAGRAPH way (mirrors paragraph/3): a bare-string child is
+  # escaped verbatim, a Pd node (a mark span, link, code) is walked. Shared by
+  # PdBlockquote so its inner is byte/shape-equal to a paragraph's — the parity
+  # harness compares the article <blockquote> against the JS emitter.
+  defp paragraph_inner(children, width, pal) do
+    children
+    |> Enum.map(fn
+      k when is_binary(k) -> escape_html(k)
+      k -> walk(k, width, pal)
+    end)
     |> Enum.join("")
   end
 end

@@ -79,6 +79,17 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
   # a field shape but carry their own `"type"` so the alias-dispatch path is real.
   @inputs %{
+    # scaffy:add-block-type Blockquote MARK:parity-input-blockquote
+    # Grown (pbw-w1): a semantic attributed quotation — `content` inline array +
+    # `cite`. Exercises the PdBlockquote article path (`<blockquote><p>…</p><cite>`)
+    # that the JS `blockquote` emitter is proven shape-equal to.
+    "blockquote" => %{
+      "type" => "blockquote",
+      "content" => [
+        %{"type" => "text", "value" => "The best way to predict the future is to invent it."}
+      ],
+      "cite" => "Alan Kay"
+    },
     # scaffy:add-block-type Filetree MARK:parity-input-filetree
     # W7 grow (D78): verbatim box-glyph tree lines exercising ALL THREE
     # annotation markers (● / ○ / ✕) plus the optional legend row.

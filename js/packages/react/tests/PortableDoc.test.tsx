@@ -9,9 +9,47 @@ import { REGISTERED_TYPES } from '../src/blocks/registry'
 // theme-vs-data contract), so their marker is the tag; every richer block
 // carries its `bp-*` wrapper class. The cross-surface byte/shape match against
 // the Elixir golden is the SEPARATE parity-proof slice; this is the JS-side
-// self-proof that all 46 render, without throwing, into the expected wrapper.
+// self-proof that every registered type renders, without throwing, into its
+// expected wrapper. Count via Object.keys(DISPATCH) — never trust a literal.
 const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Title' }, marker: '<h2' },
+  // scaffy:add-block-type Blockquote MARK:js-case-blockquote
+  {
+    type: 'blockquote',
+    block: { type: 'blockquote', content: [{ type: 'text', value: 'Invent it.' }], cite: 'Alan Kay' },
+    marker: 'bp-blockquote__cite',
+  },
+  // authoring-drift aliases → list / blockquote (compose.ex alias choke point twins)
+  {
+    type: 'bulletList',
+    block: { type: 'bulletList', items: [[{ type: 'text', value: 'camelCase point' }]] },
+    marker: 'camelCase point',
+  },
+  {
+    type: 'bullet_list',
+    block: { type: 'bullet_list', items: ['[{"type":"text","value":"json-encoded point"}]'] },
+    marker: 'json-encoded point',
+  },
+  {
+    type: 'bulleted-list',
+    block: { type: 'bulleted-list', items: [[{ type: 'text', value: 'kebab point' }]] },
+    marker: 'kebab point',
+  },
+  {
+    type: 'bulleted_list',
+    block: { type: 'bulleted_list', items: ['plain string point'] },
+    marker: 'plain string point',
+  },
+  {
+    type: 'numbered_list',
+    block: { type: 'numbered_list', items: [[{ type: 'text', value: 'ordered point' }]] },
+    marker: '<ol>',
+  },
+  {
+    type: 'quote',
+    block: { type: 'quote', content: [{ type: 'text', value: 'quoted words' }] },
+    marker: 'bp-blockquote',
+  },
   // scaffy:add-block-type Filetree MARK:js-case-filetree
   {
     type: 'filetree',
@@ -358,13 +396,17 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain(marker)
   })
 
-  it('covers EXACTLY the 46 in-scope types (registry ≡ authored cases)', () => {
+  it('covers EXACTLY the registered types (registry ≡ authored cases)', () => {
     const authored = CASES.map((c) => c.type).sort()
     const registered = [...REGISTERED_TYPES].sort()
     expect(authored).toEqual(registered)
     // scaffy:add-block-type Diff MARK:js-count-diff
     // scaffy:add-block-type Filetree MARK:js-count-filetree
-    expect(registered).toHaveLength(48)
+    // scaffy:add-block-type Blockquote MARK:js-count-blockquote
+    // 49 canonical/aliased emitters from the scaffy census + 6 authoring-drift
+    // aliases (bulletList / bullet_list / bulleted-list / bulleted_list /
+    // numbered_list / quote) added by pbw-w1 = 55.
+    expect(registered).toHaveLength(55)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

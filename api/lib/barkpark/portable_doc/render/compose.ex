@@ -261,10 +261,36 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdParagraph", "children" => compose_inline_children(paragraph_inline(b))}
   end
 
+  # ── Authoring-drift type aliases (the choke point) ─────────────────────────
+  # 77 live prod blocks were persisted under TipTap-internal / snake / kebab
+  # spellings this engine never dispatched → "Unsupported block" placeholders on
+  # the public reader. Normalize the drifted spelling to its canonical type ONCE
+  # here — compose_block/2 is the single funnel every render lands in (the
+  # style/theme entry compose_block/3 forwards every non-email-variant block here
+  # byte-unchanged), so View + Email + every direct caller render real blocks on
+  # deploy with ZERO stored-data migration. VARIABLE-guard form (matching on a
+  # bound `t`, never a quoted string head) is deliberate: it keeps these aliases
+  # OUT of the tiers-completeness / parity-census extractors (both grep quoted
+  # string type heads), because an alias has no tier or golden of its own — it
+  # borrows its target's. The list-variant `items` carry the same shape the
+  # `list` clause already reads; `quote` becomes `blockquote` (born below).
+  @unordered_list_aliases ~w(bulletList bullet_list bulleted-list bulleted_list)
+  def compose_block(%{"type" => t} = b, style) when t in @unordered_list_aliases,
+    do: compose_block(Map.put(b, "type", "list"), style)
+
+  def compose_block(%{"type" => t} = b, style) when t == "numbered_list",
+    do: compose_block(b |> Map.put("type", "list") |> Map.put("ordered", true), style)
+
+  def compose_block(%{"type" => t} = b, style) when t == "quote",
+    do: compose_block(Map.put(b, "type", "blockquote"), style)
+
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
-  # (mirrors doc.css `.pullquote`) in article mode. Email/default mode degrades
-  # to a plain italic span (no border / sizing cues) via the same `_role` hook
-  # the other typographic roles use, so it stays a single styled `<span>`.
+  # (mirrors doc.css `.pullquote`) in article mode. The clause is style-INVARIANT:
+  # it emits the same PdParagraph with `_role: "pullquote"` in every style, and
+  # walk.ex paints the full role treatment (terracotta left-border + sizing) at
+  # BOTH `:article` (via the `.bp-role-pullquote` class) and email/default (via
+  # inline styles from apply_text_role/4). It does NOT degrade to a bare italic
+  # span — the earlier "email drops the border" note was stale.
   def compose_block(%{"type" => "pullquote"} = b, _style) do
     # A real `<p>` in every style — inline spans can't carry the pullquote's
     # vertical margins (email-prose-polish).
@@ -291,7 +317,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         %{
           "kind" => "PdListItem",
           "children" => [
-            %{"kind" => "PdText", "children" => compose_inline_children(item)}
+            %{"kind" => "PdText", "children" => compose_inline_children(normalize_list_item(item))}
           ]
         }
       end)
@@ -314,7 +340,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           "style" => %{"flexDirection" => "row"},
           "children" => [
             %{"kind" => "PdText", "children" => [prefix]},
-            %{"kind" => "PdText", "children" => compose_inline_children(item)}
+            %{"kind" => "PdText", "children" => compose_inline_children(normalize_list_item(item))}
           ]
         }
       end)
@@ -1186,6 +1212,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # scaffy:add-block-type Blockquote MARK:ex-compose-blockquote
+  # Blockquote — a semantic, attributed quotation. Distinct from `pullquote`
+  # (a styled editorial LEAD-quote paragraph): a blockquote is a plain quoted
+  # passage with optional attribution. Born to absorb the 8 live `quote` blocks
+  # (aliased above) that agents authored via raw mutate — there was nothing
+  # canonical to render them as, so they leaked "Unsupported block" placeholders.
+  # Reads its inline body the SAME way paragraph/pullquote do (paragraph_inline/1
+  # — a `content` inline array, else a bare `text` string), plus an optional
+  # `cite`/`attribution` string. Emits a PdBlockquote node so walk.ex owns the
+  # semantic `<blockquote>` (article) / inline-styled `<blockquote>` (email)
+  # split and all inline escaping — no `_raw` hand-built HTML. Empty body still
+  # yields a real (empty) `<blockquote>`, never a placeholder.
+  def compose_block(%{"type" => "blockquote"} = b, _style) do
+    %{
+      "kind" => "PdBlockquote",
+      "children" => compose_inline_children(paragraph_inline(b)),
+      "cite" => blockquote_cite(b)
+    }
+  end
+
   # scaffy:add-block-type Filetree MARK:ex-compose-filetree
   # `filetree` (W7 grow, charter D78): verbatim tree lines with annotation
   # spans + the optional legend row — Components.filetree_html/1 through the
@@ -1285,6 +1331,35 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp stringish(nil), do: ""
   defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)
   defp stringish(_), do: ""
+
+  # Optional attribution for a blockquote — `cite` preferred, `attribution` the
+  # accepted alias. A non-blank BINARY only: a non-string cite (a raw mutate may
+  # persist a map/number) or a blank string falls through to nil so walk.ex omits
+  # the `<cite>` entirely rather than painting an empty attribution.
+  defp blockquote_cite(b) do
+    case Map.get(b, "cite") || Map.get(b, "attribution") do
+      s when is_binary(s) -> if String.trim(s) == "", do: nil, else: s
+      _ -> nil
+    end
+  end
+
+  # Normalize ONE list item. Canonical items are inline-node arrays (or a bare
+  # scalar) and pass through untouched. But the drifted list variants aliased
+  # onto `list` (bullet_list especially) persisted their items as JSON-ENCODED
+  # STRINGS — `~s([{"type":"text","value":"…"}])` — via raw mutate; left as-is
+  # those render the literal JSON as text. If a string item parses as a JSON
+  # array of inline-node maps, decode it to that array; otherwise keep the string
+  # verbatim (a plain-text item stays plain text). Backward-compatible: non-binary
+  # items and non-JSON strings are returned unchanged, so canonical lists (and
+  # the golden fixture) are byte-identical.
+  defp normalize_list_item(item) when is_binary(item) do
+    case Jason.decode(item) do
+      {:ok, [%{} | _] = nodes} -> nodes
+      _ -> item
+    end
+  end
+
+  defp normalize_list_item(item), do: item
 
   # A labelled value row: bold label on its own line, then the value as PdText.
   defp field_row(b, value_text) when is_binary(value_text) do
