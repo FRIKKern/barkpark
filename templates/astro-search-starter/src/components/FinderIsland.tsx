@@ -42,13 +42,16 @@ const ORIGIN = (() => {
 // The type allowlist the finder scopes to — D45 pins it to the single built type.
 const TYPES = DOC_TYPES.map((t) => t.type).join(',')
 const MAX_HITS = 100
-// The exact fields normalizeHit/derive* consume (find.ts) — requested via the
-// route's ?fields= allowlist so a hit ships ~1KB, not ~38KB. Live-caught: a
-// limit=100 keystroke returned 15MB of JSON (papers' body_html — 97% of the
-// payload — which the finder never reads); wall time seconds instead of ms.
-// System keys (_id/_type/_draft/…) always ride along server-side.
+// The SCALAR fields normalizeHit/derive* consume (find.ts) — requested via the
+// route's ?fields= allowlist so a hit ships ~600B, not ~38KB. Live-caught
+// twice: papers' body_html (37KB/hit, never read by the finder) and then their
+// PortableDoc source under body/blocks/content (~120KB/hit) made a limit=100
+// keystroke 12-15MB of JSON. Deliberately NO body/blocks/content: snippets
+// degrade to description + the server's own highlights (deriveBody's fallback),
+// which is the price of a ~40ms keystroke — the engine already matched the
+// body server-side. System keys (_id/_type/_draft/…) always ride along.
 const HIT_FIELDS =
-  'title,name,excerpt,description,bio,slug,content,body,blocks,publishedAt,status,author,category'
+  'title,name,excerpt,description,bio,slug,publishedAt,status,author,category'
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify(data), {
