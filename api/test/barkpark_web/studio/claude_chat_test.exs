@@ -1228,6 +1228,19 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute "--strict-mcp-config" in args
     end
 
+    # The `--egress-host` values that ride pre-`--` (shim-own, knob 6 D238/D240 —
+    # W29): each host is its OWN repeated pair, NEVER comma-joined. Returned in
+    # argv order (the derivation is sorted+unique at the CloudPolicy layer).
+    defp egress_hosts(args) do
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      args
+      |> Enum.take(sep)
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.filter(fn [flag, _] -> flag == "--egress-host" end)
+      |> Enum.map(fn [_, host] -> host end)
+    end
+
     test "1 tool install — exactly that provider's HTTP server, headersHelper stripped, belt intact",
          %{ws: ws} do
       insert_install("github", "octocat/repo", ws.id)
@@ -1247,6 +1260,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                  "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
                }
              }
+
+      # W29 (D237/D238): the egress allowlist is the SAME survivor set — exactly
+      # github's host, never the non-installed linear's.
+      assert egress_hosts(args) == ["api.githubcopilot.com"]
+      refute "mcp.linear.app" in args
 
       assert_w12_belt_intact(args)
       assert_no_host_mcp_path(args)
@@ -1272,6 +1290,20 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                }
              }
 
+      # W29 (D237/D238): both installed connectors' declared hosts, SORTED UNIQUE,
+      # as SEPARATE repeated --egress-host pairs (never comma-joined).
+      assert egress_hosts(args) == ["api.githubcopilot.com", "mcp.linear.app"]
+      assert Enum.count(args, &(&1 == "--egress-host")) == 2
+      refute "api.githubcopilot.com,mcp.linear.app" in args
+      refute "api.anthropic.com" in args
+
+      # Every --egress-host rides pre-`--` (shim-own, not a claude flag).
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      for {flag, i} <- Enum.with_index(args), flag == "--egress-host" do
+        assert i < sep, "--egress-host must ride pre-`--`"
+      end
+
       assert_w12_belt_intact(args)
       assert_no_host_mcp_path(args)
     end
@@ -1292,6 +1324,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       # --keep-sandbox (W14 D137). No binding ⇒ no --sandbox-id.
       assert Enum.take(args, 4) == ["--workspace", ws.id, "--keep-sandbox", "--"]
       refute "--sandbox-id" in args
+      # W29 (D237): 0 surviving servers ⇒ NO egress widening — the deny-all wall is
+      # preserved (a non-installed github descriptor never opens github's host).
+      refute "--egress-host" in args
+      assert egress_hosts(args) == []
     end
   end
 
