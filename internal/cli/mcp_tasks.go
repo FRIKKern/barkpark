@@ -52,6 +52,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -137,6 +138,10 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// like `bp task ready --limit N` — applyQuery turns g.limitSet into the
 		// query param regardless of whether the manifest declares a limit flag.
 		gq := g
+		// An MCP consumer is an agent by definition: request the brief view
+		// (AXI R1 — compact cards, no content echo). Old servers ignore the
+		// param (proven inert); task_show remains the full-detail escape hatch.
+		gq.view = "brief"
 		if in.Limit != nil {
 			gq.limit = *in.Limit
 			gq.limitSet = true
@@ -475,7 +480,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_prime",
 		Title:       "Rehydrate task context",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "One-call REHYDRATION for a resuming agent — read this first when you pick up work. It returns, in a single response: your in_progress claims (each carries content.claim.epoch, so you can task_close WITHOUT re-fetching the task), the ready-head (top of the queue), recent_events (what changed lately), lifecycle counts, and rails (rail_rev per epic you hold). Pass worker_id = the SAME id you claim and close with, so in_progress is scoped to YOUR claims; OMITTING worker_id returns ALL open claims across every worker — the orchestrator dump, not your working set. IMPORTANT: prime is read-only and NEVER (re-)establishes a claim. If a task you expected is MISSING from in_progress, your claim LAPSED — re-claim it with task_next before you touch it; do not assume the old epoch is still valid.",
+		Description: "One-call REHYDRATION for a resuming agent — read this first when you pick up work. It returns, in a single response: your in_progress claims (each carries claim.epoch, so you can task_close WITHOUT re-fetching the task), the ready-head (top of the queue), recent_events (what changed lately), lifecycle counts, and rails (rail_rev per epic you hold). Pass worker_id = the SAME id you claim and close with, so in_progress is scoped to YOUR claims; OMITTING worker_id returns ALL open claims across every worker — the orchestrator dump, not your working set. IMPORTANT: prime is read-only and NEVER (re-)establishes a claim. If a task you expected is MISSING from in_progress, your claim LAPSED — re-claim it with task_next before you touch it; do not assume the old epoch is still valid.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -510,7 +515,12 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.Limit != nil {
 			tail = append(tail, "--limit", strconv.Itoa(*in.Limit))
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, primeCmd, tail)), nil
+		// Agent surface → brief view (AXI R1): the rehydration read keeps its
+		// claim epochs and counts but drops the content echoes. Inert on old
+		// servers; task_show stays full for any doc that needs the whole body.
+		gp := g
+		gp.view = "brief"
+		return mcpRun(execManifestCommand(gp, ctx, m, primeCmd, tail)), nil
 	})
 
 	// task_stamp — record evidence on ONE acceptance criterion mid-claim. A
@@ -795,11 +805,22 @@ func decodeMCPArgs(req *mcp.CallToolRequest, dst any) error {
 	return nil
 }
 
+// mcpToolResultMaxBytes is the last-resort byte guard on every MCP tool result
+// that rides mcpRun — 7/8 curated tools plus ALL bridge tools in one place
+// (AXI R4, charter decision 10). Brief server views are the real diet; this cap
+// only stops a pathological payload (a 350KB task_ready against a pre-views
+// server) from flooding an agent's context. 48KB keeps a full brief page with
+// headroom while bounding the worst case.
+const mcpToolResultMaxBytes = 48 << 10
+
 // mcpRun wraps an mcpInvoke result into an MCP tool result: the raw response body
 // as text content, with IsError set when the HTTP status is >= 400. A transport
 // error (never reached the server) is itself an IsError text result. NOTE: a 200
 // carrying {"ok":false,"reason":"no_ready"} (the empty-queue claim) is NOT an
 // error — it is a valid outcome the model should read, so IsError stays false.
+// An oversized body is clamped to mcpToolResultMaxBytes with an inline
+// truncation notice naming the byte total and the escape command (truncation
+// honesty — anything omitted says so, with the exact way to get the rest).
 func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 	if err != nil {
 		return mcpTextError("request failed: " + err.Error())
@@ -808,10 +829,29 @@ func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 	if text == "" {
 		text = fmt.Sprintf("(empty response, HTTP %d)", status)
 	}
+	text = clampMCPToolResult(text)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		IsError: status >= 400,
 	}
+}
+
+// clampMCPToolResult bounds a tool-result body at mcpToolResultMaxBytes,
+// cutting on a rune boundary (walk back with utf8.RuneStart so a multi-byte
+// rune is never split) and appending the AXI-format truncation notice: the
+// byte total plus the exact escape commands that retrieve the rest. Small
+// payloads pass through untouched.
+func clampMCPToolResult(text string) string {
+	if len(text) <= mcpToolResultMaxBytes {
+		return text
+	}
+	cut := mcpToolResultMaxBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + fmt.Sprintf(
+		"\n[truncated: %d bytes total, first %d shown — narrow the call (a smaller limit, or a single-task read via task_show <doc_id>) to fetch the rest]",
+		len(text), cut)
 }
 
 // mcpArgError is an IsError result for a bad tool argument (before any request).

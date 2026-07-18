@@ -317,7 +317,7 @@ var completionGlobals = []string{
 	"-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
 	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest",
 	"--json", "-q", "--quiet", "-v", "--verbose", "--no-color", "--dry-run",
-	"--yes", "--all", "-h", "--help", "--version", "-V",
+	"--yes", "--all", "--full", "-h", "--help", "--version", "-V",
 }
 
 // runCompletion emits a shell completion script for `bp` (`bash`, `zsh`, or

@@ -31,7 +31,13 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		return nil, fmt.Errorf("fetch manifest: nil client")
 	}
 
-	url := client.BaseURL() + CapabilitiesPath
+	// ?views=1 is the additive-key opt-in (charter law 7, the ?build=1
+	// precedent): a server that knows the views feature emits per-command
+	// `views` descriptors ONLY to callers that ask, so a stale binary that
+	// never sends it keeps receiving the exact old shape and its strict decode
+	// never sees an unknown key. Older servers ignore the param entirely
+	// (proven inert — byte-identical 200s).
+	url := client.BaseURL() + CapabilitiesPath + "?views=1"
 
 	var (
 		key          string

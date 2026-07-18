@@ -105,6 +105,60 @@ func TestParseRejectsTrailingData(t *testing.T) {
 	}
 }
 
+// The command-level `views` descriptor is a dormant additive field (AXI brief
+// views, charter decision 2): a views-PRESENT manifest parses with all three
+// keys typed, and a views-ABSENT manifest (every server today, and every server
+// not asked with ?views=1) parses with Views nil. Ported from the wave's
+// manifest-decode verify probe: DisallowUnknownFields recurses into Command, so
+// modelling the field is what keeps a views-emitting server from bricking the
+// strict decode.
+func TestParseViewsPresentAndAbsent(t *testing.T) {
+	withViews := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[{"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table","views":{"supported":["brief","full"],"default":"full","default_for_agents":"brief"}}]}`)
+	m, err := Parse(withViews)
+	if err != nil {
+		t.Fatalf("Parse rejected a views-present manifest: %v", err)
+	}
+	v := m.Commands[0].Views
+	if v == nil {
+		t.Fatal("views-present command decoded with Views nil")
+	}
+	if !reflect.DeepEqual(v.Supported, []string{"brief", "full"}) {
+		t.Errorf("views.supported = %v, want [brief full]", v.Supported)
+	}
+	if v.Default != "full" {
+		t.Errorf("views.default = %q, want full", v.Default)
+	}
+	if v.DefaultForAgents != "brief" {
+		t.Errorf("views.default_for_agents = %q, want brief", v.DefaultForAgents)
+	}
+
+	withoutViews := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[{"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"}]}`)
+	m2, err := Parse(withoutViews)
+	if err != nil {
+		t.Fatalf("Parse rejected a views-absent manifest: %v", err)
+	}
+	if m2.Commands[0].Views != nil {
+		t.Errorf("views-absent command decoded with Views = %+v, want nil (dormant)", m2.Commands[0].Views)
+	}
+
+	// The pre-views fixtures must stay parseable untouched — the dormant field
+	// changes nothing for a server that never emits it.
+	for _, cmd := range parseFixture(t, "core-manifest.json").Commands {
+		if cmd.Views != nil {
+			t.Errorf("fixture command %s unexpectedly carries views", cmd.ID)
+		}
+	}
+}
+
+// Strict decode recurses into the views object itself: an unknown key inside it
+// fails Parse, the same additionalProperties:false discipline as everywhere else.
+func TestParseRejectsUnknownViewsKey(t *testing.T) {
+	bad := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[{"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table","views":{"supported":["brief"],"default":"full","default_for_agents":"brief","bogus":true}}]}`)
+	if _, err := Parse(bad); err == nil {
+		t.Fatal("Parse accepted an unknown key inside views; want error")
+	}
+}
+
 // Parse must accept the root-only $comment annotation the fixtures carry.
 func TestParseAcceptsComment(t *testing.T) {
 	ok := []byte(`{"$comment":"hi","manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[]}`)

@@ -120,7 +120,11 @@ func registerBridgeToolsFiltered(srv *mcp.Server, g globals, ctx manifest.Contex
 				return mcpArgError(err), nil
 			}
 			tail := buildCommandTail(cmd, args)
-			return mcpRun(execManifestCommand(g, ctx, m, cmd, tail)), nil
+			// Bridge tools inherit the manifest's agent-default view generically
+			// (agentViewGlobals, run.go): a command declaring
+			// views.default_for_agents gets ?view= with zero per-tool code here —
+			// the manifest stays the moat.
+			return mcpRun(execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)), nil
 		})
 	}
 	return nil
