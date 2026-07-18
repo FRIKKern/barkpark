@@ -1683,6 +1683,12 @@ defmodule BarkparkWeb.Router do
   scope "/v1/chat", BarkparkWeb do
     pipe_through([:api, :require_chat_access])
 
+    # The herd fleet stream (charter D45h): snapshot-then-live STATE frames for the
+    # whole in-scope herd on ONE connection. STATIC `/events` declared BEFORE the
+    # dynamic `/sessions/:id/events` — sibling paths, never shadowed, but kept in
+    # obvious order.
+    get("/events", ChatController, :fleet_events)
+
     get("/sessions", ChatController, :index)
     post("/sessions", ChatController, :create)
     get("/sessions/:id", ChatController, :show)

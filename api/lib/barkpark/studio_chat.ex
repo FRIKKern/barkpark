@@ -95,6 +95,26 @@ defmodule Barkpark.StudioChat do
 
   defp scope_sessions(query, _fail_closed), do: where(query, false)
 
+  @doc """
+  The in-memory TERM TWIN of `scope_sessions/2` (herd wave 1, charter D43h): does
+  a session owned by `owner_ws` fall inside the caller's store `scope`? The fleet
+  wire (`FleetHub` + `GET /v1/chat/events`) can never run a per-flip DB query, so
+  the live-flip and ring-replay seams reuse THIS predicate against the
+  `owner_workspace_id` carried on the broadcast, while the snapshot seam runs the
+  Ecto `scope_sessions/2`. The three clauses are byte-faithful to that query:
+
+    * `:global` — instance-wide authority sees every session (the identity clause).
+    * a workspace binary — confined to `owner_ws == ws`; a `nil` (NULL-owner /
+      admin/global) session never equals a binary, so it is INVISIBLE to every
+      workspace scope — the same NULL-owner invisibility `scope_sessions/2` gets
+      from SQL `= NULL` never being true.
+    * anything else — fail closed (no match), mirroring the `where(false)` clause.
+  """
+  @spec scope_match?(binary() | nil, :global | binary() | term()) :: boolean()
+  def scope_match?(_owner_ws, :global), do: true
+  def scope_match?(owner_ws, ws) when is_binary(ws), do: owner_ws == ws
+  def scope_match?(_owner_ws, _fail_closed), do: false
+
   # The owner_workspace_id to STAMP on a new session from the create scope. The
   # controller threads the resolved `chat_scope` (`:global | {:workspace, ws}`,
   # charter D18); a bare workspace binary is also accepted defensively. Anything
@@ -222,6 +242,40 @@ defmodule Barkpark.StudioChat do
 
   defp archived_filter(query, true), do: where(query, [s], not is_nil(s.archived_at))
   defp archived_filter(query, false), do: where(query, [s], is_nil(s.archived_at))
+
+  @doc """
+  The scoped fleet snapshot (herd wave 1, charter D45h): every in-scope session's
+  current `{session_id, agent_state, ts, title}` — the herd-wire state tuple, NO
+  content, NO `owner_workspace_id`. Reuses the SAME `scope_sessions/2` seam as
+  `list_sessions/2` (so a workspace caller sees only its own owned rows and NULL
+  owners stay invisible), ordered newest-active-first and capped at the sidebar
+  cap. `ts` is `agent_state_at` — the D42h liveness stamp, so a consumer can age
+  a stale `working`/`blocked` into a stall badge exactly as the sweep does. This
+  is fail-closed SEAM 1 of the three fleet-scope seams (live-flip + ring-replay
+  reuse the `scope_match?/2` term twin above).
+  """
+  @spec fleet_snapshot(:global | binary() | term()) :: [
+          %{
+            session_id: binary(),
+            agent_state: binary(),
+            ts: DateTime.t() | nil,
+            title: binary() | nil
+          }
+        ]
+  def fleet_snapshot(scope \\ :global) do
+    Session
+    |> archived_filter(false)
+    |> scope_sessions(scope)
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(^@sidebar_cap)
+    |> select([s], %{
+      session_id: s.id,
+      agent_state: s.agent_state,
+      ts: s.agent_state_at,
+      title: s.title
+    })
+    |> Repo.all()
+  end
 
   @doc """
   List a session's messages in `seq` order, within `scope` (charter D17).

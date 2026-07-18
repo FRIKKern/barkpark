@@ -72,7 +72,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{Recorder, Runtime}
+  alias Barkpark.StudioChat.{FleetHub, Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -355,6 +355,149 @@ defmodule BarkparkWeb.ChatController do
           # are never touched (no adopt_sink, no close).
           send(forwarder, :stop)
         end
+    end
+  end
+
+  # ── GET /v1/chat/events (the herd fleet stream) ────────────────────────────
+
+  @doc """
+  The herd fleet SSE stream (charter D44h/D45h): snapshot-then-live STATE frames
+  for the WHOLE in-scope herd on ONE connection — a client watching N sessions
+  holds one stream, not N. Every frame is `{session_id, agent_state, ts, title}`
+  — never message content, never `owner_workspace_id` (`FleetHub` strips the
+  stamp before it can reach the wire).
+
+  On connect: an `event: snapshot` frame carries the current scoped fleet
+  (`StudioChat.fleet_snapshot/1` — seam 1), tagged `id: <epoch>:<seq>`; then live
+  `event: state` flips (`id: <epoch>:<seq>`, replayable) and id-less
+  `event: heartbeat` liveness ticks (unreplayable — never a ring slot or seq).
+  `Last-Event-ID` is the opaque `epoch:seq` cursor: an in-ring cursor replays
+  EXACTLY the missed flips; a wrong epoch or out-of-ring cursor degrades to a
+  fresh scoped snapshot. `: keepalive` every 30s; the D5/D24 never-shed law holds
+  — `max_heap_size` is the only valve. Scope is fail-closed at three seams (the
+  snapshot query, the live-flip filter, the ring replay) sharing the
+  `StudioChat.scope_match?/2` predicate against `conn.assigns.chat_scope`.
+  """
+  def fleet_events(conn, _params) do
+    # Emergency per-connection heap cap (charter D24) — the same node-safety guard
+    # the per-session stream uses; a stalled reader can never OOM the node.
+    Process.flag(:max_heap_size, %{size: sse_max_heap_words(), kill: true, error_logger: true})
+
+    scope = store_scope(scope(conn))
+    cursor = fleet_last_event_id(conn)
+
+    # Subscribe to the fleet topic BEFORE the handshake so no flip that lands
+    # between the handshake and the live loop is lost; the loop then drops any
+    # frame with `seq <= boundary` (already reflected in the snapshot/replay), so
+    # the handoff is gap-free by convergence with no duplicate state.
+    forwarder = start_forwarder(FleetHub.fleet_topic(), self())
+    {mode, epoch, boundary, entries} = FleetHub.handshake(cursor, scope)
+
+    conn =
+      conn
+      |> put_resp_content_type("text/event-stream")
+      |> put_resp_header("cache-control", "no-cache")
+      |> put_resp_header("connection", "keep-alive")
+      |> send_chunked(200)
+
+    conn = emit_fleet_open(conn, mode, epoch, boundary, entries, scope)
+
+    try do
+      fleet_stream_loop(conn, scope, epoch, boundary)
+    after
+      send(forwarder, :stop)
+    end
+  end
+
+  # Emit the connect payload: a fresh scoped snapshot (seam 1) OR the exact scoped
+  # ring replay (seam 3), depending on the handshake decision.
+  defp emit_fleet_open(conn, :snapshot, epoch, boundary, _entries, scope) do
+    chunk_fleet(conn, fleet_snapshot_frame(StudioChat.fleet_snapshot(scope), epoch, boundary))
+  end
+
+  defp emit_fleet_open(conn, :replay, epoch, _boundary, entries, _scope) do
+    Enum.reduce(entries, conn, fn entry, c -> chunk_fleet(c, fleet_state_frame(entry, epoch)) end)
+  end
+
+  defp chunk_fleet(conn, data) do
+    case chunk(conn, data) do
+      {:ok, conn} -> conn
+      {:error, _} -> conn
+    end
+  end
+
+  @doc false
+  # The live fleet receive loop. Seam 2 (live flip) + heartbeat both scope-filter
+  # through `StudioChat.scope_match?/2`; flips already covered by the connect
+  # payload (`seq <= boundary`) are dropped. NEVER shed-and-close (D5/D24).
+  def fleet_stream_loop(conn, scope, epoch, boundary) do
+    receive do
+      {:fleet_flip, %{seq: seq, owner_ws: owner_ws} = entry} ->
+        if seq > boundary and StudioChat.scope_match?(owner_ws, scope) do
+          fleet_chunk_or_stop(conn, fleet_state_frame(entry, epoch), scope, epoch, boundary)
+        else
+          fleet_stream_loop(conn, scope, epoch, boundary)
+        end
+
+      {:fleet_heartbeat, sid, ts, owner_ws} ->
+        if StudioChat.scope_match?(owner_ws, scope) do
+          fleet_chunk_or_stop(conn, fleet_heartbeat_frame(sid, ts), scope, epoch, boundary)
+        else
+          fleet_stream_loop(conn, scope, epoch, boundary)
+        end
+
+      _other ->
+        fleet_stream_loop(conn, scope, epoch, boundary)
+    after
+      30_000 ->
+        fleet_chunk_or_stop(conn, sse_keepalive(), scope, epoch, boundary)
+    end
+  end
+
+  defp fleet_chunk_or_stop(conn, data, scope, epoch, boundary) do
+    case chunk(conn, data) do
+      {:ok, conn} -> fleet_stream_loop(conn, scope, epoch, boundary)
+      {:error, _} -> conn
+    end
+  end
+
+  @doc false
+  # The connect snapshot frame (D45h): the whole scoped fleet as one
+  # `event: snapshot`, tagged `id: <epoch>:<seq>` so a reconnect that saw ONLY the
+  # snapshot still carries a valid cursor. Each session is the herd-wire tuple —
+  # no content, no owner id.
+  def fleet_snapshot_frame(sessions, epoch, seq) do
+    "id: #{epoch}:#{seq}\nevent: snapshot\ndata: #{Jason.encode!(%{sessions: Enum.map(sessions, &fleet_session_json/1)})}\n\n"
+  end
+
+  @doc false
+  # A live flip (seam 2) or a replayed ring flip (seam 3): `id: <epoch>:<seq>`
+  # makes it Last-Event-ID resumable. `title` is `null` on a live flip (the
+  # activity carries none and D43h forbids a per-flip DB lookup); the consumer
+  # keeps the title it holds from the snapshot.
+  def fleet_state_frame(%{seq: seq, session_id: sid, agent_state: agent_state, ts: ts}, epoch) do
+    payload = %{session_id: sid, agent_state: agent_state, ts: ts, title: nil}
+    "id: #{epoch}:#{seq}\nevent: state\ndata: #{Jason.encode!(payload)}\n\n"
+  end
+
+  @doc false
+  # A heartbeat liveness tick (D45h): id-less and seq-less — UNREPLAYABLE, exactly
+  # like the runtime/permission/exit deltas on the per-session wire. Carries only
+  # the session id + the liveness stamp, never state or content.
+  def fleet_heartbeat_frame(sid, ts) do
+    "event: heartbeat\ndata: #{Jason.encode!(%{session_id: sid, ts: ts})}\n\n"
+  end
+
+  defp fleet_session_json(%{session_id: sid, agent_state: agent_state, ts: ts, title: title}) do
+    %{session_id: sid, agent_state: agent_state, ts: ts, title: title}
+  end
+
+  # Read + parse the opaque `epoch:seq` Last-Event-ID (D45h) via FleetHub's lenient
+  # 2-part parser; `nil` (absent or malformed) means a fresh snapshot.
+  defp fleet_last_event_id(conn) do
+    case get_req_header(conn, "last-event-id") do
+      [value | _] -> FleetHub.parse_cursor(value)
+      _ -> nil
     end
   end
 
