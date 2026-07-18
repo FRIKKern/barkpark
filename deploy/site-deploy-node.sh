@@ -137,9 +137,10 @@ MODE=deploy
 case "${1:-}" in
   --rollback)           MODE=rollback ;;
   --rollback-preflight) MODE=preflight ;;
+  --teardown)           MODE=teardown ;;
   --self-test)          MODE=selftest ;;
   "")                   MODE=deploy ;;
-  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight, --self-test)"; exit 2 ;;
+  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight, --teardown, --self-test)"; exit 2 ;;
 esac
 
 # ---------------------------------------------------------------------------
@@ -907,6 +908,32 @@ FAKENPM
   check "reattach: the log carries RAW child output, not BPSTAGE lines" \
     sh -c "grep -q 'building the site' '$R_LOG' && ! grep -q '^BPSTAGE' '$R_LOG'"
 
+  echo "[selftest] e2e: --teardown stops BOTH slots, disarms the Caddy route, deletes the tree"
+  # selftest was armed into $CF with two slot units; tear the whole site down. The
+  # 'warm' site's route must survive (single-site excision), and its slots too.
+  env PATH="$FAKEBIN:$PATH" \
+    SITE_SLUG=selftest SITE_PORT_A="$T_PORT_A" SITE_PORT_B="$T_PORT_B" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/deploy.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td.out" 2>&1; tdrc=$?
+  check "node teardown exit 0"                     [ "$tdrc" = 0 ]
+  check "node teardown printed TORN_DOWN=selftest" grep -q '^TORN_DOWN=selftest' "$TD/td.out"
+  check "node teardown deleted the release tree"   [ ! -d "$N_SITE" ]
+  check "node teardown removed the selftest route" \
+    sh -c '! grep -q "BARKPARK_SITE_ROUTE:selftest" "'"$CF"'"'
+  check "node teardown stopped slot a" \
+    sh -c '! env PATH="'"$FAKEBIN"':$PATH" systemctl is-active --quiet barkpark-site@selftest__a'
+  check "node teardown stopped slot b" \
+    sh -c '! env PATH="'"$FAKEBIN"':$PATH" systemctl is-active --quiet barkpark-site@selftest__b'
+  check "node teardown SPARED the neighbour 'warm' route" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  check "node teardown SPARED the neighbour warm slot a" \
+    env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet barkpark-site@warm__a
+  check "node teardown is idempotent (second run exit 0)" \
+    sh -c 'env PATH="'"$FAKEBIN"':$PATH" SITE_SLUG=selftest BARKPARK_SITES_DIR="'"$TD"'/sites" BARKPARK_SLOT_ENV_DIR="'"$SENV"'" BARKPARK_CADDYFILE="'"$CF"'" BARKPARK_SITE_DEPLOY_LOCK="'"$TD"'/deploy.lock" BARKPARK_CADDYFILE_LOCK="'"$TD"'/caddyfile.lock" BARKPARK_SITE_NO_CAP=1 bash "'"$SELF"'" --teardown >/dev/null 2>&1'
+
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
@@ -1041,6 +1068,51 @@ if [ "$MODE" = rollback ]; then
   rb_mark "TARGET_BUILD=$p_build"
   echo "TARGET_BUILD=$p_build"
   log "ROLLED BACK — '$SITE_SLUG' now on slot $p_slot ($p_build)"
+  exit 0
+fi
+
+# ===========================================================================
+# TEARDOWN (the inverse of a spawn, node edition): stop BOTH warm slot units,
+# disarm the Caddy route, delete the slot env files + the release tree — so a
+# `bp cloud site delete` leaves no process, no route, no bytes. Idempotent:
+# missing units / route / dir are all fine. Mirrors the static engine's
+# --teardown; the extra step is the running SSR process (a symlink site has none).
+# ===========================================================================
+# Remove THIS slug's marker-guarded Caddy block — the inverse of
+# arm_caddy_node_route. Same brace-counted excision as the static engine (drops
+# the marker comment through the close brace of the handle[_path], covering the
+# @matcher/redir/reverse_proxy form) and the same commit safety (backup + caddy
+# validate + reload-or-revert): a botched excision REVERTS, never breaking Caddy.
+disarm_caddy_node_route() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
+  local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
+  grep -q "$marker" "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
+  local tmp; tmp="$(mktemp)"
+  BP_MARK="$marker" awk '
+    BEGIN { m = ENVIRON["BP_MARK"] }
+    !inb && index($0, m) { inb = 1; depth = 0; opened = 0; next }
+    inb {
+      o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
+      if (o > 0) opened = 1
+      if (opened && depth <= 0) inb = 0
+      next
+    }
+    { print }
+  ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
+  commit_caddyfile "$tmp"
+}
+
+if [ "$MODE" = teardown ]; then
+  stop_slot a; stop_slot b
+  with_caddy_lock disarm_caddy_node_route || true
+  rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
+  if [ -d "$ROOT" ]; then
+    rm -rf "$ROOT" && log "TORE DOWN — stopped slots + removed release tree $ROOT"
+  else
+    log "teardown: no site dir at $ROOT (already gone)"
+  fi
+  echo "TORN_DOWN=$SITE_SLUG"
   exit 0
 fi
 
