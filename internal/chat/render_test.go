@@ -524,10 +524,12 @@ func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
 	}
 }
 
-// TestPickerRowSurfacesNeedsYou proves the pill flows through the picker row: a
-// workflow session with pending approvals shows the needs-you pill on its tick
-// line, while a plain (workflow-less) row stays byte-identical to the legacy
-// render regardless of its pending count.
+// TestPickerRowSurfacesNeedsYou proves the wsc needs-you pill still flows
+// through the herd row's tick line (a workflow session with pending approvals
+// shows it), and that a plain (workflow-less) row never grows a tick line —
+// it stays ONE physical line wearing only the herd's four-state pill (the
+// pre-herd byte-identity contract is SUPERSEDED by "every row wears the pill",
+// herd charter D55h).
 func TestPickerRowSurfacesNeedsYou(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	m := Model{width: 80, sessions: []SessionSummary{
@@ -535,14 +537,23 @@ func TestPickerRowSurfacesNeedsYou(t *testing.T) {
 		{ID: "cycle", Title: "epic cycle run", MessageCount: 9, PendingApprovals: 2, Workflow: &wf},
 	}}
 	rows := m.pickerRows()
-	if !strings.Contains(rows[2], "needs you") {
-		t.Fatalf("a workflow row with pending approvals must surface the pill, got:\n%q", rows[2])
+	var plainRow, wfRow string
+	for _, r := range rows[1:] {
+		if strings.Contains(r, "just a chat") {
+			plainRow = r
+		}
+		if strings.Contains(r, "epic cycle run") {
+			wfRow = r
+		}
 	}
-	// a plain row never grows a tick line — byte-identical to legacy even with a
-	// pending count (the pill is a WORKFLOW-row affordance only).
-	if rows[1] != legacyPickerRow(m.sessions[0]) {
-		t.Fatalf("a plain row must stay byte-identical to legacy, got:\n%q\nwant:\n%q",
-			rows[1], legacyPickerRow(m.sessions[0]))
+	if !strings.Contains(wfRow, "needs you") {
+		t.Fatalf("a workflow row with pending approvals must surface the needs-you pill, got:\n%q", wfRow)
+	}
+	if strings.Contains(plainRow, "\n") {
+		t.Fatalf("a plain row must never grow a tick line, got:\n%q", plainRow)
+	}
+	if !strings.Contains(plainRow, "1 pending") {
+		t.Fatalf("the pending count must still ride the plain row's meta, got:\n%q", plainRow)
 	}
 }
 
@@ -573,10 +584,11 @@ func TestPhaseTicksFallback(t *testing.T) {
 	}
 }
 
-// TestPickerRowsWorkflowMultiline proves a workflow session's picker row spans
-// the two extra lines (so the list expands in height to show fleet progress),
-// while a plain session's row is UNCHANGED — byte-identical to the pre-wsc render
-// (the minimalism contract: plain chats pay zero).
+// TestPickerRowsWorkflowMultiline proves a workflow session's herd row spans
+// the two extra wsc card lines UNCHANGED (fleet progress stays visible at a
+// glance), while a plain session's row stays exactly ONE physical line — the
+// herd-era minimalism contract (D55h: the pill replaced byte-identity; the
+// one-line law is what remains protected).
 func TestPickerRowsWorkflowMultiline(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	m := Model{width: 80, sessions: []SessionSummary{
@@ -588,49 +600,88 @@ func TestPickerRowsWorkflowMultiline(t *testing.T) {
 	if len(rows) != 3 { // "+ new session" + two sessions
 		t.Fatalf("one navigable row per session (+ new), got %d", len(rows))
 	}
+	var plainRow, wfRow string
+	for _, r := range rows[1:] {
+		if strings.Contains(r, "just a chat") {
+			plainRow = r
+		}
+		if strings.Contains(r, "epic cycle run") {
+			wfRow = r
+		}
+	}
 
-	// Plain row: exactly the legacy single-line shape, no embedded newline.
-	plainRow := rows[1]
+	// Plain row: one physical line, pill + title + meta.
 	if strings.Contains(plainRow, "\n") {
 		t.Fatalf("a plain session row must stay single-line, got:\n%q", plainRow)
 	}
-	wantPlain := "just a chat" // the legacy %-40s title + meta; assert it is byte-for-byte the old shape
-	if !strings.HasPrefix(plainRow, wantPlain) {
-		t.Fatalf("plain row must render as today, got:\n%q", plainRow)
-	}
-	legacy := legacyPickerRow(m.sessions[0])
-	if plainRow != legacy {
-		t.Fatalf("plain row must be byte-identical to the pre-wsc render.\n got: %q\nwant: %q", plainRow, legacy)
+	if !strings.Contains(plainRow, "4 msg") {
+		t.Fatalf("plain row must keep its meta tail, got:\n%q", plainRow)
 	}
 
 	// Workflow row: three physical lines (title + tick line + goal line), and it
 	// is still ONE navigable entry (cursor stops once).
-	wfRow := rows[2]
 	if n := strings.Count(wfRow, "\n"); n != 2 {
 		t.Fatalf("a workflow row (with goal) spans three lines, got %d newlines:\n%q", n, wfRow)
 	}
 	if !strings.Contains(wfRow, "13/17") {
 		t.Fatalf("workflow row must surface the fleet counter, got:\n%q", wfRow)
 	}
+	if !strings.Contains(wfRow, "2/5 slices") {
+		t.Fatalf("workflow row must keep the wsc goal line, got:\n%q", wfRow)
+	}
 }
 
-// legacyPickerRow reproduces the exact pre-wsc single-line row shape — the frozen
-// baseline the byte-identical proof asserts a plain (workflow-less) session still
-// renders. If pickerRows ever changed a plain row, this diverges and the test above
-// fails.
-func legacyPickerRow(s SessionSummary) string {
-	title := strings.TrimSpace(s.Title)
-	if title == "" {
-		title = "untitled session"
+// TestHerdRowPillAgeCost is the herd home's row proof (charter D50h): every
+// session row wears the four-state pill, an honest RELATIVE age (never a live
+// now-line — the row must not carry any activity text), and the session's
+// cost; a stalled working row swaps its pill for the stall badge; the rows
+// come out in attention order.
+func TestHerdRowPillAgeCost(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	iso := func(t time.Time) string { return t.Format(time.RFC3339Nano) }
+	m := Model{width: 100, now: func() time.Time { return now }, sessions: []SessionSummary{
+		{ID: "w", Title: "worker", MessageCount: 1, TotalCostUSD: 1.5,
+			AgentState: "working", AgentStateAt: iso(now.Add(-2 * time.Minute))},
+		{ID: "b", Title: "blocked one", MessageCount: 2, TotalCostUSD: 0.42,
+			AgentState: "blocked", AgentStateAt: iso(now.Add(-5 * time.Minute))},
+		{ID: "i", Title: "idler", MessageCount: 3,
+			AgentState: "idle", AgentStateAt: iso(now.Add(-3 * time.Hour))},
+		{ID: "s", Title: "wedged", MessageCount: 4,
+			AgentState: "working", AgentStateAt: iso(now.Add(-10 * time.Minute))},
+	}}
+	m.herd = herdSeed(m.herd, m.sessions)
+	// a fresh heartbeat keeps w honest-working; s saw nothing for 10m → stalled
+	m.herd = herdHeartbeat(m.herd, "w", now)
+
+	rows := m.pickerRows()
+	if len(rows) != 5 {
+		t.Fatalf("expected new + 4 rows, got %d", len(rows))
 	}
-	meta := fmt.Sprintf("%d msg", s.MessageCount)
-	if s.PendingApprovals > 0 {
-		meta += fmt.Sprintf(" · %d pending", s.PendingApprovals)
+	// attention order: blocked, stalled, working, idle
+	for i, want := range []string{"blocked one", "wedged", "worker", "idler"} {
+		if !strings.Contains(rows[i+1], want) {
+			t.Fatalf("attention order row %d must be %q, got rows:\n%s", i+1, want, strings.Join(rows[1:], "\n"))
+		}
 	}
-	if age := relTime(s.LastActiveAt); age != "" {
-		meta += " · " + age
+	if !strings.Contains(rows[1], "⏸ blocked") || !strings.Contains(rows[1], "$0.42") {
+		t.Fatalf("blocked row must wear the pill + cost, got:\n%q", rows[1])
 	}
-	return fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
+	if !strings.Contains(rows[1], "5m") {
+		t.Fatalf("blocked row must carry the honest relative age, got:\n%q", rows[1])
+	}
+	if !strings.Contains(rows[2], "⚠ stalled") {
+		t.Fatalf("a working row with no frame past 150s must wear the stall badge, got:\n%q", rows[2])
+	}
+	if !strings.Contains(rows[3], "● working") || !strings.Contains(rows[3], "$1.50") {
+		t.Fatalf("working row must wear the pill + cost, got:\n%q", rows[3])
+	}
+	if !strings.Contains(rows[4], "○ idle") || !strings.Contains(rows[4], "3h") {
+		t.Fatalf("idle row must wear the pill + age, got:\n%q", rows[4])
+	}
+	// no cost on the wire → no fabricated $0.00
+	if strings.Contains(rows[4], "$") {
+		t.Fatalf("a costless row must not fabricate a cost, got:\n%q", rows[4])
+	}
 }
 
 // TestTranscriptOrdering proves the transcript stacks settled messages, then

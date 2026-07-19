@@ -6349,3 +6349,15 @@ test("ERRORS gains the two billing truths; friendly() precedence is ERRORS → d
   // details still outrank the fallback (field-level truth is more specific).
   assert.equal(hooks.friendly({ error: "x", details: { name: ["is required"] } }, "fb"), "name is required");
 });
+
+test("tierCardHtml: a trial team's Free card never offers a doomed checkout (review fix)", () => {
+  // There is no free checkout — POST /v1/billing/checkout with plan=free 422s
+  // plan_invalid. Only a TRIAL team ever sees Free as non-current, and doing
+  // nothing IS how a trial lands on Free, so the card is honest and inert.
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  const onTrial = hooks.tierCardHtml(free, "trial", false);
+  assert.ok(!onTrial.includes('data-plan="free"'), "no checkout wire on the free card");
+  assert.ok(onTrial.includes("Yours when the trial ends"), "the honest inert label");
+  // A genuinely free team still reads Free as its current plan.
+  assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
+});

@@ -37,18 +37,18 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pickCursor > 0 {
 			m.pickCursor--
 		}
-		return m, nil
+		return m.syncHerdCursorFromIndex(), nil
 	case "down", "j":
 		if m.pickCursor < len(m.sessions) { // rows = 1 (new) + len(sessions)
 			m.pickCursor++
 		}
-		return m, nil
+		return m.syncHerdCursorFromIndex(), nil
 	case "g", "home":
 		m.pickCursor = 0
-		return m, nil
+		return m.syncHerdCursorFromIndex(), nil
 	case "G", "end":
 		m.pickCursor = len(m.sessions)
-		return m, nil
+		return m.syncHerdCursorFromIndex(), nil
 	case "enter":
 		return m.openPickerRow()
 	case "n":
@@ -63,16 +63,19 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // openPickerRow acts on the cursor row: index 0 is the "+ new session" row, any
-// other resumes that session (a FULL re-GET, charter D14).
+// other resumes that session (a FULL re-GET, charter D14). The row set is the
+// herd's attention-sorted order — the SAME projection the paint uses, so Enter
+// always opens exactly the row under the cursor.
 func (m Model) openPickerRow() (tea.Model, tea.Cmd) {
 	if m.pickCursor <= 0 {
 		return m, m.createSessionCmd()
 	}
+	order := m.orderedSessions()
 	idx := m.pickCursor - 1
-	if idx >= len(m.sessions) {
+	if idx >= len(order) {
 		return m, nil
 	}
-	return m, m.resumeSessionCmd(m.sessions[idx].ID)
+	return m, m.resumeSessionCmd(order[idx].ID)
 }
 
 // handleChatKey is the conversation grammar. Enter sends the composer (charter
@@ -111,8 +114,15 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scroll = -1 // a send always re-follows so you see your own line
 		return m.apply(SendEvent{Content: content})
 	case tea.KeyEsc:
-		// Interrupt the active turn. Reduce makes an idle Esc a no-op, so the key
-		// is safe to press any time.
+		// Contextual Esc, decided at the SHELL, never the reducer (herd charter
+		// D51h, amending D11): with NO active turn Esc detaches back to the herd
+		// — the exact Ctrl+B leaveSession path (draft PATCH + stream stop +
+		// screen flip) with the server session left running. Mid-turn Esc still
+		// interrupts, and the reducer's idle no-op stays law for any
+		// InterruptEvent that reaches it by another road.
+		if m.st.Phase == TurnIdle {
+			return m.leaveSession()
+		}
 		return m.apply(InterruptEvent{})
 	case tea.KeyCtrlA:
 		// Allow / approve / plan-approve the focused pending card (charter D27).

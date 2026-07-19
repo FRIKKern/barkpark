@@ -7846,6 +7846,12 @@
       btn = '<button class="btn" disabled>Current plan</button>';
     } else if (subscribed) {
       btn = '<button class="btn" data-portal-plan="' + esc(t.plan) + '" type="button">Change in billing portal</button>';
+    } else if (t.free) {
+      // Only a TRIAL team ever sees Free as a non-current tier (free/canceled
+      // teams read Free as current). There is no free checkout to POST — the
+      // server 422s plan_invalid — and "doing nothing" IS how a trial lands on
+      // Free, so the honest action here is no action at all.
+      btn = '<button class="btn" disabled>Yours when the trial ends</button>';
     } else {
       btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
     }

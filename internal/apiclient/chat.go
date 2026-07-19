@@ -177,6 +177,18 @@ type ChatSessionSummary struct {
 	InsertedAt       string `json:"inserted_at,omitempty"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
 
+	// AgentState/AgentStateAt are the herd cold-mount fields (herd charter
+	// D50h): the four-state autopilot truth (working|blocked|idle|unknown) the
+	// wave-5 substrate persists on the session row, plus its flip timestamp —
+	// what `bp chat`'s herd home sorts and badges from before the fleet stream
+	// delivers its first frame. Additive: an older server that omits them
+	// decodes to "" (the herd mounts those rows honestly as unknown).
+	AgentState   string `json:"agent_state,omitempty"`
+	AgentStateAt string `json:"agent_state_at,omitempty"`
+	// TotalCostUSD is the session's cumulative spend — sidebar_json has always
+	// emitted it; the herd row is the first Go surface to render it.
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+
 	// Workflow is the compact epic-cycle summary (wsc D10/D12). Present only for
 	// a session running/settling a workflow; nil for plain chats.
 	Workflow *ChatWorkflowSummary `json:"workflow,omitempty"`
