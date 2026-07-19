@@ -12,16 +12,28 @@ name: console-harness
 # NOTE: this workflow only *gates* a PR once it is registered as a required
 # check in the repo's branch-protection settings (a human GitHub step). Until
 # then it still runs and reds the PR page on failure.
+#
+# PATH FILTERS COVER THE GOLDENS TOO. The harness compares the fixtures embedded
+# in cloud/priv/static/__preview__/coherence.html against the committed Go
+# goldens under internal/**/testdata/. Scoping the triggers to cloud/priv/static
+# alone let a foreign PR regenerate a golden without ever running this job:
+# #4393 added the considering/researching lifecycle rows and main went red on
+# the NEXT cloud PR instead of its own (repaired by gr-p5-coherence-fixture).
+# Any path this harness reads belongs in both filters below.
 
 on:
   push:
     branches: [main]
     paths:
       - "cloud/priv/static/**"
+      - "internal/taskboard/testdata/**"
+      - "internal/pdrender/testdata/**"
       - ".github/workflows/console-harness.yml"
   pull_request:
     paths:
       - "cloud/priv/static/**"
+      - "internal/taskboard/testdata/**"
+      - "internal/pdrender/testdata/**"
       - ".github/workflows/console-harness.yml"
 
 concurrency:
