@@ -124,21 +124,73 @@ defmodule BarkparkWeb.WorkspaceController do
   sent in one `send_resp/3`. An unknown slug collapses to 404 (no existence leak
   beyond the admin gate); the resolved workspace always carries a valid UUID, so
   the engine's fail-closed `:workspace_id_required` guard is never reached here.
+
+  ## Scope query params (PDS W1 — additive, both optional)
+
+    * `profile=dev` — the scrubbed dev bundle (secret/credential/PII/size
+      classes are never queried, per `Catalog.dev_partition/0`). Absent or
+      `profile=full` is the unchanged full-fidelity backup.
+    * `dataset=<slug>` — narrow the bundle to one dataset.
+    * `source_server=<url>` — provenance passthrough stamped into the manifest.
+
+  A bad profile / unknown / ambiguous dataset slug answers 422 `unprocessable`
+  with an additive `reason` naming which one (`invalid_profile`,
+  `dataset_not_found`, `ambiguous_dataset_slug`) — an honest refusal, never a
+  silently wrong bundle. The response content type is set UNCONDITIONALLY to
+  `application/x-tar`; there is no Accept negotiation on this route.
   """
-  def export(conn, %{"workspace_slug" => slug}) do
+  def export(conn, %{"workspace_slug" => slug} = params) do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         {:ok, bundle} <- WorkspaceBundle.export(workspace.id) do
+         {:ok, bundle} <- export_bundle(workspace, params) do
       conn
       |> put_resp_content_type("application/x-tar", nil)
-      |> put_resp_header("content-disposition", "attachment; filename=#{workspace.slug}.tar")
+      |> put_resp_header(
+        "content-disposition",
+        "attachment; filename=#{export_filename(params, workspace)}"
+      )
       |> send_resp(200, bundle)
     else
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
+      {:error, {:export_scope, reason, message}} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "unprocessable", reason: reason, message: message}})
+
       # export/2 only errors on a nil/non-UUID id or a missing workspace — both
       # unreachable once get_workspace_by_slug returns a real %Workspace{} — but
       # fold any error into 404 rather than leak an engine tuple.
-      {:error, _} -> {:error, :not_found}
+      {:error, _} ->
+        {:error, :not_found}
     end
+  end
+
+  # The engine RAISES on an unresolvable scope opt (a scope mistake must never
+  # resolve silently into a wrong bundle); the HTTP edge turns that into an
+  # honest 422 envelope instead of a 500.
+  defp export_bundle(workspace, params) do
+    opts =
+      [
+        profile: params["profile"],
+        dataset: params["dataset"],
+        source_server: params["source_server"]
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    WorkspaceBundle.export(workspace.id, opts)
+  rescue
+    e in WorkspaceBundle.ExportScopeError ->
+      {:error, {:export_scope, e.code, Exception.message(e)}}
+  end
+
+  # The filename names the grain the caller actually asked for, so two pulls of
+  # the same workspace never land on top of each other on disk.
+  defp export_filename(params, workspace) do
+    [workspace.slug, params["dataset"], params["profile"]]
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.join("-")
+    |> Kernel.<>(".tar")
   end
 
   @doc """

@@ -259,6 +259,48 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     """)
   end
 
+  @doc """
+  Group-A (live): every table carrying the CANONICAL `dataset_id` column
+  (migration 20260527131000's dual dataset-column family).
+
+  A dataset-scoped export narrows these on `dataset_id` and NEVER on the
+  `dataset` string mirror — the mirror is a denormalized convenience that can
+  name a slug another project also owns, so keying on it would pull a
+  sibling dataset's rows into a dataset-grained bundle (PDS-D7). Derived live
+  for the same reason E1/E2/E3 are: a new dataset_id table inherits the
+  narrowing instead of silently exporting workspace-whole.
+  """
+  def live_dataset_id_tables(repo) do
+    query_col(repo, """
+    SELECT table_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name = 'dataset_id'
+    ORDER BY table_name
+    """)
+  end
+
+  @doc """
+  The columns of `table` that FK-reference `documents.id` (live) — the seam the
+  dev-profile document type-deny CASCADES through (PDS-D27).
+
+  A denied document type (today `ticket`) is filtered out of the `documents`
+  member, but every child keyed to it — `content_edges` (BOTH endpoints),
+  `task_edges`, `plugin_doc_state` — is reached through a type-BLIND join, so
+  without this cascade those rows travel as orphans that violate the FK on
+  import. Live-derived so a new child table inherits the cascade automatically.
+  """
+  def document_fk_columns(repo, table) do
+    query_col(repo, """
+    SELECT a.attname
+    FROM pg_constraint c
+    JOIN pg_class cl ON cl.oid = c.conrelid
+    JOIN pg_class pl ON pl.oid = c.confrelid
+    JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE c.contype = 'f' AND cl.relname = '#{sql_ident(table)}' AND pl.relname = 'documents'
+    ORDER BY a.attname
+    """)
+  end
+
   @doc "Every base table in the public schema (live)."
   def live_base_tables(repo) do
     query_col(repo, """
