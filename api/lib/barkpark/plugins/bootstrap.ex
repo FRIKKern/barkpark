@@ -202,6 +202,22 @@ defmodule Barkpark.Plugins.Bootstrap do
 
     dataset = schema.dataset || "production"
 
+    if pulled_row(attrs["name"], dataset) do
+      skip_pulled(plugin_name, attrs["name"], dataset)
+    else
+      do_upsert(plugin_name, attrs, dataset, scope)
+    end
+  end
+
+  defp upsert_one(plugin_name, other, _scope) do
+    Logger.warning(
+      "Plugins.Bootstrap: plugin #{inspect(plugin_name)} register_schemas/1 returned non-SchemaDefinition entry: #{inspect(other)} — skipping"
+    )
+
+    {:error, {:invalid_entry, other}}
+  end
+
+  defp do_upsert(plugin_name, attrs, dataset, scope) do
     case Content.upsert_schema(attrs, dataset) do
       {:ok, %SchemaDefinition{} = saved} ->
         stamp_scope(saved, scope)
@@ -221,20 +237,86 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
-  defp upsert_one(plugin_name, other, _scope) do
+  # ─── The pull-provenance guard (PDS-D21/D22) ───────────────────────────
+  #
+  # WHAT THE CLOBBER ACTUALLY IS. `Content.upsert_schema/2` reads first via
+  # `get_schema/3`. `Content.Scope.scope_to_workspace_global/1` really is
+  # `do: query` (no workspace filter), BUT `scope_schema_to_dataset/3` narrows
+  # the read to the DEFAULT project's dataset_id, because `resolve_read_dataset_id`
+  # falls to `read_default_project_id([])` on the empty opts bootstrap passes.
+  # The effective narrowing is therefore DEFAULT-DATASET-SLOT MATCHING —
+  # neither "Default-project-scoped by an explicit filter" nor "fully unscoped".
+  # A properly-backfilled FOREIGN row is never matched; a row sitting in the
+  # Default slot IS updated in place, and the update reverts EIGHT columns
+  # (title, icon, visibility, owner_scoped, fields — plus cors_origins,
+  # desk_groups and list_preview, which revert to bare plugin-struct defaults
+  # even when the plugin says nothing about them). All of it is pinned by
+  # `test/barkpark/plugins/bootstrap_default_slot_probe_test.exs`.
+  #
+  # Post-PDS-D9 the Default slot IS the pulled workspace (a pulled guerrilla
+  # workspace adopts the `default` slug), so every boot would silently overwrite
+  # pulled schema rows with the local plugin's declaration.
+  #
+  # THE GUARD, and deliberately no more: if the row this upsert WOULD match
+  # lives in a (workspace, dataset) slot carrying a `pull_provenance` stamp,
+  # skip the CHANGESET-BEARING content update and log the drift. Everything else
+  # is unchanged — insert-when-absent still runs (that path is already
+  # idempotent), `get_schema` is NOT filtered by workspace_id and no scope opt
+  # is threaded into the read, because the read already lands on the Default
+  # slot; both would be dead weight. A blanket never-update stays rejected: it
+  # would freeze legitimate plugin schema evolution on every un-pulled install.
+
+  defp pulled_row(name, dataset) when is_binary(name) do
+    case Content.get_schema(name, dataset) do
+      {:ok, %SchemaDefinition{} = existing} -> provenance_covered?(existing, dataset)
+      _ -> false
+    end
+  rescue
+    e ->
+      # Never let the guard's own read break the boot sweep — degrade to
+      # today's behaviour rather than skipping a legitimate registration.
+      Logger.warning(
+        "Plugins.Bootstrap: pull-provenance guard read failed for #{inspect(name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
+      )
+
+      false
+  end
+
+  defp pulled_row(_name, _dataset), do: false
+
+  defp provenance_covered?(%SchemaDefinition{workspace_id: nil}, _dataset), do: false
+
+  defp provenance_covered?(%SchemaDefinition{} = existing, dataset) do
+    # The row's own `dataset` STRING is the dataset SLUG the stamp is keyed by.
+    slug = existing.dataset || dataset
+
+    existing.workspace_id
+    |> Tenancy.get_workspace_by_id()
+    |> Tenancy.pull_provenance(slug)
+    |> map_size()
+    |> Kernel.>(0)
+  end
+
+  defp skip_pulled(plugin_name, name, dataset) do
     Logger.warning(
-      "Plugins.Bootstrap: plugin #{inspect(plugin_name)} register_schemas/1 returned non-SchemaDefinition entry: #{inspect(other)} — skipping"
+      "Plugins.Bootstrap: schema #{inspect(name)} (dataset=#{inspect(dataset)}) sits in a " <>
+        "PULLED workspace/dataset (pull_provenance stamped) — skipping the content update " <>
+        "from plugin #{inspect(plugin_name)}. The local plugin declaration and the pulled " <>
+        "row have DRIFTED; re-pull or clear the stamp to accept the plugin's version."
     )
 
-    {:error, {:invalid_entry, other}}
+    :ok
   end
 
   # Stamp the Default tenancy scope onto a freshly upserted schema row.
   # `Content.upsert_schema/2` routes through `SchemaDefinition.changeset/2`,
-  # which does NOT cast the tenancy FKs, so the saved row carries nil scope.
-  # Force the columns here via `Ecto.Changeset.change/2` so bootstrap-registered
-  # schemas live under the same Default workspace/project as the v1 seeds.
-  # No-ops when no Default exists (backfill not run) or when the row is already
+  # which DOES cast :workspace_id / :project_id / :dataset_id
+  # (schema_definition.ex:77-79) — `Content.put_scope_attrs/2` drops any
+  # caller-supplied scope keys and re-stamps them with the Default ids, so the
+  # saved row already carries the Default scope and the `is_nil` clause below is
+  # unreachable whenever a Default workspace exists. It survives as the
+  # belt-and-braces path for a pre-backfill DB (no Default → `put_scope_attrs`
+  # resolves nothing). No-ops when no Default exists or when the row is already
   # scoped — keeps the bootstrap idempotent and never re-stamps an
   # operator-moved schema.
   defp stamp_scope(_saved, {nil, _project_id}), do: :ok
