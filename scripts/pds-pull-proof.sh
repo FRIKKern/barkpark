@@ -358,6 +358,11 @@ ensure_bp() { # 0 = $BP_BIN is a fresh binary that speaks the dialect
     *"--profile full|dev"*) : ;;
     *) BP_WHY="the bp built from this worktree does not advertise --profile in \`cloud workspace --help\` — the dialect is not in this tree"; return 1 ;;
   esac
+  # --dataset is asserted for the SAME reason as the other three, and it is the
+  # one this gate was blind to while two info lines claimed it covered (PDS-D86).
+  # D61 — the global parser silently swallowing `--dataset` — is a regression
+  # this binary would still ADVERTISE its way past if nobody read the help.
+  case "$help" in *"--dataset"*) : ;; *) BP_WHY="the built bp does not advertise --dataset — an un-scoped export would silently take the whole workspace (the D61 class)"; return 1 ;; esac
   case "$help" in *"--merge"*) : ;; *) BP_WHY="the built bp does not advertise --merge"; return 1 ;; esac
   case "$help" in *"--with-blobs"*) : ;; *) BP_WHY="the built bp does not advertise --with-blobs"; return 1 ;; esac
   BP_BIN="$out"
@@ -1186,8 +1191,9 @@ step_2() {
 #
 # Steps 3 and 4 both need a FULL-fidelity bundle: step 3 for the ticket control
 # that must FIRE, step 4 for the secret-scan control that must FIRE. Neither may
-# fetch one. This function is the single acquisition point, and it is severable:
-# when it aborts, ONLY steps 3 and 4 pay — 0/0b/0c/1/2/5/6/7/8 run regardless.
+# fetch one. This function is the single acquisition point, and it is severable
+# (PDS-D71): when it aborts, ONLY steps 3 and 4 pay — 0/0b/0c/1/2/5/6/7/8 run
+# regardless, so one unaffordable export never collapses the whole ladder.
 #
 # WHY IT IS THIS CAREFUL. A full export peaks the source's beam.smp well into
 # gigabytes on a 3.8 GB box that is ALSO serving the live content API, and an
@@ -1333,7 +1339,9 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   ( command -v sync >/dev/null 2>&1 && sync ) 2>/dev/null || true
   info "attempt         $spent_now of $FULL_BUDGET — counter flushed to $FULL_ATTEMPTS_FILE BEFORE the request"
 
-  # ── the RSS sampler: 1 Hz ps over SSH, NO slot restart ────────────────────
+  # ── the RSS sampler: 1 Hz ps over SSH, NO slot restart (PDS-D70) ──────────
+  # RSS is MEASURED for THIS export, never quoted from a prior run's figure;
+  # when no sampler can be started the run says so and quotes nothing (below).
   local rss_log rss_pid beam_pid baseline_kb peak_kb
   rss_log="$ART_DIR/full-export-rss.log"
   mkdir -p "$ART_DIR"
@@ -1743,6 +1751,8 @@ head_asset() { # url_or_path -> "code<TAB>content_length"
 }
 
 step_5() {
+  # (PDS-D67) the asset roster is resolved from the TARGET's own index and its
+  # originalUrl/size are taken VERBATIM — never a path composed from the source.
   head_step 5 "SERVED ASSET — EVERY imported asset serves 200 with a matching content-length"
 
   say "  RESOLVED FROM THE TARGET'S OWN INDEX, never from a path guessed off the"
@@ -2206,12 +2216,28 @@ preflight() {
 }
 
 main() {
-  case "${1:---plan}" in
-    --plan|plan)
-      cmd_plan
-      exit 0
-      ;;
+  # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
+  #
+  # The parser used to be a bare `case` on $1 with no shift loop, so
+  # `--only 0a --plan` dispatched --only and DROPPED --plan on the floor: the
+  # operator read "dry run" and the harness took a real ~51 MB export off live
+  # guerrilla. A dry-run flag that is silently ignored is worse than one that
+  # does not exist. Two rules, in this order:
+  #   1. --plan anywhere in the argument vector means PLAN, and nothing runs.
+  #   2. anything else the parser does not understand DIES, never gets dropped.
+  # bash 3.2: a plain positional loop, no arrays, no mapfile, no ${var,,}.
+  local a
+  for a in "$@"; do
+    case "$a" in
+      --plan|plan) cmd_plan; exit 0 ;;
+    esac
+  done
+  # no arguments at all is still the PLAN — the safe default is unchanged.
+  [ $# -eq 0 ] && { cmd_plan; exit 0; }
+
+  case "$1" in
     --all|all)
+      [ $# -le 1 ] || die "--all takes no further arguments (got: $*). Nothing after it is ignored — say what you mean."
       preflight
       run_steps "$ALL_STEPS"
       summary
@@ -2219,6 +2245,10 @@ main() {
       ;;
     --only)
       [ $# -ge 2 ] || die "--only needs a comma-separated step list (e.g. --only 0a,0b,7)"
+      [ $# -le 2 ] || die "--only takes exactly one comma-separated step list; unrecognised trailing arguments: $(printf '%s ' "${@:3}")
+  A flag this parser does not understand is REFUSED, never silently dropped —
+  \`--only 0a --plan\` used to take a real live export while printing nothing
+  about the flag it ignored (PDS-D89)."
       preflight
       run_steps "$(printf '%s' "$2" | tr ',' ' ')"
       summary
