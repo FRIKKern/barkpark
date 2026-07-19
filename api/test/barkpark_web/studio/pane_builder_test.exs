@@ -639,6 +639,20 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
                %{role: :list, priority: :active}
              ] = panes
 
+      # INVARIANT (spd-s1..s3 review pin): a non-:active pane's priority IS its
+      # index in the pane list. The :list site computes `depth + 1`, which only
+      # coincides with the index because the walk appends one pane per level —
+      # insert a pane anywhere and the two silently desync, which would
+      # mis-order any consumer that squeezes by priority (spd-s4). Assert the
+      # relationship, not the literal numbers.
+      panes
+      |> Enum.with_index()
+      |> Enum.each(fn {pane, idx} ->
+        assert pane.priority == :active or pane.priority == idx,
+               "pane #{idx} (#{pane.title}) carries priority #{inspect(pane.priority)} — " <>
+                 "expected :active or #{idx}"
+      end)
+
       # The same :list group opened AS the leaf segment is itself :active.
       {panes2, _editor2} = PaneBuilder.build(dataset, ["plugins"], scope: scope)
       assert [%{role: :nav, priority: 0}, %{role: :list, priority: :active}] = panes2
