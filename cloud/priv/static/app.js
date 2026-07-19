@@ -1883,8 +1883,11 @@
   // logged-out park→resume that rides submitAuth). The challenge_token lives in
   // the mount CLOSURE only — never sessionStorage/localStorage (short-lived
   // secret). SECONDS the disabled-countdown mirrors renderActivateRateLimited so
-  // a 429 can't be instantly re-fired.
-  var TFA_RATE_WAIT_S = 30;
+  // a 429 can't be instantly re-fired. 60 matches the backend limiter's FIXED
+  // window (two_factor_rate_limiter.ex: @limit 5, @window_ms 60_000) — the old
+  // 30 under-waited and invited a re-fire straight into the same 429. A server
+  // retry_after seam is backlog (gr-backlog-tfa-retry-after), not this constant.
+  var TFA_RATE_WAIT_S = 60;
 
   // Pure classifier for a POST /v1/auth/login result: does it carry a session,
   // a two-factor challenge, or an error? Shared by submitAuth + newSubmitAuth so
@@ -1914,6 +1917,10 @@
   // Pure card markup — tokens only, no native controls. `mode` toggles the OTP
   // field ↔ the recovery-code field; `error` paints an honest inline message;
   // `rateLimited` swaps in the paused-retry state; `back` adds a return link.
+  // Heading/copy ride the AUTH-scoped .auth-title/.auth-desc (GR21 decoupling:
+  // Launch Theater keeps .new-title/.new-desc for its OWN screens — this card
+  // renders at three mount sites (#twofa-card, /new's #new-twofa, the /activate
+  // park→resume) and must not import theater vocabulary into any of them).
   function twoFactorCardHtml(opts) {
     opts = opts || {};
     var recovery = opts.mode === "recovery";
@@ -1925,8 +1932,8 @@
         '<svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>' +
         '<span class="wordmark-text">Barkpark <b>Cloud</b></span>' +
       '</div>' +
-      '<h1 class="new-title">Two-factor authentication</h1>' +
-      '<p class="new-desc">' + (recovery
+      '<h1 class="auth-title">Two-factor authentication</h1>' +
+      '<p class="auth-desc">' + (recovery
         ? "Enter one of your recovery codes to finish signing in."
         : "Enter the 6-digit code from your authenticator app to finish signing in.") + "</p>";
 
@@ -2069,6 +2076,15 @@
   function resetTokenFromHash() {
     var m = (location.hash || "").match(/^#\/auth\/reset\?token=([^&]+)/);
     return m ? safeDecode(m[1]) : null;
+  }
+
+  // Which tab should the sign-in card open on? #signup / #/auth/signup deep-link
+  // straight to the Create-account tab (marketing links, and the preview
+  // harness's loggedout-signup scenario). Same law as resetTokenFromHash: kept
+  // OUT of parseHash (GR10 — the router routes the AUTHENTICATED app; logged in,
+  // an unknown #signup degrades to Overview exactly as before). Pure, node-pinned.
+  function authModeFromHash(hash) {
+    return hash === "#signup" || hash === "#/auth/signup" ? "signup" : "login";
   }
 
   function showResetError(msg) { var e = $("#reset-error"); setText(e, msg); show(e); }
@@ -11472,7 +11488,7 @@
       } else {
         show($("#login-card"));
         hide($("#reset-card"));
-        setAuthMode("login");
+        setAuthMode(authModeFromHash(location.hash || ""));
         renderOAuthButtons();
         // An invitation accept link (#/invitations/accept?token=…) landed while
         // logged out: park the token (sessionStorage), scrub it from the URL,
@@ -12322,6 +12338,10 @@
       ctxDotColor: ctxDotColor,
       bpThemeLabel: bpThemeLabel,
       bpThemeOptions: bpThemeOptions,
+      // gr-p2-front-door: the sign-in card's initial-tab classifier (#signup /
+      // #/auth/signup deep links land on the Create-account tab). Pure,
+      // node-pinned; the DOM flip (setAuthMode) is browser+smoke-verified.
+      authModeFromHash: authModeFromHash,
     });
   }
 })();

@@ -1163,6 +1163,34 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
     },
   },
+
+  // ── gr-p2-front-door: the logged-out front door (B-01..B-03). mock.js clears
+  // the seeded session for any scenario named loggedout* — keep the prefix.
+  "loggedout-signup": {
+    label: "Logged out — #signup deep-links straight to the Create-account tab",
+    authed: false,
+    deepLink: "#signup",
+    data: { me: null, barkparks: [], subscription: null, sites: [], audit: [] },
+  },
+  "loggedout-reset": {
+    label: "Password reset — the emailed #/auth/reset?token= link opens the set-new-password card",
+    authed: false,
+    deepLink: "#/auth/reset?token=demo",
+    data: {
+      me: null, barkparks: [], subscription: null, sites: [], audit: [],
+      reset: { status: 200, body: {} },
+    },
+  },
+  "loggedout-twofactor": {
+    label: "Two-factor challenge — submit ANY credentials to swap in the shared 2FA card; a wrong code shows the honest 401",
+    authed: false,
+    deepLink: "#overview",
+    data: {
+      me: null, barkparks: [], subscription: null, sites: [], audit: [],
+      login: { status: 200, body: { two_factor_required: true, challenge_token: "demo-challenge" } },
+      twoFactorChallenge: { status: 401, body: { error: "invalid_code" } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1189,6 +1217,21 @@ export function route(name, method, path) {
       ? { status: 200, body: inv.preview }
       : { status: 404, body: { error: "invalid_or_expired" } };
   }
+
+  // gr-p2-front-door: the front door's own unauthenticated POSTs.
+  //   • request-reset is ALWAYS the neutral 200 — the real endpoint is
+  //     enumeration-safe by design, so the harness must never model a
+  //     "no such account" branch either.
+  //   • d.login lets a logged-out scenario answer the sign-in submit (the 2FA
+  //     preview returns two_factor_required, so submitting ANY credentials
+  //     swaps in the shared challenge card).
+  //   • d.twoFactorChallenge answers the code submit (the committed fixture is
+  //     401 invalid_code — the honest inline error, one click away).
+  //   • d.reset answers the set-new-password submit off the emailed link.
+  if (method === "POST" && p === "/v1/auth/request-reset") return { status: 200, body: {} };
+  if (method === "POST" && p === "/v1/auth/login" && d.login) return d.login;
+  if (method === "POST" && p === "/v1/auth/two-factor-challenge" && d.twoFactorChallenge) return d.twoFactorChallenge;
+  if (method === "POST" && p === "/v1/auth/reset" && d.reset) return d.reset;
 
   // Logged out: no authed reads are modelled.
   if (!scen.authed) return { status: 401, body: { error: "unauthorized" } };

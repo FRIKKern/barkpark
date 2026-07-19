@@ -186,10 +186,19 @@ function bootScenario(name) {
   sandbox.window.location = location;
   sandbox.globalThis = sandbox;
 
+  // gr-p2-front-door: capture the app's __bpTestHook export (the same seam
+  // __app.test.mjs uses) so an EXPECTATION can drive a pure mount — e.g. the
+  // shared 2FA card, which only ever mounts behind a click this shim keeps
+  // inert. The hook call runs at app.js eval tail, so it is populated by the
+  // time bootScenario returns; absent in a real browser, a no-op here too if
+  // app.js ever drops the export (expectations assert it explicitly).
+  const captured = { hooks: null };
+  sandbox.__bpTestHook = (h) => { captured.hooks = h; };
+
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry };
+  return { registry, hooks: captured.hooks };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -497,6 +506,53 @@ const EXPECTATIONS = {
       assert.equal(reg.get("bp-theme-picker").value, "iris", "the restored bp_theme=iris is the active option");
     },
   },
+
+  // ── gr-p2-front-door: the logged-out front door (B-01..B-03) ────────────────
+  "loggedout-signup": {
+    what: "#signup deep-links the sign-in card straight onto the Create-account tab",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "app shell must be hidden");
+      assert.equal(reg.get("login-card").hidden, false, "login card must be visible");
+      assert.equal(reg.get("field-team").hidden, false, "signup shows the team-name field");
+      assert.equal(reg.get("field-remember").hidden, true, "signup hides remember-me");
+      assert.equal(reg.get("auth-submit").textContent, "Create account", "the CTA reads Create account");
+      assert.ok(reg.get("auth-foot").innerHTML.includes("Already have an account?"),
+        "the foot offers the switch back to log in");
+    },
+  },
+  "loggedout-reset": {
+    what: "the emailed reset link swaps the login form for the set-new-password card (absorbs gr-backlog-reset-route-smoke)",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "app shell must stay hidden");
+      assert.equal(reg.get("reset-card").hidden, false, "reset card must be visible");
+      assert.equal(reg.get("login-card").hidden, true, "login card must hand off to the reset card");
+      assert.equal(reg.get("twofa-card").hidden, true, "no stale 2FA card on a reset landing");
+    },
+  },
+  "loggedout-twofactor": {
+    what: "the shared 2FA challenge card mounts into #twofa-card in the AUTH (never theater) vocabulary",
+    check(reg, hooks) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.ok(hooks && typeof hooks.mountTwoFactorCard === "function",
+        "the 2FA mount seam must be exported through __bpTestHook");
+      // The card only ever mounts behind a login submit (inert in this shim) —
+      // drive the mount seam directly into the REAL #twofa-card slot, exactly
+      // as showTwoFactorLoginCard does, and pin the composed markup.
+      const root = reg.get("twofa-card");
+      hooks.mountTwoFactorCard(root, { challengeToken: "demo-challenge" });
+      const html = root.innerHTML || "";
+      for (const needle of ['class="auth-title"', 'class="auth-desc"', 'id="tfa-form"',
+        'id="tfa-code"', "Two-factor authentication", 'autocomplete="one-time-code"']) {
+        assert.ok(html.includes(needle), "#twofa-card missing " + JSON.stringify(needle));
+      }
+      for (const needle of ["new-title", "new-desc"]) {
+        assert.ok(!html.includes(needle),
+          "#twofa-card must not import theater vocabulary " + JSON.stringify(needle));
+      }
+    },
+  },
 };
 
 function countMatches(hay, needle) {
@@ -506,11 +562,11 @@ function countMatches(hay, needle) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry } = bootScenario(name);
+  const { registry, hooks } = bootScenario(name);
   await flush();
 
   if (exp.check) {
-    exp.check(registry);
+    exp.check(registry, hooks);
     return exp.what;
   }
 
