@@ -118,7 +118,14 @@ defmodule Barkpark.Content.Errors do
                          # Step-up auth challenges — require_recent_mfa.ex,
                          # require_org_mfa_enrolment.ex (an SDK must branch on these)
                          "mfa_required",
-                         "mfa_enrolment_required"
+                         "mfa_enrolment_required",
+                         # Workspace bundle merge-import (PDS W1) —
+                         # v1/workspace_controller.ex: import disabled by the
+                         # fail-closed guard (403), an unknown import mode (422),
+                         # and a workspace-slug collision on adopt (409).
+                         "bundle_import_disabled",
+                         "invalid_mode",
+                         "workspace_slug_conflict"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
