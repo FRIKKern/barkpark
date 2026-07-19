@@ -44,44 +44,102 @@
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
 :root {
+  --cc-bg: #f4f5f7;
+  --cc-bg-side: #ffffff;
+  --cc-card: #ffffff;
+  --cc-card2: #eceef2;
+  --cc-modal: #ffffff;
+  --cc-toast: #212936;
+  --cc-toast-fg: #f4f5f7;
+  --cc-fg: #1a2330;
+  --cc-fg2: #3d4859;
+  --cc-fg3: #5f6a7b;
+  --cc-fg4: #76818f;
+  --cc-fg5: #c6ccd6;
+  --cc-spark-dim: #a8b0bd;
+  --cc-line-rgb: 20,30,48;
+  --cc-backdrop: rgba(18,26,40,0.4);
+  --cc-red: #bb4040;
+  --cc-red-strong: #b23636;
+  --cc-on-red: #ffffff;
+  --cc-blue: #2560bd;
+  --cc-blue-hover: #1c4c99;
+  --cc-amber: #96660f;
+  --cc-hetzner: #e06a55;
+  --cc-azure: #2f7fce;
+  --cc-cloudflare: #e8a34e;
+  --cc-github: var(--cc-fg3);
+  --bg: var(--cc-bg);
+  --surface: var(--cc-card);
+  --muted-surface: var(--cc-card2);
+  --text: var(--cc-fg);
+  --muted-text: var(--cc-fg2);
+  --dim: var(--cc-fg3);
+  --border: rgba(var(--cc-line-rgb), 0.12);
+  --accent: var(--cc-amber);
+  --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red-strong); --info: var(--cc-blue);
+  --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: #7d5500;
   --primary: hsl(151.96 71.81% 29.22%);
-  --primary-hover: hsl(151.96 71.81% 23.22%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(0 0% 100%);
-  --surface: hsl(0 0% 100%);
-  --muted-surface: hsl(240 4.8% 95.9%);
-  --text: hsl(240 10% 3.9%);
-  --muted-text: hsl(240 3.8% 45%);
-  --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
-  --accent: hsl(30 92% 42%);
   --primary-hsl: 151.96 71.81% 29.22%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 151.96 71.81% 29.22%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(151.96 71.81% 23.22%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
 }
 [data-theme="dark"] {
+  --cc-bg: #0b0e13;
+  --cc-bg-side: #0d1117;
+  --cc-card: #10141b;
+  --cc-card2: #161b24;
+  --cc-modal: #12161d;
+  --cc-toast: #1a2029;
+  --cc-toast-fg: #e9edf3;
+  --cc-fg: #e9edf3;
+  --cc-fg2: #c3cad5;
+  --cc-fg3: #8d96a5;
+  --cc-fg4: #626c7c;
+  --cc-fg5: #3a4150;
+  --cc-spark-dim: #5a6372;
+  --cc-line-rgb: 255,255,255;
+  --cc-backdrop: rgba(4,6,10,0.7);
+  --cc-red: #e57f7f;
+  --cc-red-strong: #e56a6a;
+  --cc-on-red: #1a0808;
+  --cc-blue: #7fb4ff;
+  --cc-blue-hover: #a8ccff;
+  --cc-amber: #e8b45a;
+  --cc-hetzner: #e06a55;
+  --cc-azure: #62aaf4;
+  --cc-cloudflare: #e8a34e;
+  --cc-github: var(--cc-fg3);
+  --bg: var(--cc-bg);
+  --surface: var(--cc-card);
+  --muted-surface: var(--cc-card2);
+  --text: var(--cc-fg);
+  --muted-text: var(--cc-fg2);
+  --dim: var(--cc-fg3);
+  --border: rgba(var(--cc-line-rgb), 0.14);
+  --accent: var(--cc-amber);
+  --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+  --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red); --info: var(--cc-blue);
+  --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: #e8b45a;
   --primary: hsl(152.92 60% 52.94%);
-  --primary-hover: hsl(152.92 60% 60.94%);
   --primary-fg: hsl(163 45% 8%);
-  --bg: hsl(240 10% 3.9%);
-  --surface: hsl(240 10% 5.5%);
-  --muted-surface: hsl(240 3.7% 12%);
-  --text: hsl(0 0% 95%);
-  --muted-text: hsl(240 5% 64.9%);
-  --border: hsl(240 3.7% 15.9%);
   --ring: hsl(152.92 60% 52.94%);
-  --accent: hsl(33 92% 60%);
   --primary-hsl: 152.92 60% 52.94%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 152.92 60% 52.94%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(152.92 60% 60.94%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
 }
@@ -99,211 +157,126 @@
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] {
   --primary: hsl(151.96 71.81% 29.22%);
-  --primary-hover: hsl(151.96 71.81% 23.22%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(0 0% 100%);
-  --surface: hsl(0 0% 100%);
-  --muted-surface: hsl(240 4.8% 95.9%);
-  --text: hsl(240 10% 3.9%);
-  --muted-text: hsl(240 3.8% 45%);
-  --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
-  --accent: hsl(30 92% 42%);
   --primary-hsl: 151.96 71.81% 29.22%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 151.96 71.81% 29.22%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(151.96 71.81% 23.22%);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary: hsl(152.92 60% 52.94%);
-  --primary-hover: hsl(152.92 60% 60.94%);
   --primary-fg: hsl(163 45% 8%);
-  --bg: hsl(240 10% 3.9%);
-  --surface: hsl(240 10% 5.5%);
-  --muted-surface: hsl(240 3.7% 12%);
-  --text: hsl(0 0% 95%);
-  --muted-text: hsl(240 5% 64.9%);
-  --border: hsl(240 3.7% 15.9%);
   --ring: hsl(152.92 60% 52.94%);
-  --accent: hsl(33 92% 60%);
   --primary-hsl: 152.92 60% 52.94%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 152.92 60% 52.94%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(152.92 60% 60.94%);
 }
 html[data-bp-theme="charple"] {
   --primary: hsl(282.39 44.23% 40.78%);
-  --primary-hover: hsl(282.39 44.23% 34.78%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(250 42% 98%);
-  --surface: hsl(250 42% 98%);
-  --muted-surface: hsl(279.9 15.77% 95.84%);
-  --text: hsl(249 10% 14%);
-  --muted-text: hsl(280.01 2.7% 41.61%);
-  --border: hsl(279.92 7.63% 88.18%);
   --ring: hsl(282.39 44.23% 48.78%);
-  --accent: hsl(282.39 44.23% 40.78%);
   --primary-hsl: 282.39 44.23% 40.78%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 137.37 45.8% 35.72%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.01 48.12% 48.54%; --info-hsl: 221.09 46.48% 51.51%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 282.39 44.23% 40.78%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(282.39 44.23% 34.78%);
 }
 html[data-bp-theme="charple"][data-theme="dark"] {
   --primary: hsl(282.56 58.11% 70.98%);
-  --primary-hover: hsl(282.56 58.11% 78.98%);
   --primary-fg: hsl(282.56 45% 8%);
-  --bg: hsl(249 10% 14%);
-  --surface: hsl(249 12% 6%);
-  --muted-surface: hsl(281.67 8.96% 5.56%);
-  --text: hsl(249 15% 93%);
-  --muted-text: hsl(281.55 3.67% 61.01%);
-  --border: hsl(281.64 6.45% 8.05%);
   --ring: hsl(282.56 58.11% 70.98%);
-  --accent: hsl(282.56 58.11% 70.98%);
   --primary-hsl: 282.56 58.11% 70.98%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 133.37 34.29% 57.81%; --warn-hsl: 36.55 62.65% 53.22%; --danger-hsl: 5.58 76.29% 69.57%; --info-hsl: 220.48 78.3% 71.71%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 282.56 58.11% 70.98%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(282.56 58.11% 78.98%);
 }
 html[data-bp-theme="ember"] {
   --primary: hsl(19.33 71.29% 40.98%);
-  --primary-hover: hsl(19.33 71.29% 34.98%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(30 40% 99%);
-  --surface: hsl(30 40% 99%);
-  --muted-surface: hsl(16.91 26.32% 95.67%);
-  --text: hsl(22 24% 11%);
-  --muted-text: hsl(16.98 4.69% 41.3%);
-  --border: hsl(16.93 12.99% 87.94%);
   --ring: hsl(19.33 71.29% 48.98%);
-  --accent: hsl(19.33 71.29% 40.98%);
   --primary-hsl: 19.33 71.29% 40.98%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 136.56 41.81% 36.51%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.3 45.96% 48.52%; --info-hsl: 220.99 44.07% 51.23%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 19.33 71.29% 40.98%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(19.33 71.29% 34.98%);
 }
 html[data-bp-theme="ember"][data-theme="dark"] {
   --primary: hsl(19.01 75.53% 63.14%);
-  --primary-hover: hsl(19.01 75.53% 71.14%);
   --primary-fg: hsl(19.01 45% 8%);
-  --bg: hsl(24 22% 8%);
-  --surface: hsl(24 26% 6%);
-  --muted-surface: hsl(18.16 16.09% 5.41%);
-  --text: hsl(32 24% 92%);
-  --muted-text: hsl(18.07 6.38% 60.58%);
-  --border: hsl(18.13 11.51% 7.89%);
   --ring: hsl(19.01 75.53% 63.14%);
-  --accent: hsl(19.01 75.53% 63.14%);
   --primary-hsl: 19.01 75.53% 63.14%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 133.24 33.65% 58.01%; --warn-hsl: 36.39 61.56% 53.68%; --danger-hsl: 5.64 74.73% 69.52%; --info-hsl: 220.45 76.42% 71.58%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 19.01 75.53% 63.14%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(19.01 75.53% 71.14%);
 }
 html[data-bp-theme="fjord"] {
   --primary: hsl(191.6 80.95% 28.82%);
-  --primary-hover: hsl(191.6 80.95% 22.82%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(210 36% 99%);
-  --surface: hsl(210 36% 99%);
-  --muted-surface: hsl(195.16 24.3% 95.35%);
-  --text: hsl(220 30% 11%);
-  --muted-text: hsl(195.09 4.8% 40.74%);
-  --border: hsl(195.15 12.47% 87.49%);
   --ring: hsl(191.6 80.95% 36.82%);
-  --accent: hsl(191.6 80.95% 28.82%);
   --primary-hsl: 191.6 80.95% 28.82%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 133.06 24.42% 40.04%; --warn-hsl: 36.2 52.84% 37.17%; --danger-hsl: 5.71 33.01% 48.02%; --info-hsl: 220.42 30.54% 49.43%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 191.6 80.95% 28.82%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(191.6 80.95% 22.82%);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary: hsl(193.27 62.43% 64.51%);
-  --primary-hover: hsl(193.27 62.43% 72.51%);
   --primary-fg: hsl(193.27 45% 8%);
-  --bg: hsl(220 28% 8%);
-  --surface: hsl(216 30% 6%);
-  --muted-surface: hsl(194.22 17.11% 5.16%);
-  --text: hsl(212 26% 92%);
-  --muted-text: hsl(194.33 6.22% 59.89%);
-  --border: hsl(194.26 11.99% 7.63%);
   --ring: hsl(193.27 62.43% 64.51%);
-  --accent: hsl(193.27 62.43% 64.51%);
   --primary-hsl: 193.27 62.43% 64.51%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 131.84 26.28% 60%; --warn-hsl: 35.21 48.85% 57.57%; --danger-hsl: 6.23 56.9% 68.81%; --info-hsl: 220.18 55.98% 70.09%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 193.27 62.43% 64.51%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(193.27 62.43% 72.51%);
 }
 html[data-bp-theme="iris"] {
   --primary: hsl(248.75 63.72% 55.69%);
-  --primary-hover: hsl(248.75 63.72% 49.69%);
   --primary-fg: hsl(0 0% 100%);
-  --bg: hsl(0 0% 100%);
-  --surface: hsl(0 0% 100%);
-  --muted-surface: hsl(235.46 20.43% 96.1%);
-  --text: hsl(240 10% 3.9%);
-  --muted-text: hsl(235.74 3.22% 42.05%);
-  --border: hsl(235.51 9.55% 88.53%);
   --ring: hsl(248.75 63.72% 62%);
-  --accent: hsl(248.75 63.72% 55.69%);
   --primary-hsl: 248.75 63.72% 55.69%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 145.96 92.95% 27.76%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.06 59.77% 48.31%; --info-hsl: 221.65 59.02% 52.86%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --ok-hsl: 248.75 63.72% 55.69%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --ok-strong: hsl(248.75 63.72% 49.69%);
 }
 html[data-bp-theme="iris"][data-theme="dark"] {
   --primary: hsl(248.87 100% 77.45%);
-  --primary-hover: hsl(248.87 100% 85.45%);
   --primary-fg: hsl(248.87 45% 8%);
-  --bg: hsl(240 10% 3.9%);
-  --surface: hsl(244.25 31% 1.46%);
-  --muted-surface: hsl(243.29 9.75% 5.78%);
-  --text: hsl(0 0% 95%);
-  --muted-text: hsl(242.8 4.23% 61.64%);
-  --border: hsl(243.15 7.1% 8.28%);
   --ring: hsl(248.87 100% 77.45%);
-  --accent: hsl(248.87 100% 77.45%);
   --primary-hsl: 248.87 100% 77.45%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 134.5 39.04% 56.2%; --warn-hsl: 38.55 77.19% 47.99%; --danger-hsl: 5.1 88.03% 69.88%; --info-hsl: 220.68 92.97% 72.65%;
-  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --ok-hsl: 248.87 100% 77.45%;
+  --ok: hsl(var(--ok-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --ok-strong: hsl(248.87 100% 85.45%);
 }
 /* END GENERATED: tokens */
 
 :root {
-  --bg: hsl(0 0% 100%);
-  --surface: hsl(0 0% 100%);
-  --muted-surface: hsl(240 4.8% 95.9%);
-  --text: hsl(240 10% 3.9%);
-  --muted-text: hsl(240 3.8% 46.1%);
-  --dim: hsl(240 4% 45%); /* WCAG 1.4.3: 5.04:1 on white, 4.58:1 on --muted-surface */
-
-  /* Identity (charter decision 27): a deep park evergreen replaces the
-     borrowed shadcn-zinc near-black, and ONE warm amber accent (below)
-     replaces the borrowed preview blue. The focus ring follows the brand.
-     Every colour here is gated by the __css_check.mjs CONTRAST_PAIRS
-     manifest — tune values HERE, never in a component rule. */
-  --primary: hsl(163 46% 22%);
-  --primary-fg: hsl(0 0% 100%);
+  /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
+     (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
+     status roles (--ok*/--warn*/--danger*/--info*/--warn-strong), --ring,
+     --accent, and the brand --primary/--primary-fg are now OWNED by the
+     GENERATED block above (design/tokens.json → color.cloudChrome + the
+     per-identity accent, mapped role-for-role onto the designer ladder). One
+     generated move retints this whole file. Freeze-by-generation (GR11): tune
+     values in tokens.json, NEVER here. Only tokens the emitter does not yet own
+     stay hand-authored below. */
 
   /* Solid button fills — decoupled from --primary so dark can keep a light
      sage LINK while buttons carry a deeper fill with LIGHT text (user call,
@@ -313,40 +286,12 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --btn-fg: var(--primary-fg);
   --btn-danger-bg: var(--danger);
   --btn-danger-fg: hsl(0 0% 100%);
-  --border: hsl(240 5.9% 90%);
-  --ring: hsl(163 42% 30%);
   --ring-soft: hsl(163 42% 30% / 0.15);
 
-  /* Semantic status roles — the machine-enforced contract (__css_check.mjs).
-     One hue per role as raw HSL channels (--X-hsl), the resolved color (--X),
-     and a -soft tint matching the --ring-soft house style. Component rules
-     consume these — bespoke tint strengths use hsl(var(--X-hsl) / a) so the
-     hue still has exactly one owner. Never a raw status literal in a rule.
-     Lightness is tuned PER THEME to clear the contrast gate: status colours
-     double as text (error lines, pills), so light theme runs them darker. */
-  --ok-hsl: 142 72% 26%;
-  --warn-hsl: 35 92% 38%;
-  --danger-hsl: 0 68% 42%;
-  --info-hsl: 217.2 91.2% 59.8%;  /* the demoted ex-ring blue (DESIGN.md §5) */
-  --ok: hsl(var(--ok-hsl));
-  --warn: hsl(var(--warn-hsl));
-  --danger: hsl(var(--danger-hsl));
-  --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --warn-soft: hsl(var(--warn-hsl) / 0.15);
-  --danger-soft: hsl(var(--danger-hsl) / 0.15);
-  --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(35 92% 30%); /* warn as TEXT on a warn tint — darker for contrast */
-
   /* Legacy aliases — existing rules still reference these; they resolve to the
-     semantic roles above. New rules use --ok / --danger directly. */
+     generated semantic roles. New rules use --ok / --danger directly. */
   --success: var(--ok);
   --destructive: var(--danger);
-
-  /* THE warm amber accent (decision 27). Today's consumer: the left border on
-     branch-preview deploy rows. Use for "warm highlight", never for status. */
-  --accent-hsl: 30 92% 42%;
-  --accent: hsl(var(--accent-hsl));
 
   /* Build/provision console — a dark terminal in BOTH themes by design. */
   --console-bg: hsl(240 10% 8%);
@@ -411,19 +356,12 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 }
 
 [data-theme="dark"] {
-  --bg: hsl(240 10% 3.9%);
-  --surface: hsl(240 10% 5.5%);
-  --muted-surface: hsl(240 3.7% 12%);
-  --text: hsl(0 0% 95%);
-  --muted-text: hsl(240 5% 64.9%);
-  --dim: hsl(240 5% 54%); /* WCAG 1.4.3: 5.37:1 on --bg, 4.52:1 on --muted-surface */
-
-  /* Identity, dark (decision 27): a light park sage carries the brand — light
-     enough to read as link text on the near-black bg AND to carry the ink
-     --primary-fg on buttons (no single dark green can do both; a colour
-     needs luminance ≤0.183 for white text but ≥0.189 to be a link here). */
-  --primary: hsl(160 42% 62%);
-  --primary-fg: hsl(163 45% 8%);
+  /* GR7 alias bridge (GUI-remake wave 2): shell + status + --ring + --accent +
+     brand --primary/--primary-fg are OWNED by the generated [data-theme="dark"]
+     block above (color.cloudChrome + per-identity accent). The re-declarations
+     below stay hand-authored ONLY for the tokens the emitter does not yet own,
+     and MUST re-declare any :root alias that references a dark-re-themed role
+     (E8): --btn-*, --ring-soft, --success, --destructive. */
 
   /* Solid button fills, dark: deeper greens/reds than the sage link colour so
      the label can be WHITE (user call 2026-07-04). Re-declared here rather
@@ -432,27 +370,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --btn-fg: hsl(0 0% 100%);
   --btn-danger-bg: hsl(0 65% 48%);
   --btn-danger-fg: hsl(0 0% 100%);
-  --border: hsl(240 3.7% 15.9%);
-  --ring: hsl(160 42% 62%);
   --ring-soft: hsl(160 42% 62% / 0.2);
-
-  /* Semantic status roles — same HUES as light; lightness is retuned for the
-     dark surfaces (status colours double as text on -soft tints, so dark runs
-     them LIGHTER — including --warn-strong, which flips lighter here). The
-     -soft tints go 0.2 like --ring-soft above. */
-  --ok-hsl: 142 52% 52%;
-  --warn-hsl: 38 94% 56%;
-  --danger-hsl: 0 82% 66%;
-  --info-hsl: 217.2 91.2% 59.8%;
-  --ok: hsl(var(--ok-hsl));
-  --warn: hsl(var(--warn-hsl));
-  --danger: hsl(var(--danger-hsl));
-  --info: hsl(var(--info-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --warn-soft: hsl(var(--warn-hsl) / 0.2);
-  --danger-soft: hsl(var(--danger-hsl) / 0.2);
-  --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(40 96% 68%);
 
   /* Alias re-declarations — REQUIRED, not redundant. var() inside a custom
      property substitutes where the property is DECLARED, so a :root-only alias
@@ -461,9 +379,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
      that). Gated by E8 in __css_check.mjs. */
   --success: var(--ok);
   --destructive: var(--danger);
-
-  --accent-hsl: 33 92% 60%;
-  --accent: hsl(var(--accent-hsl));
 
   /* Elevation — deeper shadows on the dark surfaces; the --shadow aliases are
      re-declared below so scoped-dark subtrees pick them up (see E8 note). */
