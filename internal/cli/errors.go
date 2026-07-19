@@ -38,14 +38,22 @@ var codeExit = map[string]int{
 	// An unknown filter operator (?filter[f][bogus]=x) — a malformed request,
 	// same bucket as `malformed`. Added when the query API began rejecting
 	// unknown ops instead of silently returning every row (#570).
-	"invalid_filter":      exitUsage,
-	"validation_failed":   exitValidation,
-	"invalid_paper":       exitValidation,
-	"malformed_op":        exitValidation,
-	"invalid_op":          exitValidation,
-	"block_not_found":     exitValidation,
-	"type_mismatch":       exitValidation,
-	"duplicate_id":        exitValidation,
+	"invalid_filter":    exitUsage,
+	"validation_failed": exitValidation,
+	"invalid_paper":     exitValidation,
+	"malformed_op":      exitValidation,
+	"invalid_op":        exitValidation,
+	"block_not_found":   exitValidation,
+	"type_mismatch":     exitValidation,
+	"duplicate_id":      exitValidation,
+	// Blob-push refusals from the media put_blob route (the sidecar channel
+	// `bp cloud workspace import --with-blobs` writes to). Both are 422s emitted
+	// BEFORE any byte touches disk — a traversal/malformed relative path, and an
+	// empty body (usually a mislabeled content-type Plug.Parsers already ate).
+	// Absent from this table they fell to the exit-1 unknown-code bucket, which
+	// reads as "unexpected" for what is a plainly invalid payload (PDS-D52).
+	"invalid_path":        exitValidation,
+	"empty_body":          exitValidation,
 	"rev_mismatch":        exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,

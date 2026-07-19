@@ -86,6 +86,8 @@ is the status the API actually returns for that code.
 | `block_not_found` | 422 | `5` | Patch target block id absent (dynamic). | `block not found: <block_id>`. |
 | `type_mismatch` | 422 | `5` | Patch op type mismatch (dynamic). | `type mismatch in op`. |
 | `duplicate_id` | 422 | `5` | Patch would create a duplicate block id (dynamic). | `duplicate id: <id>`. |
+| `invalid_path` | 422 | `5` | Blob push rejected: the relative path failed the server-blob allowlist (traversal / absolute / malformed segment), refused before any disk write. | `invalid blob path: <path>` — the sidecar path must be the server-generated `YYYY/MM/<slug>-<hex8>.<ext>` shape. |
+| `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (commonly a mislabeled content-type that `Plug.Parsers` consumed). | `empty blob body` — send the raw bytes as `application/octet-stream`. |
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
