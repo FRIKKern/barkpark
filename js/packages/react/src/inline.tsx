@@ -146,14 +146,14 @@ export const STATUS_ROLES: StatusRole[] = [
     glyph: '◌', // U+25CC dotted circle — a candidate, not yet committed
     spinner: false,
     label: 'considering',
-    meaning: 'a candidate — weighing whether to pursue it',
+    meaning: 'a candidate being weighed',
   },
   {
     role: 'researching',
     glyph: '◎', // U+25CE bullseye — under investigation before it is ready
     spinner: false,
     label: 'researching',
-    meaning: 'under investigation before it is felt ready',
+    meaning: 'under active investigation',
   },
   // ── fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
   // a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
@@ -187,7 +187,7 @@ const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
 
-// The canonical manifest ladder — the SIX roles that live in
+// The canonical manifest ladder — the EIGHT roles that live in
 // design/status-manifest.json today. `LEGEND_ROLES` (below) is the cross-surface
 // parity KEY and must stay byte-frozen to what the Elixir StatusVocab emits.
 const MANIFEST_LADDER = new Set([
