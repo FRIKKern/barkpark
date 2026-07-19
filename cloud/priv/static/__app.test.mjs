@@ -419,6 +419,44 @@ test("gr-p5-2fa: closeModal stays UNGATED — a pin never imprisons the operator
   }
 });
 
+test("gr-p5-2fa: the pin hides EVERY [data-close] in the body, not just the × (review fix)", () => {
+  // The account modal's footer renders `<button data-close>Close</button>`. It
+  // rides the SAME delegated handler as the backdrop and the ×, so the pin
+  // deadens it too — and hiding only the × left a full-width dead button
+  // sitting under the one-shot recovery sheet. Behavioural, through the real
+  // setModalPin.
+  const footerClose = { hidden: false };
+  const el = (id) => ({
+    id, innerHTML: "", hidden: false, textContent: "",
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => id === "modal-x" },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null,
+    querySelectorAll: () => (id === "modal-body" ? [footerClose] : []),
+    focus() {},
+  });
+  const nodes = { "#modal-root": el("modal-root"), "#modal-body": el("modal-body"), ".modal-x": el("modal-x") };
+  const prevQS = sandbox.document.querySelector;
+  try {
+    sandbox.document.querySelector = (sel) => nodes[sel] || null;
+    hooks.setModalPin(true);
+    assert.equal(footerClose.hidden, true,
+      "a dead footer Close is exactly the defect the × rule exists to prevent");
+    hooks.setModalPin(false);
+    assert.equal(footerClose.hidden, false, "un-pinning must bring the footer back");
+  } finally {
+    sandbox.document.querySelector = prevQS;
+    hooks.setModalPin(false);
+  }
+});
+
+test("gr-p5-2fa: a hidden footer [data-close] is actually invisible — .btn is display:inline-flex", () => {
+  // Same author-rule-beats-[hidden] trap as .modal-x, one selector wider: the
+  // footer Close is a `.btn`, so `hidden` alone would not hide it.
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  assert.ok(/#modal-body \[data-close\]\[hidden\]\s*\{[^}]*display:\s*none/.test(css),
+    "app.css must restore [hidden] for body-rendered close affordances");
+});
+
 test("gr-p5-2fa: a hidden .modal-x is actually invisible — [hidden] must beat the display rule", () => {
   // `.modal-x { display: grid }` is an AUTHOR rule, and author rules beat the
   // UA sheet's [hidden]{display:none} regardless of specificity. Without an

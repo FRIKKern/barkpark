@@ -256,10 +256,22 @@
   // `.modal-x` carries data-close (index.html), so it rides the same delegated
   // handler as the backdrop and a pin DEADENS it. A visible dead × is strictly
   // worse than no × — hide it while pinned.
+  //
+  // The × is not the only one: EVERY `[data-close]` affordance a body renders
+  // (the account modal's footer "Close" is the first) rides that same delegated
+  // handler and is deadened by exactly the same predicate. Hiding only the ×
+  // would leave a full-width dead button sitting under the pinned sheet — the
+  // very defect this rule exists to prevent, one selector wider.
   function setModalPin(on) {
     modalPinFlag = !!on;
     var x = $(".modal-x");
     if (x) x.hidden = modalPinFlag;
+    var body = $("#modal-body");
+    if (body) {
+      body.querySelectorAll("[data-close]").forEach(function (el) {
+        el.hidden = modalPinFlag;
+      });
+    }
     return modalPinFlag;
   }
   function modalPinState() { return modalPinFlag; }
@@ -952,7 +964,10 @@
         busyLabel: "Turning off…",
         bodyHtml: "Sign-in drops back to <b>password only</b>, and your unused recovery " +
           "codes stop working immediately.",
-        onConfirm: function (ctl) {
+        // Named so the recovery arm can RE-ISSUE the request, exactly as
+        // confirmDisconnectProvider / runRemoveMember do. A recovery handler
+        // that only calls busy() would spin the button forever on a dead end.
+        onConfirm: function run(ctl) {
           api("DELETE", "/v1/account/two-factor", null, { noBounce: true }).then(function (r) {
             if (r.ok) {
               a2fSetEnabled(false);
@@ -960,7 +975,7 @@
               openAccountModal(); // straight back to the account screen, now Off
             } else {
               ctl.fail(friendly(r.data, "Couldn't turn two-factor off."), "Try again",
-                function (again) { again.busy(); });
+                function (again) { again.busy(); run(again); });
             }
           });
         }

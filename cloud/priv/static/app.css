@@ -4417,5 +4417,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* GR56: `.modal-x` carries data-close, so a pin DEADENS it. An author rule beats
    the UA sheet regardless of specificity, so `.modal-x { display: grid }` would
-   keep a DEAD × visible — this restores [hidden] for the pinned sheet. */
+   keep a DEAD × visible — this restores [hidden] for the pinned sheet.
+   The same applies to every [data-close] a BODY renders (the account footer's
+   "Close" is a `.btn`, i.e. `display: inline-flex`): same delegated handler,
+   same pin, same need for [hidden] to actually hide. */
 .modal-x[hidden] { display: none; }
+#modal-body [data-close][hidden] { display: none; }
