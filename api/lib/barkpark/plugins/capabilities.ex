@@ -499,6 +499,16 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" => "Dataset-level content stats and overview.",
         "plugin" => nil
       },
+      # The `data.counts` verb (GET /v1/data/counts/:dataset) is a core command
+      # whose noun is `data` — bundled cross-type reads over the `/v1/data`
+      # surface. Declaring the noun keeps the manifest honest (every command's
+      # noun resolves to a declared noun — the `capabilities_manifest_test`
+      # invariant that dataset.stats' orphaned noun once tripped).
+      %{
+        "name" => "data",
+        "summary" => "Bundled cross-type reads over a dataset (per-type counts).",
+        "plugin" => nil
+      },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
       %{
         "name" => "token",
@@ -698,6 +708,17 @@ defmodule Barkpark.Plugins.Capabilities do
         "Dataset content overview: total documents, per-type published/draft counts, and recent activity.",
         "GET",
         "/v1/data/analytics/:dataset",
+        "read",
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "data.counts",
+        "data",
+        "counts",
+        "Bundled per-type published-document counts for a dataset in one query — {\"counts\":{\"<type>\":N,...}}.",
+        "GET",
+        "/v1/data/counts/:dataset",
         "read",
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
