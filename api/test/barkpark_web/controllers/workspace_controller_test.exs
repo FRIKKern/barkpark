@@ -577,6 +577,97 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     end
   end
 
+  describe "POST /api/workspaces/:workspace_slug/import?mode=merge (PDS-D10 fail-closed guard)" do
+    test "REFUSED 403 bundle_import_disabled while :allow_bundle_import is unset (fail-closed default)",
+         %{conn: conn, member_ws: member_ws} do
+      # Stand-alone: the env plumb ships in a disjoint slice — make the absent
+      # (default-false) polarity explicit regardless of ambient test config.
+      Application.delete_env(:barkpark, :allow_bundle_import)
+
+      raw_admin = "ws-merge-off-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=merge", "never-imported")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "bundle_import_disabled"
+    end
+
+    test "explicit false refuses identically (the guard reads the value, not mere presence)",
+         %{conn: conn, member_ws: member_ws} do
+      Application.put_env(:barkpark, :allow_bundle_import, false)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-false-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=merge", "never-imported")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "bundle_import_disabled"
+    end
+
+    test "ALLOWED when :allow_bundle_import is true — merge converges a drifted, still-populated workspace over HTTP",
+         %{conn: conn} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-on-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Merge RT WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      # Drift the STILL-POPULATED workspace — the clean path would PK-crash here;
+      # merge must converge it back without any pre-purge.
+      Repo.query!("UPDATE workspaces SET name = 'HTTP-DRIFT' WHERE slug = $1", [target.slug])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["mode"] == "merge"
+      assert is_map(body["tables"])
+      assert body["total_rows"] > 0
+
+      # The drift is converged back through the HTTP path — not a vacuous 200.
+      assert Tenancy.get_workspace_by_slug(target.slug).name == "Merge RT WS"
+      assert scoped_row_count("documents", target.id) > 0
+    end
+
+    test "unknown mode → 422 invalid_mode (never silently treated as clean)",
+         %{conn: conn, member_ws: member_ws} do
+      raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=sideways", "never-imported")
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_mode"
+    end
+  end
+
   # Clear the two FK-less audit tables for a workspace so a bundle re-import into
   # the same DB has a clean copy-strategy target. audit_events enforces
   # append-only via a trigger, so the DELETE runs under

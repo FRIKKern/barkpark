@@ -146,16 +146,84 @@ defmodule BarkparkWeb.WorkspaceController do
   re-import it via `WorkspaceBundle.import_bundle/2` (admin-gated).
 
   The bundle is SELF-DESCRIBING (its manifest carries the workspace identity and
-  per-table import strategy). Its string-keyed members (E3/allowlist) re-import
-  idempotently via INSERT ON CONFLICT DO NOTHING, but the copy-strategy members
-  (root/E1/E2) assume a CLEAN target — so this is a restore into an empty scope,
-  NOT a repeatable upsert: a second import over a still-populated workspace
-  PK-conflicts. Returns the import stats — `{tables, total_rows}` — as JSON.
+  per-table import strategy). Two modes, selected via the `mode` query param:
+
+    * absent / `mode=clean` (default) — restore into an EMPTY scope. The
+      string-keyed members (E3/allowlist) re-import idempotently via INSERT ON
+      CONFLICT DO NOTHING, but the copy-strategy members (root/E1/E2) assume a
+      CLEAN target: a second import over a still-populated workspace
+      PK-conflicts. Unchanged behavior.
+    * `mode=merge` (PDS-D8/D10) — convergent upsert over a possibly-populated
+      workspace. FAIL-CLOSED OPT-IN: refused with 403 `bundle_import_disabled`
+      unless `Application.get_env(:barkpark, :allow_bundle_import, false)` is
+      true (the env plumb ships separately; the default here is always false).
+      A same-slug/different-id root collision on a NON-empty workspace returns
+      409 `workspace_slug_conflict` (PDS-D9) instead of an opaque 25P02.
+
+  Returns the import stats — `{tables, total_rows}` — as JSON (plus
+  `mode: "merge"` on the merge path).
   """
-  def import(conn, %{"workspace_slug" => _slug}) do
-    {bundle, conn} = read_full_body(conn)
-    {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
-    json(conn, %{tables: stats.tables, total_rows: stats.total_rows})
+  def import(conn, %{"workspace_slug" => _slug} = params) do
+    case params["mode"] || "clean" do
+      "clean" ->
+        {bundle, conn} = read_full_body(conn)
+        {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
+        json(conn, %{tables: stats.tables, total_rows: stats.total_rows})
+
+      "merge" ->
+        if Application.get_env(:barkpark, :allow_bundle_import, false) do
+          {bundle, conn} = read_full_body(conn)
+          merge_import(conn, bundle)
+        else
+          # Fail-closed opt-in (PDS-D10): merge writes into a live workspace, so
+          # the server operator must explicitly allow it — refused BEFORE the
+          # body is drained or the engine is touched.
+          conn
+          |> put_status(:forbidden)
+          |> json(%{
+            error: %{
+              code: "bundle_import_disabled",
+              message:
+                "mode=merge requires the server to opt in via the " <>
+                  ":allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"
+            }
+          })
+        end
+
+      other ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "invalid_mode",
+            message: "unknown import mode #{inspect(other)} (expected clean or merge)"
+          }
+        })
+    end
+  end
+
+  defp merge_import(conn, bundle) do
+    case WorkspaceBundle.import_bundle(bundle, mode: :merge) do
+      {:ok, stats} ->
+        json(conn, %{tables: stats.tables, total_rows: stats.total_rows, mode: "merge"})
+
+      {:error, {:workspace_slug_conflict, info}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{
+            code: "workspace_slug_conflict",
+            message:
+              "workspace slug #{inspect(info.slug)} exists under a different id and is " <>
+                "not an empty shell — refuse to merge over it",
+            details: %{
+              slug: info.slug,
+              existing_id: info.existing_id,
+              bundle_id: info.bundle_id
+            }
+          }
+        })
+    end
   end
 
   # Drain the entire raw request body (the tar bundle) — a POST body can arrive in

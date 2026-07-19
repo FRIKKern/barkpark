@@ -508,6 +508,145 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── merge import mode (PDS-D8/D9) ─────────────────────────────────────────────
+
+  describe "merge import mode (PDS-D8): ON CONFLICT (order_columns) DO UPDATE convergence" do
+    test "merge over a POPULATED workspace converges — mutated rows restored, deleted rows resurrected, 2nd AND 3rd import md5-stable" do
+      %{ws_a: ws_a, only_a_doc: only_a_doc} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest_before, _} = Archive.unpack(bundle)
+      md5s = fn m -> Map.new(m["tables"], &{&1["name"], &1["md5"]}) end
+
+      # Drift the target four ways, one per convergence class:
+      #   root non-key mutation (DO UPDATE on workspaces)…
+      Repo.query!("UPDATE workspaces SET name = 'PDS-DRIFT-NAME' WHERE id = $1::text::uuid", [
+        ws_a.id
+      ])
+
+      #   …E1 non-key mutation (DO UPDATE on documents)…
+      Repo.query!(
+        "UPDATE documents SET title = 'PDS-DRIFT-TITLE' " <>
+          "WHERE workspace_id = $1::text::uuid AND doc_id = $2",
+        [ws_a.id, only_a_doc]
+      )
+
+      #   …E2 row deletion (plain insert resurrects — no conflict)…
+      Repo.query!(
+        "DELETE FROM content_edges WHERE from_id IN " <>
+          "(SELECT id FROM documents WHERE workspace_id = $1::text::uuid)",
+        [ws_a.id]
+      )
+
+      #   …E3 row deletion (bare DO NOTHING re-inserts the missing row).
+      Repo.query!("DELETE FROM authoring_exemptions WHERE doc_id = $1", [only_a_doc])
+
+      # Second import (the first was the export's implicit source state): MERGE
+      # over the still-populated workspace — on origin/main this PK-crashes.
+      {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+      assert stats.total_rows > 0
+
+      # Row-count receipts keep CARRIED-rows semantics in merge mode too.
+      assert stats.tables["workspaces"] == 1
+
+      # The mutations are converged back and the deletions resurrected —
+      # re-export md5 parity across EVERY table is the strongest proof.
+      assert scalar("SELECT name FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) ==
+               ws_a.name
+
+      {:ok, b2} = WorkspaceBundle.export(ws_a.id)
+      {m2, _} = Archive.unpack(b2)
+      assert md5s.(manifest_before) == md5s.(m2)
+
+      # Third import over the converged state: still {:ok, _}, still identical.
+      {:ok, _} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+      {:ok, b3} = WorkspaceBundle.export(ws_a.id)
+      {m3, _} = Archive.unpack(b3)
+      assert md5s.(manifest_before) == md5s.(m3)
+    end
+
+    test "clean re-import over a populated workspace still ABORTS (default mode untouched)" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      # The default :clean path assumes a clean target — a re-import over the
+      # still-populated workspace PK-conflicts and the transaction rolls back.
+      assert_raise Postgrex.Error, fn -> WorkspaceBundle.import_bundle(bundle) end
+
+      # Nothing partial-imported: the workspace row is still the single original.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
+    end
+
+    test "unknown mode raises ArgumentError before touching the database" do
+      assert_raise ArgumentError, ~r/unknown import mode/, fn ->
+        WorkspaceBundle.import_bundle(<<>>, mode: :sideways)
+      end
+    end
+  end
+
+  describe "root-slug pre-flight (PDS-D9): empty-shell adoption, fail-closed refusal" do
+    test "same slug + different id + provably EMPTY shell → shell replaced in-transaction" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, _} = Archive.unpack(bundle)
+
+      # Simulate the fresh-target shape: A is gone, and a migrate-seeded shell
+      # squats A's slug under a DIFFERENT id (with its own project + dataset —
+      # the shell's FK children must vanish with it, not orphan).
+      purge_workspace!(ws_a.id, manifest)
+      shell = create_workspace!(ws_a.slug)
+      shell_proj = create_project!(shell, unique("shellproj"))
+      refute shell.id == ws_a.id
+
+      {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+      assert stats.total_rows > 0
+
+      # The bundle's workspace owns the slug again; the shell and its children
+      # are gone (deleted in-transaction, FK cascade intact).
+      assert scalar("SELECT id::text FROM workspaces WHERE slug = $1", [ws_a.slug]) == ws_a.id
+
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [shell.id]) == 0
+
+      assert scalar("SELECT count(*) FROM projects WHERE id = $1::text::uuid", [shell_proj.id]) ==
+               0
+
+      # A's content really landed.
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [
+               ws_a.id
+             ]) > 0
+    end
+
+    test "same slug + different id + NON-empty workspace → refused with a NAMED error, never a raw 25P02; target untouched" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, _} = Archive.unpack(bundle)
+
+      purge_workspace!(ws_a.id, manifest)
+
+      # A POPULATED squatter on A's slug — one document makes it not-a-shell.
+      squatter = create_workspace!(ws_a.slug)
+      squatter_proj = create_project!(squatter, unique("squatproj"))
+
+      {:ok, _doc} =
+        create_document_in!(squatter, squatter_proj, "post", %{"doc_id" => "squat-doc"}, "test")
+
+      assert {:error, {:workspace_slug_conflict, info}} =
+               WorkspaceBundle.import_bundle(bundle, mode: :merge)
+
+      assert info.slug == ws_a.slug
+      assert info.existing_id == squatter.id
+      assert info.bundle_id == ws_a.id
+
+      # Fail-closed: the squatter and its document are untouched, and A was NOT
+      # partially imported (the whole transaction rolled back).
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [
+               squatter.id
+             ]) == 1
+
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 0
+    end
+  end
+
   # ── seed + helpers ────────────────────────────────────────────────────────────
 
   # Workspace A: full spread across every extraction path. Workspace B: the leak
