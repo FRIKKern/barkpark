@@ -95,7 +95,17 @@ function makeDom() {
     querySelector: query,
     querySelectorAll() { return []; },
     getElementById: byId,
-    createElement() { return makeEl(""); },
+    // Created (non-registry) elements are throwaway wiring surfaces here. Their
+    // querySelector answers an inert element (never null) so a primitive that
+    // wires its own fresh markup — toast()'s close button is the first smoke-
+    // exercised case (gr-p2 portal-return ack) — stays inert instead of
+    // crashing the boot. Registry (#id) elements keep the null-returning
+    // querySelector above, so existence-driven logic is untouched.
+    createElement() {
+      const el = makeEl("");
+      el.querySelector = () => makeEl("");
+      return el;
+    },
   };
 
   return { registry, document, byId };
@@ -186,10 +196,19 @@ function bootScenario(name) {
   sandbox.window.location = location;
   sandbox.globalThis = sandbox;
 
+  // gr-p2-front-door: capture the app's __bpTestHook export (the same seam
+  // __app.test.mjs uses) so an EXPECTATION can drive a pure mount — e.g. the
+  // shared 2FA card, which only ever mounts behind a click this shim keeps
+  // inert. The hook call runs at app.js eval tail, so it is populated by the
+  // time bootScenario returns; absent in a real browser, a no-op here too if
+  // app.js ever drops the export (expectations assert it explicitly).
+  const captured = { hooks: null };
+  sandbox.__bpTestHook = (h) => { captured.hooks = h; };
+
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry };
+  return { registry, hooks: captured.hooks };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -497,6 +516,194 @@ const EXPECTATIONS = {
       assert.equal(reg.get("bp-theme-picker").value, "iris", "the restored bp_theme=iris is the active option");
     },
   },
+
+  // ── gr-p2-front-door: the logged-out front door (B-01..B-03) ────────────────
+  "loggedout-signup": {
+    what: "#signup deep-links the sign-in card straight onto the Create-account tab",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "app shell must be hidden");
+      assert.equal(reg.get("login-card").hidden, false, "login card must be visible");
+      assert.equal(reg.get("field-team").hidden, false, "signup shows the team-name field");
+      assert.equal(reg.get("field-remember").hidden, true, "signup hides remember-me");
+      assert.equal(reg.get("auth-submit").textContent, "Create account", "the CTA reads Create account");
+      assert.ok(reg.get("auth-foot").innerHTML.includes("Already have an account?"),
+        "the foot offers the switch back to log in");
+    },
+  },
+  "loggedout-reset": {
+    what: "the emailed reset link swaps the login form for the set-new-password card (absorbs gr-backlog-reset-route-smoke)",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "app shell must stay hidden");
+      assert.equal(reg.get("reset-card").hidden, false, "reset card must be visible");
+      assert.equal(reg.get("login-card").hidden, true, "login card must hand off to the reset card");
+      assert.equal(reg.get("twofa-card").hidden, true, "no stale 2FA card on a reset landing");
+    },
+  },
+  "loggedout-twofactor": {
+    what: "the shared 2FA challenge card mounts into #twofa-card in the AUTH (never theater) vocabulary",
+    check(reg, hooks) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.ok(hooks && typeof hooks.mountTwoFactorCard === "function",
+        "the 2FA mount seam must be exported through __bpTestHook");
+      // The card only ever mounts behind a login submit (inert in this shim) —
+      // drive the mount seam directly into the REAL #twofa-card slot, exactly
+      // as showTwoFactorLoginCard does, and pin the composed markup.
+      const root = reg.get("twofa-card");
+      hooks.mountTwoFactorCard(root, { challengeToken: "demo-challenge" });
+      const html = root.innerHTML || "";
+      for (const needle of ['class="auth-title"', 'class="auth-desc"', 'id="tfa-form"',
+        'id="tfa-code"', "Two-factor authentication", 'autocomplete="one-time-code"']) {
+        assert.ok(html.includes(needle), "#twofa-card missing " + JSON.stringify(needle));
+      }
+      for (const needle of ["new-title", "new-desc"]) {
+        assert.ok(!html.includes(needle),
+          "#twofa-card must not import theater vocabulary " + JSON.stringify(needle));
+      }
+    },
+  },
+
+  // ── gr-p2 plan & dunning (C-03/C-04): trial CTA, GR17 dunning, portal return ─
+  "billing-trial": {
+    what: "the trial billing state — countdown chip, the RATIFIED CTA verbatim, quota-honest open plan grid, trial topbar chip",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The ratified CTA (task-2ed0ea068f37345d), VERBATIM — never the
+      // prototype's superseded draft.
+      assert.ok(box.includes("Pick a plan below to keep it. No card needed."),
+        "the ratified trial CTA must render verbatim");
+      assert.ok(box.includes('class="trial-chip"'), "the countdown chip must render");
+      assert.ok(box.includes("14 days left"), "the chip must carry the server's days-remaining");
+      // Trial expiry is a real teardown — the dunning suspend promise must NOT
+      // leak into trial copy.
+      assert.ok(!box.includes("suspended — not deleted"), "trial copy must never borrow the dunning suspend promise");
+      // The plan grid opens right below the CTA ("below" must be true) and is
+      // quota-honest: real ceilings, no unlimited fiction.
+      assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open under the CTA");
+      const grid = reg.get("billing-tiers").innerHTML || "";
+      for (const q of ["1 managed instance", "3 managed instances", "10 managed instances"]) {
+        assert.ok(grid.includes(q), "tier cards must state the real ceiling " + JSON.stringify(q));
+      }
+      assert.ok(!grid.includes("Unlimited managed instances"), "the unlimited fiction must be gone");
+      // GR20: the topbar chip reads trial (XOR — never the past-due skin).
+      const chip = reg.get("billing-chip");
+      assert.equal(chip.textContent, "Trial · 14 days left", "topbar chip must count the trial down");
+      assert.ok(chip.className.includes("billing-chip--trial"), "topbar chip must ride the trial skin");
+      assert.ok(!chip.className.includes("past_due"), "trial XOR past-due — never both");
+      assert.equal(chip.href, "#billing", "the chip must route to #billing");
+    },
+  },
+  "billing-past-due": {
+    what: "past due — the GR17 banner verbatim with data-driven dates, portal CTA, no denial copy, red topbar chip",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // GR17 strings, data-driven: both date slots filled from current_period_end.
+      assert.ok(box.includes("Your card was declined on "), "the banner must open with the failed date");
+      assert.ok(box.includes("Your instances keep running until "), "the banner must carry the suspend date");
+      assert.ok(box.includes("then they're suspended — not deleted — and come right back the moment payment succeeds."),
+        "the suspended-not-deleted sentence must render verbatim");
+      assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
+      assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
+      assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
+      assert.ok(box.includes(">Manage billing<"), "the current-plan card must offer the portal");
+      // The dead promises stay dead.
+      assert.ok(!box.includes("retry twice more"), "the retry-count fiction must be gone");
+      assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
+      // GR20: the topbar chip flips to the past-due alarm (XOR trial).
+      const chip = reg.get("billing-chip");
+      assert.equal(chip.textContent, "Payment failed · fix billing", "topbar chip must alarm on past-due");
+      assert.ok(chip.className.includes("billing-chip--past_due"), "topbar chip must ride the past-due skin");
+      assert.ok(!chip.className.includes("--trial"), "past-due XOR trial — never both");
+      // The sidebar pill keeps the PAID plan (the activePlan past_due fix).
+      assert.equal(reg.get("ws-plan").textContent, "Supporter", "a past_due team keeps its paid plan in the sidebar pill");
+    },
+  },
+  "billing-portal-return": {
+    what: "back from the portal — billing renders the current plan, portal-managed copy, no denial copy",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
+      assert.ok(box.includes(">Manage billing<"), "the portal CTA must render");
+      assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
+      // A healthy active sub shows NO topbar billing chip (trial XOR past-due only).
+      assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
+    },
+  },
+
+  // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
+  "new-launch": {
+    what: "/new signed-in — the template card + the one-field Launch step",
+    check(reg) {
+      assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "the app shell stays hidden on /new");
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.length > 0, "#new-body rendered empty");
+      for (const needle of ['class="new-title">Astro Blog', "new-gets", 'id="new-launch-btn"', ">Launch<", "no card required"]) {
+        assert.ok(body.includes(needle), "#new-body missing " + JSON.stringify(needle));
+      }
+    },
+  },
+  "theater-midflight": {
+    what: "the /new theater mid-flight — conditional 5-row rail, the price line, the open console",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-progress"), "the progress theater must be mounted");
+      assert.ok(body.includes("Launching Hugin"), "the head names the instance (v4 copy)");
+      // GR18(1): the conditional rail — the warm path reports no freshen/content,
+      // so EXACTLY the 5 planned rows render (never the render's 7 static rows).
+      assert.equal(countMatches(body, '<li class="new-step '), 5, "typical run renders 5 rail rows");
+      assert.ok(!body.includes('data-step="freshen"'), "unreported freshen stays hidden");
+      assert.ok(!body.includes('data-step="content"'), "unreported content stays hidden");
+      assert.ok(body.includes('class="new-step active" data-step="configure"'), "configure is the live step");
+      // GR18(3): the price-before-charge line — the REAL catalog row via
+      // formatMonthlyPrice, never plan-grid digits.
+      assert.ok(body.includes("data-price-line"), "the price line renders above the rail");
+      assert.ok(body.includes("€4.9/mo"), "the price is the catalog row (formatMonthlyPrice)");
+      assert.ok(body.includes("price confirmed before anything is charged."), "the ratified price copy renders");
+      assert.ok(body.includes("Falkenstein"), "the human region name renders");
+      // GR18(5): console open-by-default with the worker's redacted narration.
+      assert.ok(body.includes("new-console"), "the console panel mounts");
+      assert.ok(!body.includes("new-console is-collapsed"), "the console is open by default");
+      assert.ok(body.includes("configure: docker compose up -d"), "the live console lines render");
+    },
+  },
+  "theater-failed": {
+    what: "the /new theater failed — the snap: red failed step, skipped rest, ONE recovery action",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-failed"), "the failed theater must be mounted");
+      assert.ok(body.includes("Setup didn&#39;t finish"), "the honest headline renders");
+      // GR18(4): the honest server-owned failCopy, verbatim.
+      assert.ok(body.includes("the TLS certificate was never issued"), "provision_error renders verbatim");
+      // The snap: the failing step is failed, everything behind it is skipped —
+      // never a live pending row, never a plan hint.
+      assert.ok(body.includes('class="new-step failed" data-step="secure"'), "secure renders failed");
+      assert.equal(countMatches(body, '<li class="new-step skipped"'), 3, "configure/verify/ready render skipped");
+      assert.ok(!body.includes('class="new-step pending"'), "no live pending rows behind a failure");
+      // ONE recovery action (parent D25) + the console stays for the read-out.
+      assert.equal(countMatches(body, 'id="new-retry"'), 1, "exactly one Retry recovery action");
+      assert.ok(body.includes(">Retry setup<"), "the recovery action is Retry setup");
+      assert.ok(body.includes("new-console"), "the console stays on the failed screen");
+      assert.ok(body.includes("provision FAILED after 3 attempts"), "the console carries the failure tail");
+    },
+  },
+  "theater-ready": {
+    what: "the /new ready hero — the SHARED readyHeroHtml: Live eyebrow, Open Studio, deploy handoff",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-ready"), "the shared ready hero must render");
+      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      assert.ok(body.includes('id="new-open-studio"'), "Open Studio is the primary action");
+      assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
+      assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
+      assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
@@ -506,11 +713,11 @@ function countMatches(hay, needle) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry } = bootScenario(name);
+  const { registry, hooks } = bootScenario(name);
   await flush();
 
   if (exp.check) {
-    exp.check(registry);
+    exp.check(registry, hooks);
     return exp.what;
   }
 

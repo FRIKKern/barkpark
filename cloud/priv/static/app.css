@@ -85,7 +85,6 @@
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -135,7 +134,6 @@
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -160,7 +158,6 @@ html[data-bp-theme="evergreen"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -171,7 +168,6 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -182,7 +178,6 @@ html[data-bp-theme="charple"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(282.39 44.23% 48.78%);
   --primary-hsl: 282.39 44.23% 40.78%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 282.39 44.23% 40.78%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -193,7 +188,6 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-fg: hsl(282.56 45% 8%);
   --ring: hsl(282.56 58.11% 70.98%);
   --primary-hsl: 282.56 58.11% 70.98%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 282.56 58.11% 70.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -204,7 +198,6 @@ html[data-bp-theme="ember"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(19.33 71.29% 48.98%);
   --primary-hsl: 19.33 71.29% 40.98%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 19.33 71.29% 40.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -215,7 +208,6 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-fg: hsl(19.01 45% 8%);
   --ring: hsl(19.01 75.53% 63.14%);
   --primary-hsl: 19.01 75.53% 63.14%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 19.01 75.53% 63.14%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -226,7 +218,6 @@ html[data-bp-theme="fjord"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(191.6 80.95% 36.82%);
   --primary-hsl: 191.6 80.95% 28.82%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 191.6 80.95% 28.82%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -237,7 +228,6 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-fg: hsl(193.27 45% 8%);
   --ring: hsl(193.27 62.43% 64.51%);
   --primary-hsl: 193.27 62.43% 64.51%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 193.27 62.43% 64.51%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -248,7 +238,6 @@ html[data-bp-theme="iris"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(248.75 63.72% 62%);
   --primary-hsl: 248.75 63.72% 55.69%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 248.75 63.72% 55.69%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -259,7 +248,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-fg: hsl(248.87 45% 8%);
   --ring: hsl(248.87 100% 77.45%);
   --primary-hsl: 248.87 100% 77.45%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 248.87 100% 77.45%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -497,7 +485,10 @@ a:hover { text-decoration: underline; }
 .btn-ghost:hover { background: var(--muted-surface); color: var(--text); }
 
 .btn-sm { height: 28px; padding: 0 10px; font-size: var(--text-xs); }
-.btn-block { width: 100%; }
+/* Full-width CTA (auth submit, launch, ready-fold, Vercel handoff): every
+   .btn-block in the product is a screen's ONE primary-weight action, so it
+   carries the taller 40px front-door hit target (v4, gr-p2-front-door). */
+.btn-block { width: 100%; height: 40px; font-size: var(--text-base); }
 
 /* ---------------------------------------------------------- inputs */
 .label { display: block; font-size: var(--text-sm); font-weight: 500; margin-bottom: 6px; color: var(--text); }
@@ -506,13 +497,13 @@ a:hover { text-decoration: underline; }
 
 .form-input {
   width: 100%;
-  height: 36px;
+  height: 38px;
   padding: 0 var(--space-3);
   font-family: inherit;
   font-size: var(--text-base);
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.14);
   border-radius: var(--radius-sm);
   transition: border-color var(--t), box-shadow var(--t);
   appearance: none;
@@ -524,10 +515,12 @@ select.form-input {
   padding-right: 32px;
 }
 .form-input::placeholder { color: var(--dim); }
+/* Focus rides the IDENTITY accent (not the evergreen-frozen --ring-soft): the
+   ring recolours across all 5 skins × both modes for free (gr-p2-front-door). */
 .form-input:focus {
   outline: none;
   border-color: var(--ring);
-  box-shadow: 0 0 0 2px var(--ring-soft);
+  box-shadow: 0 0 0 3px hsl(var(--primary-hsl) / 0.15);
 }
 
 /* ---------------------------------------------------------- card */
@@ -646,24 +639,63 @@ select.form-input {
   border-radius: var(--radius-sm);
 }
 
-/* ============================================================ AUTH */
+/* ============================================================ AUTH
+   The front door (B-01..B-03: login/signup, reset request+form, 2FA challenge),
+   composed fresh from the styleguide vocabulary on the v4 ladder (GR21 — no
+   agency mock exists for auth; the component spec is styleguide.html). Chrome
+   rides the identity-invariant cloudChrome family; ONLY the accent
+   (--primary…) varies per skin, so the welcome glow, active tab, focus rings
+   and links restyle across all 5 identities × light/dark for free. The shared
+   form primitives (.field/.label/.form-input/.btn-block/.input-affix/
+   .check-row/.oauth-*, in their sections above) stay UNSCOPED on purpose:
+   /new's auth step and /activate inherit them by class identity — never scope
+   them under .auth-card, never import Launch Theater's .new-* here. */
 .auth-screen {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(60% 60% at 50% 0%, var(--muted-surface) 0%, transparent 70%),
+    radial-gradient(90% 55% at 50% -5%, hsl(var(--primary-hsl) / 0.08) 0%, transparent 70%),
     var(--bg);
 }
 .auth-center { flex: 1; display: grid; place-items: center; padding: 24px; }
-.auth-card { width: 100%; max-width: 380px; padding: 32px; box-shadow: var(--shadow); }
-.auth-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; }
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 36px 32px 32px;
+  background: var(--cc-card);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.1);
+  box-shadow: var(--elev-2);
+}
+.auth-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 26px; }
+.auth-brand .wordmark-text { font-size: 16px; }
+
+/* Card heading + supporting copy — AUTH-scoped by name, shared by the reset
+   card and the 2FA challenge card at ALL THREE of its mount sites (#twofa-card,
+   /new's #new-twofa, the /activate park→resume). GR21: theater's
+   .new-title/.new-desc never render on an auth surface. */
+.auth-title {
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.auth-desc {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--dim);
+  margin: 0 0 20px;
+}
+
+/* Segmented Log in / Sign up switch — card2 track, card-raised active thumb. */
 .auth-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   padding: 4px;
-  background: var(--muted-surface);
+  background: var(--cc-card2);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.06);
   border-radius: var(--radius);
   margin-bottom: 24px;
 }
@@ -673,29 +705,39 @@ select.form-input {
   background: transparent;
   border-radius: var(--radius-sm);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--muted-text);
+  color: var(--dim);
   cursor: pointer;
   transition: background var(--t), color var(--t), box-shadow var(--t);
 }
-.auth-tab.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
-.auth-foot { font-size: 13px; text-align: center; margin: 20px 0 0; }
+.auth-tab:hover { color: var(--text); }
+.auth-tab.is-active {
+  background: var(--cc-card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--elev-1);
+}
+.auth-foot { font-size: var(--text-sm); text-align: center; margin: 20px 0 0; }
 
 /* ---------------------------------------------- OAuth / SSO (oauth-sso) */
-/* "or" divider between password auth and the provider buttons. */
+/* "or" divider between password auth and the provider buttons — the mono
+   eyebrow voice (machine string, meta duty: --cc-fg4 is capped ≥3:1). */
 .oauth-divider {
   display: flex; align-items: center; gap: 12px;
-  margin: 20px 0; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 20px 0; color: var(--cc-fg4);
+  font-family: var(--mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.14em;
 }
 .oauth-divider::before, .oauth-divider::after {
-  content: ""; flex: 1; height: 1px; background: var(--border);
+  content: ""; flex: 1; height: 1px; background: rgba(var(--cc-line-rgb), 0.1);
 }
 .oauth-buttons { display: flex; flex-direction: column; gap: 10px; }
 .btn-oauth {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  background: var(--cc-card); color: var(--text);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.14);
 }
-.btn-oauth:hover { background: var(--bg); border-color: var(--primary); }
+.btn-oauth:hover { background: var(--cc-card); border-color: rgba(var(--cc-line-rgb), 0.3); }
 
 /* ========================================================== SHELL */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
@@ -1153,7 +1195,10 @@ select.form-input {
   cursor: pointer;
 }
 .size-opt:hover { border-color: var(--dim); }
-.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
+/* GR22: --primary-soft retired (this was its sole consumer) — the selected tint
+   reads --ok-soft, the same accent channel/alpha by GR6 law (the --ok family
+   TRACKS accent.primary), so the bytes painted are identical. */
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--ok-soft); }
 .size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
 .size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -1178,7 +1223,7 @@ select.form-input {
 .input-affix .form-input { padding-right: 40px; }
 .affix-btn {
   position: absolute; top: 0; right: 0;
-  height: 36px; width: 36px;
+  height: 38px; width: 38px; /* mirrors .form-input's 38px control height */
   display: grid; place-items: center;
   background: none; border: none; cursor: pointer; color: var(--dim);
 }
@@ -1566,6 +1611,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   padding: 48px 20px;
 }
 .new-body { width: 100%; max-width: 560px; }
+/* GR18 theater (v4, screens/09): the progress + failed screens open into the
+   two-column stage, so their host body widens; the form steps (auth/launch/
+   pricing) keep the focused 560px column. */
+.new-body:has(.new-progress), .new-body:has(.new-failed) { max-width: 920px; }
 .new-card { padding: 32px; }
 .new-eyebrow {
   display: inline-block;
@@ -1576,7 +1625,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--muted-text);
   margin-bottom: 10px;
 }
-.new-eyebrow.ok { color: var(--success); }
+.new-eyebrow.ok { color: var(--ok); } /* ladder voice (legacy --success alias retired in-region) */
 .new-title { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 8px; }
 .new-desc { color: var(--muted-text); margin: 0 0 18px; line-height: 1.5; }
 .new-gets {
@@ -1598,7 +1647,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   position: absolute;
   left: 0;
   top: 0;
-  color: var(--success);
+  color: var(--ok);
   font-weight: 700;
 }
 .new-fineprint { font-size: 13px; margin: 12px 0 0; text-align: center; }
@@ -1640,8 +1689,38 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-tier-price .dim { font-size: 13px; font-weight: 400; }
 .new-tier .btn { margin-top: 12px; }
 
-/* progress step */
-.new-progress h2 { font-size: 20px; margin: 0 0 4px; }
+/* ── GR18 theater (v4, screens/09): head + price line + two-column stage ─────
+   The progress/failed screens share the theater shell: a centred head (title +
+   pace + the price-before-charge line), the master bar, then the stage — step
+   rail beside the live console. Phone contract (styleguide 10): the rail
+   stacks ABOVE the console (DOM order already rail-first), the console caps at
+   40vh, and no theater text falls below 13px. */
+.new-theater-head { text-align: center; }
+.new-theater-head .new-title { font-size: 24px; margin: 0 0 6px; }
+.new-theater-head .new-desc { margin: 0; font-size: 13.5px; }
+.theater-price {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted-text);
+  line-height: 1.5;
+}
+.theater-price-amount { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.new-theater-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-top: 18px;
+}
+.new-theater-rail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+}
+.new-theater-rail .new-steps { margin-top: 0; }
+.new-theater-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.new-theater-side .new-console { margin-top: 0; }
+.new-theater-note { margin: 0; font-size: 13px; }
 .new-elapsed { font-variant-numeric: tabular-nums; }
 
 /* ── Overall progress (the headline master bar; shared /new + instance timeline).
@@ -1686,10 +1765,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--primary-fg);
+  /* Styleguide motion contract: state advance eases 250ms… */
+  transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
 }
-.new-step.done .new-step-dot { background: var(--success); border-color: var(--success); }
+.new-step-label { transition: color 250ms ease; }
+/* …and failure SNAPS (0ms) — a break is never eased in (ladder snap law). */
+.new-step.failed .new-step-dot,
+.new-step.failed .new-step-label { transition: none; }
+.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = mint (--ok tracks the accent, GR6) */
 /* The active dot IS the per-phase loading bar: a conic ring filled by --p
    (stepRingProgress over the phase's expected duration, ticked in place every
    second). Registered as a <percentage> so the fill animates smoothly between
@@ -1703,7 +1788,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   transition: --p 0.9s linear;
 }
 /* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
-.new-step.failed .new-step-dot { background: var(--destructive); border-color: var(--destructive); }
+.new-step.failed .new-step-dot { background: var(--danger); border-color: var(--danger); }
+/* GR18(4): steps behind a failure never ran and never will — dashed hollow,
+   dimmed, no plan hint (markup drops it), clearly distinct from live pending. */
+.new-step.skipped .new-step-dot { border-style: dashed; background: transparent; }
+.new-step.skipped .new-step-label { color: var(--dim); }
 /* Between-steps honesty: the `next` row (previous step done, this one about to
    report — e.g. the SSH boot wait) pulses instead of sitting frozen. */
 .new-step.next .new-step-dot { border-color: var(--primary); animation: new-next-pulse 1.4s ease-in-out infinite; }
@@ -1713,11 +1802,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   0%, 100% { box-shadow: 0 0 0 0 var(--ring-soft); }
   50% { box-shadow: 0 0 0 4px var(--ring-soft); }
 }
-.new-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.new-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .new-step-label { color: var(--muted-text); }
 .new-step.active .new-step-label { color: var(--text); font-weight: 600; }
 .new-step.done .new-step-label { color: var(--text); }
-.new-step.failed .new-step-label { color: var(--destructive); font-weight: 600; }
+.new-step.failed .new-step-label { color: var(--danger); font-weight: 600; }
 /* dwb-19: the live sub-caption under the active step — muted, smaller, with a
    subtle fade/translate that re-plays each time the caption element re-mounts
    (its text changed). A done/failed step keeps its final caption, dimmer. */
@@ -1816,9 +1905,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
 .new-ready .mono { font-family: var(--mono); font-size: 13px; }
 
-/* failed step */
-.new-failed h2 { font-size: 20px; margin: 0 0 10px; }
-.new-failed .notice { margin-bottom: 12px; }
+/* failed step — the theater's failure stage (GR18(4)): head carries the honest
+   server-owned failCopy; the rail shows the snap (failed red, rest skipped);
+   ONE recovery action below the stage. */
+.new-fail-copy {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  border: 1px solid hsl(var(--danger-hsl) / 0.3);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+.new-failed .new-actions { margin: 18px 0 0; }
+.new-failed .new-failed-caption {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-text);
+  min-height: 18px;
+}
 
 /* dwb-16: live provisioning console — dark, monospace, auto-scrolling, visible by
    default during provisioning, collapsible. Stays on the failed screen too. */
@@ -1869,6 +1976,32 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* dwb-16: connection-lost banner in the progress screen. */
 .new-conn-lost { margin: 0 0 14px; }
 
+/* Theater/phone (styleguide contract 10): the stage stacks — rail above the
+   console (DOM order is already rail-first) — the console caps at 40vh, the
+   done-banner buttons go full-width, and no theater text falls below 13px. */
+@media (max-width: 720px) {
+  .new-theater-grid { grid-template-columns: 1fr; gap: 16px; }
+  .new-console-body, .bp-console-body { max-height: 40vh; }
+  .new-ready .new-actions .btn { width: 100%; }
+  .new-step-detail, .new-step-probe, .new-step-time,
+  .new-console-toggle, .new-console-body,
+  .bp-console-toggle, .bp-console-body { font-size: 13px; }
+}
+
+/* Reduced motion (styleguide contract 10): nothing conveys information through
+   motion alone — the glyphs/colours already carry every state, so the next-row
+   pulse goes static (full opacity), state changes cut instead of easing, the
+   caption fade is dropped, and the ring stops tweening between ticks. The
+   .new-step-spin spinner keeps its literal duration by house law: a loading
+   indicator is state, not decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .new-step.next .new-step-dot { animation: none; }
+  .new-step-dot, .new-step-label { transition: none; }
+  .new-step.active .new-step-dot { transition: none; }
+  .new-step-detail { animation: none; }
+  .prov-overall-fill { transition: none; }
+}
+
 /* ========================================================= C3 PROVISION TIMELINE
    ONE component, every mount (unified-provision-view): the instance-detail
    timeline renders the SAME .new-step rows as the /new progress screen — ring,
@@ -1879,10 +2012,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .bp-timeline {
   margin: 0 0 20px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 16px 18px;
   background: var(--surface);
 }
+/* GR18(3): the price-before-charge line inside the fold sits under the head,
+   left-aligned (the fold has no centred theater head). */
+.bp-timeline .theater-price { margin: 6px 0 0; }
 .bp-tl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .bp-tl-title { font-size: 15px; margin: 0; }
 .bp-tl-total { font-size: 13px; color: var(--muted-text); font-variant-numeric: tabular-nums; }
@@ -2454,13 +2590,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .invite-skip:hover { color: var(--text); }
 
 /* The sign-in card's invitation banner (logged-out landing). :empty hides the
-   slot while the preview fetch is in flight, so no husk flashes. */
+   slot while the preview fetch is in flight, so no husk flashes. Info-tinted
+   on the ladder (styleguide banner grammar: tint + border say "info"; copy
+   stays readable --muted-text, never colour-on-colour). */
 .auth-invite {
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--muted-text);
   background: var(--info-soft);
-  border: 1px solid hsl(var(--info-hsl) / 0.25);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 18px;
@@ -3341,4 +3479,83 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .app-shell { flex-direction: column; }
   .sidebar { flex-basis: auto; width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08); }
   .nav-spacer { display: none; }
+}
+
+/* ---------------------------------------------------------- gr-p2 plan & dunning (C-03/C-04)
+   Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
+   quota line on tier cards, and the GR20 topbar billing chip. Append-only tail;
+   new rules ride the v4 ladder (--cc-*) directly — no new legacy-alias uses. */
+.trial-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: var(--pill);
+  color: var(--cc-blue);
+  background: hsl(var(--info-hsl) / 0.12);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
+  white-space: nowrap;
+}
+.trial-chip--low {
+  color: var(--danger);
+  background: hsl(var(--danger-hsl) / 0.1);
+  border-color: hsl(var(--danger-hsl) / 0.3);
+}
+.trial-cta { font-size: 14px; font-weight: 600; color: var(--cc-fg); margin: 4px 0 10px; }
+
+/* The GR17 banner stacks (chip+title / body / CTA) inside the .notice frame. */
+.dunning-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
+.dunning-banner .btn { margin-left: 0; }
+.dunning-head { display: flex; align-items: center; gap: 10px; }
+.dunning-plan {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.25);
+  color: var(--cc-fg2);
+  white-space: nowrap;
+}
+.dunning-title { color: var(--warn-strong); font-weight: 700; }
+.dunning-body { margin: 0; max-width: 62ch; }
+
+/* Quota-honest tier cards: the real ceiling, mono, right above the action. */
+.tier-quota { font-family: var(--mono); font-size: 11px; color: var(--cc-fg3); margin: 0 0 12px; }
+
+/* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
+   the info blue, past-due the danger red. It is a link to #billing. */
+.billing-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--pill);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  text-decoration: none;
+}
+.billing-chip:hover { text-decoration: none; }
+.billing-chip--trial {
+  color: var(--cc-blue);
+  background: hsl(var(--info-hsl) / 0.1);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
+}
+.billing-chip--trial:hover { background: hsl(var(--info-hsl) / 0.16); }
+.billing-chip--past_due {
+  color: var(--cc-red-strong);
+  background: hsl(var(--danger-hsl) / 0.1);
+  border: 1px solid hsl(var(--danger-hsl) / 0.3);
+}
+.billing-chip--past_due:hover { background: hsl(var(--danger-hsl) / 0.16); }
+
+/* The current-plan status pill in its warning state — "Past due" must never
+   ride the green Recommended skin. */
+.plan-rec--due {
+  color: var(--warn-strong);
+  border-color: hsl(var(--warn-hsl) / 0.4);
+  background: hsl(var(--warn-hsl) / 0.1);
 }

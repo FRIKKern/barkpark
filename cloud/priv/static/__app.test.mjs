@@ -84,6 +84,42 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── gr-p2-front-door: the v4 front door (B-01..B-03) ────────────────────────
+// The sign-in card's initial-tab classifier, the 2FA card's AUTH-scoped
+// vocabulary (GR21: theater's .new-title/.new-desc never render on an auth
+// surface), and the DELIBERATE 60s rate-limit countdown pin.
+
+test("authModeFromHash: #signup / #/auth/signup land the Create-account tab; all else login", () => {
+  assert.equal(typeof hooks.authModeFromHash, "function", "authModeFromHash must be exported");
+  assert.equal(hooks.authModeFromHash("#signup"), "signup");
+  assert.equal(hooks.authModeFromHash("#/auth/signup"), "signup");
+  for (const h of ["", "#", "#overview", "#login", "#signup2", "#/auth/signup?x=1",
+    "#/auth/reset?token=x", null, undefined]) {
+    assert.equal(hooks.authModeFromHash(h), "login", JSON.stringify(h) + " → login");
+  }
+});
+
+test("gr-p2: every 2FA card state composes in the AUTH vocabulary — zero theater classes", () => {
+  for (const opts of [{ mode: "otp" }, { mode: "recovery" },
+    { mode: "otp", rateLimited: true }, { mode: "otp", error: "invalid_code" }]) {
+    const html = hooks.twoFactorCardHtml(opts);
+    assert.match(html, /class="auth-title"/, JSON.stringify(opts) + " must carry .auth-title");
+    assert.match(html, /class="auth-desc"/, JSON.stringify(opts) + " must carry .auth-desc");
+    assert.doesNotMatch(html, /new-title|new-desc/,
+      JSON.stringify(opts) + " must not import theater vocabulary");
+  }
+});
+
+test("gr-p2: TFA_RATE_WAIT_S is DELIBERATELY 60 — the backend window is a fixed 60s", () => {
+  // two_factor_rate_limiter.ex: @limit 5, @window_ms 60_000. The old 30s
+  // countdown re-enabled the button INSIDE the same window and re-fired
+  // straight into the same 429. A server retry_after seam is backlog
+  // (gr-backlog-tfa-retry-after) — until then the constant mirrors the window.
+  assert.equal(hooks.twoFactorRateWaitS, 60);
+  const html = hooks.twoFactorCardHtml({ mode: "otp", rateLimited: true });
+  assert.match(html, /Try again in 60s/); // the countdown copy matches the pin
+});
+
 // ── gr-w3 v4 shell: context-morph enum + fail-closed operator gate ──────────
 // The sidebar morph is a PURE function of the parsed route (three panes, one
 // visible); the operator entry is gated fail-closed on /v1/me.platform_operator.
@@ -1230,7 +1266,9 @@ test("timelineHtml: ONE component — the instance timeline renders the SHARED .
   const html = hooks.timelineHtml(rows, { failed: true, failureDetail: "SECRET_KEY_BASE was 32 bytes" });
   // The unified rows: same markup family as /new — ring dots, pace column, probes.
   assert.match(html, /<li class="new-step failed" data-step="create">/);
-  assert.match(html, /<li class="new-step pending" data-step="secure">/);
+  // gr-p2 (GR18(4)) pin update: unstarted steps BEHIND a failure render
+  // `skipped` (dashed hollow, no plan hint), never a live `pending`.
+  assert.match(html, /<li class="new-step skipped" data-step="secure">/);
   assert.match(html, /new-step-time">3s</); // the failed step's real elapsed
   assert.match(html, /new-step-probe">verify\.login: 401 in 182ms/);
   assert.doesNotMatch(html, /bp-tl-step|bp-tl-dot|bp-tl-elapsed/); // the old row family is GONE
@@ -6212,4 +6250,271 @@ test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the es
   assert.ok(p > 0.1 && p < 0.9, "mid-build ring should be partway filled, got " + p);
   // Without an estimate (the pre-fix state) it was flat 0.
   assert.equal(hooks.stepRingProgress(30000, undefined), 0);
+});
+
+// ── gr-p2 plan & dunning (GR17/GR19/GR20): catalog, dunning, trial, chip ─────
+
+test("PLAN_CATALOG is the one quota-honest source: USD placeholders + real 1/3/10 ceilings", () => {
+  const cat = hooks.planCatalog;
+  assert.equal(cat.length, 3, "exactly the three real plans");
+  const by = {};
+  for (const t of cat) by[t.plan] = t;
+  // The REAL enforced ceilings (server Billing @default_limits) — never unlimited.
+  assert.equal(by.free.instances, 1);
+  assert.equal(by.supporter.instances, 3);
+  assert.equal(by.support_plus.instances, 10);
+  // USD placeholders held until the cloud-console-billing-live-gate human gate.
+  assert.equal(by.free.price, "$0");
+  assert.equal(by.supporter.price, "$69");
+  assert.equal(by.support_plus.price, "$499");
+});
+
+test("planFeatures leads with the real ceiling — the unlimited fiction is gone", () => {
+  const names = { free: "1 managed instance", supporter: "3 managed instances", support_plus: "10 managed instances" };
+  for (const t of hooks.planCatalog) {
+    const feats = hooks.planFeatures(t);
+    assert.equal(feats[0], names[t.plan], t.plan + " must state its real ceiling first");
+    assert.ok(!feats.join("|").includes("Unlimited"), t.plan + " must never claim unlimited");
+  }
+  assert.equal(hooks.planInstanceLimit({ instances: 1 }), "1 managed instance", "singular at 1");
+});
+
+test("planFromSub: a past_due team KEEPS its paid plan (the sidebar-pill fix)", () => {
+  assert.equal(hooks.planFromSub({ status: "past_due", plan: "supporter" }), "supporter");
+  assert.equal(hooks.planFromSub({ status: "active", plan: "supporter" }), "supporter");
+  assert.equal(hooks.planFromSub({ status: "active", plan: "trial" }), "trial");
+  // canceled / absent / plan-less all read free — never a stale paid name.
+  assert.equal(hooks.planFromSub({ status: "canceled", plan: "supporter" }), "free");
+  assert.equal(hooks.planFromSub(null), "free");
+  assert.equal(hooks.planFromSub({ status: "active" }), "free");
+});
+
+test("dunningDates: failed_date is EXACTLY suspend_date minus the 3-day grace", () => {
+  const end = "2026-08-01T12:00:00.000Z";
+  const d = hooks.dunningDates({ current_period_end: end });
+  assert.ok(d, "a dated sub yields both milestones");
+  assert.equal(d.suspendMs, Date.parse(end));
+  assert.equal(d.suspendMs - d.failedMs, 3 * 86400 * 1000, "the −3d offset is the grace window");
+  // No dated milestone → null (the banner drops dates, never invents them).
+  assert.equal(hooks.dunningDates({ current_period_end: null }), null);
+  assert.equal(hooks.dunningDates(null), null);
+});
+
+test("dunningBannerHtml: GR17 strings verbatim, portal CTA, dead promises stay dead", () => {
+  const html = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.match(html, /Your card was declined on .+\. Your instances keep running until .+, then they're suspended — not deleted — and come right back the moment payment succeeds\./);
+  assert.ok(html.includes(">Past due<"), "the banner title");
+  assert.ok(html.includes(">Supporter<"), "the plan-name chip");
+  assert.ok(html.includes(">Update payment method<"), "the GR17 CTA verbatim");
+  assert.ok(html.includes('id="dunning-portal"'), "the CTA is the portal wire point");
+  assert.ok(!html.includes("retry twice more"), "the retry-count fiction is gone");
+  assert.ok(!/contact support/i.test(html), "the support-mail denial copy is gone");
+  // Date-less sub still renders the honest sentence, without invented dates.
+  const bare = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: null });
+  assert.ok(bare.includes("suspended — not deleted"), "the promise survives date-less");
+  assert.ok(!bare.includes("declined on"), "no invented failed date");
+});
+
+test("trialCardHtml carries the RATIFIED CTA verbatim and never the teardown-dishonest promise", () => {
+  const html = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 14 });
+  assert.ok(html.includes("Pick a plan below to keep it. No card needed."),
+    "the ratified CTA (task-2ed0ea068f37345d), verbatim");
+  assert.ok(html.includes("14 days left"), "the countdown chip");
+  assert.ok(!html.includes("suspended — not deleted"), "trial expiry is a real teardown");
+  // The final days flip the chip to the low state; singular reads correctly.
+  const low = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 1 });
+  assert.ok(low.includes("trial-chip--low"), "≤3 days lights the low chip");
+  assert.ok(low.includes("1 day left"), "singular day");
+});
+
+test("tierCardHtml: quota line always; portal button for subscribed, checkout otherwise", () => {
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const fresh = hooks.tierCardHtml(supporter, "free", false);
+  assert.ok(fresh.includes("3 managed instances"), "the quota line renders");
+  assert.ok(fresh.includes('data-plan="supporter"'), "unsubscribed → checkout");
+  const paid = hooks.tierCardHtml(supporter, "support_plus", true);
+  assert.ok(paid.includes('data-portal-plan="supporter"'), "subscribed → portal, self-serve");
+  assert.ok(!/contact support/i.test(paid), "no support-mail denial copy");
+  const current = hooks.tierCardHtml(supporter, "supporter", true);
+  assert.ok(current.includes(">Current plan<"), "the current tier is marked");
+});
+
+test("billingChipModel: trial countdown XOR past-due alarm; silent otherwise (GR20)", () => {
+  assert.equal(hooks.billingChipModel(null), null);
+  const trial = hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 5 });
+  assert.equal(trial.kind, "trial");
+  assert.equal(trial.label, "Trial · 5 days left");
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 1 }).label, "Trial · 1 day left");
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 0 }).label, "Trial ended");
+  const due = hooks.billingChipModel({ plan: "supporter", status: "past_due" });
+  assert.equal(due.kind, "past_due");
+  assert.equal(due.label, "Payment failed · fix billing");
+  // XOR: a past_due trial reads past-due (payment beats countdown).
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "past_due", trial_days_remaining: 5 }).kind, "past_due");
+  // An active paid plan / free team shows NO chip.
+  assert.equal(hooks.billingChipModel({ plan: "supporter", status: "active" }), null);
+  assert.equal(hooks.billingChipModel({ plan: "free", status: "active" }), null);
+});
+
+test("currentPlanCardHtml: dunning banner only when past_due; portal CTA always", () => {
+  const due = hooks.currentPlanCardHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
+  assert.ok(due.includes("dunning-banner"), "past_due carries the banner");
+  assert.ok(due.includes(">Manage billing<"), "the portal CTA renders");
+  const ok = hooks.currentPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
+  assert.ok(!ok.includes("dunning-banner"), "active carries no banner");
+  assert.ok(ok.includes(">Manage billing<"), "the portal CTA renders for active too");
+  assert.ok(!/contact support/i.test(ok + due), "no support-mail denial copy anywhere");
+});
+
+test("billingPortalFlag matches the gateway's pinned return_url flag exactly", () => {
+  // stripe_gateway.ex default_portal_return_url: "https://barkpark.cloud/?billing=portal"
+  assert.equal(hooks.billingPortalFlag("?billing=portal"), true);
+  assert.equal(hooks.billingPortalFlag("?billing=portal&x=1"), true);
+  assert.equal(hooks.billingPortalFlag("?x=1&billing=portal"), true);
+  assert.equal(hooks.billingPortalFlag("?checkout=success"), false);
+  assert.equal(hooks.billingPortalFlag("?billing=portalx"), false, "no prefix-match false positive");
+  assert.equal(hooks.billingPortalFlag(""), false);
+  assert.equal(hooks.billingPortalFlag(undefined), false);
+});
+
+test("ERRORS gains the two billing truths; friendly() precedence is ERRORS → details → fallback → slug", () => {
+  assert.equal(hooks.friendly({ error: "limit_reached" }, "fallback"), "You're at your plan's instance limit.");
+  assert.equal(hooks.friendly({ error: "billing_not_configured" }), "Billing isn't set up on this deployment yet.");
+  // The GR19 fix: a designed per-call fallback now BEATS the humanized slug…
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }, "Please try again."), "Please try again.");
+  // …while a call WITHOUT a fallback still surfaces the humanized slug.
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
+  // details still outrank the fallback (field-level truth is more specific).
+  assert.equal(hooks.friendly({ error: "x", details: { name: ["is required"] } }, "fb"), "name is required");
+});
+
+test("tierCardHtml: a trial team's Free card never offers a doomed checkout (review fix)", () => {
+  // There is no free checkout — POST /v1/billing/checkout with plan=free 422s
+  // plan_invalid. Only a TRIAL team ever sees Free as non-current, and doing
+  // nothing IS how a trial lands on Free, so the card is honest and inert.
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  const onTrial = hooks.tierCardHtml(free, "trial", false);
+  assert.ok(!onTrial.includes('data-plan="free"'), "no checkout wire on the free card");
+  assert.ok(onTrial.includes("Yours when the trial ends"), "the honest inert label");
+  // A genuinely free team still reads Free as its current plan.
+  assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// gr-p2 launch theater (GR18): conditional rail proof, price-before-charge,
+// failure snap (skipped rows). Appended at the tail (OC9 append-only law).
+// ════════════════════════════════════════════════════════════════════════════
+
+test("GR18(1): conditional rail — 5 rows without freshen/content, 7 when the server reports both", () => {
+  // The typical warm-path run: neither optional step reported → exactly the 5
+  // planned rows (the design render's 7 static rows over-promise; code wins).
+  const bare = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+  ] }, NOW);
+  assert.equal(bare.length, 5);
+  assert.deepEqual([...bare.map((r) => r.step)], ["create", "secure", "configure", "verify", "ready"]);
+  // A stale-box templated run: the server reported freshen AND content → both
+  // slot into their places and the rail grows to 7.
+  const full = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(1) },
+    { step: "freshen", status: "started", at: T(1) },
+    { step: "freshen", status: "done", at: T(3) },
+    { step: "secure", status: "started", at: T(3) },
+    { step: "secure", status: "done", at: T(4) },
+    { step: "configure", status: "started", at: T(4) },
+    { step: "configure", status: "done", at: T(5) },
+    { step: "content", status: "started", at: T(5) },
+  ] }, NOW);
+  assert.equal(full.length, 7);
+  assert.deepEqual([...full.map((r) => r.step)],
+    ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
+});
+
+// A priced catalog fixture shaped like the real /v1/providers/:kind/catalog
+// payload (server_types[].monthly_price, regions[].{slug,name}, currency).
+const THEATER_CATALOG = {
+  currency: "EUR",
+  regions: [{ slug: "fsn1", name: "Falkenstein" }, { slug: "hel1", name: "Helsinki" }],
+  server_types: [
+    { slug: "cx22", cores: 2, ram_gb: 4, disk_gb: 40, monthly_price: 4.9 },
+    { slug: "cx32", cores: 4, ram_gb: 8, disk_gb: 80, monthly_price: null }, // honest unpriced row
+  ],
+};
+const THEATER_BP = { provider: "hetzner", region: "fsn1", server_type: "cx22" };
+
+test("GR18(3): price-before-charge — the REAL catalog price via formatMonthlyPrice, provider + human region", () => {
+  const m = hooks.theaterPriceModel(THEATER_BP, THEATER_CATALOG);
+  // The price IS formatMonthlyPrice's output for the catalog row — never
+  // plan-grid digits, never an invented number.
+  assert.equal(m.price, hooks.formatMonthlyPrice(4.9, "hetzner", "EUR"));
+  assert.equal(m.price, "€4.9/mo");
+  assert.equal(m.provider, "Hetzner Cloud"); // providerMeta's honest display name
+  assert.equal(m.location, "Falkenstein"); // the region NAME, slug as fallback
+  const html = hooks.theaterPriceLineHtml(THEATER_BP, THEATER_CATALOG);
+  assert.match(html, /data-price-line/);
+  assert.match(html, /€4\.9\/mo/);
+  assert.match(html, /on Hetzner Cloud · Falkenstein/);
+  assert.match(html, /price confirmed before anything is charged\./);
+});
+
+test("GR18(3): the price line is OMITTED when no real price exists (nil-safe, never fabricated)", () => {
+  // The catalog row exists but carries no price (nil monthly_price).
+  const unpriced = Object.assign({}, THEATER_BP, { server_type: "cx32" });
+  assert.equal(hooks.theaterPriceModel(unpriced, THEATER_CATALOG), null);
+  assert.equal(hooks.theaterPriceLineHtml(unpriced, THEATER_CATALOG), "");
+  // No catalog at all (managed launch → 404 no_provider), no server_type, an
+  // unknown type, and garbage — all omit, never throw, never "Price unavailable".
+  assert.equal(hooks.theaterPriceLineHtml(THEATER_BP, null), "");
+  assert.equal(hooks.theaterPriceLineHtml({ provider: "hetzner" }, THEATER_CATALOG), "");
+  assert.equal(hooks.theaterPriceLineHtml(Object.assign({}, THEATER_BP, { server_type: "nope" }), THEATER_CATALOG), "");
+  assert.equal(hooks.theaterPriceLineHtml(null, null), "");
+  assert.equal(hooks.theaterPriceLineHtml(THEATER_BP, { server_types: "garbled" }), "");
+});
+
+test("GR18(3): a region the catalog does not know falls back to the slug; azure frames its floor price", () => {
+  const m = hooks.theaterPriceModel(Object.assign({}, THEATER_BP, { region: "xyz9" }), THEATER_CATALOG);
+  assert.equal(m.location, "xyz9");
+  const az = hooks.theaterPriceModel(
+    { provider: "azure", region: "westeurope", server_type: "b2s" },
+    { currency: "USD", regions: [], server_types: [{ slug: "b2s", monthly_price: 30.4 }] },
+  );
+  assert.equal(az.price, "from ~$30/mo compute"); // Decision 6 azure floor framing (≥10 rounds whole)
+  assert.equal(az.provider, "Microsoft Azure");
+});
+
+test("GR18(4): failure snap — rows behind the failed step render `skipped` with no plan hint, no caption", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(1) },
+    { step: "secure", status: "started", at: T(1), detail: "Requesting certificate" },
+    { step: "secure", status: "failed", at: T(4) },
+  ] }, NOW);
+  const html = hooks.newStepsHtml(rows);
+  assert.match(html, /<li class="new-step done" data-step="create">/);
+  assert.match(html, /<li class="new-step failed" data-step="secure">/);
+  // Everything behind the break is skipped — dashed hollow, and NEVER the
+  // pending "~30s" plan hint (promising a plan for a step that won't run).
+  assert.match(html, /<li class="new-step skipped" data-step="configure">/);
+  assert.match(html, /<li class="new-step skipped" data-step="verify">/);
+  assert.match(html, /<li class="new-step skipped" data-step="ready">/);
+  assert.doesNotMatch(html, /new-step pending/);
+  const skippedChunk = html.slice(html.indexOf('data-step="configure"'));
+  assert.doesNotMatch(skippedChunk, /new-step-time/); // no pace column on skipped rows
+  assert.doesNotMatch(skippedChunk, /new-step-detail/); // no caption either
+  // The failed row keeps its truth: real elapsed + its last caption.
+  assert.match(html, /new-step failed[\s\S]*?new-step-detail[^>]*>Requesting certificate/);
+  assert.match(html, /new-step failed[\s\S]*?new-step-time">3s</);
+});
+
+test("GR18(4): a step the server DID report after a break stays truthful (never blanket-skipped)", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "failed", at: T(2) },
+    { step: "verify", status: "started", at: T(3) },
+  ] }, NOW);
+  const html = hooks.newStepsHtml(rows);
+  assert.match(html, /<li class="new-step failed" data-step="create">/);
+  assert.match(html, /<li class="new-step active" data-step="verify">/); // reported → truthful
+  assert.match(html, /<li class="new-step skipped" data-step="secure">/);
 });
