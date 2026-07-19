@@ -1072,6 +1072,85 @@ const EXPECTATIONS = {
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
     },
   },
+
+  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
+  // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
+  "members-populated": {
+    what: "Members (admin) — roster + invitations on the .set-* anatomy, 3 real roles",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const body = reg.get("members-body").innerHTML || "";
+      assert.ok(body.includes("set-section"), "the roster rides the .set-section anatomy");
+      assert.ok(body.includes("Team members"), "the roster card heading renders");
+      assert.ok(body.includes("Pending invitations"), "the admin-only invitations card renders");
+      assert.ok(body.includes("ada@acme.com") && body.includes("lin@acme.com") && body.includes("rex@acme.com"), "every member row renders");
+      assert.ok(body.includes("(you)"), "the acting owner is self-tagged and gets no self-remove");
+      assert.ok(body.includes("sky@partner.io"), "a pending invitation renders");
+      // THREE roles only — the chips read Owner/Admin/Member; NO invented tiers.
+      assert.ok(body.includes(">Owner<") && body.includes(">Admin<") && body.includes(">Member<"), "the 3 real role chips render");
+      assert.ok(!body.includes("Operator") && !body.includes("Supporter"), "no design-fiction 5-role vocabulary is rendered");
+      // Manage affordances present for the admin; Remove is the destroy path.
+      assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "manager rows carry Change role + Remove");
+    },
+  },
+  // The plain-member seam (GR33 plain-member law): read-only roster, no
+  // invitations card, no manage affordances — proven by their ABSENCE.
+  "members-member": {
+    what: "Members (member) — read-only roster, zero manage affordances",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const body = reg.get("members-body").innerHTML || "";
+      assert.ok(body.includes("Team members") && body.includes("rex@acme.com"), "the roster still renders for a member");
+      assert.ok(!body.includes("Pending invitations"), "a member sees no invitations card");
+      assert.ok(!body.includes(">Change role<") && !body.includes(">Remove<"), "a member sees no manage affordances");
+      // The header Invite button stays hidden for a plain member.
+      assert.equal(reg.get("members-invite").hidden, true, "the Invite button is hidden for a member");
+    },
+  },
+  // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
+  // secret + write-once chips, the sealed write-once note) + the add FORM.
+  "env-populated": {
+    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
+      assert.ok(body.includes("DATABASE_URL") && body.includes("STRIPE_SECRET_KEY") && body.includes("WORKER_TOKEN"), "every var key renders");
+      assert.ok(body.includes(">Secret<"), "a secret chip renders");
+      assert.ok(body.includes(">Write-once<"), "a write-once chip renders");
+      assert.ok(body.includes(">Team<") && body.includes(">Instance<"), "both scope chips render");
+      // The value is sealed forever — NEVER a reveal affordance anywhere.
+      assert.ok(!body.includes("Reveal") && !body.includes("Show value") && !body.includes("value=\"env"), "no reveal affordance — the value is sealed");
+      // The write-once row carries the honest sealed-and-unreplaceable note.
+      assert.ok(body.includes("Delete and recreate to change"), "the write-once row states it can't be changed in place");
+      // The admin add-var FORM section with its own save-row.
+      assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
+      assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
+    },
+  },
+  // The write-once 409 twin renders the same sealed note; the POST-collision copy
+  // itself is unit-pinned (envVarWriteFailureCopy) since the submit is click-driven.
+  "env-write-once-409": {
+    what: "Environment variables — the write-once row's sealed state (409 copy unit-pinned)",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("STRIPE_SECRET_KEY") && body.includes("Write-once"), "the write-once var renders");
+      assert.ok(body.includes("Delete and recreate to change"), "the sealed per-row note renders");
+    },
+  },
+  // Env-vars (member): read-only rows, NO add form, NO Delete (member-read law).
+  "env-member": {
+    what: "Environment variables (member) — read-only rows, no add form",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("DATABASE_URL"), "the rows still render for a member");
+      assert.ok(!body.includes("Add a variable") && !body.includes("set-save-row"), "a member sees no add form");
+      assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

@@ -182,6 +182,7 @@
             <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
             <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
             <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
+            <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
           </div>
         </div>
 
@@ -403,6 +404,18 @@
           </header>
 
           <div id="members-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- ENVIRONMENT VARIABLES (G-06 — team env-vars, row model) ---------- -->
+        <section class="view" id="view-env" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Environment variables</h1>
+              <p class="dim">Team-wide values injected into your instances at boot. Keys are visible; values are encrypted and never shown again.</p>
+            </div>
+          </header>
+
+          <div id="env-body" aria-live="polite"></div>
         </section>
 
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->
