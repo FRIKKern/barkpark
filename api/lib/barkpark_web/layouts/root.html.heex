@@ -1326,7 +1326,28 @@
         inset: 0 0 0 auto;
         width: 300px;
         z-index: 5;
-        box-shadow: -12px 0 32px hsl(var(--bp-shadow-hsl) / 0.18);
+        /* Overlay tier, not docked tier. Once the inspector stops taking its
+           own column and starts covering the document, its shadow has to say
+           so — 0.18 read as a panel that mysteriously floats. */
+        box-shadow: -16px 0 48px hsl(var(--bp-shadow-hsl) / 0.28);
+      }
+      /* The scrim. It is the missing half of "this thing is ON TOP": without
+         it the document underneath still reads as live, editable surface.
+         ABSOLUTE, never fixed — the overlay is anchored to .editor-panel's
+         `position: relative`, so a fixed scrim would dim the whole viewport
+         (sidebar, topbar and neighbouring panes included) instead of the
+         document it covers. It also renders zero times outside this width,
+         because the :has() only matches while the sidebar is overlaid.
+         `pointer-events: none` is deliberate: CSS cannot carry a phx-click,
+         so a click-catching scrim would be a dead zone that swallows edits.
+         Tap-to-dismiss is spd-b12's job, in the .ex half. */
+      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        background: hsl(var(--bp-scrim-hsl) / 0.55);
+        pointer-events: none;
       }
       /* Inspector label/value rows crowd once the panel can sit over
          arbitrary content — let them wrap instead of colliding. */
