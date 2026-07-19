@@ -2804,6 +2804,71 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/counts/{dataset}": {
+      "get": {
+        "operationId": "data.counts.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bundled per-type published-document counts for a dataset in one query — {\"counts\":{\"<type>\":N,...}}.",
+        "tags": [
+          "data"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/tickets/{id}/answer": {
       "post": {
         "operationId": "ticket.answer",
@@ -10111,6 +10176,55 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/data/counts/{dataset}": {
+      "get": {
+        "operationId": "data.counts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bundled per-type published-document counts for a dataset in one query — {\"counts\":{\"<type>\":N,...}}.",
+        "tags": [
+          "data"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/register": {
       "post": {
         "operationId": "auth.register",
@@ -11009,6 +11123,10 @@
     {
       "description": "Dataset-level content stats and overview.",
       "name": "dataset"
+    },
+    {
+      "description": "Bundled cross-type reads over a dataset (per-type counts).",
+      "name": "data"
     },
     {
       "description": "Outbound webhook subscriptions.",
