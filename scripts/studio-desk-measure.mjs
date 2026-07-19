@@ -268,10 +268,13 @@ async (faceOverride) => {
   // ── force the face on the surface itself, so its OWN font-family (and every
   //    ch it resolves, including the one inside calc(55ch + 80px)) recomputes.
   const hadInline = surface.style.getPropertyValue('--paper-font-serif');
+  const hadInlinePriority = surface.style.getPropertyPriority('--paper-font-serif');
   if (faceOverride) surface.style.setProperty('--paper-font-serif', faceOverride);
 
   const restore = () => {
-    if (hadInline) surface.style.setProperty('--paper-font-serif', hadInline);
+    // Value AND priority — restoring without the priority would leave the page
+    // in a state this harness invented, for every row after this one.
+    if (hadInline) surface.style.setProperty('--paper-font-serif', hadInline, hadInlinePriority);
     else surface.style.removeProperty('--paper-font-serif');
   };
 
@@ -337,15 +340,28 @@ async (faceOverride) => {
 
   const widthWithFloor = surface.getBoundingClientRect().width;
   const hadMin = surface.style.getPropertyValue('min-inline-size');
+  const hadMinPriority = surface.style.getPropertyPriority('min-inline-size');
   surface.style.setProperty('min-inline-size', '0px', 'important');
   const widthWithoutFloor = surface.getBoundingClientRect().width;
-  if (hadMin) surface.style.setProperty('min-inline-size', hadMin);
+  // Restore the PRIORITY too. We overrode with !important; putting the value
+  // back without its original priority would silently promote a plain inline
+  // declaration to important for the rest of the run.
+  if (hadMin) surface.style.setProperty('min-inline-size', hadMin, hadMinPriority);
   else surface.style.removeProperty('min-inline-size');
   const floorBinds = Math.abs(widthWithFloor - widthWithoutFloor) > 0.5;
 
-  // The browser's own in-floor ch, derived from the resolved calc(55ch + 80px).
-  // Printed ALONGSIDE the probe, never instead of it.
-  const chInFloorPx = (minInlinePx && minInlinePx > 80) ? (minInlinePx - 80) / 55 : null;
+  // The browser's own in-floor ch, derived from the resolved floor. We only
+  // ever see the USED px value, never the authored formula, so the formula is
+  // an ASSUMPTION and is named as one. spd-w5-measure-lever-moves is chartered
+  // to change it (to calc(55ch + 2 * var(--paper-gutter)), or to retire it), at
+  // which point this derivation goes quietly wrong — so the divergence against
+  // the probe is checked below and a drift beyond tolerance is REPORTED, not
+  // absorbed. Printed ALONGSIDE the probe, never instead of it.
+  const FLOOR_CH_MULTIPLIER = 55;
+  const FLOOR_ADDEND_PX = 80;
+  const chInFloorPx = (minInlinePx && minInlinePx > FLOOR_ADDEND_PX)
+    ? (minInlinePx - FLOOR_ADDEND_PX) / FLOOR_CH_MULTIPLIER
+    : null;
 
   // ── the content box. clientWidth excludes borders and includes padding.
   const surfaceBorderBoxPx = surface.getBoundingClientRect().width;
@@ -444,7 +460,10 @@ async (faceOverride) => {
       probe_px_per_ch: round(chProbePx, 4),
       probe_method: 'span[style="width:1ch"] inserted as a CHILD of .bp-paper-surface',
       in_floor_px_per_ch: round(chInFloorPx, 4),
-      in_floor_method: minInlinePx ? '(resolved min-inline-size - 80) / 55' : 'min-inline-size resolved to 0 — no in-floor ch to derive',
+      in_floor_method: minInlinePx
+        ? \`(resolved min-inline-size - \${FLOOR_ADDEND_PX}) / \${FLOOR_CH_MULTIPLIER}\`
+        : 'min-inline-size resolved to 0 — no in-floor ch to derive',
+      in_floor_formula_assumed: \`calc(\${FLOOR_CH_MULTIPLIER}ch + \${FLOOR_ADDEND_PX}px)\`,
       divergence_pct: (chProbePx && chInFloorPx) ? round(((chInFloorPx - chProbePx) / chProbePx) * 100, 4) : null,
     },
     gutter: {
@@ -664,6 +683,21 @@ async function main() {
               `inflates ch and would hand the next verifier a free overturn. Availability: ` +
               JSON.stringify(rec.font.face_available));
         }
+        // The in-floor ch derivation ASSUMES the authored formula is
+        // `calc(55ch + 80px)`; the browser only ever exposes the used px. The
+        // two ch readings agree to ~0.107% today (D83). A drift past 2% means
+        // the assumption has rotted — almost certainly because the floor's
+        // formula changed (spd-w5-measure-lever-moves is chartered to change
+        // it) — so it is REPORTED rather than silently published as a number.
+        const drift = rec.ch.divergence_pct;
+        if (drift !== null && Math.abs(drift) > 2) {
+          run.warnings.push(
+            `viewport ${width}px / ${state} / face "${face.id}": in-floor ch diverges from the ` +
+            `probe by ${drift}% (assumed formula ${rec.ch.in_floor_formula_assumed}, resolved ` +
+            `${rec.floor.min_inline_size_raw}). The floor's authored formula has probably changed — ` +
+            `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
+            `(and every ch in the table above) is unaffected.`);
+        }
         if (face.override && !rec.font.face_applied) {
           run.warnings.push(
             `viewport ${width}px / ${state} / face "${face.id}": asked for ` +
@@ -711,7 +745,20 @@ async function main() {
     await browser.close();
   }
 
-  if (!JSON_ONLY) printTable(run);
+  // The contract is "it prints a matrix". The JSON matrix IS the deliverable;
+  // the human table is a convenience rendered from it. A formatting bug in the
+  // table (one null where a number was expected, at the very end of a ~10min
+  // authenticated run) must never destroy the data the run was for — so the
+  // table is best-effort and says so on stderr if it fails.
+  if (!JSON_ONLY) {
+    try {
+      printTable(run);
+    } catch (e) {
+      process.stderr.write(
+        `\n  [table] the human table failed to render: ${e?.message || e}\n` +
+        `  The JSON matrix below is unaffected and is the authoritative record.\n\n`);
+    }
+  }
   process.stdout.write(JSON.stringify(run, null, 2) + '\n');
 }
 
