@@ -16,7 +16,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /new                 —         deploy-button landing (?template=<slug>) → SPA shell
       GET     /activate            —         bp-login device-approve page → SPA shell
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
-      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
+      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id} (429 carries retry_after)
       POST    /v1/auth/device/start   —      {client_name} → {device_code, user_code, verification_uri, ...}
       POST    /v1/auth/device/poll    —      {device_code} → pending | {token, team_id} | slow_down | expired
       POST    /v1/auth/device/inspect user   {user_code} → {client_name, ip_address, user_agent, expires_at}
@@ -52,7 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
-      GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
+      GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
@@ -80,6 +80,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
       POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
       POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
@@ -112,7 +113,7 @@ defmodule BarkparkCloud.Web.Router do
       PUT     /v1/notifications/channels admin  update per-channel transport settings
       PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      user send a rate-limited test email
-      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first)
+      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it)
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
       DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
@@ -502,7 +503,8 @@ defmodule BarkparkCloud.Web.Router do
   ##   body {challenge_token, code} OR {challenge_token, recovery_code}
   ##   → 200 {token, team_id}        — OTP/recovery accepted; full session minted
   ##   → 401 {error: "invalid_code"} — bad token, bad OTP, or unknown recovery code
-  ##   → 429 {error: "rate_limited"} — >5 attempts/min for this pending user
+  ##   → 429 {error: "rate_limited", retry_after: <seconds>} — >5 attempts/min
+  ##     for this pending user
   ##
   ## Step two of the two-phase login. The challenge_token is the 2fa-pending
   ## token from /v1/auth/login; a correct OTP or an unused recovery code swaps it
@@ -510,6 +512,12 @@ defmodule BarkparkCloud.Web.Router do
   ## non-2FA user). The minted session records device metadata via
   ## session_opts(conn), exactly like the non-2FA path. The rate limiter mirrors
   ## Coolify's 5/min on this challenge.
+  ##
+  ## `retry_after` is the whole seconds left of the limiter's fixed window (the
+  ## `POST /v1/notifications/test` precedent below): the caller is told exactly
+  ## when the budget refills instead of being left to guess, and the SPA can
+  ## count a real number down. It is a legitimate-user affordance only — the
+  ## number leaks nothing an attacker can't derive from the 60s window itself.
 
   post "/v1/auth/two-factor-challenge" do
     pending = conn.body_params["challenge_token"]
@@ -519,8 +527,8 @@ defmodule BarkparkCloud.Web.Router do
     case is_binary(pending) and Accounts.verify_two_factor_pending_token(pending) do
       %{} = user ->
         case TwoFactorRateLimiter.check(user.id) do
-          {:error, :rate_limited} ->
-            json(conn, 429, %{error: "rate_limited"})
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
 
           :ok ->
             ok? =
@@ -1498,10 +1506,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/audit?limit=&before=&target_type=&target_id= → 200 {events: [...]}.
+  # GET /v1/audit?limit=&before=&target_type=&target_id=&actor_user_id=&action_prefix=
+  # → 200 {events: [...]}.
   # The authenticated admin's team audit trail, newest first, keyset-paginated
   # (`?before=<oldest inserted_at>` walks the next page). Strictly team-scoped via
   # conn.assigns.current_team — an admin only ever sees their OWN team's events.
+  #
+  # The two narrowing filters answer the questions the trail is actually read
+  # for: `?actor_user_id=` is "what did this member do?" and `?action_prefix=` is
+  # "show me the webhook story" (a prefix of the closed `noun.verb` vocabulary,
+  # so `webhook` matches every `webhook.*`). Both are IGNORED when absent, empty,
+  # or unparseable — a garbage actor id is a no-op filter, never a 500 and never
+  # a silently wider result set. They compose with each other and with
+  # target_type/target_id; filtering happens INSIDE the limit, so a filtered page
+  # is a real page of matches, not a filtered slice of the newest 50.
   #
   # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
   # require_primary_team_admin halts 401 (no session) / 422 no_team / 403 (a plain
@@ -1518,7 +1536,9 @@ defmodule BarkparkCloud.Web.Router do
         limit: parse_int(conn.query_params["limit"], 50),
         before: parse_dt(conn.query_params["before"]),
         target_type: conn.query_params["target_type"],
-        target_id: conn.query_params["target_id"]
+        target_id: conn.query_params["target_id"],
+        actor_user_id: conn.query_params["actor_user_id"],
+        action_prefix: conn.query_params["action_prefix"]
       ]
 
       events = Accounts.list_audit_events(conn.assigns.current_team, opts)
@@ -2787,6 +2807,14 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.replay")
   end
 
+  # webhook TEST-SEND (GR45 — always spelled "webhook test-send"; the
+  # notifications email test-send is an unrelated surface). One-shot synthetic
+  # event to the customer's endpoint, single attempt: a `:mutate` because the
+  # instance really does make the outbound request and record a delivery row.
+  post "/v1/barkparks/:id/api/webhooks/:webhook_id/test-send" do
+    proxy_instance_webhook(conn, :"webhook.test_send")
+  end
+
   # POST /v1/providers → 201 {provider: ...}. Provider-neutral connect:
   #
   #   * hetzner: {kind:"hetzner", token, label?}
@@ -3537,17 +3565,29 @@ defmodule BarkparkCloud.Web.Router do
   # session / 403 for a plain member) for parity with the other notifications admin
   # routes. `?limit` caps the page via parse_int, hard-capped at 200 HERE (the
   # /v1/audit precedent — list_audit_events caps in the context, but
-  # list_deliveries rides UNCHANGED per the wave brief, so the router owns the
-  # clamp); there is no `?before` — the log is a bounded backlog, not a
-  # keyset-paged trail like /v1/audit.
+  # list_deliveries leaves the clamp to its caller, so the router owns it).
+  #
+  # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
+  # inserted_at>` walks the next page (the /v1/audit keyset). Filters run INSIDE
+  # the query, so "show me the failures" is a real page of failures rather than
+  # the failures that happen to be in the newest 50. A filter value outside the
+  # closed vocabulary matches nothing rather than being dropped — a dropped
+  # filter would silently show MORE than was asked for.
   get "/v1/notifications/deliveries" do
     conn = Auth.require_team_admin(conn, [])
 
     if conn.halted do
       conn
     else
-      limit = min(parse_int(conn.query_params["limit"], 50), 200)
-      deliveries = Notifications.list_deliveries(conn.assigns.current_team, limit)
+      opts = [
+        limit: min(parse_int(conn.query_params["limit"], 50), 200),
+        channel: conn.query_params["channel"],
+        status: conn.query_params["status"],
+        event: conn.query_params["event"],
+        before: parse_dt(conn.query_params["before"])
+      ]
+
+      deliveries = Notifications.list_deliveries(conn.assigns.current_team, opts)
       json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
     end
   end
@@ -8291,15 +8331,21 @@ defmodule BarkparkCloud.Web.Router do
         maybe_audit_instance_mutation(conn, team, bp, entry)
         json(conn, status, %{ok: true, resource: "webhook", data: decode_instance_body(body)})
 
-      # A bare upstream 404 on one of the three C5-added routes (rotate /
-      # deliveries / replay) is AMBIGUOUS from the status alone (C11 / D25 / OC4):
+      # A bare upstream 404 on one of the LATE-ADDED routes (rotate / deliveries
+      # / replay from C5, test-send from GR45) is AMBIGUOUS from the status alone
+      # (C11 / D25 / OC4):
       # the instance may be too OLD to serve the route at all, OR the route exists
       # and the webhook/event was simply DELETED — very likely elsewhere, on a
       # modern autoupdate-by-default fleet. "Update this instance" is an actively
       # WRONG dead-end for the deleted case. `instance_capability_404/2`
       # discriminates on the instance's OWN coded body (see there).
       {:ok, %{status: 404, body: body}}
-      when entry.capability in [:"webhook.rotate", :"webhook.deliveries", :"webhook.replay"] ->
+      when entry.capability in [
+             :"webhook.rotate",
+             :"webhook.deliveries",
+             :"webhook.replay",
+             :"webhook.test_send"
+           ] ->
         instance_capability_404(conn, body)
 
       # Any other non-2xx is relayed with the instance's OWN status so a caller
@@ -8402,6 +8448,11 @@ defmodule BarkparkCloud.Web.Router do
   defp instance_mutation_action(:"webhook.delete"), do: "webhook.deleted"
   defp instance_mutation_action(:"webhook.rotate"), do: "webhook.rotated"
   defp instance_mutation_action(:"webhook.replay"), do: "webhook.replayed"
+  # LOAD-BEARING, not optional: maybe_audit_instance_mutation/4 calls this for
+  # EVERY :mutate-tier catalog entry and there is no catch-all clause, so a
+  # :mutate capability without a clause here raises FunctionClauseError the first
+  # time the route lands a 2xx in production.
+  defp instance_mutation_action(:"webhook.test_send"), do: "webhook.test_sent"
 
   # GET carries no body; a mutation forwards the parsed request body re-encoded
   # as JSON (an absent body is an empty object, harmless for rotate/replay).

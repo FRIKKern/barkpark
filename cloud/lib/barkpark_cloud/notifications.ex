@@ -505,17 +505,57 @@ defmodule BarkparkCloud.Notifications do
   defp decrypt(nil), do: :error
   defp decrypt(ciphertext) when is_binary(ciphertext), do: Vault.decrypt(ciphertext)
 
-  @doc "A Team's notification deliveries, newest first (the delivery log surface)."
-  @spec list_deliveries(Team.t() | binary(), pos_integer()) :: [Delivery.t()]
-  def list_deliveries(team, limit \\ 50) do
+  @doc """
+  A Team's notification deliveries, newest first (the delivery log surface).
+
+  The second argument is a keyword list (a bare integer is still accepted and
+  means `limit:`, so every pre-filter caller keeps working):
+
+    * `:limit`   — page size, default 50. The ROUTER owns the hard cap; the
+                   context stays honest about what it was asked for.
+    * `:channel` — one egress channel (`"email"`, `"discord"`, …).
+    * `:status`  — one send outcome (`"pending"` | `"sent"` | `"failed"`).
+    * `:event`   — one event name (`"test"`, `"deploy.failed"`, …).
+    * `:before`  — a `DateTime` cursor; only rows strictly older are returned
+                   (keyset pagination on `inserted_at`, the `/v1/audit`
+                   precedent — the log outgrew "a bounded backlog" the moment
+                   filters made deep reads worth walking).
+
+  A filter value outside the closed vocabulary is NOT rewritten or ignored: it
+  is matched literally and therefore returns nothing. Silently DROPPING an
+  unrecognised filter would widen the result set behind the caller's back, which
+  is the one failure mode a delivery log must not have.
+  """
+  @spec list_deliveries(Team.t() | binary(), keyword() | pos_integer()) :: [Delivery.t()]
+  def list_deliveries(team, opts \\ [])
+
+  def list_deliveries(team, limit) when is_integer(limit),
+    do: list_deliveries(team, limit: limit)
+
+  def list_deliveries(team, opts) when is_list(opts) do
     tid = team_id(team)
+    limit = opts |> Keyword.get(:limit, 50) |> max(1)
 
     Delivery
     |> where([d], d.team_id == ^tid)
+    |> maybe_delivery_eq(:channel, opts[:channel])
+    |> maybe_delivery_eq(:status, opts[:status])
+    |> maybe_delivery_eq(:event, opts[:event])
+    |> maybe_delivery_before(opts[:before])
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> limit(^limit)
     |> Repo.all()
   end
+
+  defp maybe_delivery_eq(query, field, value) when is_binary(value) and value != "",
+    do: where(query, [d], field(d, ^field) == ^value)
+
+  defp maybe_delivery_eq(query, _field, _value), do: query
+
+  defp maybe_delivery_before(query, %DateTime{} = ts),
+    do: where(query, [d], d.inserted_at < ^ts)
+
+  defp maybe_delivery_before(query, _), do: query
 
   @doc """
   The platform-wide FLEET-DIGEST delivery log — the Operator-console analogue of

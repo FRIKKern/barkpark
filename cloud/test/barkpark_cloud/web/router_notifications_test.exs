@@ -66,6 +66,14 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
     )
   end
 
+  # GET the delivery log with `query` appended, asserting a 200 — the filter
+  # tests are about WHICH rows come back, never about the status code.
+  defp filtered(token, query) do
+    conn = call(:get, "/v1/notifications/deliveries?" <> query, nil, token)
+    assert conn.status == 200
+    body(conn)["deliveries"]
+  end
+
   # A fresh user joined to `team` at `role`, plus a live session token.
   defp token_for(team, role) do
     {:ok, user} =
@@ -280,6 +288,82 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       conn = call(:get, "/v1/notifications/deliveries?limit=100000", nil, token)
       assert conn.status == 200
       assert length(body(conn)["deliveries"]) == 200
+    end
+
+    test "?channel / ?status / ?event narrow the log, and compose" do
+      {_user, team, token} = user_with_team()
+      t0 = DateTime.utc_now()
+
+      insert_delivery(team, %{
+        channel: "email",
+        status: "sent",
+        event: "provision_failed",
+        inserted_at: DateTime.add(t0, -1, :second)
+      })
+
+      insert_delivery(team, %{
+        channel: "discord",
+        status: "failed",
+        event: "provision_failed",
+        inserted_at: DateTime.add(t0, -2, :second)
+      })
+
+      insert_delivery(team, %{
+        channel: "discord",
+        status: "failed",
+        event: "test",
+        inserted_at: DateTime.add(t0, -3, :second)
+      })
+
+      assert [%{"channel" => "discord"}, %{"channel" => "discord"}] =
+               filtered(token, "channel=discord")
+
+      assert [%{"status" => "sent"}] = filtered(token, "status=sent")
+      assert [%{"event" => "test"}] = filtered(token, "event=test")
+
+      # Composed: the discord FAILURE for provision_failed, and nothing else.
+      assert [%{"event" => "provision_failed", "channel" => "discord"}] =
+               filtered(token, "channel=discord&status=failed&event=provision_failed")
+    end
+
+    test "a filter value outside the vocabulary matches nothing (never silently dropped)" do
+      {_user, team, token} = user_with_team()
+      insert_delivery(team, %{channel: "email", status: "sent"})
+
+      # Dropping an unrecognised filter would show the caller MORE rows than
+      # they asked for — the one failure mode a delivery log must not have.
+      assert filtered(token, "status=bogus") == []
+      assert filtered(token, "channel=carrier-pigeon") == []
+      # An EMPTY value is absent, not "match the empty string".
+      assert length(filtered(token, "status=&channel=&event=")) == 1
+    end
+
+    test "?before keysets to the next page, and filters survive the cursor" do
+      {_user, team, token} = user_with_team()
+      t0 = DateTime.utc_now()
+
+      for i <- 1..3 do
+        insert_delivery(team, %{
+          recipient: "r#{i}@example.com",
+          status: "failed",
+          inserted_at: DateTime.add(t0, -i, :second)
+        })
+      end
+
+      # A row that must never appear on a status-filtered page, however deep.
+      insert_delivery(team, %{
+        recipient: "sent@example.com",
+        status: "sent",
+        inserted_at: DateTime.add(t0, -10, :second)
+      })
+
+      page1 = filtered(token, "status=failed&limit=2")
+      assert length(page1) == 2
+
+      cursor = page1 |> List.last() |> Map.fetch!("inserted_at") |> URI.encode_www_form()
+      page2 = filtered(token, "status=failed&limit=2&before=" <> cursor)
+
+      assert [%{"recipient" => "r3@example.com"}] = page2
     end
 
     test "an admin only ever sees their OWN team's deliveries (no cross-team leak)" do

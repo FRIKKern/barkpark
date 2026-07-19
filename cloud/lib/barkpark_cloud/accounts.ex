@@ -398,6 +398,16 @@ defmodule BarkparkCloud.Accounts do
     * `:before`      — a `DateTime` cursor; only events strictly older are
                        returned (keyset pagination on `inserted_at`)
     * `:target_type` + `:target_id` — narrow to one resource's history
+    * `:actor_user_id` — only events this member caused ("what did Alice do?").
+                       System/webhook events carry a nil actor and are therefore
+                       never matched by an actor filter.
+    * `:action_prefix` — narrow to one noun of the closed `noun.verb` action
+                       vocabulary (`"webhook"` → every `webhook.*` event).
+                       Matched as `LIKE '<prefix>%'` with the caller's `%`, `_`
+                       and `\\` ESCAPED, so a filter value can never widen its
+                       own match (`_` is a legitimate character in the
+                       vocabulary — `notifications.channels_changed` — and must
+                       stay a literal, not a single-char wildcard).
 
   Preloads `:actor_user` so the read renders "alice@x invited a member" without
   an N+1. Strictly team-scoped — never crosses teams.
@@ -411,6 +421,8 @@ defmodule BarkparkCloud.Accounts do
     |> where([e], e.team_id == ^tid)
     |> maybe_audit_before(opts[:before])
     |> maybe_audit_target(opts[:target_type], opts[:target_id])
+    |> maybe_audit_actor(opts[:actor_user_id])
+    |> maybe_audit_action_prefix(opts[:action_prefix])
     |> order_by([e], desc: e.inserted_at, desc: e.id)
     |> limit(^limit)
     |> preload(:actor_user)
@@ -424,6 +436,37 @@ defmodule BarkparkCloud.Accounts do
     do: where(query, [e], e.target_type == ^type and e.target_id == ^id)
 
   defp maybe_audit_target(query, _type, _id), do: query
+
+  # actor_user_id arrives from a query string, so it is NOT trusted to be a UUID:
+  # a raw non-uuid binary in a :binary_id comparison raises Ecto.Query.CastError
+  # (a 500 on a typo'd filter). Cast first; anything that is not a UUID is simply
+  # not a filter.
+  defp maybe_audit_actor(query, actor_user_id) when is_binary(actor_user_id) do
+    case Ecto.UUID.cast(actor_user_id) do
+      {:ok, uuid} -> where(query, [e], e.actor_user_id == ^uuid)
+      :error -> query
+    end
+  end
+
+  defp maybe_audit_actor(query, _), do: query
+
+  # Prefix-match one noun of the closed `noun.verb` action vocabulary. The LIKE
+  # metacharacters in the caller's value are escaped (Postgres LIKE's default
+  # escape character is `\`), so `%` / `_` in a filter are literals and a filter
+  # can never match MORE than it spells.
+  defp maybe_audit_action_prefix(query, prefix) when is_binary(prefix) and prefix != "" do
+    pattern = escape_like(prefix) <> "%"
+    where(query, [e], like(e.action, ^pattern))
+  end
+
+  defp maybe_audit_action_prefix(query, _), do: query
+
+  defp escape_like(value) do
+    value
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
 
   @doc """
   How many days a team's audit events are retained before a retention sweeper may

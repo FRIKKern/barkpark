@@ -222,7 +222,16 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
         call(:post, "/v1/auth/two-factor-challenge", %{challenge_token: challenge, code: "000000"})
 
       assert sixth.status == 429
-      assert json_body(sixth)["error"] == "rate_limited"
+      body = json_body(sixth)
+      assert body["error"] == "rate_limited"
+
+      # The 429 carries a REAL countdown, not an opaque "try again later": the
+      # remainder of the limiter's 60s fixed window, so the SPA can render a
+      # timer. Bounded rather than pinned because the window boundary moves with
+      # wall-clock time here (the exact arithmetic is pinned, with an injected
+      # clock, in two_factor_rate_limiter_test.exs).
+      assert is_integer(body["retry_after"])
+      assert body["retry_after"] >= 1 and body["retry_after"] <= 60
     end
   end
 
