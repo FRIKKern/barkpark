@@ -34,6 +34,31 @@ WARN=0
 fail() { echo "FAIL: $*"; FAIL=1; }
 warn() { echo "WARN: $*"; WARN=$((WARN + 1)); }
 
+# --- generated / scratch trees: PRUNE at the walk, not after it (D18) --------
+# §5, §7 and §8 walk the whole repo. On a clean CI checkout that is cheap; on a
+# working checkout node_modules (~46k files), js/node_modules (another ~1.3G),
+# _build, deps and the .omx / .claude worktree scratch trees dominate the walk —
+# the run took 17+ minutes and had to be killed, i.e. the gate was not runnable
+# LOCALLY, which is exactly where doc edits are made. Every directory below was
+# ALREADY dropped by a `-not -path` / `grep -v` filter AFTER the walk, so moving
+# the exclusion INTO the walk is a pure performance fix: same result set, one
+# order of magnitude less I/O. Scratch checkouts (.omx, .tmp-bp89, .claude) are
+# copies of the repo — their headers/markers are duplicates by construction and
+# were already excluded by §7 (D26) and by §5's './.claude' exclusion.
+# `find`: name-matched so nested copies (js/node_modules, api/_build) prune too.
+prune_find() {
+  # $@ = extra find predicates applied to the surviving tree
+  find . \
+    \( -name node_modules -o -name _build -o -name deps -o -name .git \
+       -o -name .omx -o -name .tmp-bp89 -o -name .claude -o -name .artifacts \
+       -o -path './_attic' -o -path './cloud/priv/templates' \) -prune -o \
+    "$@"
+}
+# `grep -r`: same trees, minus _attic (§7/§8 filter _attic themselves downstream).
+GREP_PRUNE=(--exclude-dir=node_modules --exclude-dir=_build --exclude-dir=deps
+  --exclude-dir=.git --exclude-dir=.omx --exclude-dir=.tmp-bp89
+  --exclude-dir=.claude --exclude-dir=.artifacts)
+
 HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ \| budget: [0-9]+tok -->'
 
 # Return the G1 header line of a file (first line, or first line after a
@@ -197,12 +222,7 @@ done
 # --- 5. canonical-for uniqueness (repo-wide, non-attic) ----------------------
 echo "== canonical-for uniqueness =="
 DUPES=$(
-  find . -name '*.md' \
-    -not -path './_attic/*' -not -path './node_modules/*' \
-    -not -path '*/node_modules/*' -not -path './.artifacts/*' \
-    -not -path '*/_build/*' -not -path '*/deps/*' \
-    -not -path './.claude/*' \
-    -not -path './cloud/priv/templates/*' |
+  prune_find -name '*.md' -print |
   while IFS= read -r f; do
     h=$(header_line "$f")
     # `grep` returns 1 for a header-less file (README etc.); `|| true` keeps that
@@ -214,7 +234,7 @@ DUPES=$(
 )
 if [ -n "$DUPES" ]; then
   for d in $DUPES; do
-    fail "canonical-for '$d' has more than one owner: $(grep -rl "canonical-for: $d " --include='*.md' . | grep -v _attic | grep -v node_modules | tr '\n' ' ')"
+    fail "canonical-for '$d' has more than one owner: $(grep -rl "canonical-for: $d " --include='*.md' "${GREP_PRUNE[@]}" . | grep -v _attic | grep -v node_modules | tr '\n' ' ')"
   done
 else
   echo "ok:   all canonical-for values unique"
@@ -245,7 +265,7 @@ tripwire() {
   # after `sed 's|^\./||'` a top-level hit reads '.claude/…' with NO leading
   # slash, so an unanchored '/\.claude/' would miss it and leave thousands of
   # worktree-copy WARNs (D26).
-  hits=$(grep -rlF "$literal" --include='*.md' . 2>/dev/null |
+  hits=$(grep -rlF "$literal" --include='*.md' "${GREP_PRUNE[@]}" . 2>/dev/null |
     sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' \
     | grep -v '/_build/' | grep -v '/deps/' \
     | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)\.omx/' | grep -vE '(^|/)\.tmp-bp89/' || true)
@@ -288,7 +308,7 @@ echo "== @canonical capability markers =="
 CANON_DUPES=$(
   grep -rHoE '@canonical capability:[A-Za-z0-9._-]+' \
     --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-    --exclude-dir='.claude' \
+    "${GREP_PRUNE[@]}" \
     . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' \
     | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
 )
@@ -302,7 +322,7 @@ fi
 # (b) each marker sits on a PUBLIC entry point (def / func / export within 6 lines below)
 grep -rn '@canonical capability:' \
   --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-  --exclude-dir='.claude' \
+  "${GREP_PRUNE[@]}" \
   . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' > /tmp/canon-hits.$$ || true
 while IFS= read -r hit; do
   [ -z "$hit" ] && continue
