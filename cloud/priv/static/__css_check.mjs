@@ -105,6 +105,8 @@ const ALLOW_PREFIXES = [
   "instance-card-spark spark--",   // + statusOf role (.instance-card-spark / .spark-- rules)
   "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
   "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
+  // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
+  "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -203,7 +205,7 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--muted-surface", min: 3, why: "warn status dot on badge" },
   { fg: "--danger", bg: "--muted-surface", min: 3, why: "danger status dot" },
   { fg: "--info", bg: "--surface", min: 3, why: "active-step ring / probe dot" },
-  { fg: "--accent", bg: "--surface", min: 3, why: "branch-preview accent border" },
+  { fg: "--cc-amber", bg: "--surface", min: 3, why: "branch-preview amber edge (--accent retired, reads --cc-amber directly)" },
   { fg: "--ring", bg: "--bg", min: 3, why: "focus-ring visibility" },
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
   { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
