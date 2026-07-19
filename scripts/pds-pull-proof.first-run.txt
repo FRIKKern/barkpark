@@ -245,3 +245,37 @@ SUMMARY — run 20260719T195816Z-18976
 RESULT: BLOCKED — every step above either passed with run-time numbers or
 named the merge it waits on. This is the honest partial artifact the wave
 is supposed to carry; it is NOT a green.
+
+══════════════════════════════════════════════════════════════════════════════
+REVIEW ADDENDUM — 2026-07-19, wave-3 review (this transcript is UNEDITED above)
+══════════════════════════════════════════════════════════════════════════════
+Two no-silent-skip holes were closed in the ladder AFTER the run above, and both
+were re-run live against guerrilla on the fixed script:
+
+  STEP 2 — a type whose count call failed used to yield 0 and then be dropped
+  from the table by the "both zero, skip" rule: a broken type VANISHED and the
+  totals still read as complete. It now prints ERR in the table and FAILS the
+  step, naming every unreadable type. Live re-run (fixed): 10 types with rows,
+  raw 2826 / published 2611 / 215 draft-only over 36 declared types, no ERR row.
+  Mutation-checked — forcing `task`'s count to return empty prints
+  "task ERR ERR ERR" and "FAIL 2 the census is INCOMPLETE … for: task".
+
+  STEP 3 — the row-grain assertion parses the documents member as Postgres COPY
+  TEXT (tab-separated, one row per line) but never asserted it WAS that grammar.
+  A missing, empty, CSV or BINARY member would have tab-split into nothing and
+  reported a FALSELY CLEAN zero — the exact failure the step exists to catch. The
+  member must now exist, carry rows, and its first row must split into exactly the
+  field count the manifest declares. Live re-run (fixed, real dev bundle):
+  "grammar COPY TEXT confirmed: 2827 row(s), first row = 16 fields = the
+  manifest's 16 columns", ticket ROWS 0, byte hits still printed and classified
+  (pds-w1-crown-proof/task and pds-wave-2-2026-07-19/paper — prose references).
+
+Also on the fixed state: step 0a re-ran PASS, so the dev dialect was still live on
+guerrilla at review time.
+
+STILL UNPAID, and deliberately so (these are pds-w1-crown-proof's to spend):
+steps 0c, 1, 5 and 6 have never executed their bodies; step 1's invented flag
+names will need adjusting to whatever pds-w1-pull-cli actually ships; and the
+scratch teardown's orphan matcher is proven at the MATCHER level only (synthetic
+ps input: a real postmaster and its argv-rewritten workers are caught, pg_ctl and
+a self-naming command line are not) — no live orphan postmaster was stood up.

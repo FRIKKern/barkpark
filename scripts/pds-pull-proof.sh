@@ -612,13 +612,20 @@ step_2() {
   fi
   n_types="$(printf '%s\n' "$types" | wc -w | tr -d ' ')"
 
-  local t raw pub total_raw=0 total_pub=0 drafts
+  # A type whose count call FAILS is NOT the same as a type with zero rows, and
+  # collapsing the two is the silent skip this ladder forbids: a broken type
+  # would simply vanish from the table and the totals would still look sane.
+  # An unreadable count is NAMED in the table (ERR) and fails the step.
+  local t raw pub total_raw=0 total_pub=0 drafts unreadable=""
   printf '      %-28s %10s %10s %10s\n' TYPE RAW PUBLISHED DRAFT-ONLY
   for t in $types; do
     raw="$(src_total "$t" raw)"
     pub="$(src_total "$t" published)"
-    [ -n "$raw" ] || raw=0
-    [ -n "$pub" ] || pub=0
+    if [ -z "$raw" ] || [ -z "$pub" ]; then
+      printf '      %-28s %10s %10s %10s\n' "$t" "${raw:-ERR}" "${pub:-ERR}" ERR
+      unreadable="$unreadable $t"
+      continue
+    fi
     drafts=$((raw - pub))
     [ "$raw" -eq 0 ] && [ "$pub" -eq 0 ] && continue
     printf '      %-28s %10s %10s %10s\n' "$t" "$raw" "$pub" "$drafts"
@@ -626,6 +633,11 @@ step_2() {
     total_pub=$((total_pub + pub))
   done
   printf '      %-28s %10s %10s %10s\n' TOTAL "$total_raw" "$total_pub" "$((total_raw - total_pub))"
+
+  if [ -n "$unreadable" ]; then
+    fail 2 "the census is INCOMPLETE — no count could be derived for:${unreadable}. A census missing a type is not a census; re-run once the source answers for every declared type rather than reading the totals above as complete."
+    return 0
+  fi
 
   local n_schemas n_media
   n_schemas="$(jqp 'len(d["schemas"])' <"$schemas_json" 2>/dev/null || echo '?')"
@@ -720,14 +732,14 @@ step_3() {
   # (b) zero ROWS in documents.copy that ARE the ticket. Column positions come
   # from the manifest's own column list for `documents` — never a hardcoded
   # ordinal, which would silently mis-read after any column addition.
-  local cols i_id i_docid i_type rows
+  local cols i_id i_docid i_type n_cols rows
   cols="$(python3 -c '
 import json,sys
 d=json.load(open(sys.argv[1]))
 t=[x for x in d["tables"] if x["name"]=="documents"]
 if not t: sys.exit(1)
 c=t[0]["columns"]
-print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1)' "$bdir/manifest.json" 2>/dev/null || true)"
+print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/manifest.json" 2>/dev/null || true)"
   if [ -z "$cols" ]; then
     fail 3 "the manifest does not describe a documents member — the row-grain assertion cannot be made, and a byte scan alone cannot distinguish the row from prose about it"
     return 0
@@ -735,12 +747,34 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1)' "$bdir/manifest.
   i_id="$(printf '%s' "$cols" | awk '{print $1}')"
   i_docid="$(printf '%s' "$cols" | awk '{print $2}')"
   i_type="$(printf '%s' "$cols" | awk '{print $3}')"
-  info "columns         documents: id=\$$i_id doc_id=\$$i_docid type=\$$i_type (from the manifest, this run)"
+  n_cols="$(printf '%s' "$cols" | awk '{print $4}')"
+  info "columns         documents: id=\$$i_id doc_id=\$$i_docid type=\$$i_type of $n_cols (from the manifest, this run)"
+
+  # (b0) THE PARSE ITSELF IS AN ASSERTION. The row grammar below is Postgres
+  # COPY TEXT — tab-separated, one row per line, embedded newlines escaped. If
+  # the member is missing, empty, or ever moves to CSV/BINARY, a tab-split awk
+  # reports zero ticket rows and step 3 goes FALSELY CLEAN — the exact failure
+  # this step exists to catch. So refuse to trust the parse until it is shown to
+  # BE that grammar: the member must exist, carry rows, and its first row must
+  # split into exactly the number of fields the manifest declares.
+  local docs_copy docs_rows first_fields
+  docs_copy="$bdir/tables/documents.copy"
+  if [ ! -s "$docs_copy" ]; then
+    fail 3 "tables/documents.copy is absent or empty in the dev bundle — a zero ticket-row count over an empty member is vacuous, not clean"
+    return 0
+  fi
+  docs_rows="$(grep -c . "$docs_copy" 2>/dev/null || echo 0)"
+  first_fields="$(head -n 1 "$docs_copy" | awk -F'\t' '{print NF}')"
+  if [ "${first_fields:-0}" -ne "$n_cols" ]; then
+    fail 3 "tables/documents.copy is not the COPY TEXT grammar this assertion parses: its first row splits into ${first_fields:-0} tab-separated fields, the manifest declares $n_cols columns. A tab-split scan of a non-text dump silently finds nothing — refusing to report clean off an unparsed member."
+    return 0
+  fi
+  info "grammar         COPY TEXT confirmed: $docs_rows row(s), first row = $first_fields fields = the manifest's $n_cols columns"
 
   rows="$(awk -F'\t' -v a="$doc_id" -v b="$pub_id" -v u="$row_uuid" \
             -v ii="$i_id" -v idc="$i_docid" -v it="$i_type" '
           $it == "ticket" || $idc == a || $idc == b || (u != "" && $ii == u) { n++ }
-          END { print n + 0 }' "$bdir/tables/documents.copy" 2>/dev/null || echo ERR)"
+          END { print n + 0 }' "$docs_copy" 2>/dev/null || echo ERR)"
   if [ "$rows" = "ERR" ]; then
     fail 3 "could not read tables/documents.copy out of the dev bundle"
     return 0
@@ -773,7 +807,7 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1)' "$bdir/manifest.
       { line = $0 }
       index(line, a) || index(line, b) || (u != "" && index(line, u)) {
         printf "        containing row: doc_id=%s type=%s  (a PROSE reference in this row'\''s own content, not the ticket row)\n", $idc, $it
-      }' "$bdir/tables/documents.copy" | sort -u | head -20
+      }' "$docs_copy" | sort -u | head -20
     info "None of the above IS the ticket row — the row-grain count is 0. This is the"
     info "false-alarm shape a naive byte scan produces for an identifier that other"
     info "documents talk about, and it is reported rather than suppressed."
