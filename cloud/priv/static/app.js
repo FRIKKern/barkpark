@@ -157,8 +157,16 @@
   // action: { label, onClick }. Auto-dismisses; X closes early.
   var TOAST_GLYPH = { success: "✓", error: "!", info: "i" };
 
+  // Pure: normalize toast() input. toast() reads opts.title, so a bare string
+  // used to render an EMPTY toast (a dead notification, GR41) — coerce it to
+  // {title} so a stray legacy call always shows its text. Total over junk.
+  function toastShape(opts) {
+    if (typeof opts === "string") return { title: opts };
+    return opts || {};
+  }
+
   function toast(opts) {
-    opts = opts || {};
+    opts = toastShape(opts);
     var stack = $("#toast-stack");
     if (!stack) return;
     var kind = opts.kind || "info";
@@ -305,11 +313,17 @@
   // the modal renders the human sentence inline and the primary button MORPHS
   // into exactly one recovery action (retry, or refresh-and-close).
 
-  // opts: { tier: "mutate"|"destroy", title, consequence | consequences[],
-  //         resourceName (destroy), confirmLabel }. Total over junk.
+  // opts: { tier: "mutate"|"danger"|"destroy", title, consequence |
+  //         consequences[], bodyHtml, resourceName (destroy), confirmLabel }.
+  // Total over junk. GR41: "danger" is the DANGER-NO-ECHO tier — btn-danger
+  // weight without the typed echo (a rollback is grave but reversible; the echo
+  // is reserved for destroy). bodyHtml is the rich-body slot: TRUSTED caller
+  // markup (static copy with esc()'d interpolations ONLY — never a raw server
+  // string) for warnings that need <b> emphasis plain consequences[] can't carry.
   function confirmModalInit(opts) {
     opts = opts || {};
-    var tier = opts.tier === "destroy" ? "destroy" : "mutate";
+    var tier = opts.tier === "destroy" ? "destroy"
+      : opts.tier === "danger" ? "danger" : "mutate";
     var consequences = [];
     if (Array.isArray(opts.consequences)) {
       consequences = opts.consequences.map(function (c) { return String(c); });
@@ -319,6 +333,7 @@
     return {
       tier: tier,
       title: String(opts.title || "Are you sure?"),
+      bodyHtml: opts.bodyHtml != null ? String(opts.bodyHtml) : null,
       consequences: consequences,
       resourceName: tier === "destroy" ? String(opts.resourceName || "") : null,
       confirmLabel: String(opts.confirmLabel || "Confirm"),
@@ -380,9 +395,14 @@
   }
 
   // Pure render of the modal body for an initial state. The destroy tier's
-  // Confirm ships disabled (armed only by the typed echo); mutate ships live.
+  // Confirm ships disabled (armed only by the typed echo); mutate and danger
+  // ship live — danger differs from mutate only in button weight (btn-danger).
   function confirmModalHtml(state) {
     var h = '<h2 class="modal-title" id="modal-title">' + esc(state.title) + "</h2>";
+    // Rich-body slot: TRUSTED caller markup (see confirmModalInit) — rendered
+    // raw so static warnings can carry <b> emphasis. Server data must arrive
+    // pre-esc()'d by the caller, or ride title/consequences (esc'd here).
+    if (state.bodyHtml) h += '<p class="modal-sub cm-body">' + state.bodyHtml + "</p>";
     if (state.tier === "destroy") {
       h += '<ul class="cm-consequences">' +
         state.consequences.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
@@ -399,7 +419,9 @@
     h += '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
       (state.tier === "destroy"
         ? '<button class="btn btn-danger" type="button" id="cm-confirm" disabled>' + esc(state.confirmLabel) + "</button>"
-        : '<button class="btn btn-primary" type="button" id="cm-confirm">' + esc(state.confirmLabel) + "</button>") +
+        : state.tier === "danger"
+          ? '<button class="btn btn-danger" type="button" id="cm-confirm">' + esc(state.confirmLabel) + "</button>"
+          : '<button class="btn btn-primary" type="button" id="cm-confirm">' + esc(state.confirmLabel) + "</button>") +
       "</div>";
     return h;
   }
@@ -4744,26 +4766,26 @@
   // D7/D25 SITE-deployment "Roll back to this" promote (app.js:5139-5175) — that's
   // per-site deployment history; this is per-INSTANCE slot flip.
   function confirmRollbackInstance(bp) {
-    openModal(rollbackConfirmHtml(bp));
-    var go = $("#rollback-go");
-    if (go) go.addEventListener("click", function () { rollbackInstance(bp, go); });
+    var opts = rollbackConfirmOpts(bp);
+    opts.onConfirm = function (ctl) { rollbackInstance(bp, ctl); };
+    openConfirmModal(opts);
   }
 
   // POST /v1/barkparks/:id/rollback → 202 {status,target_sha,pinned_release}. On
   // 202 the CP has ALREADY re-pinned at the rolled-back target (charter D16) — the
   // toast names it so the operator sees the pin land. A typed 409/50x refusal is
-  // classified by rollbackConflictCopy and surfaced honestly (no silent retry).
+  // classified by rollbackConflictCopy and rendered INLINE in the confirm modal
+  // (decision 25 — a failed confirm never dies into a toast): terminal refusals
+  // (rollbackRefusalTerminal) offer Close, transient ones Try again.
   //
   // NO noBounce: this route is session-gated (require_primary_team_admin), so a 401
   // is a genuinely-expired session that SHOULD bounce to login. noBounce is ONLY
   // for the worker-gated fleet-banner probe (loadFleetRollout above) where a plain
   // session token 401s by design.
-  function rollbackInstance(bp, btn) {
-    btn = btn || $("#rollback-go");
-    if (btn) { btn.disabled = true; btn.textContent = "Rolling back…"; }
+  function rollbackInstance(bp, ctl) {
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/rollback", {}).then(function (r) {
       if (r.status === 202) {
-        closeModal();
+        ctl.succeed();
         var d = r.data || {};
         // target_sha is server data → toast() escapes it (see toast()).
         var target = d.target_sha ? shortSha(d.target_sha)
@@ -4776,14 +4798,19 @@
         loadInstance(bp.id);
         return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = "Roll back"; }
       // Errors arrive as {error:{code}} (or a bare string) — never the flat
-      // friendly() shape. Classify to typed, honest copy.
+      // friendly() shape. Classify to typed, honest copy, rendered inline.
       var err = (r.data && r.data.error) || {};
       var code = typeof err === "string" ? err : err.code;
       var copy = rollbackConflictCopy(code, r.data);
-      closeModal();
-      toast({ kind: "error", title: copy.title, body: copy.body });
+      if (rollbackRefusalTerminal(code)) {
+        ctl.fail(copy.title + " — " + copy.body, "Close", function () { closeModal(); });
+      } else {
+        ctl.fail(copy.title + " — " + copy.body, "Try again", function (c) {
+          c.busy();
+          rollbackInstance(bp, c);
+        });
+      }
     });
   }
 
@@ -4951,21 +4978,35 @@
   // The request body for a forced (pin-overriding) self-update re-trigger.
   function forceUpdateBody() { return { force: true }; }
 
-  // isu-w6: the rollback confirm-modal markup. HONEST copy per charter D19 — a
-  // rollback flips code to the previous slot but the SCHEMA STAYS FORWARD (it
-  // does not undo migrations), and the instance is PINNED at the rolled-back
-  // version (D16: an unpinned rollback re-updates on the next cron tick — a lie).
-  // bp.name is server data → escaped, so a hostile instance name can never inject
-  // markup (escaping test mirrors the isu-w5 hostile-channel precedent).
-  function rollbackConfirmHtml(bp) {
+  // isu-w6 → GR41: the instance rollback rides the SHARED confirm modal on its
+  // danger-no-echo tier. Pure opts builder (onConfirm is wired by the caller) so
+  // the harness pins the HONEST D19 copy — a rollback flips code to the previous
+  // slot but the SCHEMA STAYS FORWARD (it does not undo migrations), and the
+  // instance is PINNED at the rolled-back version (D16: an unpinned rollback
+  // re-updates on the next cron tick — a lie). bp.name is server data → it rides
+  // `title`, which confirmModalHtml esc()'s; the bodyHtml slot carries STATIC
+  // copy only, so a hostile instance name can never inject markup.
+  function rollbackConfirmOpts(bp) {
     bp = bp || {};
-    return '<h2 class="modal-title" id="modal-title">Roll back ' + esc(bp.name) + "?</h2>" +
-      '<p class="modal-sub">App-level rollback to the previous slot. Schema stays forward &mdash; ' +
+    return {
+      tier: "danger",
+      title: "Roll back " + String(bp.name || "") + "?",
+      bodyHtml: "App-level rollback to the previous slot. Schema stays forward &mdash; " +
         "rolling back code does <b>not</b> undo migrations (write a compensating migration if you " +
         "need to). The instance will be <b>pinned</b> at the rolled-back version so autoupdate " +
-        "won't re-apply the version you're leaving.</p>" +
-      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" type="button" id="rollback-go">Roll back</button></div>';
+        "won't re-apply the version you're leaving.",
+      confirmLabel: "Roll back",
+      busyLabel: "Rolling back…",
+    };
+  }
+
+  // Which rollback refusals are TERMINAL — a retry cannot help until the box or
+  // its config changes, so the modal's single recovery is Close. Transient ones
+  // (already_running, instance_unreachable, instance_error, unknown) offer Try
+  // again — for the unknown default, retrying is the honest safe bet. Pure.
+  function rollbackRefusalTerminal(code) {
+    return code === "no_previous_slot" || code === "not_supported" ||
+      code === "not_enabled" || code === "feature_not_configured" || code === "not_live";
   }
 
   // isu-w6: typed, honest copy for a rollback refusal. PURE — maps the charter's
@@ -7380,11 +7421,14 @@
           themeSel.disabled = false;
           if (r.ok) {
             site.theme = val;
-            toast("Theme set to " + (val || "template default") + " — applies on the next deploy");
+            toast({
+              kind: "success", title: "Theme updated",
+              body: "Set to " + (val || "template default") + " — applies on the next deploy.",
+            });
           } else {
             themeSel.value = site.theme || "";
             var msg = (r.data && (r.data.error || r.data.detail)) || ("update failed (" + r.status + ")");
-            toast("Couldn't set theme: " + String(msg));
+            toast({ kind: "error", title: "Couldn't set theme", body: String(msg) });
           }
         });
       });
@@ -8010,18 +8054,32 @@
     return "/v1/sites/" + encodeURIComponent(String(siteId)) + "/rollback";
   }
 
-  // The confirm-modal markup — clones the isu-w6 instance idiom (rollbackConfirmHtml
-  // / confirmRollbackInstance) but points at the SITE endpoint. Honest consequence
-  // copy: an in-place flip to the previous release, no rebuild, current stays in
-  // history (roll-forward stays possible). `domain` is server data → escaped.
-  function siteRollbackConfirmHtml(site, domain) {
-    return '<h2 class="modal-title" id="modal-title">Roll back ' + esc(domain) + "?</h2>" +
-      '<p class="modal-sub">This flips the live site back to its <b>previous release</b> right ' +
+  // GR41: the site rollback rides the SHARED confirm modal on its danger-no-echo
+  // tier (clones the instance idiom — rollbackConfirmOpts). Pure opts builder;
+  // honest consequence copy: an in-place flip to the previous release, no rebuild,
+  // current stays in history (roll-forward stays possible). `domain` is server
+  // data → it rides `title`, which confirmModalHtml esc()'s; bodyHtml is STATIC.
+  function siteRollbackConfirmOpts(site, domain) {
+    return {
+      tier: "danger",
+      title: "Roll back " + String(domain || "") + "?",
+      bodyHtml: "This flips the live site back to its <b>previous release</b> right " +
         "now &mdash; no rebuild, no waiting. The release you're leaving stays in history, so you " +
         "can roll forward again. To ship a specific earlier build instead, use " +
-        "<b>Roll back to this</b> on a deployment below.</p>" +
-      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" type="button" id="site-rollback-go">Roll back</button></div>';
+        "<b>Roll back to this</b> on a deployment below.",
+      confirmLabel: "Roll back",
+      busyLabel: "Rolling back…",
+    };
+  }
+
+  // Which site-rollback refusals are TERMINAL (Close is the single recovery):
+  // the two typed 422s — not_rollbackable / no_previous — describe a site whose
+  // shape can't change by retrying. A 409 (deploy in flight) and the generic
+  // fallback stay transient: Try again is the honest recovery. Pure.
+  function siteRollbackRefusalTerminal(status, data) {
+    var err = (data && data.error) || {};
+    var code = typeof err === "string" ? err : err.code;
+    return status === 422 && (code === "not_rollbackable" || code === "no_previous");
   }
 
   // Fold the SYNCHRONOUS 200 rollback envelope
@@ -8108,25 +8166,25 @@
       "<span>Rolled back to the previous release." + link + "</span></div>";
   }
 
-  // Open the confirm modal + wire its danger button (the isu-w6 idiom, browser-verified).
+  // Open the shared confirm modal on the danger-no-echo tier (GR41 fold of the
+  // isu-w6 idiom).
   function confirmSiteRollback(site, domain) {
-    openModal(siteRollbackConfirmHtml(site, domain));
-    var go = $("#site-rollback-go");
-    if (go) go.addEventListener("click", function () { runSiteRollback(site, domain, go); });
+    var opts = siteRollbackConfirmOpts(site, domain);
+    opts.onConfirm = function (ctl) { runSiteRollback(site, domain, ctl); };
+    openConfirmModal(opts);
   }
 
   // POST /v1/sites/:id/rollback on its SYNCHRONOUS transport. On 200 {ok:true}: stash
   // the flash, show a "Rolled back" completion toast, and quiet-refetch so the history
   // panel settles over the single "deployments" SSE tick (the restored row marker /
   // previous-release banner appear on that repaint). NO six-stage rail — a rollback
-  // mints no Deployment row, so mountDeployRail has nothing to mount. A typed refusal
-  // is terminal: close + honest toast (never a silent retry, never a poll).
-  function runSiteRollback(site, domain, btn) {
-    btn = btn || $("#site-rollback-go");
-    if (btn) { btn.disabled = true; btn.textContent = "Rolling back…"; }
+  // mints no Deployment row, so mountDeployRail has nothing to mount. A refusal is
+  // classified by siteRollbackFailure and rendered INLINE in the modal (decision
+  // 25 — never a dead toast): terminal 422s offer Close, the rest Try again.
+  function runSiteRollback(site, domain, ctl) {
     api("POST", siteRollbackPath(site.id), {}).then(function (r) {
       if (r.status === 200 && r.data && r.data.ok) {
-        closeModal();
+        ctl.succeed();
         var res = siteRollbackResult(r.data);
         siteRollbackFlash[String(site.id)] = res;
         toast({
@@ -8139,8 +8197,14 @@
         return;
       }
       var copy = siteRollbackFailure(r.status, r.data);
-      closeModal();
-      toast({ kind: "error", title: copy.title, body: copy.body });
+      if (siteRollbackRefusalTerminal(r.status, r.data)) {
+        ctl.fail(copy.title + " — " + copy.body, "Close", function () { closeModal(); });
+      } else {
+        ctl.fail(copy.title + " — " + copy.body, "Try again", function (c) {
+          c.busy();
+          runSiteRollback(site, domain, c);
+        });
+      }
     });
   }
 
@@ -15023,11 +15087,14 @@
       updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,
       updatePanelHtml: updatePanelHtml, fleetRolloutBanner: fleetRolloutBanner,
       fleetRolloutBannerHtml: fleetRolloutBannerHtml,
-      // isu-w6 console instance-rollback: the confirm-modal HTML builder + the
-      // typed-conflict copy classifier. Both pure (node-pinned); the DOM mounts
-      // (confirmRollbackInstance/rollbackInstance, wired via wireUpdatePanel) are
-      // browser-verified. rollbackConfirmHtml escapes the server-supplied name.
-      rollbackConfirmHtml: rollbackConfirmHtml, rollbackConflictCopy: rollbackConflictCopy,
+      // isu-w6 → GR41 console instance-rollback: the confirm-opts builder (rides
+      // the shared danger-no-echo confirm modal), the typed-conflict copy
+      // classifier, and the terminal-refusal split. All pure (node-pinned); the
+      // DOM mounts (confirmRollbackInstance/rollbackInstance, wired via
+      // wireUpdatePanel) are browser-verified. The server-supplied name rides
+      // opts.title → esc()'d by confirmModalHtml.
+      rollbackConfirmOpts: rollbackConfirmOpts, rollbackConflictCopy: rollbackConflictCopy,
+      rollbackRefusalTerminal: rollbackRefusalTerminal,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,
@@ -15089,6 +15156,9 @@
       confirmModalInit: confirmModalInit, confirmModalReduce: confirmModalReduce,
       confirmModalArmed: confirmModalArmed, confirmModalTypedMatch: confirmModalTypedMatch,
       confirmModalHtml: confirmModalHtml, trapTarget: trapTarget,
+      // GR41: the toast-input normalizer — a bare string coerces to {title}
+      // instead of rendering an empty (dead) toast.
+      toastShape: toastShape,
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
@@ -15096,11 +15166,12 @@
       // until the new build is live) + the loadInstanceSites stale-paint guard.
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
       staleGuard: staleGuard,
-      // stw5 (charter D25/D28): the SITE-level synchronous rollback (distinct from the
-      // per-row async promote) + the capped deploy-history render. Only the PURE
-      // path/fold/copy/markup helpers are node-pinned; confirmSiteRollback /
-      // runSiteRollback (openModal + api + toast) are browser-verified.
-      siteRollbackPath: siteRollbackPath, siteRollbackConfirmHtml: siteRollbackConfirmHtml,
+      // stw5 → GR41 (charter D25/D28): the SITE-level synchronous rollback (distinct
+      // from the per-row async promote) + the capped deploy-history render. Only the
+      // PURE path/fold/copy/opts helpers are node-pinned; confirmSiteRollback /
+      // runSiteRollback (openConfirmModal + api) are browser-verified.
+      siteRollbackPath: siteRollbackPath, siteRollbackConfirmOpts: siteRollbackConfirmOpts,
+      siteRollbackRefusalTerminal: siteRollbackRefusalTerminal,
       siteRollbackResult: siteRollbackResult, siteRollbackFailure: siteRollbackFailure,
       siteRollbackFlashView: siteRollbackFlashView, deployRollbackBannerHtml: deployRollbackBannerHtml,
       deployTriggerLabel: deployTriggerLabel,

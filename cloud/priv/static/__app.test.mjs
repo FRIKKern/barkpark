@@ -84,6 +84,59 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── gr-p5 GR41: danger-no-echo confirm tier, rich-body slot, toast shape ─────
+// The shared confirm modal's THIRD tier (btn-danger weight WITHOUT the typed
+// echo — for grave-but-reversible actions like rollbacks) plus the trusted
+// rich-body slot, ADDITIVE to the mutate/destroy grammar; and the toast-input
+// normalizer that keeps a bare-string call from rendering an empty dead toast.
+
+test("gr41: danger tier is armed from the start — btn-danger weight, no typed echo", () => {
+  const s = hooks.confirmModalInit({
+    tier: "danger", title: "Roll back x?", confirmLabel: "Roll back",
+  });
+  assert.equal(s.tier, "danger");
+  assert.equal(s.resourceName, null);                    // echo is destroy-only
+  assert.equal(hooks.confirmModalTypedMatch(s), true);   // no echo gate
+  assert.equal(hooks.confirmModalArmed(s), true);        // live immediately
+  const html = hooks.confirmModalHtml(s);
+  assert.match(html, /btn-danger/);                      // danger weight
+  assert.doesNotMatch(html, /cm-typed/);                 // no echo input
+  assert.doesNotMatch(html, /id="cm-confirm" disabled/); // ships enabled
+  assert.doesNotMatch(html, /btn-primary/);              // never reads as a safe primary
+});
+
+test("gr41: danger tier walks the same reducer — busy → inline error stays armed for recovery", () => {
+  let s = hooks.confirmModalInit({ tier: "danger", title: "T" });
+  s = hooks.confirmModalReduce(s, { type: "confirm" });
+  assert.equal(s.phase, "busy");
+  s = hooks.confirmModalReduce(s, { type: "fail", message: "nope" });
+  assert.equal(s.phase, "error");
+  assert.equal(s.error, "nope");
+  assert.equal(hooks.confirmModalArmed(s), true); // recovery can re-enter busy
+});
+
+test("gr41: the rich-body slot renders TRUSTED caller markup raw, on any tier, and is absent by default", () => {
+  const danger = hooks.confirmModalHtml(hooks.confirmModalInit({
+    tier: "danger", title: "Roll back?", bodyHtml: "Schema stays <b>forward</b>.",
+  }));
+  assert.match(danger, /cm-body/);
+  assert.match(danger, /Schema stays <b>forward<\/b>\./); // raw, not esc'd — the slot is trusted
+  const mutate = hooks.confirmModalHtml(hooks.confirmModalInit({
+    title: "Redeploy?", bodyHtml: "Same <b>source</b>.",
+  }));
+  assert.match(mutate, /Same <b>source<\/b>\./);          // additive: not danger-exclusive
+  const plain = hooks.confirmModalHtml(hooks.confirmModalInit({ title: "T", consequence: "C" }));
+  assert.doesNotMatch(plain, /cm-body/);                  // no slot → no empty element
+});
+
+test("gr41: toastShape coerces a bare string to {title} so a legacy call never renders an empty toast", () => {
+  assert.deepEqual(plain(hooks.toastShape("Theme saved")), { title: "Theme saved" });
+  const obj = { kind: "error", title: "Couldn't save", body: "why" };
+  assert.equal(hooks.toastShape(obj), obj);   // object form passes through untouched
+  assert.deepEqual(plain(hooks.toastShape(null)), {});      // total over junk
+  assert.deepEqual(plain(hooks.toastShape(undefined)), {});
+});
+
 // ── gr-p2-front-door: the v4 front door (B-01..B-03) ────────────────────────
 // The sign-in card's initial-tab classifier, the 2FA card's AUTH-scoped
 // vocabulary (GR21: theater's .new-title/.new-desc never render on an auth
@@ -2110,9 +2163,9 @@ test("deployRow escapes hostile git meta (branch, ref, id)", () => {
 
 test("the stw5 site-rollback helpers are exported", () => {
   for (const name of [
-    "siteRollbackPath", "siteRollbackConfirmHtml", "siteRollbackResult",
-    "siteRollbackFailure", "siteRollbackFlashView", "deployRollbackBannerHtml",
-    "deployTriggerLabel",
+    "siteRollbackPath", "siteRollbackConfirmOpts", "siteRollbackRefusalTerminal",
+    "siteRollbackResult", "siteRollbackFailure", "siteRollbackFlashView",
+    "deployRollbackBannerHtml", "deployTriggerLabel",
   ]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
@@ -2123,17 +2176,33 @@ test("siteRollbackPath targets the site rollback endpoint and encodes a hostile 
   assert.match(hooks.siteRollbackPath('a/b?x=1'), /\/v1\/sites\/a%2Fb%3Fx%3D1\/rollback/);
 });
 
-test("siteRollbackConfirmHtml clones the W6 idiom: danger confirm + Cancel, escaped domain, honest copy", () => {
-  const html = hooks.siteRollbackConfirmHtml({ id: "s1" }, "shop.example.com");
-  assert.match(html, /id="site-rollback-go"/);
+test("gr41: siteRollbackConfirmOpts rides the danger-no-echo shared modal: escaped domain, honest copy, inline-failure surface", () => {
+  const opts = hooks.siteRollbackConfirmOpts({ id: "s1" }, "shop.example.com");
+  assert.equal(opts.tier, "danger");                // no typed echo — reversible-grave, not destroy
+  const html = hooks.confirmModalHtml(hooks.confirmModalInit(opts));
+  assert.match(html, /Roll back shop\.example\.com\?/); // names the site
+  assert.match(html, /id="cm-confirm"/);            // the SHARED confirm trigger
+  assert.doesNotMatch(html, /id="cm-confirm" disabled/); // armed from the start
+  assert.doesNotMatch(html, /cm-typed/);            // no echo input
   assert.match(html, /btn-danger/);
   assert.match(html, /data-close/);                 // Cancel
-  assert.match(html, /previous release/);           // honest consequence
+  assert.match(html, /id="cm-error"/);              // D25 inline-failure surface
+  assert.match(html, /<b>previous release<\/b>/);   // honest consequence (rich-body slot)
   assert.match(html, /no rebuild/);                 // NOT the async build path
-  // Hostile domain never injects markup.
-  const evil = hooks.siteRollbackConfirmHtml({ id: "s1" }, '<img src=x onerror="y">');
+  // Hostile domain never injects markup (rides title → esc'd by confirmModalHtml).
+  const evil = hooks.confirmModalHtml(hooks.confirmModalInit(
+    hooks.siteRollbackConfirmOpts({ id: "s1" }, '<img src=x onerror="y">')));
   assert.doesNotMatch(evil, /<img src=x/);
   assert.match(evil, /&lt;img/);
+});
+
+test("gr41: siteRollbackRefusalTerminal — the two typed 422s are terminal, everything else retries", () => {
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "not_rollbackable" }), true);
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: { code: "no_previous" } }), true);
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, { error: "rollback_failed" }), false); // deploy in flight → retry later
+  assert.equal(hooks.siteRollbackRefusalTerminal(500, {}), false);
+  assert.equal(hooks.siteRollbackRefusalTerminal(0, null), false);
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "wat" }), false); // unknown 422 stays retryable
 });
 
 test("siteRollbackResult: deployment_id PRESENT → 'restored' branch (row to mark)", () => {
@@ -5789,28 +5858,48 @@ test("isu-w5: fleetRolloutBannerHtml emits a wired Halt/Resume button, empty on 
   assert.match(evil, /&lt;b&gt;x/);
 });
 
-// ── isu-w6: console instance rollback (charter W6 D16/D19/D23) ───────────────
+// ── isu-w6 → GR41: console instance rollback rides the SHARED confirm modal ──
+// (charter W6 D16/D19/D23 + GR41 danger-no-echo grammar)
 
-test("isu-w6: the rollback pure helpers are exported through the ONE test hook", () => {
-  assert.equal(typeof hooks.rollbackConfirmHtml, "function");
+test("gr41: the rollback pure helpers are exported through the ONE test hook", () => {
+  assert.equal(typeof hooks.rollbackConfirmOpts, "function");
   assert.equal(typeof hooks.rollbackConflictCopy, "function");
+  assert.equal(typeof hooks.rollbackRefusalTerminal, "function");
 });
 
-test("isu-w6: rollbackConfirmHtml carries the honest D19 copy (app-level, schema forward, pins)", () => {
-  const html = hooks.rollbackConfirmHtml({ name: "acme-prod" });
+test("gr41: rollbackConfirmOpts rides the danger-no-echo tier with the honest D19 copy (app-level, schema forward, pins)", () => {
+  const opts = hooks.rollbackConfirmOpts({ name: "acme-prod" });
+  assert.equal(opts.tier, "danger");                   // no typed echo for a reversible-grave action
+  assert.equal(opts.confirmLabel, "Roll back");
+  assert.equal(opts.busyLabel, "Rolling back…");
+  const html = hooks.confirmModalHtml(hooks.confirmModalInit(opts));
   assert.match(html, /Roll back acme-prod\?/);         // names the instance
   assert.match(html, /previous slot/);                 // app-level slot flip
-  assert.match(html, /does <b>not<\/b> undo migrations/); // schema stays FORWARD
+  assert.match(html, /does <b>not<\/b> undo migrations/); // schema stays FORWARD (rich-body slot)
   assert.match(html, /<b>pinned<\/b>/);                // pins at rolled-back version
-  assert.match(html, /id="rollback-go"/);              // the wired trigger button
+  assert.match(html, /id="cm-confirm"/);               // the SHARED confirm trigger
+  assert.doesNotMatch(html, /id="cm-confirm" disabled/); // armed from the start — no echo gate
+  assert.doesNotMatch(html, /cm-typed/);               // danger-no-echo: no typed field
+  assert.match(html, /id="cm-error"/);                 // the D25 inline-failure surface exists
   assert.match(html, /data-close/);                    // Cancel exists
   assert.match(html, /btn-danger/);                    // rollback is a caution action
 });
 
-test("isu-w6: rollbackConfirmHtml escapes a hostile instance name (no markup injection)", () => {
-  const html = hooks.rollbackConfirmHtml({ name: '<img src=x onerror=alert(1)>' });
+test("gr41: a hostile instance name never injects markup through the shared modal (title is esc'd)", () => {
+  const html = hooks.confirmModalHtml(hooks.confirmModalInit(
+    hooks.rollbackConfirmOpts({ name: '<img src=x onerror=alert(1)>' })));
   assert.doesNotMatch(html, /<img src=x/); // never emitted as live markup
   assert.match(html, /&lt;img/);           // rendered as escaped text
+});
+
+test("gr41: rollbackRefusalTerminal splits Close from Try again over the D23 vocabulary", () => {
+  for (const code of ["no_previous_slot", "not_supported", "not_enabled",
+    "feature_not_configured", "not_live"]) {
+    assert.equal(hooks.rollbackRefusalTerminal(code), true, code + " is terminal");
+  }
+  for (const code of ["already_running", "instance_unreachable", "instance_error", "wat", undefined]) {
+    assert.equal(hooks.rollbackRefusalTerminal(code), false, String(code) + " is transient (retryable)");
+  }
 });
 
 test("isu-w6: rollbackConflictCopy maps the full W6 refusal vocabulary (D23), no force affordance", () => {

@@ -185,6 +185,16 @@
       /* Shipped-component demos (04, 13-16) chrome */
       .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
       .sg-modal-demo .modal-card { max-width: 420px; }
+      .sg-fam-label {
+        font-family: var(--mono);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--cc-fg4);
+        margin: 0 0 8px;
+      }
+      .sg-fam { margin: 0 0 24px; }
+      .sg-fam:last-child { margin-bottom: 0; }
       .sg-forms { max-width: 380px; }
 
       @media (prefers-reduced-motion: reduce) {
@@ -644,22 +654,151 @@
         </div>
       </section>
 
-      <!-- 16 Modal (shipped components) ──────────────────────────────────────── -->
+      <!-- 16 Modal — the six families (shipped components) ───────────────────── -->
       <section class="sg-section">
-        <h2>16 · Modal</h2>
-        <p class="sg-note">Shown flat (no overlay). In the product it sits on the scrim at --z-modal with a focus trap. Destructive confirms are type-the-name.</p>
+        <h2>16 · Modal — the six families</h2>
+        <p class="sg-note">
+          Every dialog in the console is one of six families, all shown flat here (no overlay);
+          in the product each sits on the scrim at --z-modal with a focus trap, and Escape /
+          backdrop / Cancel dismissal stays available in every phase. The three <b>confirm</b>
+          families share one grammar (GR41): <b>mutate</b> ships a live primary button with a
+          single escaped consequence sentence; <b>danger&nbsp;(no&nbsp;echo)</b> carries
+          btn-danger weight and is armed from the start — for grave-but-reversible actions
+          (rollbacks) whose warning rides the trusted rich-body slot; <b>destroy</b> adds the
+          consequence list and the type-the-name echo, its button disabled until the name
+          matches. A failed confirm never dies into a toast: the sentence renders inline
+          (.cm-error) and the primary morphs into exactly one recovery — Try again for
+          transient refusals, Close for terminal ones (decision&nbsp;25).
+        </p>
         <div class="sg-panes sg-modal-demo" data-sg-clone>
-          <div class="modal-card card">
-            <button class="modal-x" type="button" aria-label="Close">&times;</button>
-            <h2 class="modal-title">Remove summer-lake?</h2>
-            <p class="modal-sub">This deletes the server and everything on it. Type the instance name to confirm.</p>
-            <div class="field">
-              <input class="form-input" type="text" placeholder="summer-lake" />
+          <div class="sg-stack">
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">form — create / edit, primary submit</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Invite a team member</h2>
+                <p class="modal-sub">They join this team the moment they accept.</p>
+                <div class="field">
+                  <label class="label">Email</label>
+                  <input class="form-input" type="email" placeholder="dev@example.com" />
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-primary" type="button">Send invitation</button>
+                </div>
+              </div>
             </div>
-            <div class="modal-actions">
-              <button class="btn" type="button">Cancel</button>
-              <button class="btn btn-danger" type="button">Remove instance</button>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">account — identity, sessions, sign-out</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Account &amp; sessions</h2>
+                <p class="modal-sub">You are signed in to Barkpark Cloud.</p>
+                <div class="modal-row"><span class="k">Team</span><span class="v">team_9f2c</span></div>
+                <h3 class="modal-section">Active sessions</h3>
+                <div class="sessions-box">
+                  <div class="session-row">
+                    <div class="session-main">
+                      <div class="session-device">Chrome · macOS <span class="badge badge-current">This device</span></div>
+                      <div class="session-meta">203.0.113.7 · active just now</div>
+                    </div>
+                    <button class="btn btn-sm" type="button" disabled>Current</button>
+                  </div>
+                  <div class="session-row">
+                    <div class="session-main">
+                      <div class="session-device">Firefox · Linux</div>
+                      <div class="session-meta">198.51.100.4 · active 3d ago</div>
+                    </div>
+                    <button class="btn btn-sm" type="button">Revoke</button>
+                  </div>
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Close</button>
+                  <button class="btn btn-primary" type="button">Log out</button>
+                </div>
+              </div>
             </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">cmdk — command palette (⌘K), keyboard-first</p>
+              <div class="modal-card card">
+                <div class="cmdk">
+                  <div class="cmdk-search-wrap">
+                    <input class="cmdk-search" type="text" placeholder="Search instances, sites, and actions…" aria-label="Command palette search" />
+                  </div>
+                  <div class="cmdk-list">
+                    <div class="cmdk-row is-active"><span class="cmdk-row-label">summer-lake</span><span class="cmdk-row-meta"><span class="cmdk-row-hint">open</span><span class="cmdk-row-group">Instances</span></span></div>
+                    <div class="cmdk-row"><span class="cmdk-row-label">Launch a Barkpark</span><span class="cmdk-row-meta"><span class="cmdk-row-group">Actions</span></span></div>
+                  </div>
+                  <div class="cmdk-foot">
+                    <span class="cmdk-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+                    <span class="cmdk-hint"><kbd>↵</kbd> select</span>
+                    <span class="cmdk-hint"><kbd>esc</kbd> close</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">mutate confirm — live primary, one esc'd consequence</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Deploy shop.example.com?</h2>
+                <p class="modal-sub cm-consequence">Rebuilds from the connected repository and replaces the live release when it succeeds.</p>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-primary" type="button">Deploy</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">danger (no echo) — btn-danger, armed from the start, rich body</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Roll back summer-lake?</h2>
+                <p class="modal-sub cm-body">App-level rollback to the previous slot. Schema stays forward &mdash; rolling back code does <b>not</b> undo migrations. The instance will be <b>pinned</b> at the rolled-back version so autoupdate won't re-apply the version you're leaving.</p>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button">Roll back</button>
+                </div>
+              </div>
+              <p class="sg-fam-label" style="margin-top: 12px;">&hellip; failed confirm: inline sentence + one recovery, never a toast (decision 25)</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Roll back summer-lake?</h2>
+                <div class="cm-error" role="alert">
+                  <p class="cm-error-msg">Rollback is already running — one at a time. Wait for it to settle, then try again.</p>
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button">Try again</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">destroy — consequence list + type-the-name echo, disabled until matched</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Remove summer-lake?</h2>
+                <ul class="cm-consequences">
+                  <li>Deletes the server and its volume.</li>
+                  <li>All sites on this instance go offline.</li>
+                </ul>
+                <div class="field cm-typed-field">
+                  <label class="label">Type <span class="cm-name">summer-lake</span> to confirm</label>
+                  <input class="form-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button" disabled>Remove instance</button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
