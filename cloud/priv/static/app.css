@@ -2175,35 +2175,130 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .nav-menu-item:hover { background: var(--muted-surface); color: var(--text); text-decoration: none; }
 
 /* ============================================================ OVERVIEW (home)
-   Rollup strip (clickable bucket counts → #fleet/<bucket>), the attention
-   queue, an "all healthy" resting state, and the activity digest section. */
-.rollup {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 28px;
+   gr-p2 HOME TRIAGE (C-01/C-02, v4): a time-of-day greeting, page-header fleet
+   chips + a REAL slots meter, a mint self-healing runway OR the GR17 past-due
+   banner, the attention queue, a v4 instances grid, and the activity digest. */
+
+/* Page header: greeting left, chips + slots + Launch right. */
+.overview-head { align-items: flex-start; }
+.overview-greet h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.overview-head-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.overview-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ov-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--pill);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--muted-surface); color: var(--muted-text);
 }
-.rollup-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-radius: var(--radius);
-  color: var(--text);
+.ov-chip-glyph { font-size: 10px; line-height: 1; }
+.ov-chip--attention { color: var(--warn); background: hsl(var(--warn-hsl) / 0.12); }
+.ov-chip--inflight { color: var(--info); background: hsl(var(--info-hsl) / 0.12); }
+.ov-chip--healthy { color: var(--ok); background: hsl(var(--ok-hsl) / 0.12); }
+.ov-chip-pulse { animation: ov-pulse 1.6s ease-in-out infinite; }
+@keyframes ov-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ov-chip-pulse { animation: none; } }
+.ov-slots { display: inline-flex; align-items: center; gap: 8px; }
+.ov-slots:empty { display: none; }
+.ov-slots-label { font-size: 12px; font-weight: 600; color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.ov-slots-track { width: 48px; height: 4px; border-radius: 2px; background: var(--muted-surface); overflow: hidden; }
+.ov-slots-fill { display: block; height: 100%; background: var(--ok); }
+
+/* Attention queue — amber card, one row per box that needs an operator. */
+.overview-attention { margin-top: 4px; }
+.attention-card {
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius); background: var(--surface); overflow: hidden;
+}
+.attention-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+}
+.attention-row:last-child { border-bottom: none; }
+.attention-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.attention-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.attention-name:hover { color: var(--primary); }
+.attention-reason { font-size: 13px; color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
+/* v4 instances grid — auto-fill cards. */
+.overview-instances { margin-top: 4px; }
+.instances-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px;
+}
+.instance-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 20px; border: 1px solid var(--border);
+  border-left-width: 3px; border-left-color: var(--border);
+  border-radius: var(--radius); background: var(--surface);
   transition: border-color var(--t), box-shadow var(--t);
 }
-.rollup-card:hover { text-decoration: none; box-shadow: var(--shadow-sm); }
-.rollup-n { font-size: 26px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-.rollup-k { font-size: 12px; color: var(--muted-text); }
-.rollup-card--attention { border-left-color: var(--danger); }
-.rollup-card--attention:hover { border-color: hsl(var(--danger-hsl) / 0.4); }
-.rollup-card--inflight { border-left-color: var(--info); }
-.rollup-card--inflight:hover { border-color: hsl(var(--info-hsl) / 0.4); }
-.rollup-card--healthy { border-left-color: var(--ok); }
-.rollup-card--healthy:hover { border-color: hsl(var(--ok-hsl) / 0.4); }
+.instance-card:hover { box-shadow: var(--shadow-sm); }
+.instance-card--warn { border-left-color: var(--warn); }
+.instance-card--danger { border-left-color: var(--danger); }
+.instance-card--info { border-left-color: var(--info); }
+.instance-card--ok { border-left-color: var(--ok); }
+.instance-card-head { display: flex; align-items: center; gap: 10px; }
+.instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; }
+.instance-card-name:hover { color: var(--primary); }
+.instance-card-url {
+  font-family: var(--mono); font-size: 12px; color: var(--muted-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.instance-card-spark { height: 30px; color: var(--dim); border-bottom: 1px solid var(--border); }
+.instance-card-spark .spark { display: block; width: 100%; height: 30px; }
+.spark--ok { color: var(--ok); } .spark--info { color: var(--info); }
+.spark--warn { color: var(--warn); } .spark--danger { color: var(--danger); }
+.spark--neutral { color: var(--dim); }
+.instance-card-stats { display: flex; align-items: center; gap: 18px; padding-top: 4px; }
+.instance-card-stat { display: flex; flex-direction: column; gap: 2px; }
+.instance-card-stat-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.instance-card-stat-v { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.instance-card-stat-v.is-warn { color: var(--warn); }
+.instance-card-studio { margin-left: auto; color: var(--ok); font-weight: 600; }
+
+/* C-02 self-healing runway — mint-tinted onboarding card. */
+.runway-card {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 20px 22px; border: 1px solid hsl(var(--ok-hsl) / 0.28);
+  border-radius: var(--radius); background: hsl(var(--ok-hsl) / 0.05); margin-bottom: 8px;
+}
+.runway-card-head { display: flex; align-items: baseline; gap: 12px; }
+.runway-card-head h2 { font-size: 15px; margin: 0; }
+.runway-progress { font-size: 12.5px; color: var(--muted-text); }
+.runway-dismiss { margin-left: auto; font-size: 12.5px; }
+.runway-steps { display: flex; flex-direction: column; gap: 12px; }
+.runway-step { display: flex; align-items: center; gap: 12px; }
+.runway-mark {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: var(--pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  border: 1px solid var(--border); color: var(--text); background: transparent;
+}
+.runway-step.is-done .runway-mark { border-color: hsl(var(--ok-hsl) / 0.28); background: var(--ok-soft); color: var(--ok); }
+.runway-step-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.runway-step-label { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.runway-step.is-done .runway-step-label { color: var(--muted-text); }
+.runway-step-hint { font-size: 12.5px; color: var(--dim); }
+.runway-step-action { flex: 0 0 auto; font-size: 12.5px; }
+
+/* GR17 past-due surfaces — overview banner + suspended instance-card banner. */
+.overview-dunning { margin-bottom: 8px; }
+.suspended-card-banner {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px; margin: -18px -20px 0; border-radius: 0;
+  border: none; border-bottom: 1px solid hsl(var(--danger-hsl) / 0.3);
+  background: hsl(var(--danger-hsl) / 0.08);
+}
+.suspended-card-title { font-size: 13px; font-weight: 700; color: var(--danger); }
+.suspended-card-body { font-size: 12.5px; color: var(--muted-text); margin: 0; }
+
+/* A plain-text link styled as a button (Open Studio in a card, runway actions). */
+.btn-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--primary); text-align: left;
+}
+.btn-link:hover { text-decoration: underline; }
+.btn-link:disabled { opacity: 0.55; cursor: not-allowed; text-decoration: none; }
 
 .overview-sub {
   display: flex;
@@ -2241,7 +2336,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 @media (max-width: 620px) {
-  .rollup { grid-template-columns: 1fr; }
+  .instances-grid { grid-template-columns: 1fr; }
+  .overview-head { flex-direction: column; }
+  .overview-head-right { justify-content: flex-start; }
+  .attention-row { flex-wrap: wrap; }
 }
 
 /* ============================================================ C6 INSTANCE TABS

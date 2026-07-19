@@ -2852,23 +2852,291 @@
   }
 
   // =========================================================== OVERVIEW (home)
-  // The operator's landing page (charter decision 6): a rollup strip whose three
-  // counts are clickable filters that deep-link into #fleet/<bucket>, an
-  // attention QUEUE (most-urgent instance on top via attentionRank), an activity
-  // digest that HIDES on 403 (/v1/audit is admin-gated), the welcome runway for
-  // an empty fleet (A4), and Launch-as-action in the header.
-  function rollupCard(bucket, label, n) {
-    return '<a class="rollup-card rollup-card--' + bucket + '" href="#fleet/' + bucket + '">' +
-      '<span class="rollup-n">' + n + "</span>" +
-      '<span class="rollup-k">' + esc(label) + "</span>" +
-    "</a>";
+  // C-01/C-02 (v4): the operator's landing page. A time-of-day greeting + a
+  // computed triage sentence, page-header fleet chips (attention/in-flight/
+  // healthy + a REAL slots meter off the usage quota), a mint self-healing
+  // onboarding runway OR the GR17 past-due banner (mutually exclusive), the
+  // attention queue (most-urgent first via attentionRank), a v4 instances grid,
+  // and an activity digest that HIDES on 403 (/v1/audit is admin-gated).
+
+  // Pure: the time-of-day greeting PREFIX (trailing ", " so a name appends
+  // cleanly). Mirrors the v4 prototype's `greeting` (Cloud v4.dc.html:1998).
+  function overviewGreeting(hour) {
+    var h = typeof hour === "number" ? hour : 12;
+    return h < 5 ? "Up late, " : h < 12 ? "Good morning, " : h < 18 ? "Good afternoon, " : "Good evening, ";
   }
-  function rollupStrip(sum) {
-    return '<div class="rollup">' +
-      rollupCard("attention", "Needs attention", sum.attention) +
-      rollupCard("inflight", "In flight", sum.inflight) +
-      rollupCard("healthy", "Healthy", sum.healthy) +
+
+  // Pure: the triage subline over the fleet summary (v4 `overviewSub`). One
+  // sentence that reads the truth: everything fine / one thing / N things.
+  function overviewSubline(sum) {
+    sum = sum || {};
+    var a = sum.attention || 0;
+    var total = sum.total || 0;
+    if (a === 0) return "All " + total + (total === 1 ? " instance is" : " instances are") + " running fine.";
+    if (a === 1) return "One thing needs a look — everything else is running fine.";
+    return a + " things need a look.";
+  }
+
+  // Pure: the page-header fleet chips. Amber attention (always), blue in-flight
+  // (only when >0, pulsing), mint healthy — plus an empty slot the real slots
+  // meter fills once /v1/usage/summary answers (never a hardcoded denominator).
+  function overviewHeadChipsHtml(sum) {
+    sum = sum || {};
+    var chips =
+      '<span class="ov-chip ov-chip--attention"><span class="ov-chip-glyph" aria-hidden="true">&#9650;</span>' +
+        (sum.attention || 0) + " needs attention</span>" +
+      ((sum.inflight || 0) > 0
+        ? '<span class="ov-chip ov-chip--inflight"><span class="ov-chip-glyph ov-chip-pulse" aria-hidden="true">&#9680;</span>' +
+            sum.inflight + " in flight</span>"
+        : "") +
+      '<span class="ov-chip ov-chip--healthy"><span class="ov-chip-glyph" aria-hidden="true">&#9679;</span>' +
+        (sum.healthy || 0) + " healthy</span>";
+    return chips + '<span id="overview-slots" class="ov-slots"></span>';
+  }
+
+  // Pure: the slots meter model. The denominator is the REAL team instance
+  // quota (Billing.barkpark_limit, surfaced as usage.team.instances.quota) —
+  // NEVER hardcoded. No positive quota (an older CP / unlimited) → hasLimit
+  // false and the meter stays hidden rather than inventing a ceiling.
+  function overviewSlotsModel(usage, fleetCount) {
+    var team = (usage && usage.team) || {};
+    var meter = team.instances || null;
+    var quota = meter && typeof meter.quota === "number" ? meter.quota : null;
+    var count = typeof fleetCount === "number" ? fleetCount : 0;
+    var hasLimit = typeof quota === "number" && quota > 0;
+    return {
+      count: count,
+      limit: hasLimit ? quota : null,
+      hasLimit: hasLimit,
+      pct: hasLimit ? Math.min(100, Math.round((count / quota) * 100)) : 0,
+    };
+  }
+  function overviewSlotsHtml(model) {
+    if (!model.hasLimit) return "";
+    return '<span class="ov-slots-label">' + model.count + " / " + model.limit + " slots</span>" +
+      '<span class="ov-slots-track"><span class="ov-slots-fill" style="width:' + model.pct + '%"></span></span>';
+  }
+
+  // Pure: the honest reason for an attention row — the semantic status detail
+  // (statusOf), with the v4 "Needs a look." fallback when a state carries none.
+  function attentionReason(bp) {
+    var s = statusOf(bp);
+    return (s && s.detail) || "Needs a look.";
+  }
+  // A box gets a working Open Studio link only when it is actually up (host set,
+  // not suspended, not tearing down) — the same gate fleetRow's button uses.
+  function attentionCanStudio(bp) {
+    bp = bp || {};
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed" ||
+      bp.deprovision_status === "failed";
+    return !!bp.host && !bp.suspended && !removing;
+  }
+  // Pure: one attention-queue row — pill + clickable name + reason + View
+  // instance + (when live) Open Studio. Open Studio reuses the .fleet-open-studio
+  // hook so wireFleetRows wires it (stopPropagation-safe); the name/View links
+  // are plain hash navigations (no JS wiring).
+  function attentionRowHtml(bp) {
+    return '<div class="attention-row" data-id="' + esc(bp.id) + '">' +
+      statusPill(bp) +
+      '<div class="attention-main">' +
+        '<a class="attention-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<span class="attention-reason">' + esc(attentionReason(bp)) + "</span>" +
+      "</div>" +
+      '<div class="attention-acts">' +
+        '<a class="btn btn-sm" href="#instance/' + esc(bp.id) + '">View instance</a>' +
+        (attentionCanStudio(bp)
+          ? '<button class="btn btn-primary btn-sm fleet-open-studio" type="button" data-id="' +
+              esc(bp.id) + '">Open Studio</button>'
+          : "") +
+      "</div>" +
     "</div>";
+  }
+
+  // ── v4 instances grid ───────────────────────────────────────────────────────
+  // The card stat pairs read the SAME cached /v1/usage/summary the slots meter
+  // does — never a per-instance fan-out from Overview. Four honest stats (DOCS /
+  // DISK / CPU / RAM); a warn/over meter tints its value amber.
+  var OVERVIEW_CARD_STATS = [
+    { key: "documents", label: "DOCS" },
+    { key: "disk", label: "DISK", fmt: "percent" },
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" },
+  ];
+  function instanceCardStats(meters) {
+    return OVERVIEW_CARD_STATS.map(function (h) {
+      var d = usageMeterDisplay(fleetHeadlineSpec(h), (meters || {})[h.key]);
+      return { k: h.label, v: d.unmetered ? "—" : d.value, warn: d.state === "warn" || d.state === "over" };
+    });
+  }
+  // Pure: one v4 instance card — name, status pill, infra axes, provider mark,
+  // mono URL, a status-tinted sparkline frame, up to 4 stat pairs, and the mint
+  // Open Studio link (live boxes only). Overview never fans out for a per-box
+  // time series, so the sparkline is an HONEST status-tinted axis that fills
+  // only if a cached series is ever threaded in (spark = null → empty frame,
+  // never fabricated data). A suspended box carries the GR17 card banner.
+  function instanceCardHtml(bp, opts) {
+    opts = opts || {};
+    var s = statusOf(bp);
+    var role = s.role || "neutral";
+    var stats = opts.stats || instanceCardStats(null);
+    var banner = (opts.sub && bp.suspended) ? suspendedCardBannerHtml(opts.sub) : "";
+    var statsHtml = stats.map(function (st) {
+      return '<div class="instance-card-stat">' +
+        '<span class="instance-card-stat-k">' + esc(st.k) + "</span>" +
+        '<span class="instance-card-stat-v' + (st.warn ? " is-warn" : "") + '">' + esc(st.v) + "</span>" +
+      "</div>";
+    }).join("");
+    var studio = attentionCanStudio(bp)
+      ? '<button class="btn-link instance-card-studio fleet-open-studio" type="button" data-id="' +
+          esc(bp.id) + '">Open Studio &rarr;</button>'
+      : "";
+    var spark = Array.isArray(opts.spark) ? opts.spark : null;
+    return '<div class="instance-card instance-card--' + esc(role) + '" data-id="' + esc(bp.id) + '">' +
+      banner +
+      '<div class="instance-card-head">' +
+        '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        providerChipHtml(bp.provider) + statusPill(bp) +
+      "</div>" +
+      fleetInfraLine(bp) +
+      '<div class="instance-card-url">' + esc(publicUrl(bp)) + "</div>" +
+      '<div class="instance-card-spark spark--' + esc(role) + '">' + sparklineSvg(spark, { width: 100, height: 30 }) + "</div>" +
+      '<div class="instance-card-stats">' + statsHtml + studio + "</div>" +
+    "</div>";
+  }
+  function overviewInstancesHtml(list, usage, sub) {
+    var byId = {};
+    var uinsts = (usage && Array.isArray(usage.instances)) ? usage.instances : [];
+    uinsts.forEach(function (inst) { if (inst && inst.id != null) byId[String(inst.id)] = inst.meters || {}; });
+    var cards = list.map(function (bp) {
+      return instanceCardHtml(bp, { stats: instanceCardStats(byId[String(bp.id)]), sub: sub });
+    }).join("");
+    return '<section class="overview-instances">' +
+      '<div class="overview-sub"><h2>Instances</h2><a href="#fleet">View fleet</a></div>' +
+      '<div class="instances-grid">' + cards + "</div>" +
+    "</section>";
+  }
+
+  // ── C-02 self-healing runway ────────────────────────────────────────────────
+  // Bound to me.onboarding server truth: three steps (subscription/instance/
+  // published_doc), each `done` RECOMPUTED server-side on every read — so a step
+  // finished outside the wizard self-heals on the next fetch (no client logic).
+  var RUNWAY_STEPS = [
+    { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
+    { key: "instance", label: "Launch your first Barkpark" },
+    { key: "published_doc", label: "Publish your first document", hint: "We'll notice automatically", action: "Open Studio →" },
+  ];
+  // Pure: the render model for the runway steps. done marks render a mint check,
+  // pending steps render their ordinal digit. The instance-step hint carries the
+  // real instance name (from the fleet cache) once launched.
+  function runwayStepModel(onboarding, opts) {
+    opts = opts || {};
+    var done = {};
+    ((onboarding && onboarding.steps) || []).forEach(function (s) { if (s) done[s.key] = !!s.done; });
+    return RUNWAY_STEPS.map(function (spec, i) {
+      var isDone = !!done[spec.key];
+      var hint = spec.hint || "";
+      if (spec.key === "instance") {
+        hint = isDone
+          ? (opts.instanceName ? opts.instanceName + " is running" : "Your first instance is running")
+          : "A dedicated instance, yours in minutes";
+      }
+      return {
+        key: spec.key,
+        done: isDone,
+        mark: isDone ? "✓" : String(i + 1),
+        label: spec.label,
+        hint: hint,
+        // The Open Studio nudge shows only while the published_doc step is still
+        // open (and only when there is a live box to open it on).
+        action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+      };
+    });
+  }
+  function runwayProgressText(onboarding) {
+    var steps = (onboarding && onboarding.steps) || [];
+    var done = steps.filter(function (s) { return s && s.done; }).length;
+    return done + " of " + (steps.length || RUNWAY_STEPS.length) + " done";
+  }
+  // Pure: the mint runway card. canManage hides the dismiss affordance for plain
+  // members (POST /v1/onboarding is owner/admin-only — no silent 403 button).
+  function runwayCardHtml(onboarding, opts) {
+    opts = opts || {};
+    var rows = runwayStepModel(onboarding, opts).map(function (st) {
+      return '<div class="runway-step' + (st.done ? " is-done" : "") + '">' +
+        '<span class="runway-mark" aria-hidden="true">' + esc(st.mark) + "</span>" +
+        '<div class="runway-step-main">' +
+          '<span class="runway-step-label">' + esc(st.label) + "</span>" +
+          (st.hint ? '<span class="runway-step-hint">' + esc(st.hint) + "</span>" : "") +
+        "</div>" +
+        (st.action
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
+              esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+      "</div>";
+    }).join("");
+    return '<section class="runway-card">' +
+      '<div class="runway-card-head">' +
+        "<h2>You're nearly set up</h2>" +
+        '<span class="runway-progress">' + esc(runwayProgressText(onboarding)) + "</span>" +
+        (opts.canManage
+          ? '<button class="btn-link runway-dismiss" type="button">Dismiss</button>'
+          : "") +
+      "</div>" +
+      '<div class="runway-steps">' + rows + "</div>" +
+    "</section>";
+  }
+
+  // ── GR17 past-due surfaces (dates data-driven via the shared dunningDates) ───
+  // The overview banner (ratified strings, verbatim). Two sentences; NO "come
+  // right back" tail (that is the billing-page variant). Mutually exclusive with
+  // the runway (a past-due team is never on trial). Reuses dunningDates/fmtDay —
+  // never a forked date calc.
+  function overviewDunningBannerHtml(sub) {
+    var d = dunningDates(sub);
+    var failed = d ? "Your payment failed on " + esc(fmtDay(d.failedMs)) + "." : "Your payment failed.";
+    var keep = d
+      ? "Your instances keep running until " + esc(fmtDay(d.suspendMs)) +
+        ", then they're suspended — not deleted."
+      : "Your instances keep running through a short grace period, then they're suspended — not deleted.";
+    return '<div class="notice notice-warn dunning-banner overview-dunning" role="alert">' +
+      '<div class="dunning-head"><span class="dunning-plan">' + esc(planName(sub.plan)) + "</span>" +
+        '<b class="dunning-title">Payment failed</b></div>' +
+      '<p class="dunning-body">' + failed + " " + keep + "</p>" +
+      '<button class="btn btn-primary btn-sm" id="overview-dunning-portal" type="button">Update payment method</button>' +
+    "</div>";
+  }
+  // The suspended instance-card banner (ratified strings, verbatim). {since_date}
+  // derives from the subscription's grace end (dunningDates.suspendMs).
+  function suspendedCardBannerHtml(sub) {
+    var d = dunningDates(sub);
+    var since = d ? "Suspended " + esc(fmtDay(d.suspendMs)) + " — payment failed" : "Suspended — payment failed";
+    return '<div class="notice notice-warn suspended-card-banner" role="alert">' +
+      '<div class="suspended-card-title">' + since + "</div>" +
+      '<p class="suspended-card-body">The server is stopped, not destroyed. Everything comes back exactly as it was the moment payment succeeds.</p>' +
+    "</div>";
+  }
+
+  // Pure: which mutually-exclusive state band the Overview shows. past_due wins
+  // (the money path); else a trial team with onboarding still open gets the
+  // runway; everyone else, nothing.
+  function overviewStatePick(sub, onboarding) {
+    if (sub && sub.status === "past_due") return "past_due";
+    if (sub && sub.plan === "trial" && onboarding && !onboarding.completed) return "runway";
+    return "none";
+  }
+  function overviewStateHtml(sub, onboarding, opts) {
+    var pick = overviewStatePick(sub, onboarding);
+    if (pick === "past_due") return overviewDunningBannerHtml(sub);
+    if (pick === "runway") return runwayCardHtml(onboarding, opts);
+    return "";
+  }
+
+  function canManageOnboarding() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+  function firstStudioInstance(list) {
+    for (var i = 0; i < (list || []).length; i++) if (attentionCanStudio(list[i])) return list[i];
+    return null;
   }
 
   function loadOverview() {
@@ -2876,6 +3144,8 @@
     if (!body) return;
     body.innerHTML = '<div class="loading">Loading overview&hellip;</div>';
     api("GET", "/v1/barkparks").then(function (r) {
+      body = $("#overview-body");
+      if (!body) return;
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
@@ -2884,22 +3154,24 @@
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       setHeaderLaunchHidden("overview-launch", !list.length);
+      paintOverviewHead(list);
       if (!list.length) {
         launchFlow(body, { runway: true }); // A4: empty fleet → the welcome runway
         return;
       }
       var sum = fleetSummary(list);
       // The queue is ONLY the instances that actually need an operator — the
-      // attention bucket (ranks 1–5), most-urgent first, capped. In-flight and
-      // healthy boxes live in the rollup strip a click away; keeping them out is
-      // what makes the "Needs your attention" heading, the "View all" target
-      // (#fleet/attention), and the rollup card all name the SAME set.
+      // attention bucket (ranks 1–5), most-urgent first, capped. The "View all"
+      // target (#fleet/attention) names the SAME set.
       var queue = filterFleet(list, "attention").sort(attentionCompare).slice(0, 6);
       var queueHtml;
       if (queue.length) {
-        queueHtml = '<div class="overview-sub"><h2>Needs your attention</h2>' +
+        queueHtml = '<section class="overview-attention">' +
+          '<div class="overview-sub"><h2>Needs attention</h2>' +
             (sum.attention > queue.length ? '<a href="#fleet/attention">View all</a>' : "") +
-          "</div>" + queue.map(fleetRow).join("");
+          "</div>" +
+          '<div class="attention-card">' + queue.map(attentionRowHtml).join("") + "</div>" +
+        "</section>";
       } else {
         // Nothing needs action. Stay honest when boxes are still in flight —
         // "all healthy" would be a lie while something is provisioning.
@@ -2913,12 +3185,87 @@
               (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
           "</p></div>";
       }
-      body.innerHTML = rollupStrip(sum) +
-        '<div id="overview-fleet-usage"></div>' +
-        queueHtml + '<div id="overview-digest"></div>';
-      wireFleetRows(body);
-      loadFleetUsageStrip(); // wave-3: the whole fleet's usage from cached samples
+      body.innerHTML = '<div id="overview-state"></div>' +
+        queueHtml +
+        '<div id="overview-instances"></div>' +
+        '<div id="overview-digest"></div>';
+      wireFleetRows(body); // wires each attention row's Open Studio button
       loadOverviewDigest();
+      // ONE combined fetch feeds every data-dependent region: the slots meter +
+      // instance-card stats (usage/summary), the trial/past-due state band
+      // (subscription + onboarding). Each painter re-queries its mount so a
+      // navigation mid-flight is a no-op, never a paint into a dead node.
+      Promise.all([
+        api("GET", "/v1/usage/summary"),
+        loadSubscription(),
+        api("GET", "/v1/onboarding"),
+      ]).then(function (res) {
+        var usage = (res[0].ok && res[0].data && res[0].data.usage) ? res[0].data.usage : null;
+        var sub = res[1];
+        var ob = (res[2].ok && res[2].data) ? res[2].data.onboarding : null;
+        // Self-heal the boot fold (GET /v1/onboarding recomputes server-side); if
+        // the read failed, keep the last-known fold rather than blanking it.
+        if (ob && meCache) meCache.onboarding = ob;
+        else if (!ob && meCache) ob = meCache.onboarding;
+        paintOverviewSlots(usage, list.length);
+        var grid = $("#overview-instances");
+        if (grid) { grid.innerHTML = overviewInstancesHtml(list, usage, sub); wireFleetRows(grid); }
+        paintOverviewState(list, sub, ob);
+      });
+    });
+  }
+
+  // Set the greeting + triage subline (always) and the header chips (only with a
+  // real fleet; empty hides them). The slots meter is filled async by
+  // paintOverviewSlots once the usage quota is known.
+  function paintOverviewHead(list) {
+    var teamName = (meCache && meCache.team && meCache.team.name) || "";
+    var g = overviewGreeting(new Date().getHours());
+    setText($("#overview-greeting"), teamName ? g + teamName : g.replace(/,\s*$/, ""));
+    var chips = $("#overview-chips");
+    if (!list.length) {
+      setText($("#overview-sub"), "Ready when you are — launch your first Barkpark.");
+      if (chips) { chips.innerHTML = ""; chips.hidden = true; }
+      return;
+    }
+    var sum = fleetSummary(list);
+    setText($("#overview-sub"), overviewSubline(sum));
+    if (chips) { chips.innerHTML = overviewHeadChipsHtml(sum); chips.hidden = false; }
+  }
+
+  function paintOverviewSlots(usage, fleetCount) {
+    var slot = $("#overview-slots");
+    if (!slot) return;
+    slot.innerHTML = overviewSlotsHtml(overviewSlotsModel(usage, fleetCount));
+  }
+
+  function paintOverviewState(list, sub, onboarding) {
+    var slot = $("#overview-state");
+    if (!slot) return;
+    var studio = firstStudioInstance(list);
+    slot.innerHTML = overviewStateHtml(sub, onboarding, {
+      instanceName: (list[0] && list[0].name) || "",
+      studioId: studio ? studio.id : "",
+      canManage: canManageOnboarding(),
+    });
+    var portal = $("#overview-dunning-portal");
+    if (portal) portal.addEventListener("click", function () { openBillingPortal(portal); });
+    var dismiss = slot.querySelector(".runway-dismiss");
+    if (dismiss) dismiss.addEventListener("click", function () { dismissRunway(dismiss); });
+    slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
+      b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
+    });
+  }
+
+  // Dismiss the runway — POST /v1/onboarding {action:"skip"} stamps completed_at
+  // (it never reappears). Owner/admin only (the button is hidden otherwise), so a
+  // 403 is not expected; any non-2xx just leaves the card in place with a toast.
+  function dismissRunway(btn) {
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "skip" }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't dismiss setup", body: friendly(r.data, "Please try again.") });
     });
   }
 
@@ -2935,7 +3282,7 @@
       var list = (r.data && r.data.events) || [];
       if (!list.length) { box.innerHTML = ""; return; }
       box.innerHTML = '<div class="overview-sub"><h2>Recent activity</h2><a href="#activity">View all</a></div>' +
-        list.map(activityRow).join("");
+        list.slice(0, 3).map(activityRow).join("");
     });
   }
 
@@ -8362,10 +8709,19 @@
     loadInstance(h.id, h.tab);
   }
 
+  // C-02: an onboarding tick means a step self-healed (subscribed / launched /
+  // published — possibly in another tab). The Overview runway binds to that
+  // truth, so refetch it; loadOverview re-reads /v1/onboarding server-side and
+  // repaints the state band. Off-Overview it is a no-op beyond dropping the
+  // fleet cache (the boot fold refreshes on the next Overview visit).
+  function invalidateOnboarding(v) {
+    fleetCache = null;
+    if (v === "overview") loadOverview();
+  }
+
   // Registered so the vocabulary stays closed; handled conservatively (same
   // as the unknown-type fallback): don't let a cached fleet outlive the event.
   // Per type, DELIBERATELY no view refetch:
-  //   onboarding    — no onboarding UI consumes the tick yet.
   //   notifications — a Notifications view EXISTS, but it is a settings form:
   //     a live loadNotifications() would clobber in-progress edits and stomp
   //     the "Saved." status (the saving tab receives its own broadcast).
@@ -8423,7 +8779,7 @@
     "barkpark.restored": invalidateFleet,
     members: onMembersEvent, // C10: refresh the Members panel when it's open
     notifications: invalidateConservatively,
-    onboarding: invalidateConservatively,
+    onboarding: invalidateOnboarding,
   };
 
   function handleLiveEvent(type, payload) {
@@ -10818,8 +11174,8 @@
   }
 
   // Pure: one instance cell. Native <a href="#instance/<id>/usage"> so the click
-  // is a plain hash navigation (no JS wiring, mirroring rollupCard). A no-sample
-  // instance renders the honest empty cell, never a wall of dashes.
+  // is a plain hash navigation (no JS wiring). A no-sample instance renders the
+  // honest empty cell, never a wall of dashes.
   function fleetStripCellHtml(row) {
     var href = "#instance/" + encodeURIComponent(row.id) + "/usage";
     if (row.noSample) {
@@ -10855,24 +11211,12 @@
     "</section>";
   }
 
-  // Mount the strip into its Overview container via its OWN async fetch of the
-  // cached summary — NEVER a per-instance /usage call from Overview. Like the
-  // activity digest, a failed or empty read hides the strip rather than scaring
-  // the operator: Overview's primary content (the attention queue) stands alone,
-  // and the per-instance Usage tab is where a real failure gets full recovery.
-  function loadFleetUsageStrip() {
-    var box = $("#overview-fleet-usage");
-    if (!box) return;
-    box.innerHTML = '<div class="fleet-usage-strip fleet-usage-loading">Loading fleet usage&hellip;</div>';
-    api("GET", "/v1/usage/summary").then(function (r) {
-      box = $("#overview-fleet-usage");
-      if (!box) return; // navigated away mid-flight
-      if (!r.ok || !r.data || !r.data.usage) { box.innerHTML = ""; return; }
-      var model = fleetStripModel(r.data.usage);
-      if (!model.rows.length && !model.teamMeter) { box.innerHTML = ""; return; }
-      box.innerHTML = fleetStripHtml(model);
-    });
-  }
+  // The wave-3 fleet-usage strip renderer (fleetStripModel/fleetStripHtml) is
+  // node-pinned above. gr-p2 HOME TRIAGE (C-01) folds its two truths INTO the v4
+  // Overview — the team instance ceiling became the page-header slots meter
+  // (overviewSlotsModel) and the per-instance cells became the v4 instance-card
+  // stats (instanceCardStats) — both reading the SAME /v1/usage/summary, so no
+  // separate strip mount and no second fetch. The pure model/markup stay pinned.
 
   // ── Metrics tab (S12: the on-box agent vitals beat) ─────────────────────────
   // The Metrics tab renders the monitoring truth the on-box agent reports (charter
@@ -12508,6 +12852,20 @@
       classifyBp: classifyBp, statusOf: statusOf,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
+      // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers — greeting,
+      // triage subline, header chips, the REAL slots meter, the attention row +
+      // reason, instance cards + stats, the self-healing runway model/markup, the
+      // GR17 past-due surfaces, and the mutually-exclusive state pick.
+      overviewGreeting: overviewGreeting, overviewSubline: overviewSubline,
+      overviewHeadChipsHtml: overviewHeadChipsHtml, overviewSlotsModel: overviewSlotsModel,
+      overviewSlotsHtml: overviewSlotsHtml, attentionReason: attentionReason,
+      attentionCanStudio: attentionCanStudio, attentionRowHtml: attentionRowHtml,
+      instanceCardStats: instanceCardStats, instanceCardHtml: instanceCardHtml,
+      overviewInstancesHtml: overviewInstancesHtml, runwayStepModel: runwayStepModel,
+      runwayProgressText: runwayProgressText, runwayCardHtml: runwayCardHtml,
+      overviewDunningBannerHtml: overviewDunningBannerHtml,
+      suspendedCardBannerHtml: suspendedCardBannerHtml,
+      overviewStatePick: overviewStatePick, overviewStateHtml: overviewStateHtml,
       // Dashboard billing-correctness pure helpers (mirror Billing.entitled?/1).
       launchEntitled: launchEntitled, billingStatusLabel: billingStatusLabel,
       billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
@@ -12636,10 +12994,12 @@
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml,
-      // Wave 3 (OC16/OC18): the Overview fleet usage strip. Pure model + render
-      // helpers node-pinned; the DOM mount (loadFleetUsageStrip) is browser-
-      // verified. fleetStripModel does the headline-subset selection + worst-state
-      // fold; the strip meter subset is exported so the harness pins its names.
+      // Wave 3 (OC16/OC18): the fleet usage strip's pure model + render helpers,
+      // still node-pinned. gr-p2 folded the strip's two truths into the v4
+      // Overview (team ceiling → header slots meter; per-instance cells → the
+      // instance-card stats), so there is no strip DOM mount now; fleetStripModel
+      // does the headline-subset selection + worst-state fold, and the meter
+      // subset is exported so the harness pins its names.
       fleetStripMeters: FLEET_STRIP_METERS.map(function (m) { return m.key; }),
       fleetStripModel: fleetStripModel, fleetStripWorst: fleetStripWorst,
       fleetStripCellHtml: fleetStripCellHtml, fleetStripHtml: fleetStripHtml,

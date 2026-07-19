@@ -825,7 +825,7 @@ export const SCENARIOS = {
   // fresh row, an hours-stale row, and a no-sample row — all four honest states
   // in one shot. The strip reads /v1/usage/summary, never a live fan-out.
   "fleet-usage": {
-    label: "Overview fleet usage strip — over headline + fresh / stale / no-sample cells",
+    label: "Overview instances grid — real per-instance stats (RAM at ceiling) + the real slots meter",
     authed: true,
     deepLink: "#overview",
     data: {
@@ -1391,6 +1391,77 @@ export const SCENARIOS = {
       catalog: theaterCatalog,
     },
   },
+
+  // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
+  // Three states of the ONE Overview region: the self-healing trial runway, the
+  // attention queue with a real reason, and the past-due money path (GR17 banner
+  // + suspended instance-card banner). Fresh fixtures written inline at the tail.
+  "overview-trial-runway": {
+    label: "Overview trial — the self-healing runway at 2 of 3, real instance-name step hint",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      // subscription + instance steps done, published_doc pending, not completed.
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [liveInstance],
+      subscription: trialSub,
+      sites: [],
+      audit: [],
+      // A real team ceiling so the header slots meter is honest (never hardcoded).
+      usageSummary: {
+        team: { instances: { value: 1, quota: 3, warn_at: 2, source: "control-plane.barkparks", measured_at: T } },
+        instances: [],
+      },
+    },
+  },
+  "overview-attention": {
+    label: "Overview attention — a degraded box heads the queue with its real reason + working Open Studio",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-degraded",
+          name: "Reporting",
+          slug: "reporting",
+          url: "reporting-5b2c1e.barkpark.cloud",
+          host: "reporting-5b2c1e.barkpark.cloud",
+          health_status: "down",
+          agent_status: "offline",
+          version: "0.9.2",
+          last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "overview-past-due": {
+    label: "Overview past-due — GR17 overview dunning banner + the suspended instance-card banner (no runway)",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, suspendedInstance],
+      subscription: {
+        plan: "supporter",
+        status: "past_due",
+        past_due: true,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 3 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(60 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1482,6 +1553,14 @@ export function route(name, method, path) {
   }
 
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
+  // gr-p2 HOME TRIAGE (C-02): the onboarding fold is member-readable on GET
+  // (mirrors /v1/me's fold, so the runway self-heals on refetch); the mutating
+  // POST (advance/ack/skip/complete) is owner/admin-only server-side — here it
+  // just acks with 200 (the dismiss click is inert in smoke).
+  if (p === "/v1/onboarding") {
+    if (method === "GET") return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
+    return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
+  }
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };

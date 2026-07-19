@@ -6518,3 +6518,172 @@ test("GR18(4): a step the server DID report after a break stays truthful (never 
   assert.match(html, /<li class="new-step active" data-step="verify">/); // reported → truthful
   assert.match(html, /<li class="new-step skipped" data-step="secure">/);
 });
+
+// ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers ──────────────
+// The triage headline, real slots meter, attention row, instance cards, the
+// self-healing runway model, and the GR17 past-due surfaces. Pure functions
+// only — the DOM mounts (loadOverview/paintOverview*) are smoke-verified.
+
+test("overviewGreeting: time-of-day prefix across the four bands (trailing ', ')", () => {
+  assert.equal(hooks.overviewGreeting(2), "Up late, ");
+  assert.equal(hooks.overviewGreeting(9), "Good morning, ");
+  assert.equal(hooks.overviewGreeting(14), "Good afternoon, ");
+  assert.equal(hooks.overviewGreeting(21), "Good evening, ");
+  // boundaries: <5 / <12 / <18
+  assert.equal(hooks.overviewGreeting(5), "Good morning, ");
+  assert.equal(hooks.overviewGreeting(12), "Good afternoon, ");
+  assert.equal(hooks.overviewGreeting(18), "Good evening, ");
+});
+
+test("overviewSubline: the triage sentence reads the truth (0 / 1 / N attention)", () => {
+  assert.equal(hooks.overviewSubline({ attention: 0, total: 3 }), "All 3 instances are running fine.");
+  assert.equal(hooks.overviewSubline({ attention: 0, total: 1 }), "All 1 instance is running fine.");
+  assert.equal(hooks.overviewSubline({ attention: 1, total: 4 }), "One thing needs a look — everything else is running fine.");
+  assert.equal(hooks.overviewSubline({ attention: 3, total: 5 }), "3 things need a look.");
+});
+
+test("overviewHeadChipsHtml: attention always, in-flight only when >0 (pulsing), healthy, + slots slot", () => {
+  const withFlight = hooks.overviewHeadChipsHtml({ attention: 2, inflight: 1, healthy: 4 });
+  assert.match(withFlight, /ov-chip--attention/);
+  assert.match(withFlight, /2 needs attention/);
+  assert.match(withFlight, /ov-chip--inflight/);
+  assert.match(withFlight, /1 in flight/);
+  assert.match(withFlight, /ov-chip-pulse/);
+  assert.match(withFlight, /ov-chip--healthy/);
+  assert.match(withFlight, /4 healthy/);
+  assert.match(withFlight, /id="overview-slots"/);
+  const noFlight = hooks.overviewHeadChipsHtml({ attention: 0, inflight: 0, healthy: 2 });
+  assert.doesNotMatch(noFlight, /ov-chip--inflight/); // conditional
+  assert.match(noFlight, /0 needs attention/); // amber chip always present
+});
+
+test("overviewSlotsModel: denominator is the REAL team quota, never hardcoded", () => {
+  const m = hooks.overviewSlotsModel({ team: { instances: { value: 5, quota: 10 } } }, 5);
+  assert.deepEqual({ count: m.count, limit: m.limit, hasLimit: m.hasLimit, pct: m.pct }, { count: 5, limit: 10, hasLimit: true, pct: 50 });
+  assert.match(hooks.overviewSlotsHtml(m), /5 \/ 10 slots/);
+  // No positive quota (older CP / unlimited) → no meter, no invented ceiling.
+  const none = hooks.overviewSlotsModel({ team: {} }, 3);
+  assert.equal(none.hasLimit, false);
+  assert.equal(hooks.overviewSlotsHtml(none), "");
+  assert.equal(hooks.overviewSlotsModel(null, 2).hasLimit, false);
+  // pct clamps at 100 for an over-limit fleet.
+  assert.equal(hooks.overviewSlotsModel({ team: { instances: { value: 12, quota: 10 } } }, 12).pct, 100);
+});
+
+test("attentionReason: the real status detail, with the v4 'Needs a look.' fallback", () => {
+  const degraded = { host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" };
+  assert.match(hooks.attentionReason(degraded), /Health down|Agent offline/);
+  // An 'ok' box carries a detail too (never the fallback), but a stateless one falls back.
+  assert.equal(hooks.attentionReason({ host: "h", health_status: "up", agent_status: "online", update_state: "current" }).length > 0, true);
+});
+
+test("attentionCanStudio: live boxes only (host set, not suspended, not tearing down)", () => {
+  assert.equal(hooks.attentionCanStudio({ host: "h" }), true);
+  assert.equal(hooks.attentionCanStudio({ host: "h", suspended: true }), false);
+  assert.equal(hooks.attentionCanStudio({ host: "h", deprovision_status: "pending" }), false);
+  assert.equal(hooks.attentionCanStudio({ provision_status: "failed" }), false); // no host
+});
+
+test("attentionRowHtml: pill + linked name + reason + View instance + (live) Open Studio", () => {
+  const html = hooks.attentionRowHtml({ id: "b1", name: "Reporting", host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" });
+  assert.match(html, /status-pill/);
+  assert.match(html, /href="#instance\/b1"[^>]*>Reporting<\/a>/);
+  assert.match(html, /attention-reason/);
+  assert.match(html, />View instance</);
+  assert.match(html, /fleet-open-studio[^>]*data-id="b1"/);
+  // A failed (host-less) box gets no Open Studio.
+  const failed = hooks.attentionRowHtml({ id: "b2", name: "X", provision_status: "failed" });
+  assert.doesNotMatch(failed, /Open Studio/);
+});
+
+test("instanceCardStats: four stats, over/warn meter tints its value amber", () => {
+  const meters = {
+    documents: { value: 412, measured_at: "2020" },
+    disk: { value: 37, quota: 100, warn_at: 70, measured_at: "2020" },
+    cpu: { value: 88, quota: 100, warn_at: 70, measured_at: "2020" },
+    ram: { value: 100, quota: 100, warn_at: 70, measured_at: "2020" },
+  };
+  const stats = [...hooks.instanceCardStats(meters)]; // spread across the vm realm
+  assert.deepEqual(stats.map((s) => s.k), ["DOCS", "DISK", "CPU", "RAM"]);
+  assert.equal(stats[1].warn, false); // disk 37% < warn 70
+  assert.equal(stats[2].warn, true); // cpu 88% ≥ warn 70
+  assert.equal(stats[3].warn, true); // ram 100% ≥ quota → over
+  // No meters → honest em-dash, never a fabricated 0.
+  assert.equal(hooks.instanceCardStats(null)[0].v, "—");
+});
+
+test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame, Open Studio; suspended → GR17 card banner", () => {
+  const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
+  const html = hooks.instanceCardHtml(live, { stats: hooks.instanceCardStats(null) });
+  assert.match(html, /instance-card instance-card--ok/);
+  assert.match(html, /instance-card-name[^>]*>Production</);
+  assert.match(html, /instance-card-spark spark--ok/);
+  assert.match(html, /class="spark"/); // the honest (empty) sparkline frame
+  assert.match(html, /fleet-open-studio/);
+  assert.doesNotMatch(html, /suspended-card-banner/);
+  // A suspended box (with a subscription in hand) carries the GR17 recovery banner.
+  const susp = { id: "b2", name: "Marketing", host: "m", suspended: true, provision_status: "succeeded" };
+  const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-01T00:00:00Z" };
+  const shtml = hooks.instanceCardHtml(susp, { sub, stats: hooks.instanceCardStats(null) });
+  assert.match(shtml, /suspended-card-banner/);
+  assert.match(shtml, /The server is stopped, not destroyed/);
+  assert.doesNotMatch(shtml, /Open Studio/); // suspended boxes get no Studio link
+});
+
+test("runwayStepModel: check marks vs digits, real instance-name hint, Open Studio gated on pending+studioId", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const model = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })]; // spread across the vm realm
+  assert.deepEqual(model.map((s) => s.mark), ["✓", "✓", "3"]); // done → check, pending → digit
+  assert.equal(model[1].hint, "Production is running"); // real fleet-cache name
+  assert.equal(model[2].action, "Open Studio →"); // pending published_doc + a live box
+  // No live box → no Studio nudge even while pending.
+  assert.equal(hooks.runwayStepModel(ob, { studioId: "" })[2].action, "");
+});
+
+test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {
+  const ob = { completed: false, steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  assert.equal(hooks.runwayProgressText(ob), "2 of 3 done");
+  const owner = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.match(owner, /You're nearly set up/);
+  assert.match(owner, /2 of 3 done/);
+  assert.match(owner, /runway-dismiss/); // owner/admin sees Dismiss
+  const member = hooks.runwayCardHtml(ob, { canManage: false });
+  assert.doesNotMatch(member, /runway-dismiss/); // plain member: no silent-403 button
+});
+
+test("overviewDunningBannerHtml (GR17): 'Your payment failed on {date}' + suspended-not-deleted, data-driven", () => {
+  // Midday UTC so fmtDay's local-date render never straddles a TZ boundary.
+  const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" };
+  const html = hooks.overviewDunningBannerHtml(sub);
+  assert.match(html, /Your payment failed on .+\. Your instances keep running until .+, then they're suspended — not deleted\./);
+  assert.match(html, /Update payment method/);
+  assert.doesNotMatch(html, /come right back/); // that tail is the billing-page variant only
+  assert.doesNotMatch(html, /card was declined/); // the ratified overview lead is 'Your payment failed on'
+  // No dated milestone → the banner drops the dates, never invents them.
+  assert.match(hooks.overviewDunningBannerHtml({ plan: "supporter", status: "past_due" }), /Your payment failed\. /);
+});
+
+test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' + stopped-not-destroyed, verbatim", () => {
+  const html = hooks.suspendedCardBannerHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" });
+  assert.match(html, /Suspended .+ — payment failed/);
+  assert.match(html, /The server is stopped, not destroyed\. Everything comes back exactly as it was the moment payment succeeds\./);
+  assert.doesNotMatch(html, /suspended — not deleted/); // the card uses its OWN copy, never the banner's
+});
+
+test("overviewStatePick: past_due wins; trial+incomplete → runway; else none (mutual exclusivity)", () => {
+  const ob = { completed: false, steps: [] };
+  assert.equal(hooks.overviewStatePick({ status: "past_due", plan: "supporter" }, ob), "past_due");
+  // even a trial with open onboarding yields to a past_due state (impossible in practice, but the pick is total).
+  assert.equal(hooks.overviewStatePick({ status: "past_due", plan: "trial" }, ob), "past_due");
+  assert.equal(hooks.overviewStatePick({ status: "active", plan: "trial" }, ob), "runway");
+  assert.equal(hooks.overviewStatePick({ status: "active", plan: "trial" }, { completed: true, steps: [] }), "none"); // dismissed/finished
+  assert.equal(hooks.overviewStatePick({ status: "active", plan: "pro" }, ob), "none"); // paid, not trial
+  assert.equal(hooks.overviewStatePick(null, null), "none");
+});
+
+test("overviewStateHtml: dispatches to the mutually-exclusive band", () => {
+  const ob = { completed: false, steps: [{ key: "subscription", done: true }, { key: "instance", done: false }, { key: "published_doc", done: false }] };
+  assert.match(hooks.overviewStateHtml({ status: "past_due", plan: "supporter", current_period_end: "2026-08-04T00:00:00Z" }, ob, {}), /dunning-banner/);
+  assert.match(hooks.overviewStateHtml({ status: "active", plan: "trial" }, ob, { canManage: true }), /runway-card/);
+  assert.equal(hooks.overviewStateHtml({ status: "active", plan: "pro" }, ob, {}), "");
+});
