@@ -977,6 +977,101 @@ const EXPECTATIONS = {
       assert.ok(domains.includes("certificate usually issues"), "the server remediation renders verbatim");
     },
   },
+  // gr-p3-small-surfaces (E-01): the global sites list on v4 — one density row
+  // per site with a leading deploy-status pill, states-complete, real fields
+  // ONLY (the invented Marketing/Docs/Blank "kind" taxonomy never renders).
+  sites: {
+    what: "v4 sites list — deploy-status pills (live/rebuilding/failed/never), real fields, no invented kinds",
+    check(reg) {
+      const body = (reg.get("sites-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#sites-body rendered empty");
+      // Exactly one v4 global row per fixture site.
+      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 4,
+        "one v4 density row per fixture site");
+      // The leading status pill, states-complete across the four rows.
+      assert.ok(body.includes("status-pill--ok"), "the live site reads an ok pill");
+      assert.ok(body.includes("status-pill--warn"), "the rebuilding site reads a warn pill");
+      assert.ok(body.includes("status-pill--danger"), "the deploy-failed site reads a danger pill");
+      assert.ok(body.includes("status-pill--neutral"), "the never-deployed site reads a neutral pill");
+      assert.ok(body.includes(">Not deployed<"), "a never-deployed site says so — no invented green");
+      // Real fields: the site's OWN name, its host, framework, the instance link,
+      // and a recency segment.
+      assert.ok(body.includes(">acme-web<"), "the site's real name renders");
+      assert.ok(body.includes('class="site-host"'), "the live host renders on its own line");
+      assert.ok(body.includes("acme.com"), "the host value renders");
+      assert.ok(body.includes(">nextjs "), "the framework renders in the meta line");
+      assert.ok(body.includes('class="site-inst-link" href="#instance/'), "on <instance> is a real workspace link");
+      assert.ok(body.includes("updated "), "the recency segment renders");
+      assert.ok(body.includes("Auto-deploy") && body.includes("Manual"),
+        "the auto-deploy capability chip renders both states");
+      // GR28 kill list: the invented site-kind taxonomy never crosses in.
+      assert.ok(!/\bMarketing\b|\bDocs\b|\bBlank\b|template picker|site-kind/i.test(body),
+        "no invented Marketing/Docs/Blank kind taxonomy in the sites list");
+    },
+  },
+  // gr-p3-small-surfaces (E-03): the write-only env editor. The site detail
+  // carries the Edit-environment affordance; the modal body (opened behind a
+  // click, inert here) is pinned through the pure envModalBodyHtml hook.
+  "env-editor": {
+    what: "site detail Edit-env affordance + the write-only, blank-start modal (no scope UI, no redeploy claim)",
+    check(reg, hooks) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      // The rail affordance renders — an Edit action, NO stored values/count
+      // (write-only: reveal_site_env has zero route callers).
+      assert.ok(body.includes(">Environment<"), "the Environment rail row renders");
+      assert.ok(body.includes('id="site-env-edit"'), "the Edit-environment affordance renders");
+      // Drive the pure modal body — the same hook seam the 2FA card uses.
+      assert.ok(hooks && typeof hooks.envModalBodyHtml === "function",
+        "the env modal body must be exported through __bpTestHook");
+      const modal = hooks.envModalBodyHtml({ name: "acme-web" });
+      assert.ok(modal.includes("Edit environment"), "the modal titles itself");
+      // The write-only law, verbatim.
+      assert.ok(modal.includes("Saving replaces the whole set — values are write-only, so anything you leave out is removed."),
+        "the replace-set / write-only law renders verbatim");
+      assert.ok(modal.includes("Current values can’t be read back."), "the no-read-back law renders verbatim");
+      // The textarea starts BLANK (GR28 — never pre-filled; no read-back).
+      const ta = modal.match(/<textarea[^>]*id="site-env-text"[^>]*>([\s\S]*?)<\/textarea>/);
+      assert.ok(ta, "the KEY=VALUE textarea renders");
+      assert.equal(ta[1], "", "the textarea starts blank — there is no read-back to pre-fill");
+      // Backend-true button copy: "Replace env", never "…and redeploy" (the
+      // route queues no deployment).
+      assert.ok(modal.includes(">Replace env</button>"), "the submit says Replace env");
+      assert.ok(!/redeploy/i.test(modal), "no redeploy is claimed — the route queues none");
+      // GR27: no production/preview scope UI (one blob).
+      assert.ok(!/\bpreview\b|\bproduction scope\b|scope/i.test(modal), "no invented env scopes");
+    },
+  },
+  // gr-p3-small-surfaces (I-01): the team Activity feed regrown on the shared
+  // coalescing grammar with the by-target key + backend-true filter chips.
+  activity: {
+    what: "v4 activity — coalesced by target (×3 group, unrelated targets stay split), server-true target_type chips",
+    check(reg) {
+      const filters = (reg.get("activity-filters") || {}).innerHTML || "";
+      // Backend-true filter chips: the two customer nouns + All. NO actor/verb
+      // filter (the server has no such params).
+      assert.ok(filters.includes('data-actfilter=""'), "the All chip renders");
+      assert.ok(filters.includes('data-actfilter="barkpark"'), "the Instances chip maps to target_type=barkpark");
+      assert.ok(filters.includes('data-actfilter="site"'), "the Sites chip maps to target_type=site");
+      assert.ok(filters.includes("is-active"), "one chip is active (All by default)");
+      const body = (reg.get("activity-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#activity-body rendered empty");
+      // The feed renders through the SHARED grammar (tlv-* rows).
+      assert.ok(body.includes("tlv-row"), "the feed renders through the shared timeline grammar");
+      // The three same-site deploys fold into ONE ×3 coalesced group…
+      assert.ok(body.includes("tlv-coalesce"), "the repeated same-target run coalesces");
+      assert.ok(body.includes("&times; 3") || body.includes("× 3"), "the group states its count (×3)");
+      assert.ok(body.includes("Show all 3"), "the group offers an expand affordance");
+      // …but the DIFFERENT-target deploy (bob, acme-blog) is NOT folded in — a
+      // team feed never merges unrelated targets. Exactly ONE coalesced group.
+      assert.equal(countMatches(body, 'data-tlv-group="'), 1, "only the same-target run folds — unrelated targets stay split");
+      // Actor display is backend-true (audit carries actor.email).
+      assert.ok(body.includes("ada@acme.com"), "the actor email renders from the audit row");
+      assert.ok(body.includes("bob@acme.com"), "the second actor's singleton renders separately");
+      // The keyset Load-more control survives the regrow.
+      assert.ok(reg.get("activity-more"), "the Load more control still mounts");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

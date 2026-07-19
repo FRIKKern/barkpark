@@ -38,9 +38,9 @@ export const IDS = {
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
-  siteMarketing: "5b2c1e00-0000-4000-8000-0000000000c1",
-  siteDocs: "5b2c1e00-0000-4000-8000-0000000000c2",
-  // Rollback/redeploy scenarios (deployment_json rows on the marketing site).
+  siteWeb: "5b2c1e00-0000-4000-8000-0000000000c1",
+  siteBlog: "5b2c1e00-0000-4000-8000-0000000000c2",
+  // Rollback/redeploy scenarios (deployment_json rows on the acme-web site).
   depCurrent: "5b2c1e00-0000-4000-8000-0000000000d1",
   depFailed: "5b2c1e00-0000-4000-8000-0000000000d2",
   depPrior: "5b2c1e00-0000-4000-8000-0000000000d3",
@@ -222,23 +222,67 @@ function site(over) {
     over,
   );
 }
-const marketingSite = site({
-  id: IDS.siteMarketing,
-  name: "Marketing",
-  slug: "marketing",
+const webSite = site({
+  id: IDS.siteWeb,
+  name: "acme-web",
+  slug: "acme-web",
   domains: ["acme.com", "www.acme.com"],
   framework: "nextjs",
-  github_repo: "acme/marketing",
+  github_repo: "acme/web",
   github_branch: "main",
   github_webhook_configured: true,
 });
-const docsSite = site({
-  id: IDS.siteDocs,
-  name: "Docs",
-  slug: "docs",
-  domains: ["docs.acme.com"],
+const blogSite = site({
+  id: IDS.siteBlog,
+  name: "acme-blog",
+  slug: "acme-blog",
+  domains: ["blog.acme.com"],
   framework: "astro",
 });
+
+// E-01 (#sites list): the LIST endpoint embeds a slim `last_deployment`
+// (status · trigger · stamps — never content_rev, HONESTY LAW) via
+// put_last_deployment, which the row's freshness pill reads. Detail fixtures
+// above don't carry it (detail fetches /deployments), so the list scenario
+// gets its own states-complete rows: live / rebuilding / deploy-failed /
+// never-deployed — one per pill role. Real fields only; the invented
+// Marketing/Docs "kind" taxonomy has no field to render.
+const lastDeploy = (status, trigger, ago) => ({
+  status,
+  trigger,
+  updated_at: tMinus(ago),
+  inserted_at: tMinus(ago + 120),
+});
+const sitesListRows = [
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c3",
+    name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
+    framework: "nextjs", github_repo: "acme/web", github_branch: "main",
+    github_webhook_configured: true,
+    last_deployment: lastDeploy("live", "content-auto", 900),
+  }),
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c4",
+    name: "acme-blog", slug: "acme-blog", domains: ["blog.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    // A content publish is rebuilding this static site right now.
+    last_deployment: lastDeploy("building", "content-auto", 20),
+  }),
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c5",
+    name: "acme-shop", slug: "acme-shop", domains: ["shop.acme.com"],
+    framework: "nextjs", github_repo: "acme/shop", github_branch: "main",
+    github_webhook_configured: true,
+    last_deployment: lastDeploy("failed", "manual", 3600),
+  }),
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c6",
+    name: "acme-labs", slug: "acme-labs", domains: [],
+    framework: "nextjs", github_webhook_configured: false,
+    // Never deployed — no last_deployment, so the pill reads a neutral
+    // "Not deployed" (no invented green).
+  }),
+];
 
 // ── deployments (deployment_json) ───────────────────────────────────────────
 // Envelope from router.ex deployment_json/1: id, site_id, status, git_ref,
@@ -251,7 +295,7 @@ function deployment(over) {
   return Object.assign(
     {
       id: null,
-      site_id: IDS.siteMarketing,
+      site_id: IDS.siteWeb,
       status: "queued",
       git_ref: null,
       artifact_url: null,
@@ -280,7 +324,7 @@ const depCurrent = deployment({
   status: "live",
   git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
   branch: "main",
-  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-9c1f2ab.tar.gz",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-9c1f2ab.tar.gz",
   became_live_at: tMinus(5400),
   inserted_at: tMinus(5800),
   updated_at: tMinus(5400),
@@ -294,7 +338,7 @@ const depFailed = deployment({
   inserted_at: tMinus(20000),
   updated_at: tMinus(19800),
   console: [
-    { line: "cloning acme/marketing @ b23aa01", at: tMinus(20000) },
+    { line: "cloning acme/web @ b23aa01", at: tMinus(20000) },
     { line: "npm ci — ok (34s)", at: tMinus(19960) },
     { line: "npm run build — TypeError: window is not defined", at: tMinus(19820) },
   ],
@@ -304,14 +348,14 @@ const depPrior = deployment({
   status: "live",
   git_ref: "4e7d0c9b3a5f18e2d6c4b0a9f8e7d6c5b4a39281",
   branch: "main",
-  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-4e7d0c9.tar.gz",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-4e7d0c9.tar.gz",
   became_live_at: tMinus(90000),
   inserted_at: tMinus(90400),
   updated_at: tMinus(90000),
 });
 const rollbackDeployments = [depCurrent, depFailed, depPrior];
-// The marketing site with its production pointer on the newest live row.
-const marketingSiteDeploys = Object.assign({}, marketingSite, {
+// The acme-web site with its production pointer on the newest live row.
+const webSiteDeploys = Object.assign({}, webSite, {
   current_deployment_id: IDS.depCurrent,
 });
 
@@ -331,14 +375,14 @@ const depInFlight = deployment({
   detail: "building",
   console: [
     { line: "promote → new production deployment (pinned to 9c1f2ab)", at: tMinus(30) },
-    { line: "cloning acme/marketing @ 9c1f2ab", at: tMinus(26) },
+    { line: "cloning acme/web @ 9c1f2ab", at: tMinus(26) },
     { line: "npm ci — installing 214 packages", at: tMinus(9) },
   ],
 });
 const inFlightDeployments = [depInFlight, depCurrent, depFailed, depPrior];
-// The marketing site DURING the promote: pointer still on the old live row, so
+// The acme-web site DURING the promote: pointer still on the old live row, so
 // the Current chip has NOT jumped to the building deploy.
-const marketingSiteInFlight = Object.assign({}, marketingSite, {
+const webSiteInFlight = Object.assign({}, webSite, {
   current_deployment_id: IDS.depCurrent,
 });
 
@@ -355,7 +399,7 @@ const depNowLive = deployment({
   updated_at: tMinus(20),
 });
 const migratedDeployments = [depNowLive, depCurrent, depFailed, depPrior];
-const marketingSiteMigrated = Object.assign({}, marketingSite, {
+const webSiteMigrated = Object.assign({}, webSite, {
   current_deployment_id: depNowLive.id,
 });
 
@@ -391,10 +435,26 @@ function auditEvent(over) {
 // Actions are the closed audit vocabulary (app.js ACTION_LABELS), NOT invented.
 const mixedAudit = [
   auditEvent({ id: "ev_5", action: "barkpark.go_live", target_type: "barkpark", target_id: IDS.provisioningInstance, metadata: { name: "Analytics" }, inserted_at: tMinus(190) }),
-  auditEvent({ id: "ev_4", action: "site.created", target_type: "site", target_id: IDS.siteDocs, metadata: { name: "Docs" }, inserted_at: tMinus(4000) }),
+  auditEvent({ id: "ev_4", action: "site.created", target_type: "site", target_id: IDS.siteBlog, metadata: { name: "acme-blog" }, inserted_at: tMinus(4000) }),
   auditEvent({ id: "ev_3", action: "subscription.activated", target_type: "subscription", target_id: "sub_1", metadata: { plan: "pro" }, inserted_at: tMinus(80000) }),
   auditEvent({ id: "ev_2", action: "barkpark.deleted", target_type: "barkpark", target_id: "old_box", metadata: { name: "Sandbox" }, inserted_at: tMinus(90000) }),
   auditEvent({ id: "ev_1", action: "token.minted", target_type: "token", target_id: "tok_1", metadata: { name: "CI deploy" }, inserted_at: tMinus(172800) }),
+];
+
+// I-01 (#activity): a team feed that EXERCISES the by-target coalesce key —
+// three consecutive deploys of the SAME site fold into ONE ×3 group, while a
+// deploy of a DIFFERENT site (and a different actor) stays a singleton (the
+// team feed must never fold unrelated targets, GR26). Newest-first, exactly as
+// GET /v1/audit returns; actor.email is backend-true. Bob's row proves the key
+// splits on BOTH actor and target.
+const activityFeed = [
+  auditEvent({ id: "af_7", action: "member.invited", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "user", target_id: "usr_new", metadata: { email: "kit@acme.com" }, inserted_at: tMinus(60) }),
+  auditEvent({ id: "af_6", action: "site.deploy_requested", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "site", target_id: IDS.siteWeb, metadata: { git_ref: "b23aa01" }, inserted_at: tMinus(180) }),
+  auditEvent({ id: "af_5", action: "site.deploy_requested", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "site", target_id: IDS.siteWeb, metadata: { git_ref: "9c1f2ab" }, inserted_at: tMinus(320) }),
+  auditEvent({ id: "af_4", action: "site.deploy_requested", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "site", target_id: IDS.siteWeb, metadata: { git_ref: "4e7d0c9" }, inserted_at: tMinus(460) }),
+  auditEvent({ id: "af_3", action: "site.deploy_requested", actor: { id: "usr_bob", email: "bob@acme.com" }, target_type: "site", target_id: IDS.siteBlog, metadata: { git_ref: "aa10ff2" }, inserted_at: tMinus(600) }),
+  auditEvent({ id: "af_2", action: "site.env_changed", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "site", target_id: IDS.siteWeb, metadata: { keys: ["DATABASE_URL", "API_TOKEN"] }, inserted_at: tMinus(900) }),
+  auditEvent({ id: "af_1", action: "barkpark.go_live", actor: { id: "usr_ada", email: "ada@acme.com" }, target_type: "barkpark", target_id: IDS.liveInstance, metadata: { name: "Production" }, inserted_at: tMinus(4000) }),
 ];
 
 // ── instance events + verify runs (event_json: {id,type,payload,inserted_at};
@@ -439,7 +499,7 @@ const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
 // Audit rows scoped to the live instance — what the Timeline's audit half
 // contributes (actor attribution beside the machine events).
 const liveInstanceAudit = [
-  auditEvent({ id: "ev_b2", action: "site.created", target_type: "site", target_id: IDS.siteDocs, metadata: { name: "Docs" }, inserted_at: tMinus(4000) }),
+  auditEvent({ id: "ev_b2", action: "site.created", target_type: "site", target_id: IDS.siteBlog, metadata: { name: "acme-blog" }, inserted_at: tMinus(4000) }),
   auditEvent({ id: "ev_b1", action: "barkpark.go_live", target_type: "barkpark", target_id: IDS.liveInstance, metadata: { name: "Production" }, inserted_at: tMinus(86400) }),
 ];
 
@@ -739,7 +799,7 @@ const stCrash = deployment({
   inserted_at: tMinus(21600),
   updated_at: tMinus(21581),
   console: [
-    { line: "cloning acme/marketing @ b23aa01", at: tMinus(21600) },
+    { line: "cloning acme/web @ b23aa01", at: tMinus(21600) },
     { line: "npm run build — TypeError: window is not defined", at: tMinus(21584) },
     { line: "build: exited with code 1", at: tMinus(21581) },
   ],
@@ -770,13 +830,13 @@ const stPrior = deployment({
   git_ref: "8c00e1b9f8e7d6c5b4a392817061f5e4d3c2b1a0",
   branch: "main",
   trigger: "manual",
-  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-8c00e1b.tar.gz",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-8c00e1b.tar.gz",
   became_live_at: tMinus(259200),
   inserted_at: tMinus(259244),
   updated_at: tMinus(259200),
 });
 const siteStatesDeployments = [stLive, stCrash, stBlocked, stCancelled, stPrior];
-const siteStatesSite = Object.assign({}, marketingSite, {
+const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });
 const previewLiveRow = deployment({
@@ -786,8 +846,8 @@ const previewLiveRow = deployment({
   branch: "draft/nav",
   git_ref: "b7e21c94a5f18e2d6c4b0a9f8e7d6c5b4a392817",
   trigger: "manual",
-  preview_host: "draft-nav--marketing.preview.barkpark.cloud",
-  preview_url: "https://draft-nav--marketing.preview.barkpark.cloud",
+  preview_host: "draft-nav--acme-web.preview.barkpark.cloud",
+  preview_url: "https://draft-nav--acme-web.preview.barkpark.cloud",
   became_live_at: tMinus(18000),
   inserted_at: tMinus(18052),
   updated_at: tMinus(18000),
@@ -810,7 +870,7 @@ const siteStatesPreviews = [previewLiveRow, previewFailedRow];
 const siteStatesDomains = {
   ok: false,
   checked_at: T,
-  instance: { id: IDS.siteMarketing, host: "production-5b2c1e.barkpark.cloud" },
+  instance: { id: IDS.siteWeb, host: "production-5b2c1e.barkpark.cloud" },
   domains: [
     {
       host: "acme.com", kind: "custom", overall: "ok",
@@ -865,7 +925,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance, behindInstance, provisioningInstanceRow, failedInstanceRow, suspendedInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: mixedAudit,
     },
   },
@@ -995,12 +1055,12 @@ export const SCENARIOS = {
   rollback: {
     label: "Site detail — rollback/redeploy actions (click one for the mutate confirm)",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSiteDeploys, docsSite],
+      sites: [webSiteDeploys, blogSite],
       audit: [],
       deployments: rollbackDeployments,
     },
@@ -1011,12 +1071,12 @@ export const SCENARIOS = {
   "promote-failure": {
     label: "Promote fails honestly — 409 inside the confirm (click an action, then Confirm)",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSiteDeploys, docsSite],
+      sites: [webSiteDeploys, blogSite],
       audit: [],
       deployments: rollbackDeployments,
       promote: {
@@ -1025,6 +1085,56 @@ export const SCENARIOS = {
       },
     },
   },
+  // E-01: the global #sites list on v4 — the states-complete deploy-freshness
+  // pills (live / rebuilding / deploy-failed / never-deployed), each row's real
+  // fields only, and the "on <instance>" link resolving through the fleet.
+  sites: {
+    label: "Sites list (v4) — deploy-status pills, host, framework, on <instance>, recency",
+    authed: true,
+    deepLink: "#sites",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: sitesListRows,
+      audit: [],
+    },
+  },
+
+  // E-03: the site detail carrying the write-only env editor affordance. The
+  // modal itself opens behind a click (inert in the smoke shim), so the
+  // EXPECTATION drives envModalBodyHtml through the test hook — the same seam
+  // the 2FA card uses — to pin the write-only states.
+  "env-editor": {
+    label: "Site detail — the Edit-environment affordance (write-only, blank-start)",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys, blogSite],
+      audit: [],
+      deployments: rollbackDeployments,
+    },
+  },
+
+  // I-01: the team Activity feed regrown on the coalescing grammar — three
+  // deploys of one site fold to a ×3 group; a deploy of another site (another
+  // actor) stays a singleton; the server-true target_type filter chips render.
+  activity: {
+    label: "Activity (v4) — coalesced by target, backend-true filter chips",
+    authed: true,
+    deepLink: "#activity",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: activityFeed,
+    },
+  },
+
   // ── invitation accept terminal states (charter D26 / roadmap 12) ──────────
   // The deepLink carries the token exactly as router.ex accept_url mints it
   // (hash + query). invite-joined lands on the Join confirm; clicking Join
@@ -1121,7 +1231,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: liveInstanceAudit,
       instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
     },
@@ -1134,7 +1244,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: [],
       auditDenied: true, // /v1/audit → 403 (team-admin-only)
       instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
@@ -1148,7 +1258,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: liveInstanceAudit,
       instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
     },
@@ -1161,7 +1271,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: liveInstanceAudit,
       instanceEvents: { [IDS.liveInstance]: liveInstanceEventsOneFail },
     },
@@ -1174,7 +1284,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: liveInstanceAudit,
       instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
     },
@@ -1186,12 +1296,12 @@ export const SCENARIOS = {
   "promote-in-flight": {
     label: "Promote in flight — the new build streams on top; Current stays on the live deploy",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSiteInFlight, docsSite],
+      sites: [webSiteInFlight, blogSite],
       audit: [],
       deployments: inFlightDeployments,
     },
@@ -1202,12 +1312,12 @@ export const SCENARIOS = {
   "promote-retry": {
     label: "Promote fails transiently — the confirm shows Try again (retry recovery)",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSiteDeploys, docsSite],
+      sites: [webSiteDeploys, blogSite],
       audit: [],
       deployments: rollbackDeployments,
       promote: { status: 500, body: { error: "internal", detail: "the control plane hit an unexpected error" } },
@@ -1219,12 +1329,12 @@ export const SCENARIOS = {
   "promote-migrated": {
     label: "Post-promote — the Current chip has migrated to the now-live deploy",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSiteMigrated, docsSite],
+      sites: [webSiteMigrated, blogSite],
       audit: [],
       deployments: migratedDeployments,
     },
@@ -1292,7 +1402,7 @@ export const SCENARIOS = {
     deepLink: "#overview",
     data: {
       me: me("Acme Inc", { instance: true }),
-      barkparks: [liveInstance], subscription: activeSub, sites: [marketingSite], audit: [],
+      barkparks: [liveInstance], subscription: activeSub, sites: [webSite], audit: [],
     },
   },
   "shell-instance": {
@@ -1307,10 +1417,10 @@ export const SCENARIOS = {
   "shell-site": {
     label: "v4 shell — entering a site MORPHS the sidebar to the site layer",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true }),
-      barkparks: [liveInstance], subscription: activeSub, sites: [marketingSite], audit: [],
+      barkparks: [liveInstance], subscription: activeSub, sites: [webSite], audit: [],
     },
   },
   "operator-visible": {
@@ -1674,7 +1784,7 @@ export const SCENARIOS = {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [marketingSite, docsSite],
+      sites: [webSite, blogSite],
       audit: liveInstanceAudit,
       instanceEvents: {
         [IDS.liveInstance]: [
@@ -1770,12 +1880,12 @@ export const SCENARIOS = {
   "site-states": {
     label: "Site detail v4 — states-complete ladder + previews + domains rungs",
     authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
+    deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
       subscription: activeSub,
-      sites: [siteStatesSite, docsSite],
+      sites: [siteStatesSite, blogSite],
       audit: [],
       deployments: siteStatesDeployments,
       previews: siteStatesPreviews,
