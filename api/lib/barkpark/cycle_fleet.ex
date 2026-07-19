@@ -9,7 +9,7 @@ defmodule Barkpark.CycleFleet do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.Content.{Document, Revision}
+  alias Barkpark.Content.{Document, Revision, Scope}
 
   alias Barkpark.CycleFleet.{
     AssignmentTask,
@@ -2324,7 +2324,12 @@ defmodule Barkpark.CycleFleet do
 
       pointers_exact? =
         Enum.all?(event.release_materialization["documents"], fn row ->
-          case Repo.get(Document, row["document_id"]) do
+          document =
+            from(document in Document, where: document.id == ^row["document_id"])
+            |> Scope.scope_to_workspace(event.workspace_id, event.project_id)
+            |> Repo.one()
+
+          case document do
             %Document{} = document ->
               document.current_revision_id == row["after"]["current_revision_id"] and
                 document.released_revision_id == row["after"]["released_revision_id"] and
@@ -3173,7 +3178,8 @@ defmodule Barkpark.CycleFleet do
       {:ok, summary} ->
         with true <- summary.exact || {:error, :correction_not_ready},
              true <- summary.fleet_complete || {:error, :correction_not_ready},
-             true <- get_in(summary, [:experiment, :complete?]) || {:error, :correction_not_ready},
+             true <-
+               get_in(summary, [:experiment, :complete?]) || {:error, :correction_not_ready},
              true <- correction_violation_lists_empty?(summary) || {:error, :correction_not_ready} do
           :ok
         end

@@ -16,6 +16,14 @@ config :barkpark, Barkpark.Repo,
 # base set in config.exs.
 config :barkpark, :preview, secret: "dev-preview-secret-change-in-prod-please-32-chars"
 
+# Stable local-only key for the immutable Cycle release-proof anchor. Production
+# still requires an independently generated BARKPARK_RELEASE_CAPTURE_HMAC_SECRET
+# in runtime.exs; this value exists so a clean local install can migrate and boot
+# without secret provisioning before the user has enabled any cloud capture.
+config :barkpark,
+       :cycle_release_capture_hmac_secret,
+       "barkpark-local-release-capture-secret-do-not-use-in-production"
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

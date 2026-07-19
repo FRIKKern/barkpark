@@ -279,7 +279,8 @@ defmodule Barkpark.CycleFleet.Promotion do
     children = Enum.group_by(events, & &1.previous_event_id)
 
     with true <- length(genesis) <= 1,
-         true <- Enum.all?(children, fn {parent, rows} -> is_nil(parent) or length(rows) == 1 end),
+         true <-
+           Enum.all?(children, fn {parent, rows} -> is_nil(parent) or length(rows) == 1 end),
          {:ok, chain} <- follow(genesis, children, []) do
       if length(chain) == length(events),
         do: {:ok, chain},
