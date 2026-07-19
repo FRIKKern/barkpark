@@ -14,12 +14,18 @@ defmodule Barkpark.Tasks.Validation do
   (`lifecycle_statuses/0`, `kinds/0`) here so callers are unchanged.
   """
 
-  @lifecycle_statuses ~w(open in_progress blocked done cancelled)
+  # The five original states first (open in_progress blocked done cancelled),
+  # then the two thought states appended (considering researching). Order is
+  # load-bearing for readers that render a ladder; the append keeps every
+  # existing index stable. "OPEN MEANS READY" is held by construction — only
+  # open|blocked is claimable (queue.ex/claim.ex allowlists), and the two new
+  # states are simply not in that allowlist.
+  @lifecycle_statuses ~w(open in_progress blocked done cancelled considering researching)
   @kinds ~w(task)
 
   alias Barkpark.Tasks.{ExecutionPolicy, QueueGate}
 
-  @doc "The five lifecycle-status string values a task document may carry."
+  @doc "The seven lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   def lifecycle_statuses, do: @lifecycle_statuses
 
@@ -41,7 +47,8 @@ defmodule Barkpark.Tasks.Validation do
 
   Shape-checked when present: `priority` (integer 0..4), `assignee`
   (string), `dependencies` (list of strings), `parent_id` (string),
-  `claim` (map) — plus the dossier fields: `description` / `design` /
+  `claim` (map), `engagement` (map — the thought-state object companion) —
+  plus the dossier fields: `description` / `design` /
   `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
   (strings), `papers` / `attachments` (lists of strings), `labels` /
   `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
@@ -102,6 +109,12 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_string(content, "parent_id")
     |> check_optional_string_list(content, "dependencies")
     |> check_optional_map(content, "claim")
+    # Engagement companion map (task-lifecycle-visibility): the object a thought
+    # state carries — %{object: "research"|"build", holder, ts, note}. Thought is
+    # not contended work, so this is shape-only (top-level map), NO CAS epochs —
+    # the claim-map precedent. The honesty-lease TTL sweeper (separate slice)
+    # clears a stale engagement; validation only guards the shape.
+    |> check_optional_map(content, "engagement")
     # Dossier fields — shape-only-when-present, following the claim
     # precedent (top-level shape, NO sub-key enforcement). Sub-key
     # contracts live in the schema field descriptions (agent-facing,
