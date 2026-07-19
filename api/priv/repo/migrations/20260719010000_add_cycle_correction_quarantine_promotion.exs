@@ -40,22 +40,41 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
     WHERE revision.id = bindings.revision_id AND bindings.document_id IS NOT NULL;
     """
 
+    create index(:revisions, [:document_id])
+    execute "ANALYZE revisions (document_id)"
+
     execute """
-    UPDATE documents document
-    SET current_revision_id = (
-      SELECT revision.id FROM revisions revision
-      WHERE revision.document_id = document.id AND
-        revision.content IS NOT DISTINCT FROM document.content AND
+    WITH current_revisions AS (
+      SELECT DISTINCT ON (revision.document_id)
+        revision.document_id, revision.id
+      FROM revisions revision
+      JOIN documents document ON document.id = revision.document_id
+      WHERE revision.content IS NOT DISTINCT FROM document.content AND
         revision.title IS NOT DISTINCT FROM document.title AND
         revision.status IS NOT DISTINCT FROM document.status
-      ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
-    ), released_revision_id = (
-      SELECT revision.id FROM revisions revision
-      WHERE revision.document_id = document.id AND revision.status = 'published' AND
+      ORDER BY revision.document_id, revision.inserted_at DESC, revision.id DESC
+    )
+    UPDATE documents document
+    SET current_revision_id = current_revision.id
+    FROM current_revisions current_revision
+    WHERE document.id = current_revision.document_id;
+    """
+
+    execute """
+    WITH released_revisions AS (
+      SELECT DISTINCT ON (revision.document_id)
+        revision.document_id, revision.id
+      FROM revisions revision
+      JOIN documents document ON document.id = revision.document_id
+      WHERE revision.status = 'published' AND
         revision.content IS NOT DISTINCT FROM document.content AND
         revision.title IS NOT DISTINCT FROM document.title
-      ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
-    );
+      ORDER BY revision.document_id, revision.inserted_at DESC, revision.id DESC
+    )
+    UPDATE documents document
+    SET released_revision_id = released_revision.id
+    FROM released_revisions released_revision
+    WHERE document.id = released_revision.document_id;
     """
 
     create table(:cycle_correction_roots, primary_key: false) do

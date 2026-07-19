@@ -30,6 +30,9 @@ type headingRenderer struct{ ir InlineRenderer }
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
 	text := sanitizeDisplayText(attrStr(b.Attrs, "text"))
+	if text == "" {
+		text = h.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	}
 	style := ctx.Theme.Heading[level-1]
 
 	display := text

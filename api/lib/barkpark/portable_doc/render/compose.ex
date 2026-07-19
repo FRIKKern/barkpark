@@ -190,7 +190,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # persist a map/list where the heading string was expected, which used to
     # FunctionClauseError in the walker (a non-binary heading child has no walk
     # clause). Binaries/numbers stringify byte-identically; a map/list → "".
-    text = stringish(Map.get(b, "text", ""))
+    children =
+      case Map.get(b, "content") do
+        content when is_list(content) and content != [] -> compose_inline_children(content)
+        _ -> [stringish(Map.get(b, "text", ""))]
+      end
+
     level = heading_level(Map.get(b, "level"))
 
     # EVERY style emits a real semantic heading node (`PdHeading` → `<h1>` /
@@ -201,7 +206,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # headings were bold `<span>`s until the email-view wave (gp-w3): a mailed
     # paper deserves the same typographic skeleton the reader shows.
     _ = style
-    %{"kind" => "PdHeading", "level" => level, "children" => [text]}
+    %{"kind" => "PdHeading", "level" => level, "children" => children}
   end
 
   def compose_block(%{"type" => "eyebrow"} = b, style) do
@@ -317,7 +322,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         %{
           "kind" => "PdListItem",
           "children" => [
-            %{"kind" => "PdText", "children" => compose_inline_children(normalize_list_item(item))}
+            %{
+              "kind" => "PdText",
+              "children" => compose_inline_children(normalize_list_item(item))
+            }
           ]
         }
       end)
@@ -340,7 +348,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           "style" => %{"flexDirection" => "row"},
           "children" => [
             %{"kind" => "PdText", "children" => [prefix]},
-            %{"kind" => "PdText", "children" => compose_inline_children(normalize_list_item(item))}
+            %{
+              "kind" => "PdText",
+              "children" => compose_inline_children(normalize_list_item(item))
+            }
           ]
         }
       end)
@@ -1811,7 +1822,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         if text == "" do
           nil
         else
-          %{text: text, level: toc_level(Map.get(it, "level")), anchor: stringish(Map.get(it, "anchor", ""))}
+          %{
+            text: text,
+            level: toc_level(Map.get(it, "level")),
+            anchor: stringish(Map.get(it, "anchor", ""))
+          }
         end
 
       _ ->

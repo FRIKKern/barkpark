@@ -213,6 +213,7 @@ func renderPaperCaptureReaders(source apiclient.ReleasePaperSource, opt paperCap
 	cliRaw := pdrender.DefaultRegistry(cliTheme).RenderDoc(blocks, pdrender.RenderCtx{
 		Width: opt.width, Theme: cliTheme, Profile: pdrender.NoColor,
 	}) + "\n"
+	cliRaw = paperCaptureWithTitle(source.Title, cliRaw)
 
 	// Task board: the exported production FramePaper renderer, not a capture-only
 	// marker or approximation. An immutable candidate has no mutable task rail.
@@ -242,6 +243,7 @@ func renderPaperCaptureReaders(source apiclient.ReleasePaperSource, opt paperCap
 		tuiBody = strings.Join(parts, "\n")
 	}
 	tuiRaw := tuiBody + "\n"
+	tuiRaw = paperCaptureWithTitle(source.Title, tuiRaw)
 
 	binaryDigest, err := captureBinaryDigest()
 	if err != nil {
@@ -278,6 +280,14 @@ func renderPaperCaptureReaders(source apiclient.ReleasePaperSource, opt paperCap
 		return nil, err
 	}
 	return map[string]paperCaptureReader{"cli": cliReader, "task_board": taskReader, "tui": tuiReader}, nil
+}
+
+func paperCaptureWithTitle(title, body string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || strings.Contains(strings.ToLower(body), strings.ToLower(title)) {
+		return body
+	}
+	return title + "\n\n" + body
 }
 
 var captureEpoch = func() time.Time { return time.Unix(0, 0).UTC() }()

@@ -586,7 +586,7 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	// global (client-side pagination); `file`/`set`/`quiet` carry the request body.
 	clientOnly := map[string]bool{"file": true, "set": true, "quiet": true, "all": true}
 	for _, f := range cmd.Flags {
-		if clientOnly[f.Name] || f.Type == "file" {
+		if clientOnly[f.Name] || f.Type == "file" || commandFlagBelongsInBody(cmd, f.Name) {
 			continue
 		}
 		if f.Type == "bool" {
@@ -705,6 +705,14 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			obj[a.Name] = v
 		}
 	}
+	for _, f := range cmd.Flags {
+		if !commandFlagBelongsInBody(cmd, f.Name) {
+			continue
+		}
+		if values := flags[f.Name]; len(values) > 0 {
+			obj[f.Name] = values[len(values)-1]
+		}
+	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
 	// default, merged flat into the body object.
 	setTarget := obj
@@ -757,6 +765,18 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	}
 	raw, _ := json.Marshal(obj)
 	return raw, nil, "application/json", nil
+}
+
+func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
+	if cmd.ID != "cycle.open" {
+		return false
+	}
+	switch name {
+	case "experiment_contract_json", "correction_of_json", "correction_of_digest", "release_gate_receipt_json":
+		return true
+	default:
+		return false
+	}
 }
 
 // commandHasFileFlag reports whether cmd's manifest declares the --file body

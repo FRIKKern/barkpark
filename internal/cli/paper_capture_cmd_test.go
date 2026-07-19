@@ -67,7 +67,8 @@ func TestPaperCaptureFetchesOnceAndEmitsRealPinnedReaders(t *testing.T) {
 	sourceSum := sha256.Sum256([]byte(body))
 	for _, name := range []string{"cli", "task_board", "tui"} {
 		got := first.Readers[name]
-		if got.RawUTF8 == "" || !utf8.ValidString(got.RawUTF8) || !strings.Contains(got.RawUTF8, "candidate proof") {
+		if got.RawUTF8 == "" || !utf8.ValidString(got.RawUTF8) || !strings.Contains(got.RawUTF8, "candidate proof") ||
+			!strings.Contains(got.RawUTF8, "Campaign proof") {
 			t.Errorf("%s raw output is not the real candidate render: %q", name, got.RawUTF8)
 		}
 		p := got.Provenance

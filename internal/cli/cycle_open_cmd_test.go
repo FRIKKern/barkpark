@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"net/url"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -26,6 +25,7 @@ func cycleOpenCorrectionCommand() manifest.Command {
 			{Name: "experiment_contract_json", Type: "string"},
 			{Name: "correction_of_json", Type: "string"},
 			{Name: "correction_of_digest", Type: "string"},
+			{Name: "release_gate_receipt_json", Type: "string"},
 		},
 		Writes: true,
 	}
@@ -52,15 +52,22 @@ func TestCycleOpenCorrectionNeedsOnlyWaveIdentity(t *testing.T) {
 	}
 
 	rawURL := applyQuery("https://example.test/v1/cycles/epic-1/wave-2/open", globals{}, cmd, flags, args)
-	parsed, err := url.Parse(rawURL)
+	if rawURL != "https://example.test/v1/cycles/epic-1/wave-2/open" {
+		t.Fatalf("correction contract leaked into URL: %s", rawURL)
+	}
+	body, _, contentType, err := buildBodyWithStdinOwnership(cmd, flags, args, false)
 	if err != nil {
-		t.Fatalf("parse correction URL: %v", err)
+		t.Fatalf("buildBody correction mode: %v", err)
 	}
-	if got := parsed.Query().Get("correction_of_json"); got != correction {
-		t.Errorf("correction_of_json = %q, want %q", got, correction)
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q, want application/json", contentType)
 	}
-	if got := parsed.Query().Get("correction_of_digest"); got != "sha256:abc" {
-		t.Errorf("correction_of_digest = %q, want sha256:abc", got)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode correction body: %v", err)
+	}
+	if got["correction_of_json"] != correction || got["correction_of_digest"] != "sha256:abc" {
+		t.Fatalf("correction body = %#v", got)
 	}
 }
 
