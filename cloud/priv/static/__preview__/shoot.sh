@@ -119,7 +119,13 @@ shot() {
   local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}"
   local accent_q="" accent_sfx=""
   if [[ -n "$accent" ]]; then accent_q="&accent=$accent"; accent_sfx="-$accent"; fi
-  local url="http://localhost:$PORT/?scen=$scen&theme=$theme$deep$accent_q"
+  # ORDER MATTERS: $accent_q is a QUERY param and $deep is the URL FRAGMENT, so
+  # the accent MUST come first. mock.js:32 reads accent from location.search,
+  # which excludes everything past `#`, and falls back to evergreen SILENTLY —
+  # so the old `$deep$accent_q` ordering dropped the accent for the 72 of 81
+  # scenarios that carry a deepLink, making every accent-suffixed filename a lie
+  # (charter GR58). Do not reorder.
+  local url="http://localhost:$PORT/?scen=$scen&theme=$theme$accent_q$deep"
   local png="$OUT/${scen}-${theme}-${width}${accent_sfx}.png"
   # Fresh --user-data-dir per shot dodges the shared-profile lock (the local
   # Chrome-drive gotcha) and keeps runs hermetic.
