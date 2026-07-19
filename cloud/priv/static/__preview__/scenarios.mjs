@@ -1905,6 +1905,67 @@ export const SCENARIOS = {
       siteDomainStatus: siteStatesDomains,
     },
   },
+
+  // ── gr-p4-billing (G-01): plain-member + cancel states (tail-append, OC9) ────
+  // A plain MEMBER of a PAID team: the billing surface must render read-only —
+  // the plan STATE with zero write CTAs (never a disabled ghost) and the honest
+  // "Only the team owner can manage billing." line. Role rides me()'s 3rd param
+  // (the hygiene seam); the subscription is a healthy Supporter so there IS a
+  // paid plan an owner could manage — proving the gate hides it for the member,
+  // not the absence of a plan.
+  "billing-member": {
+    label: "Billing — a plain member of a paid team: read-only plan, no manage/cancel CTA, owner-gate copy",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+  // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
+  // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
+  // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays
+  // (the owner can still open the portal / resubscribe). d.billingCancel drives
+  // the mock's cancel POST for the interactive preview; smoke exercises the
+  // SETTLED state (its clicks are inert).
+  "billing-cancelling": {
+    label: "Billing — owner after cancel: grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: true,
+        current_period_end: new Date(Date.parse(T) + 12 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(45 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+      // The failure variant the danger modal designs for: a wrong password re-poll
+      // answers 401 password_invalid (the mock's cancel POST for the preview).
+      billingCancel: { status: 401, body: { error: "password_invalid" } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2006,6 +2067,18 @@ export function route(name, method, path) {
   }
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
+  // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
+  // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
+  // to drive the failure variants (401 password_invalid, 403 forbidden, …). The
+  // cancel 200 mirrors the router EXACTLY — {status, cancel_at_period_end} only,
+  // NO current_period_end — so the SPA's re-poll of /v1/subscription (not this
+  // body) is what renders the "Access until {date}" line.
+  if (method === "POST" && p === "/v1/billing/portal") {
+    return d.billingPortal || { status: 200, body: { portal_url: "https://billing.stripe.example/session/preview" } };
+  }
+  if (method === "POST" && p === "/v1/billing/cancel") {
+    return d.billingCancel || { status: 200, body: { status: "active", cancel_at_period_end: true } };
+  }
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).

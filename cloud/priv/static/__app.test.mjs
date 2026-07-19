@@ -6586,14 +6586,19 @@ test("billingChipModel: trial countdown XOR past-due alarm; silent otherwise (GR
   assert.equal(hooks.billingChipModel({ plan: "free", status: "active" }), null);
 });
 
-test("currentPlanCardHtml: dunning banner only when past_due; portal CTA always", () => {
+test("currentPlanCardHtml: STATE only — dunning banner only when past_due; the portal CTA moved to its own action section (G-01 anatomy)", () => {
   const due = hooks.currentPlanCardHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
   assert.ok(due.includes("dunning-banner"), "past_due carries the banner");
-  assert.ok(due.includes(">Manage billing<"), "the portal CTA renders");
   const ok = hooks.currentPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
   assert.ok(!ok.includes("dunning-banner"), "active carries no banner");
-  assert.ok(ok.includes(">Manage billing<"), "the portal CTA renders for active too");
+  // GR33: billing is an ACTION page — the state card no longer buries the
+  // Manage-billing button (it rides the #billing-manage .set-section now), and
+  // the invoice-less portal copy moved with it. The card stays STATE only.
+  assert.ok(!ok.includes(">Manage billing<") && !due.includes(">Manage billing<"), "the portal CTA is NOT in the state card");
+  assert.ok(!/download invoices/i.test(ok + due), "the invoice-less portal copy moved to the action section");
   assert.ok(!/contact support/i.test(ok + due), "no support-mail denial copy anywhere");
+  // "See all plans" (a read affordance the card owns) stays.
+  assert.ok(ok.includes("See all plans"), "the state card keeps its grid toggle");
 });
 
 test("billingPortalFlag matches the gateway's pinned return_url flag exactly", () => {
@@ -7509,4 +7514,38 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
     assert.match(html, /19s/);
     assert.match(html, /deploy-fail-dot/);
   }
+});
+
+// ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
+test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
+  // Owner-only writes: only the literal "owner" role manages billing (stricter
+  // than admin — require_primary_team_owner).
+  assert.equal(hooks.billingCanManage("owner"), true);
+  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
+  assert.equal(hooks.billingCanManage("member"), false);
+  assert.equal(hooks.billingCanManage(undefined), false);
+  // A real paid plan (a non-free catalog plan in an active/past_due state) has a
+  // portal to open and a plan to cancel; a trial / free / canceled does not.
+  assert.equal(hooks.billingHasPaidPlan({ plan: "supporter", status: "active" }), true);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "support_plus", status: "past_due" }), true);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "trial", status: "active" }), false, "a trial is not a paid Stripe plan");
+  assert.equal(hooks.billingHasPaidPlan({ plan: "free", status: "active" }), false);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "supporter", status: "canceled" }), false, "canceled has no live portal");
+  assert.equal(hooks.billingHasPaidPlan(null), false);
+});
+
+test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing the pure models (GR36 plain-member law)", () => {
+  const paid = hooks.readOnlyPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.ok(paid.includes(">Supporter<"), "reads the real plan name");
+  assert.ok(paid.includes("3 managed instances"), "reuses the quota-honest features verbatim");
+  assert.ok(paid.includes("Renews "), "reuses billingPeriodLine");
+  // Never a write affordance — no buttons, no grid toggle, no portal copy.
+  assert.ok(!/<button/i.test(paid), "no buttons in the read-only card");
+  assert.ok(!paid.includes("plan-more") && !/Manage billing/i.test(paid), "no CTAs at all");
+  // A cancelling paid plan surfaces "Access until" honestly, still button-free.
+  const ending = hooks.readOnlyPlanCardHtml({ plan: "supporter", status: "active", cancel_at_period_end: true, current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.ok(ending.includes("Access until ") && ending.includes(">Ending<"), "a cancelling plan reads Access-until + the Ending badge");
+  const trial = hooks.readOnlyPlanCardHtml({ plan: "trial", status: "active", trial_days_remaining: 9 });
+  assert.ok(trial.includes("Free trial") && trial.includes("9 days left"), "trial summary carries the countdown");
+  assert.ok(!/<button/i.test(trial) && !/Pick a plan below/i.test(trial), "no CTA and no misleading 'pick a plan below' (the grid is hidden for members)");
 });

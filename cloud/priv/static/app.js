@@ -127,7 +127,12 @@
     // launch-time quota ceiling (registry.ex); billing_not_configured is the
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
-    billing_not_configured: "Billing isn't set up on this deployment yet."
+    billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // GR36: billing writes are owner-only (require_primary_team_owner). A residual
+    // 403 on the portal/cancel POSTs is an authority answer, NOT a transient
+    // failure — this honest copy keeps it from reading as "try again in a moment"
+    // (absorbs gr-backlog-portal-retry-sentence).
+    forbidden: "Only the team owner can manage billing."
   };
   // Precedence (GR19 fix): curated ERRORS copy → field-level details → the
   // caller's DESIGNED fallback → the humanized slug. (Previously any truthy
@@ -2401,7 +2406,7 @@
     }
     if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
-    if (r.view === "billing") renderRecommended();
+    if (r.view === "billing") renderBilling();
     if (r.view === "providers") { loadProviders(); loadGithub(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
@@ -8703,7 +8708,30 @@
   }
   function activePlan() { return planFromSub(subCache); }
 
-  function renderRecommended() {
+  // GR36: billing WRITES (Stripe portal + cancel) are owner-only —
+  // `require_primary_team_owner`, stricter than every other settings gate. The
+  // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
+  // node test pins the gate; the DOM branch reads it via billingIsOwner().
+  function billingCanManage(role) { return role === "owner"; }
+  function billingIsOwner() { return !!(meCache && billingCanManage(meCache.role)); }
+
+  // Pure: does the team hold a REAL paid subscription (a catalog plan that isn't
+  // Free) in a state the Stripe portal can act on? A trial (plan "trial", not in
+  // the catalog) and Free both answer false — neither has a portal to open or a
+  // plan to cancel. Reuses catalogPlan verbatim.
+  function billingHasPaidPlan(sub) {
+    if (!sub || (sub.status !== "active" && sub.status !== "past_due")) return false;
+    var t = catalogPlan(sub.plan);
+    return !!t && !t.free;
+  }
+
+  // GR33 anatomy: billing is an ACTION page composed of .set-section cards — the
+  // plan STATE card, then the Manage-billing (portal) and Cancel-plan action
+  // sections. renderBilling() is the orchestrator: it owns the subscription
+  // guard (moved off renderPlanState) and, for a non-owner, swaps the whole
+  // surface to the read-only view. Owners get the interactive plan state + the
+  // two owner-gated action sections.
+  function renderBilling() {
     var box = $("#billing-recommended");
     if (!box) return;
 
@@ -8711,7 +8739,9 @@
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
       box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
-      loadSubscription().then(renderRecommended);
+      showBillingSection("#billing-manage-section", false);
+      showBillingSection("#billing-cancel-section", false);
+      loadSubscription().then(renderBilling);
       return;
     }
 
@@ -8724,14 +8754,182 @@
         '<div class="empty-state"><h2>Couldn\'t load your plan</h2>' +
           "<p>Check your connection and retry.</p>" +
           '<p><button class="btn btn-primary btn-sm" id="sub-retry" type="button">Retry</button></p></div>';
+      showBillingSection("#billing-manage-section", false);
+      showBillingSection("#billing-cancel-section", false);
       var rb = $("#sub-retry");
       if (rb) rb.addEventListener("click", function () {
         subError = false;
-        renderRecommended();
+        renderBilling();
       });
       return;
     }
 
+    // GR36 plain-member law: a non-owner (admin OR member) sees the plan state
+    // read-only with NO write CTA anywhere — never a disabled ghost. The honest
+    // "Only the team owner can manage billing." copy lives in the Manage section.
+    if (!billingIsOwner()) { renderBillingReadOnly(box); return; }
+
+    renderPlanState(box);
+    renderBillingManage(true);
+    renderBillingCancel(true);
+  }
+
+  function showBillingSection(sel, on) {
+    var s = $(sel);
+    if (s) s.hidden = !on;
+  }
+
+  // The non-owner surface: a read-only plan summary (pure models, ZERO buttons),
+  // no plan grid, and the Manage section carrying only the honest owner-gate
+  // copy. The Cancel section stays hidden — a member has nothing to cancel.
+  function renderBillingReadOnly(box) {
+    box.innerHTML = readOnlyPlanCardHtml(subCache);
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    renderBillingManage(false);
+    renderBillingCancel(false);
+  }
+
+  // A button-free plan card for the read-only (non-owner) view. Reuses the same
+  // pure models as the owner card — planFromSub / billingStatusBadge /
+  // billingStatusLabel / billingPeriodLine / priceFor / planFeatsHtml — so the
+  // numbers never diverge; it just omits every affordance.
+  function readOnlyPlanCardHtml(sub) {
+    var isTrial = !!sub && sub.plan === "trial";
+    if (isTrial) {
+      var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
+      var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
+      return '<div class="card plan-card">' +
+          '<div class="plan-head"><span class="plan-name">Free trial</span>' +
+            '<span class="trial-chip">' + esc(chip) + "</span></div>" +
+          '<p class="plan-tagline">A real dedicated instance, free while your trial runs.</p>' +
+        "</div>";
+    }
+    var plan = planFromSub(sub);
+    var periodLine = sub ? billingPeriodLine(sub) : "";
+    return '<div class="card plan-card">' +
+        '<div class="plan-head"><span class="plan-name">' + esc(planName(plan)) + "</span>" +
+          (sub
+            ? (sub.status === "past_due"
+                ? '<span class="plan-rec plan-rec--due">'
+                : '<span class="plan-rec">') + esc(billingStatusBadge(sub)) + "</span>"
+            : "") +
+        "</div>" +
+        '<div class="plan-price">' + esc(priceFor(plan)) + "<small>/mo</small></div>" +
+        planFeatsHtml(catalogPlan(plan)) +
+        (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
+        (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+      "</div>";
+  }
+
+  // The owner-gated Manage-billing (Stripe portal) section — GR36 invoice-less
+  // honesty: no invoice table ever exists server-side, so the copy points at the
+  // portal. Non-owner → the honest owner-gate line, no button. Owner without a
+  // paid plan (trial/free) → the section hides (nothing to manage; their action
+  // is to pick a plan in the state card above).
+  function renderBillingManage(owner) {
+    var body = $("#billing-manage");
+    if (!body) return;
+    if (!owner) {
+      showBillingSection("#billing-manage-section", true);
+      body.innerHTML = '<p class="set-purpose">Only the team owner can manage billing.</p>';
+      return;
+    }
+    if (!billingHasPaidPlan(subCache)) {
+      showBillingSection("#billing-manage-section", false);
+      body.innerHTML = "";
+      return;
+    }
+    showBillingSection("#billing-manage-section", true);
+    body.innerHTML =
+      '<p class="set-purpose">Update your card, download invoices, change or cancel your plan &mdash; all in the secure Stripe billing portal.</p>' +
+      '<button class="btn" id="plan-portal" type="button">Manage billing</button>';
+    var mp = $("#plan-portal");
+    if (mp) mp.addEventListener("click", function () { openBillingPortal(mp); });
+  }
+
+  // The owner-gated Cancel-plan action, in the danger grammar (GR36). Only shown
+  // when there is a paid plan to cancel and it is not ALREADY cancelling at the
+  // period end (a second cancel would be a no-op). "Cancel plan…" opens the
+  // password-reconfirm modal.
+  function renderBillingCancel(owner) {
+    var body = $("#billing-cancel");
+    if (!body) return;
+    var sub = subCache;
+    var canCancel = owner && billingHasPaidPlan(sub) && !(sub && sub.cancel_at_period_end);
+    if (!canCancel) {
+      showBillingSection("#billing-cancel-section", false);
+      body.innerHTML = "";
+      return;
+    }
+    showBillingSection("#billing-cancel-section", true);
+    body.innerHTML =
+      '<p class="set-purpose">Cancelling keeps your instances running until the end of the current billing period, then stops them &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<button class="btn btn-danger" id="plan-cancel" type="button">Cancel plan&hellip;</button>';
+    var cb = $("#plan-cancel");
+    if (cb) cb.addEventListener("click", openCancelPlanModal);
+  }
+
+  // GR36: the in-app cancel — a password-reconfirm modal riding the LIVE
+  // POST /v1/billing/cancel (owner + password gated; grace default, so the team
+  // stays entitled until the period end). Built on the openModal primitive (the
+  // confirm-modal grammar is typed-echo, not password, so this is its own thin
+  // modal) with the decision-25 failure contract: a wrong password renders an
+  // inline sentence, never a toast, and the button re-arms in place. A 401
+  // password_invalid is special-cased to honest wrong-password copy — the shared
+  // ERRORS slug means "new password too short" for registration, which would
+  // misread here.
+  function openCancelPlanModal() {
+    var body = openModal(
+      '<h2 class="modal-title" id="modal-title">Cancel your plan?</h2>' +
+      '<p class="modal-sub">Your instances keep running until the end of the current billing period, then they\'re stopped &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<div class="field"><label class="label" for="cancel-pw">Confirm your password</label>' +
+        '<input class="form-input" id="cancel-pw" type="password" autocomplete="current-password" /></div>' +
+      '<div class="cm-error" id="cancel-err" role="alert" hidden><p class="cm-error-msg" id="cancel-err-msg"></p></div>' +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Keep my plan</button>' +
+        '<button class="btn btn-danger" type="button" id="cancel-go">Cancel plan</button></div>'
+    );
+    if (!body) return;
+    var pw = $("#cancel-pw");
+    var go = $("#cancel-go");
+    var errBox = $("#cancel-err");
+    var errMsg = $("#cancel-err-msg");
+    function showErr(m) { if (errMsg) setText(errMsg, m); show(errBox); }
+
+    if (go) go.addEventListener("click", function () {
+      var password = pw ? pw.value : "";
+      if (!password) { showErr("Enter your password to confirm."); if (pw) pw.focus(); return; }
+      var prev = go.textContent;
+      go.disabled = true;
+      go.textContent = "Cancelling…";
+      hide(errBox);
+      api("POST", "/v1/billing/cancel", { password: password }).then(function (r) {
+        if (r.status === 200) {
+          closeModal();
+          toast({ kind: "success", title: "Plan cancelled",
+            body: "Your access continues until the end of the current billing period." });
+          // The cancel response carries {status, cancel_at_period_end} but NOT
+          // current_period_end — re-poll the real subscription so the plan card's
+          // billingPeriodLine renders the honest "Access until {date}". The server
+          // also pushed a "subscription" SSE event; this makes the update
+          // deterministic for the acting tab.
+          loadSubscription().then(function () {
+            if (currentView() === "billing") renderBilling();
+          });
+        } else {
+          go.disabled = false;
+          go.textContent = prev;
+          var msg = r.status === 401
+            ? "That password didn't match. Try again."
+            : friendly(r.data, "Couldn't cancel your plan. Please try again.");
+          showErr(msg);
+          if (r.status === 401 && pw) { pw.value = ""; pw.focus(); }
+        }
+      });
+    });
+  }
+
+  function renderPlanState(box) {
     // dwb-13: a team on its free trial gets a days-remaining badge + a
     // one-click upgrade CTA, ahead of the paid-plan state below.
     if (subCache && subCache.plan === "trial") {
@@ -8875,8 +9073,11 @@
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
-        '<button class="btn btn-block" id="plan-portal" type="button">Manage billing</button>' +
-        '<p class="plan-meta dim">Update your card, download invoices, change or cancel your plan — all in the secure Stripe billing portal.</p>' +
+        // GR33: this card is STATE only — the Manage-billing (portal) action and
+        // the invoice-less portal copy live in their own .set-section below, so
+        // an ACTION section carries the action (never a save-row, never a button
+        // buried in a status card). "See all plans" stays: it toggles the grid,
+        // a read affordance the card owns.
         '<a class="plan-more" id="plan-more">See all plans</a>' +
       "</div>";
   }
@@ -8887,8 +9088,6 @@
     if (grid) grid.hidden = true;
     var dp = $("#dunning-portal");
     if (dp) dp.addEventListener("click", function () { openBillingPortal(dp); });
-    var mp = $("#plan-portal");
-    if (mp) mp.addEventListener("click", function () { openBillingPortal(mp); });
     $("#plan-more").addEventListener("click", function () {
       var nowHidden = !grid.hidden;
       grid.hidden = nowHidden;
@@ -9057,6 +9256,12 @@
         // platform_operator is known, and refresh the scope label's team name.
         applyOperatorGate();
         setScopeLabel(parseHash(), shellNavLayer(parseHash()));
+        // G-01: billing gates its write affordances on meCache.role (owner-only,
+        // GR36). If the user deep-linked to #billing, the first render ran before
+        // /v1/me resolved — meCache was null and it fell to the read-only view.
+        // Re-render now that the real role is known so an owner isn't stranded on
+        // the member surface (mirrors loadSubscription's re-render seam).
+        if (currentView() === "billing") renderBilling();
       }
     });
   }
@@ -9620,7 +9825,7 @@
     fleet: invalidateFleet,
     subscription: function (v) {
       loadSubscription().then(function () {
-        if (v === "billing") renderRecommended();
+        if (v === "billing") renderBilling();
         // A4: the welcome runway's trial subline reads the same cache — keep any
         // mounted runway honest when the subscription flips (no-op otherwise).
         refreshRunwaySubline(document);
@@ -9707,7 +9912,7 @@
     loadSubscription().then(function (sub) {
       if (sub && sub.status === "active") {
         toast({ kind: "success", title: "Subscription active", body: planName(sub.plan) + " is live — you can launch now." });
-        if (currentView() === "billing") renderRecommended();
+        if (currentView() === "billing") renderBilling();
       } else if (attempt < 6) {
         // Webhook may lag a few seconds; retry, then give up gracefully (SSE
         // will still flip it when the webhook lands).
@@ -9744,7 +9949,7 @@
     var before = JSON.stringify(subCache);
     loadSubscription().then(function () {
       if (JSON.stringify(subCache) !== before) {
-        if (currentView() === "billing") renderRecommended();
+        if (currentView() === "billing") renderBilling();
       } else if (attempt < 6) {
         setTimeout(function () { pollSubscriptionRefresh(attempt + 1); }, 1500);
       }
@@ -13967,6 +14172,13 @@
       planInstanceLimit: planInstanceLimit,
       planFeatures: planFeatures,
       planFromSub: planFromSub,
+      // gr-p4-billing (G-01, GR36): the owner-honest gate + the paid-plan test
+      // that drive which billing sections/CTAs render. Pure, node-pinned; the
+      // section mounts (renderBillingManage/renderBillingCancel/openCancelPlanModal)
+      // are smoke+browser-verified.
+      billingCanManage: billingCanManage,
+      billingHasPaidPlan: billingHasPaidPlan,
+      readOnlyPlanCardHtml: readOnlyPlanCardHtml,
       dunningDates: dunningDates,
       dunningBannerHtml: dunningBannerHtml,
       currentPlanCardHtml: currentPlanCardHtml,
