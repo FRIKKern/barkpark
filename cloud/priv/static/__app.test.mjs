@@ -6300,6 +6300,141 @@ test("stw4 freshnessBadge: is-rebuilding class + escaped, no content_rev leak", 
   assert.ok(!sneaky.includes("deadbeef"), "content_rev never reaches the badge");
 });
 
+// ── E-01 (gr-p3): the v4 sites-list row + its leading deploy-status pill ─────
+
+test("E-01 siteStatusPill: freshness → status-pill role, states-complete", () => {
+  const roleOf = (last_deployment) => {
+    const html = hooks.siteStatusPill(last_deployment ? { last_deployment } : {});
+    const m = html.match(/status-pill--(\w+)/);
+    return m && m[1];
+  };
+  assert.equal(roleOf({ status: "live", trigger: "content-auto", updated_at: new Date().toISOString() }), "ok");
+  assert.equal(roleOf({ status: "building", trigger: "content-auto" }), "warn", "an in-flight rebuild is amber");
+  assert.equal(roleOf({ status: "building", trigger: "manual" }), "info", "a plain deploy is info");
+  assert.equal(roleOf({ status: "failed", trigger: "manual", updated_at: new Date().toISOString() }), "danger");
+  // Nil-honest: a never-deployed site reads a neutral "Not deployed" — no
+  // invented green.
+  assert.equal(roleOf(null), "neutral");
+  assert.ok(hooks.siteStatusPill({}).includes(">Not deployed<"), "never-deployed says so");
+});
+
+test("E-01 globalSiteRow: real fields only, v4 anatomy, no invented kind taxonomy", () => {
+  const s = {
+    id: "site-1", name: "acme-web", slug: "acme-web", framework: "nextjs",
+    domains: ["acme.com"], github_webhook_configured: true,
+    last_deployment: { status: "live", trigger: "content-auto", updated_at: new Date().toISOString() },
+  };
+  const bp = { id: "bp-1", name: "Production", slug: "production", host: "h" };
+  const html = hooks.globalSiteRow(s, bp);
+  assert.ok(html.includes('class="site-row site-row--global"'), "the v4 density row");
+  assert.ok(html.includes("status-pill--ok"), "the leading deploy-status pill");
+  assert.ok(html.includes(">acme-web<"), "the site's own name, not a domain");
+  assert.ok(html.includes('class="site-host"') && html.includes("acme.com"), "the live host");
+  assert.ok(html.includes("nextjs"), "the framework");
+  assert.ok(html.includes('class="site-inst-link" href="#instance/bp-1"'), "on <instance> is a real link");
+  assert.ok(html.includes(">Production</a>"), "the instance name renders in the link");
+  assert.ok(html.includes("updated "), "the recency segment");
+  assert.ok(html.includes("Auto-deploy"), "the auto-deploy capability chip");
+  // GR28: the invented Marketing/Docs/Blank kind taxonomy has no field, so a
+  // row NEVER carries a kind label or template picker.
+  assert.ok(!/\bMarketing\b|\bDocs\b|\bBlank\b|template picker|site-kind|data-site-kind/i.test(html),
+    "no invented site-kind taxonomy");
+});
+
+test("E-01 globalSiteRow: no instance → honest 'on —', never a fabricated instance", () => {
+  const html = hooks.globalSiteRow({ id: "s", name: "orphan", framework: "astro", domains: [] }, null);
+  assert.ok(html.includes("on —"), "an unresolved instance reads a dash, not an invented name");
+  assert.ok(!html.includes("site-inst-link"), "no dead link when the instance is unknown");
+});
+
+// ── E-03 (gr-p3): the write-only env editor — KEY=VALUE parser + modal body ──
+
+test("E-03 parseEnvBlob: valid KEY=VALUE lines → env map; blanks + #comments skipped", () => {
+  const r = hooks.parseEnvBlob("# a comment\nFOO=bar\n\n  BAZ = qux \nEMPTY=");
+  assert.equal(r.ok, true);
+  // (Assert keys individually — the vm realm's object has a cross-realm
+  // prototype that deepStrictEqual would reject.)
+  assert.deepEqual(Object.keys(r.env).sort(), ["BAZ", "EMPTY", "FOO"]);
+  assert.equal(r.env.FOO, "bar");
+  assert.equal(r.env.BAZ, " qux ", "value is verbatim after the first '=' (only the key is trimmed)");
+  assert.equal(r.env.EMPTY, "");
+});
+
+test("E-03 parseEnvBlob: a value may contain '='; only the first splits", () => {
+  const r = hooks.parseEnvBlob("DATABASE_URL=postgres://u:p@h/db?sslmode=require");
+  assert.equal(r.ok, true);
+  assert.equal(r.env.DATABASE_URL, "postgres://u:p@h/db?sslmode=require");
+});
+
+test("E-03 parseEnvBlob: a bad line fails the WHOLE parse (no partial replace)", () => {
+  const noEq = hooks.parseEnvBlob("FOO=bar\njust-a-word");
+  assert.equal(noEq.ok, false);
+  assert.match(noEq.error, /Line 2/, "the error names the offending line");
+  const badKey = hooks.parseEnvBlob("1BAD=x");
+  assert.equal(badKey.ok, false);
+  assert.match(badKey.error, /not a valid variable name/);
+  const spacedKey = hooks.parseEnvBlob("HAS SPACE=x");
+  assert.equal(spacedKey.ok, false, "a key with whitespace is rejected");
+});
+
+test("E-03 envModalBodyHtml: write-only law verbatim, BLANK textarea, backend-true button copy", () => {
+  const html = hooks.envModalBodyHtml({ name: "acme-web" });
+  // The replace-set / write-only / no-read-back law, verbatim.
+  assert.ok(html.includes("Saving replaces the whole set — values are write-only, so anything you leave out is removed."));
+  assert.ok(html.includes("Current values can’t be read back."));
+  // GR28: the textarea starts BLANK (there is no read-back to pre-fill).
+  const ta = html.match(/<textarea[^>]*id="site-env-text"[^>]*>([\s\S]*?)<\/textarea>/);
+  assert.ok(ta && ta[1] === "", "the textarea has no pre-filled content");
+  // Backend-true: "Replace env" — the route queues NO deploy, so no redeploy claim.
+  assert.ok(html.includes(">Replace env</button>"));
+  assert.ok(!/redeploy/i.test(html), "the button never claims a redeploy the route doesn't do");
+  // GR27: one blob — no production/preview scope UI.
+  assert.ok(!/\bpreview\b|scope/i.test(html), "no invented env scopes");
+});
+
+// ── I-01 (gr-p3): the Activity feed — audit normalization + by-target fold ───
+
+test("I-01 auditEntry: an audit row → the mergeTimeline audit-entry shape", () => {
+  const e = hooks.auditEntry({
+    id: "a1", action: "site.deploy_requested", inserted_at: "2026-07-19T00:00:00Z",
+    actor: { id: "u", email: "ada@acme.com" }, target_type: "site", target_id: "s7", metadata: { git_ref: "abc" },
+  });
+  assert.equal(e.source, "audit");
+  assert.equal(e.key, "a:a1");
+  assert.equal(e.type, "site.deploy_requested");
+  assert.equal(e.actor, "ada@acme.com", "actor is backend-true (audit_json's actor.email)");
+  assert.equal(e.target, "site:s7", "target is <type>:<id> for the by-target coalesce key");
+  // A target-less row (no target_id) degrades to null — the by-target key then
+  // falls back to the type key (never a fabricated target).
+  const noTarget = hooks.auditEntry({ id: "a2", action: "subscription.activated", target_type: "subscription", target_id: null });
+  assert.equal(noTarget.target, null);
+});
+
+test("I-01 coalesceEntries by target: same target folds, unrelated targets never merge", () => {
+  const mk = (id, target) => hooks.auditEntry({ id, action: "site.deploy_requested", actor: { email: "ada@acme.com" }, target_type: "site", target_id: target });
+  // Three deploys of site A (consecutive) then one of site B.
+  const entries = [mk("1", "A"), mk("2", "A"), mk("3", "A"), mk("4", "B")];
+  const out = hooks.coalesceEntries(entries, hooks.tlvCoalesceKeyByTarget);
+  // One ×3 group (site A) + one singleton (site B) = 2 render items.
+  assert.equal(out.length, 2, "the A-run folds, B stays separate");
+  assert.equal(out[0].group, true, "the same-target run is a group");
+  assert.equal(out[0].count, 3, "the group folds all three A deploys");
+  assert.ok(!out[1].group, "the different-target deploy is a singleton, never folded in");
+  // Same actions on different targets must NOT fold even when adjacent.
+  const split = hooks.coalesceEntries([mk("5", "A"), mk("6", "B")], hooks.tlvCoalesceKeyByTarget);
+  assert.equal(split.length, 2, "adjacent but different targets never merge");
+});
+
+test("I-01 activityFiltersHtml: the server-true target_type chips, All active by default", () => {
+  const html = hooks.activityFiltersHtml();
+  assert.ok(html.includes('data-actfilter=""'), "the All chip");
+  assert.ok(html.includes('data-actfilter="barkpark"'), "Instances → target_type=barkpark");
+  assert.ok(html.includes('data-actfilter="site"'), "Sites → target_type=site");
+  // Exactly one active chip; no actor/verb filter is offered (server has none).
+  assert.equal((html.match(/actfilter-chip is-active/g) || []).length, 1, "one chip active");
+  assert.ok(!/actor|verb/i.test(html), "no actor/verb filter UI — the backend has no such params");
+});
+
 // ── search-template W8: site theme-edit pure helpers ────────────────────────
 
 test("siteThemeOptionsHtml lists the four palettes + a template-default, current selected", () => {

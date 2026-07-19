@@ -4484,9 +4484,10 @@
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
       });
     });
-    // The "Visit ↗" link opens the LIVE site — it must NOT also trigger the
-    // row's drill-into-detail navigation, so swallow the bubble.
-    scope.querySelectorAll(".site-open").forEach(function (a) {
+    // The "Visit ↗" link opens the LIVE site, and the "on <instance>" link
+    // jumps to the instance workspace — neither must ALSO trigger the row's
+    // drill-into-detail navigation, so swallow the bubble on both.
+    scope.querySelectorAll(".site-open, .site-inst-link").forEach(function (a) {
       a.addEventListener("click", function (e) { e.stopPropagation(); });
     });
   }
@@ -6460,17 +6461,56 @@
       "</span>";
   }
 
+  // E-01: the site's deploy-freshness as a LEADING v4 status pill — the global
+  // #sites list mirrors the fleet-row anatomy (status column · main · badges),
+  // reusing the shared .status-pill roles rather than a site-only pill
+  // vocabulary. freshnessModel is the single source (status · trigger · when);
+  // a NEVER-deployed site reads a neutral "Not deployed" (nil-honest — no
+  // invented green). Dynamic head `status-pill status-pill--` is ALLOW_PREFIXES-
+  // listed (E3); role ∈ ok|info|warn|danger|neutral, all real rules.
+  function siteStatusPill(s) {
+    var m = freshnessModel(s);
+    var role = "neutral", label = "Not deployed";
+    if (m) {
+      label = m.label;
+      if (m.dot === "up") role = "ok";
+      else if (m.dot === "rebuild") role = "warn";
+      else if (m.dot === "deploy") role = "info";
+      else if (m.dot === "down") role = "danger";
+    }
+    return '<span class="status-pill status-pill--' + esc(role) + '">' +
+      '<span class="status-pill-dot" aria-hidden="true"></span>' +
+      '<span class="status-pill-label">' + esc(label) + "</span>" +
+    "</span>";
+  }
+
+  // E-01 (GR28): the global sites list on v4 density rows. Renders ONLY real
+  // fields — the deploy-status pill, the site's own name, its live host, and a
+  // mono meta line (framework · on <instance link> · updated <when>). The
+  // invented Marketing/Docs/Blank "kind" taxonomy has no backend field, so it
+  // never appears. `on <instance>` is a real link to the instance workspace,
+  // its click swallow-bubbled in wireSiteRows so it never also drills into the
+  // site. Recency reads the last deploy's stamp when deployed, the site's own
+  // updated_at otherwise.
   function globalSiteRow(s, bp) {
-    var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
+    var host = (s.domains && s.domains[0]) || s.slug || s.name || "—";
+    var name = s.name || s.slug || host;
     var fw = s.framework ? esc(s.framework) : "site";
-    var inst = bp ? esc(bp.name) : "—";
     var auto = s.github_webhook_configured;
-    return '<div class="site-row" data-id="' + esc(s.id) + '" role="button" tabindex="0"><div class="site-main">' +
-      '<div class="site-name">' + esc(domain) + "</div>" +
-      '<div class="site-meta">' + fw + ' &middot; on <span class="site-inst">' + inst + "</span></div>" +
-      '</div><div class="fleet-badges">' +
+    var m = freshnessModel(s);
+    var updated = m ? m.when : relTime(s.updated_at);
+    var instSeg = bp
+      ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+      : "on —";
+    return '<div class="site-row site-row--global" data-id="' + esc(s.id) + '" role="button" tabindex="0">' +
+      '<div class="site-status">' + siteStatusPill(s) + "</div>" +
+      '<div class="site-main">' +
+        '<div class="site-name">' + esc(name) + "</div>" +
+        '<div class="site-host">' + esc(host) + "</div>" +
+        '<div class="site-meta">' + fw + " &middot; " + instSeg + " &middot; updated " + esc(updated) + "</div>" +
+      "</div>" +
+      '<div class="fleet-badges">' +
         siteOpenLink(siteLiveUrl(s, bp)) +
-        freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -6552,6 +6592,8 @@
       loadSiteDomains(site);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
+      var eb = $("#site-env-edit");
+      if (eb) eb.addEventListener("click", function () { openSiteEnvModal(site); });
       var themeSel = $("#site-theme-select");
       if (themeSel) themeSel.addEventListener("change", function () {
         var val = themeSel.value;
@@ -6706,6 +6748,12 @@
             '<select class="rail-select" id="site-theme-select" aria-label="Deploy theme">' +
               siteThemeOptionsHtml(site.theme || "") + "</select>") +
           railRowHtml("Repository", repo) +
+          // E-03: the env editor affordance. Write-only truth (POST …/env is a
+          // full-blob replace; reveal_site_env has zero route callers) means the
+          // row shows NO stored values or count — only an Edit action into the
+          // replace-set modal.
+          railRowHtml("Environment",
+            '<button class="btn btn-ghost btn-sm" id="site-env-edit" type="button">Edit</button>') +
           railRowHtml("Auto-deploy", badge(auto ? "On" : "Manual", auto ? "online" : "unknown")) +
           railRowHtml("Previews", badge(previewsFlag, previewsFlag === "On" ? "online" : "unknown")) +
           railRow("Port", site.port != null ? String(site.port) : "—") +
@@ -6714,6 +6762,100 @@
           railRowPlain("Created", fmtWhen(site.inserted_at)) +
         "</aside>" +
       "</div>";
+  }
+
+  // ── E-03: the env editor (GR27/GR28 — write-only, blank-start) ─────────────
+  //
+  // POST /v1/sites/:id/env {env:{...}} is a FULL-BLOB REPLACE (router.ex ~5327):
+  // it re-encrypts the whole map, queues NO deployment, and the values are never
+  // echoed back (reveal_site_env has zero route callers as of 5cac4ffe). So the
+  // editor is honest about three things the styleguide's aspirational copy is
+  // not: (1) it starts BLANK — there is no read-back to pre-fill; (2) saving
+  // REPLACES the whole set (anything omitted is dropped); (3) the button says
+  // "Replace env", not "…and redeploy" — the route provably queues no deploy, so
+  // the change applies on the NEXT deploy. No production/preview scope UI: the
+  // backend holds ONE blob (scopes are wave-2 fiction, GR27).
+
+  // Pure: parse a KEY=VALUE textarea into an env map. Blank lines and #-comments
+  // are ignored. A key is [A-Za-z_][A-Za-z0-9_]* (the POSIX env-name shape); the
+  // first offending line fails the whole parse with a line-numbered message (a
+  // partial replace would be a silent data-loss trap). Everything after the
+  // first '=' is the value, verbatim (values may contain '='), trimmed of a
+  // trailing CR only. Returns { ok, env } | { ok:false, error }.
+  function parseEnvBlob(text) {
+    var lines = String(text == null ? "" : text).split("\n");
+    var env = {};
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i].replace(/\r$/, "");
+      var line = raw.trim();
+      if (!line || line.charAt(0) === "#") continue;
+      var eq = raw.indexOf("=");
+      if (eq < 1) {
+        return { ok: false, error: "Line " + (i + 1) + ": each entry must be KEY=VALUE." };
+      }
+      var key = raw.slice(0, eq).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        return { ok: false, error: "Line " + (i + 1) + ': "' + key + '" is not a valid variable name (letters, digits, underscore; not starting with a digit).' };
+      }
+      env[key] = raw.slice(eq + 1);
+    }
+    return { ok: true, env: env };
+  }
+
+  // Pure: the env modal body. Amber write-only warning (verbatim law), a BLANK
+  // mono textarea, an inline error slot, and Cancel + "Replace env". Node-pinned.
+  function envModalBodyHtml(site) {
+    var name = (site && (site.name || site.slug)) || "this site";
+    return '<h2 class="modal-title" id="modal-title">Edit environment</h2>' +
+      '<p class="modal-sub">Environment variables for ' + esc(name) + ", applied on the next deploy.</p>" +
+      '<div class="notice notice-warn env-warn" role="note">' +
+        "Saving replaces the whole set — values are write-only, so anything you leave out is removed. " +
+        "Current values can’t be read back." +
+      "</div>" +
+      '<div class="field"><label class="label" for="site-env-text">Variables <span class="dim">(one KEY=VALUE per line)</span></label>' +
+        '<textarea class="form-input env-textarea" id="site-env-text" spellcheck="false" autocomplete="off" ' +
+          'placeholder="DATABASE_URL=postgres://…&#10;API_TOKEN=…"></textarea></div>' +
+      '<div class="cred-remediation" id="site-env-err" role="alert" hidden></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn btn-ghost" id="site-env-cancel" type="button">Cancel</button>' +
+        '<button class="btn btn-primary" id="site-env-submit" type="button">Replace env</button>' +
+      "</div>";
+  }
+
+  function openSiteEnvModal(site) {
+    openModal(envModalBodyHtml(site));
+    var cancel = $("#site-env-cancel");
+    if (cancel) cancel.addEventListener("click", closeModal);
+    var submit = $("#site-env-submit");
+    if (!submit) return;
+    submit.addEventListener("click", function () {
+      var errBox = $("#site-env-err");
+      var ta = $("#site-env-text");
+      var parsed = parseEnvBlob(ta ? ta.value : "");
+      if (!parsed.ok) {
+        errBox.textContent = parsed.error;
+        errBox.hidden = false;
+        return;
+      }
+      // In-flight: the button states the motion + locks (a second click would
+      // POST a duplicate full-blob replace).
+      errBox.hidden = true;
+      submit.disabled = true;
+      submit.textContent = "Replacing…";
+      api("POST", "/v1/sites/" + encodeURIComponent(site.id) + "/env", { env: parsed.env }).then(function (r) {
+        if (r.ok) {
+          closeModal();
+          var n = Object.keys(parsed.env).length;
+          toast({ kind: "success", title: "Environment replaced",
+            body: n + (n === 1 ? " variable" : " variables") + " set — applies on the next deploy." });
+        } else {
+          submit.disabled = false;
+          submit.textContent = "Replace env";
+          errBox.textContent = friendly(r.data, "Couldn’t replace the environment. Please try again.");
+          errBox.hidden = false;
+        }
+      });
+    });
   }
 
   // Map a raw internal builder failure_reason (from builder.go) to human copy,
@@ -9017,12 +9159,22 @@
     "token.revoked": "revoked an API token",
     "site.created": "created a site",
     "site.deleted": "deleted a site",
+    "site.deploy_requested": "requested a deploy",
+    "site.rolled_back": "rolled back a site",
+    "site.env_changed": "replaced a site's environment",
+    "site.domain_added": "added a domain",
+    "site.github_connected": "connected a repo",
     "barkpark.go_live": "launched a Barkpark",
-    "barkpark.deleted": "removed a Barkpark"
+    "barkpark.deleted": "removed a Barkpark",
+    "barkpark.autoupdate_changed": "changed autoupdate"
   };
 
   function humanAction(a) { return ACTION_LABELS[a] || a; }
 
+  // A COMPACT single audit row — the home Overview's "Recent activity" digest
+  // (3-item glance, loadOverviewDigest) renders through this. The full #activity
+  // feed does NOT: it coalesces through the grammar below. A 3-item preview has
+  // nothing to fold, so it keeps the terse fleet-row shape.
   function activityRow(e) {
     var who = (e.actor && e.actor.email) || "system";
     var when = e.inserted_at ? new Date(e.inserted_at).toLocaleString() : "";
@@ -9037,34 +9189,132 @@
     "</div>";
   }
 
+  // ── I-01: Activity regrown on THE coalescing grammar (GR26) ───────────────
+  //
+  // The team feed rides GET /v1/audit (there is no /v1/activity) and renders
+  // through the SAME timelineFeedHtml the instance timeline uses — but with the
+  // PARAMETERIZED group key tlvCoalesceKeyByTarget (type+actor+target), so a
+  // team-wide feed only folds REPEATS of one action on ONE thing (three deploys
+  // of site 12) and never merges unrelated targets (site 12 vs site 14). Audit
+  // rows normalise to mergeTimeline's audit-entry shape; actor display is
+  // backend-true (audit_json carries actor.email).
+  //
+  // Filters are BACKEND-TRUE: GET /v1/audit accepts only target_type/target_id
+  // (router.ex ~1494), so the chips filter by target_type server-side. Actor /
+  // verb-class filtering has NO server params (backlog gr-backlog-audit-filter-
+  // params) — surfacing it as a client-only filter over a keyset-paginated feed
+  // would lie about completeness (it would filter one page, not the trail), so
+  // it is deliberately absent this wave.
+
+  // The server-true target_type filter set — the two customer-facing nouns with
+  // their own places (#fleet, #sites). `null` = the whole trail.
+  var ACTIVITY_FILTERS = [
+    { type: null, label: "All" },
+    { type: "barkpark", label: "Instances" },
+    { type: "site", label: "Sites" }
+  ];
+  var activityFilter = { target_type: null };
+  // The full accumulated normalised feed (grows with Load more), plus the
+  // per-entry / per-group open memory (a repaint must re-open what was read).
+  var activityEntries = null;
+  var activityExpanded = {};
+  var activityGroupOpen = {};
+
+  // Pure: one audit row → the mergeTimeline audit-entry shape (source "audit",
+  // target "<type>:<id>" for the by-target coalesce key). Node-pinned.
+  function auditEntry(e) {
+    e = e || {};
+    return {
+      source: "audit",
+      key: "a:" + String(e.id),
+      at: e.inserted_at || null,
+      type: String(e.action || ""),
+      payload: e.metadata || null,
+      actor: (e.actor && e.actor.email) || null,
+      target: e.target_type && e.target_id != null
+        ? String(e.target_type) + ":" + String(e.target_id)
+        : null
+    };
+  }
+
+  // The GET /v1/audit URL for the current filter + keyset cursor. Only the
+  // server-supported params (limit, before, target_type) are ever sent.
+  function activityQuery(before) {
+    var q = "/v1/audit?limit=" + ACTIVITY_PAGE;
+    if (activityFilter.target_type) q += "&target_type=" + encodeURIComponent(activityFilter.target_type);
+    if (before) q += "&before=" + encodeURIComponent(before);
+    return q;
+  }
+
+  // The filter chip row. Static per-branch class strings (the active/idle class
+  // is a full literal head, never a concat modifier) so __css_check resolves
+  // every class to a real rule. Rendered into the static #activity-filters slot.
+  function activityFiltersHtml() {
+    var cur = activityFilter.target_type || null;
+    return ACTIVITY_FILTERS.map(function (f) {
+      var active = cur === f.type;
+      var tail = ' type="button" data-actfilter="' + esc(String(f.type || "")) +
+        '" aria-pressed="' + (active ? "true" : "false") + '">' + esc(f.label) + "</button>";
+      return active
+        ? '<button class="actfilter-chip is-active"' + tail
+        : '<button class="actfilter-chip"' + tail;
+    }).join("");
+  }
+
+  function paintActivityFilters() {
+    var box = $("#activity-filters");
+    if (box) box.innerHTML = activityFiltersHtml();
+  }
+
+  // Paint the cached feed, coalesced through the by-target grammar. Re-opens the
+  // operator's expanded rows/groups so a refetch never folds what they read.
+  function paintActivity() {
+    var body = $("#activity-body");
+    if (!body) return;
+    var entries = activityEntries || [];
+    if (!entries.length) {
+      var msg = activityFilter.target_type
+        ? "No activity for this filter yet."
+        : "Launches, removals, site changes, and subscription updates show up here.";
+      body.innerHTML = '<div class="empty-state"><h2>No activity yet</h2><p>' + esc(msg) + "</p></div>";
+      return;
+    }
+    var open = [];
+    entries.forEach(function (e) { if (activityExpanded[e.key]) open.push(e.key); });
+    body.innerHTML = timelineFeedHtml(entries, {
+      groupKey: tlvCoalesceKeyByTarget,
+      expandedKeys: open,
+      openGroups: Object.keys(activityGroupOpen)
+    });
+  }
+
   function loadActivity() {
     var body = $("#activity-body");
     body.innerHTML = '<div class="loading">Loading activity&hellip;</div>';
-    api("GET", "/v1/audit?limit=" + ACTIVITY_PAGE).then(function (r) {
+    paintActivityFilters();
+    api("GET", activityQuery(null)).then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
-        return;
-      }
-      var list = (r.data && r.data.events) || [];
-      if (!list.length) {
-        body.innerHTML = '<div class="empty-state"><h2>No activity yet</h2>' +
-          "<p>Launches, removals, site changes, and subscription updates show up here.</p></div>";
         toggleActivityMore(false);
         return;
       }
-      body.innerHTML = list.map(activityRow).join("");
-      toggleActivityMore(list.length === ACTIVITY_PAGE, list);
+      var list = (r.data && r.data.events) || [];
+      activityEntries = list.map(auditEntry);
+      paintActivity();
+      toggleActivityMore(list.length === ACTIVITY_PAGE);
     });
   }
 
   function loadMoreActivity() {
-    var rows = activityCursorRows;
-    if (!rows || !rows.length) return;
-    var before = rows[rows.length - 1].inserted_at;
+    var entries = activityEntries;
+    if (!entries || !entries.length) return;
+    // Keyset cursor = the oldest loaded row's stamp (entries are 1:1 with audit
+    // rows — coalescing is display-only, so it never drops the cursor row).
+    var before = entries[entries.length - 1].at;
     var btn = $("#activity-load-more");
     btn.disabled = true;
-    api("GET", "/v1/audit?limit=" + ACTIVITY_PAGE + "&before=" + encodeURIComponent(before)).then(function (r) {
+    api("GET", activityQuery(before)).then(function (r) {
       btn.disabled = false;
       if (!r.ok) {
         toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
@@ -9072,19 +9322,65 @@
       }
       var more = (r.data && r.data.events) || [];
       if (more.length) {
-        $("#activity-body").insertAdjacentHTML("beforeend", more.map(activityRow).join(""));
+        // Re-coalesce the WHOLE accumulated list and repaint — a same-key run
+        // spanning the page boundary must fold as one, which an append can't do.
+        activityEntries = entries.concat(more.map(auditEntry));
+        paintActivity();
       }
-      toggleActivityMore(more.length === ACTIVITY_PAGE, (activityCursorRows || []).concat(more));
+      toggleActivityMore(more.length === ACTIVITY_PAGE);
     });
   }
 
-  // Tracks the rows currently displayed so "Load more" knows the keyset cursor
-  // (the oldest visible inserted_at).
-  var activityCursorRows = null;
-  function toggleActivityMore(show, rows) {
-    if (rows) activityCursorRows = rows;
+  function toggleActivityMore(show) {
     var wrap = $("#activity-more");
     if (wrap) wrap.hidden = !show;
+  }
+
+  // ONE delegated listener each on the feed (tlv Details / group Show-all) and
+  // the filter row (target_type chips → server refetch). Wired once at init.
+  function wireActivityFeed() {
+    var body = $("#activity-body");
+    if (body && body.addEventListener) body.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var gbtn = t.closest("[data-tlv-group-toggle]");
+      if (gbtn) {
+        var grow = gbtn.closest("[data-tlv-group]");
+        if (!grow) return;
+        var gkey = grow.getAttribute("data-tlv-group");
+        if (activityGroupOpen[gkey]) delete activityGroupOpen[gkey];
+        else activityGroupOpen[gkey] = true;
+        paintActivity();
+        return;
+      }
+      var btn = t.closest("[data-tlv-toggle]");
+      if (btn) {
+        var row = btn.closest("[data-tlv-key]");
+        if (!row) return;
+        var detail = row.querySelector(".tlv-detail");
+        if (!detail) return;
+        var opening = detail.hidden;
+        detail.hidden = !opening;
+        btn.setAttribute("aria-expanded", opening ? "true" : "false");
+        var key = row.getAttribute("data-tlv-key");
+        if (opening) activityExpanded[key] = true;
+        else delete activityExpanded[key];
+        return;
+      }
+    });
+    var filters = $("#activity-filters");
+    if (filters && filters.addEventListener) filters.addEventListener("click", function (e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-actfilter]") : null;
+      if (!chip) return;
+      var next = chip.getAttribute("data-actfilter") || "";
+      next = next || null;
+      if ((activityFilter.target_type || null) === next) return; // re-click = no-op
+      activityFilter.target_type = next;
+      // A new filter is a new feed: its open memory doesn't carry.
+      activityExpanded = {};
+      activityGroupOpen = {};
+      loadActivity();
+    });
   }
 
   // =========================================================== LIVE EVENTS (SSE)
@@ -13219,6 +13515,8 @@
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);
     $("#activity-load-more").addEventListener("click", loadMoreActivity);
+    // I-01: the delegated feed (Details / Show-all) + filter-chip listeners.
+    wireActivityFeed();
     var notifTest = $("#notif-test");
     if (notifTest) notifTest.addEventListener("click", sendTestNotification);
 
@@ -13549,6 +13847,12 @@
       // model + markup. Amber-pulse only while a content-auto rebuild is in
       // flight; nil-honest for a never-deployed site.
       freshnessModel: freshnessModel, freshnessBadge: freshnessBadge,
+      // E-01: the v4 sites-list row + its leading deploy-status pill (pure).
+      siteStatusPill: siteStatusPill, globalSiteRow: globalSiteRow,
+      // E-03: the write-only env editor — KEY=VALUE parser + modal body (pure).
+      parseEnvBlob: parseEnvBlob, envModalBodyHtml: envModalBodyHtml,
+      // I-01: the Activity feed — audit-row normalization + filter chips (pure).
+      auditEntry: auditEntry, activityFiltersHtml: activityFiltersHtml,
       parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
       inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
