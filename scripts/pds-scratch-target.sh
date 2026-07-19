@@ -187,7 +187,7 @@ cmd_up() {
   command -v shasum >/dev/null 2>&1 || die "shasum not found on PATH"
   [ -x "$BARKPARK_BIN" ] || die "$BARKPARK_BIN not found or not executable"
 
-  local home port pg_port media_dir boot_log envf token
+  local home port pg_port media_dir boot_log envf token pg_conninfo
   home="$(new_scratch_home)"
   media_dir="${BARKPARK_MEDIA_DIR:-$home/media}"
   port="${PORT:-$(free_port)}"
@@ -244,6 +244,12 @@ cmd_up() {
   log "minting admin token (TRAP 6: a fresh box 401s the blob-push route)"
   token="$(mint_admin_token)"
 
+  # barkpark-pg's own defaults (bin/barkpark-pg: PG_HOST=127.0.0.1, PG_DB and
+  # PG_USER default to "barkpark", overridable via BARKPARK_PG_DB/_USER). Mirror
+  # the overrides rather than hardcoding, so scratch.env stays true if a caller
+  # sets them.
+  pg_conninfo="host=127.0.0.1 port=$pg_port dbname=${BARKPARK_PG_DB:-barkpark} user=${BARKPARK_PG_USER:-barkpark}"
+
   cat >"$envf" <<EOF
 # sourceable handle on this scratch personal-local target
 export BARKPARK_HOME="$home"
@@ -254,6 +260,10 @@ export PHX_HOST="$PHX_HOST"
 export PDS_SCRATCH_BASE="http://$PHX_HOST:$port"
 export PDS_SCRATCH_TOKEN="$token"
 export PDS_SCRATCH_TREE="$REPO_ROOT"
+# A libpq conninfo for the scratch database, so the crown proof can hand the
+# TARGET DB straight to \`pds-secret-scan.sh --db\` (step 4 scores the imported
+# rows, not only the bundle bytes) without re-deriving barkpark-pg's defaults.
+export PDS_SCRATCH_DB="$pg_conninfo"
 EOF
   printf '%s\n' "$home" >"$POINTER_FILE"
 
