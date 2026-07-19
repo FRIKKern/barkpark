@@ -14,7 +14,7 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
     adapter =
       Application.get_env(:barkpark, :cycle_release_capture_adapter, __MODULE__.Production)
 
-    if function_exported?(adapter, :public_smoke, 1),
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :public_smoke, 1),
       do: adapter.public_smoke(request),
       else: {:error, :public_release_smoke_unavailable}
   end
