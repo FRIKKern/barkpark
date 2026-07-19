@@ -38,6 +38,15 @@ var taskLifecycleRoles = map[string]string{
 	"ready":       "",
 	"open":        "",
 	"cancelled":   "",
+	// The pre-open thought states (task-lifecycle-visibility epic): a candidate the
+	// strategizer just named (considering) and one under investigation (researching).
+	// Both neutral ("") — considering's dotted-circle and researching's violet
+	// bullseye are glyph/hue voices, not semantic status roles (there is no violet
+	// status token), matching the board's RoleFor default for them. Mapped here so
+	// TaskLifecycles publishes the full 9-token set and the taskboard parity test
+	// forces RoleFor to keep up in the same commit.
+	"considering": "",
+	"researching": "",
 }
 
 // TaskLifecycles returns every task-lifecycle token this package maps, sorted.

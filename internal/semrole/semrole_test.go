@@ -68,11 +68,12 @@ func TestVocabulariesDisjoint(t *testing.T) {
 
 // TestTaskLifecyclesMatchesFor pins TaskLifecycles to the map For consults:
 // every published token round-trips through For with the pinned role, and the
-// published set carries exactly the seven known tokens (extend both this pin
-// and taskboard.RoleFor when the vocabulary grows — the taskboard parity test
-// enforces the latter automatically).
+// published set carries exactly the nine known tokens — the seven shipped states
+// plus the pre-open thought states considering + researching (task-lifecycle-
+// visibility epic). Extend both this pin and taskboard.RoleFor when the
+// vocabulary grows — the taskboard parity test enforces the latter automatically.
 func TestTaskLifecyclesMatchesFor(t *testing.T) {
-	want := []string{"blocked", "cancelled", "closed", "done", "in_progress", "open", "ready"}
+	want := []string{"blocked", "cancelled", "closed", "considering", "done", "in_progress", "open", "ready", "researching"}
 	got := TaskLifecycles()
 	if len(got) != len(want) {
 		t.Fatalf("TaskLifecycles() = %v, want %v", got, want)

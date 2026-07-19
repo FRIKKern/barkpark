@@ -148,6 +148,12 @@ export const BASE_ROLES = [
 export const STATUS_ROLES = ["ok", "warn", "danger", "info"];
 export const LIFE_ORDER = [
   "in_progress", "blocked", "done", "closed", "cancelled", "ready", "open",
+  // The pre-open thought states (task-lifecycle-visibility epic): a candidate
+  // the strategizer just named (considering ◌) → under investigation
+  // (researching ◎) → open (ready). Appended so the canonical emission order the
+  // whole generated chain reads (Go board/semrole, Studio TokensGen, paper-surface
+  // .bp-lg--, root --life-*) extends without renumbering the shipped states.
+  "considering", "researching",
 ];
 // Cloud INSTANCE lifecycle emission order (matches tokens.instanceLifecycle).
 export const INST_ORDER = [

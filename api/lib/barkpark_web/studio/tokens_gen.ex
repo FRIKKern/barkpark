@@ -60,7 +60,9 @@ defmodule BarkparkWeb.Studio.TokensGen do
       %{state: "closed", glyph: "✓", ascii: "v", light: "#0d9488", dark: "#2dd4bf"},
       %{state: "cancelled", glyph: "✕", ascii: "x", light: "#a1a1aa", dark: "#71717a"},
       %{state: "ready", glyph: "○", ascii: "o", light: "#18181b", dark: "#e7edf2"},
-      %{state: "open", glyph: "○", ascii: ".", light: "#71717a", dark: "#5f6b78"}
+      %{state: "open", glyph: "○", ascii: ".", light: "#71717a", dark: "#5f6b78"},
+      %{state: "considering", glyph: "◌", ascii: "?", light: "#a1a1aa", dark: "#71717a"},
+      %{state: "researching", glyph: "◎", ascii: "R", light: "#7c3aed", dark: "#a78bfa"}
     ]
   end
 

@@ -305,11 +305,16 @@ for (const k of ["tabnav", "topbar", "menu", "modal", "toast"]) {
 
 // --- lifecycle: every required state present, reconciled with Go source ----
 const life = tokens.lifecycle || {};
-const REQUIRED_LIFE = ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"];
-// role reconciled 1:1 with internal/semrole/semrole.go taskLifecycleRoles
+const REQUIRED_LIFE = ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open", "considering", "researching"];
+// role reconciled 1:1 with internal/semrole/semrole.go taskLifecycleRoles.
+// considering + researching are the pre-open thought states (task-lifecycle-
+// visibility epic): both neutral-role ('') — the dotted circle (considering) and
+// the violet bullseye (researching) are glyph/hue voices, NOT semantic status
+// roles (there is no violet status token), exactly as ready/open/cancelled carry
+// a bespoke hue at role ''.
 const EXPECTED_ROLE = {
   in_progress: "info", blocked: "warn", done: "ok", closed: "ok",
-  cancelled: "", ready: "", open: "",
+  cancelled: "", ready: "", open: "", considering: "", researching: "",
 };
 for (const state of REQUIRED_LIFE) {
   const e = life[state];

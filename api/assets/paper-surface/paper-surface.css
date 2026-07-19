@@ -414,6 +414,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-lg--cancelled { color: #a1a1aa; }
 .bp-lg--ready { color: #18181b; }
 .bp-lg--open { color: #71717a; }
+.bp-lg--considering { color: #a1a1aa; }
+.bp-lg--researching { color: #7c3aed; }
 @media (prefers-color-scheme: dark) {
   .bp-lg--in_progress { color: #60a5fa; }
   .bp-lg--blocked { color: #fbbf24; }
@@ -422,6 +424,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   .bp-lg--cancelled { color: #71717a; }
   .bp-lg--ready { color: #e7edf2; }
   .bp-lg--open { color: #5f6b78; }
+  .bp-lg--considering { color: #71717a; }
+  .bp-lg--researching { color: #a78bfa; }
 }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen"] .bp-paper-body {
