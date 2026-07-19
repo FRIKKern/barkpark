@@ -169,6 +169,31 @@ defmodule BarkparkWeb.Studio.StudioLiveWidthBucketTest do
       assert has_element?(view, ~s(.pane-column--collapsed[phx-click="expand-pane"]))
     end
 
+    test "the narrow back strip actually navigates BACK when clicked (D35/D46)", %{conn: conn} do
+      # spd-s4 PROMOTES this strip to the ONLY navigation affordance on the
+      # narrow desk, so "it carries phx-click" is not enough — the click has to
+      # land somewhere useful. `expand_pane` truncates nav_path to the clicked
+      # index, which for the last pane means "the same list, no document", so
+      # the editor closes and the full nav row comes back. If a future edit
+      # changed phx-value-idx (or expand_pane's take/2 arithmetic) the strip
+      # would silently become a no-op and this is the only test that notices.
+      {:ok, view, wide_html} = open_doc(conn)
+      assert wide_html =~ ~s(class="editor-panel")
+      wide_panes = pane_count(wide_html)
+
+      set_bucket(view, "narrow")
+
+      after_click = view |> element(".pane-column--collapsed") |> render_click()
+
+      refute after_click =~ ~s(class="editor-panel"),
+             "clicking the narrow back strip must close the document — it is the only " <>
+               "way out of the drilled state at that width"
+
+      assert pane_count(after_click) == wide_panes,
+             "with the document closed the narrow row must restore its nav columns, " <>
+               "got #{pane_count(after_click)} of #{wide_panes}"
+    end
+
     test "narrow WITHOUT a document keeps its full drill column", %{conn: conn} do
       # The editor-closed row has no 560px floor and never overflowed, so it
       # must NOT lose its content — this is what stops D35 from over-reaching.
@@ -258,13 +283,35 @@ defmodule BarkparkWeb.Studio.StudioLiveWidthBucketTest do
       assert count(html, ~r/data-priority="/) > 0
     end
 
-    test "the Document inspector is stamped data-role=\"inspector\"", %{conn: conn} do
-      {:ok, view, _html} = open_doc(conn)
+    test "every .bp-doc-sidebar render site is stamped data-role=\"inspector\"" do
+      # The inspector sidebar renders only on the PAPER editor path, which this
+      # file's `post` fixture never reaches — a `if has_element?(…)` guard here
+      # would pass vacuously forever. So the stamp is pinned at SOURCE instead:
+      # every place that emits a `bp-doc-sidebar` class must carry the role, or
+      # the D12 inspector-overlay rules (which key on `[data-role="inspector"]`)
+      # would skip a real sidebar. Text-based on purpose — there is no rendered
+      # fixture for this surface in this suite.
+      source = File.read!("lib/barkpark_web/live/studio/studio_live/components.ex")
 
-      # Present only when the paper sidebar renders; assert the stamp rides the
-      # sidebar rather than asserting the sidebar exists on every doc type.
-      if has_element?(view, ".bp-doc-sidebar") do
-        assert has_element?(view, ~s(.bp-doc-sidebar[data-role="inspector"]))
+      sites =
+        source
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.filter(fn {line, _} -> line =~ ~s(class={"bp-doc-sidebar) end)
+
+      assert sites != [],
+             "no bp-doc-sidebar render site found — this guard has drifted off its subject"
+
+      for {_line, lineno} <- sites do
+        window =
+          source
+          |> String.split("\n")
+          |> Enum.slice(max(lineno - 1, 0), 8)
+          |> Enum.join("\n")
+
+        assert window =~ ~s(data-role="inspector"),
+               "the bp-doc-sidebar at components.ex:#{lineno} is not stamped " <>
+                 ~s(data-role="inspector" — D12's overlay rules would skip it)
       end
     end
   end
