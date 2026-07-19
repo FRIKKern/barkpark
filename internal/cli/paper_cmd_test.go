@@ -2,10 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+)
+
+const (
+	cliReleaseGate = "11111111-1111-4111-8111-111111111111"
+	cliWaveRev     = "22222222-2222-4222-8222-222222222222"
+	cliCandidate   = "33333333-3333-4333-8333-333333333333"
+	cliDocument    = "44444444-4444-4444-8444-444444444444"
 )
 
 // A mistyped --perspective/--theme/--profile VALUE must be rejected by
@@ -119,6 +127,48 @@ func TestParsePaperArgsFullRoundTrip(t *testing.T) {
 	}
 	if p.server != "prod" {
 		t.Fatalf("server = %q, want prod", p.server)
+	}
+}
+
+func TestRunPaperViewUsesImmutableReleasePins(t *testing.T) {
+	var requested string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.RequestURI()
+		w.Header().Set("ETag", `"sha256:`+strings.Repeat("b", 64)+`"`)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Barkpark-Release-Gate", cliReleaseGate)
+		w.Header().Set("X-Barkpark-Wave-Revision", cliWaveRev)
+		w.Header().Set("X-Barkpark-Paper-Candidate", cliCandidate)
+		w.Header().Set("X-Barkpark-Paper-Role", "successor")
+		_, _ = fmt.Fprintf(w, `{"release_gate_id":%q,"wave_revision":%q,"candidate_id":%q,"role":"successor","document_id":%q,"doc_id":"successor-paper","title":"Successor","content_digest":%q,"source":{"kind":"blocks","blocks":[{"type":"paragraph","text":"proof"}]}}`,
+			cliReleaseGate, cliWaveRev, cliCandidate, cliDocument, strings.Repeat("b", 64))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	out := newWriter(&stdout, &stderr)
+	out.output = "json"
+	args := []string{srv.URL + "/w/acme/p/rocket/papers/successor-paper", "--epic-id", "epic-1",
+		"--wave-id", "wave-4", "--release-gate-id", cliReleaseGate, "--revision-id", cliWaveRev,
+		"--candidate-id", cliCandidate, "--paper-role", "successor"}
+	if code := runPaperView(out, globals{outputSet: true}, args); code != exitOK {
+		t.Fatalf("runPaperView exit = %d, stderr = %s", code, stderr.String())
+	}
+	want := "/w/acme/p/rocket/v1/cycles/epic-1/wave-4/release-gates/" + cliReleaseGate + "/papers/successor/source?candidate_id=" + cliCandidate + "&wave_revision=" + cliWaveRev
+	if requested != want {
+		t.Fatalf("request = %q, want exact immutable route %q", requested, want)
+	}
+	if !strings.Contains(stdout.String(), `"release_gate_id"`) || !strings.Contains(stdout.String(), cliWaveRev) {
+		t.Fatalf("JSON output lost immutable source envelope: %s", stdout.String())
+	}
+}
+
+func TestRunPaperViewRejectsPartialReleasePins(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	out := newWriter(&stdout, &stderr)
+	code := runPaperView(out, globals{}, []string{"paper", "--release-gate-id", cliReleaseGate})
+	if code == exitOK || !strings.Contains(stderr.String(), "--epic-id is required") {
+		t.Fatalf("partial release pins exit=%d stderr=%q", code, stderr.String())
 	}
 }
 

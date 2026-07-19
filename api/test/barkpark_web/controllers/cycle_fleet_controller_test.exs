@@ -2,12 +2,14 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Ecto.Query
 
   alias Barkpark.{CycleFleet, Repo, Tenancy}
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
-  alias Barkpark.CycleFleet.AssignmentTask
+  alias Barkpark.CycleFleet.{AssignmentTask, Wave}
   alias Barkpark.EpicFleet
+  alias Barkpark.EpicFleet.Assignment
   alias Barkpark.Plugins.Capabilities
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -29,6 +31,24 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       TenancyAuth.create_membership(workspace.id, token.id, "admin", "api_token")
 
     %{workspace: workspace, project: project, token: raw}
+  end
+
+  test "public Paper verification failures return a stable 503 without internal details" do
+    for reason <- [
+          :public_release_smoke_failed,
+          :public_release_smoke_pending,
+          {:public_release_smoke_compensation_failed, {:database, "sensitive detail"}}
+        ] do
+      response =
+        build_conn()
+        |> BarkparkWeb.CycleFleetController.release_verification_unavailable(reason)
+
+      assert response.status == 503
+      body = Jason.decode!(response.resp_body)
+      assert body["error"]["code"] == "release_verification_unavailable"
+      refute response.resp_body =~ "sensitive"
+      refute response.resp_body =~ "compensation_failed"
+    end
   end
 
   test "flat routes are token-bound projectless legacy routes distinct from canonical scoped routes",
@@ -76,6 +96,28 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert first_open["authority"]["project_id"] == first_project.id
     assert second_open["authority"]["project_id"] == second_project.id
     refute first_open["authority"]["wave_revision"] == second_open["authority"]["wave_revision"]
+  end
+
+  test "correction fields reach the HTTP authority and reject a wrong digest", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "correction-http-#{System.unique_integer([:positive])}"
+    prefix = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}"
+    _opened = open_epic(prefix <> "/wave-1", token, ["unit-1"])
+
+    rejected =
+      build_conn()
+      |> bearer(token)
+      |> post(prefix <> "/wave-2/open", %{
+        "correction_of" => %{"version" => "correction_of-v1"},
+        "correction_of_digest" => String.duplicate("0", 64)
+      })
+      |> json_response(422)
+
+    assert rejected["error"]["code"] == "validation_failed"
+    assert rejected["error"]["details"]["reason"] =~ "correction_digest_mismatch"
   end
 
   test "Legendary seal is refused before 15 experiments and freezes Pilot evidence after them", %{
@@ -189,7 +231,9 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       |> Enum.filter(&String.starts_with?(&1["id"], "cycle."))
 
     assert MapSet.new(commands, & &1["id"]) ==
-             MapSet.new(~w(cycle.show cycle.open cycle.seal cycle.assign cycle.result))
+             MapSet.new(
+               ~w(cycle.show cycle.open cycle.release-gate-open cycle.release-paper-stage cycle.release-gate-activate cycle.seal cycle.assign cycle.result cycle.quarantine cycle.promote cycle.rollback)
+             )
 
     for command <- commands do
       assert String.starts_with?(
@@ -203,13 +247,100 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open = Enum.find(commands, &(&1["id"] == "cycle.open"))
     seal = Enum.find(commands, &(&1["id"] == "cycle.seal"))
     assign = Enum.find(commands, &(&1["id"] == "cycle.assign"))
-    assert required_arg?(open, "scale_contract_json")
+    refute required_arg?(open, "scale_contract_json")
     assert required_arg?(seal, "golden_fixtures_json")
 
     assert Enum.any?(
              assign["flags"],
              &(&1["name"] == "task_id" and &1["type"] == "string")
            )
+
+    quarantine = Enum.find(commands, &(&1["id"] == "cycle.quarantine"))
+    promote = Enum.find(commands, &(&1["id"] == "cycle.promote"))
+    rollback = Enum.find(commands, &(&1["id"] == "cycle.rollback"))
+
+    assert required_arg?(quarantine, "correction_receipt_json")
+    assert required_arg?(promote, "gate_receipt_json")
+    refute required_arg?(promote, "previous_event_id")
+    assert required_arg?(rollback, "previous_event_id")
+    assert required_arg?(rollback, "restore_event_id")
+
+    refute Enum.any?(commands, fn command ->
+             Enum.any?(
+               List.wrap(command["args"]) ++ List.wrap(command["flags"]),
+               &(&1["name"] == "actor")
+             )
+           end)
+  end
+
+  test "correction lifecycle writes are scoped-only and reject non-object or ambiguous receipts",
+       %{
+         workspace: workspace,
+         project: project,
+         token: token
+       } do
+    epic_id = "correction-lifecycle-http-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    opened = open_epic(base, token, ["unit-1"])
+    immutable_revision = String.duplicate("d", 64)
+
+    assert opened["correction_lifecycle"]["format"] == "quarantine-promotion-v1"
+    assert opened["correction_lifecycle"]["promotion"] == nil
+    assert opened["correction_lifecycle"]["quarantines"] == []
+    assert opened["correction_lifecycle"]["superseded"] == []
+
+    malformed =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/quarantine", %{
+        "idempotency_key" => "quarantine-malformed",
+        "reason" => "gate failed",
+        "correction_receipt_json" => "[]",
+        "actor" => %{"type" => "forged", "id" => "caller", "extra" => true},
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert malformed["error"]["details"]["reason"] =~ "invalid_correction_receipt"
+
+    ambiguous =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/promote", %{
+        "idempotency_key" => "promote-ambiguous",
+        "correction_receipt" => %{},
+        "correction_receipt_json" => "{}",
+        "gate_receipt_json" => "{}",
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert ambiguous["error"]["details"]["reason"] =~ "ambiguous_correction_receipt"
+
+    invalid_rollback =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/rollback", %{
+        "idempotency_key" => "rollback-without-head",
+        "previous_event_id" => Ecto.UUID.generate(),
+        "restore_event_id" => "genesis",
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert invalid_rollback["error"]["details"]["reason"] =~ "invalid_rollback_target"
+
+    flat_response =
+      build_conn()
+      |> bearer(token)
+      |> post("/v1/cycles/#{epic_id}/wave-1/quarantine", %{
+        "correction_receipt_json" => "{}"
+      })
+
+    assert flat_response.status == 404
   end
 
   test "scoped assignment freezes a same-project Task and replays without rebinding", %{
@@ -540,18 +671,36 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
     assert assignment_conflict["error"]["details"]["reason"] == "assignment_conflict"
 
-    result_params = %{
+    completed_outcomes = %{
+      "completed_unit_ids" => ["unit-1"],
+      "stalled_unit_ids" => [],
+      "excluded_unit_ids" => []
+    }
+
+    valid_payload = semantic_http_payload(base, "build-1", completed_outcomes)
+
+    missing_receipts = %{
       "idempotency_key" => "terminal-build-1",
       "status" => "completed",
       "evidence" => "paper://build/1",
       "evidence_revision" => "rev-1",
-      "payload_json" =>
-        Jason.encode!(%{
-          "completed_unit_ids" => ["unit-1"],
-          "stalled_unit_ids" => [],
-          "excluded_unit_ids" => []
-        })
+      "payload_json" => Jason.encode!(completed_outcomes)
     }
+
+    missing =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments/build-1/results", missing_receipts)
+      |> json_response(422)
+
+    assert missing["error"]["details"]["reason"] =~ "semantic_receipts_required"
+
+    result_params =
+      Map.put(
+        missing_receipts,
+        "payload_json",
+        Jason.encode!(valid_payload)
+      )
 
     assert build_conn()
            |> bearer(token)
@@ -566,11 +715,13 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
         Map.put(
           result_params,
           "payload_json",
-          Jason.encode!(%{
-            "completed_unit_ids" => [],
-            "stalled_unit_ids" => ["unit-1"],
-            "excluded_unit_ids" => []
-          })
+          Jason.encode!(
+            semantic_http_payload(base, "build-1", %{
+              "completed_unit_ids" => [],
+              "stalled_unit_ids" => ["unit-1"],
+              "excluded_unit_ids" => []
+            })
+          )
         )
       )
       |> json_response(409)
@@ -977,14 +1128,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   defp create_http_result(base, token, assignment_id, status, payload) do
     payload =
       if status == "completed" do
-        Map.merge(
-          %{
-            "completed_unit_ids" => [],
-            "stalled_unit_ids" => [],
-            "excluded_unit_ids" => []
-          },
-          payload
-        )
+        semantic_http_payload(base, assignment_id, payload)
       else
         payload
       end
@@ -999,6 +1143,116 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       "payload_json" => Jason.encode!(payload)
     })
     |> json_response(201)
+  end
+
+  defp semantic_http_payload(base, assignment_id, payload) do
+    segments = base |> URI.parse() |> Map.fetch!(:path) |> String.split("/", trim: true)
+    cycle_index = Enum.find_index(segments, &(&1 == "cycles"))
+    epic_id = Enum.at(segments, cycle_index + 1)
+    wave_key = Enum.at(segments, cycle_index + 2)
+
+    assignment =
+      Repo.one!(
+        from assignment in Assignment,
+          join: wave in Wave,
+          on: wave.id == assignment.cycle_wave_id,
+          where:
+            assignment.assignment_id == ^assignment_id and wave.epic_id == ^epic_id and
+              wave.wave_id == ^wave_key
+      )
+
+    task = ensure_semantic_http_task!(assignment)
+    wave = Repo.get!(Wave, assignment.cycle_wave_id)
+
+    outcomes =
+      Map.merge(
+        %{
+          "completed_unit_ids" => [],
+          "stalled_unit_ids" => [],
+          "excluded_unit_ids" => []
+        },
+        stringify_keys(payload)
+      )
+
+    dispositions =
+      Enum.reduce(
+        [
+          shipped: outcomes["completed_unit_ids"],
+          stalled: outcomes["stalled_unit_ids"],
+          excluded: outcomes["excluded_unit_ids"]
+        ],
+        %{},
+        fn {disposition, ids}, acc ->
+          Enum.reduce(ids, acc, &Map.put(&2, &1, Atom.to_string(disposition)))
+        end
+      )
+
+    receipts =
+      assignment.unit_ids
+      |> Enum.sort()
+      |> Enum.map(fn unit_id ->
+        %{
+          "assignment_id" => assignment.id,
+          "ownership" => %{
+            "assignment_id" => assignment.id,
+            "assignment_key" => assignment.assignment_id,
+            "cycle_wave_id" => assignment.cycle_wave_id,
+            "snapshot_digest" => assignment.snapshot_digest,
+            "workspace_id" => assignment.workspace_id,
+            "project_id" => wave.project_id,
+            "dataset_id" => task.dataset_id
+          },
+          "task_id" => task.id,
+          "task_doc_id" => task.doc_id,
+          "task_rev" => task.rev,
+          "lifecycle_status" => "done",
+          "criteria" => task.content["acceptance_criteria"],
+          "claim" => %{
+            "worker" => task.content["claim"]["worker"],
+            "epoch" => task.content["claim"]["epoch"]
+          },
+          "unit_id" => unit_id,
+          "disposition" => Map.fetch!(dispositions, unit_id)
+        }
+      end)
+
+    Map.put(outcomes, "semantic_receipts", receipts)
+  end
+
+  defp ensure_semantic_http_task!(assignment) do
+    case Repo.get(AssignmentTask, assignment.id) do
+      %AssignmentTask{task_id: task_id} ->
+        Repo.get!(Document, task_id)
+
+      nil ->
+        wave = Repo.get!(Wave, assignment.cycle_wave_id)
+        project = Repo.get!(Barkpark.Tenancy.Project, wave.project_id)
+        worker = "http-builder-#{assignment.assignment_id}"
+
+        task =
+          create_task!(
+            Repo.get!(Barkpark.Tenancy.Workspace, assignment.workspace_id),
+            project,
+            worker
+          )
+
+        content = %{
+          "kind" => "task",
+          "lifecycle_status" => "done",
+          "acceptance_criteria" => [
+            %{
+              "criterion" => "#{assignment.assignment_id} has HTTP evidence",
+              "met" => true,
+              "evidence" => "paper://http/#{assignment.assignment_id}"
+            }
+          ],
+          "claim" => %{"worker" => worker, "epoch" => 1}
+        }
+
+        task = task |> Ecto.Changeset.change(content: content) |> Repo.update!()
+        assert {:ok, _binding} = CycleFleet.bind_assignment_task(assignment, task.id)
+        task
+    end
   end
 
   defp get_cycle(base, token) do

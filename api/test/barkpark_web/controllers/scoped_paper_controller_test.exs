@@ -12,7 +12,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, Sharing}
+  alias Barkpark.{Auth, Content, EpicFleet, Repo, Sharing}
+  alias Barkpark.Content.{Document, Revision}
 
   import Barkpark.TenancyFixtures
 
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
     # Create a real paper (doc_id == slug, NOT a `drafts.` row) in this scope,
     # carrying a known body_html so we can assert it renders.
-    {:ok, _paper} =
+    {:ok, paper} =
       Content.upsert_paper(
         Barkpark.LabelFixtures.paper_attrs(%{
           "slug" => "shared-paper",
@@ -36,9 +37,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
         })
       )
 
+    paper = pin_released_revision!(paper)
+
     # The conn is anonymous (no Bearer / no session token) — so the only way it
     # can read this scope is via a public share.
-    {:ok, Map.merge(ctx, %{conn: conn, ws: ws, project: project})}
+    {:ok, Map.merge(ctx, %{conn: conn, ws: ws, project: project, paper: paper})}
   end
 
   defp paper_path(ws, project, slug), do: "/w/#{ws.slug}/p/#{project.slug}/papers/#{slug}"
@@ -62,7 +65,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     test "returns 200 and renders the paper for an anonymous caller", %{
       conn: conn,
       ws: ws,
-      project: project
+      project: project,
+      paper: paper
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
@@ -71,6 +75,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       assert body =~ "Hello Shared Paper"
       assert body =~ "scoped body"
+      assert_revision_headers(conn, paper)
     end
 
     test "block-backed scoped reader rejects a conflicting body_html cache", %{
@@ -98,6 +103,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
             "project_id" => project.id
           })
         )
+
+      paper = pin_released_revision!(paper)
 
       stale_content =
         paper.content
@@ -134,6 +141,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert conn.status in [401, 403, 404]
       refute conn.status == 200
       refute conn.resp_body =~ "Hello Shared Paper"
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
     end
 
     test "sharing a DIFFERENT scope does not make THIS scope public", %{
@@ -149,6 +158,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert conn.status in [401, 403, 404]
       refute conn.status == 200
       refute conn.resp_body =~ "Hello Shared Paper"
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
     end
   end
 
@@ -312,7 +323,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       {default_ws, default_project} = ensure_default_scope!()
 
-      {:ok, _paper} =
+      {:ok, paper} =
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{
             "slug" => "default-public-paper",
@@ -323,11 +334,19 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
           })
         )
 
-      {:ok, conn: conn, default_ws: default_ws, default_project: default_project}
+      paper = pin_released_revision!(paper)
+
+      {:ok,
+       conn: conn, default_ws: default_ws, default_project: default_project, default_paper: paper}
     end
 
     test "an anonymous caller reads a Default-scope published paper (parity with /papers/:slug)",
-         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+         %{
+           conn: conn,
+           default_ws: default_ws,
+           default_project: default_project,
+           default_paper: paper
+         } do
       # Sanity: the flat public reader serves this paper anonymously.
       flat = get(conn, "/papers/default-public-paper")
       assert html_response(flat, 200) =~ "Default Public Paper"
@@ -338,6 +357,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       assert body =~ "Default Public Paper"
       assert body =~ "default body"
+      assert_revision_headers(conn, paper)
     end
 
     test "a missing slug in the Default scope returns the canonical 404",
@@ -419,5 +439,69 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       body = html_response(conn, 200)
       assert body =~ "Hello Shared Paper"
     end
+  end
+
+  describe "Paper revision response authority" do
+    test "missing and unpublished Papers never receive revision authority headers", %{
+      ws: ws,
+      project: project,
+      paper: paper
+    } do
+      missing =
+        Plug.Test.conn(:get, paper_path(ws, project, "missing-paper"))
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> BarkparkWeb.Plugs.PaperRevisionHeaders.call([])
+
+      assert Plug.Conn.get_resp_header(missing, "etag") == []
+      assert Plug.Conn.get_resp_header(missing, "x-barkpark-paper-revision") == []
+
+      paper |> Ecto.Changeset.change(status: "draft") |> Repo.update!()
+
+      unpublished =
+        Plug.Test.conn(:get, paper_path(ws, project, paper.doc_id))
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> BarkparkWeb.Plugs.PaperRevisionHeaders.call([])
+
+      assert Plug.Conn.get_resp_header(unpublished, "etag") == []
+      assert Plug.Conn.get_resp_header(unpublished, "x-barkpark-paper-revision") == []
+    end
+  end
+
+  defp assert_revision_headers(conn, paper) do
+    paper = Repo.get!(Document, paper.id)
+
+    assert get_resp_header(conn, "x-barkpark-paper-revision") == [paper.released_revision_id]
+
+    assert get_resp_header(conn, "etag") == [
+             ~s("sha256:#{EpicFleet.canonical_digest(paper.content)}")
+           ]
+  end
+
+  defp pin_released_revision!(paper) do
+    revision =
+      %Revision{}
+      |> Revision.changeset(%{
+        document_id: paper.id,
+        doc_id: paper.doc_id,
+        type: paper.type,
+        dataset: paper.dataset,
+        dataset_id: paper.dataset_id,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id,
+        title: paper.title,
+        status: paper.status,
+        action: "publish",
+        content: paper.content
+      })
+      |> Repo.insert!()
+
+    paper
+    |> Ecto.Changeset.change(
+      current_revision_id: revision.id,
+      released_revision_id: revision.id
+    )
+    |> Repo.update!()
   end
 end

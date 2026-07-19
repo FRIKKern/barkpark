@@ -248,6 +248,20 @@ defmodule BarkparkWeb.ShareMetaTest do
       assert %{"title" => "Stamped"} = ShareMeta.manifest(content, "/papers/x", "paper")
     end
 
+    test "ignores a legacy scalar preview instead of crashing the Paper reader" do
+      content = %{
+        "title" => "Survey wave",
+        "description" => "Reader-visible evidence",
+        "preview" => "legacy preview prose"
+      }
+
+      manifest = ShareMeta.manifest(content, "/papers/survey-wave", "paper")
+
+      assert is_map(manifest)
+      assert manifest["title"] == "Survey wave"
+      assert manifest["url"] == "/papers/survey-wave"
+    end
+
     test "falls back to a degraded core manifest when no preview + no projector" do
       # Barkpark.Preview is unmerged (pc-w1) → read-time returns nil → degraded.
       content = %{"title" => "Legacy Paper", "excerpt" => "A short lead."}

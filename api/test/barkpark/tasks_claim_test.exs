@@ -264,10 +264,17 @@ defmodule Barkpark.TasksClaimTest do
       assert claim1.content["claim"]["epoch"] == 1
 
       # Reset the row to be ready again (simulating a sweep that returned
-      # it to the queue) — flip lifecycle_status back to open WITHOUT
-      # nuking the claim map (which carries the epoch).
+      # it to the queue) — flip lifecycle_status back to open and clear the
+      # expired worker WITHOUT nuking the claim map (which carries the epoch).
       import Ecto.Query
-      reopened_content = Map.put(claim1.content, "lifecycle_status", "open")
+
+      reopened_claim = Map.put(claim1.content["claim"], "worker", nil)
+
+      reopened_content =
+        claim1.content
+        |> Map.put("lifecycle_status", "open")
+        |> Map.put("claim", reopened_claim)
+
       new_rev = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
       {1, _} =

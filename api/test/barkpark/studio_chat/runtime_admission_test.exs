@@ -52,7 +52,7 @@ defmodule Barkpark.StudioChat.RuntimeAdmissionTest do
     assert RuntimeAdmission.active_count(registry) == 1
     send(pid, :stop)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
-    assert RuntimeAdmission.active_count(registry) == 0
+    assert_eventually(fn -> RuntimeAdmission.active_count(registry) == 0 end)
     assert {:ok, _lease} = RuntimeAdmission.acquire("session-2", opts(registry, 1))
   end
 
@@ -84,5 +84,17 @@ defmodule Barkpark.StudioChat.RuntimeAdmissionTest do
       admission_registry: registry,
       managed_runtime_limit: limit
     }
+  end
+
+  defp assert_eventually(fun, attempts \\ 100)
+  defp assert_eventually(fun, 0), do: assert(fun.())
+
+  defp assert_eventually(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(5)
+      assert_eventually(fun, attempts - 1)
+    end
   end
 end

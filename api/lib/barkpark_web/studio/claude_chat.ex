@@ -802,6 +802,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     BOKBASEN_CLIENT_ID BOKBASEN_CLIENT_SECRET
     INDX_USER_EMAIL INDX_USER_PASSWORD INDX_API_TOKEN
     BARKPARK_SYNC_TOKEN
+    BARKPARK_RELEASE_CAPTURE_TOKEN BARKPARK_RELEASE_CAPTURE_HMAC_SECRET
     MEDIA_SIGNING_SECRET MEDIA_CDN_INVALIDATION_SECRET
     MEDIA_PROCESSING_CALLBACK_TOKEN MEDIA_WEBHOOK_SECRET
     SMTP_USERNAME SMTP_PASSWORD
@@ -1227,6 +1228,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       end
     end
 
+    # All file paths used by this callback are minted below from the OS temp
+    # directory and a server-owned session identity; none comes from a request.
+    # sobelow_skip ["Traversal.FileModule"]
     @impl true
     def init(%{sink: sink} = opts) do
       session_opts = Map.get(opts, :session_opts, %{})
@@ -1509,6 +1513,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     # The stderr capture file must not outlive the session (charter D54) — remove
     # it on every teardown path (clean close, exit, crash). Best-effort.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_stderr(%{stderr_path: path}) when is_binary(path), do: File.rm(path)
     defp cleanup_stderr(_), do: :ok
 
@@ -1518,6 +1523,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # path, mirroring cleanup_stderr. Total and best-effort: a dead Repo at
     # teardown must never turn a normal stop into a crash — the token's short
     # TTL is the crash backstop.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_mcp(%{mcp_token: token} = state) when not is_nil(token) do
       safe_revoke(token)
       cleanup_mcp_file(state)
@@ -1526,6 +1532,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp cleanup_mcp(state) when is_map(state), do: cleanup_mcp_file(state)
     defp cleanup_mcp(_), do: :ok
 
+    # The path was minted by `mcp_config_path/1` under the OS temp directory.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_mcp_file(%{mcp_config_path: path}) when is_binary(path), do: File.rm(path)
     defp cleanup_mcp_file(_), do: :ok
 
@@ -1689,6 +1697,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # mint stays valid, so a transient tmp-dir problem degrades hands, never
     # revokes them. Rescues internally so a post-mint crash can't leak the
     # token past setup_mcp's return.
+    # `mcp_config_path/1` always anchors this file in `System.tmp_dir!/0`.
+    # sobelow_skip ["Traversal.FileModule"]
     defp write_mcp_config(opts, raw, tool_descriptors) do
       path = mcp_config_path(opts)
       json = Jason.encode!(ClaudeChat.mcp_config(raw, tool_descriptors))
@@ -1747,6 +1757,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # that carry no captured stderr.
     defp read_stderr_tail(nil), do: ""
 
+    # `stderr_path/1` always anchors this file in `System.tmp_dir!/0`.
+    # sobelow_skip ["Traversal.FileModule"]
     defp read_stderr_tail(path) do
       case File.open(path, [:read, :binary]) do
         {:ok, io} ->

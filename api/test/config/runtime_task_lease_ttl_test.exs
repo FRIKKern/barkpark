@@ -12,6 +12,7 @@ defmodule Barkpark.Config.RuntimeTaskLeaseTtlTest do
   # positive integer verbatim and otherwise leave the compiled default alone.
 
   @prod_env %{
+    "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET" => String.duplicate("r", 32),
     "DATABASE_URL" => "ecto://postgres:postgres@localhost/ignored",
     "SECRET_KEY_BASE" => String.duplicate("s", 64),
     "PREVIEW_JWT_SECRET" => String.duplicate("p", 32),

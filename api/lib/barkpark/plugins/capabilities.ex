@@ -1946,13 +1946,23 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [
           arg("epic_id", true, "string", "Epic id."),
           arg("wave_id", true, "string", "Wave id."),
-          arg("profile", true, "string", "epic | legendary"),
-          arg("inventory_json", true, "string", "JSON array of immutable inventory units."),
+          arg(
+            "profile",
+            false,
+            "string",
+            "Standard open only: epic | legendary. Omit when opening a correction wave."
+          ),
+          arg(
+            "inventory_json",
+            false,
+            "string",
+            "Standard open only: JSON array of immutable inventory units. Omit for corrections."
+          ),
           arg(
             "scale_contract_json",
-            true,
+            false,
             "string",
-            "Complete Legendary scale contract JSON; use {} for profile=epic."
+            "Standard open only: complete Legendary scale contract JSON; use {} for profile=epic."
           )
         ],
         flags: [
@@ -1960,7 +1970,78 @@ defmodule Barkpark.Plugins.Capabilities do
             "experiment_contract_json",
             "string",
             "Optional JSON experiment contract; Legendary accepts the canonical five-round contract."
+          ),
+          flag(
+            "correction_of_json",
+            "string",
+            "Correction open only: canonical correction_of-v1 JSON naming the prior wave and exact false claims."
+          ),
+          flag(
+            "correction_of_digest",
+            "string",
+            "Correction open only: SHA-256 digest of the canonical correction_of-v1 JSON."
+          ),
+          flag(
+            "release_gate_receipt_json",
+            "string",
+            "Correction open only: exact admitted cycle-release-gate-v1 open receipt."
           )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-gate-open",
+        "cycle",
+        "release-gate-open",
+        "Admit and reserve the immutable pre-open contract for one correction.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("idempotency_key", true, "string", "Stable admission replay key."),
+          arg("correction_of_json", true, "string", "Canonical correction_of-v1 JSON."),
+          arg("correction_of_digest", true, "string", "Canonical correction digest.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-paper-stage",
+        "cycle",
+        "release-paper-stage",
+        "Stage one immutable campaign or successor Paper candidate for an admitted release gate.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("release_gate_id", true, "string", "Admitted release gate UUID."),
+          arg("role", true, "string", "campaign | successor"),
+          arg("document_id", true, "string", "Stable Paper document id."),
+          arg("title", true, "string", "Paper title."),
+          arg("content_json", true, "string", "Canonical Paper content JSON object.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-gate-activate",
+        "cycle",
+        "release-gate-activate",
+        "Capture every required reader and activate one fully staged release gate.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("release_gate_id", true, "string", "Fully staged release gate UUID."),
+          arg("idempotency_key", true, "string", "Stable activation replay key."),
+          arg("b1_experiment_id", true, "string", "Exact accepted B1 experiment identifier.")
         ],
         writes: true,
         default_output: "json"
@@ -2042,6 +2123,73 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("evidence", true, "string", "Evidence URI or durable reference."),
           arg("evidence_revision", true, "string", "Evidence revision."),
           arg("payload_json", true, "string", "JSON typed result payload.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.quarantine",
+        "cycle",
+        "quarantine",
+        "Append immutable evidence that a correction wave cannot be promoted.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable quarantine replay key."),
+          arg("reason", true, "string", "Durable quarantine reason."),
+          arg("correction_receipt_json", true, "string", "Canonical correction receipt JSON."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.promote",
+        "cycle",
+        "promote",
+        "Append a fenced event making one verified correction current.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable promotion replay key."),
+          arg("correction_receipt_json", true, "string", "Canonical correction receipt JSON."),
+          arg("gate_receipt_json", true, "string", "Canonical release-gate receipt JSON."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
+        ],
+        flags: [
+          flag(
+            "previous_event_id",
+            "string",
+            "Current promotion event UUID; omit only for the first promotion."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.rollback",
+        "cycle",
+        "rollback",
+        "Append a fenced pointer event restoring an earlier verified correction.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable rollback replay key."),
+          arg("previous_event_id", true, "string", "Current promotion event UUID."),
+          arg("restore_event_id", true, "string", "Earlier event UUID or genesis."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
         ],
         writes: true,
         default_output: "json"

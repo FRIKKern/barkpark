@@ -319,6 +319,11 @@ defmodule Barkpark.Content.Broadcast do
   def save_revision(doc, type, dataset, action, actor_user_id \\ nil) do
     %Revision{}
     |> Revision.changeset(%{
+      # Terminal lifecycle revisions are written after their source row has
+      # been deleted, so they preserve the snapshot without claiming a live
+      # document FK. Ordinary writes stay bound and advance the document's
+      # current/released revision pointers in the database trigger.
+      document_id: if(action in ["delete", "discardDraft"], do: nil, else: doc.id),
       doc_id: DraftId.published_id(doc.doc_id),
       type: type,
       dataset: dataset,

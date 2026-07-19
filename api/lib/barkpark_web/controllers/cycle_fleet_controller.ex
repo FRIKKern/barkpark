@@ -22,10 +22,17 @@ defmodule BarkparkWeb.CycleFleetController do
     with_scope(conn, params, :write, fn scope ->
       attrs =
         scope
-        |> Map.merge(select(params, ~w(profile inventory experiment_contract scale_contract)))
+        |> Map.merge(
+          select(
+            params,
+            ~w(profile inventory experiment_contract scale_contract correction_of correction_of_digest release_gate_receipt)
+          )
+        )
         |> maybe_decode_json(:inventory, params["inventory_json"])
         |> maybe_decode_json(:experiment_contract, params["experiment_contract_json"])
         |> maybe_decode_json(:scale_contract, params["scale_contract_json"])
+        |> maybe_decode_json(:correction_of, params["correction_of_json"])
+        |> maybe_decode_json(:release_gate_receipt, params["release_gate_receipt_json"])
 
       case CycleFleet.open_wave(attrs) do
         {:ok, _wave} ->
@@ -39,6 +46,160 @@ defmodule BarkparkWeb.CycleFleetController do
           unprocessable(conn, reason)
       end
     end)
+  end
+
+  def admit_open_release_gate(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, correction} <-
+             required_json_object(params, "correction_of", "correction_of_json") do
+        attrs = %{
+          target_wave_id: params["target_wave_id"] || scope.wave_id,
+          idempotency_key: params["idempotency_key"],
+          correction_of: correction,
+          correction_of_digest: params["correction_of_digest"]
+        }
+
+        case CycleFleet.admit_open_release_gate(scope, attrs) do
+          {:ok, gate} ->
+            conn
+            |> put_status(:created)
+            |> json(%{release_gate_id: gate.id, receipt: gate.receipt})
+
+          {:error, :release_gate_conflict} ->
+            conflict(conn, :release_gate_conflict)
+
+          {:error, reason} ->
+            unprocessable(conn, reason)
+        end
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def stage_release_paper(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, content} <- required_json_object(params, "content", "content_json") do
+        attrs = %{document_id: params["document_id"], title: params["title"], content: content}
+
+        case CycleFleet.stage_release_paper_candidate(
+               scope,
+               params["release_gate_id"],
+               params["role"],
+               attrs
+             ) do
+          {:ok, candidate} ->
+            conn
+            |> put_status(:created)
+            |> json(%{candidate_id: candidate.id, content_digest: candidate.content_digest})
+
+          {:error, :paper_candidate_conflict} ->
+            conflict(conn, :paper_candidate_conflict)
+
+          {:error, reason} ->
+            unprocessable(conn, reason)
+        end
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def activate_release_gate(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      case CycleFleet.activate_release_gate(scope, params["release_gate_id"], %{
+             idempotency_key: params["idempotency_key"],
+             b1_experiment_id: params["b1_experiment_id"]
+           }) do
+        {:ok, gate} ->
+          conn |> put_status(:created) |> json(%{release_gate_id: gate.id, receipt: gate.receipt})
+
+        {:error, :release_gate_conflict} ->
+          conflict(conn, :release_gate_conflict)
+
+        {:error, reason} ->
+          unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def release_paper_source(conn, params) do
+    with_scope(conn, params, :read, fn scope ->
+      case CycleFleet.release_paper_candidate(
+             scope,
+             params["release_gate_id"],
+             params["role"],
+             params["wave_revision"],
+             params["candidate_id"]
+           ) do
+        {:ok, gate, candidate} ->
+          payload = %{
+            release_gate_id: gate.id,
+            wave_revision: gate.reserved_target_revision,
+            candidate_id: candidate.id,
+            role: candidate.role,
+            document_id: candidate.document_id,
+            doc_id: candidate.doc_id,
+            title: candidate.title,
+            content_digest: candidate.content_digest,
+            source: %{"kind" => "blocks", "blocks" => candidate.content["blocks"]}
+          }
+
+          conn |> put_release_candidate_headers(gate, candidate) |> json(payload)
+
+        {:error, :paper_candidate_not_found} ->
+          not_found(conn, "release Paper candidate not found")
+
+        {:error, :release_gate_target_mismatch} ->
+          conflict(conn, :release_gate_target_mismatch)
+
+        {:error, reason} ->
+          unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  # @sobelow_skip — XSS.SendResp is a false-positive at this deliberate HTML
+  # response boundary. PortableDoc.Render escapes persisted text and attributes;
+  # cycle_release_gate_hostile_test.exs locks that contract with executable-tag
+  # and event-handler payloads before this authenticated candidate reader emits it.
+  # sobelow_skip ["XSS.SendResp"]
+  def release_paper_render(conn, params) do
+    with_scope(conn, params, :read, fn scope ->
+      case CycleFleet.release_paper_candidate(
+             scope,
+             params["release_gate_id"],
+             params["role"],
+             params["wave_revision"],
+             params["candidate_id"]
+           ) do
+        {:ok, gate, candidate} ->
+          html = Barkpark.PortableDoc.Render.render_blocks(candidate.content["blocks"], %{})
+
+          conn
+          |> put_release_candidate_headers(gate, candidate)
+          |> put_resp_content_type("text/html")
+          |> send_resp(200, html)
+
+        {:error, :paper_candidate_not_found} ->
+          not_found(conn, "release Paper candidate not found")
+
+        {:error, :release_gate_target_mismatch} ->
+          conflict(conn, :release_gate_target_mismatch)
+
+        {:error, reason} ->
+          unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  defp put_release_candidate_headers(conn, gate, candidate) do
+    conn
+    |> put_resp_header("etag", ~s("sha256:#{candidate.content_digest}"))
+    |> put_resp_header("x-barkpark-release-gate", gate.id)
+    |> put_resp_header("x-barkpark-wave-revision", gate.reserved_target_revision)
+    |> put_resp_header("x-barkpark-paper-candidate", candidate.id)
+    |> put_resp_header("x-barkpark-paper-role", candidate.role)
   end
 
   def seal(conn, params) do
@@ -136,6 +297,64 @@ defmodule BarkparkWeb.CycleFleetController do
     end)
   end
 
+  def quarantine(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, correction_receipt} <-
+             required_json_object(params, "correction_receipt", "correction_receipt_json") do
+        attrs = %{
+          idempotency_key: params["idempotency_key"],
+          reason: params["reason"],
+          correction_receipt: correction_receipt,
+          actor: cycle_actor(conn),
+          evidence: params["evidence"],
+          evidence_revision: params["evidence_revision"]
+        }
+
+        respond_correction_mutation(conn, scope, CycleFleet.quarantine_correction(scope, attrs))
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def promote(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, correction_receipt} <-
+             required_json_object(params, "correction_receipt", "correction_receipt_json"),
+           {:ok, gate_receipt} <-
+             required_json_object(params, "gate_receipt", "gate_receipt_json") do
+        attrs = %{
+          idempotency_key: params["idempotency_key"],
+          previous_event_id: blank_to_nil(params["previous_event_id"]),
+          correction_receipt: correction_receipt,
+          gate_receipt: gate_receipt,
+          actor: cycle_actor(conn),
+          evidence: params["evidence"],
+          evidence_revision: params["evidence_revision"]
+        }
+
+        respond_correction_mutation(conn, scope, CycleFleet.promote_correction(scope, attrs))
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def rollback(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      attrs = %{
+        idempotency_key: params["idempotency_key"],
+        previous_event_id: params["previous_event_id"],
+        restore_event_id: params["restore_event_id"],
+        actor: cycle_actor(conn),
+        evidence: params["evidence"],
+        evidence_revision: params["evidence_revision"]
+      }
+
+      respond_correction_mutation(conn, scope, CycleFleet.rollback_correction(scope, attrs))
+    end)
+  end
+
   defp with_scope(conn, %{"epic_id" => epic_id, "wave_id" => wave_id} = params, action, fun) do
     case conn.assigns[:current_workspace] do
       %{id: workspace_id} ->
@@ -181,6 +400,77 @@ defmodule BarkparkWeb.CycleFleetController do
   end
 
   defp maybe_decode_json(attrs, _key, _value), do: attrs
+
+  defp required_json_object(params, direct_key, encoded_key) do
+    case {params[direct_key], params[encoded_key]} do
+      {%{} = object, nil} ->
+        {:ok, object}
+
+      {nil, encoded} when is_binary(encoded) ->
+        case Jason.decode(encoded) do
+          {:ok, %{} = object} -> {:ok, object}
+          _ -> {:error, receipt_error(direct_key, :invalid)}
+        end
+
+      {nil, nil} ->
+        {:error, receipt_error(direct_key, :required)}
+
+      _ ->
+        {:error, receipt_error(direct_key, :ambiguous)}
+    end
+  end
+
+  defp receipt_error("correction_receipt", :invalid), do: :invalid_correction_receipt
+  defp receipt_error("correction_receipt", :required), do: :correction_receipt_required
+  defp receipt_error("correction_receipt", :ambiguous), do: :ambiguous_correction_receipt
+  defp receipt_error("gate_receipt", :invalid), do: :invalid_gate_receipt
+  defp receipt_error("gate_receipt", :required), do: :gate_receipt_required
+  defp receipt_error("gate_receipt", :ambiguous), do: :ambiguous_gate_receipt
+
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
+
+  defp cycle_actor(conn) do
+    token = conn.assigns[:api_token]
+    %{"type" => "api_token", "id" => token.id}
+  end
+
+  defp respond_correction_mutation(conn, scope, {:ok, _event}) do
+    case CycleFleet.projection(scope) do
+      {:ok, projection} -> json(conn, decorate_authority(conn, projection))
+      {:error, :wave_not_found} -> not_found(conn, "cycle wave not found")
+      {:error, reason} -> unprocessable(conn, reason)
+    end
+  end
+
+  defp respond_correction_mutation(conn, _scope, {:error, :wave_not_found}),
+    do: not_found(conn, "cycle wave not found")
+
+  defp respond_correction_mutation(conn, _scope, {:error, reason})
+       when reason in [:public_release_smoke_failed, :public_release_smoke_pending],
+       do: release_verification_unavailable(conn, reason)
+
+  defp respond_correction_mutation(
+         conn,
+         _scope,
+         {:error, {:public_release_smoke_compensation_failed, _reason} = reason}
+       ),
+       do: release_verification_unavailable(conn, reason)
+
+  defp respond_correction_mutation(conn, _scope, {:error, reason})
+       when reason in [
+              :quarantine_conflict,
+              :stale_promotion_head,
+              :promotion_conflict,
+              :already_current,
+              :current_wave_requires_rollback,
+              :idempotency_conflict
+            ],
+       do: conflict(conn, reason)
+
+  defp respond_correction_mutation(conn, _scope, {:error, reason}),
+    do: unprocessable(conn, reason)
 
   defp parse_integer(attrs, key) do
     case attrs[key] do
@@ -306,6 +596,19 @@ defmodule BarkparkWeb.CycleFleetController do
       "validation_failed",
       "cycle request failed validation",
       %{reason: inspect(reason)}
+    )
+  end
+
+  @doc false
+  def release_verification_unavailable(conn, reason)
+      when reason in [:public_release_smoke_failed, :public_release_smoke_pending] or
+             (is_tuple(reason) and elem(reason, 0) == :public_release_smoke_compensation_failed) do
+    ErrorResponse.emit_custom(
+      conn,
+      :service_unavailable,
+      "release_verification_unavailable",
+      "release verification did not complete",
+      %{}
     )
   end
 end

@@ -315,6 +315,42 @@ defmodule Barkpark.Tasks.Schema do
             }
           ]
         },
+        %{
+          "name" => "queue_gate",
+          "title" => "Execution gate",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Optional strict version-1 execution gate. Legacy or absent gates are executable. foreign_claimed is derived from live claim state and cannot be stored.",
+          "fields" => [
+            %{
+              "name" => "version",
+              "title" => "Version",
+              "type" => "number",
+              "validation" => %{"required" => true, "min" => 1, "max" => 1}
+            },
+            %{
+              "name" => "state",
+              "title" => "State",
+              "type" => "select",
+              "options" => ~w(executable human_gated parked evidence_stalled)
+            },
+            %{
+              "name" => "reason",
+              "title" => "Reason",
+              "type" => "text",
+              "rows" => 3,
+              "description" => "Required for every non-executable state; absent for executable."
+            },
+            %{
+              "name" => "evidence",
+              "title" => "Evidence",
+              "type" => "string",
+              "description" =>
+                "Required for evidence_stalled; optional for other non-executable states."
+            }
+          ]
+        },
 
         # Native datetime-local picker in Studio. Engine-inert by design;
         # agents/humans set it. (Started/closed timestamps live in the

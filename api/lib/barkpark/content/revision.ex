@@ -5,6 +5,7 @@ defmodule Barkpark.Content.Revision do
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "revisions" do
+    belongs_to :document, Barkpark.Content.Document, type: :binary_id
     field :doc_id, :string
     field :type, :string
     field :dataset, :string, default: "production"
@@ -43,6 +44,7 @@ defmodule Barkpark.Content.Revision do
       :content,
       :action,
       :actor_user_id,
+      :document_id,
       :workspace_id,
       :project_id
     ])

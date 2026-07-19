@@ -14,7 +14,7 @@ if [[ " $* " == *" search query "* ]]; then
   if [[ "${BP_FIXTURE_EMPTY:-}" == "1" ]]; then
     printf '%s\n' '{"documents":[]}'
   else
-    printf '%s\n' '{"documents":[{"_id":"blocks-paper"},{"_id":"html-paper"}]}'
+    printf '%s\n' '{"documents":[{"_id":"blocks-paper"},{"id":"html-paper"}]}'
   fi
   exit 0
 fi

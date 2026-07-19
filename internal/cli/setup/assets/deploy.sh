@@ -132,7 +132,7 @@ git config core.hooksPath .githooks
 if [ ! -f "$APP_DIR/.env" ]; then
   echo ">> Generating .env..."
   SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
-  # BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET + BARKPARK_KEK: prod runtime.exs
+  # Cloak + preview + KEK + release-capture HMAC: prod runtime.exs
   # RAISES at boot if any is unset (Cloak vault key; preview-JWT signer;
   # field-seal key-encryption-key). Each is independent of SECRET_KEY_BASE and
   # of each other, so rotating one never invalidates the others.
@@ -143,12 +143,14 @@ if [ ! -f "$APP_DIR/.env" ]; then
   # 32-CHARACTER string (decodes to ~24 bytes), which LocalKek rejects → the app
   # raises at boot. openssl rand -base64 32 is exactly base64(32 bytes).
   KEK=$(openssl rand -base64 32)
+  RELEASE_CAPTURE_HMAC=$(openssl rand -base64 32)
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET
 BARKPARK_CLOAK_KEY=$CLOAK
 PREVIEW_JWT_SECRET=$PREVIEW_JWT
 BARKPARK_KEK=$KEK
+BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=$RELEASE_CAPTURE_HMAC
 PHX_HOST=$DOMAIN
 PHX_SCHEME=$PHX_SCHEME
 PORT=4000
@@ -164,7 +166,7 @@ fi
 # Backfill generated secrets required by prod runtime.exs but absent from .env
 # files written by older deploy.sh versions (each RAISES at boot if unset).
 # Idempotent: append only when missing, never overwrite an existing value.
-for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK; do
+for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
   if ! grep -q "^${_var}=" "$APP_DIR/.env"; then
     echo ">> Adding missing ${_var} to .env"
     # BARKPARK_KEK needs base64(EXACTLY 32 bytes) — openssl, NOT the truncated

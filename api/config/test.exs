@@ -61,6 +61,7 @@ config :barkpark, search_intel_record_async: false
 # Config.Secrets stays clean (test.exs is in Sobelow's config skip-list). Merges
 # with the ttl_seconds/issuer base set in config.exs.
 config :barkpark, :preview, secret: "test-preview-secret-change-in-prod-please-32"
+config :barkpark, :cycle_release_capture_hmac_secret, String.duplicate("capture-test-secret-", 2)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

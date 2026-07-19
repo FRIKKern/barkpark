@@ -497,13 +497,19 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.ready",
         noun: "task",
         verb: "ready",
-        summary: "List ready (unblocked) tasks.",
+        summary: "List executable, unblocked tasks (priority order by default).",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
         flags: [
           %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
-          %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0}
+          %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0},
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id."
+          }
         ],
         writes: false,
         batch: false,
@@ -532,7 +538,18 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary: "Narrow in_progress to this worker's claims."
           },
-          %{name: "limit", type: "int", summary: "Ready-head and event-window size.", default: 10}
+          %{
+            name: "limit",
+            type: "int",
+            summary: "Ready-head and event-window size.",
+            default: 10
+          },
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest order for the ready head; compatibility order remains the default."
+          }
         ],
         writes: false,
         batch: false,
@@ -825,7 +842,7 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.next",
         noun: "task",
         verb: "next",
-        summary: "Atomically claim the next ready task (priority order).",
+        summary: "Atomically claim the next executable task (priority order by default).",
         http: %{method: "POST", path_template: "/v1/tasks/claim"},
         auth_tier: "read",
         args: [
@@ -843,6 +860,12 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id."
+          },
           %{
             name: "observed_rail_rev",
             type: "string",

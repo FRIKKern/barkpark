@@ -10,7 +10,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (34 today; the three
+    * **E1** — every table carrying a `workspace_id` column (41 today; the three
       epic-cycle ledgers `cycle_waves` / `epic_assignments` /
       `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
       generic `WHERE workspace_id = $ws` path, the three
@@ -31,12 +31,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
       instance-global secret (`workspace_id IS NULL`, e.g. `ingest_token`) is
       never matched by any workspace scan — the two-tier tenant wall.
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
-      that do NOT themselves carry `workspace_id` (12: `content_edges`,
+      that do NOT themselves carry `workspace_id` (16: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
       `webhook_deliveries`, plus the six 20260715 cycle-fleet children
       `chat_runtime_usage_receipts`, `cycle_build_plans`,
       `epic_assignment_results`, `epic_assignment_runtime_attempts`,
-      `epic_assignment_tasks`, `epic_benchmark_attempts`). Reached via a real FK,
+      `epic_assignment_tasks`, `epic_benchmark_attempts`, plus the four release
+      evidence tables `cycle_release_gate_captures`,
+      `cycle_release_gate_consumptions`, `cycle_release_paper_candidates`, and
+      `cycle_release_public_smokes`). Reached via a real FK,
       extracted through a parent-join to the nearest `workspace_id`-bearing
       ancestor.
     * **E3** — the `dataset`-column tables minus E1 (4), keyed by a `dataset`
@@ -87,7 +90,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # live-detected but unpinned, which is exactly what the sentinel raises on).
   @pinned_e1 ~w(
     access_grants api_tokens audit_events audit_export_sinks chat_execution_events
-    chat_execution_leases cycle_waves data_keys documents epic_assignments
+    chat_execution_leases cycle_correction_admissions
+    cycle_correction_promotion_events cycle_correction_quarantines
+    cycle_correction_roots cycle_correction_targets
+    cycle_release_gate_admissions cycle_release_gate_challenges cycle_waves
+    data_keys documents epic_assignments
     epic_benchmark_experiments media_files mutation_events paper_events
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
@@ -109,7 +116,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #   * epic_assignment_tasks             → epic_assignments (assignment_id)
   #   * epic_benchmark_attempts           → epic_benchmark_experiments (experiment_id)
   @pinned_e2 ~w(
-    chat_runtime_usage_receipts content_edges cycle_build_plans datasets
+    chat_runtime_usage_receipts content_edges cycle_build_plans
+    cycle_release_gate_captures cycle_release_gate_consumptions
+    cycle_release_paper_candidates cycle_release_public_smokes datasets
     epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
     epic_benchmark_attempts plugin_doc_state role_permissions task_edges
     webhook_deliveries
@@ -148,7 +157,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @pinned_non_tenant ~w(
     chat_messages chat_runtime_telemetry_events chat_sessions
     codelist_value_translations codelist_values
-    codelists collapsed_schema_definitions_backup idempotency_keys login_tickets
+    codelists collapsed_schema_definitions_backup
+    cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_connections schema_migrations
@@ -170,10 +180,19 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     # 20260715 cycle-fleet children. Each FK column is NOT NULL, so the plain
     # (many-to-one) parent-join neither fans out nor drops a row — the same
     # shape as every other E2 spec above.
-    "chat_runtime_usage_receipts" =>
-      {"JOIN documents d ON d.id = t.task_id", "d.workspace_id"},
-    "cycle_build_plans" =>
-      {"JOIN cycle_waves cw ON cw.id = t.wave_id", "cw.workspace_id"},
+    "chat_runtime_usage_receipts" => {"JOIN documents d ON d.id = t.task_id", "d.workspace_id"},
+    "cycle_build_plans" => {"JOIN cycle_waves cw ON cw.id = t.wave_id", "cw.workspace_id"},
+    "cycle_release_gate_captures" =>
+      {"JOIN cycle_release_gate_challenges challenge ON challenge.id = t.challenge_id",
+       "challenge.workspace_id"},
+    "cycle_release_gate_consumptions" =>
+      {"JOIN cycle_release_gate_admissions admission ON admission.id = t.admission_id",
+       "admission.workspace_id"},
+    "cycle_release_paper_candidates" =>
+      {"JOIN cycle_waves wave ON wave.id = t.target_wave_id", "wave.workspace_id"},
+    "cycle_release_public_smokes" =>
+      {"JOIN cycle_correction_promotion_events event ON event.id = t.promotion_event_id",
+       "event.workspace_id"},
     "epic_assignment_results" =>
       {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
     "epic_assignment_runtime_attempts" =>

@@ -139,13 +139,14 @@ timeout 2400 bash scripts/deploy-rebuild.sh
 # go-live's secrets-install writes the real per-instance set).
 export PATH="$HOME/.asdf/shims:$PATH"; . "$HOME/.asdf/asdf.sh" 2>/dev/null || true
 cp /opt/barkpark/.env /tmp/env.pre-bake 2>/dev/null || touch /tmp/env.pre-bake
-grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' /tmp/env.pre-bake > /tmp/env.bake || true
+grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=' /tmp/env.pre-bake > /tmp/env.bake || true
 {
   cat /tmp/env.bake
   echo "SECRET_KEY_BASE=$(head -c 48 /dev/urandom | base64)"
   echo "BARKPARK_KEK=$(head -c 32 /dev/urandom | base64)"
   echo "BARKPARK_CLOAK_KEY=$(head -c 32 /dev/urandom | base64)"
   echo "PREVIEW_JWT_SECRET=$(head -c 32 /dev/urandom | base64)"
+  echo "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=$(head -c 32 /dev/urandom | base64)"
 } > /opt/barkpark/.env
 cd /opt/barkpark/api
 (set -a; . /opt/barkpark/.env; set +a; MIX_ENV=prod timeout 600 mix ecto.migrate) \

@@ -166,6 +166,49 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert fetch_ids.("-10") == first
       assert fetch_ids.("not-an-int") == first
     end
+
+    test "closure_nearest is explicit and leaves compatibility priority order as default", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("phase-ready-closure")
+
+      priority_head =
+        mk_task!(uniq("priority-head"), scope, %{
+          "parent_id" => phase,
+          "priority" => 0,
+          "acceptance_criteria" => [
+            %{"criterion" => "one", "met" => false},
+            %{"criterion" => "two", "met" => false}
+          ]
+        })
+
+      closure_head =
+        mk_task!(uniq("closure-head"), scope, %{
+          "parent_id" => phase,
+          "priority" => 4,
+          "acceptance_criteria" => [%{"criterion" => "done", "met" => true}]
+        })
+
+      first_id = fn path ->
+        resp = conn |> authed() |> get(path)
+        assert resp.status == 200
+        resp.resp_body |> Jason.decode!() |> get_in(["docs", Access.at(0), "doc_id"])
+      end
+
+      assert first_id.("/v1/tasks/ready?phase_id=#{phase}&limit=1") == priority_head.doc_id
+
+      assert first_id.("/v1/tasks/ready?phase_id=#{phase}&limit=1&order=closure_nearest") ==
+               closure_head.doc_id
+    end
+
+    test "an unknown explicit order is rejected instead of silently changing scheduling law", %{
+      conn: conn
+    } do
+      resp = conn |> authed() |> get("/v1/tasks/ready?order=closure-neerest")
+      assert resp.status == 400
+      assert Jason.decode!(resp.resp_body)["message"] =~ "order must be closure_nearest"
+    end
   end
 
   describe "GET /v1/tasks index limit clamp" do
@@ -220,6 +263,44 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == false
       assert payload["reason"] == "no_ready"
+    end
+
+    test "atomic next honors explicit closure-nearest order", %{conn: conn, scope: scope} do
+      phase = uniq("phase-claim-closure")
+
+      _priority_head =
+        mk_task!(uniq("claim-priority"), scope, %{
+          "parent_id" => phase,
+          "priority" => 0,
+          "acceptance_criteria" => [
+            %{"criterion" => "one", "met" => false},
+            %{"criterion" => "two", "met" => false}
+          ]
+        })
+
+      closure_head =
+        mk_task!(uniq("claim-closure"), scope, %{
+          "parent_id" => phase,
+          "priority" => 4,
+          "acceptance_criteria" => [%{"criterion" => "done", "met" => true}]
+        })
+
+      body = Jason.encode!(%{worker_id: "closure-worker", phase_id: phase})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/claim?order=closure_nearest", body)
+
+      assert resp.status == 200
+      assert get_in(Jason.decode!(resp.resp_body), ["doc", "doc_id"]) == closure_head.doc_id
+    end
+
+    test "atomic next rejects an unknown explicit order", %{conn: conn} do
+      body = Jason.encode!(%{worker_id: "order-worker"})
+      resp = conn |> authed() |> post("/v1/tasks/claim?order=oldest-ish", body)
+      assert resp.status == 400
+      assert Jason.decode!(resp.resp_body)["message"] =~ "order must be closure_nearest"
     end
   end
 
@@ -1815,6 +1896,16 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> json_response(200)
 
       assert Enum.any?(payload["in_progress"], &String.contains?(&1["doc_id"], a))
+    end
+
+    test "rejects an unknown explicit ready-head order", %{conn: conn} do
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/prime?order=almost-chronological")
+        |> json_response(400)
+
+      assert payload["message"] =~ "order must be closure_nearest"
     end
 
     test "401 with no token", %{conn: conn} do

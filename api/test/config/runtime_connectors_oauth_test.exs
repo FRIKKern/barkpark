@@ -16,6 +16,7 @@ defmodule Barkpark.Config.RuntimeConnectorsOauthTest do
   # default (bridge_url + connect_secret: nil) is otherwise untouched.
 
   @prod_env %{
+    "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET" => String.duplicate("r", 32),
     "DATABASE_URL" => "ecto://postgres:postgres@localhost/ignored",
     "SECRET_KEY_BASE" => String.duplicate("s", 64),
     "PREVIEW_JWT_SECRET" => String.duplicate("p", 32),

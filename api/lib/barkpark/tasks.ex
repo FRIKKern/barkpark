@@ -53,6 +53,10 @@ defmodule Barkpark.Tasks do
           "epoch"  => 1
         },
         "parent_id" => "<parent-task-doc-id>"   # optional string (hierarchy)
+        "queue_gate" => %{                       # optional strict execution gate
+          "version" => 1,
+          "state" => "executable" | "human_gated" | "parked" | "evidence_stalled"
+        }
       }
 
   The validator enforces only what is REQUIRED + the enum shape of the five
@@ -88,6 +92,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Pulse
+  alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Stamp
@@ -157,6 +162,14 @@ defmodule Barkpark.Tasks do
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
   defdelegate validate_kind_content(kind, content), to: Validation
+
+  @doc "Persistable queue_gate-v1 states."
+  @spec queue_gate_states() :: [String.t()]
+  defdelegate queue_gate_states(), to: QueueGate, as: :persisted_states
+
+  @doc "Derive a Task's current execution class from its gate and live claim."
+  @spec execution_class(map() | nil, String.t() | nil) :: String.t()
+  defdelegate execution_class(content, worker_id \\ nil), to: QueueGate
 
   # ─── Criteria progress (extracted → Barkpark.Tasks.Criteria) ────────────────
 

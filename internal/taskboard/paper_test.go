@@ -2,6 +2,7 @@ package taskboard
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+)
+
+const (
+	taskReleaseGate = "11111111-1111-4111-8111-111111111111"
+	taskWaveRev     = "22222222-2222-4222-8222-222222222222"
+	taskCandidate   = "33333333-3333-4333-8333-333333333333"
+	taskDocument    = "44444444-4444-4444-8444-444444444444"
 )
 
 var updatePaper = flag.Bool("update-paper", false, "regenerate the paper-frame golden")
@@ -78,6 +86,46 @@ func TestFetchPaperHydratesBlocks(t *testing.T) {
 	}
 	if ps.Err != "" {
 		t.Errorf("Err must be empty on success, got %q", ps.Err)
+	}
+}
+
+func TestFetchPaperUsesCanonicalReleaseReferenceWithoutFallback(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		wantPath := "/w/ws/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate + "/papers/campaign/source"
+		if r.URL.Path != wantPath || r.URL.Query().Get("wave_revision") != taskWaveRev ||
+			r.URL.Query().Get("candidate_id") != taskCandidate || len(r.URL.Query()) != 2 {
+			t.Fatalf("release request = %q, want pinned scoped route", r.URL.RequestURI())
+		}
+		w.Header().Set("ETag", `"sha256:`+strings.Repeat("b", 64)+`"`)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Barkpark-Release-Gate", taskReleaseGate)
+		w.Header().Set("X-Barkpark-Wave-Revision", taskWaveRev)
+		w.Header().Set("X-Barkpark-Paper-Candidate", taskCandidate)
+		w.Header().Set("X-Barkpark-Paper-Role", "campaign")
+		_, _ = fmt.Fprintf(w, `{"release_gate_id":%q,"wave_revision":%q,"candidate_id":%q,"role":"campaign","document_id":%q,"doc_id":"campaign-paper","title":"Campaign","content_digest":%q,"source":{"kind":"blocks","blocks":%s}}`,
+			taskReleaseGate, taskWaveRev, taskCandidate, taskDocument, strings.Repeat("b", 64), fixtureBlocks)
+	}))
+	defer srv.Close()
+	ref := srv.URL + "/w/ws/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate +
+		"/papers/campaign/source?wave_revision=" + taskWaveRev + "&candidate_id=" + taskCandidate
+
+	ps, err := FetchPaper(paperClient(srv.URL), "production", ref)
+	if err != nil {
+		t.Fatalf("FetchPaper release ref: %v", err)
+	}
+	if requests != 1 || ps.Rev != taskCandidate || ps.Title != "Campaign" || !blocksNonEmpty(ps.BlocksRaw) {
+		t.Fatalf("release Paper state drifted: requests=%d state=%+v", requests, ps)
+	}
+}
+
+func TestFetchPaperRejectsReleaseReferenceScopeDrift(t *testing.T) {
+	ref := "https://other.example/w/other/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate +
+		"/papers/campaign/source?wave_revision=" + taskWaveRev + "&candidate_id=" + taskCandidate
+	ps, err := FetchPaper(paperClient("https://api.example"), "production", ref)
+	if err == nil || ps.Err == "" {
+		t.Fatalf("scope/origin drift accepted: state=%+v err=%v", ps, err)
 	}
 }
 

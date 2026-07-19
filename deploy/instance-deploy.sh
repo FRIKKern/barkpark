@@ -307,7 +307,7 @@ if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
 fi
 
 # Backfill the prod-required secret keys if absent (each RAISES at boot).
-for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET; do
+for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
   if ! grep -q "^${v}=" .env 2>/dev/null; then
     echo "${v}=$(openssl rand -base64 32)" >> .env
     log "added missing ${v} to .env"
