@@ -89,16 +89,21 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ "pane-column--last"
     end
 
-    test "flex attr adds inline style and width override" do
+    test "column sizing is class-only — no inline style is emitted" do
+      # The retired :flex attr used to inline `flex: …; width: auto;
+      # min-width: 0;`, which beat every width-bucket rule in root.html.heex.
+      # Callers that need a different proportion now pass marker_class and
+      # keep the declarations in their own stylesheet (.api-col-docs).
       html =
         render_component(&StudioComponents.pane_column/1, %{
           title: "Docs",
-          flex: "1.1",
+          marker_class: "api-col-docs",
           inner_block: [%{inner_block: fn _, _ -> "" end}]
         })
 
-      assert html =~ "flex: 1.1"
-      assert html =~ "width: auto"
+      assert html =~ ~s(class="pane-column api-col-docs")
+      refute html =~ "style="
+      refute html =~ "min-width: 0"
     end
 
     test "header_actions slot renders inside the header" do
