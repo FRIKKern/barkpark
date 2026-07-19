@@ -39,7 +39,10 @@
 #   · the DEV export of step 0a, re-used by step 1's pull;
 #   · exactly ONE full-fidelity export, shared by steps 3 and 4 and by nothing
 #     else. It is parked at a RUN-STABLE path with a .meta sidecar so the NEXT
-#     run reuses it for zero attempts; its attempt counter is flushed BEFORE the
+#     run reuses it for zero attempts — but ONLY when that sidecar's served_sha
+#     matches the sha this run pinned, because a bundle from an older deploy
+#     dated by a fresh pin is the silent wrong answer, not a saving; its attempt
+#     counter is flushed BEFORE the
 #     request (an export that DIES still paid its memory peak); it is locked with
 #     mkdir (flock does not exist on Darwin); and all five abort conditions are
 #     printed with their measured values before a single byte moves. Two
@@ -1209,22 +1212,47 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   esac
 }
 
-full_attempts() { # -> integer
+full_meta_field() { # key -> the value recorded in the .meta sidecar (empty if absent)
+  [ -f "$FULL_META" ] || return 0
+  awk -v k="$1:" '$1 == k { $1=""; sub(/^[ \t]+/, ""); print; exit }' "$FULL_META"
+}
+
+full_attempts() { # -> integer (never empty — an empty/garbage counter file reads 0)
+  local n=""
   if [ -f "$FULL_ATTEMPTS_FILE" ]; then
-    tr -dc '0-9' <"$FULL_ATTEMPTS_FILE" | head -c 6
-    return 0
+    n="$(tr -dc '0-9' <"$FULL_ATTEMPTS_FILE" | head -c 6)"
   fi
-  printf '0'
+  printf '%s' "${n:-0}"
 }
 
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
+  local stale_note=""
   mkdir -p "$FULL_DIR" 2>/dev/null || true
 
+  # ── REUSE IS PROVENANCE-GATED (PDS-D20) ───────────────────────────────────
+  # The store is RUN-STABLE by design, which is exactly what makes a bundle
+  # taken off an OLDER deploy survive into a run that pinned a NEWER sha. Every
+  # differential steps 3 and 4 take off this bundle is dated by step 0a's sha,
+  # so reusing a bundle from another sha would date a stale artifact with a
+  # fresh pin — the silent-wrong-answer class this whole ladder exists to kill.
+  # A mismatch therefore does NOT reuse: it falls through to the five
+  # conditions, which either buy a fresh bundle within budget or ABORT saying
+  # the staleness out loud (severable — it costs steps 3 and 4 only).
   if full_meta_ok; then
-    info "full bundle     REUSED from $FULL_TAR ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes) — 0 attempts spent this run"
-    [ -f "$FULL_META" ] && sed 's/^/                /' "$FULL_META"
-    return 0
+    local meta_sha
+    meta_sha="$(full_meta_field served_sha)"
+    if [ -n "$DEPLOYED_SHA" ] && [ -n "$meta_sha" ] && [ "$meta_sha" != "unresolved" ] && [ "$meta_sha" != "$DEPLOYED_SHA" ]; then
+      stale_note="the parked bundle was taken off sha $meta_sha but step 0a pinned $DEPLOYED_SHA — it is NOT reusable for a differential dated by this run's pin. "
+      info "full bundle     STALE — parked at sha $meta_sha, this run pinned $DEPLOYED_SHA. Not reused."
+    else
+      info "full bundle     REUSED from $FULL_TAR ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes) — 0 attempts spent this run"
+      [ -f "$FULL_META" ] && sed 's/^/                /' "$FULL_META"
+      if [ -z "$meta_sha" ] || [ "$meta_sha" = "unresolved" ]; then
+        info "                PROVENANCE UNKNOWN — this bundle records no served sha, so the controls taken off it are NOT dated by step 0a's pin. Say so in the transcript."
+      fi
+      return 0
+    fi
   fi
 
   # ── the five conditions, printed with measured values, before any byte moves
@@ -1293,7 +1321,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   say ""
 
   if [ "$ok" -ne 1 ]; then
-    FULL_WHY="a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (e) $cond_e"
+    FULL_WHY="${stale_note}a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (e) $cond_e"
     return 1
   fi
 
@@ -1788,13 +1816,22 @@ for a in d["result"]["assets"]:
   # still answers 200, with a content-length that matches the truncated body.
   # Only the size stored in the database convicts it. Disable with
   # PDS_STEP5_FAILDEMO=0 (and then say so, because the green is weaker).
-  local demo="" demo_path demo_url demo_size disk r2 c2 l2
+  local demo="" demo_row demo_path demo_url demo_size disk r2 c2 l2
   if [ "${PDS_STEP5_FAILDEMO:-1}" = "1" ] && [ -n "$TARGET_MEDIA" ]; then
-    demo_path="$(tail -1 "$rows" | cut -f1)"
-    demo_size="$(tail -1 "$rows" | cut -f2)"
-    demo_url="$(tail -1 "$rows" | cut -f3)"
+    # The LARGEST asset, not the last one: truncating to 100 bytes only
+    # demonstrates anything when the blob is bigger than 100 bytes — on a
+    # smaller one the "truncated" file is byte-identical and the demo would
+    # report a comparator that cannot fire when in fact nothing was cut.
+    demo_row="$(sort -t"$(printf '\t')" -k2,2n "$rows" | tail -1)"
+    demo_path="$(printf '%s' "$demo_row" | cut -f1)"
+    demo_size="$(printf '%s' "$demo_row" | cut -f2)"
+    demo_url="$(printf '%s' "$demo_row" | cut -f3)"
     disk="$TARGET_MEDIA/$demo_path"
-    if [ -f "$disk" ]; then
+    if [ "${demo_size:-0}" -le 100 ] 2>/dev/null; then
+      info "failure demo    SKIPPED — the largest imported asset is ${demo_size:-0} bytes, so a truncate-to-100 cuts nothing. Nothing was mutated, and the pass below is weaker for it."
+      disk=""
+    fi
+    if [ -n "$disk" ] && [ -f "$disk" ]; then
       BLOB_ORIGINAL="$disk"
       BLOB_BACKUP="$(mktemp "${TMPDIR:-/tmp}/pds-blob.XXXXXX")"
       TMP_FILES="$TMP_FILES $BLOB_BACKUP"
@@ -1822,12 +1859,16 @@ for a in d["result"]["assets"]:
         fail 5 "the failure demonstration did NOT fire: a blob truncated to 100 bytes was not caught by the content-length assertion. An assertion that cannot fail is not an instrument (PDS-D20)."
         return 0
       fi
-      if [ "$c2" = "500" ]; then
-        fail 5 "a MISSING blob answered HTTP 500, not the typed 404 'media blob missing' — the honest-404 guard is not holding"
+      # The claim is the TYPED 404, so assert 404 — not merely "not a 500".
+      # A 200 here would mean a missing blob still served bytes from somewhere
+      # (a cache, a fallback), which is a worse answer than a 500 and would
+      # sail through a not-500 check.
+      if [ "$c2" != "404" ]; then
+        fail 5 "a MISSING blob answered HTTP $c2, not the typed 404 'media blob missing'$([ "$c2" = "500" ] && printf ' — the honest-404 guard is not holding' || printf ' — a missing blob must never serve, and must never be a bare 5xx')"
         return 0
       fi
-    else
-      info "failure demo    SKIPPED — the last asset's blob is not at \$BARKPARK_MEDIA_DIR/$demo_path (nothing was mutated)"
+    elif [ -n "$disk" ]; then
+      info "failure demo    SKIPPED — that asset's blob is not at \$BARKPARK_MEDIA_DIR/$demo_path (nothing was mutated)"
     fi
   else
     info "failure demo    DISABLED (PDS_STEP5_FAILDEMO=0) — the pass below is weaker for it: nothing proved the size comparator can fail"
@@ -1845,7 +1886,12 @@ for a in d["result"]["assets"]:
 # cors_origins, desk_groups and list_preview, which revert to bare plugin-struct
 # defaults even when the plugin says nothing about them. Digested as one value so
 # a single changed byte anywhere shows up.
-GUARDED_DIGEST_SQL="SELECT md5(string_agg(name || '|' || coalesce(title,'') || '|' || coalesce(icon,'') || '|' || coalesce(visibility,'') || '|' || coalesce(owner_scoped::text,'') || '|' || coalesce(fields::text,'') || '|' || coalesce(cors_origins::text,'') || '|' || coalesce(desk_groups::text,'') || '|' || coalesce(list_preview::text,''), E'\n' ORDER BY name)) || ' rows=' || count(*) FROM schema_definitions"
+# KEYED BY (dataset, name) — that pair, not `name` alone, is the table's unique
+# index (create_initial_tables.exs:35). Digesting with `ORDER BY name` on a
+# target holding the same schema name in two datasets leaves string_agg's order
+# undefined between the tied rows, so two reads of an UNCHANGED database can
+# differ and the reboot comparison would report a clobber that never happened.
+GUARDED_DIGEST_SQL="SELECT md5(string_agg(dataset || '|' || name || '|' || coalesce(title,'') || '|' || coalesce(icon,'') || '|' || coalesce(visibility,'') || '|' || coalesce(owner_scoped::text,'') || '|' || coalesce(fields::text,'') || '|' || coalesce(cors_origins::text,'') || '|' || coalesce(desk_groups::text,'') || '|' || coalesce(list_preview::text,''), E'\n' ORDER BY dataset, name)) || ' rows=' || count(*) FROM schema_definitions"
 
 reboot_target() { # 0 = the target answered HTTP again
   local i code
@@ -2095,10 +2141,40 @@ summary() {
   return 0
 }
 
+# canonical_order — reorder a requested step list into LADDER order.
+#
+# The ladder is SEQUENCED, not a menu: step 6's guard-off control deliberately
+# leaves the target CLOBBERED, so `--only 6,5` typed in that order would measure
+# step 5 against a target step 6 had already wrecked and report it as a finding.
+# The steps a user asks for are honoured exactly; only their ORDER is corrected,
+# and the correction is announced.
+canonical_order() { # space-separated ids -> the same ids in ALL_STEPS order
+  local want="$1" known unknown="" out="" s w
+  for s in $ALL_STEPS; do
+    for w in $want; do
+      [ "$w" = "$s" ] && { out="$out $s"; break; }
+    done
+  done
+  for w in $want; do
+    known=0
+    for s in $ALL_STEPS; do [ "$w" = "$s" ] && known=1; done
+    [ "$known" -eq 1 ] || unknown="$unknown $w"
+  done
+  [ -z "$unknown" ] || die "unknown step(s)$unknown (known: $ALL_STEPS)"
+  printf '%s' "${out# }"
+}
+
 run_steps() { # space-separated ids
-  local s
+  local s ordered
+  ordered="$(canonical_order "$1")"
   banner
-  for s in $1; do
+  if [ "$ordered" != "$(printf '%s' "$1" | tr -s ' ' | sed 's/^ //;s/ $//')" ]; then
+    say "NOTE: steps reordered to ladder order ($ordered). The ladder is sequenced —"
+    say "      step 6's guard-off control leaves the target clobbered on purpose, so"
+    say "      running a later rung before an earlier one would measure wreckage."
+    say ""
+  fi
+  for s in $ordered; do
     case "$s" in
       0a) step_0a ;;
       0b) step_0b ;;
@@ -2149,7 +2225,7 @@ main() {
       exit $?
       ;;
     -h|--help|help)
-      sed -n '2,81p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,83p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
