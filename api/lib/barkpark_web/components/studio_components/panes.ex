@@ -46,13 +46,19 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   @doc """
   A single pane column with a header row and a body area.
 
-  Attrs: title (required), flex (e.g. "1.1"), last (boolean), collapsed
-  (boolean), phx_click / phx_value_idx (for collapsed click target), id.
+  Attrs: title (required), last (boolean), collapsed (boolean),
+  phx_click / phx_value_idx (for collapsed click target), id.
+
+  Column sizing is CSS-only: the default width comes from `.pane-column`, and
+  a caller that needs a different proportion passes a `marker_class` whose
+  rule lives in that caller's own stylesheet (see `.api-col-docs` /
+  `.api-col-response` in `api_tester_live.ex`). There is deliberately no
+  inline sizing style — an inline `min-width: 0` would override the
+  space-priority protections the width buckets rely on.
 
   Slots: :header_actions (optional inline right-aligned), :inner_block (body).
   """
   attr :title, :string, required: true
-  attr :flex, :string, default: nil
   attr :last, :boolean, default: false
   attr :collapsed, :boolean, default: false
   attr :phx_click, :string, default: nil
@@ -122,13 +128,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <div class="pane-column-collapsed-label"><%= @title %></div>
       </div>
     <% else %>
-      <div
-        class={@col_class}
-        id={@id}
-        data-role={@role_attr}
-        data-priority={@priority_attr}
-        style={@flex && "flex: #{@flex}; width: auto; min-width: 0;"}
-      >
+      <div class={@col_class} id={@id} data-role={@role_attr} data-priority={@priority_attr}>
         <div class="pane-header">
           <span class="pane-header-titlewrap">
             <span class="pane-header-title"><%= @title %></span>
