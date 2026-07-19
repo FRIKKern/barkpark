@@ -3657,3 +3657,107 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-color: hsl(var(--warn-hsl) / 0.4);
   background: hsl(var(--warn-hsl) / 0.1);
 }
+
+/* ============================================================================
+   GR24 — INSTANCE WORKSPACE v4 (D-02 header + D-03 Overview, screens/02)
+   The persistent header (H1 + the two-axis compound pill, mono address + copy,
+   Open Studio / Attach domain / the bp CLI disclosure), the collapsible bp-CLI
+   card (conduit-driven; the pause sentence is server copy), and the composed
+   Overview (golden path + updates + sites cards left; identity / runtime /
+   platform / activity card rail right). .status-pill and the domain-checklist
+   internals are CONSUMED as-is (GR25/GR31) — no rule of theirs is edited here.
+   ========================================================================== */
+
+/* ── header (screens/02) ── */
+.detail-head--inst { align-items: flex-start; }
+.detail-head-main { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.detail-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.detail-title-row h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.detail-head--inst .detail-actions {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto;
+}
+.detail-url { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.detail-url-text {
+  font-family: var(--mono); font-size: 12.5px; color: var(--muted-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.inst-cli-toggle { font-family: var(--mono); gap: 6px; }
+.inst-cli-caret { font-size: 10px; line-height: 1; display: inline-block; transition: transform var(--t); }
+.inst-cli-toggle.is-open { background: var(--muted-surface); }
+.inst-cli-toggle.is-open .inst-cli-caret { transform: rotate(180deg); }
+
+/* ── the bp CLI card (disclosed by #inst-cli-toggle) ── */
+.inst-lifecycle-actions { margin: 0 0 20px; }
+.cli-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 18px;
+}
+.cli-card-title { flex: 1; min-width: 160px; font-size: 13px; font-weight: 600; color: var(--muted-text); }
+.cli-card .inst-life-head { margin-bottom: 12px; }
+.cli-card .inst-life-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+}
+.cli-card .inst-life-cli {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+}
+.cli-card .inst-life-verb { flex: 0 0 auto; font-size: 12.5px; }
+.cli-card .inst-life-cli .cli-chip { flex: 1; min-width: 0; justify-content: space-between; border: none; background: transparent; padding: 0; }
+.cli-card .inst-life-disabled { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+.cli-card-foot {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.inst-life-footnote { flex: 1; font-size: 12px; color: var(--muted-text); line-height: 1.5; }
+
+/* ── overview cards (D-03) ── */
+.inst-sites-card { padding: 16px 18px; }
+.inst-sites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.inst-sites-head h2 { margin: 0; }
+.inst-sites-card .site-row { border: none; box-shadow: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+.inst-sites-card .site-row + .site-row { margin-top: 0; }
+.inst-sites-card .empty-state { border: none; padding: 8px 0 4px; }
+
+/* The rail as v4 cards: the aside itself goes transparent; each labelled
+   sub-section becomes its own card with a mono eyebrow. */
+.detail-rail--cards { background: transparent; border: none; box-shadow: none; padding: 0; }
+.detail-rail--cards .rail-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+.detail-rail--cards .rail-group + .rail-group { margin-top: 14px; padding-top: 14px; border-top: none; }
+.detail-rail--cards .rail-group-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+/* Golden-path card head: heading + the verdict subtitle left, the one action right.
+   Inside the Overview main column the rhythm comes from .inst-overview, so the
+   card's own bottom margin is dropped (no double gap above the Updates card). */
+.inst-overview .vf-card { margin-bottom: 0; }
+.vf-head-main { flex: 1; min-width: 0; }
+.vf-head-main h2 { margin: 0; font-size: 14px; }
+.vf-head-main .vf-meta { margin: 3px 0 0; }
+
+@media (max-width: 620px) {
+  .detail-head--inst { flex-direction: column; }
+  .detail-head--inst .detail-actions { justify-content: flex-start; }
+}
