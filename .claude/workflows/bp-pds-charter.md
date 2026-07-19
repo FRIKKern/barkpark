@@ -12,6 +12,8 @@
 > offline-first, G8 = `bp dev sync` local⇄cloud).
 > Wave 1 paper: **`pds-wave-2026-07-19`** (style=article). Decided 2026-07-19.
 > Wave 2 paper: **`pds-wave-2-2026-07-19`** — "The Honest Clone" (style=article). Decided 2026-07-19.
+> Wave 3 paper: **`pds-wave-3-2026-07-19`** — "The Crown Proof" (style=article). Decided 2026-07-19.
+> Wave 4 paper: **`pds-wave-4-2026-07-19`** — "The Crown Proof Paid" (style=article). Decided 2026-07-19.
 >
 > NOTE ON THE CHARTER SLOT: the epic-cycle harness names
 > `.claude/workflows/bp-cloud-gui-remake-charter.md` as its default charter path. That file is the
@@ -275,6 +277,299 @@ below are all evidence-forced reversals of what wave 1 assumed.
 - **PDS-D38 — Every wave-2 builder is `opus`.** Fable 5 is spend-limited this session. Not a
   quality judgment — a hard constraint carried from the wish.
 
+### Wave 3 amendments — "The Crown Proof" (decided 2026-07-19, paper `pds-wave-3-2026-07-19`)
+
+Wave 3 opened on a world that changed mid-survey. Two surveyors built elaborate, well-evidenced
+cases for a dead deploy pipeline and a box pinned at `7a43e5847`; both were TRUE WHEN WRITTEN and
+FALSE by Decide. Every ruling below is anchored to run output taken after that turn, not to the
+prose that preceded it.
+
+- **PDS-D39 — THE PROOF IS THE PROGRAM: the crown proof is authored FIRST as an executable
+  ladder, not last as a report.** `scripts/pds-pull-proof.sh` is a red-to-green ladder whose every
+  step either PASSES with run-time-derived numbers or ABORTS naming exactly which merge it waits
+  on; each engine merge flips named steps from ABORT to PASS, and the deliverable is the
+  transcript. Why: wave 2 graded A- with three green engine slices and an UNPAID headline claim
+  precisely because the proof was terminal — under this shape a partial transcript with honestly
+  named ABORTs is still a real artifact that tells the truth about where the data plane stands.
+
+- **PDS-D40 — P0 and P0.5 are CLOSED by evidence, not by work; do not spend a slice on either.**
+  #4438/#4439/#4440 merged 18:54:55–18:55:14Z and #4412 (the D21–D38 amendment) merged after;
+  push-triggered `deploy.yml` fired again at 18:55Z and guerrilla's deployed HEAD is `ec70fdc3d`,
+  origin/main's tip, re-confirmed by SSH against `/opt/barkpark` and `/status.json`
+  (`version 0.2.25.1308`). The dev dialect is LIVE: `export?profile=dev&dataset=production` →
+  200, 51,623,424 bytes in 6.7 s, filename `default-production-dev.tar`, manifest carrying
+  profile/dataset/source_dataset/source_workspace/source_server. Why: the strategy's headline
+  prediction — that guerrilla would serve opts-discarding code and return a full bundle wearing a
+  dev command line — is now wrong in the wave's favour; the source-freshness gate still ships,
+  but it will PASS on first run rather than ABORT.
+
+- **PDS-D41 — The anti-vacuity control is PAID: the ammo FIRES.** Same scan binary, same 8 ammo
+  values, minutes apart: `full.tar` (941,046,272 bytes, 63 members) → **8 HITS, all in
+  `tables/webhooks.copy`, one per line, exit 1**; `dev.tar` (51,841,024 bytes, 18 members) →
+  **CLEAN, 0 hits, exit 0**. Why: an empty or truncated tar could not produce that bijection, so
+  today's clean dev result is discriminating rather than the vacuous green PDS-D20 forbids.
+
+- **PDS-D42 — Export gets an explicit timeout; it was the only unprotected path.**
+  `run_copy_out/1` is `Repo.query!(sql, [])` with NO `:timeout` (workspace_bundle.ex:601-604), so
+  every COPY inherits Ecto's 15,000 ms default; the file's sole `timeout: :infinity` (L229) guards
+  the IMPORT transaction only. Live: the first full export died **HTTP 500 after 27.0 s**
+  (`DBConnection.ConnectionError … workspace_bundle.ex:602: run_copy_out/1`), the retry succeeded
+  in 193.7 s on a page cache warmed by the operator's own queries. Why: the wave's most expensive
+  step cannot be intermittent, and closing a one-line asymmetry is cheaper than a retry policy.
+
+- **PDS-D43 — An export failure is an honest envelope, never a bare 500.** `export_bundle/2`
+  rescues only `WorkspaceBundle.ExportScopeError`, so a DBConnection raise degrades to
+  `internal_error / unknown error` with no reason and no hint. Why: `bp dev pull` cannot tell
+  "retry me" from "permanently broken" without a code, and a request_id the caller cannot resolve
+  is not a signal.
+
+- **PDS-D44 — PDS-D31's one-export budget counts ATTEMPTS, not successes.** Measured on the
+  **active GREEN slot** (blue is `inactive` with `MemoryPeak=[not set]` — the obvious probe
+  measures nothing): baseline `MemoryPeak=734547968` (700 MiB) → **2.65 GiB after the FAILED
+  export** → **2.90 GiB after the successful one**, on a 3819 MB box already ~979 MB into swap at
+  rest. Why: neither the charter's 1.83 GB design estimate nor the digest's 3.0 G is the planning
+  number, and an export that dies still pays nearly the full memory cost — a retry loop counting
+  only successes OOMs the live content API.
+
+- **PDS-D45 — `:full` is NOT lossless, and the crown proof PRE-DECLARES the shortfall.**
+  `production` is owned by BOTH `default` and `gyldendal`, so `dataset_slugs_for/1` drops it under
+  the D21 exclusivity rule and bare-slug E3 tables get `dataset = ANY('{}')`: the single `shares`
+  row at `dataset='production'` is silently omitted — `tables/shares.copy` is **0 bytes** in the
+  full bundle. Why: this will surface in the per-type count diffs as an unexplained shortfall and
+  discovering it mid-run looks like corruption, so the parity assertion must exclude bare-slug E3
+  tables or assert the shortfall as EXPECTED with this explanation attached. The engine fix is
+  backlog, not this wave.
+
+- **PDS-D46 — Empty `dataset_slugs` is correct by design and is NOT in the provenance path.** It
+  is the workspace-EXCLUSIVE bare-slug attribution set, not "datasets in this bundle"; the code
+  comment predicts the symptom verbatim ("guerrilla's manifest omits `production` for exactly this
+  reason"), and an unscoped export of the same workspace returns
+  `['bl-preview-crash-scratch', 'papers', 'tasks']`. The lineage fields the stamp reads are
+  `source_server/source_workspace/source_dataset/exported_at/profile/pulled_at`, all non-empty.
+  Why: the digest flagged it as an unexamined anomaly sitting in the provenance path; it is
+  neither an anomaly nor in that path.
+
+- **PDS-D47 — Step 0's "schema_migrations parity" is REFRAMED to deploy-provenance.** There is no
+  `schema_migrations` HTTP surface anywhere and guerrilla's Postgres is unreachable externally;
+  `/status.json`'s `"migrations":"operational"` is a boolean over the RUNNING BINARY's own
+  migration files, so a stale build prints identical green. Why: PDS-D20 forbids a green a broken
+  build could also produce — the executable substitute is the deployed sha (`gh run list
+  --workflow deploy.yml`, `/status.json` version, and the box's own git HEAD where SSH is
+  reachable) asserted to equal or be an ancestor of the worktree the scratch target migrated from.
+
+- **PDS-D48 — The bootstrap mechanism is RE-PROVEN and the probe is COMMITTED this wave.** The
+  7-scenario probe ran **7/7 green on `ec70fdc3d`** and was mutation-tested — inverting S7 fails
+  with `left: [] right: ["https://pulled.example"]`, inverting S1 with `left: "Pulled Title"
+  right: "Plugin Title"` — but it has never existed as a tracked file
+  (`grep -rn 'PDS-D21|PDS-D22|PDS-D23|DEFAULT-DATASET-SLOT'` over `.md/.ex/.exs/.sh/.go` returns
+  zero hits). Why: wave 2's exact failure mode was a mechanism proven and then lost back to prose;
+  a decision without a re-runnable artifact is not a decision.
+
+- **PDS-D49 — `bootstrap.ex:232-233`'s comment is FALSE and is corrected in the guard's own PR.**
+  It asserts `SchemaDefinition.changeset/2` does not cast the tenancy FKs;
+  `schema_definition.ex:77-79` casts all three, so `stamp_scope/2`'s `is_nil` clause is
+  unreachable whenever a Default workspace exists and the S3 tenancy rewrite flows through `cast`,
+  not `stamp_scope`. Why: the stale comment sits directly above the line the guard modifies and
+  will make a builder gate the wrong write.
+
+- **PDS-D50 — An empty or truncated bundle is a 422, not a 500 — and the fix RIDES the
+  provenance-guard slice.** `archive.ex:46` hard-matches `{:ok, entries} = :erl_tar.extract(…)`,
+  so `{:error, :eof}` raises MatchError through `workspace_controller.ex:258` (proven live on the
+  scratch box). Why: pull-cli's streamed channel WILL produce truncated bodies during development,
+  and folding the fix into the slice that already owns the import half of the controller removes a
+  same-region collision instead of creating one.
+
+- **PDS-D51 — `internal/cli/cloud_workspace_cmd.go` is NOT greenfield.** 340 lines plus a 270-line
+  test file already implement `bp cloud workspace export|import` for the shipped B2 bundle route
+  (#3013, #4382). Why: a builder told to claim an empty file will either wedge the pull dialect
+  into an unrelated verb family or lose a cycle discovering the collision — the slice EXTENDS the
+  existing verb switch.
+
+- **PDS-D52 — `empty_body` and `invalid_path` map to `exitValidation` (5).** Both are live 422s
+  from `media_controller.ex:206-234` — the exact blob endpoint the sidecar calls — and neither has
+  a `codeExit` entry, so today they fall through to `exitGeneric` (1). Why:
+  `docs/cli/error-exit-table.md`'s own logic buckets 422 to exitValidation; leaving it unruled
+  makes the builder invent a mapping under an exit-code assertion.
+
+- **PDS-D53 — The scratch teardown's orphan-postgres matcher SELF-MATCHES and is fixed before the
+  proof runs.** `ps -Ao pid=,command= | grep -F "$home" | grep -F postgres` has no self-pid
+  exclusion and no anchor on the postgres server binary, so any argv naming both the root and the
+  substring scores as an orphan — proven: identical root, identical state, teardown FAILED twice
+  from a naming command line ("orphan postgres processes … 38130", roots left standing) and PASSED
+  from a wrapper, with Postgres fully down throughout. Why: `pds-pull-proof.sh` will name the
+  scratch root and the word postgres on one command line and turn its own teardown red.
+
+- **PDS-D54 — Pin `BARKPARK_HOME` and `PDS_SCRATCH_POINTER` explicitly, per run.** `/tmp` is the
+  69 GiB boot volume while the worktree is on 1.6 TiB; the 85-byte root cap is real and enforced;
+  the pointer file is ONE global path that two concurrent PDS runs clobber. Cold boot measured
+  3m17s, a warm re-boot with the full verify suite 14.6s — so step 6's convergence reboot is
+  essentially free. Why: this wave runs beside two other cycles on one host.
+
+- **PDS-D55 — The repo-wide 87-file `mix format` drift does NOT ride this wave.** It is
+  pre-existing, disjoint from every PDS diff (checked file-by-file against all three merged PRs),
+  behaviour-neutral after reformat (164/164 tenancy + 74/74 across a sample of the files the diff
+  actually touched), and the check is labelled advisory — all four PDS PRs merged with it red.
+  Why: a reformat touching `barkpark_web/controllers/**` is a gratuitous conflict surface against
+  the concurrent Studio and cloud/ cycles; it lands as its own hygiene PR when they are quiet.
+
+- **PDS-D56 — Every wave-3 builder runs `opus`.** Why: Fable 5 is spend-limited; the constraint is
+  a hard input to the wave, not a preference.
+
+- **PDS-D57 — `scripts/pds-pull-proof.sh` has two owners IN SEQUENCE, never in parallel.** The
+  harness slice AUTHORS the ladder in round 1 and commits the first honest partial transcript; the
+  crown-proof slice RUNS it in round 2 and edits it only where the live run forces a change. Why:
+  proof-first only pays if the script exists before the engines land, and one file with two
+  concurrent owners is a merge conflict wearing a plan.
+
+
+- **PDS-D58 — The pull front door is the two-command PAIR, never a single `bp dev pull` verb.**
+  `pds-w1-pull-cli` shipped the pull as `bp cloud workspace export --profile dev --dataset <ds>
+  --with-blobs` followed by `import --yes --merge --with-blobs`; a single-verb wrapper was REFUSED
+  by the task dedup wall as a duplicate of that slice. Why: any brief or script text claiming
+  step 1 self-greens on the CLI merge is describing a verb that does not exist — the crown proof
+  must wire the pair itself. (A unified `bp dev pull` belongs to the later `bp dev` namespace.)
+
+- **PDS-D59 — The round-2 fidelity slice is `pds-w3-shares-fidelity`.** The wave-3 roadmap named
+  `pds-w3-full-fidelity-shares-gap`, a task id that was never published. Why: a roadmap pointing at
+  a nonexistent id strands the lead's dispatch the moment round 1 clears.
+
+- **PDS-D60 — All four wave-3 PRs are MERGED and DEPLOYED; the stale-box hazard is closed by
+  measurement, and the LOCAL-source-plane contingency is RETIRED.** #4476/#4478/#4479 merged
+  20:40–20:41Z, #4477 merged 20:55:03Z after registering `export_failed` in
+  `Content.Errors.@public_inline_codes` + openapi + api-v1 §9; guerrilla's box HEAD, its
+  `.instance-deploy-last`, and origin/main are all `b7d6ce8ee`, and `strings` on the LIVE slot's
+  `Elixir.Barkpark.Tenancy.WorkspaceBundle.beam` finds `export_copy_timeout` where the previous
+  build finds zero. Why: the two-plane hedge was a rejected Strategize rival that never reached the
+  charter or the ledger — hedging against a hazard that has been measured away spends the wave's
+  budget on nothing. The proof runs on the real guerrilla source plane, and says so in its banner.
+
+- **PDS-D61 — `bp cloud workspace export --dataset` is a SILENT NO-OP and must be fixed before the
+  crown proof runs.** `-d/--dataset` is a GLOBAL flag consumed by `globals.go:189` wherever it
+  appears in argv, so `cloud_workspace_cmd.go:129`'s local `dataset` flag always resolves empty and
+  `bundleScopeQuery` omits it; `--dry-run` renders `…/export?profile=dev` with no dataset in every
+  spelling. The bundle taken this way carries `dataset: null` and three exclusive `dataset_slugs`
+  — a WHOLE-WORKSPACE bundle wearing a dataset-scoped command line. `cloud_site_cmd.go:163-172`
+  documents the identical collision and works around it; export never got the treatment. Why: this
+  is the same silent-wrong-answer shape step 0b exists to kill, one layer lower — in the CLI, not
+  the deploy.
+
+- **PDS-D62 — The dropped `--dataset` leaves the Bootstrap clobber guard INERT, so step 6 requires
+  a dataset-narrowed pull.** `stamp_provenance` keys the stamp by `manifest["dataset"] ||
+  source_dataset`, else `dataset_slugs`; with dataset null it stamped `tasks`/`papers`/
+  `bl-preview-crash-scratch`, while all 36 imported `schema_definitions` rows are
+  `dataset='production'` and `provenance_covered?` looks up `pull_provenance(ws, row.dataset)` —
+  `settings->'pull_provenance'->'production'` reads `null`. Structurally a whole-workspace bundle
+  can NEVER stamp `production`, because `dataset_slugs_for/1` drops cross-tenant-shared slugs by
+  design (D21/D46). Why: a step-6 convergence green taken on a workspace-grain pull measures
+  identical plugin declarations, not a guard — the exact vacuous green D20 forbids.
+
+- **PDS-D63 — The CLI env dialect is `BARKPARK_API_URL` + `BARKPARK_API_TOKEN`, and every rung
+  passes `-s <url> --token <tok>` explicitly.** `BARKPARK_TOKEN` is read NOWHERE (`cli.go:631-640`);
+  the prescribed line ran with the guerrilla admin token from `~/.config/barkpark/config.json` and
+  answered `unauthorized`. Why: the mirrored typo aims a production admin token at production —
+  explicit flags cannot inherit ambient config.
+
+- **PDS-D64 — Step 0c's `MIX_ENV=dev mix run` targets the DEVELOPER'S `barkpark_dev`, never the
+  scratch DB, and must be corrected in the same slice.** With `BARKPARK_HOME`, `BARKPARK_PG_PORT`,
+  `PDS_SCRATCH_DB` and `DATABASE_URL` all pointed at a scratch instance, the Repo resolved
+  `[username: "postgres", hostname: "localhost", database: "barkpark_dev"]` — `dev.exs:4-12`
+  hardcodes host/port/user and `DATABASE_URL` is read only in the prod branch. Step 0c has never
+  executed its body, so the defect is latent, not yet recorded. Why: a "SENTINELS OK" measured
+  against the wrong database is a vacuous green with a transcript line.
+
+- **PDS-D65 — The provenance off-switch is a direct `psql` UPDATE with a `RETURNING` assertion, and
+  the reboot is `bin/barkpark stop && up`.** There is no CLI/HTTP surface for
+  `set_pull_provenance(ws, ds, %{})` (`tenancy.ex:604-606` says so verbatim); direct-SQL mutation of
+  the scratch DB is already the sanctioned idiom (`pds-scratch-target.sh:167-176` mints the admin
+  token that way). `jsonb_set` is a silent NO-OP when the `pull_provenance` parent is absent —
+  proven — so the clear must assert its `RETURNING` value or use the `#-` delete form.
+  `pds-scratch-target.sh` has NO `restart` verb and `teardown` stops Postgres. Why: step 6's
+  failure demonstration is the only thing that makes its green an instrument.
+
+- **PDS-D66 — The census carrier hazard is REFUTED, but the roster is derived at RUN TIME and the
+  authedness is asserted.** The scratch target's own minted admin token reads as authed on
+  `?perspective=raw&count=true` (authed raw 404 papers vs published 397; target authed raw 1 vs
+  published 0). Two live traps remain: an UNAUTHED raw query does not 401, it silently returns
+  published-only (a 7-document false differential on this bundle), and anonymous callers on
+  PRIVATE-visibility schemas get a flat 404 rather than a pinned perspective. `production/post`
+  returns 0 on BOTH ends because this workspace has no `post` documents at all. Why: a census that
+  hardcodes a type or loses its token reads as data loss, not as an instrument failure.
+
+- **PDS-D67 — Step 5 resolves from the TARGET's own `/v1/media/:dataset` index, takes `originalUrl`
+  and `size` VERBATIM, and asserts 200 AND `content-length == size` for EVERY asset.** Run-proven
+  34/34, 0 mismatches, surviving a reboot. `media_files.size` is stamped once at upload from
+  `File.stat` and round-trips byte-for-byte through the bundle COPY; `put_blob` writes bytes and
+  never touches the DB, so the stored size is an INDEPENDENT witness. A truncated blob still serves
+  200 with a matching `content-length` (Plug's `send_file` reports on-disk bytes) — only the stored
+  size convicts it; a missing blob answers the typed 404 `media blob missing`. The FLAT `/media`
+  index emits no `originalUrl` and ignores `limit`, and `originalUrl` may be signed. Why: a
+  source-guessed path or a rebuilt URL proves the harness's arithmetic, not the pull.
+
+- **PDS-D68 — `UNSCANNED > 0` is a HARD GATE in step 4's target-DB half.** `pds-secret-scan.sh`'s
+  own exit code is driven only by `$HITS`; `UNSCANNED` prints a NOTE and never fails, and a table
+  the connecting role has NO privilege on does not even reach the UNSCANNED branch — it drops out
+  of `information_schema.tables` entirely and the scan reports `tables scanned: 0 · CLEAN` with the
+  secret sitting in the database. The instrument itself is sound: `control` exits 0 and
+  `control --simulate-broken-instrument` exits 3. Why: a partially-permissioned target reading as
+  CLEAN is indistinguishable from a genuinely clean one — the disclosure must gate, not narrate.
+
+- **PDS-D69 — ONE full export, run-STABLE path, ATTEMPT-counted before the request, mkdir-locked,
+  with five declared abort conditions printed before any byte moves.** There is NO server-side
+  serialization: `workspace_controller.ex:154` has no lock or semaphore and `send_resp(200, bundle)`
+  materialises the whole ~941 MB tar as one BEAM binary, so PDS-D31's "never two at once" is a
+  policy the runner's own client-side lock is the only enforcement of. `flock` does not exist on
+  Darwin, so the lock is `mkdir`. `ART_DIR` is `RUN_TAG`-scoped and changes every invocation, so a
+  bundle parked there is invisible to the next run and tempts a second attempt. Gates: (a) served
+  sha re-pinned and equal to step 0a's, (b) `MemAvailable >= 2200 MB`, (c) attempts < budget,
+  (d) no `deploy.yml` run in progress, (e) lock acquired. Why: PDS-D44 counts ATTEMPTS — a dead
+  export already pays 2.65 GiB on a 3.8 GB box that was measured falling from 2618 MB to 1927 MB
+  available in twelve idle minutes.
+
+- **PDS-D70 — The export's memory cost is measured by a 1 Hz `ps` RSS sampler over SSH; the slot is
+  NOT restarted.** `memory.peak` is mode `0444` on kernel `6.8.0-106` (writable reset landed in
+  6.12), so the cgroup counter can only be zeroed by restarting the unit — measured at ~26 s of
+  live content-API downtime, an authorization-requiring act. The cgroup figure is therefore reported
+  as CUMULATIVE since `ExecMainStartTimestamp` and explicitly labelled contaminated. No RSS
+  instrumentation exists anywhere in the repo; the sampler is new code. Neither PDS-D31's 1.83 GB
+  (1 Hz sampled) nor PDS-D44's 2.65/2.90 GiB (monotonic, never reset between the failed and the
+  successful attempt) is the run's number. Why: the run's own measurement is the only honest one,
+  and a 26-second outage is not a free instrument tweak.
+
+- **PDS-D71 — The ladder is SEVERABLE: the dev-pull rungs run regardless of the full-export gate.**
+  Steps 0/0b/0c/1/2/5/6/7/8 need only the cheap dev export (7.2 s, 52.9 MB, 34 blobs, +33.5 MiB
+  cgroup peak — measured). Steps 3 and 4 alone consume the one full bundle. Why: a headroom ABORT
+  must cost two rungs, never the crown proof's core — and an ABORT on (b) is the CORRECT behaviour,
+  not a wave failure.
+
+- **PDS-D72 — A closing re-pin rung is MANDATORY.** `DEPLOYED_SHA` is captured once at
+  `pds-pull-proof.sh:382` and read by every later step without ever being re-queried; the box
+  redeployed three times inside one 15-minute survey and once inside a three-minute read-only probe
+  (`d220c53e → b7d6ce8e`, Caddy's upstream flipping `:4000 → :4001` mid-command). The rung re-reads
+  the sha over SSH and compares, with `status.json`'s process-relative `uptime_seconds` as the
+  SSH-free fallback (weaker: it detects a restart, not which sha). Why: a differential straddling
+  two binaries is not a differential.
+
+- **PDS-D73 — Step 7's 403 `bundle_import_disabled` proof is scoped to `mode=merge` ONLY.** The
+  `:allow_bundle_import` gate wraps only the merge branch (`workspace_controller.ex:258-282`);
+  `clean` is the DEFAULT mode and is ungated, and a clean import into a populated target answers an
+  opaque 500 whose true cause is a `25P02 in_failed_sql_transaction` at
+  `workspace_bundle.ex:233`. The refusal code itself is real and pinned by tests — the earlier
+  "exists nowhere in api/" survey claim was a primary-checkout artifact. Why: claiming "guerrilla
+  cannot be written" from a merge-mode 403 overstates what was proven.
+
+- **PDS-D74 — `shares` and `preview_token_jti` get DIFFERENT answers, and the fix lands AFTER the
+  crown proof.** `shares` carries `workspace_slug NOT NULL` with a unique
+  `(workspace_slug, project_slug, dataset)` index, so correct-export is `WHERE t.workspace_slug =
+  <lit>` — no triad, +50 lines, 0 test edits, the line-222 cross-tenant refute untouched, and the
+  md5 parity suite compares run-to-run rather than golden hashes. `preview_token_jti` carries ONLY a
+  bare `dataset` string, so any triad predicate resolves by slug STRING, matches BOTH colliding
+  workspaces and flips that refute into a live leak — its answer is a DECLARED LOSS in the manifest.
+  A prototype also exposed that `tenancy.ex:1234` claims the teardown predicates are "the EXACT
+  keystone extraction shapes" while `delete_e3_dataset_keyed` hardcodes the bare slug ANY, and 98
+  tests stay green across the drift. Why: one answer across `@e3_dataset_keyed` either strands the
+  loss or opens the leak, and landing a fidelity change underneath a running proof invalidates its
+  census.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -298,7 +593,7 @@ Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
   default/production → scratch: green count diffs, served asset, zero-hit secret scan of bundle
   bytes AND target DB, re-run converges).
 
-Wave 2 — THE HONEST CLONE (this wave; 6 slices; all builders `opus` per PDS-D38):
+Wave 2 — THE HONEST CLONE (COMPLETE — all 6 slices merged 2026-07-19; 6 slices; all builders `opus` per PDS-D38):
 
 - R1 `pds-w1-dev-export` (opus, L): profile+dataset export — deny SKIPPED at COPY time (D31),
   documents type-deny read from `dev_doc_type_deny/0` not `dev_action/1` (D28), the deny CASCADED
@@ -319,13 +614,66 @@ Wave 2 — THE HONEST CLONE (this wave; 6 slices; all builders `opus` per PDS-D3
   with a firing full-bundle control, migration parity precondition (D32), `:merge` pinned (D33),
   REBOOT between the two pulls (D23), honestly-scoped convergence (D30).
 
-Wave 3 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
+Wave 3 — THE CROWN PROOF (COMPLETE — round 1 merged + deployed 2026-07-19; 6 slices; PROOF-FIRST per D39; every builder opus
+per D56):
+
+- R1 `pds-w3-proof-harness` (opus, L): `scripts/pds-pull-proof.sh` authored as a FAILING
+  executable specification — every step PASSES with run-time-derived numbers or ABORTS naming the
+  merge it waits on; consumes (never duplicates) `pds-scratch-target.sh` + `pds-secret-scan.sh`;
+  fixes the self-matching teardown orphan check (D53); reframes step 0 to deploy-provenance (D47);
+  pre-declares the bare-slug E3 shortfall (D45); commits the first honest partial transcript.
+- R1 `pds-w3-export-timeout` (opus, S): `run_copy_out` gets an explicit timeout mirroring import
+  (D42) and a DBConnection failure becomes an honest `export_failed` envelope, never a bare 500
+  (D43). Owns the EXPORT half of `workspace_controller.ex` only.
+- R1 `pds-w1-provenance-guard` (opus, L): `pull_provenance` accessors + import stamp + receipt +
+  the provenance-keyed Bootstrap SKIP with the 8-column regression bar (D21/D22), the COMMITTED
+  7-scenario probe (D48), the corrected `bootstrap.ex` comment (D49), and the truncated-bundle 422
+  (D50). Owns the IMPORT half of `workspace_controller.ex` only.
+- R1 `pds-w1-pull-cli` (opus, L): extends the EXISTING 340-line `cloud_workspace_cmd.go` (D51) —
+  `--profile/--dataset/--merge/--with-blobs`, streamed blob sidecar, provenance receipt,
+  `ServerKind` warning, `empty_body`/`invalid_path` → exitValidation (D52).
+- R2 `pds-w1-crown-proof` (opus, L; after the four R1 slices merge): THE LIVE RUN — a real
+  guerrilla dataset pulled into a scratch box, per-type raw-perspective census, a served asset, a
+  zero-hit value scan with the 8-webhook control FIRING, a rebooted convergence, and the 403
+  refusal. The transcript IS the deliverable.
+- R2 `pds-w3-shares-fidelity` (opus, M; after crown-proof establishes the baseline; renamed
+  per D59 from the never-published `pds-w3-full-fidelity-shares-gap`):
+  close D45 — bare-slug E3 rows under a cross-tenant-shared slug are silently dropped from a
+  "byte-identical" backup.
+
+Wave 4 — THE CROWN PROOF PAID (THIS WAVE; 6 slices; every builder `opus` per D38/D56; the ladder
+is FINISHED before it is CLIMBED — merging the wave-3 PRs greened zero blocked rungs):
+
+- R1 `pds-w4-pull-dataset-flag` (opus, M): fix the silently-dropped `--dataset` on
+  `bp cloud workspace export`/`import` (D61) WITHOUT letting ambient config silently narrow an
+  unflagged export, add a `--source-server` surface so a CLI-taken bundle stops stamping
+  `source_server: null`, and add the ARGV-LEVEL test the existing direct-call harness structurally
+  cannot fail (D61's vacuous green).
+- R1 `pds-w4-harness-rungs` (opus, L): the SINGLE owner of `scripts/pds-pull-proof.sh` (D57) closes
+  every unwritten rung — step 1's two-command pull (D58/D63), step 2's target half (D66), step 5
+  (D67), step 6 with its guard-disabled failure demonstration (D62/D65), step 0c's Repo targeting
+  (D64), step 4's UNSCANNED hard gate (D68), the ONE shared full-export acquisition (D69/D70), the
+  severability of the ladder (D71), and the closing re-pin rung (D72). Every rung's assertion is
+  PRE-DECLARED in `--plan` before it is written.
+- R1 `pds-w4-guard-test-eight` (opus, S): widen the escape-hatch test to the full 8-column revert
+  (it asserts 3 of 8 today) so both polarities of the Bootstrap guard carry the same bar (D22).
+- R1 `pds-w4-media-size-roundtrip` (opus, S): pin `media_files.size` surviving a bundle round-trip
+  — the property step 5 depends on has NO in-tree test (D67).
+- R2 `pds-w1-crown-proof` (opus, L; after the two R1 harness/CLI slices merge): THE RUN. One
+  serialized owner of the scratch target, the one full export and the transcript. A FAIL is the
+  interesting outcome and is never downgraded or re-run until explained.
+- R2 `pds-w3-shares-fidelity` (opus, M; after the crown proof establishes the census baseline):
+  close D45 per-table (D74), and split `delete_e3_dataset_keyed` so export and teardown stop
+  disagreeing.
+
+
+Wave 5 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
 byte-identical; delete-reconciliation refresh; streamed bundle channel (task 24913529, unblocked
 once wave 2 merges — PDS-D37).
-Wave 4 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
-Wave 5 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
-Wave 6 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
-guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W3/W4.
+Wave 6 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
+Wave 7 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
+Wave 8 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
+guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W4/W5.
 
 Backlog (filed as published child tasks of the epic): flat-verb `-w` honesty · streamed bundle
 channel + import-body streaming · delete-reconciliation refresh · G8 secondary-unique identity
@@ -335,7 +683,18 @@ nil-`dataset_id` rows · `/v1/data/counts` silently ignores `?perspective` (213 
 invisible) · `docs/setup/personal-local.md` staleness (D34's five traps documented nowhere) ·
 `plugin_doc_state` unreviewed `:copy` classification · pin the `webhook_deliveries` E2 INNER JOIN
 as a security invariant · no admin-token mint path on a fresh `bin/barkpark up` box · `bp search`
-verb absent from this CLI build.
+verb absent from this CLI build. · **wave-3 additions:** `:full` drops bare-slug E3 rows under a
+cross-tenant-shared slug (D45 — a backup that is not a backup) · the repo-wide 87-file `mix format`
+drift as its own hygiene PR (D55) · `bin/barkpark stop` port-4000 fallback · the scratch pointer
+file as one global path (D54).
+· **wave-4 additions:** the export route has NO server-side serialization (D69 is a client-side
+policy only) · `clean` import mode is ungated and answers an opaque 500 on a populated target
+(D73) · the human import receipt prints `— rows across — tables` because the CLI decodes the
+server's table MAP as an int · neither blob sidecar leg verifies transferred bytes against the
+`media_files.size` it already holds · `memory.peak` cannot be reset below kernel 6.12 · the
+export/teardown lockstep is prose-only and asserted by no test (D74) · the scratch pointer is one
+global path and other sessions were observed using it concurrently (D54).
+
 
 ## Wave log
 
@@ -370,3 +729,28 @@ the merge-gated criteria) → re-verify export live on guerrilla → dispatch
 `pds-w1-dev-export` (R2) → `pds-w1-provenance-guard` + `pds-w1-pull-cli` (R3, parallel)
 → `pds-w1-crown-proof` (R4, the live zero-secret pull proof). Debrief: paper
 `pds-wave-2026-07-19`.
+
+### Wave 4 2026-07-19 — "The Crown Proof Paid" — DECIDED, 4 slices building
+
+All four wave-3 PRs merged AND deployed (D60): guerrilla's box HEAD, `.instance-deploy-last` and
+origin/main are all `b7d6ce8ee`, and the LIVE slot's compiled `WorkspaceBundle.beam` carries
+`export_copy_timeout` where the previous build carries none. The stale-box fear is closed by
+measurement and the LOCAL-source contingency is retired.
+
+But merging those four greened ZERO blocked rungs. Steps 1, 2-target, 5 and 6 of
+`scripts/pds-pull-proof.sh` are ABORT STUBS — prose, a blocker name, no implementation — and steps
+3 and 4 abort independently for want of a full bundle nobody takes. Running `--all` today yields a
+transcript byte-similar to one obtainable before the wave started. So this wave FINISHES the
+ladder, then climbs it: D61–D74 amend the charter, four round-1 slices close the rungs and the CLI
+defect that would have made step 6 vacuous, and round 2 is the single serialized RUN.
+
+Verification also killed three assumptions and one instrument: `--dataset` on
+`bp cloud workspace export` is a silent no-op that leaves the Bootstrap guard inert for
+`production` (D61/D62); step 0c's `mix run` targets the developer's own `barkpark_dev` (D64); the
+census-carrier false-differential hazard is REFUTED but the unauthed-degradation and hardcoded-type
+traps are real (D66); and `UNSCANNED` in the secret scan never gates, with zero-privilege tables
+invisible even to the disclosure (D68).
+
+Slices: `pds-w4-pull-dataset-flag` · `pds-w4-harness-rungs` · `pds-w4-guard-test-eight` ·
+`pds-w4-media-size-roundtrip` (R1) → `pds-w1-crown-proof` → `pds-w3-shares-fidelity` (R2).
+Paper: `pds-wave-4-2026-07-19`.
