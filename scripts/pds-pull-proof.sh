@@ -35,10 +35,17 @@
 # draft row), and why step 4's clean scan is only ever reported next to a control
 # that FIRES.
 #
-# COST DISCIPLINE (PDS-D31/D44). This script takes exactly ONE export and it is
-# the DEV profile (~51 MB, ~7 s). It never takes a full-fidelity export: that one
-# budgeted attempt belongs to pds-w1-crown-proof, and an export that DIES still
-# pays ~2.65 GiB on a 3819 MB box.
+# COST DISCIPLINE (PDS-D31/D44/D69). Two exports, at most, per run:
+#   · the DEV export of step 0a, re-used by step 1's pull;
+#   · exactly ONE full-fidelity export, shared by steps 3 and 4 and by nothing
+#     else. It is parked at a RUN-STABLE path with a .meta sidecar so the NEXT
+#     run reuses it for zero attempts; its attempt counter is flushed BEFORE the
+#     request (an export that DIES still paid its memory peak); it is locked with
+#     mkdir (flock does not exist on Darwin); and all five abort conditions are
+#     printed with their measured values before a single byte moves. Two
+#     concurrent full exports would OOM the LIVE content API on a 3.8 GB box.
+# THE LADDER IS SEVERABLE: if the full export cannot be taken, ONLY steps 3 and 4
+# abort — every other rung still runs and still reports.
 #
 # It does NOT reimplement its two siblings — it CONSUMES them:
 #   scripts/pds-scratch-target.sh   boots/tears down the personal-local target
@@ -59,6 +66,16 @@
 #   BARKPARK_HOME        the scratch target's root. PINNED per run (PDS-D54).
 #   PDS_SCRATCH_POINTER  pinned per run — it is ONE global path and two
 #                        concurrent PDS runs clobber each other.
+#   PDS_FULL_EXPORT_DIR  default /tmp/pds-full-export — the RUN-STABLE home of
+#                        the one full bundle, its .meta, its attempt counter and
+#                        its lock. Deliberately NOT under ART_DIR.
+#   PDS_FULL_EXPORT_BUDGET       default 1 attempt, ever, per store
+#   PDS_FULL_EXPORT_MIN_MEM_MB   default 2200 — the source's MemAvailable floor
+#   PDS_STEP5_FAILDEMO=0 skip step 5's truncate/restore failure demonstration
+#                        (the pass then says so: nothing proved the comparator
+#                        can fail)
+#   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
+#   PDS_PROOF_LIB=1      load the rungs as a library without running any
 #
 # bash 3.2 compatible (macOS system bash).
 
@@ -94,6 +111,24 @@ export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"
 export PDS_SCRATCH_POINTER="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch.$RUN_TAG.last}"
 ART_DIR="${PDS_PROOF_ARTIFACTS:-/tmp/pds-proof-art.$RUN_TAG}"
 MAX_HOME_LEN=85
+
+# ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
+#
+# ART_DIR is RUN_TAG-scoped: a bundle parked there is INVISIBLE to the next run,
+# which then spends a second attempt on a 3.8 GB box. So the one full export
+# lives at a RUN-STABLE path with a .meta sidecar, a persistent attempt counter
+# and a mkdir lock (flock does not exist on Darwin). Steps 3 and 4 CONSUME it
+# from disk and never fetch.
+FULL_DIR="${PDS_FULL_EXPORT_DIR:-/tmp/pds-full-export}"
+FULL_TAR="$FULL_DIR/full-$SOURCE_WS.tar"
+FULL_META="$FULL_TAR.meta"
+FULL_ATTEMPTS_FILE="$FULL_DIR/attempts"
+FULL_LOCK="$FULL_DIR/lock"
+FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"
+FULL_MIN_MEM_MB="${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}"
+FULL_LOCK_OWNED=""
+FULL_WHY=""            # why acquisition aborted, if it did
+FULL_RSS_LINE=""       # the measured RSS sentence (method + baseline + peak)
 
 # ── output helpers ───────────────────────────────────────────────────────────
 
@@ -144,6 +179,12 @@ cleanup() {
   local f d
   for f in $TMP_FILES; do [ -f "$f" ] && rm -f "$f"; done
   for d in $TMP_DIRS; do [ -d "$d" ] && rm -rf "$d"; done
+  # Release the full-export lock ONLY if this run took it. A lock we did not
+  # create belongs to a concurrent run and removing it would let two full
+  # exports overlap — the one thing PDS-D31 forbids.
+  [ -n "$FULL_LOCK_OWNED" ] && [ -d "$FULL_LOCK" ] && rmdir "$FULL_LOCK" 2>/dev/null || true
+  # A step-5 failure demo must never leave a blob truncated on the target.
+  restore_blob_backup
   return 0
 }
 trap cleanup EXIT
@@ -228,11 +269,118 @@ src_psql() { # sql — read-only. The SQL travels on ssh's STDIN (psql -f -) rat
     "sudo -u postgres psql -d '$SOURCE_PG_DB' -At -f -" 2>/dev/null
 }
 
+# ── the TARGET: the disposable personal-local box booted by the sibling ──────
+#
+# Everything about it comes from ITS OWN scratch.env (pds-scratch-target.sh
+# writes PDS_SCRATCH_BASE/_TOKEN/_DB/_TREE there). Nothing here re-derives a
+# port, a token or a conninfo — a harness that guesses them is proving something
+# about its guess.
+
+TARGET_BASE=""; TARGET_TOKEN=""; TARGET_DB=""; TARGET_TREE=""; TARGET_MEDIA=""
+load_target() { # 0 = a booted target is loaded
+  local envf="$BARKPARK_HOME/scratch.env"
+  [ -f "$envf" ] || return 1
+  # shellcheck disable=SC1090
+  . "$envf"
+  TARGET_BASE="${PDS_SCRATCH_BASE:-}"
+  TARGET_TOKEN="${PDS_SCRATCH_TOKEN:-}"
+  TARGET_DB="${PDS_SCRATCH_DB:-}"
+  TARGET_TREE="${PDS_SCRATCH_TREE:-}"
+  TARGET_MEDIA="${BARKPARK_MEDIA_DIR:-}"
+  [ -n "$TARGET_BASE" ] && [ -n "$TARGET_TOKEN" ]
+}
+
+target_hint() { # the exact command that produces a target
+  printf 'BARKPARK_HOME=%s PDS_SCRATCH_POINTER=%s %s up --verify' \
+    "$BARKPARK_HOME" "$PDS_SCRATCH_POINTER" "$SCRATCH_SCRIPT"
+}
+
+http_code() { # normalise a `curl -w %{http_code}` capture
+  # curl PRINTS 000 on a connection failure AND exits non-zero, so the common
+  # `|| echo 000` fallback concatenates two codes ("000000") and every later
+  # comparison against "401" silently misses. Keep the last three digits.
+  local c
+  c="$(printf '%s' "${1:-}" | tr -dc '0-9' | tail -c 3)"
+  printf '%s' "${c:-000}"
+}
+
+curl_tgt() { # path [curl args…] — authed GET against the target
+  local path="$1"; shift
+  curl -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
+    -H "Authorization: Bearer $TARGET_TOKEN" "$TARGET_BASE$path" "$@"
+}
+
+curl_tgt_anon() { # path [curl args…] — the SAME call with no Authorization header
+  local path="$1"; shift
+  curl -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" "$TARGET_BASE$path" "$@"
+}
+
+tgt_psql() { # sql -> rows, tab-separated, no header. Runs through the target's
+             # OWN bin/barkpark, which knows its socket (PDS-D65: the guard has
+             # no CLI or HTTP off-switch, so SQL is the sanctioned idiom).
+  [ -n "$TARGET_TREE" ] || return 1
+  "$TARGET_TREE/bin/barkpark" psql --quiet --tuples-only --no-align --field-separator=$'\t' \
+    --command "$1" 2>/dev/null
+}
+
+# ── a bp binary NEW ENOUGH to speak the pull dialect (PDS-D63) ───────────────
+#
+# The installed bp predates --profile/--dataset/--merge/--with-blobs, and an old
+# binary does not error on an unknown flag in a way anyone reads — it is refused
+# up front instead. The binary is built FROM THIS WORKTREE and its own --help is
+# the freshness assertion.
+
+BP_BIN=""
+BP_WHY=""
+ensure_bp() { # 0 = $BP_BIN is a fresh binary that speaks the dialect
+  [ -n "$BP_BIN" ] && return 0
+  if ! command -v go >/dev/null 2>&1; then
+    BP_WHY="go is not on PATH, so a fresh bp cannot be built from this worktree (the installed bp predates the pull dialect and must not be used)"
+    return 1
+  fi
+  mkdir -p "$ART_DIR"
+  local out log cc
+  out="$ART_DIR/bp"
+  log="$ART_DIR/bp-build.log"
+  # `cc` on this host is a Claude wrapper, not a C compiler (a known local trap).
+  cc="${PDS_CC:-/usr/bin/clang}"
+  [ -x "$cc" ] || cc="cc"
+  if ! ( cd "$REPO_ROOT" && CC="$cc" go build -o "$out" ./cmd/barkpark ) >"$log" 2>&1; then
+    BP_WHY="go build ./cmd/barkpark failed — see $log ($(tail -3 "$log" | tr '\n' ' '))"
+    return 1
+  fi
+  local help
+  help="$("$out" cloud workspace --help 2>&1 || true)"
+  case "$help" in
+    *"--profile full|dev"*) : ;;
+    *) BP_WHY="the bp built from this worktree does not advertise --profile in \`cloud workspace --help\` — the dialect is not in this tree"; return 1 ;;
+  esac
+  case "$help" in *"--merge"*) : ;; *) BP_WHY="the built bp does not advertise --merge"; return 1 ;; esac
+  case "$help" in *"--with-blobs"*) : ;; *) BP_WHY="the built bp does not advertise --with-blobs"; return 1 ;; esac
+  BP_BIN="$out"
+  return 0
+}
+
+# ── step-5 blob backup (a failure demo must be reversible) ───────────────────
+
+BLOB_BACKUP=""     # a copy of the blob the demo mutates
+BLOB_ORIGINAL=""   # where it belongs
+restore_blob_backup() {
+  if [ -n "$BLOB_BACKUP" ] && [ -f "$BLOB_BACKUP" ] && [ -n "$BLOB_ORIGINAL" ]; then
+    cp "$BLOB_BACKUP" "$BLOB_ORIGINAL" 2>/dev/null || true
+    rm -f "$BLOB_BACKUP" 2>/dev/null || true
+  fi
+  BLOB_BACKUP=""; BLOB_ORIGINAL=""
+  return 0
+}
+
 # ── cross-step state (derived at RUN time, never from a snapshot) ────────────
 
 DEPLOYED_SHA=""
 DEPLOYED_VERSION=""
+DEPLOYED_UPTIME_0A=""
 DEV_BUNDLE=""
+PULL_BUNDLE=""      # the bundle step 1 actually imported
 AMMO_FILE=""
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -253,7 +401,10 @@ cmd_plan() {
   say "source:        $SOURCE_BASE  workspace=$SOURCE_WS  dataset=$SOURCE_DS"
   say "scratch root:  $BARKPARK_HOME  (${#BARKPARK_HOME} bytes, cap $MAX_HOME_LEN)"
   say "pointer:       $PDS_SCRATCH_POINTER"
-  say "artifacts:     $ART_DIR"
+  say "artifacts:     $ART_DIR   (RUN-scoped — invisible to the next run, by design)"
+  say "full export:   $FULL_TAR"
+  say "               budget=$FULL_BUDGET attempt(s) · spent so far=$([ -f "$FULL_ATTEMPTS_FILE" ] && cat "$FULL_ATTEMPTS_FILE" || echo 0) · on-disk bundle=$([ -s "$FULL_TAR" ] && echo "PRESENT ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes, would be REUSED for 0 attempts)" || echo absent)"
+  say "               min MemAvailable on the source before it is taken: ${FULL_MIN_MEM_MB} MB"
   say "siblings:      $(basename "$SCRATCH_SCRIPT") $([ -x "$SCRATCH_SCRIPT" ] && echo present || echo MISSING) · $(basename "$SCAN_SCRIPT") $([ -x "$SCAN_SCRIPT" ] && echo present || echo MISSING)"
   say "tooling:       curl $(command -v curl >/dev/null 2>&1 && echo yes || echo NO) · python3 $(command -v python3 >/dev/null 2>&1 && echo yes || echo NO) · psql $(command -v psql >/dev/null 2>&1 && echo yes || echo NO) · ssh $(command -v ssh >/dev/null 2>&1 && echo yes || echo NO) · bp $(command -v bp >/dev/null 2>&1 && echo yes || echo NO)"
   say ""
@@ -272,36 +423,40 @@ cmd_plan() {
     "RUNNABLE. There is NO schema_migrations HTTP surface anywhere and the source's Postgres is unreachable externally; /status.json's migrations component is a boolean over the RUNNING BINARY's own migration files, so a stale build prints the identical green — the vacuous green PDS-D20 forbids. The assertion is instead: the deployed sha EQUALS OR IS AN ANCESTOR OF the worktree the target migrated from."
 
   plan_row 0c "SENTINELS — Catalog.assert_partition!/1 + assert_dev_partition!/1" \
-    "a reachable Repo (the booted scratch target's DB)" \
-    "CONDITIONAL. Runs when a scratch target is up; otherwise ABORTS naming the exact command. A NEW tenant table RAISES the fail-closed sentinel — that is reported honestly as a FAIL, never bypassed."
+    "a booted scratch target, and a Repo that provably points AT IT" \
+    "RUNNABLE when a target is up. ASSERTS, before the sentinels: the Repo it started answers current_database()/inet_server_port() equal to the conninfo in scratch.env. WHY (PDS-D64): the bare \`MIX_ENV=dev mix run\` idiom resolves to the DEVELOPER'S OWN barkpark_dev even with BARKPARK_HOME/BARKPARK_PG_PORT/PDS_SCRATCH_DB/DATABASE_URL all pointed at the scratch box (dev.exs hardcodes host/port/user). This step now starts the Repo with the scratch conninfo explicitly and ABORTS rather than emit 'SENTINELS OK' measured against the wrong database. A NEW tenant table RAISES the fail-closed sentinel — reported as a FAIL, never bypassed."
 
-  plan_row 1 "THE PULL — export + import + scrub through one front door" \
-    "\`bp dev pull\` exists (pds-w1-pull-cli) and a scratch target is up" \
-    "ABORTS naming pds-w1-pull-cli. Mode is PINNED :merge (PDS-D33). CORRECTED at wave-3 review: that slice ships the pull as the EXISTING pair (\`bp cloud workspace export --profile dev --dataset <ds> --with-blobs\` then \`import --yes --merge --with-blobs\`), not a single \`bp dev pull\` verb — so this step needs pds-w1-crown-proof to wire the pair; it does not self-green on merge."
+  plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
+    "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62); (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it."
 
-  plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true" \
-    "step 1 imported into a target" \
-    "SOURCE HALF RUNNABLE (live per-type raw + published totals, schema count, media count). TARGET HALF ABORTS naming pds-w1-pull-cli. NEVER /v1/data/counts/:dataset — it hard-codes perspective=published and ignores ?perspective, hiding every draft row. The bare-slug E3 shortfall (PDS-D45) is PRE-DECLARED and those tables are EXCLUDED from the parity assertion."
+  plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
+    "source HTTP; for the target half, step 1's import" \
+    "RUNNABLE both halves. Roster derived at RUN TIME from /v1/schemas on each end — never hardcoded (production/post is 0 on BOTH ends; this workspace has no post documents at all). ASSERTS AUTHEDNESS INDEPENDENTLY on each end before believing any total: an UNAUTHED raw query does NOT 401, it silently returns the published view, so the authed and unauthed censuses must DIFFER — and when a dataset genuinely has no drafts, an admin-only route must 401/403 instead. The import assertion is BUNDLE→TARGET per type (the bundle's own documents.copy rows, parsed with manifest column positions); SOURCE→BUNDLE deltas are printed as the scrub's scope, never asserted as loss. NEVER /v1/data/counts/:dataset (hard-codes published). Bare-slug E3 (PDS-D45) stays excluded."
 
   plan_row 3 "TICKET-DENY BYTE-SCAN — bytes at ROW grain, never a count diff" \
-    "a dev bundle (0a) plus a full-fidelity bundle for the FIRING control" \
-    "HALF RUNNABLE. doc_id and row uuid are RE-DERIVED at run time (the two surveys disagree on the uuid — trust the run). The assertion is at ROW grain — no ticket-carrying member, and zero rows in documents.copy whose own doc_id/type/id fields identify the ticket, with column positions read from the manifest — because the ticket's identifiers are QUOTED IN PROSE by other documents and a naive byte-absence assertion fires on a bundle where the deny held perfectly. Byte hits are still printed and each is classified by its containing document. The step ABORTS naming pds-w1-crown-proof: a zero with no control that fires is the vacuous green PDS-D20 forbids, and the one budgeted full export is crown-proof's."
+    "the dev bundle (0a) plus THE ONE full-fidelity bundle for the FIRING control" \
+    "RUNNABLE when the one budgeted full export is acquirable; otherwise ABORTS with the acquisition's own named reason (severable — only 3 and 4 pay). doc_id and row uuid are RE-DERIVED at run time. ASSERTS: no ticket-carrying member and zero ROWS in documents.copy whose own doc_id/type/id identify the ticket (column positions from the manifest), because those identifiers are QUOTED IN PROSE elsewhere and a naive byte-absence assertion fires on a bundle where the deny held perfectly. THE CONTROL: the same identifiers must be FOUND at row grain in the FULL bundle — a zero with no control that fires is the vacuous green PDS-D20 forbids."
 
   plan_row 4 "VALUE-BASED SECRET SCAN — consumes scripts/pds-secret-scan.sh" \
-    "run-time ammo (the source's webhook secrets) + a bundle + the target DB" \
-    "HALF RUNNABLE. Ammo is pulled at run time; the dev bundle is scanned and the instrument's own control is run when a maintenance PG is configured. The TARGET-DB half ABORTS naming pds-w1-pull-cli and the 8-webhook control on a FULL bundle ABORTS naming pds-w1-crown-proof. Any UNSCANNED table count is surfaced, never silenced."
+    "run-time ammo (the source's webhook secrets) + the dev bundle + the full bundle + the target DB" \
+    "RUNNABLE. Three assertions, none reimplemented here: (1) the dev bundle is CLEAN; (2) the SAME ammo FIRES on the one full bundle (the positive control — a scan that has never fired is not an instrument); (3) the TARGET DB is scanned via \`pds-secret-scan.sh scan --db \$PDS_SCRATCH_DB\` and the step FAILS when UNSCANNED > 0 or when zero tables were scanned — that script's own exit code is driven only by HITS (PDS-D68), so an unreadable table would otherwise print CLEAN with the secret sitting in the database."
 
-  plan_row 5 "SERVED ASSET — an imported asset path returns HTTP 200 with a matching content-length" \
+  plan_row 5 "SERVED ASSET — every imported asset serves HTTP 200 with a matching content-length" \
     "step 1 imported blobs into the scratch target" \
-    "ABORTS naming pds-w1-pull-cli."
+    "RUNNABLE. Resolves from the TARGET's OWN /v1/media/:dataset (the flat /media index emits no originalUrl and ignores limit) and takes originalUrl and size VERBATIM per asset — originalUrl may be signed, so it is never rebuilt from a path. ASSERTS HTTP 200 AND content-length == the stored size for EVERY asset. FAILURE DEMO, run inline and reversed: one blob truncated to 100 bytes still serves 200 — only the stored size convicts it. SEPARATE ASSERTION: a missing blob answers the typed 404 'media blob missing', never a 500."
 
-  plan_row 6 "CONVERGENCE — two pulls with a REBOOT between them, byte-identical (PDS-D23)" \
-    "step 1, plus the provenance guard whose behaviour convergence MEASURES" \
-    "ABORTS naming pds-w1-provenance-guard. The Bootstrap clobber fires only on boot, so a convergence proof without a restart proves nothing."
+  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)" \
+    "step 1's import, stamped" \
+    "RUNNABLE. Reboot is \`bin/barkpark stop\` then \`up\` in the SAME BARKPARK_HOME — there is NO restart verb and teardown stops Postgres. ASSERTS the eight columns the boot-time schema upsert would otherwise revert (title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups, list_preview) are byte-identical across the reboot, and the pull_provenance stamp survives. THEN — sequenced AFTER the convergence it demonstrates against — the guard is switched OFF by direct SQL (no CLI/HTTP surface exists) with the RETURNING value ASSERTED, because jsonb_set is a proven silent no-op when the parent path is absent, and the next boot must CLOBBER those columns. A demo that fails to clobber makes the convergence green uninterpretable and is reported as a FAIL."
 
-  plan_row 7 "THE NEGATIVE GUARD — import against the SOURCE is refused 403 bundle_import_disabled" \
+  plan_row 7 "THE NEGATIVE GUARD — a MERGE import against the SOURCE is refused 403" \
     "the source answers HTTP" \
-    "RUNNABLE, and it PASSES. Re-derived at RUN time on purpose: this is a blue/green box and a deploy could land between the survey and the run. The single point of failure is anyone appending BARKPARK_ALLOW_BUNDLE_IMPORT=1 to an env source."
+    "RUNNABLE, and it PASSES. SCOPE (PDS-D73): :allow_bundle_import wraps ONLY the merge branch — clean is the DEFAULT mode and is UNGATED — so the claim is 'the source refuses a MERGE import', never 'the source cannot be written'. Re-derived at RUN time on purpose: this is a blue/green box and a deploy could land between the survey and the run. The single point of failure is anyone appending BARKPARK_ALLOW_BUNDLE_IMPORT=1 to an env source."
+
+  plan_row 8 "CLOSING RE-PIN — the box must not have redeployed under the run (PDS-D72)" \
+    "step 0a captured a sha and/or an uptime baseline" \
+    "RUNNABLE whenever 0a ran. The deployed sha is captured ONCE at the top and every differential above is dated by it; this box has redeployed three times inside one 15-minute survey, Caddy flipping :4000 → :4001 mid-command. ASSERTS the sha re-read over SSH equals 0a's, with /status.json's uptime_seconds going BACKWARDS as the SSH-free fallback. A drift is a FAIL (the signal fired); no signal at all is an ABORT (never a silent pass)."
 
   rule
   say "Run it:  $0 --all      (or --only 0a,0b,7)"
@@ -345,7 +500,17 @@ banner() {
   say "     are EXCLUDED and the shortfall is pre-declared in step 2 (PDS-D45)."
   say "   · Deploy scope — step 0b asserts DEPLOY PROVENANCE, not migration parity."
   say "     No schema_migrations HTTP surface exists; a stale build prints the same"
-  say "     /status.json green (PDS-D47)."
+  say "     /status.json green (PDS-D47). Step 8 re-pins the same sha at the CLOSE:"
+  say "     everything between them is dated by ONE build or the run says so."
+  say "   · Refusal scope — step 7 proves the source refuses a MERGE import. The"
+  say "     clean/restore mode is NOT gated by that flag, so 'guerrilla cannot be"
+  say "     written' is a claim this transcript does not make (PDS-D73)."
+  say "   · Asset scope — step 5 asserts served bytes against the size the TARGET's"
+  say "     own database stores. It does not compare bytes against the SOURCE."
+  say "   · Full-export scope — exactly ONE full-fidelity export is taken per store,"
+  say "     and only as the FIRING control for steps 3 and 4. Its memory figure is"
+  say "     measured by a 1 Hz ps sampler over SSH during that export; no cgroup"
+  say "     number and no survey number is reprinted as this run's."
   say ""
   say "  THE SCAN'S OWN LIMITS, VERBATIM (they bound every 'clean' below):"
   say "   1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given. It"
@@ -366,7 +531,7 @@ step_0a() {
 
   local status code version uptime
   status="$(mktmp)"
-  code="$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" || echo 000)"
+  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
   if [ "$code" != "200" ]; then
     fail 0a "GET $SOURCE_BASE/status.json -> $code (the source is not answering; nothing downstream is believable)"
     return 0
@@ -374,7 +539,14 @@ step_0a() {
   version="$(jqp 'd["version"]' <"$status" || echo unknown)"
   uptime="$(jqp 'd.get("uptime_seconds","?")' <"$status" || echo '?')"
   DEPLOYED_VERSION="$version"
+  # The step-8 baseline. uptime_seconds going BACKWARDS is the SSH-free proof
+  # that the BEAM this run has been talking to was replaced under it (PDS-D72).
+  case "$uptime" in
+    ''|*[!0-9]*) DEPLOYED_UPTIME_0A="" ;;
+    *) DEPLOYED_UPTIME_0A="$uptime" ;;
+  esac
   info "status.json     status=$(jqp 'd["status"]' <"$status" || echo '?') version=$version uptime_seconds=$uptime"
+  info "step-8 baseline uptime_seconds=${DEPLOYED_UPTIME_0A:-UNAVAILABLE} — re-read at close; backwards means the box redeployed mid-run"
 
   # The sha, three ways — the version string above is NOT one (it is a marketing
   # number and two different builds print it identically).
@@ -398,7 +570,7 @@ step_0a() {
   hdr="$(mktmp)"
   t0="$(date +%s)"
   code="$(curl_src "/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=$SOURCE_DS" \
-            -D "$hdr" -o "$bundle" -w '%{http_code}' || echo 000)"
+            -D "$hdr" -o "$bundle" -w '%{http_code}' 2>/dev/null || true)"; code="$(http_code "$code")"
   t1="$(date +%s)"
   elapsed=$((t1 - t0))
   bytes="$(wc -c <"$bundle" 2>/dev/null | tr -d ' ' || echo 0)"
@@ -510,28 +682,99 @@ step_0c() {
   say "  assertion. An unclassified table is an unproven export."
   say ""
 
-  local envf
-  envf="$BARKPARK_HOME/scratch.env"
-  if [ ! -f "$envf" ]; then
+  say "  AND THE REPO MUST BE THE SCRATCH REPO (PDS-D64). \`MIX_ENV=dev mix run\`"
+  say "  resolves [hostname: localhost, username: postgres, database: barkpark_dev]"
+  say "  — the DEVELOPER'S OWN database — even with BARKPARK_HOME, BARKPARK_PG_PORT,"
+  say "  PDS_SCRATCH_DB and DATABASE_URL all pointed at the scratch box, because"
+  say "  dev.exs hardcodes host/port/user and DATABASE_URL is read on the prod"
+  say "  branch only. So the Repo is started HERE with the scratch conninfo and its"
+  say "  identity is asserted from inside the BEAM before either sentinel runs. A"
+  say "  'SENTINELS OK' measured against the wrong database is worse than an ABORT."
+  say ""
+
+  if ! load_target; then
     abort 0c "env:scratch-target-not-booted" \
-      "no Repo to run the sentinels against ($envf absent). FIX: BARKPARK_HOME=$BARKPARK_HOME PDS_SCRATCH_POINTER=$PDS_SCRATCH_POINTER $SCRATCH_SCRIPT up --verify   (budget one ~3.5 min cold compile per NEW worktree so a slow first boot is not mistaken for a hang)."
+      "no Repo to run the sentinels against ($BARKPARK_HOME/scratch.env absent). FIX: $(target_hint)   (budget one ~3.5 min cold compile per NEW worktree so a slow first boot is not mistaken for a hang)."
     return 0
   fi
+  if [ -z "$TARGET_DB" ]; then
+    abort 0c "env:scratch-db-unknown" \
+      "the target booted but its scratch.env carries no PDS_SCRATCH_DB conninfo, so the Repo cannot be aimed at it and a run would silently measure barkpark_dev. FIX: re-boot the target with a current pds-scratch-target.sh ($(target_hint))."
+    return 0
+  fi
+
+  # Parse libpq conninfo -> the four parts Ecto needs. Written by
+  # pds-scratch-target.sh as: host=… port=… dbname=… user=…
+  local pg_host pg_port pg_db pg_user kv
+  pg_host=""; pg_port=""; pg_db=""; pg_user=""
+  for kv in $TARGET_DB; do
+    case "$kv" in
+      host=*)   pg_host="${kv#host=}" ;;
+      port=*)   pg_port="${kv#port=}" ;;
+      dbname=*) pg_db="${kv#dbname=}" ;;
+      user=*)   pg_user="${kv#user=}" ;;
+    esac
+  done
+  if [ -z "$pg_host" ] || [ -z "$pg_port" ] || [ -z "$pg_db" ] || [ -z "$pg_user" ]; then
+    abort 0c "env:scratch-db-unparsed" \
+      "PDS_SCRATCH_DB did not parse into host/port/dbname/user ('$TARGET_DB'). Refusing to fall back to the ambient dev Repo."
+    return 0
+  fi
+  info "scratch Repo    host=$pg_host port=$pg_port dbname=$pg_db user=$pg_user (from scratch.env, not from dev.exs)"
 
   local out rc
   out="$(mktmp)"
   rc=0
-  # shellcheck disable=SC1090
-  ( set -a; . "$envf"; set +a
-    cd "$API_DIR" && MIX_ENV=dev mix run -e '
+  # --no-start: no supervision tree, no dev Repo. The Repo below is started by
+  # hand with the scratch conninfo, and PROVES where it landed before asserting
+  # anything about a partition.
+  ( cd "$API_DIR" && \
+    PDS_PG_HOST="$pg_host" PDS_PG_PORT="$pg_port" PDS_PG_DB="$pg_db" PDS_PG_USER="$pg_user" \
+    MIX_ENV=dev mix run --no-start -e '
       alias Barkpark.Tenancy.WorkspaceBundle.Catalog
+
+      want_db   = System.get_env("PDS_PG_DB")
+      want_port = String.to_integer(System.get_env("PDS_PG_PORT"))
+
+      Application.put_env(:barkpark, Barkpark.Repo,
+        hostname: System.get_env("PDS_PG_HOST"),
+        port: want_port,
+        database: want_db,
+        username: System.get_env("PDS_PG_USER"),
+        password: System.get_env("PDS_PG_PASSWORD") || "",
+        pool_size: 2
+      )
+
+      {:ok, _} = Barkpark.Repo.start_link()
+
+      %{rows: [[got_db, got_port]]} =
+        Barkpark.Repo.query!("SELECT current_database(), inet_server_port()")
+
+      IO.puts("REPO IS #{got_db}:#{got_port}")
+
+      if got_db != want_db or got_port != want_port do
+        IO.puts("REPO MISMATCH — wanted #{want_db}:#{want_port}")
+        System.halt(9)
+      end
+
       :ok = Catalog.assert_partition!(Barkpark.Repo)
       :ok = Catalog.assert_dev_partition!(Barkpark.Repo)
       IO.puts("SENTINELS OK")
     ' ) >"$out" 2>&1 || rc=$?
 
+  local repo_line
+  repo_line="$(grep -m1 '^REPO IS ' "$out" 2>/dev/null || true)"
+  [ -n "$repo_line" ] && info "$repo_line (asserted from inside the BEAM, not from the env it was handed)"
+
+  if [ "$rc" -eq 9 ] || grep -q 'REPO MISMATCH' "$out" 2>/dev/null; then
+    info "$(tail -20 "$out" | sed 's/^/  /')"
+    abort 0c "env:repo-resolved-elsewhere" \
+      "the Repo did NOT land on the scratch database ($pg_db:$pg_port) — see the mismatch above. Refusing to report a sentinel result measured against another database (PDS-D64)."
+    return 0
+  fi
+
   if [ "$rc" -eq 0 ] && grep -q 'SENTINELS OK' "$out"; then
-    pass 0c "both sentinels returned :ok against the scratch Repo — the live tenant-table membership matches the reviewed E1/E2/E3 partition AND every bundle-reachable table has a dev-partition classification"
+    pass 0c "both sentinels returned :ok against the SCRATCH Repo (proven $pg_db:$pg_port from inside the BEAM) — the live tenant-table membership matches the reviewed E1/E2/E3 partition AND every bundle-reachable table has a dev-partition classification"
   else
     info "$(tail -20 "$out" | sed 's/^/  /')"
     fail 0c "a sentinel RAISED (exit $rc) — see the message above. A new/unclassified tenant table must be classified, not bypassed."
@@ -541,6 +784,20 @@ step_0c() {
 # ═════════════════════════════════════════════════════════════════════════════
 # STEP 1 — THE PULL
 # ═════════════════════════════════════════════════════════════════════════════
+
+# manifest_field <tar> <key> -> the value, or the empty string. Extracts ONLY
+# manifest.json, never the whole bundle.
+manifest_field() {
+  local tar="$1" key="$2" d
+  d="$(mktemp -d "${TMPDIR:-/tmp}/pds-mf.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $d"
+  tar -xf "$tar" -C "$d" manifest.json 2>/dev/null || { printf '\n'; return 0; }
+  KEY="$key" python3 -c '
+import json,os,sys
+d=json.load(open(sys.argv[1]))
+v=d.get(os.environ["KEY"])
+print("" if v is None else v)' "$d/manifest.json" 2>/dev/null || printf '\n'
+}
 
 # WHAT pds-w1-pull-cli ACTUALLY SHIPPED (corrected at wave-3 review). This step
 # was authored expecting a single `bp dev pull` verb. That verb does NOT exist:
@@ -558,35 +815,107 @@ step_0c() {
 # `bp dev pull` probe below is kept because it is free and correct IF that verb
 # ever lands (pds-bl / wave 5).
 step_1() {
-  head_step 1 "THE PULL — export + import + scrub through one front door (mode PINNED :merge)"
+  head_step 1 "THE PULL — export --profile dev + import --yes --merge (both --with-blobs)"
 
-  if command -v bp >/dev/null 2>&1 && bp dev pull --help >/dev/null 2>&1; then
-    info "\`bp dev pull\` is present — running it against the scratch target"
-    local envf
-    envf="$BARKPARK_HOME/scratch.env"
-    if [ ! -f "$envf" ]; then
-      abort 1 "env:scratch-target-not-booted" \
-        "the pull front door exists but there is no target ($envf absent). FIX: BARKPARK_HOME=$BARKPARK_HOME $SCRATCH_SCRIPT up --verify"
-      return 0
-    fi
-    local rc out
-    out="$(mktmp)"
-    rc=0
-    # shellcheck disable=SC1090
-    ( set -a; . "$envf"; set +a
-      bp dev pull --from "$SOURCE_BASE" --workspace "$SOURCE_WS" --dataset "$SOURCE_DS" \
-        --profile dev --mode merge --with-blobs --to "$PDS_SCRATCH_BASE" ) >"$out" 2>&1 || rc=$?
-    sed 's/^/      /' "$out"
-    if [ "$rc" -eq 0 ]; then
-      pass 1 "bp dev pull exited 0 — see the per-file report above (a NON-ZERO exit on any blob failure is that CLI's own contract)"
-    else
-      fail 1 "bp dev pull exited $rc"
-    fi
+  say "  ENV DIALECT (PDS-D63): BARKPARK_TOKEN is read NOWHERE by this CLI. Both"
+  say "  calls below carry an explicit -s <base> --token <tok>, and the two are"
+  say "  never the same pair — the source token is a PRODUCTION admin token and a"
+  say "  mirrored typo would aim it at production."
+  say ""
+
+  if ! load_target; then
+    abort 1 "env:scratch-target-not-booted" \
+      "there is no target to import into ($BARKPARK_HOME/scratch.env absent). FIX: $(target_hint)"
+    return 0
+  fi
+  if ! ensure_bp; then
+    abort 1 "env:bp-dialect-unavailable" \
+      "no bp that speaks the pull dialect: $BP_WHY. The INSTALLED bp must not be substituted — it predates --profile/--dataset/--merge/--with-blobs and would send an un-scoped, un-merged request."
+    return 0
+  fi
+  info "bp binary       $BP_BIN (built from $REPO_ROOT this run; its own \`cloud workspace --help\` advertises --profile, --dataset, --merge and --with-blobs)"
+  info "target          $TARGET_BASE  (media dir $TARGET_MEDIA)"
+
+  local tar out rc t0 t1
+  tar="$ART_DIR/pull-$SOURCE_WS-$SOURCE_DS.tar"
+  mkdir -p "$ART_DIR"
+  out="$(mktmp)"
+
+  # ── the workspaces row BEFORE the import (PDS-D9 adoption fires silently) ──
+  local ws_before ws_after
+  ws_before="$(tgt_psql "SELECT id || ' ' || slug FROM workspaces ORDER BY inserted_at LIMIT 5" | tr '\n' ';' || true)"
+
+  # ── export ────────────────────────────────────────────────────────────────
+  rc=0; t0="$(date +%s)"
+  "$BP_BIN" -s "$SOURCE_BASE" --token "$SOURCE_TOKEN" \
+    cloud workspace export "$SOURCE_WS" \
+      --profile dev --dataset "$SOURCE_DS" --file "$tar" --with-blobs >"$out" 2>&1 || rc=$?
+  t1="$(date +%s)"
+  sed 's/^/      /' "$out"
+  if [ "$rc" -ne 0 ]; then
+    fail 1 "\`cloud workspace export $SOURCE_WS --profile dev --dataset $SOURCE_DS --with-blobs\` exited $rc against $SOURCE_BASE — see above. A non-zero exit here is the CLI's blob-failure contract as well as its HTTP contract; it is never downgraded."
+    return 0
+  fi
+  local bytes blobs_dir n_blobs
+  bytes="$(wc -c <"$tar" 2>/dev/null | tr -d ' ' || echo 0)"
+  blobs_dir="$tar.blobs"
+  n_blobs="$(find "$blobs_dir" -type f 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+  info "export          exit 0 · $bytes bytes · $((t1 - t0))s · $n_blobs blob(s) in $blobs_dir"
+
+  # ── the GRAIN assertion, before a single byte is imported ──────────────────
+  #
+  # A workspace-grain bundle wearing a dev command line is the silent-wrong-
+  # answer hazard of this whole wave: it imports fine, and every census below
+  # then measures a workspace, not the dataset the transcript claims.
+  local m_ds m_profile
+  m_profile="$(manifest_field "$tar" profile)"
+  m_ds="$(manifest_field "$tar" dataset)"
+  info "manifest        profile='${m_profile:-<absent>}' dataset='${m_ds:-<absent>}' (asked for profile=dev dataset=$SOURCE_DS)"
+  if [ -z "$m_ds" ]; then
+    abort 1 "pds-w4-pull-dataset-flag" \
+      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
+    return 0
+  fi
+  if [ "$m_ds" != "$SOURCE_DS" ]; then
+    fail 1 "the exported manifest says dataset='$m_ds' but the export asked for '$SOURCE_DS' — the scope flag is not reaching the engine. Nothing was imported."
+    return 0
+  fi
+  if [ "$m_profile" != "dev" ]; then
+    fail 1 "the exported manifest says profile='${m_profile:-<absent>}' but the export asked for 'dev' — this bundle is NOT scrubbed and must not be treated as one. Nothing was imported."
     return 0
   fi
 
-  abort 1 "pds-w1-pull-cli" \
-    "\`bp dev pull\` does not exist in this bp binary, and (corrected at wave-3 review) it is NOT what that slice ships: the front door landed as \`bp cloud workspace export --profile dev --dataset <ds> --with-blobs\` + \`bp cloud workspace import --yes --merge --with-blobs\`. This step therefore does NOT self-green on merge — pds-w1-crown-proof wires the pair (see the comment above this function for the exact two command lines). Everything downstream that needs a populated target (2 target half, 5, 6) aborts with it."
+  # ── import (--merge is MANDATORY) ─────────────────────────────────────────
+  #
+  # Without --merge the CLI sends mode=clean, and clean against a POPULATED
+  # target answers an opaque HTTP 500 whose real cause is 25P02
+  # in_failed_sql_transaction at workspace_bundle.ex:233.
+  rc=0; t0="$(date +%s)"
+  "$BP_BIN" -s "$TARGET_BASE" --token "$TARGET_TOKEN" \
+    cloud workspace import "$SOURCE_WS" \
+      --file "$tar" --yes --merge --with-blobs >"$out" 2>&1 || rc=$?
+  t1="$(date +%s)"
+  sed 's/^/      /' "$out"
+  if [ "$rc" -ne 0 ]; then
+    fail 1 "\`cloud workspace import $SOURCE_WS --yes --merge --with-blobs\` exited $rc against the target — see above. Per the CLI's own contract this exit is also what a FAILED BLOB PUSH produces, so a partially-populated target is a FAIL, never a pass with a footnote."
+    return 0
+  fi
+  local receipt
+  receipt="$(grep -iE 'table|row|blob' "$out" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-220 || true)"
+
+  ws_after="$(tgt_psql "SELECT id || ' ' || slug FROM workspaces ORDER BY inserted_at LIMIT 5" | tr '\n' ';' || true)"
+  if [ -n "$ws_before" ] && [ "$ws_before" != "$ws_after" ]; then
+    info "PDS-D9 ADOPTION FIRED — the target's workspaces row changed across the import"
+    info "  before: $ws_before"
+    info "  after:  $ws_after"
+    info "  Nothing in the CLI output, the HTTP receipt or the provenance block says"
+    info "  so; it is only visible by diffing the row, which is why it is diffed."
+  else
+    info "workspaces row unchanged across the import (no PDS-D9 adoption observed this run)"
+  fi
+
+  PULL_BUNDLE="$tar"
+  pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -602,6 +931,86 @@ src_total() { # type perspective -> integer (or empty)
   local t="$1" p="$2"
   curl_src "/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
     | jqp 'd["result"]["total"]' 2>/dev/null || true
+}
+
+src_total_anon() { # type perspective -> integer (or empty) — NO Authorization
+  local t="$1" p="$2"
+  curl -sS --max-time "${PDS_HTTP_TIMEOUT:-120}" \
+    "$SOURCE_BASE/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
+    | jqp 'd["result"]["total"]' 2>/dev/null || true
+}
+
+tgt_total() { # type perspective -> integer (or empty)
+  local t="$1" p="$2"
+  curl_tgt "/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
+    | jqp 'd["result"]["total"]' 2>/dev/null || true
+}
+
+tgt_total_anon() { # type perspective -> integer (or empty) — NO Authorization
+  local t="$1" p="$2"
+  curl_tgt_anon "/v1/data/query/$SOURCE_DS/$t?perspective=$p&count=true&limit=0" \
+    | jqp 'd["result"]["total"]' 2>/dev/null || true
+}
+
+# ── authedness, asserted INDEPENDENTLY of any total it is used to justify ────
+#
+# An unauthed ?perspective=raw query does NOT 401. It silently answers the
+# PUBLISHED view, so a census taken with a dropped header reads as a clean,
+# plausible, WRONG number (a 7-document false differential on the live bundle),
+# and on a PRIVATE-visibility schema an anonymous caller gets a flat 404 instead.
+# Two acceptable proofs, in order: the authed and unauthed raw censuses DIFFER
+# (only a real token could widen the view), or — when a dataset genuinely has no
+# drafts to widen — an admin-only route refuses the anonymous caller.
+AUTHED_METHOD=""
+assert_authed() { # base token authed_raw_total unauthed_raw_total label
+  local base="$1" token="$2" a="$3" u="$4" label="$5" code
+  AUTHED_METHOD=""
+  if [ -n "$a" ] && [ -n "$u" ] && [ "$a" != "$u" ]; then
+    AUTHED_METHOD="the authed raw census ($a) is WIDER than the same call with no Authorization header ($u) — only a real token widens it"
+    return 0
+  fi
+  code="$(http_code "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+            "$base/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=$SOURCE_DS" 2>/dev/null || true)")"
+  if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+    AUTHED_METHOD="the raw and published views coincide on $label (no drafts to widen), so authedness was proven on an admin-only route instead: anonymous GET /api/workspaces/$SOURCE_WS/export -> HTTP $code"
+    return 0
+  fi
+  AUTHED_METHOD="UNPROVEN — the authed and unauthed raw censuses are identical ($a vs $u) AND the anonymous admin route answered HTTP $code instead of 401/403. The census below cannot be distinguished from a published-only read."
+  return 1
+}
+
+# ── the bundle's OWN per-type row counts ────────────────────────────────────
+#
+# The import assertion that means something is BUNDLE -> TARGET: everything the
+# bundle carried must be present. SOURCE -> BUNDLE is the scrub's scope and is
+# printed, never asserted as loss. Column position comes from the manifest, so a
+# column addition can never silently shift this onto the wrong field.
+BUNDLE_TYPES_FILE=""
+bundle_type_counts() { # tar -> writes "type<TAB>count" lines to $BUNDLE_TYPES_FILE; 1 on failure
+  local tar="$1" d cols i_type n_cols first
+  BUNDLE_TYPES_FILE=""
+  d="$(mktemp -d "${TMPDIR:-/tmp}/pds-btc.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $d"
+  tar -xf "$tar" -C "$d" manifest.json tables/documents.copy 2>/dev/null || return 1
+  [ -s "$d/tables/documents.copy" ] || return 1
+  cols="$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+t=[x for x in d["tables"] if x["name"]=="documents"]
+if not t: sys.exit(1)
+c=t[0]["columns"]
+print(c.index("type")+1, len(c))' "$d/manifest.json" 2>/dev/null || true)"
+  [ -n "$cols" ] || return 1
+  i_type="$(printf '%s' "$cols" | awk '{print $1}')"
+  n_cols="$(printf '%s' "$cols" | awk '{print $2}')"
+  first="$(head -n 1 "$d/tables/documents.copy" | awk -F'\t' '{print NF}')"
+  # The parse IS an assertion: a non-COPY-TEXT member tab-splits into nothing
+  # and every count below would come back 0, reading as a clean empty bundle.
+  [ "${first:-0}" -eq "$n_cols" ] || return 1
+  BUNDLE_TYPES_FILE="$d/types.tsv"
+  awk -F'\t' -v it="$i_type" '{ c[$it]++ } END { for (t in c) printf "%s\t%s\n", t, c[t] }' \
+    "$d/tables/documents.copy" | sort >"$BUNDLE_TYPES_FILE"
+  return 0
 }
 
 step_2() {
@@ -631,7 +1040,7 @@ step_2() {
   # collapsing the two is the silent skip this ladder forbids: a broken type
   # would simply vanish from the table and the totals would still look sane.
   # An unreadable count is NAMED in the table (ERR) and fails the step.
-  local t raw pub total_raw=0 total_pub=0 drafts unreadable=""
+  local t raw pub total_raw=0 total_pub=0 drafts unreadable="" top_type="" top_raw=0
   printf '      %-28s %10s %10s %10s\n' TYPE RAW PUBLISHED DRAFT-ONLY
   for t in $types; do
     raw="$(src_total "$t" raw)"
@@ -646,8 +1055,24 @@ step_2() {
     printf '      %-28s %10s %10s %10s\n' "$t" "$raw" "$pub" "$drafts"
     total_raw=$((total_raw + raw))
     total_pub=$((total_pub + pub))
+    if [ "$raw" -gt "$top_raw" ]; then top_raw="$raw"; top_type="$t"; fi
   done
   printf '      %-28s %10s %10s %10s\n' TOTAL "$total_raw" "$total_pub" "$((total_raw - total_pub))"
+
+  # AUTHEDNESS OF THE SOURCE CENSUS, asserted independently of the numbers it
+  # justifies. The heaviest type is the discriminator: if the header were being
+  # dropped, its raw total would collapse to the published one.
+  local src_anon_raw
+  src_anon_raw=""
+  if [ -n "$top_type" ]; then
+    src_anon_raw="$(src_total_anon "$top_type" raw)"
+    if assert_authed "$SOURCE_BASE" "$SOURCE_TOKEN" "$top_raw" "${src_anon_raw:-}" "$SOURCE_BASE/$top_type"; then
+      info "authedness      SOURCE census is AUTHED — $AUTHED_METHOD"
+    else
+      fail 2 "the SOURCE census cannot be shown to be authed: $AUTHED_METHOD"
+      return 0
+    fi
+  fi
 
   if [ -n "$unreadable" ]; then
     fail 2 "the census is INCOMPLETE — no count could be derived for:${unreadable}. A census missing a type is not a census; re-run once the source answers for every declared type rather than reading the totals above as complete."
@@ -684,14 +1109,267 @@ step_2() {
   fi
   info "EXCLUDED from every parity assertion in this step: $bare_slug"
 
+  # ── THE TARGET HALF ────────────────────────────────────────────────────────
   say ""
-  abort 2 "pds-w1-pull-cli" \
-    "the SOURCE census above is live and complete (raw $total_raw / published $total_pub across $n_types declared types, $n_schemas schemas, $n_media media). The TARGET half — the per-type diff that makes it a proof rather than a reading — needs a populated target, which needs the pull. Bare-slug E3 tables ($bare_slug) stay excluded when it runs."
+  say "  ── TARGET HALF ──────────────────────────────────────────────────────"
+  say "  The assertion that means something is BUNDLE -> TARGET: every document"
+  say "  row the bundle CARRIED must be present at the raw perspective on the"
+  say "  target. SOURCE -> BUNDLE is the dev scrub's scope; it is printed as a"
+  say "  delta and never asserted as loss (a dev bundle is SUPPOSED to be smaller)."
+  say ""
+
+  if ! load_target; then
+    abort 2 "env:scratch-target-not-booted" \
+      "the SOURCE census above is live and complete (raw $total_raw / published $total_pub across $n_types declared types, $n_schemas schemas, $n_media media), but there is no target to diff it against. FIX: $(target_hint), then re-run --only 1,2."
+    return 0
+  fi
+  local pull_tar
+  pull_tar="${PULL_BUNDLE:-}"
+  if [ -z "$pull_tar" ]; then
+    abort 2 "step:1" \
+      "no bundle was imported this run, so there is nothing to assert the target AGAINST. Re-run with step 1 selected (--only 1,2); a target populated by an earlier run is not evidence for this one."
+    return 0
+  fi
+  if ! bundle_type_counts "$pull_tar"; then
+    fail 2 "the imported bundle's tables/documents.copy could not be parsed at the COPY TEXT grammar its manifest declares — a per-type count over an unparsed member reads as an empty bundle, which would make every 'target matches bundle' below vacuous"
+    return 0
+  fi
+
+  # Authedness of the TARGET census, proven the same way, on its own box.
+  local tgt_top_type tgt_top_raw tgt_anon
+  tgt_top_type="$(awk -F'\t' 'NR==1||$2>m{m=$2;t=$1} END{print t}' "$BUNDLE_TYPES_FILE")"
+  tgt_top_raw="$(tgt_total "$tgt_top_type" raw)"
+  tgt_anon="$(tgt_total_anon "$tgt_top_type" raw)"
+  if assert_authed "$TARGET_BASE" "$TARGET_TOKEN" "${tgt_top_raw:-}" "${tgt_anon:-}" "$TARGET_BASE/$tgt_top_type"; then
+    info "authedness      TARGET census is AUTHED — $AUTHED_METHOD"
+  else
+    fail 2 "the TARGET census cannot be shown to be authed: $AUTHED_METHOD"
+    return 0
+  fi
+
+  local bt bc tr sr short=0 missing=""
+  printf '\n      %-28s %10s %10s %10s\n' TYPE BUNDLE 'TARGET raw' 'SOURCE raw'
+  while IFS="$(printf '\t')" read -r bt bc; do
+    [ -n "$bt" ] || continue
+    tr="$(tgt_total "$bt" raw)"
+    sr="$(src_total "$bt" raw)"
+    printf '      %-28s %10s %10s %10s\n' "$bt" "$bc" "${tr:-ERR}" "${sr:-?}"
+    if [ -z "$tr" ]; then
+      missing="$missing $bt(unreadable)"
+      continue
+    fi
+    if [ "$tr" -lt "$bc" ]; then
+      short=$((short + 1))
+      missing="$missing $bt($tr<$bc)"
+    fi
+  done <"$BUNDLE_TYPES_FILE"
+
+  if [ -n "$missing" ]; then
+    fail 2 "the target does NOT carry everything the bundle did:${missing}. A type whose count could not be read is reported here too — an unreadable count is not a zero and is never collapsed into one."
+    return 0
+  fi
+
+  info "EXCLUDED from every parity assertion (PDS-D45, bare-slug E3): $bare_slug"
+  pass 2 "raw-perspective census, BOTH ends, authedness proven on each: source raw $total_raw / published $total_pub across $n_types declared types; every type the dev bundle carried is present on the target at >= the bundle's own row count (bundle types: $(wc -l <"$BUNDLE_TYPES_FILE" | tr -d ' ')). The source->bundle delta above is the DEV SCRUB's scope, not loss."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
 # STEP 3 — TICKET-DENY BYTE-SCAN
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE ONE FULL EXPORT (PDS-D69/D70/D71) — acquired once, consumed twice
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Steps 3 and 4 both need a FULL-fidelity bundle: step 3 for the ticket control
+# that must FIRE, step 4 for the secret-scan control that must FIRE. Neither may
+# fetch one. This function is the single acquisition point, and it is severable:
+# when it aborts, ONLY steps 3 and 4 pay — 0/0b/0c/1/2/5/6/7/8 run regardless.
+#
+# WHY IT IS THIS CAREFUL. A full export peaks the source's beam.smp well into
+# gigabytes on a 3.8 GB box that is ALSO serving the live content API, and an
+# export that DIES still pays the peak. So: one run-stable copy, a persistent
+# attempt counter flushed BEFORE the request (a killed run must not get a free
+# retry), a mkdir lock (flock does not exist on Darwin), and five conditions
+# printed with their measured values BEFORE any byte moves.
+#
+# THE RSS NUMBER IS MEASURED, NOT QUOTED. A 1 Hz `ps -o rss= -p <beam pid>`
+# sampler over SSH, with NO slot restart: cgroup memory.peak is mode 0444 on
+# this kernel and only a restart resets it, and a restart costs ~26 s of LIVE
+# content-API downtime. Any cgroup figure that appears anywhere is labelled
+# CUMULATIVE-SINCE-BOOT. The survey's numbers are never reprinted as this run's.
+
+full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
+  [ -s "$FULL_TAR" ] || return 1
+  local p
+  p="$(manifest_field "$FULL_TAR" profile)"
+  case "$p" in
+    ""|full) return 0 ;;   # "" = an engine that predates the profile field
+    *) return 1 ;;
+  esac
+}
+
+full_attempts() { # -> integer
+  if [ -f "$FULL_ATTEMPTS_FILE" ]; then
+    tr -dc '0-9' <"$FULL_ATTEMPTS_FILE" | head -c 6
+    return 0
+  fi
+  printf '0'
+}
+
+acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
+  FULL_WHY=""
+  mkdir -p "$FULL_DIR" 2>/dev/null || true
+
+  if full_meta_ok; then
+    info "full bundle     REUSED from $FULL_TAR ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes) — 0 attempts spent this run"
+    [ -f "$FULL_META" ] && sed 's/^/                /' "$FULL_META"
+    return 0
+  fi
+
+  # ── the five conditions, printed with measured values, before any byte moves
+  local spent mem_kb mem_mb sha_now deploy_running cond_a cond_b cond_c cond_d cond_e ok=1
+  spent="$(full_attempts)"
+
+  sha_now=""
+  if ssh_available; then sha_now="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"; fi
+  if [ -z "$DEPLOYED_SHA" ] || [ -z "$sha_now" ]; then
+    cond_a="UNKNOWN (0a sha='${DEPLOYED_SHA:-unresolved}', re-pin='${sha_now:-unresolved}')"; ok=0
+  elif [ "$sha_now" = "$DEPLOYED_SHA" ]; then
+    cond_a="OK ($sha_now, re-pinned this instant)"
+  else
+    cond_a="FAILED — the box redeployed since step 0a ($DEPLOYED_SHA -> $sha_now)"; ok=0
+  fi
+
+  mem_mb=""
+  if ssh_available; then
+    mem_kb="$(ssh_src "awk '/MemAvailable/{print \$2}' /proc/meminfo" | tr -d '[:space:]' || true)"
+    [ -n "$mem_kb" ] && mem_mb=$((mem_kb / 1024))
+  fi
+  if [ -z "$mem_mb" ]; then
+    cond_b="UNKNOWN (MemAvailable unreadable — SSH is the only route to it)"; ok=0
+  elif [ "$mem_mb" -ge "$FULL_MIN_MEM_MB" ]; then
+    cond_b="OK (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB)"
+  else
+    cond_b="FAILED (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB) — taking it now risks OOMing the LIVE content API"; ok=0
+  fi
+
+  if [ "$spent" -lt "$FULL_BUDGET" ]; then
+    cond_c="OK ($spent of $FULL_BUDGET attempt(s) spent)"
+  else
+    cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately or reuse $FULL_TAR"; ok=0
+  fi
+
+  deploy_running=""
+  if command -v gh >/dev/null 2>&1; then
+    deploy_running="$(gh run list --workflow deploy.yml --branch main --status in_progress --limit 5 \
+                        --json databaseId -q '.[].databaseId' 2>/dev/null | tr '\n' ' ' || true)"
+    if [ -z "$deploy_running" ]; then
+      cond_d="OK (no deploy.yml run in progress)"
+    else
+      cond_d="FAILED — deploy.yml run(s) in progress: $deploy_running. A deploy mid-export swaps the slot under the request"; ok=0
+    fi
+  else
+    cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
+  fi
+
+  cond_e="not attempted (an earlier condition already failed)"
+  if [ "$ok" -eq 1 ]; then
+    if mkdir "$FULL_LOCK" 2>/dev/null; then
+      FULL_LOCK_OWNED=1
+      cond_e="OK (took $FULL_LOCK)"
+    else
+      cond_e="FAILED — $FULL_LOCK is held by another run. Two concurrent full exports OOM the box (PDS-D31)"; ok=0
+    fi
+  fi
+
+  say ""
+  info "FULL-EXPORT PRECONDITIONS (all five printed BEFORE any byte moves):"
+  info "  (a) served sha re-pinned == step 0a's ....... $cond_a"
+  info "  (b) MemAvailable >= ${FULL_MIN_MEM_MB} MB ................. $cond_b"
+  info "  (c) attempts < budget ...................... $cond_c"
+  info "  (d) no deploy.yml run in progress .......... $cond_d"
+  info "  (e) lock acquired .......................... $cond_e"
+  say ""
+
+  if [ "$ok" -ne 1 ]; then
+    FULL_WHY="a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (e) $cond_e"
+    return 1
+  fi
+
+  # ── the attempt is spent BEFORE the request, and flushed to disk ───────────
+  local spent_now
+  spent_now=$((spent + 1))
+  printf '%s\n' "$spent_now" >"$FULL_ATTEMPTS_FILE"
+  # A killed run must not come back to a counter that never moved.
+  ( command -v sync >/dev/null 2>&1 && sync ) 2>/dev/null || true
+  info "attempt         $spent_now of $FULL_BUDGET — counter flushed to $FULL_ATTEMPTS_FILE BEFORE the request"
+
+  # ── the RSS sampler: 1 Hz ps over SSH, NO slot restart ────────────────────
+  local rss_log rss_pid beam_pid baseline_kb peak_kb
+  rss_log="$ART_DIR/full-export-rss.log"
+  mkdir -p "$ART_DIR"
+  : >"$rss_log"
+  beam_pid=""; rss_pid=""
+  if ssh_available; then
+    beam_pid="$(ssh_src "pgrep -f beam.smp | head -1" | tr -d '[:space:]' || true)"
+    baseline_kb="$(ssh_src "ps -o rss= -p ${beam_pid:-0}" | tr -d '[:space:]' || true)"
+    if [ -n "$beam_pid" ]; then
+      ssh -i "$SOURCE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=20 \
+        -o StrictHostKeyChecking=accept-new "$SOURCE_SSH" \
+        "for i in \$(seq 1 900); do ps -o rss= -p $beam_pid 2>/dev/null || exit 0; sleep 1; done" \
+        >"$rss_log" 2>/dev/null &
+      rss_pid=$!
+      info "rss sampler     1 Hz \`ps -o rss= -p $beam_pid\` over SSH (pid $rss_pid), baseline ${baseline_kb:-?} KB. No slot restart: cgroup memory.peak is 0444 on this kernel and only a restart resets it, at ~26 s of LIVE content-API downtime — so any cgroup figure would be CUMULATIVE-SINCE-BOOT, not this export's."
+    fi
+  fi
+
+  local t0 t1 code bytes
+  t0="$(date +%s)"
+  code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TAR" -w '%{http_code}' \
+            --max-time "${PDS_FULL_EXPORT_TIMEOUT:-900}" 2>/dev/null || true)")"
+  t1="$(date +%s)"
+
+  if [ -n "$rss_pid" ]; then kill "$rss_pid" 2>/dev/null || true; wait "$rss_pid" 2>/dev/null || true; fi
+  peak_kb="$(awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }' "$rss_log" 2>/dev/null || echo 0)"
+
+  bytes="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ' || echo 0)"
+  if [ "$code" != "200" ] || [ "$bytes" -lt 1024 ]; then
+    rm -f "$FULL_TAR"
+    FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first."
+    [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
+    return 1
+  fi
+  if ! full_meta_ok; then
+    FULL_WHY="the export succeeded but the bundle is not a readable full-profile bp-export-v1 bundle (manifest profile='$(manifest_field "$FULL_TAR" profile)')"
+    [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
+    return 1
+  fi
+
+  if [ "$peak_kb" -gt 0 ]; then
+    FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB, measured by a 1 Hz ps sampler over SSH across this export only (baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
+  else
+    FULL_RSS_LINE="beam.smp RSS was NOT measured this run (no sampler could be started) — no figure is quoted in its place"
+  fi
+
+  cat >"$FULL_META" <<EOF
+served_sha:     ${DEPLOYED_SHA:-unresolved}
+served_version: ${DEPLOYED_VERSION:-unknown}
+bytes:          $bytes
+wall_seconds:   $((t1 - t0))
+taken_at:       $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+attempt:        $spent_now of $FULL_BUDGET
+rss_method:     1 Hz ps -o rss= -p <beam pid> over SSH, no slot restart
+rss_peak_kb:    $peak_kb
+rss_baseline_kb: ${baseline_kb:-unknown}
+run_id:         $RUN_ID
+EOF
+
+  info "full bundle     HTTP 200 · $bytes bytes · $((t1 - t0))s · $FULL_RSS_LINE"
+  info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts"
+  [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
+  return 0
+}
 
 step_3() {
   head_step 3 "TICKET-DENY BYTE-SCAN — bytes at ROW grain, never a count diff"
@@ -830,8 +1508,49 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
     info "dev bundle: zero byte hits as well (mechanism = type DENY cascading into documents)"
   fi
 
-  abort 3 "pds-w1-crown-proof" \
-    "the ROW-GRAIN zero above is real — and it is HALF a proof: a scan that has never fired on this ammo is not an instrument. The positive control — the same identifiers found in a FULL-fidelity bundle, minutes apart, same binary — needs the one budgeted full export, which is crown-proof's to spend (PDS-D31/D44: a full export peaks beam.smp at ~1.83 GB on a 3819 MB box, and one that DIES still pays ~2.65 GiB)."
+  # ── (d) THE POSITIVE CONTROL: the same identifiers, FOUND in a FULL bundle ─
+  #
+  # A row-grain zero that has never been shown to be capable of a non-zero is
+  # not a proof. The control is the SAME assertion, same run, same binary,
+  # against the one full-fidelity bundle: the ticket row MUST be there.
+  say ""
+  info "POSITIVE CONTROL — the same row-grain assertion against the ONE full bundle:"
+  if ! acquire_full_bundle; then
+    abort 3 "env:full-export-unavailable" \
+      "the ROW-GRAIN zero above is real — and it is HALF a proof without a control that fires. The one full-fidelity bundle could not be acquired: $FULL_WHY. This ABORT is SEVERABLE: it costs steps 3 and 4 only; every other rung ran."
+    return 0
+  fi
+
+  local fdir f_cols f_i_docid f_i_type f_rows
+  fdir="$(mktemp -d "${TMPDIR:-/tmp}/pds-full.XXXXXX")"
+  TMP_DIRS="$TMP_DIRS $fdir"
+  if ! tar -xf "$FULL_TAR" -C "$fdir" manifest.json tables/documents.copy 2>/dev/null; then
+    fail 3 "the full bundle carries no manifest.json + tables/documents.copy pair — the control cannot be run, and a zero without a control is not reportable"
+    return 0
+  fi
+  f_cols="$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+t=[x for x in d["tables"] if x["name"]=="documents"]
+if not t: sys.exit(1)
+c=t[0]["columns"]
+print(c.index("doc_id")+1, c.index("type")+1)' "$fdir/manifest.json" 2>/dev/null || true)"
+  if [ -z "$f_cols" ]; then
+    fail 3 "the full bundle's manifest does not describe a documents member — the control cannot be run"
+    return 0
+  fi
+  f_i_docid="$(printf '%s' "$f_cols" | awk '{print $1}')"
+  f_i_type="$(printf '%s' "$f_cols" | awk '{print $2}')"
+  f_rows="$(awk -F'\t' -v a="$doc_id" -v b="$pub_id" -v idc="$f_i_docid" -v it="$f_i_type" '
+            $it == "ticket" || $idc == a || $idc == b { n++ } END { print n + 0 }' \
+            "$fdir/tables/documents.copy" 2>/dev/null || echo ERR)"
+  info "full bundle     ticket ROWS in tables/documents.copy: $f_rows (the control must be > 0)"
+  if [ "$f_rows" = "ERR" ] || [ "$f_rows" -eq 0 ]; then
+    fail 3 "THE CONTROL DID NOT FIRE: the FULL bundle carries $f_rows ticket rows too. Either the ammo (doc_id=$doc_id) is wrong or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
+    return 0
+  fi
+
+  pass 3 "the type deny cascades into documents at ROW grain: 0 ticket rows in the DEV bundle, $f_rows in the FULL bundle taken from the same source and asserted the same way this run. The dev zero is a measurement, not an absence of measurement."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -914,34 +1633,330 @@ step_4() {
     info "instrument control: NOT RUN (set PDS_CONTROL_PG=<maintenance conninfo> to run \`$SCAN_SCRIPT control\` — it builds its own throwaway fixture and spends no guerrilla export)"
   fi
 
-  abort 4 "pds-w1-crown-proof + pds-w1-pull-cli" \
-    "two halves are still owed and neither is fakeable here. (a) THE CONTROL THAT MATTERS: the enumerated webhook secrets FOUND in a full-fidelity bundle of this very source, minutes apart, same binary, same ammo — that is crown-proof's one budgeted full export. (b) THE TARGET DB: scanning the imported rows (\`--db \$PDS_SCRATCH_DB\`) needs a populated target, which needs pds-w1-pull-cli. Until (a) lands, the clean result above proves the instrument was pointed at the bundle — not that the instrument can see."
+  # ── (b) THE TARGET DB — and a HARD gate on UNSCANNED (PDS-D68) ────────────
+  #
+  # pds-secret-scan.sh's exit code is driven ONLY by $HITS. An unscannable table
+  # prints a skip line and a NOTE, and a table the role cannot read at all is
+  # invisible even to that NOTE — "tables scanned: 0 · CLEAN" is a reachable
+  # output with the secret sitting in the database. So the gate lives HERE: the
+  # step FAILS on any UNSCANNED table and on a zero-table scan. No scan logic is
+  # reimplemented — only its coverage is judged.
+  if load_target && [ -n "$TARGET_DB" ]; then
+    local drc dout unscanned_n tables_n
+    dout="$(mktmp)"
+    drc=0
+    "$SCAN_SCRIPT" scan --db "$TARGET_DB" --ammo-file "$AMMO_FILE" --profile dev >"$dout" 2>&1 || drc=$?
+    sed 's/^/      /' "$dout"
+    unscanned_n="$(sed -n 's/^NOTE: \([0-9][0-9]*\) table(s) were UNSCANNED.*/\1/p' "$dout" | tail -1)"
+    [ -n "$unscanned_n" ] || unscanned_n="$(grep -c 'counted as UNSCANNED' "$dout" 2>/dev/null || echo 0)"
+    tables_n="$(sed -n 's/.*tables scanned: \([0-9][0-9]*\).*/\1/p' "$dout" | tail -1)"
+    info "target DB       exit=$drc · tables scanned=${tables_n:-?} · UNSCANNED=${unscanned_n:-0}"
+    if [ "$drc" -eq 1 ]; then
+      fail 4 "the TARGET DATABASE carries enumerated secret values after a dev-profile pull — the whole point of the dev profile did not hold"
+      return 0
+    elif [ "$drc" -ne 0 ]; then
+      fail 4 "the scan could not run against the target DB (exit $drc)"
+      return 0
+    fi
+    if [ -z "$tables_n" ] || [ "$tables_n" -eq 0 ]; then
+      fail 4 "the target-DB scan reported ${tables_n:-no} tables scanned — a CLEAN over zero tables is not a clean database, it is an unscanned one (PDS-D68)"
+      return 0
+    fi
+    if [ "${unscanned_n:-0}" -gt 0 ]; then
+      fail 4 "$unscanned_n table(s) in the target database were UNSCANNED. pds-secret-scan.sh exits 0 on this by design — this step does not: an unscannable table is not a clean table."
+      return 0
+    fi
+    info "target DB: CLEAN over $tables_n table(s), 0 UNSCANNED"
+  else
+    abort 4 "env:scratch-target-not-booted" \
+      "the bundle half above ran, but the TARGET-DB half — scanning the rows that actually landed — needs a booted, populated target. FIX: $(target_hint) then re-run --only 1,4."
+    return 0
+  fi
+
+  # ── (c) THE CONTROL THAT MATTERS: the same ammo FIRING on a FULL bundle ────
+  say ""
+  info "POSITIVE CONTROL — the SAME ammo against the ONE full-fidelity bundle:"
+  if ! acquire_full_bundle; then
+    abort 4 "env:full-export-unavailable" \
+      "the dev bundle and the target database are both CLEAN over $(wc -l <"$AMMO_FILE" | tr -d ' ') enumerated value(s) — and a scan that has never fired is not an instrument. The full-fidelity bundle that makes those cleans interpretable could not be acquired: $FULL_WHY. SEVERABLE: this costs steps 3 and 4 only."
+    return 0
+  fi
+  local frc fout
+  fout="$(mktmp)"
+  frc=0
+  "$SCAN_SCRIPT" scan --bundle "$FULL_TAR" --ammo-file "$AMMO_FILE" --profile full >"$fout" 2>&1 || frc=$?
+  sed 's/^/      /' "$fout"
+  if [ "$frc" -ne 1 ]; then
+    fail 4 "THE CONTROL DID NOT FIRE: the same ammo found NOTHING in the FULL bundle (exit $frc). Full fidelity carries webhooks.secret verbatim, so a clean here means the ammo is wrong — and every clean above is therefore uninterpretable (PDS-D20)."
+    return 0
+  fi
+
+  pass 4 "value-based scan, all three legs this run: the DEV bundle is CLEAN, the TARGET DATABASE is CLEAN over $tables_n table(s) with 0 UNSCANNED (gated here, not by the scan's own exit code), and the SAME ammo FIRES on the one full-fidelity bundle taken from the same source — the instrument is shown able to see before its silence is believed."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEPS 5, 6 — blocked by name
+# STEP 5 — THE SERVED ASSET
 # ═════════════════════════════════════════════════════════════════════════════
 
+# HEAD one asset -> "<http_code> <content-length>". originalUrl is taken
+# VERBATIM from the target's own index: it may be SIGNED, and a URL rebuilt from
+# /media/files/<path> would be a different request answering a different way.
+head_asset() { # url_or_path -> "code<TAB>content_length"
+  local u="$1" full hdr code clen
+  case "$u" in
+    http://*|https://*) full="$u" ;;
+    *) full="$TARGET_BASE$u" ;;
+  esac
+  hdr="$(mktmp)"
+  code="$(http_code "$(curl -sS -I --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" \
+            -o "$hdr" -w '%{http_code}' "$full" 2>/dev/null || true)")"
+  clen="$(grep -i '^content-length:' "$hdr" | tail -1 | awk '{print $2}' | tr -d '\r' || true)"
+  printf '%s\t%s\n' "$code" "${clen:-}"
+}
+
 step_5() {
-  head_step 5 "SERVED ASSET — an imported asset serves HTTP 200 with a matching content-length"
-  local envf="$BARKPARK_HOME/scratch.env"
-  if [ -f "$envf" ]; then
-    info "a scratch target exists at $BARKPARK_HOME, but nothing has been imported into it"
+  head_step 5 "SERVED ASSET — EVERY imported asset serves 200 with a matching content-length"
+
+  say "  RESOLVED FROM THE TARGET'S OWN INDEX, never from a path guessed off the"
+  say "  source: GET /v1/media/:dataset (the v1 route — the flat /media index emits"
+  say "  no originalUrl at all and ignores ?limit). originalUrl and size are taken"
+  say "  VERBATIM per asset; originalUrl may be signed."
+  say ""
+
+  if ! load_target; then
+    abort 5 "env:scratch-target-not-booted" \
+      "there is no target to serve an asset from. FIX: $(target_hint)"
+    return 0
   fi
-  abort 5 "pds-w1-pull-cli" \
-    "there is no imported asset to serve. When the pull lands, this step resolves an asset from the TARGET's own media index (never a path guessed from the source), GETs it, and compares the served content-length against the stored byte size — a 200 with a truncated body is the failure this must catch."
+  if [ -z "${PULL_BUNDLE:-}" ]; then
+    abort 5 "step:1" \
+      "no pull ran this run, so any asset on the target came from somewhere this transcript cannot vouch for. Re-run with step 1 selected (--only 1,5)."
+    return 0
+  fi
+
+  local idx count
+  idx="$(mktmp)"
+  curl_tgt "/v1/media/$SOURCE_DS?limit=500" >"$idx" 2>/dev/null || true
+  count="$(jqp 'd["result"]["count"]' <"$idx" 2>/dev/null || true)"
+  if [ -z "$count" ]; then
+    fail 5 "GET $TARGET_BASE/v1/media/$SOURCE_DS did not answer a media index — the assets cannot be resolved from the target's own view, and resolving them any other way would be proving something about a guess"
+    return 0
+  fi
+  if [ "$count" -eq 0 ]; then
+    fail 5 "the target's media index is EMPTY after a --with-blobs import. The source carries assets, so a zero here is an import failure, not an empty dataset."
+    return 0
+  fi
+
+  # One line per asset: path <TAB> size <TAB> originalUrl
+  local rows n_ok=0 n_bad=0 bad=""
+  rows="$(mktmp)"
+  python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+for a in d["result"]["assets"]:
+    print("\t".join([str(a.get("path","")), str(a.get("size","")), str(a.get("originalUrl",""))]))
+' "$idx" >"$rows" 2>/dev/null || true
+  if [ ! -s "$rows" ]; then
+    fail 5 "the media index answered count=$count but no asset rows could be read out of it"
+    return 0
+  fi
+
+  local apath asize aurl r code clen
+  while IFS="$(printf '\t')" read -r apath asize aurl; do
+    [ -n "$aurl" ] || { n_bad=$((n_bad + 1)); bad="$bad $apath(no-originalUrl)"; continue; }
+    r="$(head_asset "$aurl")"
+    code="$(printf '%s' "$r" | cut -f1)"
+    clen="$(printf '%s' "$r" | cut -f2)"
+    if [ "$code" != "200" ]; then
+      n_bad=$((n_bad + 1)); bad="$bad $apath(HTTP $code)"
+    elif [ -z "$clen" ] || [ "$clen" != "$asize" ]; then
+      n_bad=$((n_bad + 1)); bad="$bad $apath(len ${clen:-none} != size $asize)"
+    else
+      n_ok=$((n_ok + 1))
+    fi
+  done <"$rows"
+
+  info "assets          $n_ok/$((n_ok + n_bad)) served 200 with content-length == the stored size"
+  if [ "$n_bad" -ne 0 ]; then
+    fail 5 "$n_bad asset(s) did not serve correctly:$bad"
+    return 0
+  fi
+
+  # ── the failure demo, run inline and REVERSED ─────────────────────────────
+  #
+  # A 200 is not the assertion — the SIZE is. Truncate one blob and the route
+  # still answers 200, with a content-length that matches the truncated body.
+  # Only the size stored in the database convicts it. Disable with
+  # PDS_STEP5_FAILDEMO=0 (and then say so, because the green is weaker).
+  local demo="" demo_path demo_url demo_size disk r2 c2 l2
+  if [ "${PDS_STEP5_FAILDEMO:-1}" = "1" ] && [ -n "$TARGET_MEDIA" ]; then
+    demo_path="$(tail -1 "$rows" | cut -f1)"
+    demo_size="$(tail -1 "$rows" | cut -f2)"
+    demo_url="$(tail -1 "$rows" | cut -f3)"
+    disk="$TARGET_MEDIA/$demo_path"
+    if [ -f "$disk" ]; then
+      BLOB_ORIGINAL="$disk"
+      BLOB_BACKUP="$(mktemp "${TMPDIR:-/tmp}/pds-blob.XXXXXX")"
+      TMP_FILES="$TMP_FILES $BLOB_BACKUP"
+      cp "$disk" "$BLOB_BACKUP"
+
+      # (i) truncated blob — still 200, and the comparator must catch it.
+      dd if="$BLOB_BACKUP" of="$disk" bs=1 count=100 2>/dev/null
+      r2="$(head_asset "$demo_url")"; c2="$(printf '%s' "$r2" | cut -f1)"; l2="$(printf '%s' "$r2" | cut -f2)"
+      info "FAILURE DEMO 1  $demo_path truncated to 100 bytes on disk -> HTTP $c2, content-length ${l2:-none}, stored size $demo_size"
+      if [ "$c2" = "200" ] && [ "${l2:-0}" != "$demo_size" ]; then
+        demo="the size comparator FIRED on a truncated blob that still served HTTP $c2"
+      else
+        demo=""
+      fi
+
+      # (ii) missing blob — the typed 404, never a 500.
+      rm -f "$disk"
+      r2="$(head_asset "$demo_url")"; c2="$(printf '%s' "$r2" | cut -f1)"
+      info "FAILURE DEMO 2  $demo_path removed from disk -> HTTP $c2 (the typed 'media blob missing' 404, never a 500)"
+      restore_blob_backup
+      r2="$(head_asset "$demo_url")"; l2="$(printf '%s' "$r2" | cut -f2)"
+      info "RESTORED        $demo_path -> content-length ${l2:-none} (stored size $demo_size)"
+
+      if [ -z "$demo" ]; then
+        fail 5 "the failure demonstration did NOT fire: a blob truncated to 100 bytes was not caught by the content-length assertion. An assertion that cannot fail is not an instrument (PDS-D20)."
+        return 0
+      fi
+      if [ "$c2" = "500" ]; then
+        fail 5 "a MISSING blob answered HTTP 500, not the typed 404 'media blob missing' — the honest-404 guard is not holding"
+        return 0
+      fi
+    else
+      info "failure demo    SKIPPED — the last asset's blob is not at \$BARKPARK_MEDIA_DIR/$demo_path (nothing was mutated)"
+    fi
+  else
+    info "failure demo    DISABLED (PDS_STEP5_FAILDEMO=0) — the pass below is weaker for it: nothing proved the size comparator can fail"
+  fi
+
+  pass 5 "$((n_ok)) imported asset(s) resolved from the TARGET's own /v1/media/$SOURCE_DS and every one served HTTP 200 with content-length == the size stored in the target's database.${demo:+ Control: $demo, and a missing blob answered the typed 404 rather than a 500.}"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 6 — REBOOTED CONVERGENCE (what the Bootstrap clobber guard MEASURES)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# The EIGHT columns the boot-time plugin schema upsert reverts when it matches a
+# row in the Default slot — title, icon, visibility, owner_scoped, fields, plus
+# cors_origins, desk_groups and list_preview, which revert to bare plugin-struct
+# defaults even when the plugin says nothing about them. Digested as one value so
+# a single changed byte anywhere shows up.
+GUARDED_DIGEST_SQL="SELECT md5(string_agg(name || '|' || coalesce(title,'') || '|' || coalesce(icon,'') || '|' || coalesce(visibility,'') || '|' || coalesce(owner_scoped::text,'') || '|' || coalesce(fields::text,'') || '|' || coalesce(cors_origins::text,'') || '|' || coalesce(desk_groups::text,'') || '|' || coalesce(list_preview::text,''), E'\n' ORDER BY name)) || ' rows=' || count(*) FROM schema_definitions"
+
+reboot_target() { # 0 = the target answered HTTP again
+  local i code
+  "$TARGET_TREE/bin/barkpark" stop >/dev/null 2>&1 || true
+  "$TARGET_TREE/bin/barkpark" up >"$BARKPARK_HOME/reboot.log" 2>&1 || return 1
+  i=0
+  while [ "$i" -lt 90 ]; do
+    code="$(http_code "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$TARGET_BASE/api/schemas" 2>/dev/null || true)")"
+    [ "$code" = "200" ] && return 0
+    i=$((i + 1))
+    sleep 1
+  done
+  return 1
 }
 
 step_6() {
-  head_step 6 "CONVERGENCE — two pulls with a REBOOT between them (PDS-D23)"
+  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)"
+
   say "  The Bootstrap clobber fires only on BOOT. A convergence proof that does not"
-  say "  restart the target between the two pulls measures nothing: it re-runs an"
-  say "  import against a process that never had the chance to overwrite anything."
-  say "  A warm re-boot with the full verify suite measured ~14.6 s — the restart is"
-  say "  essentially free, and skipping it is exactly the vacuous green PDS-D20 forbids."
+  say "  restart the target measures nothing: it re-reads rows from a process that"
+  say "  never had the chance to overwrite them. Reboot here is \`bin/barkpark stop\`"
+  say "  then \`up\` in the SAME BARKPARK_HOME — there is NO restart verb, and"
+  say "  \`teardown\` would stop Postgres and take the data with it."
   say ""
-  abort 6 "pds-w1-provenance-guard" \
-    "convergence is the guard's MEASUREMENT, not an independent property: what the second pull must find unchanged is the provenance stamp (source server/workspace/dataset, pulled_at, scrub profile) and the schemas the boot-time upsert would otherwise clobber. Running it before the guard exists would measure the clobber and call it convergence."
+  say "  SCOPE: this is CONTENT-AND-PRESENCE convergence of the imported rows — not"
+  say "  byte-identity of two independently produced tar files. On a WORKSPACE-grain"
+  say "  pull it would additionally be measuring identical plugin declarations rather"
+  say "  than a guard; step 1 asserts the grain so that ambiguity cannot arise here."
+  say ""
+
+  if ! load_target; then
+    abort 6 "env:scratch-target-not-booted" \
+      "nothing to reboot. FIX: $(target_hint)"
+    return 0
+  fi
+  if [ -z "${PULL_BUNDLE:-}" ]; then
+    abort 6 "step:1" \
+      "no pull ran this run. Convergence is a property OF an import; measuring it against a target populated by some earlier run proves nothing about this transcript. Re-run --only 1,6."
+    return 0
+  fi
+  if [ -z "$TARGET_TREE" ]; then
+    abort 6 "env:scratch-tree-unknown" \
+      "scratch.env carries no PDS_SCRATCH_TREE, so the target's own bin/barkpark cannot be located and the reboot cannot be performed honestly."
+    return 0
+  fi
+
+  local stamp_before digest_before digest_after
+  stamp_before="$(tgt_psql "SELECT coalesce(settings->'pull_provenance'->>'$SOURCE_DS','<none>') FROM workspaces WHERE settings ? 'pull_provenance' LIMIT 1" | head -1 || true)"
+  digest_before="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
+  if [ -z "$digest_before" ]; then
+    fail 6 "could not digest schema_definitions on the target — the eight guarded columns cannot be compared across a reboot, so a 'converged' verdict would be unmeasured"
+    return 0
+  fi
+  info "before reboot   guarded-column digest $digest_before"
+  info "                pull_provenance[$SOURCE_DS] = ${stamp_before:-<none>}"
+  if [ "${stamp_before:-<none>}" = "<none>" ]; then
+    fail 6 "the import left NO pull_provenance stamp for dataset '$SOURCE_DS'. The guard is stamp-keyed, so an unstamped target is one the boot-time upsert is free to clobber — convergence below would be luck, not a guard."
+    return 0
+  fi
+
+  if ! reboot_target; then
+    fail 6 "the target did not come back after \`bin/barkpark stop\` + \`up\` (see $BARKPARK_HOME/reboot.log) — convergence cannot be measured across a boot that did not happen"
+    return 0
+  fi
+  digest_after="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
+  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}"
+
+  if [ "$digest_before" != "$digest_after" ]; then
+    fail 6 "the eight guarded columns CHANGED across the reboot ($digest_before -> ${digest_after:-unreadable}) — the boot-time plugin upsert clobbered pulled rows despite the provenance stamp"
+    return 0
+  fi
+
+  # ── the guard's own control, sequenced AFTER the convergence it explains ──
+  #
+  # A convergence green is only interesting if the same box CLOBBERS when the
+  # stamp is gone. The off-switch has no CLI or HTTP surface (tenancy.ex says so
+  # verbatim), so this is direct SQL — and the RETURNING value is ASSERTED,
+  # because jsonb_set is a proven silent NO-OP when the parent path is absent.
+  if [ "${PDS_STEP6_GUARD_DEMO:-1}" != "1" ]; then
+    pass 6 "content-and-presence convergence across a real reboot: the eight columns the boot-time upsert reverts are byte-identical ($digest_before) and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it."
+    return 0
+  fi
+
+  say ""
+  info "GUARD-OFF CONTROL — clearing the stamp by SQL, then booting again:"
+  local ret digest_clobbered
+  ret="$(tgt_psql "UPDATE workspaces SET settings = jsonb_set(settings,'{pull_provenance,$SOURCE_DS}','{}'::jsonb) WHERE settings ? 'pull_provenance' RETURNING settings->'pull_provenance'" | head -1 || true)"
+  info "RETURNING       ${ret:-<nothing>}"
+  case "${ret:-}" in
+    *"\"$SOURCE_DS\": {}"*)
+      : ;;
+    *)
+      fail 6 "the stamp clear did NOT take: RETURNING says '${ret:-<nothing>}'. jsonb_set is a silent no-op when the parent path is absent, which is precisely why this is asserted rather than assumed — the guard-off control cannot be trusted to have run, so the convergence above stays uncontrolled."
+      return 0 ;;
+  esac
+
+  if ! reboot_target; then
+    fail 6 "the target did not come back after the guard-off reboot (see $BARKPARK_HOME/reboot.log)"
+    return 0
+  fi
+  digest_clobbered="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
+  info "after guard-off ${digest_clobbered:-<unreadable>}"
+  if [ "$digest_clobbered" = "$digest_before" ]; then
+    fail 6 "THE CONTROL DID NOT FIRE: with the provenance stamp cleared, a boot left the eight guarded columns unchanged. Then the converged green above was not measuring a guard — it was measuring a plugin whose declaration happens to match. Uninterpretable either way (PDS-D20)."
+    return 0
+  fi
+
+  info "NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are"
+  info "                sequenced BEFORE this control for exactly that reason; a"
+  info "                re-pull is required before any further assertion about it."
+  pass 6 "content-and-presence convergence across a real reboot ($digest_before, unchanged, stamp intact) — AND the control fires: with the stamp cleared by asserted SQL, the very next boot changed those same eight columns (${digest_clobbered}). The green measures a guard, not a coincidence."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -949,8 +1964,13 @@ step_6() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 step_7() {
-  head_step 7 "THE NEGATIVE GUARD — import against the SOURCE must be REFUSED"
+  head_step 7 "THE NEGATIVE GUARD — a MERGE import against the SOURCE must be REFUSED"
 
+  say "  SCOPE, exactly (PDS-D73): the :allow_bundle_import gate wraps ONLY the merge"
+  say "  branch of the import controller. \`clean\` is the DEFAULT mode and is NOT"
+  say "  gated by that flag. So what is proven below is that the source refuses a"
+  say "  MERGE import — never the broader claim that guerrilla cannot be written."
+  say ""
   say "  Re-derived at RUN time on purpose. This is a blue/green box: a deploy could"
   say "  land between any survey and this run, and the single point of failure is"
   say "  anyone appending BARKPARK_ALLOW_BUNDLE_IMPORT=1 to an env source. A refusal"
@@ -961,24 +1981,89 @@ step_7() {
   body="$(mktmp)"
   code="$(curl_src "/api/workspaces/$SOURCE_WS/import?mode=merge" \
             -X POST -H 'Content-Type: application/octet-stream' \
-            --data-binary 'pds-proof-probe' -o "$body" -w '%{http_code}' || echo 000)"
+            --data-binary 'pds-proof-probe' -o "$body" -w '%{http_code}' 2>/dev/null || true)"; code="$(http_code "$code")"
   local err
   err="$(jqp 'd["error"]["code"]' <"$body" 2>/dev/null || echo '')"
   info "POST /api/workspaces/$SOURCE_WS/import?mode=merge -> HTTP $code  code=${err:-none}"
   info "body: $(head -c 300 "$body")"
 
   if [ "$code" = "403" ] && [ "$err" = "bundle_import_disabled" ]; then
-    pass 7 "the source REFUSES bundle import: HTTP 403 bundle_import_disabled, re-derived this run against $SOURCE_BASE (deployed sha ${DEPLOYED_SHA:-unresolved})"
+    pass 7 "the source refuses a MERGE import: POST …/import?mode=merge -> HTTP 403 bundle_import_disabled, re-derived this run against $SOURCE_BASE (deployed sha ${DEPLOYED_SHA:-unresolved}). SCOPED CLAIM: the clean/restore mode is ungated by this flag and is NOT covered by this line."
   else
-    fail 7 "the source did NOT refuse: HTTP $code code=${err:-none}. If this is a 2xx, a live content API is accepting bundle imports — check every env source (including .slots/*.env) for BARKPARK_ALLOW_BUNDLE_IMPORT."
+    fail 7 "the source did NOT refuse the MERGE import: HTTP $code code=${err:-none}. If this is a 2xx, a live content API is accepting bundle merges — check every env source (including .slots/*.env) for BARKPARK_ALLOW_BUNDLE_IMPORT."
   fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 8 — THE CLOSING RE-PIN (PDS-D72)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# DEPLOYED_SHA is captured once, in step 0a, and EVERY differential above is
+# dated by it. This box has redeployed three times inside one 15-minute survey
+# and once inside a three-minute probe, with Caddy flipping :4000 -> :4001
+# mid-command. A run that straddles a deploy is comparing two different builds
+# and calling the difference a finding. So the pin is re-read at the close.
+#
+# FAIL (the signal fired) and ABORT (there is no signal) are different outcomes
+# and this step never collapses one into the other.
+
+step_8() {
+  head_step 8 "CLOSING RE-PIN — did the source redeploy under this run?"
+
+  if [ -z "$DEPLOYED_SHA" ] && [ -z "$DEPLOYED_UPTIME_0A" ]; then
+    abort 8 "step:0a" \
+      "no baseline to re-pin against: step 0a resolved neither a deployed sha (SSH) nor an uptime_seconds. Every source-derived number above is therefore undated — that is a real limit of this transcript, not a pass."
+    return 0
+  fi
+
+  local sha_now
+  sha_now=""
+  if [ -n "$DEPLOYED_SHA" ] && ssh_available; then
+    sha_now="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"
+  fi
+  if [ -n "$sha_now" ]; then
+    info "sha at 0a       $DEPLOYED_SHA"
+    info "sha now         $sha_now"
+    if [ "$sha_now" != "$DEPLOYED_SHA" ]; then
+      fail 8 "THE SOURCE REDEPLOYED UNDER THIS RUN: $DEPLOYED_SHA -> $sha_now. Every differential above straddles two builds and none of it is safe to quote. Re-run against a settled box."
+      return 0
+    fi
+  else
+    info "sha now         UNRESOLVED over SSH — falling back to the uptime signal"
+  fi
+
+  # The SSH-free fallback: uptime_seconds going BACKWARDS means the BEAM this
+  # run was talking to was replaced under it.
+  local status code uptime_now
+  uptime_now=""
+  status="$(mktmp)"
+  code="$(http_code "$(curl -sS -o "$status" -w '%{http_code}' --max-time 30 "$SOURCE_BASE/status.json" 2>/dev/null || true)")"
+  if [ "$code" = "200" ]; then
+    uptime_now="$(jqp 'd.get("uptime_seconds","")' <"$status" 2>/dev/null || true)"
+    case "$uptime_now" in ''|*[!0-9]*) uptime_now="" ;; esac
+  fi
+
+  if [ -n "$DEPLOYED_UPTIME_0A" ] && [ -n "$uptime_now" ]; then
+    info "uptime at 0a    ${DEPLOYED_UPTIME_0A}s"
+    info "uptime now      ${uptime_now}s"
+    if [ "$uptime_now" -lt "$DEPLOYED_UPTIME_0A" ]; then
+      fail 8 "uptime_seconds went BACKWARDS ($DEPLOYED_UPTIME_0A -> $uptime_now): the process this run measured was replaced under it, whatever the sha says. Nothing above is safely quotable."
+      return 0
+    fi
+  elif [ -z "$sha_now" ]; then
+    abort 8 "env:no-repin-signal" \
+      "neither signal was readable at the close (sha over SSH unresolved, /status.json -> HTTP $code). The run may or may not have straddled a deploy; refusing to print a green over an unread instrument."
+    return 0
+  fi
+
+  pass 8 "the source did not move under this run: ${sha_now:+sha re-read over SSH is unchanged ($sha_now)}${sha_now:+; }uptime_seconds ${DEPLOYED_UPTIME_0A:-?} -> ${uptime_now:-?} (monotonic). Every source-derived number above is dated by the SAME build."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
 # DRIVER
 # ═════════════════════════════════════════════════════════════════════════════
 
-ALL_STEPS="0a 0b 0c 1 2 3 4 5 6 7"
+ALL_STEPS="0a 0b 0c 1 2 3 4 5 6 7 8"
 
 summary() {
   printf '\n'
@@ -1025,6 +2110,7 @@ run_steps() { # space-separated ids
       5)  step_5 ;;
       6)  step_6 ;;
       7)  step_7 ;;
+      8)  step_8 ;;
       *)  die "unknown step '$s' (known: $ALL_STEPS)" ;;
     esac
   done
@@ -1063,7 +2149,7 @@ main() {
       exit $?
       ;;
     -h|--help|help)
-      sed -n '2,80p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,81p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -1073,4 +2159,10 @@ main() {
   esac
 }
 
-main "$@"
+# PDS_PROOF_LIB=1 loads every rung WITHOUT running one. It exists so a rung can
+# be exercised — and made to FAIL — in isolation, which is the only way to show
+# an assertion is an instrument rather than a decoration (PDS-D20). It changes
+# nothing about --plan/--all/--only.
+if [ -z "${PDS_PROOF_LIB:-}" ]; then
+  main "$@"
+fi
