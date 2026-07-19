@@ -71,13 +71,25 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # The SIX `.editor-panel` roots (charter D42 — D29 listed only five).
   # A seventh root means the inventory below has to be re-audited, so the set is
   # pinned rather than merely counted.
+  #
+  # Each root is pinned by {file, ANCHOR, description} — a distinguishing token
+  # on the root's own source line — deliberately NOT by line number. Line
+  # numbers were the first draft and they are a false tripwire: spd-s4 is a
+  # file-disjoint sibling of this slice that nonetheless shifts every root in
+  # `components.ex` by ~12 lines (it inserts a comment block above the pane
+  # loop), which reddened this test on merge while nothing about the containment
+  # audit had actually changed. An anchor moves only when the root itself is
+  # rewritten — which IS the event worth failing on.
   @panel_roots [
-    {"live/studio/studio_live/components.ex", 98, "paper editor"},
-    {"live/studio/studio_live/components.ex", 797, "media explorer"},
-    {"live/studio/studio_live/components.ex", 861, "beta doc editor"},
-    {"components/studio_components/editor.ex", 367, "classic field editor"},
-    {"live/studio/graph_view.ex", 113, "graph view"},
-    {"live/studio/sheet_grid.ex", 2478, "sheet grid"}
+    {"live/studio/studio_live/components.ex", ~s(data-test-id="studio-paper-editor"),
+     "paper editor"},
+    {"live/studio/studio_live/components.ex", "media-explorer-panel", "media explorer"},
+    {"live/studio/studio_live/components.ex", ~s(data-test-id="studio-doc-beta-editor"),
+     "beta doc editor"},
+    {"components/studio_components/editor.ex", ~s(<div class="editor-panel"),
+     "classic field editor"},
+    {"live/studio/graph_view.ex", "graph-editor", "graph view"},
+    {"live/studio/sheet_grid.ex", "sheet-editor", "sheet grid"}
   ]
 
   # Every selector in root.html.heex whose rule block declares `position: fixed`,
@@ -250,19 +262,42 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
         for path <- studio_sources(),
             {line, idx} <- Enum.with_index(File.read!(path) |> String.split("\n"), 1),
             Regex.match?(~r/class=(\{|")[^\n]*\beditor-panel\b(?!-)/, line),
-            do: {Path.relative_to(path, @lib), idx}
+            do: {Path.relative_to(path, @lib), idx, String.trim(line)}
 
-      assert MapSet.new(rendered) ==
-               MapSet.new(for {f, l, _} <- @panel_roots, do: {f, l}),
+      found_desc =
+        Enum.map_join(Enum.sort(rendered), "\n  ", fn {f, l, t} -> "#{f}:#{l}  #{t}" end)
+
+      assert length(rendered) == length(@panel_roots),
              """
-             The set of `.editor-panel` roots moved.
+             The number of `.editor-panel` roots moved: #{length(rendered)} rendered,
+             #{length(@panel_roots)} audited.
 
              If a root was ADDED, re-audit its `position: fixed` descendants and
-             extend @fixed_css_inventory. If one merely MOVED, update
-             @panel_roots. Found:
+             extend @fixed_css_inventory before adding it to @panel_roots. Found:
 
-             #{inspect(Enum.sort(rendered), pretty: true)}
+               #{found_desc}
              """
+
+      for {file, anchor, description} <- @panel_roots do
+        matches =
+          Enum.filter(rendered, fn {f, _l, text} ->
+            f == file and String.contains?(text, anchor)
+          end)
+
+        assert length(matches) == 1,
+               """
+               The `#{description}` `.editor-panel` root is no longer identifiable.
+
+               Expected exactly one line in #{file} carrying both `editor-panel`
+               and the anchor `#{anchor}`; found #{length(matches)}.
+
+               If the root was rewritten, re-audit its `position: fixed`
+               descendants (that is what this file exists for) and then update
+               the anchor. Found roots:
+
+                 #{found_desc}
+               """
+      end
     end
 
     test "exactly three fixed-position selectors render under a panel root" do
