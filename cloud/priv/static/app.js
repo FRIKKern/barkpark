@@ -8598,10 +8598,12 @@
   // pre-first-event placeholder ("Starting…") before any server step has landed.
   // C3: "verify" is the post-provision golden-path gate (charter D45): the
   // provisioner probes the fresh box BETWEEN `content` and `ready`, so it sits
-  // there in the display order too. The server does not emit it yet — the SPA
-  // renders it forward-compat: it shows as an upcoming pending step until the
-  // gate lands, and an UNKNOWN step name (any future addition) renders
-  // generically (label = the raw name), never crashing.
+  // there in the display order too. The server EMITS it today (GR18: registry.ex
+  // appends the started/done entries plus a discrete `progress` row per probe —
+  // C8/D53), so verify renders as LIVE per-probe telemetry: buildProvisionRow
+  // collects the progress details and newStepsHtml paints them as the probe
+  // checklist under the step. An UNKNOWN step name (any future addition) still
+  // renders generically (label = the raw name), never crashing.
   // dwb-17/D10: "freshen" is the go-live freshness FALLBACK — the provisioner
   // fetch+compares against origin/main at the top of the chain and rebuilds
   // when the box is behind, so a fresh instance never boots stale code. It
@@ -8919,8 +8921,18 @@
   // pulses + spins so the between-steps window never reads frozen. The verify
   // gate's probe lines render as a checklist under their step.
   function newStepsHtml(rows) {
-    return '<ul class="new-steps">' + rows.map(function (row) {
-      var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : "pending";
+    // GR18(4) — the ladder snap law, ported to the theater: once a step has
+    // FAILED, the steps behind it never ran and never will (the worker stops
+    // at the break), so they render `skipped` (dashed hollow, no "~30s" plan
+    // hint — promising a plan for a step that will not run is a lie). Steps
+    // the server DID report after the break (a done/active row) stay truthful.
+    var failedAt = -1;
+    for (var fi = 0; fi < rows.length; fi++) {
+      if (rows[fi].role === "failed") { failedAt = fi; break; }
+    }
+    return '<ul class="new-steps">' + rows.map(function (row, idx) {
+      var skipped = failedAt >= 0 && idx > failedAt && row.role === "pending";
+      var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : skipped ? "skipped" : "pending";
       if (row.next) cls += " next";
       // A `completing` row is truth-done but mid-dwell: the tick sweeps its ring
       // to full instead of tracking elapsed (see newTickProgressClock).
@@ -8933,7 +8945,7 @@
         if (row.completing) pct = Math.max(pct, 34); // sweep starts visibly, never from empty
         dotAttrs = ' aria-hidden="true" data-ring="' + esc(row.step) + '" style="--p:' + pct + '%"';
       }
-      var cap = row.caption || (row.next ? "Starting…" : "");
+      var cap = skipped ? "" : (row.caption || (row.next ? "Starting…" : ""));
       var capHtml = cap
         ? '<span class="new-step-detail" data-cap="' + esc(cap) + '">' + esc(cap) + "</span>"
         : "";
@@ -8944,6 +8956,7 @@
         : "";
       var time = "";
       if (row.role === "active") time = fmtDur(row.elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
+      else if (skipped) time = ""; // no plan hint for a step that will not run
       else if (row.role === "pending") time = expected ? "~" + fmtDur(expected) : "";
       else if (row.elapsedMs != null) time = fmtDur(row.elapsedMs);
       var timeHtml = time
@@ -8998,6 +9011,86 @@
       "</button>" +
       '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines) + "</div>" +
     "</div>";
+  }
+
+  // ── GR18(3): price-before-charge ────────────────────────────────────────────
+  // The line above the rail: the REAL server-catalog price for the box being
+  // provisioned ("€4.9/mo on Hetzner · Falkenstein — price confirmed before
+  // anything is charged."). The price is the catalog row for bp.server_type via
+  // formatMonthlyPrice (Decision 6 — the same formatter the launch picker
+  // renders), NEVER the plan-grid digits (GR19) and never an invented number:
+  // when the catalog carries no price for this box (managed launch with no
+  // connected provider, missing server_type, unpriced type) the model is null
+  // and the line is OMITTED entirely. Pure + total.
+  function theaterPriceModel(bp, catalog) {
+    bp = bp || {};
+    if (!bp.server_type || !catalog || !Array.isArray(catalog.server_types)) return null;
+    var st = null;
+    for (var i = 0; i < catalog.server_types.length; i++) {
+      var t = catalog.server_types[i];
+      if (t && t.slug === bp.server_type) { st = t; break; }
+    }
+    if (!st || typeof st.monthly_price !== "number" || !isFinite(st.monthly_price) || st.monthly_price < 0) return null;
+    var kind = bp.provider || "hetzner";
+    var loc = null;
+    var regions = catalog.regions || [];
+    for (var j = 0; j < regions.length; j++) {
+      var rg = regions[j];
+      if (rg && rg.slug === bp.region) { loc = rg.name || rg.slug; break; }
+    }
+    if (!loc && bp.region) loc = String(bp.region);
+    return {
+      price: formatMonthlyPrice(st.monthly_price, kind, catalog.currency),
+      provider: providerMeta(kind).name,
+      location: loc
+    };
+  }
+
+  function theaterPriceLineHtml(bp, catalog) {
+    var m = theaterPriceModel(bp, catalog);
+    if (!m) return "";
+    return '<p class="theater-price" data-price-line>' +
+      '<span class="theater-price-amount">' + esc(m.price) + "</span> on " + esc(m.provider) +
+      (m.location ? " · " + esc(m.location) : "") +
+      " — price confirmed before anything is charged.</p>";
+  }
+
+  // One catalog fetch per provider kind, shared by BOTH theater mounts (/new and
+  // the in-shell fold). An unpriceable answer (404 no_provider on a managed
+  // launch, 502, error) caches null so the line stays omitted without refetch
+  // loops; waiters queue behind an in-flight fetch.
+  var theaterCatalogCache = {};
+
+  function theaterCatalogFor(bp) {
+    var c = theaterCatalogCache[(bp && bp.provider) || "hetzner"];
+    return c && c.done ? c.catalog : null;
+  }
+
+  function loadTheaterCatalog(bp, onReady) {
+    if (!bp || !bp.server_type) return; // nothing to price against
+    var kind = bp.provider || "hetzner";
+    var c = theaterCatalogCache[kind];
+    if (c && c.done) { if (onReady) onReady(); return; }
+    if (c) { if (onReady) c.waiters.push(onReady); return; }
+    c = theaterCatalogCache[kind] = { done: false, catalog: null, waiters: onReady ? [onReady] : [] };
+    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/catalog").then(function (r) {
+      var vs = catalogViewState(r);
+      c.done = true;
+      c.catalog = vs.state === "ready" ? vs.catalog : null;
+      c.waiters.splice(0).forEach(function (f) { f(); });
+    });
+  }
+
+  // Patch the price line into an already-mounted in-shell timeline (called once
+  // the catalog resolves). No-op when unpriceable or already present.
+  function tlInsertPriceLine(bp) {
+    var section = document.querySelector("[data-tl]");
+    if (!section || !section.querySelector) return;
+    if (section.querySelector("[data-price-line]")) return;
+    var html = theaterPriceLineHtml(bp, theaterCatalogFor(bp));
+    if (!html) return;
+    var anchor = section.querySelector("[data-overall]") || section.querySelector(".new-steps");
+    if (anchor && anchor.insertAdjacentHTML) anchor.insertAdjacentHTML("beforebegin", html);
   }
 
   // The provisioning classifiers, mirroring fleetRow/instanceDetailHtml so the
@@ -9073,6 +9166,10 @@
     return '<section class="bp-timeline" data-tl data-tl-bp="' + esc((bp && bp.id) || "") +
         '" data-tl-lc="' + (failed ? "failed" : "provisioning") + '">' +
         head +
+        // GR18(3): the price-before-charge line, when the shared catalog cache
+        // already resolved a real price (mountInstanceTimeline kicks the fetch
+        // and patches the line in once it lands).
+        theaterPriceLineHtml(bp, theaterCatalogFor(bp)) +
         provisionOverallHtml(rows) +
         timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
         retry +
@@ -9187,6 +9284,9 @@
   function wireInstanceTimeline(root, bp) {
     var section = root && root.querySelector ? root.querySelector("[data-tl]") : null;
     if (!section) return;
+    // GR18(3): resolve the real catalog price once per provider; the line slots
+    // in above the rail when (and only when) a real price exists.
+    loadTheaterCatalog(bp, function () { tlInsertPriceLine(bp); });
     // A full render just painted current state — prime the region-patch caches
     // so the next SSE fast path / tick only touches what actually changes.
     if (bp && bp.id != null) {
@@ -9823,22 +9923,46 @@
       // scrolled up (not stuck to bottom).
       var prevBody = document.querySelector("#new-body .new-console-body");
       if (prevBody && newState.consoleStick === false) newState.consoleScrollTop = prevBody.scrollTop;
-      var title = (newState.template && newState.template.title) || "your Barkpark";
+      // v4 head copy: once the poll knows the row, the head names the INSTANCE
+      // ("Launching Hugin…"); before that, the template is the honest handle.
+      var title = (newState.bpRow && newState.bpRow.name)
+        ? "Launching " + newState.bpRow.name + "…"
+        : "Setting up " + ((newState.template && newState.template.title) || "your Barkpark");
       var mountRows = newDisplayRows();
+      // GR18 theater (v4, screens/09): a centred head (title + pace + the
+      // price-before-charge line), the master bar, then the two-column stage —
+      // step rail beside the live console (stacking on phones, rail first).
+      // The console honesty line is TRUE: the URL carries template+bp, so a
+      // closed tab resumes right here (newStartProgress's replaceState).
       newSetBody(newPanel(
         '<div class="new-progress">' +
           newConnBannerHtml() +
-          "<h2>Setting up " + esc(title) + "</h2>" +
-          '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + newElapsedSeconds(newState.serverSteps || []) + "s elapsed</span></p>" +
+          '<div class="new-theater-head">' +
+            '<h2 class="new-title" data-theater-title>' + esc(title) + "</h2>" +
+            '<p class="new-desc">This usually takes under a minute. <span class="new-elapsed">' + newElapsedSeconds(newState.serverSteps || []) + "s elapsed</span></p>" +
+            theaterPriceLineHtml(newState.bpRow, theaterCatalogFor(newState.bpRow)) +
+          "</div>" +
           (mountRows ? provisionOverallHtml(mountRows) : "") +
-          newProgressStepsHtml() +
-          newConsoleHtml() +
+          '<div class="new-theater-grid">' +
+            '<div class="new-theater-rail">' + newProgressStepsHtml() + "</div>" +
+            '<div class="new-theater-side">' +
+              newConsoleHtml() +
+              '<p class="new-theater-note dim">You can close this page — provisioning continues on our side, and this page resumes where it left off.</p>' +
+            "</div>" +
+          "</div>" +
         "</div>"));
       newWireConsole();
       newTickProgressClock();
       return;
     }
 
+    // The head keeps pace with identity: once the poll names the row, the title
+    // flips to "Launching <name>…" in place (text-only — no rebuild).
+    var titleEl = mounted.querySelector("[data-theater-title]");
+    if (titleEl && newState.bpRow && newState.bpRow.name) {
+      var wantTitle = "Launching " + newState.bpRow.name + "…";
+      if (titleEl.textContent !== wantTitle) titleEl.textContent = wantTitle;
+    }
     if (stepsSig !== newState.stepsSig) {
       newState.stepsSig = stepsSig;
       var ul = mounted.querySelector(".new-steps");
@@ -9846,11 +9970,11 @@
       // that's the intended "new information" cue.
       if (ul) ul.outerHTML = newProgressStepsHtml();
       // First real steps arrived after the "Starting…" placeholder → the master
-      // bar wasn't mounted yet; insert it above the freshly-rendered steps.
+      // bar wasn't mounted yet; insert it above the stage grid.
       var rows = newDisplayRows();
       if (rows && !mounted.querySelector("[data-overall]")) {
-        var stepsEl = mounted.querySelector(".new-steps");
-        if (stepsEl) stepsEl.insertAdjacentHTML("beforebegin", provisionOverallHtml(rows));
+        var gridEl = mounted.querySelector(".new-theater-grid");
+        if (gridEl) gridEl.insertAdjacentHTML("beforebegin", provisionOverallHtml(rows));
       }
       patchProvisionOverall(mounted, rows || []);
     }
@@ -9878,6 +10002,22 @@
     }
   }
 
+  // GR18(3): once the catalog resolves a real price for the polled row, slot
+  // the line into the mounted theater head in place (no rebuild — animations
+  // survive); with no mount to patch, an unforced re-render includes it.
+  function newRenderPriceLine() {
+    if (!newState || newState.step !== "progress") return;
+    var mounted = document.querySelector("#new-body .new-progress");
+    if (mounted && mounted.querySelector) {
+      if (mounted.querySelector("[data-price-line]")) return;
+      var html = theaterPriceLineHtml(newState.bpRow, theaterCatalogFor(newState.bpRow));
+      if (!html) return;
+      var head = mounted.querySelector(".new-theater-head");
+      if (head && head.insertAdjacentHTML) { head.insertAdjacentHTML("beforeend", html); return; }
+    }
+    newRenderProgress();
+  }
+
   function newCheckStatus(id) {
     api("GET", "/v1/barkparks", null, {}).then(function (r) {
       // dwb-16: a FAILED poll (network error / non-2xx) leaves lastPollOkAt stale
@@ -9894,6 +10034,10 @@
       newState.serverSteps = bp.provision_steps || [];
       newState.serverConsole = bp.provision_console || [];
       newState.provisionStatus = bp.provision_status || null;
+      // GR18(3): the polled row carries provider/region/server_type — resolve
+      // the real catalog price once and patch the line in when it lands.
+      newState.bpRow = bp;
+      loadTheaterCatalog(bp, newRenderPriceLine);
       // First server truth after (re)load: everything ALREADY finished is
       // history — seed the pace ledger so a resume renders it done instantly
       // instead of replaying each old step's dwell as theatre.
@@ -10252,6 +10396,11 @@
     if (newState && newState.step === "failed") return;
     newClearTimers();
     newState.step = "failed";
+    // GR18(4): the honest failCopy — bp.provision_error is the server-owned
+    // failure copy (the worker's reason, humanized at the source per the
+    // FailureCopy law), rendered VERBATIM — what broke, never rewritten
+    // client-side. The resource-state sentence below it is the client's one
+    // truthful addition: nothing charged, same instance, Retry re-runs.
     var reason = bp.provision_error ? esc(bp.provision_error) : "Something went wrong while provisioning.";
     // dwb-16: the console STAYS on failure — that's where the user reads what
     // actually happened (the last lines carry the failure detail).
@@ -10262,14 +10411,27 @@
     var capLine = lastCap
       ? '<p class="new-failed-caption">Last step: ' + esc(lastCap) + "</p>"
       : "";
+    // GR18(4): the theater keeps its stage on failure — the rail snaps to truth
+    // (paceSteps never dwells a failure): the failing step flips red at 0ms and
+    // the steps behind it render `skipped` (newStepsHtml's snap law). ONE
+    // recovery action (parent D25): Retry setup. The instance link is
+    // navigation fineprint, not a second recovery affordance.
+    var rows = provisionSteps({ provision_steps: newState.serverSteps }, Date.now());
     newSetBody(newPanel(
       '<div class="new-failed">' +
-        "<h2>Setup didn't finish</h2>" +
-        '<p class="notice notice-error" role="alert">' + reason + "</p>" +
-        '<p class="dim">You can retry — this re-runs provisioning for the same instance. Nothing was charged.</p>' +
-        '<button class="btn btn-primary btn-block" id="new-retry" type="button">Retry setup</button>' +
-        capLine +
-        newConsoleHtml() +
+        '<div class="new-theater-head">' +
+          '<h2 class="new-title">Setup didn&#39;t finish</h2>' +
+          '<p class="new-fail-copy" role="alert">' + reason + "</p>" +
+          '<p class="new-desc">Nothing was charged. Retry re-runs setup on this same instance.</p>' +
+        "</div>" +
+        '<div class="new-theater-grid">' +
+          '<div class="new-theater-rail">' + newStepsHtml(rows) + "</div>" +
+          '<div class="new-theater-side">' +
+            capLine +
+            newConsoleHtml() +
+          "</div>" +
+        "</div>" +
+        '<div class="new-actions"><button class="btn btn-primary btn-block" id="new-retry" type="button">Retry setup</button></div>' +
         '<p class="new-fineprint"><a href="/#instance/' + esc(bp.id) + '">View instance in the dashboard</a></p>' +
       "</div>"));
     newWireConsole();
@@ -12529,6 +12691,12 @@
       tierCardHtml: tierCardHtml,
       billingChipModel: billingChipModel,
       billingPortalFlag: billingPortalFlag,
+      // gr-p2 launch theater (GR18): the price-before-charge fold — pure model
+      // (real catalog price or null, never invented) + its line markup. The
+      // catalog fetch/patch seam (loadTheaterCatalog/tlInsertPriceLine/
+      // newRenderPriceLine) is browser+smoke-driven.
+      theaterPriceModel: theaterPriceModel,
+      theaterPriceLineHtml: theaterPriceLineHtml,
     });
   }
 })();

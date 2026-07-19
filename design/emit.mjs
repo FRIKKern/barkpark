@@ -361,7 +361,10 @@ function cloudAccentVars(theme, indent, t = tokens) {
     `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
     `--ring: hsl(${t.color.ring[theme]});`,
     `--primary-hsl: ${p};`,
-    `--primary-soft: hsl(var(--primary-hsl) / ${a});`,
+    // --primary-soft retired (GUI-remake GR22, gr-p2-launch-theater): its sole
+    // consumer (.size-opt selected tint) now reads --ok-soft — the identical
+    // channel/alpha, since --ok TRACKS accent.primary (GR6). The Studio
+    // surface's primaryVars copy is untouched (root.html.heex still consumes it).
     `--ok-hsl: ${p};`,
     `--ok: hsl(var(--ok-hsl));`,
     `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
