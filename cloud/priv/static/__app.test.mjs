@@ -6687,3 +6687,128 @@ test("overviewStateHtml: dispatches to the mutually-exclusive band", () => {
   assert.match(hooks.overviewStateHtml({ status: "active", plan: "trial" }, ob, { canManage: true }), /runway-card/);
   assert.equal(hooks.overviewStateHtml({ status: "active", plan: "pro" }, ob, {}), "");
 });
+
+// ── gr-p3 D-01: the v4 fleet-row anatomy + the orthogonal update chip ────────
+// (screens/01). Pure row markup — states-complete (live/degraded/suspended/
+// failed) × update-chip present/absent, the mono metadata line, and the pill's
+// update-state decoupling. The shared classifyBp/statusOf spine is untouched.
+const fleetBp = (over) => Object.assign({
+  id: "i1", name: "Production", slug: "production",
+  url: "production.barkpark.cloud", host: "production.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.9.2",
+  update_state: "current", update_running_release: "0.9.2", update_latest_release: "0.9.2",
+  region: "fsn1", server_type: "cx22", channel: "prod",
+  autoupdate_enabled: true, autoupdate_paused: false, pinned_release: null,
+  provider: "hetzner", provision_status: "succeeded", suspended: false,
+}, over || {});
+
+test("gr-p3: the v4 fleet-row + update helpers are exported", () => {
+  for (const name of ["fleetRow", "fleetMetaHtml", "fleetAutoupdateText",
+    "fleetUpdateChip", "fleetUpdateChipHtml", "withoutUpdateState"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("gr-p3: fleetMetaHtml is the backend-true mono line, blank-tolerant", () => {
+  assert.equal(hooks.fleetMetaHtml({}), ""); // an empty row renders nothing (no dangling ·)
+  const full = hooks.fleetMetaHtml(fleetBp());
+  assert.match(full, /class="fleet-meta"/);
+  assert.match(full, /fsn1 · cx22 · v0\.9\.2 · prod · autoupdate on/);
+  // version already prefixed with v is not double-prefixed
+  assert.match(hooks.fleetMetaHtml({ version: "v1.2.3" }), /v1\.2\.3/);
+  assert.ok(hooks.fleetMetaHtml({ version: "v1.2.3" }).indexOf("vv1.2.3") === -1);
+  // no channel/autoupdate → those segments simply vanish
+  assert.equal(hooks.fleetMetaHtml({ region: "nbg1" }).indexOf("·"), -1);
+});
+
+test("gr-p3: fleetAutoupdateText — pinned > paused > off > on, hidden without a policy block", () => {
+  assert.equal(hooks.fleetAutoupdateText({}), ""); // older CP: no policy fields → nothing
+  assert.equal(hooks.fleetAutoupdateText({ autoupdate_enabled: true }), "autoupdate on");
+  assert.equal(hooks.fleetAutoupdateText({ autoupdate_enabled: false }), "autoupdate off");
+  assert.equal(hooks.fleetAutoupdateText({ autoupdate_enabled: true, autoupdate_paused: true }), "autoupdate paused");
+  assert.equal(hooks.fleetAutoupdateText({ pinned_release: "v0.9.0" }), "pinned v0.9.0");
+});
+
+test("gr-p3: fleetUpdateChip — backend-true only (behind names the release; in-flight outranks; else null)", () => {
+  assert.equal(hooks.fleetUpdateChip({ update_state: "current" }), null);
+  assert.equal(hooks.fleetUpdateChip({}), null); // never an invented state
+  const behind = hooks.fleetUpdateChip({ update_state: "behind", update_latest_release: "0.9.2" });
+  assert.equal(behind.state, "behind");
+  assert.equal(behind.label, "v0.9.2 available");
+  // a settled behind with no named latest still reads honestly
+  assert.equal(hooks.fleetUpdateChip({ update_state: "behind" }).label, "A newer release available");
+  // an in-flight rollout outranks a stale cached "behind"
+  assert.equal(hooks.fleetUpdateChip({ update_state: "behind", autoupdate_triggered_at: "2026-07-19T00:00:00Z" }).state, "in-flight");
+});
+
+test("gr-p3: fleetUpdateChipHtml — static per-state classes, escaped label; empty when no update", () => {
+  assert.equal(hooks.fleetUpdateChipHtml({ update_state: "current" }), "");
+  const ready = hooks.fleetUpdateChipHtml({ update_state: "behind", update_latest_release: "0.9.2" });
+  assert.match(ready, /class="fleet-update-chip fleet-update-chip--ready"/);
+  assert.match(ready, /v0\.9\.2 available/);
+  const busy = hooks.fleetUpdateChipHtml({ autoupdate_triggered_at: "2026-07-19T00:00:00Z" });
+  assert.match(busy, /fleet-update-chip--busy/);
+  assert.match(busy, /Updating/);
+});
+
+test("gr-p3: withoutUpdateState clears only update_state, never mutating the source", () => {
+  const src = fleetBp({ update_state: "behind" });
+  const copy = hooks.withoutUpdateState(src);
+  assert.equal(copy.update_state, null);
+  assert.equal(src.update_state, "behind"); // the shared spine's input is never mutated
+  assert.equal(copy.name, "Production");
+});
+
+test("gr-p3: fleetRow — v4 anatomy: leading pill column, mono meta, badges, chevron", () => {
+  const html = hooks.fleetRow(fleetBp());
+  assert.match(html, /class="fleet-row" data-id="i1"/);
+  assert.match(html, /<div class="fleet-status"><span class="status-pill status-pill--ok/);
+  assert.match(html, /class="fleet-name">Production/);
+  assert.match(html, /class="fleet-meta"/);
+  assert.match(html, /provider-chip--hetzner/);
+  assert.match(html, /fleet-open-studio/); // live → Open Studio
+  assert.match(html, /class="fleet-chev"/);
+  assert.equal(html.indexOf("fleet-update-chip"), -1); // current → no chip
+});
+
+test("gr-p3: fleetRow — states-complete pill roles (live/degraded/suspended/failed)", () => {
+  assert.match(hooks.fleetRow(fleetBp()), /status-pill--ok/);                 // live → Healthy
+  assert.match(hooks.fleetRow(fleetBp({ health_status: "down" })), /status-pill--warn/); // degraded
+  assert.match(hooks.fleetRow(fleetBp({ suspended: true })), /status-pill--danger/);     // suspended
+  const failed = hooks.fleetRow(fleetBp({ host: null, provision_status: "failed" }));
+  assert.match(failed, /status-pill--danger/);        // failed
+  assert.match(failed, /fleet-url failed/);           // and the failed url line
+  assert.equal(failed.indexOf("fleet-open-studio"), -1); // not live → no Open Studio
+});
+
+test("gr-p3: fleetRow — a live+behind box reads its lifecycle + a chip, NEVER a double 'Update available'", () => {
+  const html = hooks.fleetRow(fleetBp({ version: "0.8.4", update_state: "behind", update_latest_release: "0.9.2" }));
+  assert.match(html, /status-pill--ok/);                       // the pill stays lifecycle (Healthy)
+  assert.doesNotMatch(html, /Update available/);               // decoupled — no pill duplication
+  assert.match(html, /fleet-update-chip--ready/);              // the update signal is the chip
+  assert.match(html, /v0\.9\.2 available/);
+});
+
+// ── gr-p3 D-01: archives — the DISTINCT storage-unconfigured state ───────────
+test("gr-p3: archivesModel — the not_configured server copy is a DISTINCT state (docs + Retry)", () => {
+  const m = hooks.archivesModel({ ok: false, error: "Archive storage isn't configured for this deployment." });
+  assert.equal(m.notConfigured, true);
+  assert.equal(m.error, true);
+  const html = hooks.archivesPanelHtml(m);
+  assert.match(html, /archives-note--unconfigured/);
+  assert.match(html, /archives-note-dot/);
+  assert.match(html, /Archive storage isn/);            // server copy, verbatim (esc-stable fragment)
+  assert.match(html, /How archives work/);              // the docs link
+  assert.match(html, /data-archives-retry/);            // and a working Retry
+});
+
+test("gr-p3: archivesModel — a GENERIC store outage stays the transient error branch, not unconfigured", () => {
+  const m = hooks.archivesModel({ ok: false, error: "Couldn't reach the archive store. It may be temporarily unavailable — try again shortly." });
+  assert.ok(!m.notConfigured);
+  assert.equal(m.error, true);
+  const html = hooks.archivesPanelHtml(m);
+  assert.match(html, /archives-note--warn/);
+  assert.equal(html.indexOf("archives-note--unconfigured"), -1);
+  assert.equal(html.indexOf("How archives work"), -1); // no docs link on a transient outage
+  assert.match(html, /data-archives-retry/);
+});

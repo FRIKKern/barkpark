@@ -596,8 +596,9 @@ select.form-input {
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
 
-/* a failed provision reads in the destructive colour, not the muted url style */
-.fleet-url.failed { color: var(--destructive); font-family: var(--font); font-style: italic; }
+/* a failed provision reads in the danger colour, not the muted url style
+   (gr-p3: retired the legacy --destructive alias for the direct --danger role) */
+.fleet-url.failed { color: var(--danger); font-family: var(--font); font-style: italic; }
 
 /* billing: small meta lines under the plan card, and the active-tier highlight */
 .plan-meta { font-size: 12px; margin: 6px 0 0; }
@@ -862,12 +863,34 @@ select.form-input {
   transition: border-color var(--t);
 }
 .fleet-row:hover { border-color: var(--dim); }
+/* v4 screens/01: the lifecycle pill LEADS the row in its own column so names
+   align down the list; the pill's detail truncates via the existing .status-pill
+   rules (never edited here — charter GR11/GR25). */
+.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
 .fleet-main { min-width: 0; flex: 1; }
-.fleet-name { font-size: 14px; font-weight: 600; }
+.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; }
 .fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
+/* The mono metadata line: region · size · version · channel · autoupdate. */
+.fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
 .fleet-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .fleet-version { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+/* The inline update chip (v4 "vX available"). Orthogonal to the status pill —
+   ready = accent (the box is behind), busy = info (a rollout is landing). */
+.fleet-update-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: var(--pill);
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  white-space: nowrap; color: var(--text);
+}
+.fleet-update-dot { width: 6px; height: 6px; border-radius: var(--pill); background: var(--dim); flex: 0 0 auto; }
+.fleet-update-chip--ready { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
+.fleet-update-chip--ready .fleet-update-dot { background: var(--ok); }
+.fleet-update-chip--busy { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
+.fleet-update-chip--busy .fleet-update-dot { background: var(--info); }
+[data-theme="dark"] .fleet-update-chip--ready { background: hsl(var(--ok-hsl) / 0.2); }
+[data-theme="dark"] .fleet-update-chip--busy { background: hsl(var(--info-hsl) / 0.2); }
 
 /* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
    while a content-auto rebuild is in flight; a settled status·trigger·when pill
@@ -2919,6 +2942,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .archives-note p { margin: 0; }
 .archives-note--warn { color: var(--text); }
+/* storage-unconfigured: a distinct, non-transient state (amber dot + docs +
+   Retry), not a red outage. The server owns the copy verbatim. */
+.archives-note--unconfigured { color: var(--text); }
+.archives-note-dot { width: 8px; height: 8px; border-radius: var(--pill); background: var(--warn); flex: 0 0 auto; }
+.archives-docs-link { font-size: 13px; color: var(--primary); text-decoration: none; }
+.archives-docs-link:hover { text-decoration: underline; }
 
 .archive-list {
   display: flex;
