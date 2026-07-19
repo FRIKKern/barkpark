@@ -17,7 +17,16 @@
   // two independent switches (theme-system D23/D36). The pre-paint inline script
   // in index.html seeds data-bp-theme from this same key; the picker mutates it.
   var BP_THEME = "bp_theme";
-  var BP_THEMES = ["evergreen", "ember", "fjord"];
+  // The identity enum is GENERATED from design/themes/*.json (GR12) — the hand
+  // list drifted once (charple emitted but omitted here → unreachable). The
+  // switcher renders its <option>s from this at runtime, so a new theme file
+  // reaches the picker the moment `node design/emit.mjs --write` runs. Hand edits
+  // red design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
+  var BP_THEMES = [
+    /* BEGIN GENERATED: bp-theme ids (design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+    "evergreen", "charple", "ember", "fjord", "iris"
+    /* END GENERATED: bp-theme ids */
+  ];
 
   // ----------------------------------------------------------- tiny DOM utils
   function $(sel) { return document.querySelector(sel); }
@@ -1807,6 +1816,32 @@
     return applyBpTheme(t);
   }
 
+  // The picker's human label for an id — Title-case of the slug (the ids ARE the
+  // design's identity names: evergreen / charple / ember / fjord / iris). Pure.
+  function bpThemeLabel(id) {
+    var s = String(id == null ? "" : id);
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  }
+  // The picker's option model, derived from the GENERATED BP_THEMES (GR12) — so
+  // every identity emit.mjs knows about is offered, in the canonical order, with
+  // zero hand-list to drift. Pure; node-pinned.
+  function bpThemeOptions() {
+    return BP_THEMES.map(function (id) { return { id: id, label: bpThemeLabel(id) }; });
+  }
+  // Populate the identity <select> from bpThemeOptions() at boot. The prior
+  // hardcoded <option>s (and their charple/iris omission) are gone — the control
+  // is now a pure projection of the emitted enum. Re-selects the active id so the
+  // control mirrors [data-bp-theme] after initBpTheme().
+  function renderThemePicker() {
+    var sel = $("#bp-theme-picker");
+    if (!sel) return;
+    sel.innerHTML = bpThemeOptions().map(function (o) {
+      return '<option value="' + esc(o.id) + '">' + esc(o.label) + "</option>";
+    }).join("");
+    var active = normalizeBpTheme(localStorage.getItem(BP_THEME) || "evergreen");
+    sel.value = active;
+  }
+
   // =========================================================== AUTH SCREEN
   var authMode = "login";
 
@@ -2266,6 +2301,11 @@
       if (on) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
+    // v4 shell presentation over the unchanged route (GR10): morph the sidebar
+    // layer, paint the drilled-in context, keep the scope label + operator gate
+    // honest. Pure routing behaviour above is untouched — this only reflects `r`
+    // onto the new chrome (null-guarded, so the pre-v4 DOM / test shims no-op).
+    applyShellNav(r);
     // Collapse the Settings disclosure after every navigation so it never lingers
     // open over the next page.
     var menu = document.querySelector(".nav-menu");
@@ -2315,6 +2355,168 @@
       return sep + (cr.href ? '<a href="' + esc(cr.href) + '">' + esc(cr.label) + "</a>" : "<span>" + esc(cr.label) + "</span>");
     }).join("");
   }
+
+  // =========================================================== SHELL NAV (v4)
+  // The v4 sidebar CONTEXT-MORPHS: at a workspace route the root nav shows
+  // (Overview/Fleet/Sites/Activity + Settings); entering an instance or a site
+  // collapses layer 1 to a '← back' row and reveals THAT thing's sections. The
+  // layer is a PURE function of the parsed route — the prototype's
+  // navRoot/navSite/navInstance flags, folded to one enum. node-pinned; the DOM
+  // applier below reads it. The router (parseHash) is untouched: this is
+  // presentation over the unchanged IA (GR10).
+  function shellNavLayer(r) {
+    var view = r && r.view;
+    if (view === "instance") return "instance";
+    if (view === "site") return "site";
+    return "root";
+  }
+
+  // Fail-CLOSED operator gate (GR9): the sidebar Operator entry renders ONLY when
+  // /v1/me answered platform_operator === true. An absent field, a null me, a
+  // truthy-but-not-true value → hidden. Never keyed on team role (owner/admin is
+  // a different axis — Authz law). Pure; node-pinned.
+  function operatorVisible(me) {
+    return !!(me && me.platform_operator === true);
+  }
+
+  // The sidebar layer the instance/site morph shows a context NAME for. Kept in a
+  // closure var so loadInstance/loadSite can refine it once their fixture lands
+  // (a deep-link reload paints from fleetCache first, then the real name).
+  var shellCtxName = { instance: "", site: "" };
+  function setShellContextName(kind, name) {
+    if (kind !== "instance" && kind !== "site") return;
+    shellCtxName[kind] = name || "";
+    var el = $("#nav-" + kind + "-name");
+    if (el) setText(el, shellCtxName[kind] || (kind === "instance" ? "Instance" : "Site"));
+  }
+
+  // Apply the morph to the DOM: show exactly one nav layer, paint the drilled-in
+  // context + its section links, keep the topbar scope label honest, and re-run
+  // the operator gate off the cached me. Null-guarded throughout so the node/
+  // smoke shims (no real layer nodes) never throw. Presentation only.
+  function applyShellNav(r) {
+    var layer = shellNavLayer(r);
+    var layers = { root: $("#nav-layer-root"), instance: $("#nav-layer-instance"), site: $("#nav-layer-site") };
+    Object.keys(layers).forEach(function (k) { if (layers[k]) layers[k].hidden = k !== layer; });
+
+    if (layer === "instance") {
+      var bp = fleetLookup(r.id);
+      setShellContextName("instance", (bp && (bp.name || bp.slug)) || shellCtxName.instance);
+      paintCtxDot("#nav-instance-dot", bp ? classifyBp(bp) : "");
+      paintInstanceSections(r.id, r.tab);
+    } else if (layer === "site") {
+      setShellContextName("site", shellCtxName.site);
+      paintCtxDot("#nav-site-dot", "");
+    }
+    // Settings sub-items carry their OWN data-view (billing/providers/…);
+    // applyRoute's activeNav lights only the "settings" cluster (which the flat
+    // sidebar has no single trigger for), so highlight the exact settings page
+    // here — additive presentation, the router is unchanged.
+    if (document.querySelectorAll) {
+      document.querySelectorAll(".nav-sub[data-view]").forEach(function (link) {
+        var on = link.getAttribute("data-view") === (r && r.view);
+        link.classList.toggle("is-active", on);
+        if (on) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+    }
+    setScopeLabel(r, layer);
+    applyOperatorGate();
+    // A navigation closes an open scope dropdown so it never lingers over the
+    // next page (the .nav-menu disclosure gets the same treatment in applyRoute).
+    var sm = $("#scope-menu");
+    if (sm) sm.hidden = true;
+  }
+
+  function fleetLookup(id) {
+    if (!fleetCache || !id) return null;
+    for (var i = 0; i < fleetCache.length; i++) if (fleetCache[i].id === id) return fleetCache[i];
+    return null;
+  }
+
+  // The instance morph's section links: the registered instance sub-tabs, routed
+  // as #instance/<id>/<tab> so a click rides the UNCHANGED router (loadInstance
+  // repaints; the in-page tab strip stays the source of truth for the panel).
+  function paintInstanceSections(id, activeTab) {
+    var box = $("#nav-instance-sections");
+    if (!box) return;
+    box.innerHTML = INSTANCE_TABS.map(function (tab) {
+      var href = "#instance/" + encodeURIComponent(id) + (tab === INSTANCE_TAB_DEFAULT ? "" : "/" + tab);
+      var on = instanceTabOf(activeTab) === tab;
+      return '<a class="nav-link nav-sub' + (on ? " is-active" : "") + '" href="' + esc(href) + '"' +
+        (on ? ' aria-current="page"' : "") + ">" + esc(bpThemeLabel(tab)) + "</a>";
+    }).join("");
+  }
+
+  // The ctx dot's colour maps the fleet status kind (classifyBp) onto a semantic
+  // token via inline style — a FIXED class keeps it out of the dynamic-class gate
+  // (E3), and every var() here is a defined token (E1). Pure; node-pinned.
+  function ctxDotColor(kind) {
+    if (kind === "ok" || kind === "behind") return "var(--ok)";
+    if (kind === "failed" || kind === "removal_failed" || kind === "suspended" || kind === "degraded") return "var(--danger)";
+    if (kind === "provisioning" || kind === "removing") return "var(--warn)";
+    return "var(--muted-text)";
+  }
+  function paintCtxDot(sel, statusKind) {
+    var el = $(sel);
+    if (!el) return;
+    el.className = "nav-ctx-dot";
+    el.style.background = ctxDotColor(statusKind);
+  }
+
+  // Reflect the fail-closed operator gate onto the sidebar Operator entry. Reads
+  // the /v1/me cache (undefined before it loads → hidden); re-run from loadMe's
+  // callback AND every route so a late me-load flips it on without a reroute.
+  function applyOperatorGate() {
+    var el = $("#nav-operator");
+    if (el) el.hidden = !operatorVisible(meCache);
+  }
+
+  // The topbar scope label: the drilled-in instance/site name, else the
+  // workspace (team) name. Honest fallback strings before the caches land.
+  function setScopeLabel(r, layer) {
+    var el = $("#scope-label");
+    if (!el) return;
+    var label;
+    if (layer === "instance") label = shellCtxName.instance || "Instance";
+    else if (layer === "site") label = shellCtxName.site || "Site";
+    else label = (meCache && meCache.team && meCache.team.name) || "Workspace";
+    setText(el, label);
+  }
+
+  // ---- instance-scope dropdown (topbar) — a fleet jumper over the SAME router.
+  // Rows link to #instance/<id> (no fork of the ⌘K palette machinery); the menu
+  // paints from fleetCache instantly and refreshes when ensureFleet() resolves.
+  function renderScopeMenu() {
+    var menu = $("#scope-menu");
+    if (!menu) return;
+    var rows = (fleetCache || []).map(function (bp) {
+      return '<a class="scope-item" href="#instance/' + esc(bp.id) + '">' +
+        '<span class="scope-dot" style="background:' + ctxDotColor(classifyBp(bp)) + '"></span>' +
+        '<span class="scope-name">' + esc(bp.name || bp.slug || bp.id) + "</span></a>";
+    }).join("");
+    menu.innerHTML =
+      '<div class="scope-eyebrow">Instances</div>' +
+      (rows || '<div class="scope-empty">No instances yet</div>') +
+      '<a class="scope-item scope-foot" href="#fleet">View fleet</a>' +
+      '<button type="button" class="scope-item scope-foot" id="scope-launch">+ Launch instance</button>';
+    var launch = $("#scope-launch");
+    if (launch) launch.addEventListener("click", function () { toggleScopeMenu(false); openLaunchModal(); });
+  }
+  function toggleScopeMenu(force) {
+    var menu = $("#scope-menu");
+    var btn = $("#scope-switch");
+    if (!menu) return;
+    var open = force != null ? force : !!menu.hidden;
+    menu.hidden = !open;
+    if (btn) btn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      renderScopeMenu();
+      ensureFleet().then(function () { if (menu && !menu.hidden) renderScopeMenu(); });
+    }
+  }
+
+  // =========================================================== SHELL NAV (v4)
 
   // =========================================================== FLEET
   function badge(label, kind, value) {
@@ -2756,6 +2958,8 @@
         return;
       }
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
+      setShellContextName("instance", bp.name); // refine the sidebar morph ctx name
+      setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       // A4 ready fold: if we watched this box provisioning and it's now live, show
       // the ready panel. The flag is consumed on the operator's DISMISS (View
       // details), not on render — going live fires several SSE ticks in quick
@@ -5448,6 +5652,8 @@
         bp ? { label: bp.name, href: "#instance/" + encodeURIComponent(bp.id) } : null,
         { label: domain }
       ].filter(Boolean));
+      setShellContextName("site", site.name || domain); // sidebar morph ctx name
+      setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews);
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
@@ -7612,7 +7818,25 @@
     var name = (team && team.name) || (email ? email.split("@")[0] : null) || "My team";
     setText($("#account-team"), name);
     setText($("#account-avatar"), (name[0] || "B").toUpperCase());
+    // v4 sidebar account block (bottom): the USER identity, distinct from the
+    // workspace switcher's TEAM identity above it.
+    var who = email ? email.split("@")[0] : "Account";
+    setText($("#acct-name"), who);
+    setText($("#acct-email"), email || "");
+    setText($("#acct-avatar"), (who[0] || "B").toUpperCase());
     renderTeamSwitcher(team);
+  }
+
+  // The workspace switcher's plan chip — the team's current plan, hidden until
+  // the subscription is known (progressive: the Overview landing loads it). Reads
+  // activePlan() so a trial reads "Trial", a paid plan its tier name.
+  function paintWorkspacePlan() {
+    var chip = $("#ws-plan");
+    if (!chip) return;
+    if (!subLoaded || !subCache) { chip.hidden = true; return; }
+    var plan = activePlan();
+    setText(chip, plan === "trial" ? "Trial" : planName(plan));
+    chip.hidden = false;
   }
 
   // Team switcher (multi-team accounts): a <select> replaces the static team
@@ -7647,10 +7871,15 @@
 
   function loadMe() {
     setAccountChip(null, null); // immediate placeholder
+    applyOperatorGate();        // fail-closed while me is unknown (hidden)
     api("GET", "/v1/me").then(function (r) {
       if (r.ok && r.data) {
         meCache = r.data;
         setAccountChip(r.data.team, r.data.user && r.data.user.email);
+        // /v1/me is the operator truth (GR9): flip the sidebar entry on now that
+        // platform_operator is known, and refresh the scope label's team name.
+        applyOperatorGate();
+        setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       }
     });
   }
@@ -7680,6 +7909,7 @@
         // load → the UI shows a retry, not the upsell).
         subError = true;
       }
+      paintWorkspacePlan(); // the sidebar plan chip follows the real answer
       return subCache;
     });
   }
@@ -11619,6 +11849,7 @@
   function init() {
     initTheme();
     initBpTheme();
+    renderThemePicker(); // v4: the identity <select> is generated from BP_THEMES
     wireModal();
 
     // Auth.
@@ -11645,6 +11876,26 @@
     var bpPicker = $("#bp-theme-picker");
     if (bpPicker) bpPicker.addEventListener("change", function () { selectBpTheme(bpPicker.value); });
     $("#acct-btn").addEventListener("click", openAccountModal);
+    // v4 sidebar: the workspace switcher opens the same Account modal (team +
+    // sessions live there); Find/⌘K opens the EXISTING command palette (never a
+    // fork — reuses openCommandPalette's #modal-root machinery).
+    var wsSwitch = $("#ws-switch");
+    if (wsSwitch) wsSwitch.addEventListener("click", openAccountModal);
+    var navFind = $("#nav-find");
+    if (navFind) navFind.addEventListener("click", openCommandPalette);
+    // v4 topbar: the instance-scope dropdown (a fleet jumper over the router).
+    var scopeSwitch = $("#scope-switch");
+    if (scopeSwitch) scopeSwitch.addEventListener("click", function (e) {
+      e.stopPropagation();
+      toggleScopeMenu();
+    });
+    // Outside-click closes the scope dropdown (mirrors the .nav-menu handler).
+    document.addEventListener("click", function (e) {
+      var menu = $("#scope-menu");
+      if (menu && !menu.hidden && !(e.target.closest && e.target.closest(".topbar-scope"))) {
+        toggleScopeMenu(false);
+      }
+    });
 
     // Views. A4/D66: Launch is an ACTION — the Overview and Fleet header buttons
     // open the launch component in the focus-trapped modal.
@@ -12061,6 +12312,16 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the
+      // context-morph enum + fail-closed operator gate (both PURE, node-pinned;
+      // the DOM appliers applyShellNav/applyOperatorGate are browser+smoke-driven),
+      // the ctx-dot colour map, and the generated-identity picker projection (GR12).
+      resetTokenFromHash: resetTokenFromHash,
+      shellNavLayer: shellNavLayer,
+      operatorVisible: operatorVisible,
+      ctxDotColor: ctxDotColor,
+      bpThemeLabel: bpThemeLabel,
+      bpThemeOptions: bpThemeOptions,
     });
   }
 })();

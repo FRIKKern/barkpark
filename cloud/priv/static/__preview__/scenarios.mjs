@@ -1115,6 +1115,54 @@ export const SCENARIOS = {
     search: "?code=ABCD-2345",
     data: {},
   },
+
+  // ── gr-w3 v4 shell: context-morph, fail-closed operator gate, generated picker.
+  "shell-root": {
+    label: "v4 shell — a workspace route shows the ROOT nav layer (Overview/Fleet/Sites/Activity + Settings)",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [marketingSite], audit: [],
+    },
+  },
+  "shell-instance": {
+    label: "v4 shell — entering an instance MORPHS the sidebar to the instance layer + its sections",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+    },
+  },
+  "shell-site": {
+    label: "v4 shell — entering a site MORPHS the sidebar to the site layer",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [marketingSite], audit: [],
+    },
+  },
+  "operator-visible": {
+    label: "v4 shell — /v1/me platform_operator:true reveals the sidebar Operator entry (GR9)",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: { ...me("Ops Team", { instance: true }), platform_operator: true },
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+    },
+  },
+  "identity-iris": {
+    label: "v4 shell — the identity picker offers all 5 skins; iris is the active state (GR12)",
+    authed: true,
+    deepLink: "#overview",
+    seedLocal: { bp_theme: "iris" },
+    data: {
+      me: me("Acme Inc", { instance: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);

@@ -124,6 +124,9 @@ function bootScenario(name) {
   if (scen.authed) {
     store.set("bpcloud.session", JSON.stringify({ token: "preview", team_id: "preview-team" }));
   }
+  // seedLocal: pre-seed localStorage (e.g. bp_theme) so a scenario can exercise a
+  // restored identity/mode before the first paint. Optional, smoke-only.
+  if (scen.seedLocal) for (const k of Object.keys(scen.seedLocal)) store.set(k, String(scen.seedLocal[k]));
 
   // pathname/search are smoke-only optional scenario fields: a scenario that
   // needs a real path (e.g. /activate, to unlock isActivateFlow()) sets them.
@@ -445,6 +448,53 @@ const EXPECTATIONS = {
       const banner = (reg.get("auth-activate") || {}).innerHTML || "";
       assert.ok(banner.includes("Approve a device sign-in."), "banner must announce the device approval");
       assert.ok(banner.includes("ABCD-2345"), "banner must show the parked code");
+    },
+  },
+
+  // ── gr-w3 v4 shell: morph / operator / generated identity picker ────────────
+  "shell-root": {
+    what: "v4 shell — the ROOT nav layer shows, both morph layers hidden, operator hidden (no flag)",
+    check(reg) {
+      assert.equal(reg.get("app-shell").hidden, false, "app shell must be visible");
+      assert.equal(reg.get("nav-layer-root").hidden, false, "root nav layer must show at a workspace route");
+      assert.equal(reg.get("nav-layer-instance").hidden, true, "instance layer must be hidden at root");
+      assert.equal(reg.get("nav-layer-site").hidden, true, "site layer must be hidden at root");
+      assert.equal(reg.get("nav-operator").hidden, true, "operator entry is fail-closed without the flag");
+    },
+  },
+  "shell-instance": {
+    what: "v4 shell — the INSTANCE layer morphs in with its section links; root hidden",
+    check(reg) {
+      assert.equal(reg.get("nav-layer-instance").hidden, false, "instance layer must show under #instance/<id>");
+      assert.equal(reg.get("nav-layer-root").hidden, true, "root layer must collapse when drilled in");
+      const sections = reg.get("nav-instance-sections").innerHTML || "";
+      assert.ok(sections.includes("/timeline"), "instance sections must link the Timeline sub-tab");
+      assert.ok(sections.includes(">Timeline<"), "instance sections must label Timeline");
+      assert.ok(sections.includes(">Webhooks<"), "instance sections must label Webhooks");
+    },
+  },
+  "shell-site": {
+    what: "v4 shell — the SITE layer morphs in; root hidden",
+    check(reg) {
+      assert.equal(reg.get("nav-layer-site").hidden, false, "site layer must show under #site/<id>");
+      assert.equal(reg.get("nav-layer-root").hidden, true, "root layer must collapse for a site");
+      assert.equal(reg.get("nav-layer-instance").hidden, true, "instance layer stays hidden for a site");
+    },
+  },
+  "operator-visible": {
+    what: "v4 shell — platform_operator:true reveals the Operator entry (GR9 fail-open only on true)",
+    check(reg) {
+      assert.equal(reg.get("nav-operator").hidden, false, "operator entry must show when platform_operator is true");
+    },
+  },
+  "identity-iris": {
+    what: "v4 shell — the identity picker offers all 5 skins incl charple + iris; iris is the restored value (GR12)",
+    check(reg) {
+      const opts = reg.get("bp-theme-picker").innerHTML || "";
+      for (const id of ["evergreen", "charple", "ember", "fjord", "iris"]) {
+        assert.ok(opts.includes('value="' + id + '"'), "picker must offer the " + id + " identity");
+      }
+      assert.equal(reg.get("bp-theme-picker").value, "iris", "the restored bp_theme=iris is the active option");
     },
   },
 };
