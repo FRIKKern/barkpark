@@ -1462,6 +1462,48 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+
+  // ── D-05 (tail-append, OC9): the v4 auto-disabled endpoint + a failed delivery
+  // The Webhooks tab with an AUTO-DISABLED endpoint — its COUNT-FREE banner shows
+  // in the list (Re-enable offered, no client-authored failure count), plus a
+  // webhookDeliveries fixture carrying a failed (HTTP 500) row so a headless shot
+  // can open the v4 "Recent deliveries" card. smoke's click is inert, so smoke
+  // asserts the list-level count-free banner; the deliveries pill grammar + the
+  // real-response replay toast are unit-pinned in __app.test.mjs.
+  "webhooks-autodisabled": {
+    label: "Webhooks sub-tab — an auto-disabled endpoint (count-free banner) + a failed delivery",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/webhooks",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      webhooks: [
+        {
+          id: "wh-dead", name: "Reindex hook", url: "https://hooks.acme.com/reindex",
+          active: false, events: ["publish"], types: [],
+          auto_disabled_at: tMinus(1800),
+          disable_reason: "endpoint returned 500 Internal Server Error",
+          consecutive_failures: 20, updated_at: tMinus(1800),
+        },
+      ],
+      webhookDeliveries: {
+        "wh-dead": [
+          {
+            event_id: 5012, status: "failed_giveup", last_status_code: 500,
+            last_latency_ms: 182, attempts: 3,
+            last_error_text: "connect ECONNREFUSED 10.0.0.9:443", updated_at: tMinus(1800),
+          },
+          {
+            event_id: 5009, status: "delivered", last_status_code: 200,
+            last_latency_ms: 84, attempts: 1, updated_at: tMinus(7200),
+          },
+        ],
+      },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1607,6 +1649,25 @@ export function route(name, method, path) {
   if (whOne && method === "PUT") {
     const cur = (d.webhooks || []).filter((w) => String(w.id) === whOne[1])[0] || { id: whOne[1] };
     return { status: 200, body: { data: { webhook: Object.assign({}, cur) } } };
+  }
+  // D-05: an endpoint's delivery log + a replay. Deliveries read the scenario's
+  // webhookDeliveries[id] fixture (empty when absent → the honest "No deliveries
+  // yet."); a replay echoes back a fresh 200 delivery so the real-response toast
+  // (replayToastBody) has TRUE status + latency fields to name, never a mock.
+  const whDeliveries = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)\/deliveries$/);
+  if (whDeliveries && method === "GET") {
+    const list = (d.webhookDeliveries && d.webhookDeliveries[whDeliveries[1]]) || [];
+    return { status: 200, body: { data: { deliveries: list } } };
+  }
+  const whReplay = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/[^/]+\/deliveries\/([^/]+)\/replay$/);
+  if (whReplay && method === "POST") {
+    return {
+      status: 200,
+      body: { data: { delivery: {
+        event_id: whReplay[1], status: "delivered", last_status_code: 200,
+        last_latency_ms: 88, attempts: 1, updated_at: new Date().toISOString(),
+      } } },
+    };
   }
 
   // C8: the instance event history (agent events + verify runs, newest first).

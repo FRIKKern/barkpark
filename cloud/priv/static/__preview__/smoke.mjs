@@ -754,6 +754,26 @@ const EXPECTATIONS = {
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
     },
   },
+
+  // ── D-05 (tail-append, OC9): the v4 Webhooks auto-disabled state ────────────
+  // The endpoint list renders the auto-disabled endpoint's COUNT-FREE banner with
+  // a Re-enable action (the deliveries card + real-response replay are click-driven
+  // → inert here, so unit-pinned in __app.test.mjs). The banner must carry the
+  // server reason verbatim but NO client-authored failure count.
+  "webhooks-autodisabled": {
+    what: "the auto-disabled endpoint's count-free banner + Re-enable render in the list",
+    check(reg) {
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.length > 0, "#instance-tabpanel webhook list rendered empty");
+      assert.ok(panel.includes('class="wh-card"'), "the endpoint list must render webhook cards");
+      assert.ok(panel.includes("wh-autodisable"), "the auto-disabled banner renders");
+      assert.ok(panel.includes("Auto-disabled"), "the banner leads with the Auto-disabled label");
+      assert.ok(panel.includes("endpoint returned 500 Internal Server Error"), "the server disable_reason renders verbatim");
+      assert.ok(panel.includes("data-wh-reenable"), "the banner offers Re-enable (the one recovery action)");
+      assert.ok(!panel.includes("wh-autodisable-count"), "count-free: no client-authored failure count span");
+      assert.ok(!panel.includes("20 consecutive failures"), "count-free: the live-config threshold never leaks into the banner copy");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
