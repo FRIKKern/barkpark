@@ -1217,6 +1217,16 @@
       border-right: 1px solid var(--border-subtle);
       display: flex; flex-direction: column;
       background: var(--bg-card);
+      /* spd-s5: the space negotiation is a MOVE, not a jump. Collapsing a
+         pane swaps .pane-column ⇄ .pane-column--collapsed, i.e. 260px ⇄
+         44px; without a transition the row teleports and reads as a glitch
+         (measured live: transitionDuration 0s on every desk element).
+         Both states declare the same box transition so the morph plays in
+         BOTH directions. 0.15s is a hardcoded literal on purpose:
+         design/tokens.json carries motion.dur-* but the emitter emits no
+         --dur-* variable anywhere in api/, so a var() here would resolve to
+         nothing and silently kill the animation. */
+      transition: width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
     }
     /* The rightmost (focus/active) pane rides the raised surface so the drilled-to
        column reads as the elevated plane — visible depth, not decoration. */
@@ -1541,9 +1551,26 @@
     .pane-column--collapsed {
       width: 44px; min-width: 44px; max-width: 44px;
       flex-shrink: 0; cursor: pointer;
-      transition: background 0.1s;
+      transition: background 0.1s, width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
     }
     .pane-column--collapsed:hover { background: var(--bg-muted); }
+    /* The strip's INNER subtree is replaced synchronously in the click tick —
+       by the time the box starts shrinking, the vertical label is already
+       mounted, so a bare width transition shows a tiny rotated label adrift in
+       a nearly-full-width column. A crossfade is impossible (the old subtree
+       is gone), but an ENTRY animation fires naturally on freshly-inserted
+       nodes, which is exactly what these are. */
+    @keyframes bp-pane-strip-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .pane-column--collapsed > * { animation: bp-pane-strip-in 0.15s ease-out both; }
+    /* Honour the OS setting: the negotiation still HAPPENS, it just happens
+       instantly. Nulls the transition, not only the animation. */
+    @media (prefers-reduced-motion: reduce) {
+      .pane-column, .pane-column--collapsed { transition: background 0.1s; }
+      .pane-column--collapsed > * { animation: none; }
+    }
     .pane-column--collapsed .pane-header {
       justify-content: center;
       padding: 0;
