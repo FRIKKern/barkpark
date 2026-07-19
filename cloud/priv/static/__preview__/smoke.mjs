@@ -754,6 +754,37 @@ const EXPECTATIONS = {
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
     },
   },
+  // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
+  "fleet-v4": {
+    what: "v4 fleet rows (leading pill, mono meta, the update chip on the behind box) + archives storage-unconfigured",
+    check(reg) {
+      const body = (reg.get("fleet-body") || {}).innerHTML || "";
+      assert.ok(body.includes('class="fleet-row"'), "the fleet rows render");
+      assert.ok(body.includes('class="fleet-status"'), "the lifecycle pill leads its own column");
+      assert.ok(body.includes('class="fleet-meta"'), "the mono metadata line renders");
+      assert.ok(body.includes("fsn1 · cx32 · v0.1.0"), "the metadata is backend-true (region · size · version)");
+      assert.ok(body.includes("fleet-update-chip--ready"), "the behind box carries the update chip");
+      assert.ok(body.includes("v0.2.25 available"), "the chip names the real target release");
+      assert.ok(!body.includes("Update available"), "the update signal is the chip, never a doubled pill");
+      assert.ok(body.includes("provider-chip--hetzner") && body.includes("provider-chip--azure"), "provider marks render per row");
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      assert.ok(arch.includes("archives-note--unconfigured"), "archives shows the DISTINCT storage-unconfigured state");
+      assert.ok(arch.includes("Archive storage isn"), "the server's not_configured copy renders verbatim");
+      assert.ok(arch.includes("How archives work"), "the docs link renders");
+      assert.ok(arch.includes("data-archives-retry"), "a working Retry renders");
+    },
+  },
+  "fleet-archives-stored": {
+    what: "the Archives panel lists portable bundles, each with a per-provider resurrect",
+    check(reg) {
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      assert.ok(arch.includes("archive-list"), "the populated archive list renders");
+      assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle");
+      assert.ok(arch.includes("shop-9f2c1"), "a bundle is named by its fqdn");
+      assert.ok(arch.includes("archive-resurrect-btn"), "each row offers Resurrect");
+      assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

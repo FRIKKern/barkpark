@@ -1462,6 +1462,85 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
+  // Density rows across every lifecycle state (degraded / behind+chip / suspended
+  // / failed), the NEW backend-true update chip on the behind box, the mono
+  // metadata line (region · size · version · channel · autoupdate), and the
+  // DISTINCT archives storage-unconfigured state (the server's exact
+  // :not_configured copy at 502).
+  "fleet-v4": {
+    label: "Fleet v4 — density rows across states, the update chip, archives storage-unconfigured",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "5b2c1e00-0000-4000-8000-0000000000f1", name: "Gyldendal", slug: "gyldendal",
+          url: "gyldendal-506f0.barkpark.cloud", host: "gyldendal-506f0.barkpark.cloud",
+          health_status: "down", agent_status: "online", version: "0.2.25",
+          update_state: "current", update_latest_release: "0.2.25",
+          region: "fsn1", server_type: "cx22", channel: "prod", autoupdate_enabled: true,
+          provider: "hetzner", provision_status: "succeeded",
+        }),
+        bpBase({
+          id: "5b2c1e00-0000-4000-8000-0000000000f2", name: "Guerrilla", slug: "guerrilla",
+          url: "guerrilla-77a1c.barkpark.cloud", host: "guerrilla-77a1c.barkpark.cloud",
+          health_status: "up", agent_status: "online", version: "0.1.0",
+          update_state: "behind", update_running_release: "0.1.0", update_latest_release: "0.2.25",
+          region: "fsn1", server_type: "cx32", channel: "prod", autoupdate_enabled: true,
+          provider: "hetzner", provision_status: "succeeded",
+        }),
+        bpBase({
+          id: "5b2c1e00-0000-4000-8000-0000000000f3", name: "Marketing", slug: "marketing",
+          url: "marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
+          health_status: "up", agent_status: "online", version: "0.2.25",
+          region: "hel1", server_type: "cx22", channel: "prod", autoupdate_enabled: false,
+          provider: "azure", suspended: true, suspended_reason: "Payment failed — subscription past due",
+          provision_status: "succeeded",
+        }),
+        bpBase({
+          id: "5b2c1e00-0000-4000-8000-0000000000f4", name: "Reporting", slug: "reporting",
+          provision_status: "failed", provision_error: "verify.login: 500 — Studio never came up",
+          region: "fsn1", server_type: "cx22", provider: "hetzner",
+        }),
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      archives: { status: 502, body: { ok: false, error: "Archive storage isn't configured for this deployment." } },
+    },
+  },
+  "fleet-archives-stored": {
+    label: "Fleet Archives — portable bundles listed with a per-provider resurrect",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      archives: {
+        status: 200,
+        body: {
+          ok: true,
+          archives: [
+            {
+              fqdn: "shop-9f2c1.barkpark.cloud", slug: "shop", source_provider: "hetzner",
+              created_at: tMinus(3 * 86400), bundle_ref: "s3://bundles/shop.tar.zst",
+              spec: { region: "fsn1", server_type: "cx22" },
+            },
+            {
+              fqdn: "blog-1a4d7.barkpark.cloud", slug: "blog", source_provider: "azure",
+              created_at: tMinus(9 * 86400), bundle_ref: "s3://bundles/blog.tar.zst",
+              spec: { region: "hel1", server_type: "cx32" },
+            },
+          ],
+        },
+      },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1672,6 +1751,12 @@ export function route(name, method, path) {
       ? { status: 200, body: d.catalog }
       : { status: 404, body: { error: "no_provider" } };
   }
+
+  // gr-p3 D-01: the S14 archives read. A scenario carries the FULL {ok,archives|
+  // error} envelope GET /v1/archives serves on BOTH 200 and 502 (as `d.archives`);
+  // absent → the benign catch-all below (which archivesModel reads as a transient
+  // error, exactly like today), so no non-archives scenario changes.
+  if (p === "/v1/archives" && d.archives) return d.archives;
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.

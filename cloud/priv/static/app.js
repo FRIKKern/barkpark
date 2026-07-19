@@ -899,6 +899,12 @@
   //   {ok:true, archives}  → one row per bundle, each with a copy-paste resurrect
   //                          command `bp cloud instance resurrect <slug> --provider <kind>`
   // Order is the server's (newest-first); this stays a faithful projection.
+  //
+  // The EXACT server-owned copy GET /v1/archives emits for an unconfigured store
+  // (router.ex archive_store_error(:not_configured)). Matching it drives the
+  // DISTINCT storage-unconfigured panel state; a changed server string degrades
+  // safely to the generic transient-outage error.
+  var ARCHIVES_UNCONFIGURED_MSG = "Archive storage isn't configured for this deployment.";
   function archivesModel(payload) {
     if (payload === undefined) return { loading: true, error: false, rows: [] };
     if (!payload || payload.ok !== true) {
@@ -908,6 +914,12 @@
       // message — never a raw internal token surfaced as if the server sent it.
       var serverMsg = payload && payload.ok === false && typeof payload.error === "string" &&
         payload.error.trim() !== "" ? payload.error : null;
+      // An unconfigured store is a DISTINCT, non-transient state (docs + Retry),
+      // not a "try again shortly" outage — matched on the exact backend copy so it
+      // reads honestly. Any other error stays the generic transient branch.
+      if (serverMsg === ARCHIVES_UNCONFIGURED_MSG) {
+        return { loading: false, error: true, notConfigured: true, message: serverMsg, rows: [] };
+      }
       return { loading: false, error: true,
         message: serverMsg || "Couldn't load your archives — try again shortly.", rows: [] };
     }
@@ -1082,6 +1094,16 @@
   function archivesPanelHtml(model) {
     if (!model || model.loading) {
       return '<div class="loading">Loading archives&hellip;</div>';
+    }
+    // Storage unconfigured (deployment never wired object storage): a DISTINCT
+    // state — the server-owned copy verbatim, a "How archives work" docs link,
+    // and a Retry (harmless once storage IS wired). Amber dot, not a red error.
+    if (model.notConfigured) {
+      return '<div class="archives-note archives-note--unconfigured">' +
+        '<span class="archives-note-dot" aria-hidden="true"></span>' +
+        "<p>" + esc(model.message) + "</p>" +
+        '<a class="archives-docs-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">How archives work</a>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
     }
     if (model.error) {
       return '<div class="archives-note archives-note--warn"><p>' + esc(model.message) + "</p>" +
@@ -2652,6 +2674,71 @@
     "</span>";
   }
 
+  // ---- v4 fleet-row anatomy (screens/01) — pure, node-pinned via __bpTestHook.
+
+  // The mono metadata line under a row's name: region · size · running version ·
+  // channel · autoupdate policy. Every segment is BACKEND-TRUE and blank-tolerant
+  // (a pre-S6 / older-CP row that carries none renders nothing, never a dangling
+  // "·"). Distinct from fleetInfraLine (region · size only — the Overview card's
+  // denser slot): the fleet list gets the fuller mono line the v4 design shows.
+  function fleetAutoupdateText(bp) {
+    bp = bp || {};
+    if (!hasAutoupdatePolicy(bp)) return ""; // older CP sends no policy block
+    if (bp.pinned_release) return "pinned " + vRel(bp.pinned_release);
+    if (bp.autoupdate_paused) return "autoupdate paused";
+    if (bp.autoupdate_enabled === false) return "autoupdate off";
+    return "autoupdate on";
+  }
+  function fleetMetaHtml(bp) {
+    bp = bp || {};
+    var parts = [];
+    if (bp.region) parts.push(esc(String(bp.region)));
+    if (bp.server_type) parts.push(esc(String(bp.server_type)));
+    if (bp.version) parts.push(esc(vRel(bp.version)));
+    if (bp.channel) parts.push(esc(String(bp.channel)));
+    var au = fleetAutoupdateText(bp);
+    if (au) parts.push(esc(au));
+    return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
+  }
+
+  // The inline update chip (v4 screens/01: the "v0.2.25 available" affordance).
+  // BACKEND-TRUE ONLY — an in-flight rollout (autoupdate_triggered_at) outranks a
+  // stale cached "behind" (mirrors updateBadge); a settled "behind" names the
+  // real target release (update_latest_release). Any other state → null (no chip,
+  // no invented "up to date" badge in the list). It is ORTHOGONAL to the status
+  // pill: update availability never masquerades as a lifecycle state.
+  function fleetUpdateChip(bp) {
+    bp = bp || {};
+    if (bp.autoupdate_triggered_at) return { state: "in-flight", label: "Updating" };
+    if (bp.update_state === "behind") {
+      var rel = bp.update_latest_release;
+      return { state: "behind", label: (rel ? vRel(rel) : "A newer release") + " available" };
+    }
+    return null;
+  }
+  function fleetUpdateChipHtml(bp) {
+    var u = fleetUpdateChip(bp);
+    if (!u) return "";
+    // Static per-branch class strings (never a concat head) so __css_check
+    // resolves every modifier to a real rule.
+    if (u.state === "in-flight")
+      return '<span class="fleet-update-chip fleet-update-chip--busy">' +
+        '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
+    return '<span class="fleet-update-chip fleet-update-chip--ready">' +
+      '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
+  }
+
+  // A shallow bp view with update_state cleared — the fleet pill's OWN input when
+  // an update chip is showing, so a live+behind box reads its lifecycle
+  // ("Healthy") beside the chip instead of the pill doubling as "Update
+  // available". The shared classifyBp/statusOf/attentionRank spine (which Overview
+  // reads) is NEVER mutated — only this per-row copy.
+  function withoutUpdateState(bp) {
+    var c = Object.assign({}, bp || {});
+    c.update_state = null;
+    return c;
+  }
+
   function fleetRow(bp) {
     // host (not url) is the "box is actually up" signal: go_live now sets url at
     // launch (the FQDN is deterministic <slug>-<teamid>), so !bp.url would never
@@ -2678,12 +2765,18 @@
     // platform stopped it — folded into statusOf()'s single pill below.
     var live = !removing && !removeFailed && !failed && !provisioning && !bp.suspended && bp.host;
 
-    // The whole provision/suspend/health/agent/update collapse is now ONE pill
-    // (charter decision 6); the health/agent/update breakdown moved to the
-    // instance-detail rail only. S11b: the pill also carries its S4 lifecycle
-    // token class so the fleet row's status IS the lifecycle pill (identity chip
-    // stays separate — never a status stand-in).
-    var pill = statusPill(bp, instanceLifecycleClass(lifecyclePillState(bp)));
+    // v4 screens/01: update availability is the ORTHOGONAL chip, so the leading
+    // lifecycle pill never doubles as "Update available". The shared classifyBp/
+    // statusOf/attentionRank spine that Overview reads stays UNTOUCHED — we only
+    // strip update_state from the pill's OWN per-row input, so a live+behind box
+    // reads "Healthy" beside a "vX available" chip (never a double signal).
+    var upd = fleetUpdateChip(bp);
+    var pillBp = upd && upd.state === "behind" ? withoutUpdateState(bp) : bp;
+
+    // The whole provision/suspend/health/agent collapse is ONE pill (charter
+    // decision 6). S11b: the pill also carries its S4 lifecycle token class so the
+    // fleet row's status IS the lifecycle pill (identity chip stays separate).
+    var pill = statusPill(pillBp, instanceLifecycleClass(lifecyclePillState(bp)));
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -2693,18 +2786,21 @@
       : "";
 
     return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
+      // The lifecycle pill LEADS the row (v4 anatomy); its detail truncates inside
+      // the fixed lead column via the existing .status-pill rules (never edited).
+      '<div class="fleet-status">' + pill + "</div>" +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
-        // Region · size, server-stamped (S6). Blank-tolerant: pre-S6 rows carry
-        // no region/server_type and render nothing here.
-        fleetInfraLine(bp) +
+        // The mono metadata line: region · size · version · channel · autoupdate,
+        // every segment backend-true + blank-tolerant.
+        fleetMetaHtml(bp) +
       "</div>" +
       '<div class="fleet-badges">' +
-        // Provider IDENTITY chip — renders ONLY when the payload carries
-        // `provider` (S6 stamps it); never a fabricated identity, and never a
-        // stand-in for the status pill beside it.
-        providerChipHtml(bp.provider) + pill + openStudioBtn +
+        // The NEW backend-true update chip, then the provider IDENTITY chip (only
+        // when the payload carries `provider` — never a fabricated identity), then
+        // the one-click Studio entry.
+        fleetUpdateChipHtml(bp) + providerChipHtml(bp.provider) + openStudioBtn +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
@@ -13057,6 +13153,14 @@
       // newRenderPriceLine) is browser+smoke-driven.
       theaterPriceModel: theaterPriceModel,
       theaterPriceLineHtml: theaterPriceLineHtml,
+      // gr-p3 D-01 fleet + archives (v4 screens/01): the v4 row anatomy — the
+      // mono metadata line, its autoupdate segment, the orthogonal update chip
+      // (model + markup), the pill's update-state strip, and the whole row — all
+      // pure/node-pinned. The DOM mounts (loadFleet/wireFleetRows/loadArchives)
+      // stay browser-verified. archivesModel now carries the notConfigured state.
+      fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
+      fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
+      withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
     });
   }
 })();
