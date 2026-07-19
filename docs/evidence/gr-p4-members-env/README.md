@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: gr-p4-members-env-evidence | budget: 400tok -->
 # G-06 Members + env-vars — evidence shots
 
 Evergreen headless-Chrome shots (1440w, ×2 DPR) of the four admin/member states,

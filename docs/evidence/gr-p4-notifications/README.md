@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: gr-p4-notifications-evidence | budget: 1100tok -->
 # G-04 Notifications (the crown) — evidence
 
 Phase-4 Settings-wave G-04. `#view-notifications` recomposed onto the GR33 `.set-*`
