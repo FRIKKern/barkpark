@@ -81,6 +81,14 @@ mask() {
   printf '%s…(%d bytes, sha256:%s)' "$(printf '%s' "$v" | cut -c1-4)" "${#v}" "$fp"
 }
 
+# A value-taking flag with nothing after it USED to fall through `${2:-}` and
+# then die on `shift 2` — which under `set -e` exits 1 with no output at all.
+# Exit 1 is the HIT code: a typo'd invocation would read as "secrets found"
+# while nothing was ever scanned. Refuse loudly with the usage code instead.
+need_val() { # "$@" as seen at the flag
+  [ $# -ge 2 ] || die "$1 needs a value"
+}
+
 show() { # respects --reveal
   if [ "$REVEAL" = "1" ]; then printf '%s' "$1"; else mask "$1"; fi
 }
@@ -157,7 +165,7 @@ scan_bundle() { # tar-path
   say "bundle: $bundle"
   while IFS= read -r member; do
     members=$((members + 1))
-    rel="${member#$dir/}"
+    rel="${member#"$dir"/}"
     while IFS="$(printf '\t')" read -r label value; do
       n="$(grep -a -c -F -e "$value" -- "$member" 2>/dev/null || true)"
       n="${n:-0}"
@@ -239,13 +247,13 @@ cmd_scan() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      --bundle)          bundle="${2:-}"; shift 2 ;;
-      --db)              db="${2:-}"; shift 2 ;;
-      --value)           ammo_add "value#$(( $(ammo_count) + 1 ))" "${2:-}" || true; shift 2 ;;
-      --ammo-file)       ammo_add_file "ammo" "${2:-}"; shift 2 ;;
-      --extra-patterns)  ammo_add_file "extra" "${2:-}"; shift 2 ;;
-      --ammo-from-db)    from_db="${2:-}"; shift 2 ;;
-      --profile)         profile="${2:-}"; shift 2 ;;
+      --bundle)          need_val "$@"; bundle="$2"; shift 2 ;;
+      --db)              need_val "$@"; db="$2"; shift 2 ;;
+      --value)           need_val "$@"; ammo_add "value#$(( $(ammo_count) + 1 ))" "$2" || true; shift 2 ;;
+      --ammo-file)       need_val "$@"; ammo_add_file "ammo" "$2"; shift 2 ;;
+      --extra-patterns)  need_val "$@"; ammo_add_file "extra" "$2"; shift 2 ;;
+      --ammo-from-db)    need_val "$@"; from_db="$2"; shift 2 ;;
+      --profile)         need_val "$@"; profile="$2"; shift 2 ;;
       --reveal)          REVEAL=1; shift ;;
       -h|--help)         usage 0 ;;
       *) die "unknown flag for scan: $1" ;;
@@ -289,7 +297,7 @@ cmd_control() {
   local maint="${PDS_CONTROL_PG:-postgres}" keep=0 broken=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --pg)   maint="${2:-}"; shift 2 ;;
+      --pg)   need_val "$@"; maint="$2"; shift 2 ;;
       --keep) keep=1; shift ;;
       # Tripwire for the control ITSELF: hand step 1 a deny-shaped bundle so the
       # instrument CANNOT fire, and assert this mode exits 3. A control that
@@ -299,8 +307,13 @@ cmd_control() {
       *) die "unknown flag for control: $1" ;;
     esac
   done
-  command -v psql >/dev/null 2>&1 || die "control needs psql on PATH"
-  command -v tar  >/dev/null 2>&1 || die "control needs tar on PATH"
+  command -v psql    >/dev/null 2>&1 || die "control needs psql on PATH"
+  command -v tar     >/dev/null 2>&1 || die "control needs tar on PATH"
+  # The ammo is generated fresh per run so a stale hard-coded value can never be
+  # what makes the control pass — which makes openssl a hard prerequisite, not a
+  # nicety. Without this check the seed silently becomes an EMPTY secret and the
+  # control "passes" against nothing.
+  command -v openssl >/dev/null 2>&1 || die "control needs openssl on PATH (it generates the run's ammo)"
 
   local db="pds_secret_scan_ctl_$$"
   local work; work="$(mktemp -d "${TMPDIR:-/tmp}/pds-control.XXXXXX")"
