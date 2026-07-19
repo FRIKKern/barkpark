@@ -112,7 +112,7 @@ defmodule BarkparkCloud.Web.Router do
       PUT     /v1/notifications/channels admin  update per-channel transport settings
       PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      user send a rate-limited test email
-      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first)
+      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it)
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
       DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
@@ -3556,17 +3556,29 @@ defmodule BarkparkCloud.Web.Router do
   # session / 403 for a plain member) for parity with the other notifications admin
   # routes. `?limit` caps the page via parse_int, hard-capped at 200 HERE (the
   # /v1/audit precedent — list_audit_events caps in the context, but
-  # list_deliveries rides UNCHANGED per the wave brief, so the router owns the
-  # clamp); there is no `?before` — the log is a bounded backlog, not a
-  # keyset-paged trail like /v1/audit.
+  # list_deliveries leaves the clamp to its caller, so the router owns it).
+  #
+  # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
+  # inserted_at>` walks the next page (the /v1/audit keyset). Filters run INSIDE
+  # the query, so "show me the failures" is a real page of failures rather than
+  # the failures that happen to be in the newest 50. A filter value outside the
+  # closed vocabulary matches nothing rather than being dropped — a dropped
+  # filter would silently show MORE than was asked for.
   get "/v1/notifications/deliveries" do
     conn = Auth.require_team_admin(conn, [])
 
     if conn.halted do
       conn
     else
-      limit = min(parse_int(conn.query_params["limit"], 50), 200)
-      deliveries = Notifications.list_deliveries(conn.assigns.current_team, limit)
+      opts = [
+        limit: min(parse_int(conn.query_params["limit"], 50), 200),
+        channel: conn.query_params["channel"],
+        status: conn.query_params["status"],
+        event: conn.query_params["event"],
+        before: parse_dt(conn.query_params["before"])
+      ]
+
+      deliveries = Notifications.list_deliveries(conn.assigns.current_team, opts)
       json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
     end
   end
