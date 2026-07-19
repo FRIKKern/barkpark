@@ -3003,7 +3003,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* -- confirm modal ---------------------------------------------------------
    Mutate tier reuses .modal-sub for its single consequence sentence; destroy
-   tier gets the consequence LIST + the typed-echo field. */
+   tier gets the consequence LIST + the typed-echo field. GR41: the danger
+   (no-echo) tier's rich-body slot rides .modal-sub styling too — .cm-body only
+   restores the ink for its <b> emphasis (inherits --muted-text otherwise, so
+   no new fg/bg pairing enters the CONTRAST_PAIRS manifest). */
+.cm-body b { color: var(--text); font-weight: 600; }
+.cm-body { margin-bottom: 4px; }
 .cm-consequence { margin-bottom: 2px; }
 .cm-consequences {
   margin: 0 0 16px;
