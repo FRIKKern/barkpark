@@ -658,6 +658,22 @@ defmodule Barkpark.CycleFleetTest do
         })
         |> Repo.insert!()
 
+      draft_document =
+        %Document{}
+        |> Document.changeset(%{
+          doc_id: "drafts.#{document.doc_id}",
+          type: document.type,
+          dataset: document.dataset,
+          dataset_id: document.dataset_id,
+          workspace_id: document.workspace_id,
+          project_id: document.project_id,
+          title: "Legacy Paper Draft",
+          status: "draft",
+          content: %{"blocks" => [%{"type" => "paragraph", "text" => "draft-only"}]},
+          rev: Ecto.UUID.generate()
+        })
+        |> Repo.insert!()
+
       base_time =
         DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.truncate(:microsecond)
 
@@ -681,7 +697,24 @@ defmodule Barkpark.CycleFleetTest do
 
       _older_exact = insert_legacy_revision.("publish", document.content, 1)
       newest_exact = insert_legacy_revision.("update", document.content, 2)
-      _newer_mismatch = insert_legacy_revision.("update", %{"blocks" => []}, 3)
+      newer_mismatch = insert_legacy_revision.("update", %{"blocks" => []}, 3)
+
+      draft_revision =
+        %Revision{}
+        |> Revision.changeset(%{
+          doc_id: document.doc_id,
+          type: draft_document.type,
+          dataset: draft_document.dataset,
+          dataset_id: draft_document.dataset_id,
+          workspace_id: draft_document.workspace_id,
+          project_id: draft_document.project_id,
+          title: draft_document.title,
+          status: draft_document.status,
+          action: "update",
+          content: draft_document.content
+        })
+        |> Ecto.Changeset.put_change(:inserted_at, DateTime.add(base_time, 4, :second))
+        |> Repo.insert!()
 
       assert Repo.get!(Document, document.id).current_revision_id == nil
       assert Repo.get!(Document, document.id).released_revision_id == nil
@@ -689,13 +722,30 @@ defmodule Barkpark.CycleFleetTest do
       Repo.query!("ALTER TABLE revisions DISABLE TRIGGER revisions_immutable")
 
       Repo.query!("""
+      WITH bindings AS (
+        SELECT revision.id AS revision_id, (
+          SELECT document.id
+          FROM documents document
+          WHERE revision.doc_id = CASE
+              WHEN left(document.doc_id, 7) = 'drafts.' THEN substr(document.doc_id, 8)
+              ELSE document.doc_id
+            END AND
+            revision.type = document.type AND revision.dataset_id = document.dataset_id AND
+            revision.workspace_id = document.workspace_id AND
+            revision.project_id IS NOT DISTINCT FROM document.project_id AND
+            revision.title IS NOT DISTINCT FROM document.title AND
+            revision.status IS NOT DISTINCT FROM document.status AND
+            revision.content IS NOT DISTINCT FROM document.content
+          ORDER BY CASE WHEN document.doc_id = revision.doc_id THEN 0 ELSE 1 END, document.id
+          LIMIT 1
+        ) AS document_id
+        FROM revisions revision
+        WHERE revision.document_id IS NULL
+      )
       UPDATE revisions revision
-      SET document_id = document.id
-      FROM documents document
-      WHERE revision.document_id IS NULL AND revision.doc_id = document.doc_id AND
-        revision.type = document.type AND revision.dataset_id = document.dataset_id AND
-        revision.workspace_id = document.workspace_id AND
-        revision.project_id IS NOT DISTINCT FROM document.project_id
+      SET document_id = bindings.document_id
+      FROM bindings
+      WHERE revision.id = bindings.revision_id AND bindings.document_id IS NOT NULL
       """)
 
       Repo.query!("ALTER TABLE revisions ENABLE TRIGGER revisions_immutable")
@@ -723,11 +773,14 @@ defmodule Barkpark.CycleFleetTest do
       reloaded = Repo.get!(Document, document.id)
       assert reloaded.current_revision_id == newest_exact.id
       assert reloaded.released_revision_id == newest_exact.id
+      assert Repo.get!(Revision, newest_exact.id).document_id == document.id
+      assert Repo.get!(Revision, draft_revision.id).document_id == draft_document.id
+      assert Repo.get!(Revision, newer_mismatch.id).document_id == nil
 
       assert Repo.aggregate(
                from(revision in Revision, where: revision.document_id == ^document.id),
                :count
-             ) == 3
+             ) == 2
     end
 
     test "quarantine promotion migration refuses rollback after immutable correction history", %{
@@ -1575,6 +1628,12 @@ defmodule Barkpark.CycleFleetTest do
 
           assert_raise Postgrex.Error, ~r/revision history is append-only/, fn ->
             Repo.query!("UPDATE revisions SET action = 'tampered' WHERE id = $1", [
+              Ecto.UUID.dump!(fixture.paper.id)
+            ])
+          end
+
+          assert_raise Postgrex.Error, ~r/revision history is append-only/, fn ->
+            Repo.query!("UPDATE revisions SET document_id = NULL WHERE id = $1", [
               Ecto.UUID.dump!(fixture.paper.id)
             ])
           end

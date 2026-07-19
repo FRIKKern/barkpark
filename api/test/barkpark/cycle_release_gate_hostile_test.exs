@@ -372,6 +372,8 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     successor_revision = Repo.get!(Revision, successor.id)
     assert campaign_revision.document_id == campaign.document_id
     assert successor_revision.document_id == successor.document_id
+    assert campaign_revision.doc_id == promoted_campaign.doc_id
+    assert successor_revision.doc_id == promoted_successor.doc_id
     assert campaign_revision.content == campaign.content
     assert successor_revision.content == successor.content
     assert promoted.release_gate_admission_id == activation.id

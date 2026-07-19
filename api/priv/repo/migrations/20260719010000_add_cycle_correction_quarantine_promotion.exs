@@ -3,7 +3,7 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
 
   def up do
     alter table(:revisions) do
-      add :document_id, references(:documents, type: :uuid, on_delete: :delete_all)
+      add :document_id, references(:documents, type: :uuid, on_delete: :nilify_all)
     end
 
     alter table(:documents) do
@@ -12,13 +12,30 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
     end
 
     execute """
+    WITH bindings AS (
+      SELECT revision.id AS revision_id, (
+        SELECT document.id
+        FROM documents document
+        WHERE revision.doc_id = CASE
+            WHEN left(document.doc_id, 7) = 'drafts.' THEN substr(document.doc_id, 8)
+            ELSE document.doc_id
+          END AND
+          revision.type = document.type AND revision.dataset_id = document.dataset_id AND
+          revision.workspace_id = document.workspace_id AND
+          revision.project_id IS NOT DISTINCT FROM document.project_id AND
+          revision.title IS NOT DISTINCT FROM document.title AND
+          revision.status IS NOT DISTINCT FROM document.status AND
+          revision.content IS NOT DISTINCT FROM document.content
+        ORDER BY CASE WHEN document.doc_id = revision.doc_id THEN 0 ELSE 1 END, document.id
+        LIMIT 1
+      ) AS document_id
+      FROM revisions revision
+      WHERE revision.document_id IS NULL
+    )
     UPDATE revisions revision
-    SET document_id = document.id
-    FROM documents document
-    WHERE revision.document_id IS NULL AND revision.doc_id = document.doc_id AND
-      revision.type = document.type AND revision.dataset_id = document.dataset_id AND
-      revision.workspace_id = document.workspace_id AND
-      revision.project_id IS NOT DISTINCT FROM document.project_id;
+    SET document_id = bindings.document_id
+    FROM bindings
+    WHERE revision.id = bindings.revision_id AND bindings.document_id IS NOT NULL;
     """
 
     execute """
@@ -251,7 +268,11 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
       END IF;
       IF NOT EXISTS (
         SELECT 1 FROM documents document
-        WHERE document.id = NEW.document_id AND document.doc_id = NEW.doc_id AND
+        WHERE document.id = NEW.document_id AND
+          NEW.doc_id = CASE
+            WHEN left(document.doc_id, 7) = 'drafts.' THEN substr(document.doc_id, 8)
+            ELSE document.doc_id
+          END AND
           document.type = NEW.type AND document.dataset_id = NEW.dataset_id AND
           document.workspace_id = NEW.workspace_id AND
           document.project_id IS NOT DISTINCT FROM NEW.project_id AND
@@ -279,6 +300,12 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
     execute """
     CREATE FUNCTION barkpark_revision_immutable() RETURNS trigger AS $$
     BEGIN
+      IF TG_OP = 'UPDATE' AND pg_trigger_depth() > 1 AND
+         OLD.document_id IS NOT NULL AND NEW.document_id IS NULL AND
+         to_jsonb(NEW) - 'document_id' = to_jsonb(OLD) - 'document_id' AND
+         NOT EXISTS (SELECT 1 FROM documents WHERE id = OLD.document_id) THEN
+        RETURN NEW;
+      END IF;
       IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN
         RETURN OLD;
       END IF;
