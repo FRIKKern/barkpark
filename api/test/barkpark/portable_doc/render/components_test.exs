@@ -276,6 +276,35 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     assert html =~ ~s(<span class="bp-g bp-g--open">)
   end
 
+  # charter D10b/D11 (tlv-s3): before the manifest grew the thought states,
+  # TaskResolver passed raw lifecycle_status through verbatim and StatusVocab fell
+  # back to the DEFAULT role `open` — so a `considering`/`researching` board row
+  # rendered as the bright OPEN circle (the worst direction for "open means ready").
+  # FAIL-BEFORE / PASS-AFTER: each thought state now maps to its OWN role, glyph
+  # (◌ / ◎) and dim column at the ladder bottom (D12), never the open circle.
+  test "task-board renders considering/researching as their own thought glyph + column, not the open circle" do
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "Weigh the slice", "status" => "considering"},
+          %{"title" => "Investigate the seam", "status" => "researching"}
+        ]
+      })
+
+    # own dim/violet columns at the ladder bottom (D12)
+    assert html =~ "bp-board__col--considering"
+    assert html =~ "bp-board__col--researching"
+    assert html =~ ~s(<span class="bp-board__label">Considering</span>)
+    assert html =~ ~s(<span class="bp-board__label">Researching</span>)
+
+    # each thought card carries its OWN glyph-role span (◌ dotted / ◎ bullseye),
+    # NOT the bright open circle it used to fail into.
+    assert html =~ ~s(<span class="bp-g bp-g--considering">◌</span>)
+    assert html =~ ~s(<span class="bp-g bp-g--researching">◎</span>)
+    refute html =~ ~s(<span class="bp-g bp-g--open">)
+    refute html =~ "bp-board__col--open"
+  end
+
   test "roadmap draws status-coloured bars, clamps geometry, today marker + scale" do
     html =
       Components.roadmap_html(%{

@@ -44,6 +44,20 @@
         "label": "cancelled",
         "role": "cancel",
         "spinner": false
+      },
+      {
+        "glyph": "◌",
+        "glyph_role": "considering",
+        "label": "considering",
+        "role": "considering",
+        "spinner": false
+      },
+      {
+        "glyph": "◎",
+        "glyph_role": "researching",
+        "label": "researching",
+        "role": "researching",
+        "spinner": false
       }
     ]
   },

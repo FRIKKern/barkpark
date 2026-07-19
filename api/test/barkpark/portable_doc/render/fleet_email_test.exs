@@ -12,6 +12,8 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
   @done StatusVocab.tones()["ok"]["light"]
   @progress StatusVocab.tones()["info"]["light"]
   @blocked StatusVocab.tones()["warn"]["light"]
+  # the thought-state hue (charter D9/D12) — researching's one new violet
+  @violet StatusVocab.tones()["violet"]["light"]
 
   # Evergreen email skin (the default theme's captured hex).
   @ever_ground "#eaf1ee"
@@ -127,6 +129,31 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
     # the evergreen skin paints the column ground + card border
     assert html =~ "background:#{@ever_ground}"
     assert html =~ "border:1px solid #{@ever_border}"
+  end
+
+  # charter D9/D12 (tlv-s3): the two thought states are dim columns at the ladder
+  # bottom — researching carries the violet hue, considering is dim (muted). Before
+  # the manifest grew them, role_color's catch-all muted BOTH and the board dropped
+  # the columns entirely; now researching reaches the violet hex + ◎, considering ◌.
+  test "task board renders the thought columns — researching in violet, considering dim" do
+    board = %{
+      "type" => "task-board",
+      "snapshot" => [
+        %{"status" => "considering", "title" => "Weigh it"},
+        %{"status" => "researching", "title" => "Dig in"}
+      ]
+    }
+
+    html = FleetEmail.task_board_email_html(board)
+
+    # researching's column stripe + glyph carry the violet manifest hex
+    assert html =~ "border-top:3px solid #{@violet}"
+    assert html =~ "color:#{@violet}"
+    assert @violet == "#7c3aed"
+
+    # both thought glyphs render (◌ considering, ◎ researching), not the open circle
+    assert html =~ "◌"
+    assert html =~ "◎"
   end
 
   test "roadmap bars carry the status tone and DROP the today marker (D5)" do
