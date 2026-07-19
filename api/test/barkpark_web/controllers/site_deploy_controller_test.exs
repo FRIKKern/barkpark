@@ -13,12 +13,35 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Auth
-  alias Barkpark.Sites.DeployRunner
+  alias Barkpark.Sites.{DeployRunner, Provisioner}
 
   @admin_token "barkpark-test-site-deploy-admin"
   @junior_token "barkpark-test-site-deploy-junior"
 
   setup do
+    base =
+      Path.join(System.tmp_dir!(), "bp-site-controller-#{System.unique_integer([:positive])}")
+
+    sites = Path.join(base, "sites")
+    template = Path.join(base, "template")
+    File.mkdir_p!(template)
+    File.write!(Path.join(template, "package.json"), ~s({"name":"controller-stub"}))
+
+    prior_provisioner = Application.get_env(:barkpark, Provisioner)
+
+    Application.put_env(:barkpark, Provisioner,
+      sites_dir: sites,
+      template_dir: template
+    )
+
+    on_exit(fn ->
+      if prior_provisioner,
+        do: Application.put_env(:barkpark, Provisioner, prior_provisioner),
+        else: Application.delete_env(:barkpark, Provisioner)
+
+      File.rm_rf(base)
+    end)
+
     {:ok, _} =
       Auth.create_token(@admin_token, "site-deploy-admin", "test", ["read", "write", "admin"])
 

@@ -4,11 +4,12 @@ defmodule Barkpark.Release.SecretsTest do
   alias Barkpark.Release.Secrets
 
   describe "generate/0" do
-    test "returns exactly the three crypto secret keys runtime.exs needs" do
+    test "returns exactly the four crypto secret keys runtime.exs needs" do
       secrets = Secrets.generate()
 
       assert Map.keys(secrets) |> Enum.sort() == [
                "BARKPARK_CLOAK_KEY",
+               "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET",
                "PREVIEW_JWT_SECRET",
                "SECRET_KEY_BASE"
              ]
@@ -22,6 +23,7 @@ defmodule Barkpark.Release.SecretsTest do
       assert byte_size(Base.decode64!(secrets["PREVIEW_JWT_SECRET"])) >= 64
       # Cloak needs a 32-byte key.
       assert byte_size(Base.decode64!(secrets["BARKPARK_CLOAK_KEY"])) == 32
+      assert byte_size(Base.decode64!(secrets["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"])) == 32
     end
 
     test "secrets are independent of each other and random across calls" do
@@ -33,6 +35,9 @@ defmodule Barkpark.Release.SecretsTest do
       # Fresh entropy on each call.
       refute a["SECRET_KEY_BASE"] == b["SECRET_KEY_BASE"]
       refute a["BARKPARK_CLOAK_KEY"] == b["BARKPARK_CLOAK_KEY"]
+
+      refute a["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"] ==
+               b["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"]
     end
   end
 
@@ -49,7 +54,7 @@ defmodule Barkpark.Release.SecretsTest do
       {:ok, path: path, tmp: tmp}
     end
 
-    test "creates the file with the 3 secrets + 2 placeholders", %{path: path} do
+    test "creates the file with the 4 secrets + 2 placeholders", %{path: path} do
       assert {:ok, ^path} = Secrets.write_env(path)
       assert File.exists?(path)
 
@@ -58,6 +63,7 @@ defmodule Barkpark.Release.SecretsTest do
       assert byte_size(Base.decode64!(env["SECRET_KEY_BASE"])) == 64
       assert byte_size(Base.decode64!(env["PREVIEW_JWT_SECRET"])) >= 64
       assert byte_size(Base.decode64!(env["BARKPARK_CLOAK_KEY"])) == 32
+      assert byte_size(Base.decode64!(env["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"])) == 32
 
       # Placeholders use the exact var names runtime.exs reads.
       assert Map.has_key?(env, "DATABASE_URL")
@@ -109,6 +115,7 @@ defmodule Barkpark.Release.SecretsTest do
       # Missing ones are filled in.
       assert byte_size(Base.decode64!(env["BARKPARK_CLOAK_KEY"])) == 32
       assert byte_size(Base.decode64!(env["PREVIEW_JWT_SECRET"])) >= 64
+      assert byte_size(Base.decode64!(env["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"])) == 32
       assert Map.has_key?(env, "DATABASE_URL")
       assert Map.has_key?(env, "PHX_HOST")
     end

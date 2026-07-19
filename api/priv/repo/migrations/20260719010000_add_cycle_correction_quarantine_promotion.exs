@@ -20,8 +20,10 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
             WHEN left(document.doc_id, 7) = 'drafts.' THEN substr(document.doc_id, 8)
             ELSE document.doc_id
           END AND
-          revision.type = document.type AND revision.dataset_id = document.dataset_id AND
-          revision.workspace_id = document.workspace_id AND
+          revision.type = document.type AND
+          revision.dataset IS NOT DISTINCT FROM document.dataset AND
+          revision.dataset_id IS NOT DISTINCT FROM document.dataset_id AND
+          revision.workspace_id IS NOT DISTINCT FROM document.workspace_id AND
           revision.project_id IS NOT DISTINCT FROM document.project_id AND
           revision.title IS NOT DISTINCT FROM document.title AND
           revision.status IS NOT DISTINCT FROM document.status AND
@@ -42,13 +44,15 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
     UPDATE documents document
     SET current_revision_id = (
       SELECT revision.id FROM revisions revision
-      WHERE revision.document_id = document.id AND revision.content = document.content AND
-        revision.title IS NOT DISTINCT FROM document.title AND revision.status = document.status
+      WHERE revision.document_id = document.id AND
+        revision.content IS NOT DISTINCT FROM document.content AND
+        revision.title IS NOT DISTINCT FROM document.title AND
+        revision.status IS NOT DISTINCT FROM document.status
       ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
     ), released_revision_id = (
       SELECT revision.id FROM revisions revision
       WHERE revision.document_id = document.id AND revision.status = 'published' AND
-        revision.content = document.content AND
+        revision.content IS NOT DISTINCT FROM document.content AND
         revision.title IS NOT DISTINCT FROM document.title
       ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
     );
@@ -273,11 +277,14 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
             WHEN left(document.doc_id, 7) = 'drafts.' THEN substr(document.doc_id, 8)
             ELSE document.doc_id
           END AND
-          document.type = NEW.type AND document.dataset_id = NEW.dataset_id AND
-          document.workspace_id = NEW.workspace_id AND
+          document.type = NEW.type AND
+          document.dataset IS NOT DISTINCT FROM NEW.dataset AND
+          document.dataset_id IS NOT DISTINCT FROM NEW.dataset_id AND
+          document.workspace_id IS NOT DISTINCT FROM NEW.workspace_id AND
           document.project_id IS NOT DISTINCT FROM NEW.project_id AND
-          document.title IS NOT DISTINCT FROM NEW.title AND document.status = NEW.status AND
-          document.content = NEW.content
+          document.title IS NOT DISTINCT FROM NEW.title AND
+          document.status IS NOT DISTINCT FROM NEW.status AND
+          document.content IS NOT DISTINCT FROM NEW.content
       ) THEN
         RAISE EXCEPTION 'revision snapshot does not exactly match its document';
       END IF;

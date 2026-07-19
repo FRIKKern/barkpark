@@ -2,9 +2,10 @@ defmodule Barkpark.Release.Secrets do
   @moduledoc """
   First-run secret generation for personal/local installs.
 
-  `config/runtime.exs` raises in `:prod` when any of five env vars are
+  `config/runtime.exs` raises in `:prod` when any of six env vars are
   missing: `BARKPARK_CLOAK_KEY`, `DATABASE_URL`, `SECRET_KEY_BASE`,
-  `PHX_HOST`, and `PREVIEW_JWT_SECRET`. This module generates the three
+  `PHX_HOST`, `PREVIEW_JWT_SECRET`, and
+  `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`. This module generates the four
   cryptographic secrets and writes a `~/.barkpark/.env` template
   idempotently so a personal-local install can boot without hand-rolling
   `openssl rand` invocations.
@@ -24,21 +25,25 @@ defmodule Barkpark.Release.Secrets do
       key, so 32 bytes of entropy is the right size and it is generated
       **independently** of `SECRET_KEY_BASE` (key rotation in either
       system must not invalidate the other — see runtime.exs).
+    * `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` — 32 raw bytes. Authenticates
+      server-owned reader evidence independently of cookie, preview, and field
+      encryption keys, so rotating any one authority does not forge another.
   """
 
   @secret_key_base_bytes 64
   @preview_jwt_secret_bytes 64
   @cloak_key_bytes 32
+  @release_capture_hmac_bytes 32
 
   @doc """
-  Generate the three crypto secrets as a map of `var => base64 value`.
+  Generate the four crypto secrets as a map of `var => base64 value`.
 
   Each value is independently sourced from `:crypto.strong_rand_bytes/1`
   and Base64-encoded.
 
       iex> secrets = Barkpark.Release.Secrets.generate()
       iex> Map.keys(secrets) |> Enum.sort()
-      ["BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET", "SECRET_KEY_BASE"]
+      ["BARKPARK_CLOAK_KEY", "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", "PREVIEW_JWT_SECRET", "SECRET_KEY_BASE"]
       iex> byte_size(Base.decode64!(secrets["SECRET_KEY_BASE"]))
       64
       iex> byte_size(Base.decode64!(secrets["BARKPARK_CLOAK_KEY"]))
@@ -50,7 +55,8 @@ defmodule Barkpark.Release.Secrets do
     %{
       "SECRET_KEY_BASE" => random_base64(@secret_key_base_bytes),
       "PREVIEW_JWT_SECRET" => random_base64(@preview_jwt_secret_bytes),
-      "BARKPARK_CLOAK_KEY" => random_base64(@cloak_key_bytes)
+      "BARKPARK_CLOAK_KEY" => random_base64(@cloak_key_bytes),
+      "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET" => random_base64(@release_capture_hmac_bytes)
     }
   end
 
@@ -60,7 +66,7 @@ defmodule Barkpark.Release.Secrets do
   Defaults to `~/.barkpark/.env`. Behaviour:
 
     * creates the parent directory if missing,
-    * generates the three crypto secrets via `generate/0`,
+    * generates the four crypto secrets via `generate/0`,
     * adds placeholders for the two non-secret env vars `runtime.exs`
       requires — `DATABASE_URL` and `PHX_HOST`,
     * `chmod 0600` so the secrets are not world/group readable.

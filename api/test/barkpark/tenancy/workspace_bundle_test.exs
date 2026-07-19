@@ -17,9 +17,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 34 workspace_id tables including registered chat-host execution state" do
+    test "E1 = the 41 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 34
+      assert length(e1) == 41
       assert "roles" in e1
       # The run-secrets store gained a nullable workspace_id FK (Connectors W21,
       # charter D191/D192): a workspace's scoped secret rides the generic E1
@@ -34,6 +34,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert "cycle_waves" in e1
       assert "epic_assignments" in e1
       assert "epic_benchmark_experiments" in e1
+
+      for table <-
+            ~w(cycle_correction_admissions cycle_correction_promotion_events
+               cycle_correction_quarantines cycle_correction_roots cycle_correction_targets
+               cycle_release_gate_admissions cycle_release_gate_challenges) do
+        assert table in e1, "#{table} must be exported by direct workspace ownership"
+      end
+
       # search_surface_config gained a workspace_id column in Wave 5 Slice A
       # (charter D45/D49) to close a LIVE cross-tenant config bleed — re-pinned
       # out of the scope-column allowlist into E1.
@@ -53,11 +61,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
-    test "E2 = the 12 FK-transitive children without a workspace_id column" do
+    test "E2 = the 16 FK-transitive children without a workspace_id column" do
       # The six 20260715 cycle-fleet children joined the original six; each reaches
       # the tenant grain through a single many-to-one FK to a workspace_id parent.
       assert Catalog.live_e2(Repo) ==
-               ~w(chat_runtime_usage_receipts content_edges cycle_build_plans datasets
+               ~w(chat_runtime_usage_receipts content_edges cycle_build_plans
+                  cycle_release_gate_captures cycle_release_gate_consumptions
+                  cycle_release_paper_candidates cycle_release_public_smokes datasets
                   epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
                   epic_benchmark_attempts plugin_doc_state role_permissions task_edges
                   webhook_deliveries)

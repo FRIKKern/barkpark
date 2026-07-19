@@ -170,7 +170,7 @@ exit 0
 EOF
   chmod +x "$NODEDIR"/*
   APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors"
-  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
+  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"

@@ -387,9 +387,11 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     # ── the =SUM formula through the formula bar ──────────────────────────
     render_submit(grid, "bar-commit", %{"value" => "=SUM(B1:B3)"})
 
-    html = render(editor)
     # The grid shows the COMPUTED total on B4…
-    assert html =~ ~s(data-ref="B4" data-r="4" data-c="2" data-v="6750")
+    wait_until(fn ->
+      render(editor) =~ ~s(data-ref="B4" data-r="4" data-c="2" data-v="6750")
+    end)
+
     # …and the bar reads back the formula for the still-active B4.
     assert editor |> element(~s([data-test-id="sheet-formula-bar"])) |> render() =~
              ~s{value="=SUM(B1:B3)"}
@@ -401,9 +403,12 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     editor |> element(~s(th[data-r="1"] button.sheet-head-menu-btn)) |> render_click()
     editor |> element("div.sheet-menu button", "Insert above") |> render_click()
 
-    html = render(editor)
-    assert html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="Jul")
-    assert html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750")
+    wait_until(fn ->
+      html = render(editor)
+
+      html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="Jul") and
+        html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750")
+    end)
 
     # The session rewrote the formula's refs and recomputed.
     {:ok, content} = Session.peek(@slug, @dataset)
@@ -426,11 +431,14 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     render_hook(grid, "paste", %{"tsv" => "1300\t1500\n3500\t3600\n"})
 
-    html = render(editor)
-    assert html =~ ~s(data-ref="B2" data-r="2" data-c="2" data-v="1300")
-    assert html =~ ~s(data-ref="C3" data-r="3" data-c="3" data-v="3600")
-    # The total recomputed over the pasted figures: 1300 + 3500 + 2150.
-    assert html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6950")
+    wait_until(fn ->
+      html = render(editor)
+
+      # The total recomputed over the pasted figures: 1300 + 3500 + 2150.
+      html =~ ~s(data-ref="B2" data-r="2" data-c="2" data-v="1300") and
+        html =~ ~s(data-ref="C3" data-r="3" data-c="3" data-v="3600") and
+        html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6950")
+    end)
 
     # ── the colleague's pane converged on the whole story, hands off ──────
     expected_screen = %{

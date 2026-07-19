@@ -2320,9 +2320,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello there"})
 
+      # First-send dispatch is deliberately deferred through handle_info; wait
+      # for its public navigation signal before inspecting internal assigns.
+      path = assert_patch(view, 1_000)
       sid = store_id(view)
       assert is_binary(sid)
-      assert_patched(view, "/studio/chat/#{sid}")
+      assert path == "/studio/chat/#{sid}"
 
       # the user message is persisted (source markdown, D7)
       roles = StudioChat.list_messages(sid) |> Enum.map(&{&1.role, &1.source_markdown})
