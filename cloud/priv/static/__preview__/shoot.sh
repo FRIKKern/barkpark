@@ -6,13 +6,30 @@
 # (charter D63): review any screen state — including the ones that are painful
 # to reach live (mid-provision, failed, suspended) — without a backend.
 #
-#   make cloud-shots
+#   make cloud-shots                              # the full matrix (all scenarios)
 #   CHROME="/path/to/chrome" OUT=/tmp/shots ./shoot.sh
+#   SCEN=billing-trial,billing-past-due ./shoot.sh          # only these scenarios
+#   ACCENT=iris,ember ./shoot.sh                            # add the identity axis
+#   SCEN=billing-trial ACCENT=iris ./shoot.sh              # one targeted look
+#
+# Bare ./shoot.sh keeps the ORIGINAL full-matrix behavior (every scenario ×
+# light/dark × 1440/768, evergreen identity, evergreen filenames unchanged).
+#
+# WHY the poll-kill wrapper: this host's Chrome reliably WRITES each PNG and then
+# HANGS instead of exiting, so the old synchronous `--timeout=15000` path paid
+# the full 15s per shot even though the screenshot landed in ~3.6s. shot() now
+# backgrounds Chrome, polls for the PNG to SETTLE (two equal non-zero sizes),
+# and force-kills the moment it does — measured 89s→17s for a 4-shot batch,
+# ~3.6s for a single shot. (macOS has no timeout(1), so this is hand-rolled.)
 #
 # Env:
 #   CHROME  chrome/chromium binary (auto-detected on macOS/Linux otherwise)
 #   OUT     output dir (default: cloud/priv/static/__preview__/__shots__/, gitignored)
 #   PORT    preview server port (default: 4180)
+#   SCEN    comma-list of scenario names to shoot (default: all, from scenarios.mjs)
+#   ACCENT  comma-list of accent identities — evergreen|ember|fjord|charple|iris —
+#           each appends &accent=<name> to the URL (mock.js:70 seam) and -<name>
+#           to the filename. Unset ⇒ one pass, no ?accent=, filenames unchanged.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +69,24 @@ SCEN_TSV="$(HERE="$HERE" node --input-type=module -e '
 THEMES=(light dark)
 WIDTHS=(1440 768) # desktop + tablet — the second pass the slice mandates
 
+# ── optional SCEN filter (comma-list) ────────────────────────────────────────
+# Unset ⇒ shoot every scenario. Set ⇒ shoot only the named ones (an unknown
+# name simply never matches — no error, so a typo is visible as a missing PNG).
+# A space-padded allowlist; membership is a padded-substring test so this runs
+# on bash 3.2 (macOS default — no associative arrays).
+WANT_SCEN=""
+if [[ -n "${SCEN:-}" ]]; then WANT_SCEN=" ${SCEN//,/ } "; fi
+
+# ── optional ACCENT axis (comma-list) ────────────────────────────────────────
+# Unset ⇒ a single pass with NO ?accent= (evergreen fallback in CSS) and the
+# ORIGINAL filename. Set ⇒ one shot per identity, -<accent> suffixed on the file.
+ACCENTS=()
+if [[ -n "${ACCENT:-}" ]]; then
+  IFS=',' read -ra ACCENTS <<< "$ACCENT"
+else
+  ACCENTS=("") # the empty accent = old behavior (no ?accent=, no filename suffix)
+fi
+
 mkdir -p "$OUT"
 
 # ── start the preview server ─────────────────────────────────────────────────
@@ -77,14 +112,22 @@ fi
 echo ">> Chrome: $CHROME_BIN"
 echo ">> Shooting into: $OUT"
 
+# Portable file size (macOS `stat -f%z`, GNU `stat -c%s`), 0 if absent.
+png_size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+
 shot() {
-  local scen="$1" theme="$2" width="$3" deep="${4:-}"
-  local url="http://localhost:$PORT/?scen=$scen&theme=$theme$deep"
-  local png="$OUT/${scen}-${theme}-${width}.png"
+  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}"
+  local accent_q="" accent_sfx=""
+  if [[ -n "$accent" ]]; then accent_q="&accent=$accent"; accent_sfx="-$accent"; fi
+  local url="http://localhost:$PORT/?scen=$scen&theme=$theme$deep$accent_q"
+  local png="$OUT/${scen}-${theme}-${width}${accent_sfx}.png"
   # Fresh --user-data-dir per shot dodges the shared-profile lock (the local
   # Chrome-drive gotcha) and keeps runs hermetic.
   local profile
   profile="$(mktemp -d)"
+  rm -f "$png"
+  # Background Chrome, then poll — it writes the PNG and HANGS, so we can't wait
+  # on it exiting. See the header note for the measured win.
   "$CHROME_BIN" \
     --headless=new \
     --disable-gpu \
@@ -99,16 +142,45 @@ shot() {
     --virtual-time-budget=5000 \
     --timeout=15000 \
     --screenshot="$png" \
-    "$url" >/dev/null 2>&1 || echo "  !! failed: $scen/$theme/$width"
+    "$url" >/dev/null 2>&1 &
+  local cpid=$!
+  # Poll every 100ms; kill Chrome the instant the PNG has SETTLED (two equal,
+  # non-zero sizes — so we never grab a half-flushed file). Hard cap at 15s so a
+  # genuinely stuck shot can't wedge the whole run.
+  local waited=0 last=-1 cur
+  while (( waited < 15000 )); do
+    if [[ -f "$png" ]]; then
+      cur="$(png_size "$png")"
+      if [[ "$cur" -gt 0 && "$cur" == "$last" ]]; then break; fi
+      last="$cur"
+    fi
+    # Chrome exited on its own (rare on this host, but honor it).
+    kill -0 "$cpid" 2>/dev/null || break
+    sleep 0.1
+    waited=$((waited + 100))
+  done
+  # Reap: TERM, then a beat, then a guaranteed KILL — proof the spawned Chrome
+  # is never left alive (kill -0 returns non-zero once it's gone).
+  kill "$cpid" 2>/dev/null || true
+  wait "$cpid" 2>/dev/null || true
+  kill -9 "$cpid" 2>/dev/null || true
   rm -rf "$profile"
-  [[ -f "$png" ]] && echo "  ok  $(basename "$png")"
+  if [[ "$(png_size "$png")" -gt 0 ]]; then
+    echo "  ok  $(basename "$png")"
+  else
+    echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx}"
+  fi
 }
 
 while IFS=$'\t' read -r scen deep; do
   [[ -z "$scen" ]] && continue
+  # SCEN filter: when set, skip any scenario not on the list.
+  if [[ -n "$WANT_SCEN" && "$WANT_SCEN" != *" $scen "* ]]; then continue; fi
   for theme in "${THEMES[@]}"; do
     for width in "${WIDTHS[@]}"; do
-      shot "$scen" "$theme" "$width" "$deep"
+      for accent in "${ACCENTS[@]}"; do
+        shot "$scen" "$theme" "$width" "$deep" "$accent"
+      done
     done
   done
 done <<< "$SCEN_TSV"
