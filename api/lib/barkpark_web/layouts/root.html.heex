@@ -1417,15 +1417,32 @@
       background: var(--bg-card);
       overflow-x: auto; white-space: nowrap;
     }
+    /* `font-family: inherit` is NOT cosmetic here. spd-s6 renders every
+       ancestor crumb as a real <button>, and a UA button does not inherit the
+       document font — it defaults to the OS UI face. Without this line the
+       phone trail is the one piece of desk chrome not set in var(--font),
+       which reads as a rendering bug rather than a design choice. (The UA
+       font-SIZE is already overridden below; the family was not.) */
     .bp-desk-crumb {
       background: none; border: 0; padding: 2px 4px; cursor: pointer;
+      font-family: inherit;
       font-size: var(--text-xs); font-weight: 500; color: var(--fg-muted);
       border-radius: 4px; flex-shrink: 0;
     }
     .bp-desk-crumb:hover { color: var(--fg); background: var(--bg-muted); }
     .bp-desk-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .bp-desk-crumb-sep { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; user-select: none; }
-    .bp-desk-crumb--current { color: var(--fg); font-weight: 600; cursor: default; }
+    /* The trail's last entry is a document TITLE — arbitrary, user-authored
+       length — and the trail is `overflow-x: auto; white-space: nowrap` with
+       `flex-shrink: 0` crumbs. Unbounded, one long title pushes the whole
+       back-navigation off-screen on a 375px phone: the ancestors you need are
+       exactly the ones that scroll away. Truncate the one string that has no
+       length contract; the clickable ancestors keep their full labels. */
+    .bp-desk-crumb--current {
+      color: var(--fg); font-weight: 600; cursor: default;
+      min-width: 0; max-width: 45vw;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .bp-desk-crumb--current:hover { background: none; }
 
     /* ── Desk-group filter chips (schema-declared list filters on a
