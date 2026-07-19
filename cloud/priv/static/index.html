@@ -336,20 +336,21 @@
               <h1>Providers</h1>
               <p class="dim">Connect a cloud provider so Barkpark can provision on your account.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="provider-add" type="button">Connect a provider</button>
           </header>
+
+          <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
+               hybrid connect card (admin-only, verify+save in a .set-save-row).
+               loadProviders() paints both; a member sees the roster without any
+               Disconnect… affordance and no connect card at all. -->
+          <div id="provider-roster" aria-live="polite"></div>
+          <div id="provider-connect"></div>
 
           <!-- gh-2: GitHub App connection card. Renders connected / connect /
                not-configured from GET /v1/github/installation. -->
-          <div id="github-card" class="provider-list" aria-live="polite"></div>
+          <div id="github-card" aria-live="polite"></div>
 
-          <div id="provider-list" class="provider-list">
-            <div class="empty-state">
-              <h2>No providers connected</h2>
-              <p>Connect Hetzner Cloud to launch managed instances on your own account.</p>
-              <button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button>
-            </div>
-          </div>
+          <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
+          <div id="provider-matrix" aria-live="polite"></div>
         </section>
 
         <!-- ---------- NOTIFICATIONS (tab) ---------- -->

@@ -768,14 +768,14 @@
   }
 
   // Pure model for the lifecycle action row from the /v1/providers/capabilities
-  // conduit payload {providers:{kind:{tier,capabilities,gaps}}, default_gap} and
-  // the instance. Three honest degrade paths, none hidden / dead / faked:
+  // conduit payload {providers:{kind:{tier,capabilities,gaps}}} and the instance.
+  // Three honest degrade paths, none hidden / dead / faked:
   //   capPayload === undefined → loading shell (decommission live from frame 1)
   //   payload null/malformed / kind missing → "capabilities unavailable" + Retry
   //   provider tier === "dev"  → an fake/dev box we don't operate from the console
   // A wired provider yields one action per verb: capability true → CLI affordance,
   // capability false → disabled with the SERVER-OWNED gap reason (never invented;
-  // falls back only to the payload's own default_gap).
+  // the server emits no default_gap, so an absent per-verb gap shows no reason).
   function lifecycleActionsModel(capPayload, bp) {
     bp = bp || {};
     var kind = bp.provider || "hetzner";
@@ -798,14 +798,13 @@
 
     var caps = entry.capabilities || {};
     var gaps = entry.gaps || {};
-    var defaultGap = capPayload && typeof capPayload.default_gap === "string" ? capPayload.default_gap : "";
     var actions = LIFECYCLE_VERBS.map(function (v) {
       if (v.verb === "decommission") return decommission;
       if (caps[v.verb] === true) {
         return { verb: v.verb, label: v.label, mode: "cli",
           cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) };
       }
-      var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : defaultGap;
+      var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : "";
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
     });
     return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
@@ -1400,40 +1399,344 @@
     });
   }
 
-  // Fetch the team's connected providers from the server so they SURVIVE a
-  // reload (previously the connect flow was optimistic-only — a connected
-  // provider vanished on refresh).
+  // ============================================== PROVIDERS PAGE (gr-p4 G-02/G-03)
+  // The #view-providers page on the GR33 .set-* anatomy: a connected roster, the
+  // inline hybrid connect card (verify+save in a .set-save-row), and G-03's honest
+  // capability matrix. This is the wave's HONESTY FLAGSHIP — the roster never
+  // implies live validity, and the matrix never pads a cell or invents a reason.
+  // Every pure helper is node-pinned via __bpTestHook; the DOM mounts
+  // (loadProviders / renderProviderPage / loadCapabilityMatrix / disconnectProvider)
+  // are browser-verified. Whether the write affordances render is a role read
+  // (owner/admin), NOT a client degrade of a read: GET /v1/providers is
+  // member-readable, so a member still sees the roster + matrix (read-only), just
+  // without the connect card or any Disconnect… button (GR33 plain-member law).
+
+  function providerCanWrite() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
+  // A prod-tier provider's display name for a matrix column / roster row.
+  // providerMeta covers the connectable kinds; an unknown prod kind (a control
+  // plane that ships a new provider before the SPA learns its brand) falls back
+  // to the kind Title-cased — honest, never a fabricated brand name.
+  function providerDisplayName(kind) {
+    var k = String(kind || "");
+    var known = PROVIDERS.filter(function (p) { return p.kind === k; })[0];
+    if (known) return known.name;
+    return k ? k.charAt(0).toUpperCase() + k.slice(1) : "";
+  }
+
+  // The connected-roster rows. Each server row is {id,kind,label,team_id,
+  // inserted_at} — there is NO health/verified field, so a row shows kind + label
+  // + WHEN it was connected and NEVER a live-validity badge (backend truth: the
+  // roster cannot know whether the stored credential still works). `canDisconnect`
+  // gates the typed-confirm Disconnect… affordance (admin-only; a member sees none).
+  function providerRosterHtml(list, canDisconnect) {
+    var rows = Array.isArray(list) ? list : [];
+    if (!rows.length) return '<p class="set-empty">No providers connected yet.</p>';
+    return '<ul class="prov-roster">' + rows.map(function (p) {
+      var m = providerMeta(p.kind || "hetzner");
+      var when = p.inserted_at ? relTime(p.inserted_at) : "";
+      return '<li class="prov-row">' +
+        '<span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
+        '<span class="prov-row-main">' +
+          '<span class="prov-row-name">' + esc(m.name) +
+            (p.label ? ' <span class="prov-row-label">' + esc(p.label) + "</span>" : "") + "</span>" +
+          '<span class="prov-row-meta"><span class="prov-row-kind">' + esc(p.kind || "") + "</span>" +
+            (when ? '<span class="prov-row-when">connected ' + esc(when) + "</span>" : "") + "</span>" +
+        "</span>" +
+        (canDisconnect
+          ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
+            esc(p.kind || "") + '">Disconnect&hellip;</button>'
+          : "") +
+      "</li>";
+    }).join("") + "</ul>";
+  }
+
+  // Which available providers can still be connected. Duplicate connect is
+  // silently ADDITIVE server-side (no unique index, no 409), so the UI refuses a
+  // second connect: an already-connected kind is shown but NOT selectable
+  // ("Connected — disconnect to replace"; replace semantics = backlog
+  // gr-backlog-provider-reconnect). `selectable` = the first still-open kind (the
+  // default armed selection); allConnected → the card shows the replace note only.
+  function providerConnectModel(list) {
+    var connected = {};
+    (Array.isArray(list) ? list : []).forEach(function (p) { if (p && p.kind) connected[p.kind] = true; });
+    var options = PROVIDERS.filter(function (p) { return p.available; }).map(function (p) {
+      return { kind: p.kind, name: p.name, connected: !!connected[p.kind] };
+    });
+    var firstOpen = options.filter(function (o) { return !o.connected; })[0] || null;
+    return { options: options, selectable: firstOpen ? firstOpen.kind : null, allConnected: !firstOpen };
+  }
+
+  // The inline connect card body (GR33 hybrid: verify+save in a .set-save-row).
+  // A segmented provider picker (already-connected kinds shown but not selectable),
+  // the armed kind's credential subform (reused verbatim from the launch flow's
+  // builder so the two never drift), an in-card remediation slot, and the save-row.
+  // Pure — wireConnectCard() binds the picker + submit. `selected` is the armed
+  // kind, falling back to the first still-open provider.
+  function providerConnectCardHtml(list, selected) {
+    var model = providerConnectModel(list);
+    if (model.allConnected) {
+      return '<p class="set-empty">Every supported provider is connected. ' +
+        "Disconnect one above to replace its credentials.</p>";
+    }
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+      ? selected : model.selectable;
+    var p = providerMeta(armed);
+    var seg = model.options.map(function (o) {
+      return '<button class="seg-btn" type="button" data-connect-kind="' + esc(o.kind) + '"' +
+        (o.connected ? " disabled" : "") + ' aria-pressed="' + (o.kind === armed ? "true" : "false") + '">' +
+        esc(o.name) + (o.connected ? ' <span class="prov-seg-note">connected</span>' : "") + "</button>";
+    }).join("");
+    return '<div class="prov-connect-picker seg" role="group" aria-label="Provider to connect">' + seg + "</div>" +
+      '<div class="prov-connect-form">' +
+        '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
+          '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
+        credentialFieldsHtml(p) +
+        '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
+      "</div>" +
+      '<div class="set-save-row">' +
+        '<button class="btn btn-primary" id="cred-submit" type="button" data-connect-submit>Verify &amp; connect</button>' +
+      "</div>";
+  }
+
+  // The 9 lifecycle capabilities the matrix rows, in operator order (provision
+  // first, teardown in the middle, metadata last). Keys match the server
+  // capability facet 1:1; labels are the console's own plain-language gloss.
+  var CAPABILITY_VERBS = [
+    { key: "core", label: "Provision" },
+    { key: "catalog", label: "Size catalog" },
+    { key: "archive", label: "Archive" },
+    { key: "resurrect", label: "Resurrect" },
+    { key: "decommission", label: "Decommission" },
+    { key: "adopt", label: "Adopt existing" },
+    { key: "audit", label: "Audit" },
+    { key: "pause", label: "Pause" },
+    { key: "labels", label: "Labels" },
+  ];
+
+  // Pure model for the honest capability matrix from GET /v1/providers/
+  // capabilities {providers:{kind:{tier,capabilities,gaps}}}. The server NEVER
+  // emits a default_gap, so a false verb carries the server-owned gap reason when
+  // one exists and OTHERWISE a bare dash — the JS invents no reason and pads no
+  // cell. Dev-tier providers are FILTERED (the console does not operate them).
+  // Three honest states, mirroring the lifecycle conduit:
+  //   undefined            → loading
+  //   null / no providers  → unavailable (honest degrade, an older control plane)
+  //   {providers:{…}}       → the grid
+  function capabilityMatrixModel(capPayload) {
+    if (capPayload === undefined) return { loading: true, ok: false };
+    var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
+    if (!providers || typeof providers !== "object") return { loading: false, ok: false };
+    var cols = Object.keys(providers).filter(function (k) {
+      var e = providers[k];
+      return e && typeof e === "object" && e.tier !== "dev";
+    }).map(function (k) { return { kind: k, name: providerDisplayName(k) }; });
+    if (!cols.length) return { loading: false, ok: false };
+    var cells = {};
+    CAPABILITY_VERBS.forEach(function (v) {
+      cells[v.key] = {};
+      cols.forEach(function (c) {
+        var entry = providers[c.kind] || {};
+        var caps = entry.capabilities || {};
+        var gaps = entry.gaps || {};
+        var ok = caps[v.key] === true;
+        var reason = ok ? "" : (typeof gaps[v.key] === "string" && gaps[v.key].trim() !== "" ? gaps[v.key] : "");
+        cells[v.key][c.kind] = { ok: ok, reason: reason };
+      });
+    });
+    return { loading: false, ok: true, providers: cols, verbs: CAPABILITY_VERBS, cells: cells };
+  }
+
+  // Pure render of the matrix from its model. A supported cell is an affirmative
+  // mark; an unsupported cell is a dash + (only when the server owns one) the gap
+  // reason as a sub-line — NEVER an invented reason, never a padded cell.
+  function capabilityMatrixHtml(model) {
+    if (!model || model.loading) return '<p class="set-empty">Checking provider capabilities&hellip;</p>';
+    if (!model.ok) return '<p class="set-empty">Provider capabilities are unavailable right now.</p>';
+    var head = '<tr><th class="cap-corner" scope="col"><span class="visually-hidden">Capability</span></th>' +
+      model.providers.map(function (c) { return '<th class="cap-col" scope="col">' + esc(c.name) + "</th>"; }).join("") +
+      "</tr>";
+    var body = model.verbs.map(function (v) {
+      var cellsRow = model.providers.map(function (c) {
+        var cell = model.cells[v.key][c.kind];
+        if (cell.ok) {
+          return '<td class="cap-cell cap-cell--yes"><span class="cap-mark" aria-hidden="true">&#10003;</span>' +
+            '<span class="visually-hidden">Supported</span></td>';
+        }
+        return '<td class="cap-cell cap-cell--no">' +
+          '<span class="cap-dash" aria-hidden="true">&ndash;</span>' +
+          '<span class="visually-hidden">Not supported' + (cell.reason ? ": " + esc(cell.reason) : "") + "</span>" +
+          (cell.reason ? '<span class="cap-gap">' + esc(cell.reason) + "</span>" : "") +
+        "</td>";
+      }).join("");
+      return '<tr><th class="cap-verb" scope="row"><span class="cap-verb-key">' + esc(v.key) + "</span>" +
+        '<span class="cap-verb-label">' + esc(v.label) + "</span></th>" + cellsRow + "</tr>";
+    }).join("");
+    return '<div class="cap-scroll"><table class="cap-matrix"><thead>' + head + "</thead><tbody>" + body +
+      "</tbody></table></div>";
+  }
+
+  // Fetch the team's connected providers (they SURVIVE a reload — the connect
+  // flow is not optimistic-only) and repaint the roster + connect card.
   function loadProviders() {
-    var box = $("#provider-list");
-    if (!box) return;
-    box.innerHTML = '<div class="loading">Loading providers&hellip;</div>';
+    var roster = $("#provider-roster");
+    if (!roster) return;
+    roster.innerHTML = '<div class="set-section"><h2 class="set-h">Connected providers</h2>' +
+      '<div class="loading">Loading providers&hellip;</div></div>';
     api("GET", "/v1/providers").then(function (r) {
       var list = (r.ok && r.data && r.data.providers) || [];
-      renderProviderList(list);
+      renderProviderPage(list, providerCanWrite());
     });
   }
 
-  // Re-renders the Providers view body from a list (server- or optimistically-
-  // sourced).
-  function renderProviderList(list) {
-    var box = $("#provider-list");
-    if (!box) return;
-    if (!list || !list.length) {
-      box.innerHTML =
-        '<div class="empty-state"><h2>No providers connected</h2>' +
-        "<p>Connect Hetzner Cloud to launch managed instances on your own account.</p>" +
-        '<button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button></div>';
-      var b = $("#provider-add-empty");
-      if (b) b.addEventListener("click", openProviderPicker);
+  function renderProviderPage(list, canWrite) {
+    var roster = $("#provider-roster");
+    if (roster) {
+      roster.innerHTML = '<div class="set-section">' +
+        '<h2 class="set-h">Connected providers</h2>' +
+        '<p class="set-purpose">Credentials Barkpark uses to provision on your account, encrypted at rest and never shown again. ' +
+          "We show when each was connected — not a live-validity check.</p>" +
+        providerRosterHtml(list, canWrite) + "</div>";
+      if (canWrite) wireProviderDisconnect();
+    }
+    var connect = $("#provider-connect");
+    if (connect) {
+      if (canWrite) renderConnectCard(list, null);
+      else connect.innerHTML = "";
+    }
+  }
+
+  function renderConnectCard(list, selected) {
+    var connect = $("#provider-connect");
+    if (!connect) return;
+    connect.innerHTML = '<div class="set-section">' +
+      '<h2 class="set-h">Connect a provider</h2>' +
+      '<p class="set-purpose">We verify the credential before saving it. If it can’t be verified we show you exactly ' +
+        "how to mint a fresh one.</p>" +
+      providerConnectCardHtml(list, selected) + "</div>";
+    wireConnectCard(list, selected);
+  }
+
+  function wireConnectCard(list, selected) {
+    var connect = $("#provider-connect");
+    if (!connect) return;
+    var model = providerConnectModel(list);
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+      ? selected : model.selectable;
+    connect.querySelectorAll("[data-connect-kind]").forEach(function (btn) {
+      if (btn.disabled) return;
+      btn.addEventListener("click", function () {
+        renderConnectCard(list, btn.getAttribute("data-connect-kind"));
+        var f = $("#cred-token") || $("#cred-az-tenant_id");
+        if (f && f.focus) f.focus();
+      });
+    });
+    var eye = $("#cred-eye");
+    if (eye) eye.addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
+    var azEye = $("#cred-az-eye");
+    if (azEye) azEye.addEventListener("click", function () { toggleEye("#cred-az-client_secret", "#cred-az-eye"); });
+    var submit = connect.querySelector("[data-connect-submit]");
+    if (submit) submit.addEventListener("click", function () { submitInlineProviderCred(armed, list); });
+  }
+
+  // The inline verify-before-save submit (GR33 hybrid). Reuses the launch flow's
+  // pure builders so the credential shape + server-owned remediation copy never
+  // fork. On 201 the whole page repaints (the roster gains the kind, the connect
+  // picker drops it, the matrix is unaffected but refreshed for good measure); a
+  // 422 provider_unverified renders the server remediation IN the card verbatim.
+  function submitInlineProviderCred(kind, list) {
+    var p = providerMeta(kind);
+    var fields = readCredentialFields(p);
+    var label = (($("#cred-label") || {}).value || "").trim();
+    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
+    if (!valid) {
+      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
       return;
     }
-    box.innerHTML = list.map(function (p) {
-      var m = providerMeta(p.kind || "hetzner");
-      return '<div class="fleet-row"><div class="fleet-main">' +
-        '<div class="fleet-name"><span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
-          esc(m.name) + (p.label ? " &middot; " + esc(p.label) : "") + "</div>" +
-        '</div><div class="fleet-badges"><span class="badge"><span class="dot up"></span>Connected</span></div></div>';
-    }).join("");
+    var rem = $("#cred-remediation");
+    if (rem) { rem.hidden = true; rem.innerHTML = ""; }
+    var btn = $("#cred-submit");
+    if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
+    api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
+      if (r.status === 201) {
+        toast({ kind: "success", title: "Provider connected",
+          body: "Connected " + p.name + (label ? " (" + label + ")" : "") + "." });
+        loadProviders();
+        loadCapabilityMatrix();
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Verify & connect"; }
+      // Verify-before-save failure carries server-owned remediation (naming the
+      // exact console fix). ALL preflight failures collapse server-side to one
+      // provider_unverified, so the copy frames the honest single cause and
+      // renders the server string verbatim (never through friendly(), which
+      // provably drops .remediation).
+      var copy = remediationCopy(r.data);
+      if (copy) showCredRemediation(copy);
+      else toast({ kind: "error", title: "Couldn't verify those credentials",
+        body: friendly(r.data, "Check the details and try again.") });
+    });
+  }
+
+  function wireProviderDisconnect() {
+    var roster = $("#provider-roster");
+    if (!roster) return;
+    roster.querySelectorAll("[data-prov-disconnect]").forEach(function (btn) {
+      btn.addEventListener("click", function () { disconnectProvider(btn.getAttribute("data-prov-kind")); });
+    });
+  }
+
+  // Typed-confirm destroy grammar (openConfirmModal destroy tier): disconnect
+  // deletes EVERY stored credential of that kind (the server DELETE /:kind is a
+  // per-kind destroy, not per-row), so the operator types the kind to confirm.
+  // 404 is non-leaky (already gone → treat as success); 200 {ok:true} succeeds.
+  function disconnectProvider(kind) {
+    var m = providerMeta(kind);
+    openConfirmModal({
+      tier: "destroy",
+      title: "Disconnect " + m.name + "?",
+      consequences: [
+        "This deletes every stored " + m.name + " credential for this team.",
+        "Instances already running keep running, but new provisioning on " + m.name + " will need a fresh connection.",
+      ],
+      resourceName: kind,
+      confirmLabel: "Disconnect",
+      busyLabel: "Disconnecting…",
+      onConfirm: function run(ctl) {
+        api("DELETE", "/v1/providers/" + encodeURIComponent(kind)).then(function (r) {
+          if (r.ok || r.status === 404) {
+            ctl.succeed();
+            toast({ kind: "success", title: m.name + " disconnected" });
+            loadProviders();
+            loadCapabilityMatrix();
+          } else {
+            ctl.fail(friendly(r.data, "Couldn't disconnect. Try again."), "Try again", run);
+          }
+        });
+      },
+    });
+  }
+
+  // G-03: the honest capability matrix. GET /v1/providers/capabilities is
+  // member-readable, so this renders for every role. Loading → unavailable →
+  // grid, all honest (an older control plane that answers {} degrades to
+  // "unavailable", never a fabricated grid).
+  function loadCapabilityMatrix() {
+    var box = $("#provider-matrix");
+    if (!box) return;
+    function paint(model) {
+      box.innerHTML = '<div class="set-section">' +
+        '<h2 class="set-h">What each provider can do</h2>' +
+        '<p class="set-purpose">The honest matrix — a dash means we won’t pretend. Where a provider can’t do ' +
+          "something, the reason is the server’s own.</p>" +
+        capabilityMatrixHtml(model) + "</div>";
+    }
+    paint(capabilityMatrixModel(undefined));
+    api("GET", "/v1/providers/capabilities").then(function (r) {
+      paint(capabilityMatrixModel(r.ok && r.data ? r.data : null));
+    });
   }
 
   // ====================================================== GITHUB (gh-2)
@@ -1480,7 +1783,7 @@
           "<div class=\"dim\">GitHub deploys aren't configured on this Barkpark yet.</div>" +
         '</div><div class="fleet-badges"><span class="badge">Not configured</span></div></div>';
     }
-    box.innerHTML = '<div class="notif-card"><h2 class="notif-h">GitHub</h2>' + row + "</div>";
+    box.innerHTML = '<div class="set-section"><h2 class="set-h">GitHub</h2>' + row + "</div>";
     var d = $("#github-disconnect");
     if (d) d.addEventListener("click", disconnectGithub);
   }
@@ -2407,7 +2710,7 @@
     if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderBilling();
-    if (r.view === "providers") { loadProviders(); loadGithub(); }
+    if (r.view === "providers") { loadProviders(); loadGithub(); loadCapabilityMatrix(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
     if (r.view === "members") loadMembers(); // C10: the team Members settings panel
@@ -13740,8 +14043,6 @@
         );
       }
     });
-    $("#provider-add").addEventListener("click", openProviderPicker);
-    $("#provider-add-empty").addEventListener("click", openProviderPicker);
     $("#token-add").addEventListener("click", openTokenModal);
     // C10: the Members panel's invite button — reads the team context at click.
     var membersInvite = $("#members-invite");
@@ -13944,6 +14245,14 @@
       catalogSizeRowsHtml: catalogSizeRowsHtml, catalogPanelHtml: catalogPanelHtml,
       azureFieldKeys: AZURE_FIELDS.map(function (f) { return f.key; }),
       availableProviderKinds: PROVIDERS.filter(function (p) { return p.available; }).map(function (p) { return p.kind; }),
+      // gr-p4 G-02/G-03 — the providers page (roster + hybrid connect card) and
+      // the honest capability matrix. Pure; the DOM mounts (loadProviders /
+      // renderProviderPage / renderConnectCard / disconnectProvider /
+      // loadCapabilityMatrix) are browser-verified.
+      providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
+      providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
+      capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
+      capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure
       // helpers — the S4 pill state mapper, the conduit-driven action model, its
       // render, the fleet infra line, the row gate, and the optimistic reducer.

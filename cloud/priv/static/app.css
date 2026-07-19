@@ -1696,6 +1696,66 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .set-toggle { font-size: var(--text-sm); display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
 .set-toggle input { width: 15px; height: 15px; accent-color: var(--primary); }
 
+/* GR33 absence line — a muted sentence for a section's empty / loading /
+   all-connected state (roster empty, matrix loading, no connectable provider).
+   --muted-text on --surface is already a CONTRAST_PAIRS entry. */
+.set-empty { font-size: var(--text-sm); color: var(--muted-text); margin: 0; }
+
+/* gr-p4 G-02 — provider roster rows. IDENTITY mark + name/label, then the kind
+   & connected-at meta in mono; (admin-only) a typed-confirm Disconnect… trails.
+   The roster shows kind + label + WHEN only — never a live-validity badge. */
+.prov-roster { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+.prov-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) 0; border-top: 1px solid var(--border);
+}
+.prov-row:first-child { border-top: none; }
+.prov-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.prov-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+.prov-row-label { font-weight: 400; color: var(--muted-text); }
+.prov-row-meta { display: flex; flex-wrap: wrap; gap: var(--space-3); font-family: var(--mono); font-size: var(--text-xs); }
+.prov-row-kind { color: var(--dim); }
+.prov-row-when { color: var(--muted-text); }
+
+/* gr-p4 G-02 — the inline connect card: a provider picker (.seg) → the armed
+   kind's credential subform → the .set-save-row. An already-connected kind is
+   shown but not selectable (its seg-btn ships disabled + a "connected" note). */
+.prov-connect-picker { margin: var(--space-2) 0 var(--space-4); }
+.prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
+.prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }
+
+/* gr-p4 G-03 — the honest capability matrix: 9 verb rows × prod-provider
+   columns. Tokens only. The affirmative mark reads --ok (an identity-invariant
+   status green, already contrast-paired on --surface); the dash + server-owned
+   gap reason read the muted voices. No new fg/bg pairing is introduced. */
+.cap-scroll { overflow-x: auto; margin-top: var(--space-3); }
+.cap-matrix { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.cap-matrix th, .cap-matrix td {
+  text-align: left; padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border); vertical-align: top;
+}
+.cap-matrix thead th {
+  border-top: none; border-bottom: 1px solid var(--border);
+  background: var(--muted-surface); color: var(--text); font-weight: 600;
+}
+.cap-corner { width: 40%; }
+.cap-col { text-align: center; }
+.cap-verb { white-space: nowrap; }
+.cap-verb-key { display: block; font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
+.cap-verb-label { display: block; font-size: var(--text-sm); color: var(--text); font-weight: 500; }
+.cap-cell { text-align: center; }
+.cap-cell--yes { text-align: center; }
+.cap-cell--no { text-align: center; }
+.cap-mark { color: var(--ok); font-weight: 700; font-size: var(--text-base); }
+.cap-dash { color: var(--muted-text); font-weight: 600; }
+.cap-gap { display: block; margin-top: 2px; font-size: var(--text-xs); color: var(--dim); line-height: 1.4; }
+
+/* Screen-reader-only text (matrix cell yes/no + reason spoken to AT). */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {
   .topbar { padding: 0 14px; gap: 10px; }
