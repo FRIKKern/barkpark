@@ -520,10 +520,14 @@
     return (br + (os ? " · " + os : "")) || "Browser";
   }
 
-  function openAccountModal() {
-    var s = session() || {};
+  // PURE body of the account modal (GR54's safety net). Extracted verbatim from
+  // openAccountModal so the eight element-id contracts the wiring below depends
+  // on — and that a lockout would ride — are node-pinned BEFORE the markup is
+  // recomposed. `s` is the session object; only `team_id` is read.
+  function accountModalHtml(s) {
+    s = s || {};
     var team = s.team_id ? String(s.team_id) : "—";
-    openModal(
+    return (
       '<h2 class="modal-title" id="modal-title">Account &amp; sessions</h2>' +
       '<p class="modal-sub">You are signed in to Barkpark Cloud.</p>' +
       '<div class="modal-row"><span class="k">Team</span><span class="v">' + esc(team) + "</span></div>" +
@@ -551,6 +555,10 @@
         '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
       "</div>"
     );
+  }
+
+  function openAccountModal() {
+    openModal(accountModalHtml(session() || {}));
 
     loadSessions();
 
@@ -15646,6 +15654,9 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
+      // eight lockout-bearing element ids are node-pinned.
+      accountModalHtml: accountModalHtml,
       // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50). operatorRouteAllowed is
       // the fail-closed ROUTE gate — applyRoute itself is not exported and cannot
       // be pinned, so the predicate it consults is pinned instead (GR49). The rest

@@ -84,6 +84,80 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── gr-p5-account-2fa · GR54 THE SAFETY NET ─────────────────────────────────
+// The account modal is the ONE surface whose three operations (password change,
+// session revoke, log out) can lock a user out of their own console. Before the
+// body is recomposed, its element-id contracts are pinned here. Every pin below
+// was MUTATION-PROVED: deleting the thing it names reds exactly this test and
+// nothing else. Source-regex guards are BANNED (a probe's first attempt passed
+// while the guarded line sat commented out) — these read the rendered markup.
+
+test("gr-p5-account: accountModalHtml carries all eight element ids the wiring binds to", () => {
+  const html = hooks.accountModalHtml({ team_id: "team_abc" });
+  // Each id is bound by openAccountModal / submitPasswordChange / loadSessions.
+  // Losing one silently deadens a control that can strand a signed-in user.
+  for (const id of ["modal-title", "pw-current", "pw-new", "pw-error",
+    "sessions-box", "sessions-revoke-all", "pw-form", "modal-logout"]) {
+    assert.ok(html.includes('id="' + id + '"'),
+      "account modal body must carry id=" + JSON.stringify(id));
+  }
+});
+
+test("gr-p5-account: the <h2> ITSELF carries id=modal-title (index.html binds it statically)", () => {
+  const html = hooks.accountModalHtml({ team_id: "team_abc" });
+  // index.html sets aria-labelledby="modal-title" on the SHARED .modal-card, so
+  // the id must live on this body's heading — not on some other node, and never
+  // absent: dropping it strips the accessible name from EVERY modal in the app.
+  const h2 = html.match(/<h2[^>]*>/);
+  assert.ok(h2, "the account modal must open with an <h2>");
+  assert.ok(/id="modal-title"/.test(h2[0]),
+    "id=modal-title must sit on the <h2> itself, got: " + h2[0]);
+});
+
+test("gr-p5-account: index.html still binds aria-labelledby=modal-title on the shared modal card", () => {
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const card = html.match(/<div class="modal-card card"[^>]*>/);
+  assert.ok(card, "the shared .modal-card must exist in index.html");
+  assert.ok(card[0].includes('aria-labelledby="modal-title"'),
+    "the shared modal card must keep aria-labelledby=modal-title: " + card[0]);
+});
+
+test("gr-p5-account: loadSessions' two css_check-named hooks survive — .session-revoke and .badge-current", () => {
+  // These two class names are not decoration: `.session-revoke` is the selector
+  // loadSessions delegates its per-row revoke click through, and `.badge-current`
+  // is what marks the row you must NOT revoke. Both are asserted against the
+  // shipped app.js source of loadSessions, which is a DOM mount (no pure hook).
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function loadSessions("));
+  const body = fn.slice(0, fn.indexOf("\n  function ", 10));
+  assert.ok(body.includes('querySelectorAll(".session-revoke")'),
+    "loadSessions must delegate row revokes through .session-revoke");
+  assert.ok(body.includes("badge-current"),
+    "loadSessions must badge the current row with .badge-current");
+});
+
+test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
+  // openAccountModal has exactly three entry points. A recomposition that
+  // renames the function or drops a listener leaves the account unreachable.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(src.includes('$("#acct-btn").addEventListener("click", openAccountModal)'),
+    "the sidebar account button must open the account modal");
+  assert.ok(/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
+    "the workspace switcher must open the account modal");
+  // The palette id is LAW (the label is free) — no conditional guard here: a
+  // missing hook must red this test, never silently skip it.
+  assert.equal(typeof hooks.paletteActionItems, "function",
+    "paletteActionItems must stay exported");
+  assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-account"),
+    "the command palette must keep the act-account action id");
+});
+
+test("gr-p5-account: a hostile team name is ESCAPED, never injected", () => {
+  const html = hooks.accountModalHtml({ team_id: '<img src=x onerror="alert(1)">' });
+  assert.ok(!html.includes("<img src=x"), "raw hostile markup must never reach the body");
+  assert.ok(html.includes("&lt;img src=x"), "the hostile name must render escaped");
+});
+
 test("gr-p5: app.css is BRACE-BALANCED — no rule is silently swallowed by an unclosed block", () => {
   // A REAL defect this slice hit (present on main since #4271): a comment's
   // opening `/*` was lost, so `@media (max-width: 620px) {` never closed and
