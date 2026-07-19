@@ -114,6 +114,7 @@
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
+                  "export_failed",
                   "forbidden",
                   "forbidden_field",
                   "halted",

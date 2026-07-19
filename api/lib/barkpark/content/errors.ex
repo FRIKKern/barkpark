@@ -125,7 +125,10 @@ defmodule Barkpark.Content.Errors do
                          # and a workspace-slug collision on adopt (409).
                          "bundle_import_disabled",
                          "invalid_mode",
-                         "workspace_slug_conflict"
+                         "workspace_slug_conflict",
+                         # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
+                         # the export stream failed or timed out before the tar completed.
+                         "export_failed"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)

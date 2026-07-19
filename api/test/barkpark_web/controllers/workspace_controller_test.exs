@@ -529,6 +529,34 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       end
     end
 
+    test "503 export_failed with a retry hint when the COPY dies of a transport failure — never a bare 500 internal_error",
+         %{conn: conn} do
+      raw_admin = "ws-export-503-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Dying Export WS"}, admin_token(raw_admin))
+
+      # The exact exception the live 500 carried, raised from the exact function
+      # it was raised in (run_copy_out/1), through the real route. A genuine
+      # pool timeout cannot be used here: under the SQL sandbox it arrives as an
+      # ownership-shutdown EXIT, not a rescuable raise.
+      Application.put_env(:barkpark, :export_copy_fault, "tcp recv: closed")
+      on_exit(fn -> Application.delete_env(:barkpark, :export_copy_fault) end)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 503
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "export_failed"
+      assert body["error"]["reason"] == "database_unavailable"
+      assert body["error"]["message"] != ""
+      assert body["error"]["hint"] =~ "Retry"
+    end
+
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do
       raw_admin = "ws-export-404-#{System.unique_integer([:positive])}"
       {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
