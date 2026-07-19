@@ -72,6 +72,7 @@ defmodule BarkparkWeb.Studio.Caps do
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category editor-set-mode
+    width-bucket
     search ref-search validate-upload reload-remote-doc
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard

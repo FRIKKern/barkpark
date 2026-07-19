@@ -23,6 +23,26 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
 
       assert html =~ ~s(id="studio-panes")
     end
+
+    test "renders no phx-hook attribute by default (inert seam — spd-s2)" do
+      html =
+        render_component(&StudioComponents.pane_layout/1, %{
+          inner_block: [%{inner_block: fn _, _ -> "" end}]
+        })
+
+      refute html =~ "phx-hook"
+    end
+
+    test "phx_hook attr mounts the named client hook on the container (spd-s2)" do
+      html =
+        render_component(&StudioComponents.pane_layout/1, %{
+          id: "studio-panes",
+          phx_hook: "StudioWidthBucket",
+          inner_block: [%{inner_block: fn _, _ -> "" end}]
+        })
+
+      assert html =~ ~s(phx-hook="StudioWidthBucket")
+    end
   end
 
   describe "pane_column/1" do
