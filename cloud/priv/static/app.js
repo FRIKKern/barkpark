@@ -1492,8 +1492,24 @@
   }
 
   // ====================================================== NOTIFICATIONS
+  // G-04 (the crown), GR33/GR34/GR36. The settings-page anatomy in full: the
+  // Notifications view is a FORM page of `.set-section` cards, each independently-
+  // PERSISTED buffered section carrying its OWN `.set-save-row` mapping to its
+  // real endpoint (email → PUT /settings, chat channels → PUT /channels). The
+  // event×channel routing matrix is a LIVE toggle grid, not a buffered form: each
+  // cell persists to its true endpoint the instant it flips (email column → PUT
+  // /settings, chat columns → PUT /events), so per GR33's own atomicity rule it
+  // carries NO save-row (a single button spanning two endpoints would lie). The
+  // delivery log is read-only. Everything below is backend-true: chat credentials
+  // are write-only (the server echoes only `configured:bool`), the four failure
+  // events render their `chat_default_on` fan-out as an honest default (never as an
+  // explicit choice), and the always-send `test` event is stated, never faked as a
+  // toggle. Reads are member-visible; every write is admin-gated — a plain member
+  // sees the email settings READ-ONLY with no save-rows and no admin affordances.
+
   // The per-event alert toggles, in display order. Labels mirror the server's
-  // EmailSettings columns 1:1.
+  // EmailSettings columns 1:1 (Notifications.@chat_events minus the always-send
+  // "test", which the matrix renders as its own honest info row).
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
@@ -1506,6 +1522,332 @@
     ["token_expiring", "API token expiring"]
   ];
 
+  // The email transport single-select (GR34: pill()/`.seg` segmented control).
+  var NOTIF_TRANSPORTS = [
+    { v: "instance", label: "Barkpark platform" },
+    { v: "smtp", label: "SMTP" },
+    { v: "api", label: "API" }
+  ];
+
+  // The chat channel roster (ChannelConfig.@types) + per-shape credential fields.
+  // discord/slack/webhook take one {url}; telegram {token, chat_id, thread_id?};
+  // pushover {user_key, api_token}. `off` is the MANDATORY consequence sub-line
+  // (GR34 .set-check grammar). Credentials are write-only: never pre-filled.
+  var NOTIF_CHANNELS = [
+    { type: "discord", label: "Discord", off: "Off = Discord stops receiving routed events.",
+      fields: [{ k: "url", label: "Webhook URL", ph: "https://discord.com/api/webhooks/…" }] },
+    { type: "slack", label: "Slack", off: "Off = Slack stops receiving routed events.",
+      fields: [{ k: "url", label: "Webhook URL", ph: "https://hooks.slack.com/services/…" }] },
+    { type: "telegram", label: "Telegram", off: "Off = Telegram stops receiving routed events.",
+      fields: [
+        { k: "token", label: "Bot token", ph: "123456:ABC-…" },
+        { k: "chat_id", label: "Chat ID", ph: "-1001234567890" },
+        { k: "thread_id", label: "Thread ID (optional)", ph: "leave blank for the main chat" }
+      ] },
+    { type: "pushover", label: "Pushover", off: "Off = Pushover stops receiving routed events.",
+      fields: [
+        { k: "user_key", label: "User key", ph: "u…" },
+        { k: "api_token", label: "API token", ph: "a…" }
+      ] },
+    { type: "webhook", label: "Webhook", off: "Off = this endpoint stops receiving routed events.",
+      fields: [{ k: "url", label: "Endpoint URL", ph: "https://example.com/hook" }] }
+  ];
+
+  // Last-known settings envelope, held so a live matrix toggle can materialize the
+  // current effective channel set before flipping one cell (see notifEventChannels).
+  var notifCache = null;
+
+  // ── Pure builders (node-pinned) ──────────────────────────────────────────────
+
+  function notifTransportLabel(v) {
+    for (var i = 0; i < NOTIF_TRANSPORTS.length; i++) if (NOTIF_TRANSPORTS[i].v === v) return NOTIF_TRANSPORTS[i].label;
+    return v || "instance";
+  }
+
+  // The 6 routing-matrix columns: email + the 5 chat channels. Email is a real
+  // channel whose per-event control is the settings boolean; the chat channels'
+  // per-event control is event_routes. Each column writes to its OWN endpoint.
+  function notifMatrixColumns() {
+    return [{ type: "email", label: "Email" }].concat(
+      NOTIF_CHANNELS.map(function (c) { return { type: c.type, label: c.label }; })
+    );
+  }
+
+  // A channel's {enabled, configured} truth from the settings view, defaulting to
+  // an unconfigured/disabled channel when the team has never touched it.
+  function notifChannelState(settings, type) {
+    var list = (settings && settings.channels) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].type === type) return list[i];
+    return { type: type, enabled: false, configured: false };
+  }
+
+  // The honest per-cell state for event×channel. Email cell = the per-event
+  // boolean. Chat cell = explicitly routed (event_routes carries the event), OR a
+  // `chat_default_on` failure event with no custom route yet AND the channel is
+  // enabled — the latter is flagged `isDefault` so the UI never paints a default
+  // fan-out as an explicit choice. A disabled chat channel can't receive, so its
+  // cells read off + not-toggleable.
+  function notifCellState(settings, event, type) {
+    settings = settings || {};
+    if (type === "email") return { on: settings[event] === true, isDefault: false, endpoint: "email", enabled: true };
+    var ch = notifChannelState(settings, type);
+    var routes = settings.event_routes || {};
+    if (Object.prototype.hasOwnProperty.call(routes, event)) {
+      var arr = routes[event] || [];
+      return { on: arr.indexOf(type) !== -1, isDefault: false, endpoint: "chat", enabled: ch.enabled };
+    }
+    var defaults = settings.chat_default_on || [];
+    var def = defaults.indexOf(event) !== -1 && ch.enabled === true;
+    return { on: def, isDefault: def, endpoint: "chat", enabled: ch.enabled };
+  }
+
+  // The new channel-type list for PUT /v1/notifications/events when flipping
+  // `type` on `event`. If the event is on its default fan-out (no explicit route),
+  // the current set is MATERIALIZED from every enabled channel first, so the first
+  // edit doesn't silently drop the other default-on channels.
+  function notifEventChannels(settings, event, type, on) {
+    settings = settings || {};
+    var routes = settings.event_routes || {};
+    var current;
+    if (Object.prototype.hasOwnProperty.call(routes, event)) {
+      current = (routes[event] || []).slice();
+    } else if ((settings.chat_default_on || []).indexOf(event) !== -1) {
+      current = NOTIF_CHANNELS
+        .filter(function (c) { return notifChannelState(settings, c.type).enabled === true; })
+        .map(function (c) { return c.type; });
+    } else {
+      current = [];
+    }
+    var idx = current.indexOf(type);
+    if (on && idx === -1) current.push(type);
+    if (!on && idx !== -1) current.splice(idx, 1);
+    return current;
+  }
+
+  // The semantic tone of a delivery — sent→ok, failed→danger, pending→info, with
+  // an http_status override (2xx→ok, 4xx/5xx→danger) mirroring the webhook grammar.
+  function notifDeliveryTone(d) {
+    d = d || {};
+    if (d.http_status != null) {
+      var code = Number(d.http_status);
+      if (code >= 200 && code < 300) return "ok";
+      if (code >= 400) return "danger";
+      return "info";
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "sent") return "ok";
+    if (s === "failed") return "danger";
+    return "info";
+  }
+
+  // The status-pill label: an http_status reads "200 OK" / "HTTP 500"; otherwise
+  // the capitalized delivery status (pending|sent|failed).
+  function notifDeliveryStatusLabel(d) {
+    d = d || {};
+    if (d.http_status != null) {
+      var n = Number(d.http_status);
+      return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "sent") return "Sent";
+    if (s === "failed") return "Failed";
+    return "Pending";
+  }
+
+  // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
+  // recipient leads (mono), a toned status pill, then channel · event · attempts,
+  // the relative time, and — on a failure — the verbatim last_error on its own line.
+  function notifDeliveryRowHtml(d) {
+    d = d || {};
+    var tone = notifDeliveryTone(d);
+    var recipient = d.recipient ? esc(d.recipient) : "&mdash;";
+    var channel = esc(d.channel || "email");
+    var event = esc(d.event || "—");
+    var attempts = d.attempts != null
+      ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
+      : null;
+    var meta = [channel, event].concat(attempts ? [attempts] : []).join(" &middot; ");
+    var err = d.last_error != null && String(d.last_error) !== ""
+      ? '<span class="wh-del-err">' + esc(d.last_error) + "</span>"
+      : "";
+    return '<div class="wh-del-row">' +
+      '<span class="wh-del-event">' + recipient + "</span>" +
+      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(notifDeliveryStatusLabel(d)) + "</span>" +
+      '<span class="wh-del-meta">' + meta + "</span>" +
+      '<span class="wh-del-spacer"></span>' +
+      '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
+      err +
+      "</div>";
+  }
+
+  // Delivery-log body states: populated card / honest empty line.
+  function notifDeliveriesHtml(list) {
+    if (!list || !list.length) return '<div class="wh-del-empty dim">No notifications have been delivered yet.</div>';
+    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+  }
+
+  // The honest degrade when the deliveries route is absent (older control plane) or
+  // errors — the log is ABOUT the send record, not served by it, so it never spins.
+  function notifDeliveriesErrorHtml() {
+    return '<div class="wh-del-empty dim">Couldn\'t load the delivery log &mdash; it may be momentarily unavailable. Try again shortly.</div>';
+  }
+
+  // A masked secret ("********" when stored, null when unset) → the stored-or-empty
+  // placeholder. Secrets are never echoed, so the input starts blank either way.
+  function notifSecretFieldHtml(id, label, masked, ph, type) {
+    var stored = masked != null && masked !== "";
+    return '<div class="field"><label class="label" for="' + id + '">' + esc(label) + "</label>" +
+      '<input class="form-input" id="' + id + '" type="' + (type || "text") + '" placeholder="' +
+      esc(stored ? "•••••••• (stored)" : ph) + '"></div>';
+  }
+
+  function notifTransportSegHtml(transport) {
+    return '<div class="seg" id="notif-transport-seg" role="group" aria-label="Email transport">' +
+      NOTIF_TRANSPORTS.map(function (t) {
+        return '<button class="seg-btn" type="button" data-value="' + esc(t.v) + '" aria-pressed="' +
+          (t.v === transport ? "true" : "false") + '">' + esc(t.label) + "</button>";
+      }).join("") + "</div>";
+  }
+
+  // The email-delivery card. Admin: a buffered form (transport seg + from + SMTP)
+  // with its own save-row → PUT /settings. Member: a read-only definition list —
+  // no inputs, no save-row, no affordances (GR33 plain-member law).
+  function notifEmailSectionHtml(s, canManage) {
+    s = s || {};
+    var transport = s.transport || "instance";
+    if (!canManage) {
+      return '<section class="set-section">' +
+        '<h3 class="set-h">Email delivery</h3>' +
+        '<p class="set-purpose">Your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<dl class="set-readonly">' +
+          "<div><dt>Email alerts</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
+          "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
+          "<div><dt>From address</dt><dd>" + esc(s.from_address || "—") + "</dd></div>" +
+        "</dl></section>";
+    }
+    var smtp =
+      '<div id="notif-smtp"' + (transport !== "smtp" ? " hidden" : "") + ">" +
+        notifSecretFieldHtml("notif-smtp-host", "SMTP host", s.smtp_host, "smtp.example.com") +
+        notifSecretFieldHtml("notif-smtp-user", "SMTP username", s.smtp_username, "username") +
+        notifSecretFieldHtml("notif-smtp-pass", "SMTP password", s.smtp_password, "password", "password") +
+        '<div class="field"><label class="label" for="notif-smtp-port">SMTP port</label>' +
+          '<input class="form-input" id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
+      "</div>";
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Email delivery</h3>' +
+      '<p class="set-purpose">The transport your team\'s alert email is sent over, and who it comes from.</p>' +
+      '<div class="field"><label class="set-toggle"><input type="checkbox" id="notif-alerts"' +
+        (s.alerts_enabled !== false ? " checked" : "") + "> Email alerts enabled</label></div>" +
+      '<div class="field"><span class="label">Transport</span>' + notifTransportSegHtml(transport) + "</div>" +
+      '<div class="field"><label class="label" for="notif-from-addr">From address</label>' +
+        '<input class="form-input" id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
+      smtp +
+      '<div class="set-save-row"><span class="set-ack dim" id="notif-email-ack" aria-live="polite"></span>' +
+        '<button class="btn btn-primary" id="notif-email-save" type="button">Save email settings</button></div>' +
+      "</section>";
+  }
+
+  // One chat-channel row: a `.set-check` enable (name + configured tag + mandatory
+  // consequence sub-line) plus the write-only credential fields for its shape, and
+  // a "Send test" affordance only when the channel is enabled AND configured.
+  function notifChannelRowHtml(s, ch) {
+    var st = notifChannelState(s, ch.type);
+    var tag = st.configured
+      ? '<span class="set-cred-tag">configured</span>'
+      : '<span class="set-cred-tag set-cred-tag--empty">not configured</span>';
+    var creds = ch.fields.map(function (f) {
+      return '<div class="field"><label class="label">' + esc(f.label) + "</label>" +
+        '<input class="form-input" type="text" data-cred data-channel="' + esc(ch.type) + '" data-key="' + esc(f.k) + '" placeholder="' +
+        esc(st.configured ? "•••••••• (stored)" : f.ph) + '"></div>';
+    }).join("");
+    var test = st.enabled && st.configured
+      ? '<button class="btn btn-ghost btn-sm" type="button" data-notif-chan-test="' + esc(ch.type) + '">Send test</button>'
+      : "";
+    return '<div class="set-channel" data-channel-row="' + esc(ch.type) + '">' +
+      '<label class="set-check"><input type="checkbox" data-chan-enable data-channel="' + esc(ch.type) + '" data-initial="' +
+        (st.enabled ? "1" : "0") + '"' + (st.enabled ? " checked" : "") + ">" +
+        '<span class="set-check-main"><span class="set-check-name">' + esc(ch.label) + " " + tag + "</span>" +
+        '<span class="set-check-sub">' + esc(ch.off) + "</span></span></label>" +
+      '<div class="set-channel-creds">' + creds + test + "</div>" +
+      "</div>";
+  }
+
+  // The chat-channels card — a buffered form; the save-row PUTs only the touched
+  // channels (each to the same /channels endpoint, so one button is honest).
+  function notifChannelsSectionHtml(s) {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Chat channels</h3>' +
+      '<p class="set-purpose">Route alerts to Discord, Slack, Telegram, Pushover, or a raw webhook. Credentials are write-only &mdash; we seal them and never show them again.</p>' +
+      NOTIF_CHANNELS.map(function (ch) { return notifChannelRowHtml(s, ch); }).join("") +
+      '<div class="set-save-row"><span class="set-ack dim" id="notif-channels-ack" aria-live="polite"></span>' +
+        '<button class="btn btn-primary" id="notif-channels-save" type="button">Save channels</button></div>' +
+      "</section>";
+  }
+
+  function notifMatrixCellHtml(s, event, col) {
+    var st = notifCellState(s, event, col.type);
+    var cls = "set-matrix-cell" + (st.isDefault ? " set-matrix-cell--default" : "");
+    var dis = col.type !== "email" && st.enabled === false ? " disabled" : "";
+    return '<label class="' + cls + '"><input type="checkbox" data-notif-cell data-event="' + esc(event) +
+      '" data-channel="' + esc(col.type) + '"' + (st.on ? " checked" : "") + dis +
+      ' aria-label="' + esc(event) + " via " + esc(col.label) + '"></label>';
+  }
+
+  // The event×channel routing matrix — a LIVE grid (no save-row; each cell writes
+  // on toggle). Columns = email + 5 chat channels; rows = the 9 events; the
+  // always-send `test` row is stated, never a lying toggle.
+  function notifMatrixSectionHtml(s) {
+    var cols = notifMatrixColumns();
+    var head = '<div class="set-matrix-corner"></div>' + cols.map(function (c) {
+      var off = c.type !== "email" && notifChannelState(s, c.type).enabled !== true;
+      return '<div class="set-matrix-col">' + esc(c.label) + (off ? '<span class="set-matrix-off">off</span>' : "") + "</div>";
+    }).join("");
+    var rows = NOTIF_EVENTS.map(function (pair) {
+      return '<div class="set-matrix-event">' + esc(pair[1]) + "</div>" +
+        cols.map(function (c) { return notifMatrixCellHtml(s, pair[0], c); }).join("");
+    }).join("");
+    var testRow = '<div class="set-matrix-event">Test</div>' +
+      '<div class="set-matrix-testcell dim">Always sent to every enabled channel &mdash; fire one with &ldquo;Send test&rdquo;.</div>';
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Event routing</h3>' +
+      '<p class="set-purpose">Which channels each event notifies. Failure events fan to every enabled channel by default; changes save the instant you toggle.</p>' +
+      '<div class="set-matrix"><div class="set-matrix-grid" id="notif-matrix">' + head + rows + testRow + "</div></div>" +
+      '<div class="set-matrix-legend dim">Dashed cells are on by default for failure events until you customize them.</div>' +
+      '<div class="set-matrix-ack dim" id="notif-matrix-ack" aria-live="polite"></div>' +
+      "</section>";
+  }
+
+  function notifDeliveriesShellHtml() {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Delivery log</h3>' +
+      '<p class="set-purpose">The last 50 notification sends, newest first. Filtering isn\'t available yet.</p>' +
+      '<div id="notif-deliveries-body"><div class="loading">Loading delivery log&hellip;</div></div>' +
+      "</section>";
+  }
+
+  // The plain-member notice: channels, routing, and the delivery log are admin-only
+  // — an honest line, never a disabled ghost or a silent-403 button (GR33).
+  function notifMemberAdminNoticeHtml() {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Channels, routing &amp; delivery log</h3>' +
+      '<p class="set-purpose">Chat channels, the event-routing matrix, and the delivery log are managed by team admins.</p>' +
+      "</section>";
+  }
+
+  // The whole page: admin gets every section; a member gets read-only email + the
+  // admin-only notice (no save-rows, no write affordances).
+  function notifPageHtml(s, opts) {
+    opts = opts || {};
+    if (!opts.canManage) return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml();
+    return notifEmailSectionHtml(s, true) + notifChannelsSectionHtml(s) + notifMatrixSectionHtml(s) + notifDeliveriesShellHtml();
+  }
+
+  // ── DOM mounts (browser + smoke verified) ────────────────────────────────────
+
+  function notifCanManage() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
   function loadNotifications() {
     var box = $("#notif-body");
     if (!box) return;
@@ -1516,87 +1858,164 @@
     });
   }
 
-  // Render the settings form. Secrets arrive MASKED ("********") — a placeholder
-  // stands in for a stored value; leaving the field blank on save keeps it.
   function renderNotifications(s) {
+    notifCache = s;
     var box = $("#notif-body");
     if (!box) return;
-    var transports = ["instance", "smtp", "api"];
-    var transportOpts = transports.map(function (t) {
-      return '<option value="' + t + '"' + (s.transport === t ? " selected" : "") + ">" +
-        (t === "instance" ? "Barkpark platform" : t.toUpperCase()) + "</option>";
-    }).join("");
+    var canManage = notifCanManage();
+    box.innerHTML = notifPageHtml(s, { canManage: canManage });
 
-    var toggles = NOTIF_EVENTS.map(function (pair) {
-      var key = pair[0], label = pair[1];
-      var on = s[key] === true;
-      return '<label class="notif-toggle"><input type="checkbox" data-event="' + key + '"' +
-        (on ? " checked" : "") + "> " + esc(label) + "</label>";
-    }).join("");
+    // The header "Send test email" action is admin-only (email test is a mutation).
+    var testBtn = $("#notif-test");
+    if (testBtn) testBtn.hidden = !canManage;
+    if (!canManage) return; // member: read-only, nothing to wire.
 
-    box.innerHTML =
-      '<div class="notif-card">' +
-      '<label class="notif-toggle"><input type="checkbox" id="notif-alerts"' +
-        (s.alerts_enabled !== false ? " checked" : "") + "> <b>Email alerts enabled</b></label>" +
-      '<div class="notif-row"><label>Transport</label>' +
-        '<select id="notif-transport" class="form-input">' + transportOpts + "</select></div>" +
-      '<div class="notif-row"><label>From address</label>' +
-        '<input id="notif-from-addr" class="form-input" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
-      '<div class="notif-smtp">' +
-        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" class="form-input" placeholder="' +
-          (s.smtp_host ? "•••••••• (stored)" : "smtp.example.com") + '"></div>' +
-        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" class="form-input" placeholder="' +
-          (s.smtp_username ? "•••••••• (stored)" : "username") + '"></div>' +
-        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" class="form-input" type="password" placeholder="' +
-          (s.smtp_password ? "•••••••• (stored)" : "password") + '"></div>' +
-        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" class="form-input" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
-      "</div>" +
-      '<h2 class="notif-h">Events</h2><div class="notif-toggles">' + toggles + "</div>" +
-      '<button class="btn btn-primary" id="notif-save" type="button">Save settings</button>' +
-      '<span id="notif-status" class="dim"></span>' +
-      "</div>";
+    // Email section: transport seg toggles SMTP visibility + drives the save.
+    var seg = $("#notif-transport-seg");
+    if (seg) {
+      seg.querySelectorAll(".seg-btn").forEach(function (b) {
+        b.addEventListener("click", function () {
+          seg.querySelectorAll(".seg-btn").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+          var smtp = $("#notif-smtp");
+          if (smtp) smtp.hidden = b.getAttribute("data-value") !== "smtp";
+        });
+      });
+    }
+    var emailSave = $("#notif-email-save");
+    if (emailSave) emailSave.addEventListener("click", saveNotifEmail);
 
-    var save = $("#notif-save");
-    if (save) save.addEventListener("click", saveNotifications);
+    // Channels section: one save-row for all touched channels + per-channel test.
+    var chanSave = $("#notif-channels-save");
+    if (chanSave) chanSave.addEventListener("click", saveNotifChannels);
+    document.querySelectorAll("[data-notif-chan-test]").forEach(function (b) {
+      b.addEventListener("click", function () { sendChatTest(b.getAttribute("data-notif-chan-test")); });
+    });
 
-    // SMTP fields only apply to the "smtp" transport — hide them otherwise.
-    // (Blank secret fields keep stored values on save, so hiding is safe.)
-    var transport = $("#notif-transport");
-    var smtp = box.querySelector(".notif-smtp");
-    function syncSmtpVisibility() { smtp.hidden = transport.value !== "smtp"; }
-    transport.addEventListener("change", syncSmtpVisibility);
-    syncSmtpVisibility();
+    // Routing matrix: each cell persists on toggle.
+    document.querySelectorAll("[data-notif-cell]").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        onNotifCellToggle(cb.getAttribute("data-event"), cb.getAttribute("data-channel"), cb.checked, cb);
+      });
+    });
+
+    loadNotifDeliveries();
   }
 
-  function saveNotifications() {
+  function loadNotifDeliveries() {
+    var box = $("#notif-deliveries-body");
+    if (!box) return;
+    api("GET", "/v1/notifications/deliveries").then(function (r) {
+      if (r.ok && r.data && Array.isArray(r.data.deliveries)) box.innerHTML = notifDeliveriesHtml(r.data.deliveries);
+      else box.innerHTML = notifDeliveriesErrorHtml();
+    });
+  }
+
+  function notifReadTransport() {
+    var seg = $("#notif-transport-seg");
+    if (!seg) return "instance";
+    var on = seg.querySelector(".seg-btn[aria-pressed='true']");
+    return (on && on.getAttribute("data-value")) || "instance";
+  }
+
+  function saveNotifEmail() {
+    var ack = $("#notif-email-ack");
     var body = {
       alerts_enabled: $("#notif-alerts").checked,
-      transport: $("#notif-transport").value,
-      from_address: $("#notif-from-addr").value.trim()
+      transport: notifReadTransport(),
+      from_address: ($("#notif-from-addr").value || "").trim()
     };
-    // Only send a secret when the user actually typed one (blank keeps stored).
-    var host = $("#notif-smtp-host").value.trim();
-    var user = $("#notif-smtp-user").value.trim();
+    // Only send a secret the user actually typed — a blank field keeps the sealed one.
+    var host = ($("#notif-smtp-host").value || "").trim();
+    var user = ($("#notif-smtp-user").value || "").trim();
     var pass = $("#notif-smtp-pass").value;
-    var port = $("#notif-smtp-port").value.trim();
+    var port = ($("#notif-smtp-port").value || "").trim();
     if (host) body.smtp_host = host;
     if (user) body.smtp_username = user;
     if (pass) body.smtp_password = pass;
     if (port) body.smtp_port = parseInt(port, 10);
-    NOTIF_EVENTS.forEach(function (pair) {
-      var el = document.querySelector('input[data-event="' + pair[0] + '"]');
-      if (el) body[pair[0]] = el.checked;
-    });
-
-    var status = $("#notif-status");
-    setText(status, "Saving…");
+    setText(ack, "Saving…");
     api("PUT", "/v1/notifications/settings", body).then(function (r) {
-      if (r.ok && r.data && r.data.settings) {
-        renderNotifications(r.data.settings);
-        setText($("#notif-status"), "Saved.");
-      } else {
-        setText($("#notif-status"), friendly(r.data, "Couldn't save."));
+      if (r.ok && r.data && r.data.settings) { notifCache = r.data.settings; setText(ack, "Saved."); }
+      else setText(ack, friendly(r.data, "Couldn't save."));
+    });
+  }
+
+  function saveNotifChannels() {
+    var ack = $("#notif-channels-ack");
+    var jobs = [];
+    document.querySelectorAll("[data-channel-row]").forEach(function (row) {
+      var type = row.getAttribute("data-channel-row");
+      var enableCb = row.querySelector("[data-chan-enable]");
+      var enabled = !!(enableCb && enableCb.checked);
+      var initial = !!(enableCb && enableCb.getAttribute("data-initial") === "1");
+      var creds = {}, typed = false;
+      row.querySelectorAll("[data-cred]").forEach(function (inp) {
+        var v = (inp.value || "").trim();
+        if (v) { creds[inp.getAttribute("data-key")] = v; typed = true; }
+      });
+      // PUT only channels the user touched — an untouched channel would re-hit the
+      // 422 "enable with no credentials" guard for no reason.
+      if (enabled !== initial || typed) {
+        var body = { type: type, enabled: enabled };
+        if (typed) body.credentials = creds;
+        jobs.push(body);
       }
+    });
+    if (!jobs.length) { setText(ack, "No changes."); return; }
+    setText(ack, "Saving…");
+    var i = 0, lastErr = null;
+    (function next() {
+      if (i >= jobs.length) {
+        if (lastErr) setText(ack, lastErr);
+        else { setText(ack, "Saved."); loadNotifications(); } // re-read: configured/enabled truth + matrix columns
+        return;
+      }
+      var body = jobs[i++];
+      api("PUT", "/v1/notifications/channels", body).then(function (r) {
+        if (r.ok && r.data && r.data.settings) notifCache = r.data.settings;
+        else lastErr = friendly(r.data, "Couldn't save " + body.type + ".");
+        next();
+      });
+    })();
+  }
+
+  // A live matrix cell: email column → PUT /settings {event: bool}; chat column →
+  // PUT /events {event, channels} over the materialized set. A failed write reverts
+  // the checkbox (never a UI that lies about a change the server didn't accept).
+  function onNotifCellToggle(event, type, on, cb) {
+    var ack = $("#notif-matrix-ack");
+    setText(ack, "Saving…");
+    var done = function (r) {
+      if (r.ok && r.data && r.data.settings) { notifCache = r.data.settings; setText(ack, "Saved."); }
+      else { cb.checked = !on; setText(ack, friendly(r.data, "Couldn't save.")); }
+    };
+    if (type === "email") {
+      var body = {}; body[event] = on;
+      api("PUT", "/v1/notifications/settings", body).then(done);
+    } else {
+      api("PUT", "/v1/notifications/events", { event: event, channels: notifEventChannels(notifCache, event, type, on) }).then(done);
+    }
+  }
+
+  function sendChatTest(type) {
+    api("POST", "/v1/notifications/test", { channel: type }).then(function (r) {
+      if (r.ok || r.status === 202) toast({ kind: "success", title: "Test queued", body: "Sent to " + type + "." });
+      else toast({ kind: "error", title: "Couldn't send test", body: friendly(r.data, "Try again shortly.") });
+    });
+  }
+
+  // The header "Send test email" action — the wave's one sanctioned cross-region
+  // move (it physically lived inside the TOKENS span). Email test over the platform
+  // transport, rate-limited server-side to one per 10s; every failure mode gets an
+  // honest toast (rate_limited retry_after, no_recipient, generic).
+  function sendTestNotification() {
+    api("POST", "/v1/notifications/test", {}).then(function (r) {
+      if (r.ok) { toast({ kind: "success", title: "Test email sent" }); return; }
+      var msg;
+      if (r.data && r.data.error === "rate_limited") msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
+      else if (r.data && r.data.error === "no_recipient") msg = "No team member has a confirmed email to send to.";
+      else msg = friendly(r.data, "Couldn't send a test.");
+      toast({ kind: "error", title: "Test not sent", body: msg });
     });
   }
 
@@ -1746,19 +2165,6 @@
         btn.textContent = "Create token";
         toast({ kind: "error", title: "Couldn't create token", body: friendly(r.data, "Check the form and try again.") });
       }
-    });
-  }
-
-  function sendTestNotification() {
-    var status = $("#notif-status");
-    if (status) setText(status, "Sending test…");
-    api("POST", "/v1/notifications/test", {}).then(function (r) {
-      var msg;
-      if (r.ok) msg = "Test email sent.";
-      else if (r.data && r.data.error === "rate_limited")
-        msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
-      else msg = friendly(r.data, "Couldn't send a test.");
-      if ($("#notif-status")) setText($("#notif-status"), msg);
     });
   }
 
@@ -14021,6 +14427,22 @@
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,
+      // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
+      // settings-anatomy page — cell/channel state, the matrix + roster + email +
+      // delivery-log markup, and the routing-write helpers. DOM mounts
+      // (loadNotifications/renderNotifications/save*/onNotifCellToggle) are
+      // browser+smoke-verified.
+      notifChannels: NOTIF_CHANNELS.map(function (c) { return c.type; }),
+      notifMatrixColumns: notifMatrixColumns, notifChannelState: notifChannelState,
+      notifCellState: notifCellState, notifEventChannels: notifEventChannels,
+      notifTransportLabel: notifTransportLabel,
+      notifDeliveryTone: notifDeliveryTone, notifDeliveryStatusLabel: notifDeliveryStatusLabel,
+      notifDeliveryRowHtml: notifDeliveryRowHtml, notifDeliveriesHtml: notifDeliveriesHtml,
+      notifDeliveriesErrorHtml: notifDeliveriesErrorHtml,
+      notifEmailSectionHtml: notifEmailSectionHtml, notifChannelsSectionHtml: notifChannelsSectionHtml,
+      notifChannelRowHtml: notifChannelRowHtml, notifMatrixSectionHtml: notifMatrixSectionHtml,
+      notifMatrixCellHtml: notifMatrixCellHtml, notifDeliveriesShellHtml: notifDeliveriesShellHtml,
+      notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
     });
   }
 })();

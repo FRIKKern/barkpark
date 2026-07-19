@@ -7510,3 +7510,198 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
     assert.match(html, /deploy-fail-dot/);
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// G-04 — Notifications (the crown): the settings-anatomy pure builders
+// (GR33 form-page anatomy, GR34 check grammars, GR36 per-page rulings)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("G-04: the notification builders + routing helpers are exported", () => {
+  for (const name of ["notifMatrixColumns", "notifChannelState", "notifCellState",
+    "notifEventChannels", "notifTransportLabel", "notifDeliveryTone", "notifDeliveryStatusLabel",
+    "notifDeliveryRowHtml", "notifDeliveriesHtml", "notifDeliveriesErrorHtml",
+    "notifEmailSectionHtml", "notifChannelsSectionHtml", "notifChannelRowHtml",
+    "notifMatrixSectionHtml", "notifMatrixCellHtml", "notifDeliveriesShellHtml",
+    "notifMemberAdminNoticeHtml", "notifPageHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  // The 6 matrix columns are email + the 5 ChannelConfig chat types, in order.
+  assert.deepEqual([...hooks.notifMatrixColumns()].map((c) => c.type),
+    ["email", "discord", "slack", "telegram", "pushover", "webhook"]);
+  assert.deepEqual([...hooks.notifChannels], ["discord", "slack", "telegram", "pushover", "webhook"]);
+});
+
+// ── notifCellState: the honest per-cell truth ───────────────────────────────
+
+test("G-04 notifCellState: email column reads the per-event boolean", () => {
+  const s = { deployment_failed: true, provision_succeeded: false };
+  assert.equal(hooks.notifCellState(s, "deployment_failed", "email").on, true);
+  assert.equal(hooks.notifCellState(s, "provision_succeeded", "email").on, false);
+  // never flagged default — email is an explicit boolean either way.
+  assert.equal(hooks.notifCellState(s, "deployment_failed", "email").isDefault, false);
+});
+
+test("G-04 notifCellState: an explicit chat route wins over the default", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }],
+    event_routes: { provision_failed: ["discord"] },
+    chat_default_on: ["provision_failed"],
+  };
+  const st = hooks.notifCellState(s, "provision_failed", "discord");
+  assert.equal(st.on, true);
+  assert.equal(st.isDefault, false, "an explicit route is NOT a default");
+});
+
+test("G-04 notifCellState: a chat_default_on failure event fans to enabled channels as an honest DEFAULT", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }, { type: "slack", enabled: false, configured: false }],
+    event_routes: {}, // never customized
+    chat_default_on: ["provision_failed"],
+  };
+  const on = hooks.notifCellState(s, "provision_failed", "discord");
+  assert.equal(on.on, true);
+  assert.equal(on.isDefault, true, "an un-customized failure event renders as a default, not a choice");
+  // A disabled channel can't receive — off, even for a default-on event.
+  assert.equal(hooks.notifCellState(s, "provision_failed", "slack").on, false);
+  // A non-default event with no route is simply off.
+  assert.equal(hooks.notifCellState(s, "deployment_succeeded", "discord").on, false);
+});
+
+// ── notifEventChannels: the PUT /events body over the materialized set ───────
+
+test("G-04 notifEventChannels: the first edit of a default event materializes the whole fan-out", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true }, { type: "slack", enabled: true }, { type: "webhook", enabled: false }],
+    event_routes: {},
+    chat_default_on: ["provision_failed"],
+  };
+  // Turning discord OFF must keep slack (the other default) — not silently drop it.
+  assert.deepEqual([...hooks.notifEventChannels(s, "provision_failed", "discord", false)].sort(), ["slack"]);
+  // Turning a third channel ON extends the materialized set.
+  assert.deepEqual([...hooks.notifEventChannels(s, "provision_failed", "webhook", true)].sort(), ["discord", "slack", "webhook"]);
+});
+
+test("G-04 notifEventChannels: an explicitly-routed event edits its stored list", () => {
+  const s = { event_routes: { deployment_failed: ["discord"] }, channels: [], chat_default_on: [] };
+  assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "slack", true)].sort(), ["discord", "slack"]);
+  assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "discord", false)], []);
+  // A non-default event with no route starts empty.
+  assert.deepEqual([...hooks.notifEventChannels(s, "member_invited", "discord", true)], ["discord"]);
+});
+
+// ── delivery-log grammar ─────────────────────────────────────────────────────
+
+test("G-04 notifDeliveryTone: sent→ok, failed→danger, pending→info, http_status overrides", () => {
+  assert.equal(hooks.notifDeliveryTone({ status: "sent" }), "ok");
+  assert.equal(hooks.notifDeliveryTone({ status: "failed" }), "danger");
+  assert.equal(hooks.notifDeliveryTone({ status: "pending" }), "info");
+  assert.equal(hooks.notifDeliveryTone({ status: "sent", http_status: 500 }), "danger");
+  assert.equal(hooks.notifDeliveryTone({ http_status: 204 }), "ok");
+});
+
+test("G-04 notifDeliveryStatusLabel: http code → '204 OK'/'HTTP 500', else the status word", () => {
+  assert.equal(hooks.notifDeliveryStatusLabel({ http_status: 200 }), "200 OK");
+  assert.equal(hooks.notifDeliveryStatusLabel({ http_status: 500 }), "HTTP 500");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "failed" }), "Failed");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "pending" }), "Pending");
+});
+
+test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error", () => {
+  const row = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null,
+    inserted_at: "2026-07-19T10:00:00Z",
+  });
+  assert.match(row, /wh-del-row/);
+  assert.match(row, /alerts@acme\.com/);
+  assert.match(row, /wh-del-status--danger/);
+  assert.match(row, /Failed/);
+  assert.match(row, /3 attempts/);
+  assert.match(row, /wh-del-err/);
+  assert.match(row, /smtp 550 mailbox unavailable/);
+  // A chat row records the channel type as recipient — never a leaked URL.
+  const chat = hooks.notifDeliveryRowHtml({ recipient: "discord", channel: "discord", event: "deployment_failed", status: "sent", attempts: 1, http_status: 204 });
+  assert.match(chat, /204 OK/);
+  assert.match(chat, /wh-del-status--ok/);
+  assert.doesNotMatch(chat, /wh-del-err/);
+});
+
+test("G-04 notifDeliveriesHtml: populated card vs honest empty; error degrade is distinct", () => {
+  assert.match(hooks.notifDeliveriesHtml([{ recipient: "x", status: "sent" }]), /wh-del-card/);
+  assert.match(hooks.notifDeliveriesHtml([]), /No notifications have been delivered yet/);
+  assert.match(hooks.notifDeliveriesErrorHtml(), /Couldn't load the delivery log/);
+});
+
+// ── channel roster (GR34 .set-check) ─────────────────────────────────────────
+
+test("G-04 notifChannelRowHtml: configured honesty, write-only creds, consequence sub-line, gated test", () => {
+  const s = { channels: [{ type: "discord", enabled: true, configured: true }] };
+  const discord = { type: "discord", label: "Discord", off: "Off = Discord stops receiving routed events.",
+    fields: [{ k: "url", label: "Webhook URL", ph: "https://discord.com/api/webhooks/…" }] };
+  const row = hooks.notifChannelRowHtml(s, discord);
+  assert.match(row, /set-check/);
+  assert.match(row, /set-cred-tag">configured/);
+  assert.match(row, /Off = Discord stops receiving routed events\./, "the mandatory consequence sub-line renders");
+  // Write-only: a configured channel shows the sealed placeholder, never the value.
+  assert.match(row, /stored/);
+  assert.match(row, /data-notif-chan-test="discord"/, "an enabled+configured channel offers a test");
+
+  // Not configured: the empty tag + the real placeholder + NO test affordance.
+  const empty = hooks.notifChannelRowHtml({ channels: [] }, discord);
+  assert.match(empty, /set-cred-tag--empty">not configured/);
+  assert.match(empty, /discord\.com\/api\/webhooks/);
+  assert.doesNotMatch(empty, /data-notif-chan-test/);
+});
+
+// ── the routing matrix (GR36) ────────────────────────────────────────────────
+
+test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-send test row", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }],
+    event_routes: {}, chat_default_on: ["provision_failed"],
+  };
+  const html = hooks.notifMatrixSectionHtml(s);
+  assert.match(html, /set-matrix-grid/);
+  // One label column header (corner) + 6 channel columns.
+  assert.equal((html.match(/set-matrix-col/g) || []).length, 6, "6 channel columns render");
+  assert.match(html, /set-matrix-cell--default/, "a default-on failure cell is dashed");
+  assert.match(html, /Always sent to every enabled channel/, "the test row states always-send");
+  assert.doesNotMatch(html, /data-event="test"/, "the test row is NOT a lying toggle");
+  // A disabled/absent chat channel column is flagged off in its header.
+  assert.match(html, /set-matrix-off/);
+});
+
+// ── email section + page composition (GR33 plain-member law) ─────────────────
+
+test("G-04 notifEmailSectionHtml: admin gets a save-row + seg; member is read-only", () => {
+  const s = { transport: "smtp", alerts_enabled: true, from_address: "a@acme.com", smtp_host: "********" };
+  const admin = hooks.notifEmailSectionHtml(s, true);
+  assert.match(admin, /notif-transport-seg/);
+  assert.match(admin, /set-save-row/);
+  assert.match(admin, /notif-email-save/);
+  assert.match(admin, /stored/, "a stored SMTP secret shows the sealed placeholder, never a value");
+
+  const member = hooks.notifEmailSectionHtml(s, false);
+  assert.match(member, /set-readonly/);
+  assert.doesNotMatch(member, /set-save-row/, "member email section has NO save-row");
+  assert.doesNotMatch(member, /notif-email-save/, "member email section has NO save button");
+  assert.doesNotMatch(member, /form-input/, "member email section has NO inputs");
+  assert.match(member, /a@acme\.com/, "the read-only view still shows the value");
+});
+
+test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
+  const s = { transport: "instance", channels: [], event_routes: {}, chat_default_on: [] };
+  const admin = hooks.notifPageHtml(s, { canManage: true });
+  for (const needle of ["Email delivery", "Chat channels", "Event routing", "Delivery log"]) {
+    assert.ok(admin.includes(needle), "admin page includes " + needle);
+  }
+  const member = hooks.notifPageHtml(s, { canManage: false });
+  assert.match(member, /managed by team admins/);
+  assert.doesNotMatch(member, /set-save-row/, "member page has ZERO save-rows");
+  assert.doesNotMatch(member, /set-matrix-grid/, "member page has no routing matrix");
+});
+
+test("G-04 notifTransportLabel: the platform transport reads friendly", () => {
+  assert.equal(hooks.notifTransportLabel("instance"), "Barkpark platform");
+  assert.equal(hooks.notifTransportLabel("smtp"), "SMTP");
+});

@@ -1072,6 +1072,76 @@ const EXPECTATIONS = {
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
     },
   },
+
+  // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
+  "notif-configured": {
+    what: "the full notifications page — email + chat channels + routing matrix + delivery log, all backend-true",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      // GR33 anatomy: .set-section cards, each buffered section its own save-row;
+      // the loose #notif-status span is GONE, and the superseded .notif-card too.
+      assert.ok(html.includes("set-section"), "sections use the GR33 .set-section card");
+      assert.ok(!html.includes('id="notif-status"'), "the loose #notif-status span is retired");
+      assert.ok(!html.includes("notif-card"), "the superseded .notif-card is gone from this view");
+      // Email section: transport seg (single-select) + its own save-row.
+      assert.ok(html.includes("Email delivery") && html.includes("notif-transport-seg"), "email section with the transport seg");
+      assert.ok(html.includes('id="notif-email-save"'), "email section owns its save-row button");
+      // Channels roster: 6 channels (email transport + 5 chat), configured honesty,
+      // consequence sub-lines, its own save-row.
+      assert.ok(html.includes("Chat channels") && html.includes("set-channel"), "chat-channel roster renders");
+      for (const label of ["Discord", "Slack", "Telegram", "Pushover", "Webhook"]) {
+        assert.ok(html.includes(">" + label + " "), "roster lists " + label);
+      }
+      assert.ok(html.includes("configured"), "channels render their configured:bool truth");
+      assert.ok(html.includes('id="notif-channels-save"'), "channels section owns its save-row");
+      // Routing matrix: the event×channel grid on .set-toggle-weight cells + the
+      // always-send test row (stated, never a lying toggle).
+      assert.ok(html.includes("Event routing") && html.includes("set-matrix-grid"), "the routing matrix renders");
+      assert.ok(html.includes("set-matrix-cell"), "matrix cells render as toggles");
+      assert.ok(html.includes("Always sent to every enabled channel"), "the test row is stated as always-send, not a toggle");
+      // Delivery log: the async sub-mount populated the last-50 rows in the webhook
+      // grammar (mono recipient + toned status pill), with no fake filter UI.
+      assert.ok(html.includes("Delivery log") && html.includes("last 50"), "the delivery-log section frames the last 50");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("wh-del-row"), "the log renders rows in the webhook-deliveries grammar");
+      assert.ok(log.includes("wh-del-status--danger"), "a failed delivery reads danger-toned");
+      assert.ok(log.includes("Failed"), "a failure with no http_status reads 'Failed'");
+      assert.ok(log.includes("204 OK"), "a chat delivery with an http_status reads its code");
+    },
+  },
+  "notif-empty": {
+    what: "first-run notifications — no channels configured, empty delivery log, honest defaults",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("Email delivery") && html.includes("Event routing"), "the page still composes all sections");
+      assert.ok(html.includes("not configured"), "an untouched channel reads not-configured");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("No notifications have been delivered yet"), "the empty log states the honest empty case");
+    },
+  },
+  "notif-member": {
+    what: "plain-member notifications — read-only email, ZERO save-rows, no admin sections, no test button",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("set-readonly"), "the member sees read-only email settings");
+      assert.ok(html.includes("managed by team admins"), "the admin-only sections degrade to an honest line");
+      // The plain-member proof: no write affordances anywhere.
+      assert.ok(!html.includes("set-save-row"), "member view has NO save-rows");
+      assert.ok(!html.includes("notif-email-save"), "member view has NO save buttons");
+      assert.ok(!html.includes("set-matrix-grid"), "member view has NO routing matrix");
+      assert.ok(!html.includes("set-channel-creds"), "member view has NO credential inputs");
+      assert.equal(reg.get("notif-test").hidden, true, "the header Send-test button is hidden for a member");
+    },
+  },
+  "notif-deliveries-error": {
+    what: "the deliveries route errors — the delivery log degrades honestly, the rest of the page survives",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("Event routing"), "the admin page still renders when deliveries fail");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("Couldn't load the delivery log"), "the log shows the honest error-degrade, never an infinite spinner");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
