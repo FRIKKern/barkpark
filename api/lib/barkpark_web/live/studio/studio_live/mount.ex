@@ -51,6 +51,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     |> assign(
       nav_section: :structure,
       page_title: "Studio",
+      # ── Responsive width bucket (studio-space-priority-desk spd-s2) ─────
+      # Which viewport width band the desk is rendering for: "wide" (the
+      # zero-change desktop default), "standard", "narrow", or "phone". The
+      # `width-bucket` handle_event updates it once a client hook reports the
+      # measured band (attached in spd-s4). Seeded "wide" because first paint
+      # is CSS-owned and connect_params is nil on the static render — the
+      # assign only ever narrows the desk once the live socket learns better.
+      width_bucket: "wide",
       presence_topic: nil,
       subscribed_doc: nil,
       image_picker_field: nil,

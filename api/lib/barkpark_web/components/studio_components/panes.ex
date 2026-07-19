@@ -24,13 +24,20 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
   @doc """
   Flex container for one or more `<.pane_column>` children.
+
+  `:phx_hook` is an optional LiveView client-hook name mounted on the container
+  — used by the responsive space-priority desk to report the viewport width
+  bucket back to StudioLive. It renders NO `phx-hook` attribute when nil, so
+  every legacy call site stays byte-identical. A caller that passes it must also
+  pass `:id` (LiveView requires a stable DOM id on a hooked element).
   """
   attr :id, :string, default: nil
+  attr :phx_hook, :string, default: nil
   slot :inner_block, required: true
 
   def pane_layout(assigns) do
     ~H"""
-    <div class="pane-layout" id={@id}>
+    <div class="pane-layout" id={@id} phx-hook={@phx_hook}>
       <%= render_slot(@inner_block) %>
     </div>
     """
@@ -68,7 +75,6 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     extra_classes =
       [
         assigns[:last] && "pane-column--last",
-        assigns[:flex] && "pane-column--flex",
         assigns[:marker_class]
       ]
       |> Enum.filter(& &1)
