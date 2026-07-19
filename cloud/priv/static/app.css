@@ -327,11 +327,16 @@ html[data-bp-theme="iris"][data-theme="dark"] {
      and MUST re-declare any :root alias that references a dark-re-themed role
      (E8): --btn-*, --ring-soft, --success, --destructive. */
 
-  /* Solid button fills, dark: deeper greens/reds than the sage link colour so
-     the label can be WHITE (user call 2026-07-04). Re-declared here rather
-     than aliased (E8: scoped-dark subtrees must not freeze light values). */
-  --btn-bg: hsl(163 45% 30%);
-  --btn-fg: hsl(0 0% 100%);
+  /* Solid button fills, dark: IDENTITY-AWARE (GR37, gr-p4-hygiene) — --btn-bg/fg
+     follow the identity primary pair exactly as light mode does (:root above),
+     so ember/fjord/charple/iris CTAs carry THEIR accent, not a frozen evergreen
+     green. The dark --primary-fg is already the contrast-safe on-primary tone
+     (near-black on the bright dark accent; the --btn-fg/--btn-bg CONTRAST_PAIRS
+     row holds across all 10 theme states — E5). Re-declared here rather than
+     aliased (E8: scoped-dark subtrees must not freeze light values). authButton
+     stays identity-invariant (pre-login has no identity — see color.authButton). */
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-fg);
   --btn-danger-bg: hsl(0 65% 48%);
   --btn-danger-fg: hsl(0 0% 100%);
   --ring-soft: hsl(160 42% 62% / 0.2);
@@ -1617,6 +1622,67 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .notif-toggle input { width: 15px; height: 15px; accent-color: var(--primary); }
 .notif-card > .notif-toggle { margin-bottom: 14px; }
 .notif-card #notif-status { margin-left: 10px; font-size: 13px; }
+
+/* -------------------------------------------- settings anatomy (phase 4)
+   GR33/GR34 shared vocabulary that every round-2 Settings page slice
+   (G-01 billing … G-06 members) emits. Defined-but-UNEMITTED here — gate-free
+   by construction: __css_check only contrast-evaluates classes the SPA actually
+   renders, so landing the primitives ahead of their consumers cannot red E5/E6.
+   Tokens-only (a raw color literal hard-fails E6). The fg/bg pairings below are
+   --text / --muted-text on --surface, both already CONTRAST_PAIRS entries, so
+   the skeleton needs no new contrast pair (GR33 contrast law). */
+.set-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+.set-h {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 var(--space-2);
+}
+.set-purpose {
+  font-size: var(--text-sm);
+  color: var(--muted-text);
+  margin: 0 0 var(--space-4);
+}
+.set-save-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+/* GR34 check grammar — generalized from the .token-ability idiom: a bordered
+   card row + name + consequence sub-line. The G-05 API-token abilities picker
+   (read/write/deploy/root) and any per-item opt-in reuse this instead of
+   re-inventing. */
+.set-check-list { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+.set-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+.set-check input { margin-top: 3px; accent-color: var(--primary); }
+.set-check-main { display: flex; flex-direction: column; }
+.set-check-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+.set-check-sub { font-size: var(--text-xs); color: var(--muted-text); }
+
+/* GR34 toggle grammar — the compact per-event/-transport row, generalized from
+   .notif-toggle. The G-04 Notifications routing matrix (event × channel) and
+   per-transport toggles reuse this. */
+.set-toggle { font-size: var(--text-sm); display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.set-toggle input { width: 15px; height: 15px; accent-color: var(--primary); }
 
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {

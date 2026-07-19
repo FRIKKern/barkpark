@@ -2441,11 +2441,14 @@
   }
 
   // Fail-CLOSED operator gate (GR9): the sidebar Operator entry renders ONLY when
-  // /v1/me answered platform_operator === true. An absent field, a null me, a
-  // truthy-but-not-true value → hidden. Never keyed on team role (owner/admin is
-  // a different axis — Authz law). Pure; node-pinned.
+  // /v1/me answered user.platform_operator === true. The flag is NESTED under
+  // `user` in the envelope (router.ex me/2, ~1005-1018), so we read me.user —
+  // GR37 (gr-p4-hygiene) fixed a flat `me.platform_operator` read that made this
+  // gate a silent false-negative in prod (vm-run proven). An absent field, a
+  // null me/user, a truthy-but-not-true value → hidden. Never keyed on team role
+  // (owner/admin is a different axis — Authz law). Pure; node-pinned.
   function operatorVisible(me) {
-    return !!(me && me.platform_operator === true);
+    return !!(me && me.user && me.user.platform_operator === true);
   }
 
   // The sidebar layer the instance/site morph shows a context NAME for. Kept in a

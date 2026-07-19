@@ -201,14 +201,16 @@ for (const role of ["hetzner", "azure"]) {
 
 // --- cloudChrome shell vocabulary (color.cloudChrome): identity-INVARIANT ----
 // passthrough (GR2). Most roles are {light,dark} HEX; line-rgb is an "R,G,B"
-// border triplet, backdrop an rgba() scrim, github a var(--…) neutral reference.
-// A new family is otherwise validated by NOTHING, so this gates its shape.
+// border triplet. A new family is otherwise validated by NOTHING, so this gates
+// its shape. GR29/GR37 (gr-p4-hygiene): 13 HEX roles — the 11 zero-consumer roles
+// (azure/backdrop/blue-hover/cloudflare/fg5/github/hetzner/on-red/spark-dim/
+// toast/toast-fg) are retired here IN LOCKSTEP with tokens.json + emit.mjs
+// CC_ROLES (this list is the gate that gr-p3 lacked, which reverted the retire).
 const cloudChrome = color.cloudChrome || {};
 const CC_HEX_ROLES = [
-  "bg", "bg-side", "card", "card2", "modal", "toast", "toast-fg",
-  "fg", "fg2", "fg3", "fg4", "fg5", "spark-dim",
-  "red", "red-strong", "on-red", "blue", "blue-hover", "amber",
-  "hetzner", "azure", "cloudflare",
+  "bg", "bg-side", "card", "card2", "modal",
+  "fg", "fg2", "fg3", "fg4",
+  "red", "red-strong", "blue", "amber",
 ];
 for (const role of CC_HEX_ROLES) {
   const o = cloudChrome[role];
@@ -221,8 +223,6 @@ for (const role of CC_HEX_ROLES) {
 const RGB_TRIPLET = /^\d{1,3},\d{1,3},\d{1,3}$/;
 for (const theme of ["light", "dark"]) {
   ok(RGB_TRIPLET.test((cloudChrome["line-rgb"] || {})[theme] || ""), `color.cloudChrome.line-rgb.${theme} must be an "R,G,B" triplet, got ${JSON.stringify((cloudChrome["line-rgb"] || {})[theme])}`);
-  ok(/^rgba?\(/.test((cloudChrome.backdrop || {})[theme] || ""), `color.cloudChrome.backdrop.${theme} must be an rgba() literal, got ${JSON.stringify((cloudChrome.backdrop || {})[theme])}`);
-  ok(/^var\(--/.test((cloudChrome.github || {})[theme] || ""), `color.cloudChrome.github.${theme} must be a var(--…) reference, got ${JSON.stringify((cloudChrome.github || {})[theme])}`);
 }
 
 // --- auth button fills (color.authButton): HSL channels OR var(--role) -------
