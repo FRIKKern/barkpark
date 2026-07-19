@@ -16,7 +16,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /new                 —         deploy-button landing (?template=<slug>) → SPA shell
       GET     /activate            —         bp-login device-approve page → SPA shell
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
-      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
+      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id} (429 carries retry_after)
       POST    /v1/auth/device/start   —      {client_name} → {device_code, user_code, verification_uri, ...}
       POST    /v1/auth/device/poll    —      {device_code} → pending | {token, team_id} | slow_down | expired
       POST    /v1/auth/device/inspect user   {user_code} → {client_name, ip_address, user_agent, expires_at}
@@ -502,7 +502,8 @@ defmodule BarkparkCloud.Web.Router do
   ##   body {challenge_token, code} OR {challenge_token, recovery_code}
   ##   → 200 {token, team_id}        — OTP/recovery accepted; full session minted
   ##   → 401 {error: "invalid_code"} — bad token, bad OTP, or unknown recovery code
-  ##   → 429 {error: "rate_limited"} — >5 attempts/min for this pending user
+  ##   → 429 {error: "rate_limited", retry_after: <seconds>} — >5 attempts/min
+  ##     for this pending user
   ##
   ## Step two of the two-phase login. The challenge_token is the 2fa-pending
   ## token from /v1/auth/login; a correct OTP or an unused recovery code swaps it
@@ -510,6 +511,12 @@ defmodule BarkparkCloud.Web.Router do
   ## non-2FA user). The minted session records device metadata via
   ## session_opts(conn), exactly like the non-2FA path. The rate limiter mirrors
   ## Coolify's 5/min on this challenge.
+  ##
+  ## `retry_after` is the whole seconds left of the limiter's fixed window (the
+  ## `POST /v1/notifications/test` precedent below): the caller is told exactly
+  ## when the budget refills instead of being left to guess, and the SPA can
+  ## count a real number down. It is a legitimate-user affordance only — the
+  ## number leaks nothing an attacker can't derive from the 60s window itself.
 
   post "/v1/auth/two-factor-challenge" do
     pending = conn.body_params["challenge_token"]
@@ -519,8 +526,8 @@ defmodule BarkparkCloud.Web.Router do
     case is_binary(pending) and Accounts.verify_two_factor_pending_token(pending) do
       %{} = user ->
         case TwoFactorRateLimiter.check(user.id) do
-          {:error, :rate_limited} ->
-            json(conn, 429, %{error: "rate_limited"})
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
 
           :ok ->
             ok? =
