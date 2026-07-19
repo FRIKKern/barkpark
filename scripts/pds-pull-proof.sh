@@ -2147,6 +2147,22 @@ summary() {
     say "is supposed to carry; it is NOT a green."
     return 2
   fi
+  # ── a PARTIAL run NEVER claims the whole ladder (PDS-D86 class) ────────────
+  #
+  # `--only 0a,0b,7,8` used to print "the whole ladder ran and held" after
+  # running four of eleven rungs. That line is the one a reader pastes into a
+  # transcript as the crown proof, and it was the harness's own loudest
+  # overclaim — the same defect class as a self-check that advertises a flag it
+  # never asserts. A green is only "the ladder" when every rung of it ran.
+  local n_ran n_all
+  n_ran=$((N_PASS + N_ABORT + N_FAIL))
+  n_all="$(printf '%s' "$ALL_STEPS" | wc -w | tr -d ' ')"
+  if [ "$n_ran" -lt "$n_all" ]; then
+    say "RESULT: PASS (PARTIAL) — the $n_ran rung(s) requested held, but $((n_all - n_ran)) of"
+    say "the ladder's $n_all never ran. This is NOT the crown proof and must not be"
+    say "quoted as one: only \`--all\` can pay that claim."
+    return 0
+  fi
   say "RESULT: PASS — the whole ladder ran and held."
   return 0
 }
