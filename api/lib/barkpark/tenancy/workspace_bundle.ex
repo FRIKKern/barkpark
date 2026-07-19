@@ -605,10 +605,55 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
   end
 
+  # PDS-D42, THE ASYMMETRY THIS CLOSES. `import_bundle/2`'s transaction has
+  # carried `timeout: :infinity` since it was written; the export COPY loop
+  # carried NO `:timeout` at all, so every `COPY … TO STDOUT` silently inherited
+  # Ecto's 15,000 ms default (`config/runtime.exs` repo_opts sets url/pool_size/
+  # socket_options only — no `:timeout` key — so the default is genuinely in
+  # force in prod). Run-proven live: a full-fidelity export of `default` died at
+  # 27.0s with `(DBConnection.ConnectionError) tcp recv: closed` raised from THIS
+  # function. The fat members sit just under the default on a warm cache
+  # (mutation_events 9.34s / 478 MB, revisions 8.04s / 385 MB) and cross it on a
+  # cold one — a wall-clock coin flip, which is the worst kind of failure.
+  # An export is an explicit admin-initiated backup, never a request-path query:
+  # its natural bound is "as long as the dump takes", so it gets the same
+  # `:infinity` import already had rather than a new arbitrary number to
+  # re-tune. The value is read from config so a test can drive a REAL
+  # DBConnection failure through this path (see workspace_bundle_test.exs) —
+  # nothing in prod sets it, and `:export_copy_fault` (below) is the test-only
+  # seam that reproduces the failure itself.
+  #
+  # PDS-D44, BUDGET: the one-export memory budget counts ATTEMPTS, not
+  # successes. Measured on the ACTIVE green slot (blue is inactive and reports
+  # MemoryPeak `[not set]`, so the obvious probe measures nothing): baseline
+  # 700 MiB, 2.65 GiB after a FAILED export, 2.90 GiB after the successful one,
+  # on a 3819 MB box. A dead export has already paid nearly the full cost — so
+  # do NOT wrap this in a naive retry loop; two attempts is an OOM, not a
+  # second chance. The real fix for size is streaming
+  # (pds-backlog-streamed-bundle-channel), deliberately not this slice.
   defp run_copy_out(sql) do
-    res = Repo.query!(sql, [])
+    inject_copy_fault!()
+    res = Repo.query!(sql, [], timeout: copy_out_timeout())
     dump = IO.iodata_to_binary(res.rows)
     {dump, length(res.rows)}
+  end
+
+  defp copy_out_timeout do
+    Application.get_env(:barkpark, :export_copy_timeout, :infinity)
+  end
+
+  # Test-only fault seam for the honest-envelope proof (PDS-D43). The SQL
+  # sandbox cannot produce a REAL rescuable transport failure — a pool timeout
+  # under `Ecto.Adapters.SQL.Sandbox` arrives as an ownership-shutdown EXIT and
+  # takes the test's connection with it — so the envelope test raises the exact
+  # exception the live 500 carried, from the exact function it was raised in.
+  # `nil` in every non-test env: one `Application.get_env` on a path that is
+  # already about to dump hundreds of MB.
+  defp inject_copy_fault! do
+    case Application.get_env(:barkpark, :export_copy_fault) do
+      nil -> :ok
+      message when is_binary(message) -> raise DBConnection.ConnectionError, message
+    end
   end
 
   # ── Import ─────────────────────────────────────────────────────────────────

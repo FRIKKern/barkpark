@@ -647,6 +647,74 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── COPY timeout (PDS-D42) ────────────────────────────────────────────────────
+
+  describe "export COPY timeout (PDS-D42)" do
+    # A happy-path export does NOT pay for this: it is just as green with no
+    # `:timeout` at all — that is exactly how the 15s default hid until a live
+    # export died at 27.0s. So look at what actually reaches the driver: trace
+    # every `Repo.query!/3` call the export makes and read the options off the
+    # COPY calls themselves. Delete `timeout: copy_out_timeout()` from
+    # run_copy_out/1 and this test fails on the very next run.
+    #
+    # (Driving a real 0 ms budget is NOT usable here: under
+    # `Ecto.Adapters.SQL.Sandbox` a pool timeout arrives as an ownership-
+    # shutdown EXIT, not a rescuable raise, and it kills the test connection.)
+    test "every COPY reaches Repo.query! with timeout: :infinity — never Ecto's 15_000 ms default" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      calls = trace_repo_query_bang(fn -> assert {:ok, _} = WorkspaceBundle.export(ws_a.id) end)
+
+      copy_calls = Enum.filter(calls, fn {sql, _opts} -> String.starts_with?(sql, "COPY ") end)
+      assert length(copy_calls) > 10, "expected the COPY loop to run; saw #{length(copy_calls)}"
+
+      for {sql, opts} <- copy_calls do
+        assert Keyword.get(opts, :timeout) == :infinity,
+               "a COPY reached Repo with #{inspect(Keyword.get(opts, :timeout, :NO_TIMEOUT))}: " <>
+                 String.slice(sql, 0, 80)
+      end
+    end
+  end
+
+  # Call-trace `Barkpark.Repo.query!/3` for the duration of `fun`, returning
+  # `[{sql, opts}]` in call order. `:erlang.trace/3` is the only seam that
+  # observes the OPTIONS argument — Ecto's query telemetry metadata carries
+  # `:telemetry_options`, not the caller's `:timeout`. The tracer MUST be a
+  # separate process: with the traced process as its own tracer, OTP accepts
+  # the call and silently delivers nothing (measured).
+  defp trace_repo_query_bang(fun) do
+    me = self()
+    tracer = spawn_link(fn -> trace_collector([], me) end)
+
+    :erlang.trace_pattern({Repo, :query!, 3}, true, [:local])
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+
+    try do
+      fun.()
+    after
+      :erlang.trace(self(), false, [:call])
+      :erlang.trace_pattern({Repo, :query!, 3}, false, [:local])
+    end
+
+    send(tracer, {:dump, me})
+
+    receive do
+      {:traced, msgs} ->
+        for {:trace, _pid, :call, {_m, :query!, [sql, _params, opts]}} <- msgs,
+            is_binary(sql),
+            do: {sql, opts}
+    after
+      5_000 -> flunk("the trace collector never answered")
+    end
+  end
+
+  defp trace_collector(acc, parent) do
+    receive do
+      {:dump, pid} -> send(pid, {:traced, Enum.reverse(acc)})
+      msg -> trace_collector([msg | acc], parent)
+    end
+  end
+
   # ── seed + helpers ────────────────────────────────────────────────────────────
 
   # Workspace A: full spread across every extraction path. Workspace B: the leak

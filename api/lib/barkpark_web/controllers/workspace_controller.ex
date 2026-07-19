@@ -141,6 +141,9 @@ defmodule BarkparkWeb.WorkspaceController do
   `dataset_not_found`, `ambiguous_dataset_slug`) — an honest refusal, never a
   silently wrong bundle. The response content type is set UNCONDITIONALLY to
   `application/x-tar`; there is no Accept negotiation on this route.
+
+  A COPY that dies mid-dump answers 503 `export_failed` + a retry hint (PDS-D43),
+  never the old bare 500 `internal_error / unknown error`.
   """
   def export(conn, %{"workspace_slug" => slug} = params) do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
@@ -160,6 +163,28 @@ defmodule BarkparkWeb.WorkspaceController do
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: %{code: "unprocessable", reason: reason, message: message}})
+
+      # PDS-D43: a transport-class failure used to escape as a bare 500
+      # `internal_error / unknown error` — the caller learned nothing and could
+      # not tell "your request was wrong" from "the dump did not finish". 503,
+      # not 500: nothing about the REQUEST was wrong, the export is legitimately
+      # retryable, and 503 is the status every client/proxy already reads as
+      # "try me again". The hint names retry explicitly AND names the narrower
+      # grain, because on a memory-tight box a smaller bundle is the retry that
+      # actually succeeds (PDS-D44: an attempt costs the same as a success).
+      {:error, {:export_failed, reason, message}} ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{
+          error: %{
+            code: "export_failed",
+            reason: reason,
+            message: message,
+            hint:
+              "the export did not finish (database transport failure). Retry; " <>
+                "if it fails again, narrow the bundle with ?profile=dev and/or ?dataset=<slug>."
+          }
+        })
 
       # export/2 only errors on a nil/non-UUID id or a missing workspace — both
       # unreachable once get_workspace_by_slug returns a real %Workspace{} — but
@@ -185,6 +210,13 @@ defmodule BarkparkWeb.WorkspaceController do
   rescue
     e in WorkspaceBundle.ExportScopeError ->
       {:error, {:export_scope, e.code, Exception.message(e)}}
+
+    # Transport class ONLY — the connection died / the COPY did not finish.
+    # Deliberately narrow: everything else still crashes loudly into the 500
+    # path with its stacktrace, because a rescue wide enough to swallow a real
+    # engine bug would turn every future export defect into a polite "retry".
+    e in DBConnection.ConnectionError ->
+      {:error, {:export_failed, "database_unavailable", Exception.message(e)}}
   end
 
   # The filename names the grain the caller actually asked for, so two pulls of
