@@ -940,3 +940,54 @@ asserts no `lifecycle_status` CHECK/migration precondition (0 grep hits) and ste
 skippable on `--only` re-runs · each step 0a leaks ~51 MB into an uncleaned artifacts dir · the TLV
 charter exists only on local main, in no PR, while its work PRs merged · a CI deploy run reported
 SUCCESS for `7f8a0dd7f` while the box stayed at `0b4c677fd`.
+
+### Wave 5 2026-07-20 — R1 built + reviewed, grade A− (paper `pds-wave-5-2026-07-20`)
+
+Round 1 shipped FIVE slices, not the four Decide listed: `pds-w5-charter-amendment` was dispatched
+alongside the roster above. All five gates re-run green on the reviewer's final state.
+
+- `pds-w5-criteria-reconcile` → `loop-epic/the-crown-proof-is-judged-by-the-test-th-0` (no fixes).
+  Crown-proof criteria 6/7/10 rewritten to the harness that actually shipped, BEFORE the climber
+  dispatches, so the climber does not author its own rubric. Criterion 7 no longer demands a
+  two-pull byte-identity test step 6 never performs (PDS-D30 rules byte-identity impossible);
+  it now names the eight guarded columns, the `(dataset, name)` key and `PDS_STEP6_GUARD_DEMO=1`.
+  Ledger-only — the branch carries an `--allow-empty` commit whose message IS the artifact.
+- `pds-w5-harness-hygiene` → `loop-epic/the-proof-harness-stops-overclaiming-its-1-r`
+  (review fix 987a22df1). `ensure_bp` now asserts the fourth flag its own prose claimed (`--dataset`,
+  the D61 class); `--plan` wins in any argv position so `--only 0a --plan` no longer takes a real
+  ~51 MB live export while printing "dry run"; three implemented-but-uncited rulings tagged.
+  REVIEW FIX: a partial `--only` run closed with "RESULT: PASS — the whole ladder ran and held"
+  after four of eleven rungs — the harness's own loudest overclaim, and the exact line a reader
+  lifts into a transcript as the crown proof. It now reads `PASS (PARTIAL) … NOT the crown proof`.
+- `pds-w5-merge-mode-size-pins` → `loop-epic/media-files-size-under-mode-merge-gets-t-2` (no fixes).
+  Two tests pin `media_files.size` under `mode: :merge` — step 1's exact path. Mutation re-proven
+  INDEPENDENTLY at review: excluding `size` from `merge_upsert`'s DO UPDATE set reddens exactly
+  these two and nothing else (26 tests, 2 failures), while the sibling dev-profile file stays
+  15/15 GREEN under the same broken engine. The coverage hole was real, not a story.
+- `pds-w5-ledger-merge-stamps` → `loop-epic/fourteen-done-pds-tasks-stop-under-repor-3` (no fixes).
+  Fourteen done PDS tasks now carry the sha proving their merge criterion, each re-verified three
+  ways (ancestry, `gh pr view` mergeCommit compared programmatically, the PR body's own `Task:`
+  line). `pds-w4-harness-rungs` deliberately EXCLUDED and left at 4/14 — nine of its criteria are
+  "AUTHORED AND GATED, NOT RUN" and belong to the live climb. Ledger-only, already live.
+- `pds-w5-charter-amendment` → `loop-epic/the-epic-s-memory-stops-being-three-diff-4-r`.
+  Charter is contiguous D1–D90 at 942 lines; all 22 harness-cited D-numbers resolve (slash-expanded).
+
+STALE-MERGE MYSTERY, CLOSED. The builder found #4494 merged carrying only D39–D74 and flagged as
+its main blind spot that it could not tell a one-off from a systemic rebase-then-merge race —
+asking the lead to audit other PRs. Resolved at review: `356aa57d5` was AUTHORED at 23:13:26Z,
+twenty seconds AFTER the PR merged at 23:13:06Z, and GitHub's record shows headRefOid never left
+`21c144f2f`. Nothing stale was merged; two concurrent agents raced, one merging while the other
+was still writing onto the branch. NOT systemic — no PR audit is warranted, and the re-land onto a
+fresh branch is the correct remedy.
+
+WHAT DID NOT HAPPEN: the wish's headline job, `pds-w1-crown-proof`, did NOT run this wave. It is
+round 2 by the sequenced-rounds law — it depends on `pds-w5-criteria-reconcile` (which rewrites
+three of the criteria it is judged by) and `pds-w5-harness-hygiene` (which closes two holes in the
+instrument it runs). Round 1 was entirely enablers. The epic's headline claim remains UNPAID and
+the ladder still has never been run end to end; `pds-w1-crown-proof` stays `open` at 0/11.
+
+NEXT WAVE: merge round 1 (the charter branch FIRST or with the hygiene branch — the hygiene harness
+cites D86/D89, which exist only in the amended charter). Then dispatch `pds-w1-crown-proof` as a
+single owner, strictly serial, one `BARKPARK_HOME` / one `PDS_SCRATCH_POINTER` / one ATTEMPT-counted
+export. Only after its transcript lands does `pds-w3-shares-fidelity` go, because it moves the
+census baseline (PDS-D45 — the manifest's `dataset_slugs` came back `[]`, re-confirmed live).
