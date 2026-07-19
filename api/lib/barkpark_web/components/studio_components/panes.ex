@@ -67,6 +67,16 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
   # via CSS). nil leaves the legacy class string byte-identical.
   attr :marker_class, :string, default: nil
+  # Pane anatomy stamps (spd-s3 model, spd-s4 wiring): `data-role` is the
+  # pane's structural kind (`nav` on the root desk pane, `list` on every
+  # drilled pane) and `data-priority` its squeeze order (`0` root, index on
+  # intermediates, `active` on the drilled-to leaf). Both render only when
+  # supplied, so every legacy call site stays byte-identical. Any CSS written
+  # against them MUST be scoped (charter D30) — `.pane-layout > [data-role=…]`
+  # or `html[data-width-bucket=…] […]`, never a bare attribute selector: 130
+  # foreign `data-role` values already live on the Tasks board surface.
+  attr :data_role, :any, default: nil
+  attr :data_priority, :any, default: nil
 
   slot :header_actions
   slot :inner_block, required: true
@@ -85,13 +95,19 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         do: "pane-column",
         else: "pane-column #{extra_classes}"
 
-    assigns = assign(assigns, :col_class, col_class)
+    assigns =
+      assigns
+      |> assign(:col_class, col_class)
+      |> assign(:role_attr, assigns[:data_role] && to_string(assigns[:data_role]))
+      |> assign(:priority_attr, assigns[:data_priority] && to_string(assigns[:data_priority]))
 
     ~H"""
     <%= if @collapsed do %>
       <div
         class="pane-column pane-column--collapsed"
         id={@id}
+        data-role={@role_attr}
+        data-priority={@priority_attr}
         phx-click={@phx_click}
         phx-value-idx={@phx_value_idx}
         title={"Back to #{@title}"}
@@ -109,6 +125,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <div
         class={@col_class}
         id={@id}
+        data-role={@role_attr}
+        data-priority={@priority_attr}
         style={@flex && "flex: #{@flex}; width: auto; min-width: 0;"}
       >
         <div class="pane-header">

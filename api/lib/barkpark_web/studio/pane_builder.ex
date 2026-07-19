@@ -762,9 +762,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       `collapse?/3`, else `:full`. `collapse?/3` survives VERBATIM as the
       wide-bucket reducer, so every existing nav transition is
       bit-identical (the wide sweep test pins this).
-    * `"narrow"`   — only the LAST pane stays `:full`; every earlier pane
-      drops to `:strip`. The editor squeeze is handled CSS-side; the pane
-      row keeps one full column.
+    * `"narrow"`   — depends on whether the document is open:
+      * editor OPEN → every pane is `:hidden` except the LAST, which is a
+        44px `:strip`. This is the rule that actually closes the 640–1023
+        overflow band (charter D35). The briefed "last pane stays `:full`"
+        rule was measured bit-identical to `collapse?/3` whenever an
+        editor is open (`collapse?/3` already sets `keep_full_nav_count =
+        1`, the same predicate as `idx == num_panes - 1`), so it removed
+        ZERO pixels: one 140px list column + the 560px content floor still
+        overflowed every viewport below ~744px. Hiding the list columns
+        and keeping ONE strip leaves 44px of chrome beside the protected
+        content pane — the twin of what `"phone"` already does, with a
+        back affordance that survives.
+      * editor CLOSED → the LAST pane stays `:full` and every earlier pane
+        drops to `:strip`. Unchanged: without an editor there is no 560px
+        floor in the row, so it never overflowed.
     * `"phone"`    — with an editor open EVERY pane is `:hidden` (the
       document owns the viewport); without an editor the last pane is
       `:full` and the rest `:hidden` (single-column drill navigation).
@@ -778,7 +790,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     if collapse?(idx, num_panes, has_editor?), do: :strip, else: :full
   end
 
-  def display_state(idx, num_panes, _has_editor?, "narrow") do
+  # Narrow WITH a document open (charter D35): the content pane is the
+  # protected winner, so the whole nav row yields to a single 44px back
+  # strip. Anything less was measured to close zero pixels of overflow.
+  def display_state(idx, num_panes, true, "narrow") do
+    if idx == num_panes - 1, do: :strip, else: :hidden
+  end
+
+  # Narrow with NO document open: pure drill navigation, last pane full.
+  def display_state(idx, num_panes, false, "narrow") do
     if idx == num_panes - 1, do: :full, else: :strip
   end
 

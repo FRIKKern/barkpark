@@ -1145,20 +1145,31 @@
     .bp-update-bar--muted .bp-update-bar-main { min-height: 28px; }
 
     /* ── Pane layout (shared across all Studio panes) ──────────────────── */
-    /* spd-s1 escape valve (charter D15 — content must NEVER become
-       unreachable). The pane row now carries hard floors on BOTH sides of the
+    /* Escape valve (spd-s1, charter D15 — content must NEVER become
+       unreachable). The pane row carries hard floors on BOTH sides of the
        negotiation: list columns bottom out at their clamp and the content pane
-       at 560px. When the viewport cannot afford the sum (e.g. a drilled
-       document at ~700px: one 44px strip + a 140px list column + the 560px
-       content floor = 744px), the flex row overflows — and with `overflow:
-       hidden` the tail item IS the content pane, so the right edge of the
-       document would be silently CLIPPED with no way to reach it. `overflow-x:
-       auto` turns that failure into a scroll instead of a wall; it is inert
-       whenever nothing overflows (every ≥1024px desktop), so the wide/standard
-       buckets stay byte-identical. Vertical containment is unchanged — panes
-       and the editor body still own their own y-scroll. Rounds 2–3 (spd-s4
-       server strips, spd-s6 phone drill) remove the overflow itself; this line
-       is the guarantee that the interim never hides content. */
+       at 560px. If the viewport cannot afford the sum, the flex row overflows —
+       and with `overflow: hidden` the tail item IS the content pane, so the
+       right edge of the document would be silently CLIPPED with no way to reach
+       it. `overflow-x: auto` turns that failure into a scroll instead of a
+       wall; it is inert whenever nothing overflows (every ≥1024px desktop), so
+       the wide/standard buckets stay byte-identical. Vertical containment is
+       unchanged — panes and the editor body still own their own y-scroll.
+
+       WHAT SPD-S4 ACTUALLY SHIPPED (charter D35/D36 — the earlier note here
+       promised "rounds 2–3 remove the overflow"; this is that removal, stated
+       honestly). Two changes close the 640–1023 narrow band rather than merely
+       scrolling it:
+         • the server (PaneBuilder.display_state/4) now renders EVERY nav pane
+           as `:hidden` at narrow while a document is open, except one 44px
+           back `:strip`. The briefed "keep the last pane full" rule was
+           measured bit-identical to collapse?/3 and removed zero pixels.
+         • `.bp-secondary-pane` (rigid 360px, previously responsive at NO
+           bucket) is hidden at narrow and phone below.
+       The valve stays because it is still load-bearing where floors can still
+       out-sum the viewport: the editor-CLOSED narrow row, and any bucket the
+       client never stamps (JS off → no html[data-width-bucket], server pinned
+       at "wide"). It costs nothing when nothing overflows. */
     .pane-layout { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; }
     .pane-column {
       /* spd-s1 priority squeeze (charter D5): list panes YIELD before the
@@ -1219,15 +1230,46 @@
          sheet) still WINS: its selectors carry equal-or-higher specificity
          AND later source order for every property both touch. ─────────── */
 
-    /* Protected measure (D4): the paper surface + the classic editor body
-       never shrink below a readable column. FLAT floors on purpose —
-       min(100%, 55ch) silently no-ops (harness Bug 1). Scoped compound
-       selectors ONLY: the bare .bp-paper-surface block further down is
-       shared with the public reader, chat bubbles and the swatch demo and
-       stays untouched. The classic editor has no paper surface inside, so
-       .editor-body carries its own (chrome-type) floor. */
-    .editor-panel .bp-paper-surface { min-inline-size: 55ch; }
-    .editor-panel .editor-body { min-inline-size: 48ch; }
+    /* Protected measure (D4, corrected by D38). The paper surface never
+       shrinks below a readable column. FLAT floor on purpose — min(100%, 55ch)
+       silently no-ops (harness Bug 1). Scoped compound selector ONLY: the bare
+       .bp-paper-surface block further down is shared with the public reader,
+       chat bubbles and the swatch demo and stays untouched.
+
+       The floor is calc(55ch + 80px), NOT 55ch: `box-sizing: border-box` is
+       global (see the reset near the top of this sheet) and .bp-paper-surface
+       carries `padding: 56px 40px`, so a bare 55ch floors the BORDER box and
+       delivers 55ch − 80px of text. Measured on the pre-fix CSS at a 900px
+       viewport: 516px = 51.5ch (n=2) and 480px = 47.9ch (n=3/4) — under the
+       epic's own ≥55ch criterion. Adding the horizontal padding back makes the
+       floor mean what it says: 55ch of CONTENT box.
+
+       The @container gate is LOAD-BEARING, not tidiness. calc(55ch + 80px) is
+       ~631px (Iowan) / ~688px (Georgia), both ABOVE .editor-panel's 560px
+       floor, so an ungated raise would newly materialise a horizontal
+       scrollbar at every narrow width (D39: .editor-body declares only
+       overflow-y, so the spec promotes overflow-x to auto and IT is the
+       scroller — .editor-panel's overflow:hidden is never reached). Gating on
+       720px of content width means the floor applies only where the panel can
+       actually honour it; below that the surface simply fills the panel. */
+    @container content (min-width: 720px) {
+      .editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 80px); }
+    }
+    /* Classic-editor measure floor (D40). This lived at the top of this
+       section as `.editor-panel .editor-body { min-inline-size: 48ch }` and
+       had NEVER once applied: `.editor-with-preview .editor-panel-main {
+       min-width: 0 }` (further down this sheet) has equal specificity (0,2,0)
+       and later source order, and all three real render sites sit inside
+       .editor-with-preview — Chrome computed min-width:"0px" on the editor
+       body in every configuration. Re-landed here with the third class in the
+       selector so it outranks the flex reset instead of losing to it, and
+       narrowed to the CLASSIC editor: .bp-paper-body carries the paper surface
+       above, which owns the paper path's floor. 48ch is a chrome-font measure
+       (~420px), safely under the 560px panel floor, so it needs no container
+       gate. */
+    .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) {
+      min-inline-size: 48ch;
+    }
 
     /* Inspector overlay (D12): below 860px of CONTENT-PANE width — the
        560px content floor + the 300px docked inspector — a docked sidebar
@@ -1274,6 +1316,28 @@
     html[data-width-bucket="phone"] .editor-panel { min-width: 0; }
     html[data-width-bucket="phone"] .editor-panel .bp-paper-surface { min-inline-size: 0; }
     html[data-width-bucket="phone"] .editor-panel .editor-body { min-inline-size: 0; }
+    /* Same neutraliser at the specificity of the re-landed D40 classic floor
+       (0,4,0) — the plain line above is (0,3,0) and would lose to it. Without
+       this the classic editor would keep a 48ch floor on a 375px viewport. */
+    html[data-width-bucket="phone"] .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) {
+      min-inline-size: 0;
+    }
+
+    /* Secondary editor pane (D36) — the LAST unconditional crush. The E2
+       read-only secondary card is a DIRECT flex child of .pane-layout styled
+       `flex: 0 0 360px`, and until now it had no responsive rule at ANY
+       bucket: the phone block above only touches .pane-column and
+       .editor-panel. Measured with a secondary doc open, the document was
+       annihilated silently — 1024px viewport overflowed by 80px; 600px left
+       the editor panel 240px; 500px → 140px; 375px → 15px, with rowOverflow 0
+       in every case, so the escape valve above never even fired (nothing
+       overflowed; the content pane was simply squeezed out of existence).
+       Below the standard bucket the viewport cannot afford a 360px reference
+       card beside a 560px protected document, so the card yields entirely.
+       Nothing is lost: it is a READ-ONLY preview of a referenced doc, and its
+       own close/open control is in the editor header, which stays. */
+    html[data-width-bucket="narrow"] .bp-secondary-pane,
+    html[data-width-bucket="phone"] .bp-secondary-pane { display: none; }
 
     /* Breadcrumb drill strip — spd-s6 PRE-PROVISION (D13/D16: this file is
        single-owner per round, so the phone drill's full CSS contract ships
@@ -5506,6 +5570,56 @@
       },
       destroyed() {
         this.el.removeEventListener("click", this._onClick);
+      }
+    };
+
+    // WidthBucket — the space-priority desk's server seam (spd-s4, charter
+    // D1/D2/D6). Mounted on #studio-panes ONLY (the Studio pane row); the API
+    // tester's pane_layout stays hook-less. Data flows the OPPOSITE way from
+    // EditorFocus: this hook READS the bucket the pre-paint <head> script
+    // already computed and pushes it UP to StudioLive, which uses it to decide
+    // the DISCRETE half of the layout (which panes render full / as a 44px
+    // strip / not at all). The CONTINUOUS half (clamps, floors, the inspector
+    // overlay) stays pure CSS keyed on html[data-width-bucket], so first paint
+    // is correct with no round-trip and there is no flash of wrong layout —
+    // this hook only reconciles AFTER connect.
+    //
+    // window.bpWidthBucket(width, currentBucket) is the ONE bucket function
+    // (defined in the pre-paint script at the top of this file, with the +32px
+    // widen dead-band). It is never redefined here — one authority, or server
+    // and CSS would disagree at the boundaries.
+    //
+    // Pushes on mount and on bucket TRANSITIONS ONLY: resize fires continuously
+    // and the CSS already tracks it, so a per-resize pushEvent would be pure
+    // jank. The listener is rAF-throttled and removed in destroyed().
+    Hooks.WidthBucket = {
+      _compute() {
+        var fn = window.bpWidthBucket || window.__bpWidthBucket;
+        if (!fn) return null;
+        return fn(window.innerWidth, this._bucket);
+      },
+      _sync() {
+        var next = this._compute();
+        if (!next || next === this._bucket) return;
+        this._bucket = next;
+        this.pushEvent("width-bucket", { bucket: next });
+      },
+      mounted() {
+        this._bucket = null;
+        this._raf = 0;
+        this._onResize = () => {
+          if (this._raf) return;
+          this._raf = window.requestAnimationFrame(() => {
+            this._raf = 0;
+            this._sync();
+          });
+        };
+        this._sync();
+        window.addEventListener("resize", this._onResize);
+      },
+      destroyed() {
+        window.removeEventListener("resize", this._onResize);
+        if (this._raf) window.cancelAnimationFrame(this._raf);
       }
     };
 

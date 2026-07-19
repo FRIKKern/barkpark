@@ -2476,6 +2476,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     <div
       id={@id}
       class={"editor-panel sheet-editor" <> if(@read_only, do: " sheet-reader", else: "")}
+      data-role="content"
       data-test-id={if @read_only, do: "sheet-reader", else: "studio-sheet-editor"}
     >
       <.document_header :if={not @read_only} dataset={@dataset} title={@doc.title || @slug}>

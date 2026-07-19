@@ -95,7 +95,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       )
 
     ~H"""
-    <div class="editor-panel" data-test-id="studio-paper-editor">
+    <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
       <.document_header dataset={@dataset} title={@title}>
         <:status_pill>
           <span class="badge badge-published">paper</span>
@@ -303,6 +303,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     ~H"""
     <aside
       class={"bp-doc-sidebar " <> if(@panel_open, do: "is-open", else: "is-collapsed")}
+      data-role="inspector"
       data-test-id="paper-metadata-sidebar"
       aria-label="Document metadata"
     >
@@ -566,18 +567,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div id="editor-focus-mirror" phx-hook="EditorFocus" data-editor-mode={@editor_mode}
          style="display:none;"></div>
 
-    <.pane_layout id="studio-panes">
+    <%!-- The pane row reads ONE table: PaneBuilder.display_state/4 (spd-s4,
+          charter D6/D7/D35). `:full` is today's expanded column, `:strip` the
+          44px collapsed back affordance, `:hidden` skips the pane server-side
+          so no starving column is even in the flex row. @width_bucket comes
+          from the WidthBucket hook on this container (root.html.heex) and
+          stays "wide" until the client connects, so the static first render is
+          byte-identical to pre-spd-s4 main. --%>
+    <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
-        <% collapsed = PaneBuilder.collapse?(idx, num_panes, has_editor) %>
+        <% display = PaneBuilder.display_state(idx, num_panes, has_editor, @width_bucket) %>
+        <% collapsed = display == :strip %>
         <% doc_count = Enum.count(pane.items, &(&1.type == :doc)) %>
         <.pane_column
+          :if={display != :hidden}
           id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
           title={pane.title}
           count={doc_count}
           last={idx == num_panes - 1 and not has_editor}
           collapsed={collapsed}
+          data_role={pane[:role]}
+          data_priority={pane[:priority]}
           marker_class={if pane[:type_name], do: "bp-doc-list", else: nil}
           phx_click={if collapsed, do: "expand-pane", else: nil}
           phx_value_idx={if collapsed, do: "#{idx}", else: nil}
@@ -795,6 +807,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <div
           id={"media-explorer-#{@nav_desk || "all"}"}
           class="editor-panel media-explorer-panel"
+          data-role="content"
           style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;"
         >
           <%!-- Scope-level share affordance for the media library (P6b). The
@@ -858,7 +871,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               other docs only ever see Classic. --%>
         <% beta_ok = @editor_doc != nil and @editor_blocks != [] %>
         <%= if beta_ok and @editor_mode == :beta do %>
-          <div class="editor-panel" data-test-id="studio-doc-beta-editor">
+          <div class="editor-panel" data-role="content" data-test-id="studio-doc-beta-editor">
             <.document_header dataset={@dataset} title={@editor_doc.title || "Untitled"}>
               <:status_pill>
                 <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
