@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+#
+# pds-scratch-target.sh — boot and tear down a FULLY ISOLATED personal-local
+# Barkpark (the PDS pull TARGET) on this host, from any checkout or worktree.
+#
+#   scripts/pds-scratch-target.sh up          boot a scratch instance, mint an
+#                                             admin token, write scratch.env
+#   scripts/pds-scratch-target.sh up --verify boot, then run the verify suite
+#   scripts/pds-scratch-target.sh verify      prove the isolation is REAL
+#   scripts/pds-scratch-target.sh status      where is it, is it up
+#   scripts/pds-scratch-target.sh env         print the sourceable scratch.env
+#   scripts/pds-scratch-target.sh teardown    stop everything, remove the tree,
+#                                             assert both ports released and
+#                                             zero orphan postgres
+#
+# Every guard below exists because a verification run HIT the failure. Read the
+# TRAP comments before "simplifying" any of them away.
+#
+# The instance it stands up is disposable and self-contained:
+#   $BARKPARK_HOME          scratch root (Postgres data dir, socket, logs, .env)
+#   $BARKPARK_PG_PORT       free port, never 5432/5433
+#   $PORT                   free port, never 4000
+#   $BARKPARK_MEDIA_DIR     scratch media root — NOT any checkout's api/uploads
+#
+# It never touches the dev database, the shared ~/.barkpark install, the running
+# tree's api/uploads, or anything on a remote. bin/barkpark and bin/barkpark-pg
+# are used AS-IS and are never modified.
+#
+# COST: a cold tree pays TWO full compiles (ensure_secrets runs MIX_ENV=dev, the
+# server boots MIX_ENV=prod) — >10 min cold, ~90s warm.
+
+set -euo pipefail
+
+# ── Paths ────────────────────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
+API_DIR="$REPO_ROOT/api"
+BARKPARK_BIN="$REPO_ROOT/bin/barkpark"
+PG_BIN_SCRIPT="$REPO_ROOT/bin/barkpark-pg"
+
+# Pointer to the most recent scratch root, so `verify`/`teardown`/`env` work in
+# a later shell without the caller having to remember the mktemp path. Override
+# with PDS_SCRATCH_POINTER for concurrent scratch targets.
+POINTER_FILE="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch-target.last}"
+
+# Postgres caps a unix-socket path at 103 bytes (see TRAP 3). barkpark-pg puts
+# the socket at $BARKPARK_HOME/.s.PGSQL.<port> — that suffix is up to 18 bytes,
+# so the root itself must stay comfortably short.
+MAX_HOME_LEN=85
+
+log()  { printf 'pds-scratch: %s\n' "$*"; }
+warn() { printf 'pds-scratch: WARNING %s\n' "$*" >&2; }
+die()  { printf 'pds-scratch: %s\n' "$*" >&2; exit 1; }
+hr()   { printf -- '---- %s\n' "$*"; }
+
+# ── TRAP 2 — the `cc` on PATH may not be a C compiler ────────────────────────
+#
+# ~/.local/bin/cc on this host is literally `exec claude --dangerously-skip-
+# permissions "$@"`, and it precedes /usr/bin/cc on PATH for /bin/sh too, so
+# `make` picks it up when building the argon2_elixir NIF. The build then dies
+# with `error: unknown option '-g'`, which Mix mistranslates into the wholly
+# misleading "You need to have gcc and make installed". Pin the real compiler.
+export_real_cc() {
+  if [ -x /usr/bin/clang ]; then
+    export CC=/usr/bin/clang
+    log "CC=/usr/bin/clang (TRAP 2: a shim 'cc' on PATH breaks the argon2 NIF build)"
+  else
+    warn "/usr/bin/clang not found — leaving CC=${CC:-unset}; if a NIF build fails with \"You need to have gcc and make installed\", check \`command -v cc\`"
+  fi
+}
+
+# ── TRAP 7 — free ports, chosen loudly ───────────────────────────────────────
+#
+# bin/barkpark refuses to boot when $PORT is taken (good — fail loud), and a
+# scratch Postgres must never land on 5432 (system) or 5433 (the shared managed
+# instance under ~/.barkpark).
+port_in_use() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+free_port() {
+  local p _i
+  for _i in $(seq 1 200); do
+    p=$(( 20000 + RANDOM % 30000 ))
+    case "$p" in 4000|5432|5433) continue ;; esac
+    if ! port_in_use "$p"; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+  die "could not find a free TCP port after 200 tries"
+}
+
+# ── scratch root resolution + TRAP 3 ─────────────────────────────────────────
+#
+# TRAP 3: barkpark-pg starts Postgres with `-k $BARKPARK_HOME`, so the unix
+# socket lives at $BARKPARK_HOME/.s.PGSQL.<port>. Postgres caps that path at 103
+# bytes. A 109-byte agent scratchpad path fails with
+#   FATAL:  could not create any Unix-domain sockets
+# which is visible ONLY in $BARKPARK_HOME/postgres.log — `bin/barkpark up`
+# surfaces nothing but the generic `pg_ctl: could not start server`. Hence the
+# hard assert AND the /tmp default (never $TMPDIR, which on this host resolves
+# under a per-agent scratch directory).
+assert_short_home() {
+  local home="$1"
+  if [ "${#home}" -ge "$MAX_HOME_LEN" ]; then
+    printf 'pds-scratch: BARKPARK_HOME is %s bytes, which is too long (limit %s).\n' \
+      "${#home}" "$MAX_HOME_LEN" >&2
+    printf '  %s\n' "$home" >&2
+    cat >&2 <<'EOF'
+  WHY: barkpark-pg puts the Postgres unix socket at $BARKPARK_HOME/.s.PGSQL.<port>
+  and Postgres caps that path at 103 bytes. Over the cap, the server dies with
+    FATAL:  could not create any Unix-domain sockets
+  logged ONLY to $BARKPARK_HOME/postgres.log — `barkpark up` just prints
+  "pg_ctl: could not start server", so the real cause is invisible.
+  FIX: use a short root, e.g. BARKPARK_HOME=$(mktemp -d /tmp/pds.XXXX).
+EOF
+    exit 1
+  fi
+}
+
+new_scratch_home() {
+  local home
+  if [ -n "${BARKPARK_HOME:-}" ]; then
+    home="$BARKPARK_HOME"
+    mkdir -p "$home"
+  else
+    home="$(mktemp -d /tmp/pds.XXXX)"
+  fi
+  home="$(cd -P -- "$home" && pwd)"
+  assert_short_home "$home"
+  printf '%s\n' "$home"
+}
+
+scratch_env_file() { printf '%s/scratch.env\n' "$1"; }
+
+# Resolve an EXISTING scratch root for verify/status/teardown/env.
+resolve_home() {
+  local home="${BARKPARK_HOME:-}"
+  if [ -z "$home" ] && [ -f "$POINTER_FILE" ]; then
+    home="$(cat "$POINTER_FILE")"
+  fi
+  [ -n "$home" ] || die "no scratch target known — set BARKPARK_HOME=... or run \`$0 up\` first"
+  [ -d "$home" ] || die "scratch root $home does not exist (already torn down?)"
+  printf '%s\n' "$home"
+}
+
+load_scratch_env() {
+  local home envf
+  home="$(resolve_home)"
+  envf="$(scratch_env_file "$home")"
+  [ -f "$envf" ] || die "$envf missing — that root was never booted by this script"
+  set -a
+  # shellcheck disable=SC1090
+  . "$envf"
+  set +a
+}
+
+# ── TRAP 6 — mint an admin token ─────────────────────────────────────────────
+#
+# A fresh box 401s the blob-push route and there is NO mix task that mints a
+# token (33 tasks, none auth). api_tokens stores only sha256(raw) hex
+# (Barkpark.Auth.ApiToken.hash_token/1), and BarkparkWeb.Plugs.RequireAdmin
+# demands the "admin" permission, so insert the row directly and print the raw
+# token. kind='api' is what Auth.verify_token/1 filters on.
+mint_admin_token() {
+  local raw hash
+  raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+  hash="$(printf '%s' "$raw" | shasum -a 256 | awk '{print $1}')"
+
+  "$PG_BIN_SCRIPT" psql --quiet --tuples-only --no-align --command \
+    "INSERT INTO api_tokens (id, token_hash, label, name, dataset, permissions, kind, inserted_at, updated_at)
+     VALUES (gen_random_uuid(), '$hash', 'pds-scratch', 'pds-scratch admin', 'production',
+             ARRAY['read','write','admin'], 'api', now(), now())" >/dev/null
+
+  printf '%s\n' "$raw"
+}
+
+# ── up ───────────────────────────────────────────────────────────────────────
+
+cmd_up() {
+  local run_verify="${1:-}"
+
+  command -v mix >/dev/null 2>&1   || die "mix not found on PATH — install Elixir"
+  command -v curl >/dev/null 2>&1  || die "curl not found on PATH"
+  command -v shasum >/dev/null 2>&1 || die "shasum not found on PATH"
+  [ -x "$BARKPARK_BIN" ] || die "$BARKPARK_BIN not found or not executable"
+
+  local home port pg_port media_dir boot_log envf token
+  home="$(new_scratch_home)"
+  media_dir="${BARKPARK_MEDIA_DIR:-$home/media}"
+  port="${PORT:-$(free_port)}"
+  pg_port="${BARKPARK_PG_PORT:-$(free_port)}"
+  boot_log="$home/up.log"
+  envf="$(scratch_env_file "$home")"
+
+  mkdir -p "$media_dir"
+
+  # TRAP 4 — bin/barkpark NEVER sets BARKPARK_MEDIA_DIR (zero occurrences) and
+  # the compiled default is Path.expand("../uploads", __DIR__) = the RUNNING
+  # TREE's api/uploads. A harness that forgets this writes pulled blobs into the
+  # shared dev checkout. Always set it, explicitly, before anything boots.
+  export BARKPARK_HOME="$home"
+  export BARKPARK_MEDIA_DIR="$media_dir"
+  export BARKPARK_PG_PORT="$pg_port"
+  export PORT="$port"
+  export PHX_HOST="${PHX_HOST:-localhost}"
+
+  export_real_cc
+
+  log "scratch root   $home  (${#home} bytes, limit $MAX_HOME_LEN)"
+  log "http port      $port"
+  log "postgres port  $pg_port"
+  log "media dir      $media_dir"
+  log "tree           $REPO_ROOT"
+
+  if [ ! -d "$API_DIR/_build" ] || [ -z "$(ls -A "$API_DIR/_build" 2>/dev/null)" ]; then
+    warn "api/_build is empty — COLD tree: two full compiles (MIX_ENV=dev for secrets, MIX_ENV=prod for the server), expect >10 minutes. Warm runs take ~90s."
+  fi
+
+  # TRAP 1 — bin/barkpark cmd_up only checks `command -v mix`; on a fresh
+  # worktree the very first thing it runs (ensure_secrets) compiles, and the
+  # compile dies on missing deps. Fetch them first, ourselves.
+  log "mix deps.get (TRAP 1: bin/barkpark only checks for mix, not for deps)"
+  ( cd "$API_DIR" && mix deps.get )
+
+  # TRAP 5 — NEVER pipe `bin/barkpark up` into a pager/tail. On a FIRST boot the
+  # spawned postgres and the nohup'd BEAM inherit the pipe's write end, so the
+  # reader never sees EOF and the command hangs forever (measured: 9 minutes,
+  # ended only by SIGTERM). Redirect to a file and read the file afterwards.
+  log "booting (log: $boot_log) — not piped, see TRAP 5"
+  if ! "$BARKPARK_BIN" up >"$boot_log" 2>&1; then
+    hr "tail $boot_log"
+    tail -40 "$boot_log" >&2 || true
+    if [ -f "$home/postgres.log" ]; then
+      hr "tail $home/postgres.log (TRAP 3 lives here — socket-path failures are invisible upstream)"
+      tail -20 "$home/postgres.log" >&2 || true
+    fi
+    die "boot failed — see $boot_log"
+  fi
+  tail -5 "$boot_log"
+
+  log "minting admin token (TRAP 6: a fresh box 401s the blob-push route)"
+  token="$(mint_admin_token)"
+
+  cat >"$envf" <<EOF
+# sourceable handle on this scratch personal-local target
+export BARKPARK_HOME="$home"
+export BARKPARK_MEDIA_DIR="$media_dir"
+export BARKPARK_PG_PORT="$pg_port"
+export PORT="$port"
+export PHX_HOST="$PHX_HOST"
+export PDS_SCRATCH_BASE="http://$PHX_HOST:$port"
+export PDS_SCRATCH_TOKEN="$token"
+export PDS_SCRATCH_TREE="$REPO_ROOT"
+EOF
+  printf '%s\n' "$home" >"$POINTER_FILE"
+
+  hr "ready"
+  printf 'base:  http://%s:%s\n' "$PHX_HOST" "$port"
+  printf 'token: %s\n' "$token"
+  printf 'env:   source %s\n' "$envf"
+  printf 'down:  %s teardown\n' "$0"
+
+  if [ "$run_verify" = "--verify" ] || [ "$run_verify" = "verify" ]; then
+    cmd_verify
+  fi
+}
+
+# ── verify — the negative control is the point ───────────────────────────────
+#
+# Distrust vacuous green (PDS charter — the crown proof pulls a live dataset into
+# a scratch target, so the target's isolation must itself be proven). Asserting only that the media dir IS the
+# scratch path is worthless from a worktree: the UN-isolated blast target
+# follows the tree you run from, so a `find` against the PRIMARY checkout's
+# uploads would pass green while this worktree's own api/uploads got polluted.
+# So we print Barkpark.Media.upload_dir() TWICE — with BARKPARK_MEDIA_DIR set
+# and with it stripped by `env -u` — and assert the second one is exactly this
+# tree's api/uploads. The un-isolated path is shown FIRING.
+upload_dir_probe() {
+  # MIX_ENV=dev on purpose: runtime.exs's prod branch RAISES on missing
+  # SECRET_KEY_BASE/DATABASE_URL, and the BARKPARK_MEDIA_DIR block sits OUTSIDE
+  # that guard, so dev reads the same key. --no-start: no supervision tree.
+  ( cd "$API_DIR" && MIX_ENV=dev mix run --no-start -e 'IO.puts(Barkpark.Media.upload_dir())' \
+      2>/dev/null | tail -1 )
+}
+
+cmd_verify() {
+  load_scratch_env
+
+  local fails=0
+  ok()  { printf '  PASS  %s\n' "$*"; }
+  bad() { printf '  FAIL  %s\n' "$*"; fails=$((fails + 1)); }
+
+  hr "1. negative control — Barkpark.Media.upload_dir(), isolated vs NOT"
+  local isolated unisolated expected_unisolated
+  isolated="$(upload_dir_probe)"   # BARKPARK_MEDIA_DIR is exported by scratch.env
+  unisolated="$(env -u BARKPARK_MEDIA_DIR bash -c "cd '$API_DIR' && MIX_ENV=dev mix run --no-start -e 'IO.puts(Barkpark.Media.upload_dir())'" 2>/dev/null | tail -1)"
+  expected_unisolated="$API_DIR/uploads"
+
+  printf '  WITH  BARKPARK_MEDIA_DIR -> %s\n' "$isolated"
+  printf '  env -u BARKPARK_MEDIA_DIR -> %s\n' "$unisolated"
+
+  if [ "$isolated" = "$BARKPARK_MEDIA_DIR" ]; then
+    ok "isolated upload_dir is the scratch path"
+  else
+    bad "isolated upload_dir is '$isolated', expected '$BARKPARK_MEDIA_DIR'"
+  fi
+  if [ "$unisolated" = "$expected_unisolated" ]; then
+    ok "un-isolated upload_dir is the RUNNING TREE's api/uploads — the blast target is real, so the green above is not free"
+  else
+    bad "un-isolated upload_dir is '$unisolated', expected '$expected_unisolated' (negative control did not fire — do not trust the positive half)"
+  fi
+
+  hr "2. the scratch server answers, and it is not on 4000"
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$PDS_SCRATCH_BASE/api/schemas" || true)"
+  if [ "$code" = "200" ]; then
+    ok "GET $PDS_SCRATCH_BASE/api/schemas -> 200"
+  else
+    bad "GET $PDS_SCRATCH_BASE/api/schemas -> $code"
+  fi
+  # Report what (if anything) holds 4000 — someone else's dev server is fine,
+  # OURS would mean the scratch target is not isolated at all.
+  local pid_4000 our_pid
+  pid_4000="$(lsof -nP -iTCP:4000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  our_pid="$(cat "$BARKPARK_HOME/server.pid" 2>/dev/null || true)"
+  printf '  port 4000 listener: %s | scratch server pid: %s\n' "${pid_4000:-none}" "${our_pid:-unknown}"
+  if [ "$PORT" != "4000" ] && { [ -z "$pid_4000" ] || [ "$pid_4000" != "$our_pid" ]; }; then
+    ok "scratch PORT=$PORT, PG=$BARKPARK_PG_PORT — nothing of OURS listens on 4000"
+  else
+    bad "the scratch instance is on 4000 (PORT=$PORT, listener $pid_4000) — not isolated from a normal dev server"
+  fi
+
+  hr "3. admin token + blob push land in the scratch media dir"
+  local blob_path tmp_png resp
+  blob_path="pds-scratch/2026/07/probe-$$.png"
+  tmp_png="$BARKPARK_HOME/probe.png"
+  printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' \
+    | base64 -d >"$tmp_png" 2>/dev/null || printf 'PDS-SCRATCH-PROBE' >"$tmp_png"
+
+  resp="$(curl -s -w '\n%{http_code}' -X PUT \
+    "$PDS_SCRATCH_BASE/api/workspaces/default/media/blob/$blob_path" \
+    -H "Authorization: Bearer $PDS_SCRATCH_TOKEN" \
+    -H 'Content-Type: application/octet-stream' \
+    --data-binary "@$tmp_png" || true)"
+  code="$(printf '%s' "$resp" | tail -1)"
+  printf '  PUT /api/workspaces/default/media/blob/%s -> %s %s\n' \
+    "$blob_path" "$code" "$(printf '%s' "$resp" | sed '$d')"
+  if [ "$code" = "200" ]; then
+    ok "blob push accepted with the minted admin token"
+  else
+    bad "blob push returned $code (expected 200)"
+  fi
+
+  if [ -f "$BARKPARK_MEDIA_DIR/$blob_path" ]; then
+    ok "bytes landed at \$BARKPARK_MEDIA_DIR/$blob_path"
+  else
+    bad "bytes did NOT land at \$BARKPARK_MEDIA_DIR/$blob_path"
+  fi
+
+  # The blast target is THIS tree (see the negative control above), so search it.
+  local strays
+  strays="$(find "$API_DIR/uploads" -name "probe-$$.png" 2>/dev/null | head -5 || true)"
+  if [ -z "$strays" ]; then
+    ok "no copy under $API_DIR/uploads — the checkout stayed clean"
+  else
+    bad "blob leaked into the running tree: $strays"
+  fi
+
+  hr "verify: $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
+  [ "$fails" -eq 0 ]
+}
+
+# ── status / env ─────────────────────────────────────────────────────────────
+
+cmd_status() {
+  load_scratch_env
+  printf 'root:  %s\n' "$BARKPARK_HOME"
+  printf 'base:  %s\n' "$PDS_SCRATCH_BASE"
+  printf 'media: %s\n' "$BARKPARK_MEDIA_DIR"
+  "$BARKPARK_BIN" status || true
+}
+
+cmd_env() {
+  local home
+  home="$(resolve_home)"
+  cat "$(scratch_env_file "$home")"
+}
+
+# ── teardown ─────────────────────────────────────────────────────────────────
+
+cmd_teardown() {
+  local home envf port pg_port fails=0
+  home="$(resolve_home)"
+  envf="$(scratch_env_file "$home")"
+  if [ -f "$envf" ]; then
+    # shellcheck disable=SC1090
+    . "$envf"
+  fi
+  port="${PORT:-}"
+  pg_port="${BARKPARK_PG_PORT:-}"
+
+  export BARKPARK_HOME="$home"
+  [ -n "$port" ] && export PORT="$port"
+  [ -n "$pg_port" ] && export BARKPARK_PG_PORT="$pg_port"
+
+  log "stopping server + postgres under $home"
+  "$BARKPARK_BIN" stop || warn "barkpark stop reported an error — continuing to the asserts"
+
+  local p
+  for p in $port $pg_port; do
+    if port_in_use "$p"; then
+      printf 'pds-scratch: FAIL port %s still has a listener:\n' "$p" >&2
+      lsof -nP -iTCP:"$p" -sTCP:LISTEN >&2 || true
+      fails=$((fails + 1))
+    else
+      log "port $p released"
+    fi
+  done
+
+  # Orphan check BEFORE the tree goes away — a postgres still holding this data
+  # dir is exactly the leak we are looking for.
+  local orphans
+  orphans="$(pgrep -f "postgres.*$home" 2>/dev/null || true)"
+  if [ -n "$orphans" ]; then
+    printf 'pds-scratch: FAIL orphan postgres processes for %s: %s\n' "$home" "$orphans" >&2
+    fails=$((fails + 1))
+  else
+    log "zero orphan postgres for this scratch root"
+  fi
+
+  # Refuse to rm -rf anything that is not a scratch root we created/were given.
+  case "$home" in
+    /|"$HOME"|"$REPO_ROOT"*) die "refusing to remove $home — that is not a scratch root" ;;
+  esac
+  rm -rf "$home"
+  if [ -d "$home" ]; then
+    printf 'pds-scratch: FAIL %s still exists\n' "$home" >&2
+    fails=$((fails + 1))
+  else
+    log "removed $home"
+  fi
+
+  if [ -f "$POINTER_FILE" ] && [ "$(cat "$POINTER_FILE")" = "$home" ]; then
+    rm -f "$POINTER_FILE"
+  fi
+
+  hr "teardown: $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
+  [ "$fails" -eq 0 ]
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+
+case "${1:-up}" in
+  up)               shift || true; cmd_up "${1:-}" ;;
+  --verify|verify)  cmd_verify ;;
+  teardown|down)    cmd_teardown ;;
+  status)           cmd_status ;;
+  env)              cmd_env ;;
+  -h|--help|help)
+    sed -n '3,30p' "$0"
+    ;;
+  *)
+    echo "usage: pds-scratch-target.sh {up [--verify]|verify|status|env|teardown}" >&2
+    exit 2
+    ;;
+esac
