@@ -61,14 +61,21 @@ defmodule BarkparkWeb.MediaController do
 
     with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
          doc <- Media.asset_doc_for_file(file, file.dataset),
-         true <- Access.allowed?(conn, file, doc, :original) do
-      # Serve the path off the RESOLVED record, not the raw URL segment. The
-      # lookup already matched on `path == relative_path`, but deriving the disk
-      # path from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
-      # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
-      # instead of the attacker-typed segment removes any raw-input flow into
-      # `send_file`. A `../…` URL never matches a stored row → {:error,:not_found}.
-      full_path = Media.file_path(file.path)
+         true <- Access.allowed?(conn, file, doc, :original),
+         # Serve the path off the RESOLVED record, not the raw URL segment. The
+         # lookup already matched on `path == relative_path`, but deriving the disk
+         # path from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
+         # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
+         # instead of the attacker-typed segment removes any raw-input flow into
+         # `send_file`. A `../…` URL never matches a stored row → {:error,:not_found}.
+         full_path = Media.file_path(file.path),
+         # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
+         # notably right after a workspace bundle import copies the DB rows but the
+         # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
+         # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
+         # MatchError on :enoent → a bare 500. Probe the blob first and answer a
+         # truthful 404 instead.
+         {:blob, true} <- {:blob, File.regular?(full_path)} do
       mime = MIME.from_path(full_path)
 
       conn
@@ -77,6 +84,9 @@ defmodule BarkparkWeb.MediaController do
     else
       {:error, :not_found} ->
         not_found(conn, "file not found")
+
+      {:blob, false} ->
+        not_found(conn, "media blob missing")
 
       false ->
         forbidden(conn)
@@ -175,6 +185,88 @@ defmodule BarkparkWeb.MediaController do
 
     conn
     |> put_status(:forbidden)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  @doc """
+  Push a raw blob to this instance at a validated relative path (pds W1 G2).
+
+  Admin-gated (the `:require_admin` pipeline). The cross-instance blob-transfer
+  primitive: a workspace bundle import on a TARGET instance copies the source's
+  DB rows, then pushes each source blob here by its server-generated relative
+  path so `serve/2` (which derives the disk path from the row's `path`) finds
+  the bytes. The body is written VERBATIM — no re-encode, no MIME inspection.
+
+  Path safety is enforced by `Media.put_blob/2`'s strict allowlist (each
+  `/`-segment must match the server-blob shape; `.`/`..`/absolute/empty
+  rejected), so a traversal or malformed path is refused with 422 BEFORE any
+  byte touches disk. This is a bare infra route — deliberately NOT in the
+  capabilities manifest.
+  """
+  def put_blob(conn, %{"path" => path_parts}) do
+    relative_path = Enum.join(path_parts, "/")
+
+    case read_full_body(conn) do
+      {:ok, body, conn} ->
+        case Media.put_blob(relative_path, body) do
+          {:ok, written} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{written: written, bytes: byte_size(body)})
+
+          {:error, :invalid_path} ->
+            unprocessable(conn, "invalid_path", "invalid blob path")
+
+          {:error, :empty_body} ->
+            # A zero-byte blob is never legitimate media. The common cause is a
+            # mislabeled content-type (e.g. application/json) letting
+            # Plug.Parsers consume the body before this controller reads it —
+            # refuse loudly instead of writing an empty file serve/2 would
+            # then happily stream.
+            unprocessable(
+              conn,
+              "empty_body",
+              "empty blob body — send the raw bytes as application/octet-stream"
+            )
+
+          {:error, :storage_unavailable} ->
+            {:error, :storage_unavailable}
+        end
+
+      {:error, :too_large, conn} ->
+        env =
+          {:error, :payload_too_large}
+          |> Errors.to_envelope(conn)
+          |> Map.put(:message, "blob exceeds the maximum allowed size")
+
+        conn
+        |> put_status(:request_entity_too_large)
+        |> json(%{error: Map.delete(env, :status)})
+    end
+  end
+
+  # Read the whole request body in one call (the endpoint caps the body at 100 MB
+  # via Plug.Parsers `length:`, and the blob-push content-type is a pass-through
+  # `application/octet-stream` the parsers leave unread). A body that still spills
+  # past `:read_length` returns `{:more, ...}` → an honest 413 rather than a
+  # silently truncated blob.
+  defp read_full_body(conn) do
+    case Plug.Conn.read_body(conn, length: 100_000_000, read_length: 100_000_000) do
+      {:ok, body, conn} -> {:ok, body, conn}
+      {:more, _partial, conn} -> {:error, :too_large, conn}
+    end
+  end
+
+  defp unprocessable(conn, code, message) do
+    # No canonical `:unprocessable` atom exists in Errors; build the 422 envelope
+    # directly and stamp it so it still carries hint + request_id like every
+    # other error on this surface.
+    env =
+      %{code: code, message: message, status: 422}
+      |> Errors.stamp(conn)
+
+    conn
+    |> put_status(:unprocessable_entity)
     |> json(%{error: Map.delete(env, :status)})
   end
 

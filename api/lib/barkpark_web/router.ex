@@ -1982,6 +1982,22 @@ defmodule BarkparkWeb.Router do
     delete("/:id", MediaController, :delete)
   end
 
+  # ── Personal-Development-Server blob push (pds W1 G2) ────────────────────
+  # Admin-gated raw-blob write for CROSS-INSTANCE media re-pointing: a workspace
+  # bundle import on a TARGET instance copies the source's DB rows, then pushes
+  # each source blob HERE by its server-generated relative path so `serve/2`
+  # (which derives the disk path from the row's `path`) finds the bytes. The
+  # `*path` is validated to the server-blob shape by `Media.put_blob/2` (reject
+  # traversal / absolute / malformed → 422) and the body is written verbatim.
+  # DELIBERATELY a bare route — an infra primitive, NOT a public SDK verb, so it
+  # is absent from the capabilities manifest. `:workspace_slug` scopes the
+  # operation logically (the admin gate is global); blobs share the media root.
+  scope "/api/workspaces/:workspace_slug/media", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    put("/blob/*path", MediaController, :put_blob)
+  end
+
   # ── v1 Media — unified blob + mediaAsset metadata ───────────────────────
   # media search-surface-config settings — per-workspace attributed (charter
   # D45/D49), same bespoke admin pipeline as the documents settings routes.

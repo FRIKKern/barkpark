@@ -91,6 +91,21 @@ ensure_secrets() {
       >/dev/null )
 }
 
+# ── PDS W1 — personal-local is the pull TARGET, so it opts into bundle import ──
+#
+# The free Personal-Local twin exists to PULL a cloud workspace's data down into
+# it (bp cloud workspace import), so it turns the fail-closed
+# BARKPARK_ALLOW_BUNDLE_IMPORT switch ON. Append only if the key is ABSENT — a
+# user who set =0 by hand is never clobbered (mirrors write_env's idempotency).
+# Runs after ensure_secrets so ENV_FILE always exists.
+ensure_bundle_import_flag() {
+  if grep -q '^BARKPARK_ALLOW_BUNDLE_IMPORT=' "$ENV_FILE" 2>/dev/null; then
+    return 0
+  fi
+  printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >>"$ENV_FILE"
+  log "enabled bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) — personal-local is a pull target"
+}
+
 # Load ~/.barkpark/.env into the environment, then override DATABASE_URL to the
 # managed Postgres so the .env placeholder (default :5432) never wins. PORT and
 # PHX_HOST come from the env file if set there, else the defaults above.
@@ -197,6 +212,7 @@ migrate() {
 cmd_up() {
   command -v mix >/dev/null 2>&1 || die "mix not found on PATH — install Elixir"
   ensure_secrets        # T5.4
+  ensure_bundle_import_flag  # PDS W1 — local twin is the pull target
   "$PG" start           # T5.2 — managed Postgres on :5433
   load_env              # pulls DATABASE_URL from the managed instance
   migrate               # apply schema to the managed DB

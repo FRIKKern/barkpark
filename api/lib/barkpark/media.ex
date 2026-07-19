@@ -8,12 +8,33 @@ defmodule Barkpark.Media do
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
 
-  @upload_dir Application.compile_env!(:barkpark, :media_upload_dir)
   @asset_type "mediaAsset"
 
   @metadata_fields ~w(title altText caption description tags collection collections assetRole rights focalPoint relatedAssets bp_visibility)
 
-  def upload_dir, do: @upload_dir
+  # ── blob path allowlist (pds W1 G2 — put_blob/2) ───────────────────────────
+  #
+  # The cross-instance blob-push route (PUT .../media/blob/*path) writes bytes at
+  # a caller-supplied RELATIVE path. Each `/`-segment must match the
+  # server-generated blob shape — `unique_filename/1` emits `slug-<hex>.ext` and
+  # the date dirs are `YYYY`/`MM` — i.e. `[A-Za-z0-9._-]+`. `.` and `..` are
+  # rejected outright (no traversal, no current-dir), an absolute path (leading
+  # `/` → empty first segment) is rejected, and an empty path is rejected. This
+  # is a strict allowlist, NOT a blocklist, so an unforeseen escape shape fails
+  # closed.
+  @blob_segment ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+
+  @doc """
+  The media blob root.
+
+  Read at CALL TIME (not `compile_env`) so `BARKPARK_MEDIA_DIR` (runtime.exs)
+  can relocate the blob root without a recompile — the Personal-Local twin
+  points it at a portable data dir so pulled cloud blobs land beside its data.
+  Unset resolves to the `config/config.exs` default, byte-identical to the old
+  compile-time capture (`Application.fetch_env!` raises on a truly-missing key,
+  the same guarantee `compile_env!` gave).
+  """
+  def upload_dir, do: Application.fetch_env!(:barkpark, :media_upload_dir)
 
   @doc """
   Save an uploaded file to disk and create a DB record.
@@ -31,8 +52,8 @@ defmodule Barkpark.Media do
     date_dir = "#{now.year}/#{String.pad_leading("#{now.month}", 2, "0")}"
     filename = unique_filename(original_name)
     relative_path = "#{date_dir}/#{filename}"
-    full_dir = Path.join(@upload_dir, date_dir)
-    full_path = Path.join(@upload_dir, relative_path)
+    full_dir = Path.join(upload_dir(), date_dir)
+    full_path = Path.join(upload_dir(), relative_path)
 
     # SECURITY — server-derived MIME + validate-before-persist.
     #
@@ -388,7 +409,7 @@ defmodule Barkpark.Media do
         # delete is the FIRST side effect: on failure the row survives intact
         # (still pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset)
-        full_path = Path.join(@upload_dir, file.path)
+        full_path = Path.join(upload_dir(), file.path)
 
         # A stale delete means a concurrent DELETE already consumed the row →
         # {:error, :not_found} (both controllers 404 via FallbackController)
@@ -497,7 +518,59 @@ defmodule Barkpark.Media do
 
   @doc "Get the full disk path for serving a file."
   def file_path(relative_path) do
-    Path.join(@upload_dir, relative_path)
+    Path.join(upload_dir(), relative_path)
+  end
+
+  @doc """
+  Write a raw blob verbatim at a validated relative path under the media root.
+
+  The cross-instance blob-push primitive (pds W1 G2): a bundle import on a
+  TARGET instance receives each source blob by its server-generated relative
+  path and drops the bytes at the same location so `serve/2` (which resolves the
+  disk path from the DB row's `path`) finds them. Path validation is a strict
+  allowlist (`@blob_segment` per segment; `.`/`..`/absolute/empty rejected) so a
+  malicious or malformed path can never escape the media root:
+
+    * `{:ok, relative_path}` — bytes written (parent dirs created).
+    * `{:error, :invalid_path}` — the path is not a safe server-blob shape (422).
+    * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
+      empty; the common cause is a caller mislabeling the content-type (e.g.
+      `application/json`), which lets `Plug.Parsers` consume the body before the
+      controller reads it — refuse loudly instead of writing a 0-byte blob the
+      serve path would then happily stream.
+    * `{:error, :storage_unavailable}` — a disk fault on write (503).
+
+  Non-raising file ops mirror `upload/3`: a read-only mount / ENOSPC returns a
+  typed error, never a bare 500.
+  """
+  @spec put_blob(String.t(), binary()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :empty_body | :storage_unavailable}
+  def put_blob(_relative_path, ""), do: {:error, :empty_body}
+
+  def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
+    if valid_blob_path?(relative_path) do
+      full_path = file_path(relative_path)
+
+      with :ok <- File.mkdir_p(Path.dirname(full_path)),
+           :ok <- File.write(full_path, body) do
+        {:ok, relative_path}
+      else
+        {:error, _reason} -> {:error, :storage_unavailable}
+      end
+    else
+      {:error, :invalid_path}
+    end
+  end
+
+  # A path is a safe server-blob path iff it is a non-empty relative path whose
+  # every `/`-segment matches @blob_segment (so `.`, `..`, an absolute leading
+  # `/`, a trailing `/`, and any `\`/null/space shape all fail closed).
+  defp valid_blob_path?(relative_path) do
+    segments = String.split(relative_path, "/")
+
+    relative_path != "" and
+      not String.starts_with?(relative_path, "/") and
+      Enum.all?(segments, &Regex.match?(@blob_segment, &1))
   end
 
   # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the

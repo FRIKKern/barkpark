@@ -400,6 +400,32 @@ if Code.ensure_loaded?(Barkpark.Sharing) do
   config :barkpark, :share_host, System.get_env("BARKPARK_SHARE_HOST")
 end
 
+# Media blob root override (Personal-Development-Server W1, G1/G2). The blob root
+# defaults to api/uploads (config/config.exs); BARKPARK_MEDIA_DIR relocates it at
+# runtime so the Personal-Local twin can point it at a portable data dir where
+# pulled cloud blobs land beside its Postgres data. `Barkpark.Media.upload_dir/0`
+# reads this key at CALL time, so a `barkpark reload` picks it up. Unset ⇒ the
+# compiled default, byte-identical to before. Applies in ALL envs (personal-local
+# boots :prod), so it lives OUTSIDE the prod guard — same idiom as the media
+# webhook/CDN blocks below.
+case System.get_env("BARKPARK_MEDIA_DIR") do
+  dir when is_binary(dir) and dir != "" ->
+    config :barkpark, :media_upload_dir, Path.expand(dir)
+
+  _ ->
+    :ok
+end
+
+# Workspace-bundle IMPORT switch (pds W1, G3). Fail-closed: OFF unless
+# BARKPARK_ALLOW_BUNDLE_IMPORT is truthy. `bin/barkpark up` writes =1 into the
+# personal-local .env (the free local twin is the intended pull TARGET); a prod
+# box that never sets the env keeps import denied. Applies in all envs. The
+# import path (pds-w1-merge-import) reads this key with a false default; this is
+# the runtime override that flips it on.
+if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
+  config :barkpark, :allow_bundle_import, true
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->

@@ -170,6 +170,16 @@ config :barkpark, :media_uploads,
 
 config :barkpark, :media_processing_callback_token, "dev-media-processing-callback-token"
 
+# Workspace-bundle IMPORT switch (Personal-Development-Server W1, G3). FAIL-CLOSED
+# by default: a bundle import writes another instance's workspace data into THIS
+# one, so it stays OFF everywhere unless an operator opts in via
+# BARKPARK_ALLOW_BUNDLE_IMPORT (runtime.exs). `bin/barkpark up` writes =1 into the
+# personal-local scratch .env — the free local twin is the intended pull TARGET —
+# while prod boxes (which never set the env) keep import denied. Enforcement of
+# this key lives in the import path (pds-w1-merge-import); this is the default it
+# reads.
+config :barkpark, :allow_bundle_import, false
+
 # Fallback CORS allowlist for API routes without a dataset path segment
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []
