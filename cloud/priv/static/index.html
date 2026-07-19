@@ -208,7 +208,11 @@
         <!-- footer cluster: role-gated Operator (fail-closed on platform_operator),
              Docs, and the account block. -->
         <div class="nav-foot">
-          <a href="#operator" class="nav-link nav-operator" id="nav-operator" hidden>
+          <!-- data-view is LOAD-BEARING (GR49): applyRoute lights exactly the
+               .nav-link[data-view] matching the active view and stamps
+               aria-current="page" on it. Without it #operator painted a page
+               with NO nav entry highlighted and no SR current-page cue. -->
+          <a href="#operator" class="nav-link nav-operator" id="nav-operator" data-view="operator" hidden>
             <svg class="nav-ico" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.5 2.5"/></svg>
             <span>Operator</span>
           </a>

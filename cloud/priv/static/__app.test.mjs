@@ -157,6 +157,18 @@ test("gr-p5: #operator is a registered route (the sidebar link finally lands on 
   }
 });
 
+test("gr-p5: the Operator sidebar entry is data-view tagged, so #operator lights it", () => {
+  // applyRoute's highlight loop is document.querySelectorAll(".nav-link[data-view]")
+  // and activeNav for this route is the bare view name. A link without the
+  // attribute is invisible to that loop: the page painted with NO nav entry
+  // active and no aria-current="page" anywhere.
+  const indexHtml = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const link = indexHtml.match(/<a[^>]*id="nav-operator"[^>]*>/);
+  assert.ok(link, "the Operator sidebar entry exists");
+  assert.match(link[0], /data-view="operator"/);
+  assert.match(link[0], /href="#operator"/);
+});
+
 // ── card 1: the brake (GR49 — one derivation, never restated copy) ───────────
 
 test("gr-p5: operatorBrakeCardHtml is a SECOND presentation of the SHARED banner model", () => {
