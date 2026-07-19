@@ -1462,6 +1462,31 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ─────────
+  // A 10-beat health-down burst (one per minute) that MUST fold to one
+  // "<thing> × N · cadence · shared verdict" row, with a status change and a
+  // TLS event around it proving singletons pass through untouched.
+  "timeline-coalesced": {
+    label: "Timeline coalescing — a 10-beat health-down burst folds to ONE worst-verdict row (D-04, styleguide §07)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/timeline",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: {
+        [IDS.liveInstance]: [
+          // Newest-first, exactly as GET /v1/barkparks/:id/events serves them.
+          ...Array.from({ length: 10 }, (_, i) =>
+            ev(40 - i, "health", { health: "down", disk_used_pct: 91, pg_size_mb: 212 }, tMinus(60 + i * 60))),
+          ev(20, "status", { transition: "offline", reason: "agent_silent" }, tMinus(700)),
+          ev(19, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
+        ],
+      },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);

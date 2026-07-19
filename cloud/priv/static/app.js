@@ -5248,10 +5248,14 @@
   }
 
   // Pure: merge the two feeds into one newest-first timeline. Each entry:
-  // { source: "event"|"verify"|"audit", key, at, type, payload, actor }.
-  // Ordering is TOTAL and stable: timestamp desc; at equal timestamps the
-  // instance event outranks its audit attribution (the event is the primary
-  // record); final tiebreak on key so two repaints can never reorder.
+  // { source: "event"|"verify"|"audit", key, at, type, payload, actor, target }.
+  // `target` ("<target_type>:<target_id>", audit rows only) exists for the
+  // PARAMETERIZED coalesce key (tlvCoalesceKeyByTarget) — an instance feed is
+  // single-target so its events carry null; a team-wide feed (I-01) must not
+  // fold unrelated targets together. Ordering is TOTAL and stable: timestamp
+  // desc; at equal timestamps the instance event outranks its audit
+  // attribution (the event is the primary record); final tiebreak on key so
+  // two repaints can never reorder.
   function mergeTimeline(events, audits) {
     events = Array.isArray(events) ? events : [];
     audits = Array.isArray(audits) ? audits : [];
@@ -5265,6 +5269,7 @@
         type: String(e.type || ""),
         payload: e.payload || null,
         actor: null,
+        target: null,
       });
     });
     audits.forEach(function (a) {
@@ -5277,6 +5282,9 @@
         type: String(a.action || ""),
         payload: a.metadata || null,
         actor: (a.actor && a.actor.email) || null,
+        target: a.target_type && a.target_id != null
+          ? String(a.target_type) + ":" + String(a.target_id)
+          : null,
       });
     });
     entries.sort(function (x, y) {
@@ -5287,6 +5295,213 @@
       return x.key < y.key ? -1 : x.key > y.key ? 1 : 0;
     });
     return entries;
+  }
+
+  // ── D-04: THE event-coalescing grammar (GR26, styleguide §07) ─────────────
+  // "<thing> × N · cadence · shared verdict" — consecutive same-key runs fold
+  // into ONE summary row with an expand affordance. Repetition is summarised,
+  // never hidden, and the summary states the WORST verdict in the group. The
+  // fold sits between mergeTimeline (normalization) and the render, PURE all
+  // the way down; the group key is PARAMETERIZED so this same component serves
+  // the instance timeline (fold by type) and the team-wide Activity feed
+  // (I-01: fold by type+target so unrelated targets never merge).
+
+  // Pure: the instance timeline's default group key — source+type, plus the
+  // actor for audit rows (folding two people's actions into one attributed
+  // row would credit the wrong person). null = never coalesce.
+  function tlvCoalesceKey(entry) {
+    if (!entry) return null;
+    var k = String(entry.source || "") + "|" + String(entry.type || "");
+    if (entry.source === "audit") k += "|" + String(entry.actor || "");
+    return k;
+  }
+
+  // Pure: the I-01 variant — same key, further split by the entry's target
+  // ("site:12" vs "site:14"), so a team feed only folds repeats of the same
+  // action ON the same thing. Entries without a target degrade to the type key.
+  function tlvCoalesceKeyByTarget(entry) {
+    if (!entry) return null;
+    return tlvCoalesceKey(entry) + "|" + String(entry.target || "");
+  }
+
+  // Pure: fold a newest-first entry list into a render list. Singletons pass
+  // through UNCHANGED (===, so the caller's row cache/keys survive); a run of
+  // 2+ consecutive same-key entries folds to one group item:
+  //   { group: true, key, groupKey, entries, count, source, type, at }.
+  // The group's identity anchors on its OLDEST member — a live tick that
+  // prepends a new beat GROWS the group without re-keying it, so an operator's
+  // open group stays open across SSE repaints.
+  function coalesceEntries(entries, groupKeyFn) {
+    entries = Array.isArray(entries) ? entries : [];
+    var keyOf = typeof groupKeyFn === "function" ? groupKeyFn : tlvCoalesceKey;
+    var out = [];
+    var i = 0;
+    while (i < entries.length) {
+      var e = entries[i];
+      if (!e) { i++; continue; }
+      var k = keyOf(e);
+      var j = i + 1;
+      var run = [e];
+      while (k != null && j < entries.length && entries[j] && keyOf(entries[j]) === k) {
+        run.push(entries[j]);
+        j++;
+      }
+      if (run.length < 2) {
+        out.push(e);
+      } else {
+        out.push({
+          group: true,
+          key: "g:" + String(k) + ":" + String(run[run.length - 1].key),
+          groupKey: k,
+          entries: run,
+          count: run.length,
+          source: e.source,
+          type: e.type,
+          at: e.at, // newest member fronts the group
+        });
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  // Pure: one comparable verdict per entry — { text, sev } (sev 0 fine / 1
+  // neutral / 2 bad) or null where the type carries none (tls, content,
+  // audit, unknown: their rows summarise by count alone, never an invented
+  // verdict). The texts are written to compose after "all …" / "N of M …".
+  function tlvVerdictOf(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "verify") {
+      return p.ok ? { text: "passed", sev: 0 } : { text: "failed", sev: 2 };
+    }
+    if (entry.type === "health") {
+      if (p.health == null) return null;
+      var h = String(p.health);
+      return { text: "reporting health: " + h, sev: h === "up" ? 0 : 2 };
+    }
+    if (entry.type === "status") {
+      return p.transition ? { text: "→ " + String(p.transition), sev: 1 } : null;
+    }
+    if (entry.type === "backup") {
+      if (p.status == null) return null;
+      var s = String(p.status);
+      return s === "ok" ? { text: "completed", sev: 0 } : { text: s, sev: 2 };
+    }
+    return null;
+  }
+
+  // Pure: the shared-verdict segment. Every member agreeing → "all <text>";
+  // anything mixed → "<k> of <N> <worst text>" — the WORST is stated outright
+  // (highest sev; ties break to the newest member), never averaged away.
+  // Verdict-less groups return "" and the segment is omitted.
+  function tlvGroupVerdictText(entries) {
+    entries = Array.isArray(entries) ? entries : [];
+    var verdicts = [];
+    entries.forEach(function (e) {
+      var v = tlvVerdictOf(e);
+      if (v) verdicts.push(v);
+    });
+    if (!verdicts.length) return "";
+    var worst = verdicts[0]; // newest-first, so a sev tie keeps the newest
+    for (var i = 1; i < verdicts.length; i++) {
+      if (verdicts[i].sev > worst.sev) worst = verdicts[i];
+    }
+    var unanimous = verdicts.length === entries.length &&
+      verdicts.every(function (v) { return v.text === worst.text; });
+    if (unanimous) return "all " + worst.text;
+    var k = 0;
+    verdicts.forEach(function (v) { if (v.text === worst.text) k++; });
+    return k + " of " + entries.length + " " + worst.text;
+  }
+
+  // Pure: "~1m" durations — ONE rounded unit, never false precision.
+  function tlvApproxDur(ms) {
+    if (!(ms > 0)) return "0s";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.round(s / 60);
+    if (m < 60) return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 48) return h + "h";
+    return Math.round(h / 24) + "d";
+  }
+
+  // Pure: the cadence segment — "every ~1m for 9m" (mean interval + true
+  // span, both from the members' own stamps). A same-second burst (or junk
+  // stamps) yields "" rather than a fabricated rhythm.
+  function tlvGroupCadenceText(entries) {
+    entries = Array.isArray(entries) ? entries : [];
+    if (entries.length < 2) return "";
+    var span = tlvTs(entries[0].at) - tlvTs(entries[entries.length - 1].at);
+    if (!(span > 0)) return "";
+    return "every ~" + tlvApproxDur(span / (entries.length - 1)) + " for " + tlvApproxDur(span);
+  }
+
+  // Pure: the group's base title (the "× N" rides in the markup). Audit runs
+  // keep their actor only while the WHOLE run shares one (the default key
+  // guarantees it; a custom key that folds mixed actors drops the attribution
+  // rather than crediting the wrong person). Event groups read the base kind
+  // — never one member's enriched title stretched over the rest.
+  function tlvGroupTitle(group) {
+    group = group || {};
+    var entries = group.entries || [];
+    var first = entries[0] || {};
+    if (group.source === "audit") {
+      var actor = first.actor || null;
+      var mixed = false;
+      entries.forEach(function (e) { if (((e && e.actor) || null) !== actor) mixed = true; });
+      return (mixed ? "" : (actor || "system") + " ") + humanAction(group.type);
+    }
+    return TLV_EVENT_TITLES[group.type] || group.type || "Event";
+  }
+
+  // Pure: the badge tone for one entry — verify colours by OUTCOME (a green
+  // VERIFY chip over a failed run would be the badge lying), everything else
+  // by source. Shared by the single row and the group fold below.
+  function tlvBadgeMod(entry) {
+    return entry.source === "verify" && !(entry.payload && entry.payload.ok)
+      ? "verify-fail"
+      : entry.source;
+  }
+
+  // Pure: a group's badge inherits the WORST member tone — one failed run in
+  // a folded verify burst turns the whole summary badge red.
+  function tlvGroupBadgeMod(group) {
+    var entries = (group && group.entries) || [];
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i] && tlvBadgeMod(entries[i]) === "verify-fail") return "verify-fail";
+    }
+    return group.source;
+  }
+
+  // Pure: one coalesced row (tlv-coalesce family, styleguide §07). Closed:
+  // badge + "<title> × N" + "cadence · shared verdict" + "Show all N". Open:
+  // the SAME summary line (expanding adds, never swaps) with "Collapse" and
+  // every member row — each keeping its own Details toggle — on an inset rail.
+  function tlvGroupRowHtml(group, opts) {
+    opts = opts || {};
+    var open = !!opts.open;
+    var meta = [tlvGroupCadenceText(group.entries), tlvGroupVerdictText(group.entries)]
+      .filter(Boolean)
+      .join(" · ");
+    var expandedKeys = opts.expandedKeys || [];
+    return '<div class="tlv-row tlv-coalesce" data-tlv-group="' + esc(group.key) + '">' +
+      '<div class="tlv-head">' +
+        '<span class="tlv-badge tlv-badge--' + esc(tlvGroupBadgeMod(group)) + '">' + esc(group.source) + "</span>" +
+        '<span class="tlv-title">' + esc(tlvGroupTitle(group)) +
+          ' <span class="tlv-coalesce-count">&times; ' + group.count + "</span></span>" +
+        (meta ? '<span class="tlv-coalesce-meta">' + esc(meta) + "</span>" : "") +
+        '<span class="tlv-when" title="' + esc(fmtWhen(group.at)) + '">' + esc(relTime(group.at)) + "</span>" +
+        '<button class="tlv-coalesce-toggle" type="button" data-tlv-group-toggle aria-expanded="' +
+          (open ? "true" : "false") + '">' + (open ? "Collapse" : "Show all " + group.count) + "</button>" +
+      "</div>" +
+      (open
+        ? '<div class="tlv-coalesce-members">' + group.entries.map(function (e) {
+            return tlvRowHtml(e, expandedKeys.indexOf(e.key) !== -1);
+          }).join("") + "</div>"
+        : "") +
+      "</div>";
   }
 
   // Pure: one human title per entry. Audit rows read like the Activity tab
@@ -5344,13 +5559,11 @@
 
   // Pure: one feed row. `expanded` re-applies the operator's open details
   // across live repaints (an SSE tick must never fold what they were reading).
-  // The verify badge colours by OUTCOME (ok → green, anything else → red):
-  // a green VERIFY chip over "Verification failed" would be the badge lying.
+  // The badge tone comes from tlvBadgeMod (verify colours by OUTCOME: a green
+  // VERIFY chip over "Verification failed" would be the badge lying).
   function tlvRowHtml(entry, expanded) {
     var hasDetail = tlvHasDetail(entry);
-    var badgeMod = entry.source === "verify" && !(entry.payload && entry.payload.ok)
-      ? "verify-fail"
-      : entry.source;
+    var badgeMod = tlvBadgeMod(entry);
     return '<div class="tlv-row" data-tlv-key="' + esc(entry.key) + '">' +
       '<div class="tlv-head">' +
         '<span class="tlv-badge tlv-badge--' + esc(badgeMod) + '">' + esc(entry.source) + "</span>" +
@@ -5367,9 +5580,13 @@
       "</div>";
   }
 
-  // Pure: the whole feed. opts.quietLine is the ONE honest degradation line
-  // (audit 403 → "visible to team admins"); opts.expandedKeys re-opens rows.
-  // Empty teaches rather than apologises.
+  // Pure: the whole feed, coalesced through THE grammar (D-04): consecutive
+  // same-key runs render as one tlv-coalesce summary row; singletons render
+  // as before. opts.quietLine is the ONE honest degradation line (audit 403 →
+  // "visible to team admins"); opts.expandedKeys re-opens member details;
+  // opts.openGroups re-opens expanded groups (an SSE tick must never fold
+  // what the operator was reading); opts.groupKey swaps the fold key (I-01
+  // passes tlvCoalesceKeyByTarget). Empty teaches rather than apologises.
   function timelineFeedHtml(entries, opts) {
     opts = opts || {};
     entries = Array.isArray(entries) ? entries : [];
@@ -5382,8 +5599,15 @@
         "verification runs, and team actions, in order.</p></div>";
     }
     var open = opts.expandedKeys || [];
-    return quiet + entries.map(function (e) {
-      return tlvRowHtml(e, open.indexOf(e.key) !== -1);
+    var openGroups = opts.openGroups || [];
+    return quiet + coalesceEntries(entries, opts.groupKey).map(function (item) {
+      if (item && item.group) {
+        return tlvGroupRowHtml(item, {
+          open: openGroups.indexOf(item.key) !== -1,
+          expandedKeys: open,
+        });
+      }
+      return tlvRowHtml(item, open.indexOf(item.key) !== -1);
     }).join("");
   }
 
@@ -5395,6 +5619,11 @@
   // SSE-driven remount (loadInstance repaints the whole workspace) re-opens
   // exactly what the operator had open. In-memory: a refresh forgets.
   var tlvExpanded = {};
+  // Open-group memory, keyed "<bp.id>|<group.key>" — the same law for the
+  // coalesced rows: a live repaint re-opens exactly the groups the operator
+  // expanded (the group key anchors on its oldest member, so a fresh beat
+  // joining the run never re-keys it shut).
+  var tlvGroupOpen = {};
   // Last painted feed per instance — an SSE remount paints this instantly
   // instead of flashing "Loading…" on every live tick.
   var tlvCache = null;
@@ -5456,16 +5685,40 @@
     entries.forEach(function (e) {
       if (tlvExpanded[String(bp.id) + "|" + e.key]) open.push(e.key);
     });
-    box.innerHTML = timelineFeedHtml(entries, { quietLine: quietLine, expandedKeys: open });
+    var openGroups = [];
+    var prefix = String(bp.id) + "|";
+    Object.keys(tlvGroupOpen).forEach(function (k) {
+      if (k.indexOf(prefix) === 0) openGroups.push(k.slice(prefix.length));
+    });
+    box.innerHTML = timelineFeedHtml(entries, {
+      quietLine: quietLine,
+      expandedKeys: open,
+      openGroups: openGroups,
+    });
   }
 
   // ONE delegated listener per mount (the panel node lives for the tab's whole
-  // life; paints only swap its inner feed) — details toggle + error Retry.
+  // life; paints only swap its inner feed) — group Show-all/Collapse + details
+  // toggle + error Retry.
   function wireTimelineFeed(root, bp) {
     if (!root || !root.addEventListener) return; // fake-DOM smoke
     root.addEventListener("click", function (e) {
       var t = e.target;
       if (!t || !t.closest) return;
+      var gbtn = t.closest("[data-tlv-group-toggle]");
+      if (gbtn) {
+        var grow = gbtn.closest("[data-tlv-group]");
+        if (!grow) return;
+        var gkey = String(bp.id) + "|" + grow.getAttribute("data-tlv-group");
+        if (tlvGroupOpen[gkey]) delete tlvGroupOpen[gkey];
+        else tlvGroupOpen[gkey] = true;
+        // Repaint from the cached feed — the member rows only exist in the
+        // markup while their group is open (100 folded beats stay cheap).
+        if (tlvCache && String(tlvCache.id) === String(bp.id)) {
+          paintTimeline(root, bp, tlvCache.entries, tlvCache.quietLine);
+        }
+        return;
+      }
       var btn = t.closest("[data-tlv-toggle]");
       if (btn) {
         var row = btn.closest("[data-tlv-key]");
@@ -13057,6 +13310,22 @@
       // newRenderPriceLine) is browser+smoke-driven.
       theaterPriceModel: theaterPriceModel,
       theaterPriceLineHtml: theaterPriceLineHtml,
+      // gr-p3 D-04 (GR26): THE event-coalescing grammar — the pure fold, its
+      // two parameterized group keys (instance type-key vs I-01 type+target),
+      // the worst-verdict/cadence copy, and the tlv-coalesce row render. The
+      // Show-all/Collapse wiring (wireTimelineFeed) is browser-verified; the
+      // toggle's two markup states are node-pinned via tlvGroupRowHtml.
+      coalesceEntries: coalesceEntries,
+      tlvCoalesceKey: tlvCoalesceKey,
+      tlvCoalesceKeyByTarget: tlvCoalesceKeyByTarget,
+      tlvVerdictOf: tlvVerdictOf,
+      tlvGroupVerdictText: tlvGroupVerdictText,
+      tlvGroupCadenceText: tlvGroupCadenceText,
+      tlvApproxDur: tlvApproxDur,
+      tlvGroupTitle: tlvGroupTitle,
+      tlvBadgeMod: tlvBadgeMod,
+      tlvGroupBadgeMod: tlvGroupBadgeMod,
+      tlvGroupRowHtml: tlvGroupRowHtml,
     });
   }
 })();

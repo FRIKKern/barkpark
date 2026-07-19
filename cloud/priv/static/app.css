@@ -3657,3 +3657,53 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-color: hsl(var(--warn-hsl) / 0.4);
   background: hsl(var(--warn-hsl) / 0.1);
 }
+
+/* ============================================================================
+   D-04 — Timeline event-coalescing grammar (gr-p3, GR26, styleguide §07).
+   "<thing> × N · cadence · shared verdict" with an expand affordance. The
+   tlv-coalesce family EXTENDS the tlv-* feed row — new classes, never sg-*
+   imports (the .notice/.sg-banner precedent). Appended per the OC9 tail law.
+   ========================================================================== */
+.tlv-coalesce { position: relative; }
+/* The "× N" count rides the title in mono — repetition reads as a figure. */
+.tlv-coalesce-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-text);
+}
+/* "every ~1m for 9m · all reporting health: down" — the §07 meta segment. */
+.tlv-coalesce-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dim);
+}
+/* "Show all N" / "Collapse" — the §07 link affordance, button-for-a11y. */
+.tlv-coalesce-toggle {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  color: var(--info);
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.tlv-coalesce-toggle:hover { text-decoration: underline; }
+/* Expanded members sit on an inset rail; the summary row stays the anchor. */
+.tlv-coalesce-members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid hsl(var(--info-hsl) / 0.25);
+}
+.tlv-coalesce-members .tlv-row { background: var(--muted-surface); }
+@media (max-width: 720px) {
+  .tlv-coalesce-meta { white-space: normal; }
+}
