@@ -1,0 +1,247 @@
+──────────────────────────────────────────────────────────────────────────────
+PDS CROWN PROOF — run 20260719T195816Z-18976
+──────────────────────────────────────────────────────────────────────────────
+HONESTY BANNER — what this transcript does and does not claim.
+
+  SOURCE          https://guerrilla.barkpark.cloud (workspace=default dataset=production)
+  SERVED          resolved live in step 0a and printed there — version AND
+                  git sha. Auto-deploy has been observed NOT firing, so the
+                  box may be running older code than main; if it is, the
+                  transcript says so in step 0a/0b rather than blaming a slice.
+  PLANE           the proof runs on THIS host against a disposable
+                  personal-local target (/tmp/pds-proof.12de408f), booted by
+                  scripts/pds-scratch-target.sh. Nothing is written to the
+                  source: every source call here is a GET, a read-only psql,
+                  or the import POST of step 7 whose whole point is being REFUSED.
+  WORKTREE        d73f18ce9dc3e4fd04ff4c66ae320c8df1aaa2aa (worktree-wf_d41617c4-0fa-31)
+
+  SCOPE OF EVERY CLAIM BELOW:
+   · Profile scope — the pull and its scans are the DEV profile. A clean dev
+     scan proves the carrying TABLES ARE ABSENT (:deny), never that a field
+     was scrubbed: @dev_scrub is genuinely empty (PDS-D25).
+   · Convergence scope — content-and-presence convergence of the imported
+     rows, not byte-identity of two independently produced tar files.
+   · Census scope — raw-perspective row counts per type. Bare-slug E3 tables
+     are EXCLUDED and the shortfall is pre-declared in step 2 (PDS-D45).
+   · Deploy scope — step 0b asserts DEPLOY PROVENANCE, not migration parity.
+     No schema_migrations HTTP surface exists; a stale build prints the same
+     /status.json green (PDS-D47).
+
+  THE SCAN'S OWN LIMITS, VERBATIM (they bound every 'clean' below):
+   1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given. It
+      does NOT detect derived material — base64/hex re-encodings, prefix
+      slices, HMACs, hashes, or values inside compressed members.
+   2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+      of the values you ENUMERATED — never that it is free of secrets nobody
+      enumerated.
+──────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0a — SOURCE FRESHNESS — pin the source before believing any differential
+──────────────────────────────────────────────────────────────────────────────
+      status.json     status=operational version=0.2.25.1308 uptime_seconds=3491
+      deployed sha    ec70fdc3d37e5c3527f195595c4a043fad9f5071  (source of truth: the box's own git HEAD over SSH)
+      last deploy run 93fd1e2d8 success 2026-07-19T19:01:09Z
+      dev export      HTTP 200 · 52155904 bytes · 7s · filename=default-production-dev.tar
+      manifest        format=bp-export-v1 members=18
+                      profile=dev dataset=production source_workspace=default source_dataset=production source_server_key=True
+  PASS   0a   source pinned: version=0.2.25.1308 sha=ec70fdc3d37e5c3527f195595c4a043fad9f5071; dev dialect LIVE (HTTP 200, 52155904 bytes, 7s, 18 members, profile=dev dataset=production, source_* present)
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0b — DEPLOY-PROVENANCE — the assertion schema_migrations parity cannot make
+──────────────────────────────────────────────────────────────────────────────
+  WHY NOT MIGRATION PARITY: there is NO schema_migrations HTTP surface
+  anywhere in this API, and the source's Postgres is not reachable
+  externally. /status.json's migrations component is a boolean computed by
+  the RUNNING BINARY over its OWN migration files, so a stale build prints
+  an identical green. That is a green a broken build could also produce, and
+  PDS-D20 forbids it. The assertion made here instead is DEPLOY PROVENANCE:
+  the deployed sha EQUALS OR IS AN ANCESTOR OF the worktree the target
+  migrated from.
+
+      deployed  ec70fdc3d37e5c3527f195595c4a043fad9f5071 (version 0.2.25.1308)
+      worktree  d73f18ce9dc3e4fd04ff4c66ae320c8df1aaa2aa
+      worktree is 2 commit(s) ahead: 0 touching code (api/internal/cloud/js/web), 2 docs-only
+      · d73f18ce9 docs(gui-remake): GR53-GR61 phase-5 seal-wave amendment — post-crown baseline, in-place modal recomposition, the QR ships, the accent axis was lying, three-step ops gate, corrected seal ruling (#4448)
+      · c303503c0 docs(pds-charter): PDS-D21-D38 wave-2 amendment — Honest Clone rulings, evidence-forced reversals, wave-2 roadmap (#4412)
+  PASS   0b   deploy provenance holds: the deployed sha ec70fdc3d37e5c3527f195595c4a043fad9f5071 IS AN ANCESTOR OF the worktree the target migrated from (d73f18ce9dc3e4fd04ff4c66ae320c8df1aaa2aa), 2 commit(s) behind — 0 code, 2 docs-only
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0c — SENTINELS — Catalog.assert_partition!/1 and assert_dev_partition!/1
+──────────────────────────────────────────────────────────────────────────────
+  A NEW tenant table RAISES these sentinels by design. If that happens the
+  transcript reports it as a FAIL with the raise message intact — it is
+  never bypassed, never downgraded, and never 'handled' by narrowing the
+  assertion. An unclassified table is an unproven export.
+
+  ABORT  0c   waits on env:scratch-target-not-booted
+         no Repo to run the sentinels against (/tmp/pds-proof.12de408f/scratch.env absent). FIX: BARKPARK_HOME=/tmp/pds-proof.12de408f PDS_SCRATCH_POINTER=/tmp/pds-scratch.12de408f.last /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_d41617c4-0fa-31/scripts/pds-scratch-target.sh up --verify   (budget one ~3.5 min cold compile per NEW worktree so a slow first boot is not mistaken for a hang).
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 1 — THE PULL — export + import + scrub through one front door (mode PINNED :merge)
+──────────────────────────────────────────────────────────────────────────────
+  ABORT  1    waits on pds-w1-pull-cli
+         `bp dev pull` does not exist in this bp binary. This step probes for the verb at RUN time, so it goes green by itself the moment that slice merges — no edit to this script required. Everything downstream that needs a populated target (2 target half, 5, 6) aborts with it.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 2 — RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true
+──────────────────────────────────────────────────────────────────────────────
+  CARRIER CHOICE: /v1/data/counts/:dataset is NOT used. It hard-codes
+  perspective:"published" and ignores ?perspective (raw and default return
+  byte-identical bodies), so every draft row is invisible to it. The per-type
+  query route genuinely honours the parameter, and the raw-vs-published
+  spread printed below is the proof that it does.
+
+      TYPE                                RAW  PUBLISHED DRAFT-ONLY
+      book                                  1          0          1
+      bossType                              1          0          1
+      command                              22         22          0
+      mediaAsset                           34          0         34
+      metric                                6          6          0
+      paper                               401        394          7
+      sheet                                 1          0          1
+      tag                                 111        107          4
+      task                               2245       2079        166
+      ticket                                1          0          1
+      TOTAL                              2823       2608        215
+      schemas=36 (GET /v1/schemas/production)  media=34 (GET /v1/media/production)  types with rows: counted above out of 36 declared
+
+  *** PRE-DECLARED SHORTFALL — bare-slug E3, EXPECTED, NOT corruption ***
+  :full is NOT lossless. The dataset slug 'production' is owned by MORE THAN
+  ONE workspace, so dataset_slugs_for/1 drops it under the D21 exclusivity
+  rule and bare-slug E3 tables are exported with dataset = ANY('{}') — i.e.
+  nothing. tables/shares.copy is 0 BYTES in the full bundle for exactly this
+  reason. Discovering it mid-run looks like data loss; it is a known,
+  bounded ownership artifact.
+      derived live: shares rows at dataset='production' = 1 · workspaces owning the slug 'production' = 2 (>1 is what triggers the exclusivity drop)
+      EXCLUDED from every parity assertion in this step: preview_token_jti shares
+
+  ABORT  2    waits on pds-w1-pull-cli
+         the SOURCE census above is live and complete (raw 2823 / published 2608 across 36 declared types, 36 schemas, 34 media). The TARGET half — the per-type diff that makes it a proof rather than a reading — needs a populated target, which needs the pull. Bare-slug E3 tables (preview_token_jti shares) stay excluded when it runs.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 3 — TICKET-DENY BYTE-SCAN — bytes at ROW grain, never a count diff
+──────────────────────────────────────────────────────────────────────────────
+  WHAT A RAW BYTE SCAN CANNOT DO ALONE, learned by running it. The ticket's
+  doc_id and row uuid are DISCUSSED IN PROSE inside other documents (this
+  wave's own papers and tasks quote them). A naive 'these bytes appear
+  nowhere' assertion therefore FIRES on a bundle where the deny held
+  perfectly — a false alarm that reads exactly like a leak. So the assertion
+  is made at ROW grain: no ticket-carrying table member, and zero ROWS in
+  documents.copy whose own doc_id/type/id fields identify the ticket. The
+  byte hits are still printed — and each one is CLASSIFIED by the document
+  that contains it, so a prose reference is never silently equated with the row.
+
+      ticket doc_id   drafts.ticket-34751d4f62f4a8f0 (published id: ticket-34751d4f62f4a8f0) — RE-DERIVED this run
+      ticket row uuid 6b892995-de73-43c1-908d-65862c531f14 — RE-DERIVED this run (the surveys disagree on it; the run is the arbiter)
+      members         no ticket-carrying table member in 18 members
+      columns         documents: id=$1 doc_id=$2 type=$3 (from the manifest, this run)
+      ticket ROWS in tables/documents.copy: 0 (asserted 0)
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-19T19:58:33Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /tmp/pds-proof-art.12de408f/dev-default-production.tar
+        HIT  member=tables/documents.copy  ammo=value#1  value=draf…(30 bytes, sha256:7cfe8dd5)  lines=2  first_line=17
+        HIT  member=tables/documents.copy  ammo=value#2  value=tick…(23 bytes, sha256:a0aa60a2)  lines=2  first_line=17
+        HIT  member=tables/documents.copy  ammo=value#3  value=6b89…(36 bytes, sha256:80109e35)  lines=1  first_line=2771
+        members scanned: 18   ammo values: 3
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: 3 HIT(S) — enumerated secret values are present in the target.
+      dev profile: 3 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+
+      CLASSIFYING every byte hit — which document CONTAINS it:
+        containing row: doc_id=pds-w1-crown-proof type=task  (a PROSE reference in this row's own content, not the ticket row)
+        containing row: doc_id=pds-wave-2-2026-07-19 type=paper  (a PROSE reference in this row's own content, not the ticket row)
+      None of the above IS the ticket row — the row-grain count is 0. This is the
+      false-alarm shape a naive byte scan produces for an identifier that other
+      documents talk about, and it is reported rather than suppressed.
+  ABORT  3    waits on pds-w1-crown-proof
+         the ROW-GRAIN zero above is real — and it is HALF a proof: a scan that has never fired on this ammo is not an instrument. The positive control — the same identifiers found in a FULL-fidelity bundle, minutes apart, same binary — needs the one budgeted full export, which is crown-proof's to spend (PDS-D31/D44: a full export peaks beam.smp at ~1.83 GB on a 3819 MB box, and one that DIES still pays ~2.65 GiB).
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 4 — VALUE-BASED SECRET SCAN — consuming scripts/pds-secret-scan.sh
+──────────────────────────────────────────────────────────────────────────────
+      ammo            8 webhook secret(s) pulled read-only from the source DB this run; lengths 43 bytes. Values are never printed.
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-19T19:58:36Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /tmp/pds-proof-art.12de408f/dev-default-production.tar
+        members scanned: 18   ammo values: 8
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: CLEAN — 0 hits for 8 enumerated value(s).
+      dev profile: 0 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      UNSCANNED notices in the output above: 0 (never silenced — an unscannable table is not a clean table)
+      dev bundle: CLEAN
+      instrument control: NOT RUN (set PDS_CONTROL_PG=<maintenance conninfo> to run `/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_d41617c4-0fa-31/scripts/pds-secret-scan.sh control` — it builds its own throwaway fixture and spends no guerrilla export)
+  ABORT  4    waits on pds-w1-crown-proof + pds-w1-pull-cli
+         two halves are still owed and neither is fakeable here. (a) THE CONTROL THAT MATTERS: the enumerated webhook secrets FOUND in a full-fidelity bundle of this very source, minutes apart, same binary, same ammo — that is crown-proof's one budgeted full export. (b) THE TARGET DB: scanning the imported rows (`--db $PDS_SCRATCH_DB`) needs a populated target, which needs pds-w1-pull-cli. Until (a) lands, the clean result above proves the instrument was pointed at the bundle — not that the instrument can see.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 5 — SERVED ASSET — an imported asset serves HTTP 200 with a matching content-length
+──────────────────────────────────────────────────────────────────────────────
+  ABORT  5    waits on pds-w1-pull-cli
+         there is no imported asset to serve. When the pull lands, this step resolves an asset from the TARGET's own media index (never a path guessed from the source), GETs it, and compares the served content-length against the stored byte size — a 200 with a truncated body is the failure this must catch.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 6 — CONVERGENCE — two pulls with a REBOOT between them (PDS-D23)
+──────────────────────────────────────────────────────────────────────────────
+  The Bootstrap clobber fires only on BOOT. A convergence proof that does not
+  restart the target between the two pulls measures nothing: it re-runs an
+  import against a process that never had the chance to overwrite anything.
+  A warm re-boot with the full verify suite measured ~14.6 s — the restart is
+  essentially free, and skipping it is exactly the vacuous green PDS-D20 forbids.
+
+  ABORT  6    waits on pds-w1-provenance-guard
+         convergence is the guard's MEASUREMENT, not an independent property: what the second pull must find unchanged is the provenance stamp (source server/workspace/dataset, pulled_at, scrub profile) and the schemas the boot-time upsert would otherwise clobber. Running it before the guard exists would measure the clobber and call it convergence.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 7 — THE NEGATIVE GUARD — import against the SOURCE must be REFUSED
+──────────────────────────────────────────────────────────────────────────────
+  Re-derived at RUN time on purpose. This is a blue/green box: a deploy could
+  land between any survey and this run, and the single point of failure is
+  anyone appending BARKPARK_ALLOW_BUNDLE_IMPORT=1 to an env source. A refusal
+  proven yesterday is not a refusal proven now.
+
+      POST /api/workspaces/default/import?mode=merge -> HTTP 403  code=bundle_import_disabled
+      body: {"error":{"code":"bundle_import_disabled","message":"mode=merge requires the server to opt in via the :allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"}}
+  PASS   7    the source REFUSES bundle import: HTTP 403 bundle_import_disabled, re-derived this run against https://guerrilla.barkpark.cloud (deployed sha ec70fdc3d37e5c3527f195595c4a043fad9f5071)
+
+──────────────────────────────────────────────────────────────────────────────
+SUMMARY — run 20260719T195816Z-18976
+──────────────────────────────────────────────────────────────────────────────
+  PASS   0a  
+  PASS   0b  
+  ABORT  0c   waits on env:scratch-target-not-booted
+  ABORT  1    waits on pds-w1-pull-cli
+  ABORT  2    waits on pds-w1-pull-cli
+  ABORT  3    waits on pds-w1-crown-proof
+  ABORT  4    waits on pds-w1-crown-proof + pds-w1-pull-cli
+  ABORT  5    waits on pds-w1-pull-cli
+  ABORT  6    waits on pds-w1-provenance-guard
+  PASS   7   
+──────────────────────────────────────────────────────────────────────────────
+  3 PASS · 7 ABORT (blocked, named) · 0 FAIL
+──────────────────────────────────────────────────────────────────────────────
+RESULT: BLOCKED — every step above either passed with run-time numbers or
+named the merge it waits on. This is the honest partial artifact the wave
+is supposed to carry; it is NOT a green.
