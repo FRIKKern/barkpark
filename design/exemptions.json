@@ -14,8 +14,8 @@
   },
   {
    "path": "cloud/priv/static/app.css",
-   "count": 57,
-   "note": "Cloud SPA, outside the single GENERATED block: 14 hex + 8 literal rgb/rgba + 35 literal hsl. Provider brand marks + mask geometry + overlay/shadow tints — exempt-by-design but previously untracked by every gate, now tripwired. The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
+   "count": 35,
+   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57→35 by the GUI-remake GR7 alias bridge (wave 2): the hand :root/[data-theme=dark] shell + status + primary + accent literals (~22 hsl) are now OWNED by the generated block (color.cloudChrome + per-identity accent) and consumed via var(), so they no longer hand-stamp. The residue is mask geometry + overlay/shadow tints + the --btn-*/--console-*/--ring-soft/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2–4). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
   },
   {
    "path": "internal/cli/setup/assets/deploy.sh",

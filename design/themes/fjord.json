@@ -1,16 +1,16 @@
 {
   "name": "fjord",
-  "_note": "Cool blue-slate — Nordic water. Accent rides ~H222 (deep slate-blue light, clear glacier blue dark); the neutral ladder and paper ground re-hue cold off the accent, so paper/ink carry a blue-slate chill, never warm grey. Cool accents keep a warm-white on-accent per the flip.",
+  "_note": "Cool blue-slate — Nordic water. Accent rides ~H192 (designer deep teal #0e6e85 light, clear glacier cyan #6cc4dd dark — console-remake accepted ramp); the neutral ladder and paper ground re-hue cold off the accent, so paper/ink carry a blue-slate chill, never warm grey. Cool accents keep a warm-white on-accent per the flip.",
   "modes": {
     "light": {
       "bg": "210 36% 99%",
       "ink": "220 30% 11%",
-      "accent": "222 58% 44%"
+      "accent": "191.6 80.95% 28.82%"
     },
     "dark": {
       "bg": "220 28% 8%",
       "ink": "212 26% 92%",
-      "accent": "213 74% 66%"
+      "accent": "193.27 62.43% 64.51%"
     }
   },
   "overrides": {

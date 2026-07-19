@@ -181,6 +181,16 @@ const MARKER_BEGIN =
   "/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */";
 const MARKER_END = "/* END GENERATED: tokens */";
 
+// The cloud SPA's BP_THEMES list (app.js) is GENERATED, not hand-kept (GR12):
+// the hand-list had already drifted (charple emitted in CSS but unreachable
+// because the JS enum omitted it). emit.mjs owns the theme-id enum now; a hand
+// edit reds design/check.mjs Part A the same way a stale CSS surface does. The
+// marker is a JS block comment (valid CSS-comment syntax too), so it rides the
+// same splice machinery — see the app.js artifact's markerBegin/markerEnd.
+const BP_THEMES_MARKER_BEGIN =
+  "/* BEGIN GENERATED: bp-theme ids (design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const BP_THEMES_MARKER_END = "/* END GENERATED: bp-theme ids */";
+
 // ── color helpers ───────────────────────────────────────────────────────────
 const hsl = (ch) => `hsl(${ch})`;
 const alpha = (a) => String(a); // 0.15 -> "0.15", 0.2 -> "0.2"
@@ -268,6 +278,97 @@ function providerVars(theme, indent) {
   const p = tokens.color.provider;
   return PROVIDERS.map((k) => indent + `--provider-${k}: ${p[k][theme]};`).join("\n");
 }
+
+// ── cloudChrome shell vocabulary (GUI-remake GR2) ────────────────────────────
+// The designer v4 shell's chrome roles, emitted --cc-<role> into the cloud SPA's
+// bare :root / [data-theme=dark] ONLY (identity-INVARIANT passthrough — the v4
+// applyTheme() only ever moves the 5 accent vars). check.mjs Part G D25 bans
+// --cc-* from every [data-bp-theme] identity block, so this NEVER runs there.
+export const CC_ROLES = [
+  "bg", "bg-side", "card", "card2", "modal", "toast", "toast-fg",
+  "fg", "fg2", "fg3", "fg4", "fg5", "spark-dim", "line-rgb", "backdrop",
+  "red", "red-strong", "on-red", "blue", "blue-hover", "amber",
+  "hetzner", "azure", "cloudflare", "github",
+];
+function cloudChromeVars(theme, indent) {
+  const cc = tokens.color.cloudChrome;
+  return CC_ROLES.map((r) => indent + `--cc-${r}: ${cc[r][theme]};`).join("\n");
+}
+
+// ── GR7 legacy alias bridge ──────────────────────────────────────────────────
+// One generated move retints the 123KB hand CSS: the ~consumed legacy shell vars
+// map role-for-role onto the designer ladder (GR6 rulings). Identity-INVARIANT,
+// so bare :root / [data-theme=dark] only. --dim→fg3 (NEVER fg4: fg4-as-text fails
+// 4.5:1 at 3.96/3.41 — fg4 is a meta-only token duty-capped at 3:1). --accent
+// STAYS the decorative amber (doctrine "warm highlight never brand"). --border is
+// a line-rgb/alpha judgment. --primary-hover is RETIRED (0 consumers, proven dead)
+// — deliberately absent here.
+function aliasBridge(theme, indent) {
+  const borderAlpha = theme === "light" ? "0.12" : "0.14";
+  const lines = [
+    `--bg: var(--cc-bg);`,
+    `--surface: var(--cc-card);`,
+    `--muted-surface: var(--cc-card2);`,
+    `--text: var(--cc-fg);`,
+    `--muted-text: var(--cc-fg2);`,
+    `--dim: var(--cc-fg3);`,
+    `--border: rgba(var(--cc-line-rgb), ${borderAlpha});`,
+    `--accent: var(--cc-amber);`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud status text-voices (GR6) ───────────────────────────────────────────
+// warn/danger/info -hsl channels drive the -soft PILL tints (status-hue machinery
+// preserved); the TEXT voices ride the designer ramp: --danger→red-strong,
+// --info→blue. --warn keeps the status amber (dot/glyph); its -strong TEXT voice
+// is a SOLID tuned tone (GR6: light #7d5500 4.10→5.44; dark the light amber that
+// reads on the dark pill) — NOT the translucent status tint that failed every
+// ramp state at 1.35–2.07:1. Identity-INVARIANT: bare :root / [data-theme=dark].
+const WARN_STRONG_SOLID = { light: "#7d5500", dark: "#e8b45a" };
+// --danger is red TEXT on a red -soft tint: light = dark-on-light → the DARKER
+// red-strong (#b23636, GR6 tuned; designer base #bb4040 fails at 4.31); dark =
+// light-on-dark → the LIGHTER plain red (#e57f7f) clears 4.5 where red-strong
+// #e56a6a lands at 4.48. Strong-per-direction, both the designer's danger red.
+const DANGER_TEXT = { light: "var(--cc-red-strong)", dark: "var(--cc-red)" };
+function cloudStatusVars(theme, indent) {
+  const st = tokens.color.status;
+  const a = alpha(softAlpha[theme]);
+  const lines = [
+    `--warn-hsl: ${st.warn[theme]}; --danger-hsl: ${st.danger[theme]}; --info-hsl: ${st.info[theme]};`,
+    `--warn: hsl(var(--warn-hsl)); --danger: ${DANGER_TEXT[theme]}; --info: var(--cc-blue);`,
+    `--warn-soft: hsl(var(--warn-hsl) / ${a}); --danger-soft: hsl(var(--danger-hsl) / ${a}); --info-soft: hsl(var(--info-hsl) / ${a});`,
+    `--warn-strong: ${WARN_STRONG_SOLID[theme]};`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud accent block (GR6: green IS the accent) ────────────────────────────
+// The per-identity 5-tuple: --primary + its -hsl/-soft machinery, the brand ring,
+// and the --ok family that now TRACKS accent.primary (no standalone green). NEW
+// --ok-strong = accent.hover is the text-on-tint voice (fixes the light evergreen
+// 4.06 / ember 4.23 pill-text fails). Emitted in the bare :root (evergreen
+// fallback) AND inside each [data-bp-theme] block — the ONLY per-identity vars.
+// Carries NO --cc-* and NO shell roles (D25 / GR2). primary/primary-fg/ring/
+// primary-hover are HSL channel strings in tokens; --ok-strong reads the hover
+// channel WITHOUT re-emitting the retired --primary-hover var.
+function cloudAccentVars(theme, indent, t = tokens) {
+  const a = alpha(softAlpha[theme]);
+  const p = t.color.primary[theme];
+  const hover = t.color["primary-hover"][theme];
+  const lines = [
+    `--primary: hsl(${p});`,
+    `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
+    `--ring: hsl(${t.color.ring[theme]});`,
+    `--primary-hsl: ${p};`,
+    `--primary-soft: hsl(var(--primary-hsl) / ${a});`,
+    `--ok-hsl: ${p};`,
+    `--ok: hsl(var(--ok-hsl));`,
+    `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
+    `--ok-strong: hsl(${hover});`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
 function instClasses() {
   const il = tokens.instanceLifecycle;
   return INST_ORDER
@@ -279,31 +380,33 @@ function instClasses() {
 // compound — equal-idiom to the bare :root/[data-theme=dark] pair, one step more
 // specific so the theme wins). Provider tints + .bp-inst-- glyph tones are
 // theme-INVARIANT passthrough (Part D counts them positionally) — NOT here (D25).
+// Identity block: ONLY the per-identity accent 5-tuple (GR2 — the shell
+// vocabulary + status pill machinery are identity-INVARIANT, declared once in the
+// bare :root above). Light and dark scopes carry the SAME var set (Part G D26
+// tone-pair nesting). No --cc-* / no shell roles reach here (D25).
 const cloudThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] {`,
-  baseVars("light", "  ", t),
-  primaryVars("light", "  ", t),
-  statusVars("light", "  ", t),
+  cloudAccentVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] {`,
-  baseVars("dark", "  ", t),
-  primaryVars("dark", "  ", t),
-  statusVars("dark", "  ", t),
+  cloudAccentVars("dark", "  ", t),
   "}",
 ].join("\n");
 
 function cloudBlock(themes = loadThemes()) {
   const lines = [
     ":root {",
-    baseVars("light", "  "),
-    primaryVars("light", "  "),
-    statusVars("light", "  "),
+    cloudChromeVars("light", "  "),
+    aliasBridge("light", "  "),
+    cloudStatusVars("light", "  "),
+    cloudAccentVars("light", "  "),
     providerVars("light", "  "),
     "}",
     '[data-theme="dark"] {',
-    baseVars("dark", "  "),
-    primaryVars("dark", "  "),
-    statusVars("dark", "  "),
+    cloudChromeVars("dark", "  "),
+    aliasBridge("dark", "  "),
+    cloudStatusVars("dark", "  "),
+    cloudAccentVars("dark", "  "),
     providerVars("dark", "  "),
     "}",
     "/* instance-lifecycle glyph tones — colour READ THROUGH the state's status",
@@ -315,6 +418,51 @@ function cloudBlock(themes = loadThemes()) {
   const themed = themeBlocks(themes, cloudThemeBlock);
   if (themed) lines.push(THEME_BANNER, themed);
   return lines.join("\n");
+}
+
+// ── surface: living styleguide swatch grid (cloud/priv/static/styleguide.html) ─
+// The agency spec's "01 · Tokens" swatch table, byte-spliced into styleguide.html
+// so a chip label can never drift from design/tokens.json. Each cell renders its
+// CSS var LIVE (background: var(--cc-*)/var(--primary)) — the styleguide clones
+// each pane into a light and a dark scope, so the chip resolves per theme — while
+// the value line is the CANONICAL tokens.json truth (light · dark). The 11 slots
+// mirror the agency's own list: the cloudChrome passthrough family (identity-
+// invariant, so one light+dark pair each — GR2) plus the accent slot --primary
+// (per-identity; the evergreen value is shown, labelled). An HTML-comment marker
+// (kind "html") is the splice target, mirroring the CSS surfaces' BEGIN/END block.
+const SWATCH_TOKENS = [
+  { css: "--cc-bg", cc: "bg" },
+  { css: "--cc-card", cc: "card" },
+  { css: "--cc-card2", cc: "card2" },
+  { css: "--cc-fg", cc: "fg" },
+  { css: "--cc-fg2", cc: "fg2" },
+  { css: "--cc-fg3", cc: "fg3" },
+  { css: "--cc-fg4", cc: "fg4" },
+  { css: "--primary", accent: true }, // the mint/evergreen accent (restyles per identity)
+  { css: "--cc-amber", cc: "amber" },
+  { css: "--cc-red", cc: "red" },
+  { css: "--cc-blue", cc: "blue" },
+];
+
+function styleguideSwatches() {
+  const cc = tokens.color.cloudChrome;
+  const cell = (css, light, dark) =>
+    [
+      `              <div class="sg-swatch">`,
+      `                <div class="sg-swatch-chip" style="background: var(${css});"></div>`,
+      `                <div class="sg-swatch-meta">`,
+      `                  <div class="sg-swatch-name">${css}</div>`,
+      `                  <div class="sg-swatch-val">${light} · ${dark}</div>`,
+      `                </div>`,
+      `              </div>`,
+    ].join("\n");
+  return SWATCH_TOKENS.map((s) => {
+    if (s.accent) {
+      const p = tokens.color.primary;
+      return cell(s.css, hslToHex(p.light), hslToHex(p.dark));
+    }
+    return cell(s.css, cc[s.cc].light, cc[s.cc].dark);
+  }).join("\n");
 }
 
 // ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
@@ -1747,11 +1895,29 @@ function bulldocsBlock(themes = loadThemes()) {
   ].join("\n");
 }
 
+// The cloud SPA theme-id enum (app.js `var BP_THEMES = [ … ]`). loadThemes()
+// leads with the default skin (evergreen) then dir order, so the emitted list is
+// the SAME ordering every other generated enumeration uses (Go Themes(), the
+// Studio picker, the CSS blocks). Indented 4 spaces to sit inside the array
+// literal in the IIFE; no trailing comma or newline (the marker's END line
+// carries the newline). This kills the GR12 drift: the SPA's identity picker
+// reads BP_THEMES at runtime, so a new design/themes/<id>.json reaches the picker
+// the moment `emit --write` runs — no second hand-list to forget.
+export function bpThemesList(themes = loadThemes()) {
+  return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
+}
+
 // ── artifact registry ────────────────────────────────────────────────────────
-// kind "css"             : splice content between the shared marker block.
+// kind "css"             : splice content between a marker block. The shared
+//                          BEGIN/END GENERATED: tokens marker by default; an
+//                          artifact may override with markerBegin/markerEnd to
+//                          own a DISTINCT marker in a file that also carries the
+//                          tokens block elsewhere (the cloud SPA's app.js).
 // kind "go"/"ts"/"elixir": the build() is the WHOLE file.
 export const ARTIFACTS = [
   { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
+  { name: "cloud SPA theme ids", path: "cloud/priv/static/app.js", kind: "css",
+    markerBegin: BP_THEMES_MARKER_BEGIN, markerEnd: BP_THEMES_MARKER_END, build: bpThemesList },
   { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
@@ -1767,6 +1933,7 @@ export const ARTIFACTS = [
   { name: "error page (error_html)", path: "api/lib/barkpark_web/controllers/error_html.ex", kind: "css", build: errorPageBlock },
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
+  { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit
@@ -1775,6 +1942,16 @@ const markerRe = new RegExp(
   `([ \\t]*${escapeRe(MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(MARKER_END)})`
 );
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+// The kind "html" splice target: an HTML-comment marker (the swatch grid lives
+// inside styleguide.html's [data-sg-swatches] host, not a <style> block, so a CSS
+// comment can't mark it). Same tolerant leading-indent capture as markerRe.
+const HTML_MARKER_BEGIN =
+  "<!-- BEGIN GENERATED: swatches (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) -->";
+const HTML_MARKER_END = "<!-- END GENERATED: swatches -->";
+const htmlMarkerRe = new RegExp(
+  `([ \\t]*${escapeRe(HTML_MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(HTML_MARKER_END)})`
+);
 
 // Compute {expected, current, path, kind, name} for one artifact. `expected` is
 // the desired full file text; `current` is what's on disk. A missing marker for a
@@ -1786,15 +1963,31 @@ export function evaluate(a) {
   catch { current = null; }
   const content = a.build();
 
+  if (a.kind === "html") {
+    // html: splice into the HTML-comment marker of the CURRENT file (same
+    // mechanism as css, different marker). A missing marker is a hard error.
+    const base = current == null ? "" : current;
+    const m = base.match(htmlMarkerRe);
+    if (!m) {
+      return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: swatches marker in ${a.path}` };
+    }
+    const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
+    return { ...a, abs, current, expected };
+  }
   if (a.kind !== "css") {
     // whole-file artifacts (Go, TS): the build() output IS the entire file.
     return { ...a, abs, current, expected: content };
   }
-  // css: splice into the marker block of the CURRENT file
+  // css: splice into the marker block of the CURRENT file. Most surfaces share
+  // the tokens marker; an artifact may name its OWN marker (markerBegin/End) to
+  // splice a distinct region in a file that carries the tokens block elsewhere.
   const base = current == null ? "" : current;
-  const m = base.match(markerRe);
+  const re = a.markerBegin
+    ? new RegExp(`([ \\t]*${escapeRe(a.markerBegin)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(a.markerEnd)})`)
+    : markerRe;
+  const m = base.match(re);
   if (!m) {
-    return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: tokens marker in ${a.path}` };
+    return { ...a, abs, current, expected: null, error: `no ${a.markerBegin || "BEGIN/END GENERATED: tokens"} marker in ${a.path}` };
   }
   const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
   return { ...a, abs, current, expected };

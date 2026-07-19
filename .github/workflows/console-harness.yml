@@ -45,3 +45,11 @@ jobs:
 
       - name: Run console harness
         run: node --test cloud/priv/static/__app.test.mjs
+
+      # The SPA's design contract, machine-checked (charter GR5): dead classes,
+      # undefined tokens, WCAG contrast across every theme identity, offline-purity,
+      # and the living styleguide's class/token drift. Exits non-zero on any E1-E8
+      # violation. Wired here (gr-w1-styleguide-port) now that the detector fix,
+      # the token ramps, and the cloudChrome bridge have landed and it exits 0.
+      - name: CSS/token drift gate
+        run: node cloud/priv/static/__css_check.mjs

@@ -422,7 +422,7 @@ const failedBeforeF = failed;
 // shadcn-zinc bytes no longer match the formula, so its 26 zinc rungs are
 // CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). A theme with no
 // entry here is not ratcheted (a fixture); every design/themes/*.json ships one.
-const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2 };
+const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
 // DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam
@@ -663,19 +663,19 @@ for (const [name, suffix] of ATTR_SURFACES) {
 // D25: no positional-passthrough var/class may appear inside a [data-bp-theme]
 // scope on ANY CSS surface (Parts B/D accumulate [light,dark] pairs positionally
 // — a third occurrence reds them). Scan each theme block body.
-const D25_BANNED = /--life-[\w-]+|--provider-[\w-]+|\.bp-lg--|\.bp-inst--/;
+const D25_BANNED = /--life-[\w-]+|--provider-[\w-]+|--cc-[\w-]+|\.bp-lg--|\.bp-inst--/;
 let d25Clean = true;
 for (const a of ARTIFACTS) {
   if (a.kind !== "css") continue;
   for (const m of a.build().matchAll(/\[data-bp-theme="[\w-]+"\][^{]*\{([^}]*)\}/g)) {
     if (D25_BANNED.test(m[1])) {
-      fail(`  Part G FAIL: ${a.name} re-declares a positional-passthrough var/class (--life-*/--provider-*/.bp-lg--/.bp-inst--) inside a [data-bp-theme] block (D25)`);
+      fail(`  Part G FAIL: ${a.name} re-declares a positional-passthrough var/class (--life-*/--provider-*/--cc-*/.bp-lg--/.bp-inst--) inside a [data-bp-theme] block (D25)`);
       d25Clean = false;
     }
   }
 }
 if (d25Clean && failed === failedBeforeG)
-  console.log("  ok   no --life-*/--provider-*/.bp-lg--/.bp-inst-- leaked into any [data-bp-theme] scope");
+  console.log("  ok   no --life-*/--provider-*/--cc-*/.bp-lg--/.bp-inst-- leaked into any [data-bp-theme] scope");
 
 // Tone-pair nesting (D26), proven on cloud: the theme's light scope and its dark
 // scope declare the SAME var set — the active/opposite pair is complete at every
