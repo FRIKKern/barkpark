@@ -49,6 +49,20 @@ type globals struct {
 	// choose.
 	outputSet bool
 
+	// datasetSet records whether -d/--dataset was TYPED IN ARGV, as opposed to
+	// dataset merely holding a value some other layer supplied. It exists for
+	// the verbs whose OWN --dataset flag the global parser eats: parseGlobals
+	// consumes -d/--dataset wherever it appears (by design — the global scope
+	// triple may sit before or after the noun), so a command-local `dataset`
+	// flag can never see it and must read g.dataset instead. Reading g.dataset
+	// UNCONDITIONALLY is the trap (cloud_site_cmd.go:163): the resolved content
+	// context also carries an ambient dataset from ~/.config/barkpark/config.json
+	// / BARKPARK_DATASET, so an unflagged `bp cloud workspace export --profile dev`
+	// would silently become dataset-narrowed by the operator's saved context —
+	// one silent wrong answer traded for another. Only an explicitly-typed flag
+	// may scope a bundle, and this bit is how a verb tells the difference.
+	datasetSet bool
+
 	// manifestPath is the --manifest <path> override: load the manifest from a
 	// local file instead of GET /v1/capabilities. Lets the CLI run before the
 	// capabilities endpoint is deployed. Empty means no override.
@@ -188,6 +202,7 @@ func (g *globals) set(key, val string) error {
 		g.project = val
 	case "-d", "--dataset":
 		g.dataset = val
+		g.datasetSet = true
 	case "-o", "--output":
 		if !validOutput(val) {
 			return fmt.Errorf("invalid --output %q (want table|json|yaml|minimal)", val)

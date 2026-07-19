@@ -738,3 +738,166 @@ func TestSafeBlobPathRejectsTraversal(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ARGV-LEVEL export tests (PDS-D62).
+//
+// Everything above drives runCloud(w, g, args) directly — DOWNSTREAM of
+// parseGlobals. That harness structurally cannot see the defect this section
+// exists for: `-d/--dataset` is a GLOBAL value flag (globals.go valueFlags), so
+// parseGlobals consumes it wherever it appears in argv and the export verb's own
+// `dataset` flag always resolved empty — `bp cloud workspace export … --dataset
+// production` silently sent NO dataset param while TestCloudWorkspaceExportScopeParams
+// stayed green. The tests below enter through Execute(os.Args[1:]) — the same
+// path a real invocation takes, parseGlobals included — so the class is
+// reachable by a test at all.
+
+// captureExecuteArgv runs Execute(args) with os.Stdout/os.Stderr redirected to pipes
+// and returns what the process would have printed plus the exit code. Execute
+// builds its writer from the real os.Stdout/os.Stderr at call time, so the swap
+// must happen (and be undone) around the call.
+func captureExecuteArgv(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = wOut, wErr
+
+	outCh, errCh := make(chan string, 1), make(chan string, 1)
+	go func() { b, _ := io.ReadAll(rOut); outCh <- string(b) }()
+	go func() { b, _ := io.ReadAll(rErr); errCh <- string(b) }()
+
+	code := Execute(args)
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	os.Stdout, os.Stderr = origOut, origErr
+	return <-outCh, <-errCh, code
+}
+
+// TestCloudWorkspaceExportDatasetSurvivesArgv is the instrument for PDS-D62: an
+// EXPLICITLY typed --dataset must reach the server as ?dataset=, in every
+// spelling the global parser accepts (`--dataset X`, `--dataset=X`, and a global
+// `-d X` placed before the noun). On unpatched code all three send
+// `profile=dev` alone.
+func TestCloudWorkspaceExportDatasetSurvivesArgv(t *testing.T) {
+	workspaceEnvIsolate(t)
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write([]byte("TAR"))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("BARKPARK_API_URL", srv.URL)
+	t.Setenv("BARKPARK_API_TOKEN", "admin-tok")
+
+	dir := t.TempDir()
+	spellings := [][]string{
+		{"cloud", "workspace", "export", "acme", "--file", filepath.Join(dir, "a.tar"), "--profile", "dev", "--dataset", "production"},
+		{"cloud", "workspace", "export", "acme", "--file", filepath.Join(dir, "b.tar"), "--profile", "dev", "--dataset=production"},
+		{"-d", "production", "cloud", "workspace", "export", "acme", "--file", filepath.Join(dir, "c.tar"), "--profile", "dev"},
+	}
+	for _, argv := range spellings {
+		gotQuery = ""
+		stdout, stderr, code := captureExecuteArgv(t, argv...)
+		if code != exitOK {
+			t.Fatalf("argv %v: exit = %d, want 0\nstdout:%s\nstderr:%s", argv, code, stdout, stderr)
+		}
+		if gotQuery != "dataset=production&profile=dev" {
+			t.Fatalf("argv %v: query = %q, want dataset=production&profile=dev", argv, gotQuery)
+		}
+	}
+}
+
+// TestCloudWorkspaceExportUnflaggedIgnoresAmbientDataset is the other half of the
+// fix, and the reason the cloud_site_cmd.go:163 fallback must NOT be copied
+// naively: the global `-d` also carries the saved context's dataset, so an
+// unconditional `g.dataset` fallback would silently narrow a bare
+// `export --profile dev` to whatever ~/.config/barkpark/config.json holds —
+// trading one silent-wrong-answer for another. With an ambient dataset saved and
+// no --dataset in argv, the request must carry NO dataset param.
+func TestCloudWorkspaceExportUnflaggedIgnoresAmbientDataset(t *testing.T) {
+	workspaceEnvIsolate(t)
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write([]byte("TAR"))
+	}))
+	t.Cleanup(srv.Close)
+	// The ambient layer: a saved config that names a dataset (and the server).
+	if err := SaveConfig(&Config{Server: srv.URL, Token: "admin-tok", AdminToken: "admin-tok", Dataset: "ambient-ds"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	dir := t.TempDir()
+	stdout, stderr, code := captureExecuteArgv(t,
+		"cloud", "workspace", "export", "acme", "--file", filepath.Join(dir, "a.tar"), "--profile", "dev")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if gotQuery != "profile=dev" {
+		t.Fatalf("query = %q, want profile=dev alone (an ambient dataset must never narrow an unflagged export)", gotQuery)
+	}
+}
+
+// TestCloudWorkspaceExportSourceServer: --source-server is threaded into the
+// query as ?source_server=, so a CLI-taken bundle can stamp WHERE it came from
+// (the server reads params["source_server"] into the manifest; without a CLI
+// surface every CLI-taken bundle stamped source_server: null).
+func TestCloudWorkspaceExportSourceServer(t *testing.T) {
+	workspaceEnvIsolate(t)
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write([]byte("TAR"))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("BARKPARK_API_URL", srv.URL)
+	t.Setenv("BARKPARK_API_TOKEN", "admin-tok")
+
+	dir := t.TempDir()
+	stdout, stderr, code := captureExecuteArgv(t, "cloud", "workspace", "export", "acme",
+		"--file", filepath.Join(dir, "a.tar"), "--profile", "dev", "--dataset", "production",
+		"--source-server", "https://guerrilla.barkpark.cloud")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	want := "dataset=production&profile=dev&source_server=https%3A%2F%2Fguerrilla.barkpark.cloud"
+	if gotQuery != want {
+		t.Fatalf("query = %q, want %q", gotQuery, want)
+	}
+}
+
+// TestCloudWorkspaceExportDryRunRendersScope: the --dry-run line an operator
+// actually reads names the full scope it would request. A dry run that omits a
+// flag the operator typed is the same silent-wrong-answer in preview form.
+func TestCloudWorkspaceExportDryRunRendersScope(t *testing.T) {
+	workspaceEnvIsolate(t)
+	t.Setenv("BARKPARK_API_URL", "https://guerrilla.barkpark.cloud")
+	stdout, stderr, code := captureExecuteArgv(t, "--dry-run", "cloud", "workspace", "export", "default",
+		"--file", filepath.Join(t.TempDir(), "x.tar"), "--profile", "dev", "--dataset", "production",
+		"--source-server", "https://guerrilla.barkpark.cloud")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:%s", code, stderr)
+	}
+	// The dry-run line rides progressf, which follows the resolved output mode —
+	// stdout for the human view, stderr once machine output is in play (a piped
+	// test process resolves to the machine default). Assert on both streams:
+	// what matters is that the operator sees the full scope, not which fd it
+	// arrived on.
+	line := stdout + stderr
+	for _, want := range []string{"DRY RUN", "profile=dev", "dataset=production", "source_server=https%3A%2F%2Fguerrilla.barkpark.cloud"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("dry-run line missing %q:\nstdout:%s\nstderr:%s", want, stdout, stderr)
+		}
+	}
+}
