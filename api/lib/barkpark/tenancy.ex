@@ -598,6 +598,13 @@ defmodule Barkpark.Tenancy do
   dataset's stamp survive. A non-map `provenance` or a non-binary slug returns
   `{:error, :invalid_provenance}` without touching the DB; a missing workspace
   returns `{:error, :not_found}`.
+
+  CLEARING a stamp is writing an EMPTY map: `set_pull_provenance(ws, slug, %{})`.
+  That is the supported escape hatch out of the `Plugins.Bootstrap` guard — a
+  stamped slot never takes a plugin schema update again, so the operator needs a
+  way back. It is pinned by `bootstrap_guard_test.exs` ("CLEARING the stamp is a
+  real escape hatch"). There is no CLI/HTTP surface for it yet
+  (`pds-bl-clear-pull-provenance`); a remote console is the only front door.
   """
   @spec set_pull_provenance(Workspace.t() | binary(), binary(), map()) ::
           {:ok, Workspace.t()}

@@ -381,6 +381,17 @@ defmodule BarkparkWeb.WorkspaceController do
 
   # Which dataset slots this bundle covers: the narrowed one when the export was
   # dataset-scoped, else every dataset the manifest carries.
+  #
+  # KNOWN GAP, stated rather than hidden (PDS-D45/D46). `dataset_slugs` is the
+  # workspace-EXCLUSIVE attribution set, NOT "the datasets in this bundle": a
+  # slug also owned by a sibling workspace is dropped by `dataset_slugs_for/1`
+  # under the D21 exclusivity rule. So a WHOLE-WORKSPACE pull whose source slug
+  # is shared cross-tenant (guerrilla's `production` is owned by two workspaces)
+  # can land with that dataset UNSTAMPED — and an unstamped dataset is one boot
+  # away from the Bootstrap clobber this stamp exists to guard. A
+  # dataset-narrowed pull (`?dataset=<slug>`, the PDS front door) is unaffected:
+  # it reads `manifest["dataset"]`, which is always the slug that was asked for.
+  # Tracked as `pds-bl-whole-workspace-shared-slug-stamp`.
   defp provenance_slugs(manifest) do
     case manifest["dataset"] || manifest["source_dataset"] do
       slug when is_binary(slug) ->

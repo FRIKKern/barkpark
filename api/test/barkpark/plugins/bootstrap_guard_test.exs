@@ -20,7 +20,10 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
       nesting is load-bearing at the guard, not only at the accessor);
     * a FOREIGN properly-backfilled workspace is untouched either way (the read
       never reached it — the guard adds nothing there and must not remove
-      anything either).
+      anything either);
+    * CLEARING the stamp (`set_pull_provenance(ws, slug, %{})` — the literal call
+      the drift warning names) restores today's behaviour on the very next boot,
+      so the sticky skip has a proven way out, not just a documented one.
   """
 
   use Barkpark.DataCase, async: false
@@ -177,6 +180,38 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
 
     assert length(rows()) == 1
     assert_all_eight_pulled(Repo.get!(SchemaDefinition, pulled.id))
+  end
+
+  # The skip is STICKY: every import stamps its target, so a workspace that ever
+  # took a bundle never accepts a plugin schema update again. `skip_pulled/3`'s
+  # warning tells the operator to clear the stamp — this pins that the documented
+  # escape hatch is real, and that clearing restores today's behaviour EXACTLY
+  # (a recovery path with no test is a promise, not a mechanism).
+  test "CLEARING the stamp is a real escape hatch — the very next boot updates again", ctx do
+    pulled =
+      insert_pulled_row!(%{
+        workspace_id: ctx.default_ws.id,
+        project_id: ctx.default_project.id,
+        dataset_id: ctx.default_ds.id
+      })
+
+    {:ok, _} = Tenancy.set_pull_provenance(ctx.default_ws.id, @dataset, @stamp)
+    capture_log(fn -> assert {:ok, 1} = run_bootstrap() end)
+    assert_all_eight_pulled(Repo.get!(SchemaDefinition, pulled.id))
+
+    # The literal call the drift warning names.
+    {:ok, _} = Tenancy.set_pull_provenance(ctx.default_ws.id, @dataset, %{})
+
+    assert Tenancy.pull_provenance(Tenancy.get_workspace_by_id(ctx.default_ws.id), @dataset) ==
+             %{}
+
+    assert {:ok, 1} = run_bootstrap()
+
+    reloaded = Repo.get!(SchemaDefinition, pulled.id)
+    assert length(rows()) == 1, "clearing must not insert a duplicate row"
+    assert reloaded.title == "Plugin Title"
+    assert reloaded.fields == [%{"name" => "plugin_field", "type" => "string"}]
+    assert reloaded.cors_origins == []
   end
 
   test "NEGATIVE CONTROL — an UNSTAMPED slot keeps today's clobber behaviour", ctx do

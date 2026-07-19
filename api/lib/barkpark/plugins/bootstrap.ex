@@ -297,12 +297,19 @@ defmodule Barkpark.Plugins.Bootstrap do
     |> Kernel.>(0)
   end
 
+  # THE SKIP IS STICKY, ON PURPOSE — and the operator needs the exact way out.
+  # Any import stamps the target (a restore of your OWN backup counts as pulled
+  # data too), so from then on this workspace/dataset never takes a plugin
+  # schema update. Re-pulling refreshes the row; the ONLY other exit is clearing
+  # the stamp, so the warning names the literal call rather than gesturing at it.
   defp skip_pulled(plugin_name, name, dataset) do
     Logger.warning(
       "Plugins.Bootstrap: schema #{inspect(name)} (dataset=#{inspect(dataset)}) sits in a " <>
         "PULLED workspace/dataset (pull_provenance stamped) — skipping the content update " <>
         "from plugin #{inspect(plugin_name)}. The local plugin declaration and the pulled " <>
-        "row have DRIFTED; re-pull or clear the stamp to accept the plugin's version."
+        "row have DRIFTED. Re-pull to refresh the row, or accept the plugin's version by " <>
+        "clearing the stamp from a console: " <>
+        "Barkpark.Tenancy.set_pull_provenance(<workspace_id_or_struct>, #{inspect(dataset)}, %{})"
     )
 
     :ok
