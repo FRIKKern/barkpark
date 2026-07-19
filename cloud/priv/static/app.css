@@ -4203,7 +4203,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--pill);
   padding: 1px 8px;
 }
-.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* GR65 REVIEW: a rung is `white-space: nowrap` so its glyph + label never break
+   mid-phrase — but a FAILED rung also carries a server-authored reason ("No
+   A/AAAA record for acme.barkpark.cloud"), and an unbreakable 509px pill inside
+   a 340px rail pushed the whole DOCUMENT to scrollWidth 1533 in a 1440 viewport.
+   That is a horizontal page scroll on the instance workspace at DESKTOP width,
+   in every accent and both themes — not a tablet-only tightness. `max-width:
+   100%` bounds the pill to its flex line and the code span alone is allowed to
+   wrap (`anywhere`, because the reason ends in an unbreakable hostname); the
+   label chrome keeps its nowrap. Measured on the static harness, panel-overview:
+   1440 scrollWidth 1533 → 1440, 768 scrollWidth 797 → 768. */
 .dom-rung {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px;
@@ -4214,9 +4224,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
 }
 .dom-rung-glyph { font-size: 9px; line-height: 1; }
-.dom-rung-code { font-family: var(--mono); font-weight: 400; color: var(--dim); }
+.dom-rung-code {
+  font-family: var(--mono); font-weight: 400; color: var(--dim);
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left; /* a wrapped reason must read as a paragraph, not a centred blob */
+}
 .dom-rung--ok { color: var(--ok-strong); background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.3); }
 .dom-rung--ok .dom-rung-glyph { color: var(--ok); }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
