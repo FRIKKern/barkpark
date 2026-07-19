@@ -1480,17 +1480,26 @@ test("webhookBannerHtml renders NOTHING until auto_disabled_at is set", () => {
   assert.equal(hooks.webhookBannerHtml({ active: false, consecutive_failures: 3 }), "");
 });
 
-test("webhookBannerHtml prints disable_reason + consecutive_failures verbatim + a Re-enable button", () => {
+test("webhookBannerHtml prints the verbatim disable_reason + a Re-enable button, and authors NO count of its own (D-05 count-free)", () => {
   const html = hooks.webhookBannerHtml({
     auto_disabled_at: "2026-07-03T12:00:00Z",
-    disable_reason: "20 consecutive failures (last: 500 Internal Server Error)",
+    disable_reason: "endpoint returned 500 Internal Server Error",
     consecutive_failures: 20,
   });
   assert.match(html, /Auto-disabled/);
-  assert.match(html, /20 consecutive failures \(last: 500 Internal Server Error\)/); // verbatim reason
-  assert.match(html, /20 consecutive failures<\/span>/); // verbatim count
+  assert.match(html, /endpoint returned 500 Internal Server Error/); // verbatim server reason
+  // D-05: the client no longer echoes consecutive_failures — the disable
+  // THRESHOLD is live instance config, never a client-authored number.
+  assert.doesNotMatch(html, /wh-autodisable-count/);
+  assert.doesNotMatch(html, /20 consecutive failures/);
   assert.match(html, /data-wh-reenable/); // PUT {active:true} via the update capability
   assert.match(html, /notice-error/);
+});
+
+test("webhookBannerHtml falls back to a count-free sentence when the instance sent no reason", () => {
+  const html = hooks.webhookBannerHtml({ auto_disabled_at: "2026-07-03T12:00:00Z", consecutive_failures: 42 });
+  assert.match(html, /repeated delivery failures/);
+  assert.doesNotMatch(html, /42/); // no live-config threshold leaks into the copy
 });
 
 test("webhookBannerHtml escapes a hostile disable_reason (no injection)", () => {
@@ -1556,23 +1565,42 @@ test("deliveryTone: 2xx→ok, 4xx/5xx→danger, pending/other→info", () => {
   assert.equal(hooks.deliveryTone({}), "info");
 });
 
-test("deliveryRowHtml renders the toned status + a Replay button keyed by event_id", () => {
+// ── deliveryStatusLabel: the v4 pill grammar (HTTP 500 / 200 OK) ─────────────
+
+test("deliveryStatusLabel: 2xx → '<code> OK', 4xx/5xx → 'HTTP <code>', code-less give-up → 'failed', else 'pending'", () => {
+  assert.equal(hooks.deliveryStatusLabel({ last_status_code: 200 }), "200 OK");
+  assert.equal(hooks.deliveryStatusLabel({ status_code: 204 }), "204 OK");
+  assert.equal(hooks.deliveryStatusLabel({ last_status_code: 500 }), "HTTP 500");
+  assert.equal(hooks.deliveryStatusLabel({ last_status_code: 404 }), "HTTP 404");
+  assert.equal(hooks.deliveryStatusLabel({ status: "failed_giveup" }), "failed"); // no instance jargon
+  assert.equal(hooks.deliveryStatusLabel({ status: "delivered" }), "OK");
+  assert.equal(hooks.deliveryStatusLabel({ status: "pending" }), "pending");
+  assert.equal(hooks.deliveryStatusLabel({}), "pending");
+});
+
+test("deliveryRowHtml renders the v4 pill (HTTP 500), the event id, attempts+latency meta, and a Replay keyed by event_id", () => {
   const html = hooks.deliveryRowHtml(
     { event_id: 42, last_status_code: 500, last_latency_ms: 182, attempts: 3, updated_at: "2026-07-03T12:00:00Z" },
     "abc", "production");
-  assert.match(html, /wh-del-status--danger">500</);
+  assert.match(html, /wh-del-status--danger">HTTP 500</); // the designed failed treatment
   assert.match(html, /182ms/);
   assert.match(html, /event #42/);
   assert.match(html, /3 attempts/);
-  assert.match(html, /data-wh-replay="42"/);
+  assert.match(html, /wh-del-replay[^>]*data-wh-replay="42"/); // the blue replay affordance
 });
 
-test("deliveryRowHtml: a code-less failed_giveup row reads 'failed' (danger), and missing attempts is just a dash", () => {
+test("deliveryRowHtml: a clean 2xx reads '200 OK' (ok tone)", () => {
+  const html = hooks.deliveryRowHtml({ event_id: 5, last_status_code: 200, last_latency_ms: 84, attempts: 1 }, "abc", "production");
+  assert.match(html, /wh-del-status--ok">200 OK</);
+  assert.match(html, /1 attempt &middot; 84ms/); // singular attempt + latency in the meta
+  assert.doesNotMatch(html, /1 attempts/); // no dangling plural
+});
+
+test("deliveryRowHtml: a code-less failed_giveup row reads 'failed' (danger) with no jargon and no dangling meta", () => {
   const html = hooks.deliveryRowHtml({ event_id: 7, status: "failed_giveup" }, "abc", "production");
   assert.match(html, /wh-del-status--danger">failed</); // no raw failed_giveup jargon
   assert.doesNotMatch(html, /failed_giveup/);
-  assert.doesNotMatch(html, /&mdash; attempts/); // absent attempts: no dangling " attempts"
-  assert.match(html, /&mdash;<\/span>/);
+  assert.doesNotMatch(html, /wh-del-meta/); // no attempts + no latency → the meta span is omitted, not a dangling dash
 });
 
 test("deliveryRowHtml surfaces the verbatim last_error_text of a failed delivery, escaped", () => {
@@ -1586,6 +1614,23 @@ test("deliveryRowHtml surfaces the verbatim last_error_text of a failed delivery
   assert.doesNotMatch(
     hooks.deliveryRowHtml({ event_id: 1, last_status_code: 200, attempts: 1 }, "abc", "production"),
     /wh-del-err/);
+});
+
+// ── replayToastBody: the REAL replay outcome, never the prototype's mock ─────
+
+test("replayToastBody names the real status + latency ('Delivery replayed · 200 OK in 84 ms'), never a canned string", () => {
+  assert.equal(
+    hooks.replayToastBody({ last_status_code: 200, last_latency_ms: 84 }, 5),
+    "Delivery replayed · 200 OK in 84 ms");
+  // A failed re-attempt is reported honestly (the replay itself succeeded; the
+  // target answered 500) rather than claiming success.
+  assert.equal(
+    hooks.replayToastBody({ last_status_code: 500, last_latency_ms: 12 }, 9),
+    "Delivery replayed · HTTP 500 in 12 ms");
+  // An older instance that echoes no delivery detail degrades to the plain ack,
+  // never an invented status.
+  assert.equal(hooks.replayToastBody(null, 7), "event #7");
+  assert.equal(hooks.replayToastBody({}, ""), "Delivery replayed");
 });
 
 // ── hookToggleState: the D18 optimistic grammar (reconcile on RESPONSE) ──────

@@ -2484,7 +2484,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 .wh-autodisable { align-items: center; }
 .wh-autodisable-text { min-width: 0; }
-.wh-autodisable-count { font-weight: 600; }
 
 .wh-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
 .wh-meta-fail { color: var(--danger); font-weight: 500; }
@@ -2519,46 +2518,76 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   text-overflow: ellipsis;
 }
 
+/* v4 "Recent deliveries" card (D-05 / screens2-06 + v4.dc.html:1286-1300): a
+   heading over a bordered, hairline-divided card of delivery rows. */
 .wh-deliveries {
   margin-top: 14px;
-  padding-top: 12px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .wh-del-hint { font-size: 12px; }
 .wh-del-empty { font-size: 13px; padding: 6px 0; }
-.wh-delivery {
+.wh-del-heading { font-size: 13px; font-weight: 600; color: var(--text); }
+.wh-del-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.wh-del-row {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
 }
-.wh-del-status {
-  flex: 0 0 auto;
-  min-width: 46px;
-  text-align: center;
+.wh-del-card > .wh-del-row:last-child { border-bottom: none; }
+.wh-del-event {
   font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--muted-surface);
   color: var(--text);
 }
-.wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
-.wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
-.wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
-.wh-del-meta {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 12px;
+/* The status PILL — a rounded, toned capsule carrying the v4 "HTTP 500" / "200
+   OK" label. The failed tone leans on the danger colour for the text (the
+   designed red treatment); soft-tint bg stays inside the frozen alpha ladder. */
+.wh-del-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
   color: var(--muted-text);
 }
+.wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
+.wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); color: var(--danger); }
+.wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); color: var(--info); }
+.wh-del-meta { font-size: 12px; color: var(--muted-text); }
+.wh-del-spacer { flex: 1 1 auto; }
+.wh-del-when { font-size: 12px; color: var(--muted-text); }
+/* Replay — the blue text affordance from the designed row (v4 --blue → --info). */
+.wh-del-replay {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--info);
+}
+.wh-del-replay:hover { text-decoration: underline; }
+.wh-del-replay:disabled { opacity: 0.55; cursor: not-allowed; text-decoration: none; }
 /* The verbatim last_error_text of a failed delivery — wraps to its own full-
-   width line under the status/meta row (flex-basis:100% inside the wrap row). */
+   width line under the row (flex-basis:100% inside the wrap row). */
 .wh-del-err {
   flex-basis: 100%;
   font-family: var(--mono);

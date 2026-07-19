@@ -4706,26 +4706,26 @@
   }
 
   // Pure: the AUTODISABLE banner (charter #1013 substrate). Renders ONLY when the
-  // row carries `auto_disabled_at` AND is still inactive, and prints
-  // `disable_reason` + `consecutive_failures` VERBATIM from the row (never a
-  // client re-derivation) — the honest reason the instance's dispatcher gave up.
-  // The Re-enable button PUTs {active:true} through the update capability (there
-  // is NO toggle route). The `active` gate matters: the instance's update path
-  // can't clear the server-managed `auto_disabled_at` stamp (not castable), so a
-  // re-enabled row keeps the old stamp — without the gate, Re-enable would
-  // "succeed" and the reconciled card would STILL shout Auto-disabled next to an
-  // Active pill, forever.
+  // row carries `auto_disabled_at` AND is still inactive. COUNT-FREE by design
+  // (D-05 criterion): the disable THRESHOLD is live instance config, never a
+  // client-hardcoded number, so the tab authors no failure count of its own —
+  // the honest, stable sentence is "repeated delivery failures". `disable_reason`
+  // is still shown VERBATIM when the instance sent one (server truth, its own
+  // words), but the client never re-derives or echoes `consecutive_failures`
+  // beside it. The Re-enable button PUTs {active:true} through the update
+  // capability (there is NO toggle route). The `active` gate matters: the
+  // instance's update path can't clear the server-managed `auto_disabled_at`
+  // stamp (not castable), so a re-enabled row keeps the old stamp — without the
+  // gate, Re-enable would "succeed" and the reconciled card would STILL shout
+  // Auto-disabled next to an Active pill, forever.
   function webhookBannerHtml(wh) {
     wh = wh || {};
     if (!wh.auto_disabled_at || wh.active) return "";
     var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
       ? esc(wh.disable_reason)
       : "This endpoint was auto-disabled after repeated delivery failures.";
-    var count = wh.consecutive_failures != null
-      ? ' <span class="wh-autodisable-count">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
-      : "";
     return '<div class="notice notice-error wh-autodisable" role="alert">' +
-      '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + count + "</span>" +
+      '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + "</span>" +
       '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>' +
       "</div>";
   }
@@ -4744,7 +4744,12 @@
     var toggleBtn = active
       ? '<button class="btn btn-sm" type="button" data-wh-toggle>Disable</button>'
       : '<button class="btn btn-sm" type="button" data-wh-toggle>Enable</button>';
-    var fails = wh.consecutive_failures != null && wh.consecutive_failures > 0
+    // The failing-streak meta is honest signal on an ACTIVE-but-degrading
+    // endpoint. Once the row is auto-disabled the count-free banner owns that
+    // state (D-05), so the count is suppressed here — the card never shows a
+    // failure count beside its own Auto-disabled banner.
+    var bannerShowing = !!wh.auto_disabled_at && !active;
+    var fails = !bannerShowing && wh.consecutive_failures != null && wh.consecutive_failures > 0
       ? '<span class="wh-meta-fail">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
       : "";
     var updated = wh.updated_at ? "Updated " + esc(fmtWhen(wh.updated_at)) : "";
@@ -4797,39 +4802,68 @@
     return "info"; // 3xx / 0 / other
   }
 
-  // Pure: one delivery-log row — status code (toned), latency, when, attempts,
-  // plus a per-row Replay button and, when the instance recorded one, the
-  // verbatim `last_error_text` (the WHY of a failure — connection refused, TLS,
-  // 500 body — not just the tone). `delivered_at`/`status_code` are read
-  // defensively (the instance's render_delivery names them updated_at /
-  // last_status_code today; a future rename won't blank the row).
+  // Pure: the v4 status-PILL label for a delivery (screens2/06 + v4.dc.html
+  // 1290-1297). A 2xx reads "<code> OK" (mint pill), a 4xx/5xx reads
+  // "HTTP <code>" (the designed failed treatment, red pill), a code-less terminal
+  // give-up reads "failed", anything mid-flight "pending". The raw
+  // `failed_giveup` token is NEVER surfaced (no instance jargon on screen).
+  function deliveryStatusLabel(d) {
+    d = d || {};
+    var code = d.status_code != null ? d.status_code : d.last_status_code;
+    if (code != null) {
+      var n = Number(code);
+      return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "delivered" || s === "success" || s === "ok") return "OK";
+    if (s === "failed_giveup" || s === "failed" || s === "error" || s === "giveup") return "failed";
+    return "pending";
+  }
+
+  // Pure: one delivery-log row in the v4 "Recent deliveries" card grammar —
+  // event id (mono) + a toned status pill ("HTTP 500" / "200 OK") + attempts and
+  // latency meta + the relative time, then a blue Replay affordance and, when the
+  // instance recorded one, the verbatim `last_error_text` (the WHY of a failure —
+  // connection refused, TLS, 500 body — not just the tone) on its own line.
+  // `delivered_at`/`status_code` are read defensively (the instance's
+  // render_delivery names them updated_at / last_status_code today; a future
+  // rename won't blank the row).
   function deliveryRowHtml(d, instance, dataset) {
     d = d || {};
     var tone = deliveryTone(d);
-    var code = d.status_code != null ? d.status_code : d.last_status_code;
-    // A code-less row falls back to the status word; "failed_giveup" (the
-    // instance's terminal status token) reads "failed" — same truth, no jargon.
-    var codeLabel = code != null
-      ? String(code)
-      : (d.status ? (String(d.status) === "failed_giveup" ? "failed" : String(d.status)) : "pending");
-    var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : "&mdash;";
+    var label = deliveryStatusLabel(d);
     var when = esc(fmtWhen(d.delivered_at || d.updated_at || d.created_at));
+    var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : null;
     var attempts = d.attempts != null
       ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
-      : "&mdash;";
+      : null;
+    var meta = [attempts, latency].filter(Boolean).join(" &middot; ");
     var evId = d.event_id != null && d.event_id !== "" ? d.event_id : null;
     var errText = d.last_error_text != null && String(d.last_error_text) !== ""
       ? '<span class="wh-del-err">' + esc(d.last_error_text) + "</span>"
       : "";
-    return '<div class="wh-delivery">' +
-      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(codeLabel) + "</span>" +
-      '<span class="wh-del-meta">' +
-        (evId !== null ? "event #" + esc(evId) + " &middot; " : "") +
-        latency + " &middot; " + when + " &middot; " + attempts +
-      "</span>" +
-      (evId !== null ? '<button class="btn btn-sm" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
+    return '<div class="wh-del-row">' +
+      '<span class="wh-del-event">' + (evId !== null ? "event #" + esc(evId) : "&mdash;") + "</span>" +
+      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(label) + "</span>" +
+      (meta ? '<span class="wh-del-meta">' + meta + "</span>" : "") +
+      '<span class="wh-del-spacer"></span>' +
+      '<span class="wh-del-when">' + when + "</span>" +
+      (evId !== null ? '<button class="wh-del-replay" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
       errText +
       "</div>";
+  }
+
+  // Pure: the Replay-outcome toast body, built from the REAL delivery the
+  // instance returned (never the prototype's hardcoded "200 OK in 91 ms"). A
+  // clean re-attempt reads "Delivery replayed · 200 OK in N ms"; a failed target
+  // reads the honest "HTTP 500 in N ms". An older instance that echoes no delivery
+  // detail degrades to the plain event ack rather than inventing a status.
+  function replayToastBody(delivery, eventId) {
+    var d = delivery || {};
+    var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
+    if (!hasDetail) return eventId != null && eventId !== "" ? "event #" + eventId : "Delivery replayed";
+    var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
+    return "Delivery replayed · " + deliveryStatusLabel(d) + latency;
   }
 
   // Pure: the enable/disable toggle's rendered state under the D18 optimistic
@@ -5345,7 +5379,11 @@
         box.innerHTML = hint + '<div class="wh-del-empty muted">No deliveries yet.</div>';
         return;
       }
-      box.innerHTML = hint + rows.map(function (d) { return deliveryRowHtml(d, cliInstance(bp), ds); }).join("");
+      box.innerHTML = hint +
+        '<div class="wh-del-heading">Recent deliveries</div>' +
+        '<div class="wh-del-card">' +
+          rows.map(function (d) { return deliveryRowHtml(d, cliInstance(bp), ds); }).join("") +
+        "</div>";
       box.querySelectorAll("[data-wh-replay]").forEach(function (b) {
         b.addEventListener("click", function () {
           replayDelivery(listBox, bp, ds, wh, b.getAttribute("data-wh-replay"), b);
@@ -5358,7 +5396,11 @@
     if (btn) { btn.disabled = true; btn.textContent = "Replaying…"; }
     api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries/" + encodeURIComponent(eventId) + "/replay", ds), {}).then(function (r) {
       if (r.ok) {
-        toast({ kind: "success", title: "Replayed", body: "event #" + eventId });
+        // Reconcile on the RESPONSE: the proxy envelope nests the freshly-
+        // attempted delivery under data.data.delivery — the toast names its REAL
+        // status + latency, never a canned string (D-05 criterion / D18).
+        var delivery = r.data && r.data.data && r.data.data.delivery;
+        toast({ kind: "success", title: "Replayed", body: replayToastBody(delivery, eventId) });
         loadDeliveries(listBox, bp, ds, wh);
         return;
       }
@@ -13313,7 +13355,8 @@
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
-      deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
+      deliveryStatusLabel: deliveryStatusLabel, deliveryRowHtml: deliveryRowHtml,
+      replayToastBody: replayToastBody, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
       // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.
