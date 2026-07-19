@@ -11,6 +11,13 @@
 > user-ratified TWIN DOCTRINE: Personal Local free forever + Personal Cloud $29 twin,
 > offline-first, G8 = `bp dev sync` local⇄cloud).
 > Wave 1 paper: **`pds-wave-2026-07-19`** (style=article). Decided 2026-07-19.
+> Wave 2 paper: **`pds-wave-2-2026-07-19`** — "The Honest Clone" (style=article). Decided 2026-07-19.
+>
+> NOTE ON THE CHARTER SLOT: the epic-cycle harness names
+> `.claude/workflows/bp-cloud-gui-remake-charter.md` as its default charter path. That file is the
+> LIVE memory of a DIFFERENT epic (Cloud GUI Remake, `task-47bc4168392dec17`). PDS decisions must
+> never be written there. **This file is the PDS epic's charter** — every PDS wave reads and
+> amends it.
 
 ## Vision
 
@@ -137,9 +144,140 @@ client is never imported into the content-transfer path.
   (@canonical marker placement) closed — the marker sits 1 line above `def export/2`, inside its
   own 6-line acceptance window.
 
+### Wave 2 amendments — "The Honest Clone" (decided 2026-07-19, paper `pds-wave-2-2026-07-19`)
+
+Wave 2's identity: the product is a TRUSTWORTHY data plane, not merely a working pull. Every
+green must be one a broken build could NOT also produce (PDS-D20). Verification round 2 ran the
+code rather than reading it, and it CORRECTED the plan in five places — D21, D22, D24, D25, D26
+below are all evidence-forced reversals of what wave 1 assumed.
+
+- **PDS-D21 — The Bootstrap clobber has TWO legs, not three; the guard is a provenance-keyed SKIP
+  and nothing else.** Run-proven (7/7 probe scenarios): the mechanism is neither "Default-project
+  only" (surveyor #1) nor "fully unscoped, any workspace" (surveyor #2) — it is
+  **DEFAULT-DATASET-SLOT MATCHING**. `scope_to_workspace_global/1` really is `do: query` (no
+  workspace filter), but `scope_schema_to_dataset/3` narrows the read to the Default project's
+  production dataset OR the single global nil-`dataset_id` row. A properly-backfilled foreign
+  workspace row is NEVER touched (S1/S4/S6); two nil-`dataset_id` rows of the same
+  `(name, dataset)` cannot even coexist (partial unique index `20260704120000`), so the
+  `asc_nulls_last` "coin flip" is unreachable. Surveyor #2's *nilling* claim is REFUTED —
+  `put_scope_attrs` DROPS then RE-STAMPS the scope keys with Default's ids
+  (`workspace_id nilled? false / project_id nilled? false / dataset_id nilled? false`).
+  Therefore: the guard must NOT filter `get_schema`'s read by `workspace_id` and must NOT thread a
+  scope opt into `Bootstrap` — both are dead weight. It is exactly PDS-D16 as ratified: skip the
+  content UPDATE when the matched row carries a pull-provenance stamp; insert-when-absent
+  unchanged. Why: PDS-D9 adoption makes the PULLED workspace BE the Default slot (guerrilla's
+  exportable workspace slug is literally `default`, 36/36 schema rows non-null `dataset_id`), so
+  the pulled rows land in the exact slot bootstrap targets.
+- **PDS-D22 — The clobber's blast radius is 8 columns, four of them to bare plugin-struct
+  defaults.** Run-proven S7: `title · icon · visibility · owner_scoped · fields · cors_origins ·
+  desk_groups · list_preview`, in-place UPDATE on the same row id. A plugin that says nothing
+  about `cors_origins` still wipes it. Why: the regression bar for the guard is the full 8-column
+  set, not the "title/fields revert" the wave-1 live proof measured.
+- **PDS-D23 — The crown proof REBOOTS the scratch target between its two pulls.** The clobber
+  fires only on boot; a convergence proof without a restart is exactly the vacuous green PDS-D20
+  forbids. Why: it is the only step that makes the guard's third proof leg real.
+- **PDS-D24 — `payload_snapshot` is RULED OUT as a scan target; `webhooks.secret` is the sole
+  discriminator.** REFUTED live: guerrilla's 10,544 `webhook_deliveries` rows are 100%
+  `source_kind=document` with `payload_snapshot` NULL — and structurally, `media` is the only kind
+  that embeds a secret while `create_media_delivery/1` sets NO `endpoint_id`, so the E2 INNER JOIN
+  excludes those rows from EVERY bundle in EVERY profile. A scan anchored on `payload_snapshot`
+  scores zero on the full bundle too — a control that silently stops controlling. Ammo census:
+  8 webhooks, 8 distinct 43-char plaintext secrets, workspace-attributed, E1; `secrets`/
+  `secrets_audit` are one `workspace_id IS NULL` row structurally excluded by the tenant wall;
+  `api_tokens` are hashed; `access_grants` is 2 revoked synthetic `@example.com` rows. Value-scan
+  of all 17 dev-copy tables against the 8 secrets returns 0 for every table.
+- **PDS-D25 — "Provably stripped" this wave means provably ABSENT TABLES, not field-scrub.**
+  `@dev_scrub` is genuinely `%{}` — the dev partition contains zero `{:scrub_fields, _}` entries.
+  Why: the Paper and the crown proof must say deny, not scrub; claiming field-level scrubbing
+  would be an overclaim with no code behind it.
+- **PDS-D26 — The ticket-deny leg is proven by a RAW BYTE-SCAN with the full bundle as positive
+  control, never by a count diff.** `/v1/data/counts/:dataset` has NO perspective parameter — it
+  hard-codes `perspective: "published"` and filters `not like(d.doc_id, "drafts.%")`; `?perspective=raw`
+  and `?perspective=drafts` return byte-identical published bodies (live-proven). Guerrilla's SOLE
+  ticket is a DRAFT (`drafts.ticket-34751d4f62f4a8f0`), so a build that omitted the deny WHERE
+  clause entirely would print an IDENTICAL count diff. Worse: 213 draft rows across 8 types are
+  invisible to that endpoint for every type. Ruling: (a) the crown proof's census is
+  RAW-perspective (`?perspective=raw&count=true` per type, or direct SQL on both ends) — the
+  counts endpoint is never the carrier; (b) the ticket leg asserts `grep -c` of the ticket doc_id
+  token over `tables/documents.copy`: full bundle ≥ 1 (control FIRES) and dev bundle == 0, plus
+  the manifest cross-check `documents.row_count(dev) == documents.row_count(full) - 1`; (c) do NOT
+  seed a published ticket on guerrilla — prod is never a write target; seed tickets in the
+  dev-export unit fixture instead.
+- **PDS-D27 — The type-deny does NOT cascade, and dev-export must make it cascade.** `copy_where`
+  `:e3_doc` (`EXISTS … doc_id/dataset`) and the E2 joins (`JOIN documents d ON d.id = t.from_id`)
+  are type-blind, so a denied ticket's `content_edges`/`task_edges`/`plugin_doc_state`/
+  `chat_runtime_usage_receipts` rows would still travel as orphans/FK violations. Live data cannot
+  catch this (guerrilla's ticket has 0 rows in all three) — it is a UNIT-test obligation on
+  dev-export: seed a ticket + a `content_edge`, assert both absent.
+- **PDS-D28 — `dev_action/1` alone is NOT the exporter's driver.** It deliberately flattens
+  `{:copy, deny_types: ["ticket"]}` to a bare `:copy` (run-proven `dev_action("documents") == :copy`).
+  A builder driving off `dev_action/1` alone gets a correct-looking `:copy` for documents and ships
+  every ticket — invisible to a count diff (D26). The exporter MUST read `dev_doc_type_deny/0`
+  explicitly alongside it.
+- **PDS-D29 — The `--dataset` arbiter must NOT resolve through `dataset_slugs_for/1`.** Live trap:
+  guerrilla's `manifest.dataset_slugs` is `["bl-preview-crash-scratch","papers","tasks"]` — it
+  OMITS `production`, because `dataset_slugs_for/1` drops any slug also owned by another
+  workspace's project. Resolving the target through it would silently select the empty set on the
+  very host the crown proof targets. Ruling: resolve by joining `datasets → projects → workspace`
+  — the single dataset row whose slug matches AND whose project belongs to the target workspace;
+  more than one match → an explicit error, never a silent pick. E3 dataset-keyed members keep
+  going through `dataset_slugs_for/1` and INTERSECT with the target slug (fail-closed empty when
+  the slug is shared) — never a bare-slug WHERE.
+- **PDS-D30 — Convergence is claimed for the DEV profile only, and scoped honestly.** Three
+  consecutive HEADs of the full guerrilla bundle returned 918,436,864 / 918,485,504 / 918,486,016
+  bytes — the source is live and `mutation_events`/`audit_events` grow continuously, so
+  byte-identical convergence is IMPOSSIBLE for `:full` and plausible for `:dev` only because dev
+  denies every append-only event table. And per PDS-D8, E3/allowlist stay bare `ON CONFLICT DO
+  NOTHING` in BOTH modes: root+E1+E2 converge on CONTENT, E3/allowlist on PRESENCE only. The wave
+  states that boundary rather than overclaiming.
+- **PDS-D31 — Export RAM is a live operating constraint: serialize, and prefer `:dev`.** A full
+  guerrilla export peaks `beam.smp` at **1.83 GB RSS** on a **3.8 GB** box, dropping MemAvailable
+  from 2.70 GB to 816 MB (1 Hz sampled, run-proven; 64s wall, 918 MB, exit 0 — Decide's open item
+  (d) is CLOSED, the export completes). Two concurrent full exports OOM the LIVE content API.
+  Ruling: never two exports at once; the crown proof runs `:dev` (projected ~50.6 MB, an 18×
+  reduction) for everything except ONE full-fidelity positive-control bundle; and the deny must be
+  a SKIP at COPY time, never a post-filter — a post-filter keeps the 1.9 GB peak even for `:dev`.
+- **PDS-D32 — The crown proof asserts source/target `schema_migrations` parity before the first
+  COPY.** #4392 widened `documents_task_lifecycle_status_check` from 5 to 7 values; Postgres
+  enforces CHECK constraints on COPY, and guerrilla auto-deploys on merge. A target migrated from
+  an older sha fails mid-transfer on any task row with `lifecycle_status` in
+  `{considering, researching}`. `bin/barkpark up` migrates from the same checkout, so this is a
+  stated PRECONDITION, not a free property — and it generalizes to any future source-side
+  CHECK/enum widening.
+- **PDS-D33 — Import mode is pinned `:merge` for the crown proof.** PDS-D9 adoption runs only in
+  merge mode; any other mode flips the failure shape to "pulled rows safe, but a duplicate
+  Default-scoped plugin row appears alongside them", which also breaks a naive per-type count diff.
+- **PDS-D34 — The scratch-target boot recipe is a shipped script, not builder folklore.** Five
+  traps are run-proven and none are documented: (1) `bin/barkpark up` never runs `mix deps.get` —
+  a fresh worktree dies in `ensure_secrets`; (2) `CC=/usr/bin/clang` is MANDATORY because
+  `~/.local/bin/cc` is `exec claude …` and the argon2 NIF build fails with `unknown option '-g'`;
+  (3) `BARKPARK_HOME` must be **under ~85 chars** — the Postgres unix socket lives inside it and
+  caps at 103 bytes, so agent scratchpad paths FAIL with `could not create any Unix-domain
+  sockets`; (4) `bin/barkpark up | tail` HANGS FOREVER on a first boot (the spawned daemons
+  inherit the pipe) — redirect to a file; (5) a fresh box has NO admin token and no mix task to
+  mint one — the blob push 401s until a row is hand-inserted into `api_tokens`. Also: `bin/barkpark`
+  never sets `BARKPARK_MEDIA_DIR`, and the compiled default is the RUNNING TREE's `api/uploads` —
+  a harness that forgets it writes pulled blobs into the shared dev tree.
+- **PDS-D35 — Sentinel re-check is step zero of every catalog-touching slice.** Both
+  `assert_partition!/1` and `assert_dev_partition!/1` are GREEN at `567bf6e39` and the proof is
+  non-vacuous (injecting a `workspace_id` table made BOTH fire with the right message; dropping it
+  restored green). The delta `567bf6e39..87463fa3b` is docs-only — zero migrations, zero
+  create-table. But the proof is sha-scoped by construction and concurrent cycles land `api/**`
+  continuously, so each slice re-runs the sentinels at its own branch point.
+- **PDS-D36 — The dev partition is 17 copy / 45 deny / 62 total. #4384's commit message saying 18
+  is WRONG; the code is right.** Root cause traced: the squashed merge kept the FIRST sub-commit's
+  pre-review count, and the second sub-commit flipped `search_intel_events` copy→deny (exactly the
+  missing 1). No builder may "reconcile" the code to the message.
+- **PDS-D37 — Task 24913529 (WorkspaceBundle streams instead of materializing) is sequenced OUT of
+  wave 2.** It rewrites the exact functions (`do_export`, the import body read) that dev-export and
+  provenance-guard touch. Why: a parallel claim guarantees conflicts on the same functions; it
+  lands after this wave, informed by D31's measured numbers.
+- **PDS-D38 — Every wave-2 builder is `opus`.** Fable 5 is spend-limited this session. Not a
+  quality judgment — a hard constraint carried from the wish.
+
 ## Roadmap
 
-Wave 1 — data plane honest (this wave; 8 slices; ROUNDS ARE LAW):
+Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
 
 - R1 `pds-w1-export-406` (opus, S): x-tar 406 fix, both ends + honest negotiation tests.
 - R1 `pds-w1-local-boot-media` (opus, L): KEK autogen · missing-blob 404 · BARKPARK_MEDIA_DIR ·
@@ -160,17 +298,44 @@ Wave 1 — data plane honest (this wave; 8 slices; ROUNDS ARE LAW):
   default/production → scratch: green count diffs, served asset, zero-hit secret scan of bundle
   bytes AND target DB, re-run converges).
 
-Wave 2 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
-byte-identical; delete-reconciliation refresh; streamed bundle channel.
-Wave 3 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
-Wave 4 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
-Wave 5 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
-guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W2/W3.
+Wave 2 — THE HONEST CLONE (this wave; 6 slices; all builders `opus` per PDS-D38):
+
+- R1 `pds-w1-dev-export` (opus, L): profile+dataset export — deny SKIPPED at COPY time (D31),
+  documents type-deny read from `dev_doc_type_deny/0` not `dev_action/1` (D28), the deny CASCADED
+  to E2/E3 children (D27), the dataset arbiter resolved via datasets→projects→workspace (D29),
+  additive manifest fields, `:full` byte-identical (md5 tripwire).
+- R1 `pds-w2-scratch-harness` (opus, M): `scripts/pds-scratch-target.sh` — the run-proven isolated
+  personal-local boot (D34's five traps + `BARKPARK_MEDIA_DIR` + admin-token mint + clean
+  teardown), with a NEGATIVE CONTROL proving the media redirect is real.
+- R1 `pds-w2-secret-scan` (opus, M): `scripts/pds-secret-scan.sh` — value-based (not column-name)
+  scan over raw bundle bytes AND a target DB, anchored on `webhooks.secret` (D24), proven with a
+  LOCAL seeded full-vs-dev positive control so no gratuitous 1.9 GB live export is spent (D31).
+- R2 `pds-w1-provenance-guard` (opus, M; after dev-export): `pull_provenance` accessors + import
+  stamp + receipt + the two-leg Bootstrap guard (D21) with the 8-column regression bar (D22).
+- R2 `pds-w1-pull-cli` (opus, L; after dev-export): CLI `--profile/--dataset/--merge/--with-blobs`,
+  streamed blob sidecar, provenance receipt, `ServerKind` warning.
+- R3 `pds-w1-crown-proof` (opus, L; after provenance-guard + pull-cli + both R1 tools):
+  `scripts/pds-pull-proof.sh` + THE LIVE RUN — raw-perspective census (D26), byte-scan ticket leg
+  with a firing full-bundle control, migration parity precondition (D32), `:merge` pinned (D33),
+  REBOOT between the two pulls (D23), honestly-scoped convergence (D30).
+
+Wave 3 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
+byte-identical; delete-reconciliation refresh; streamed bundle channel (task 24913529, unblocked
+once wave 2 merges — PDS-D37).
+Wave 4 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
+Wave 5 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
+Wave 6 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
+guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W3/W4.
 
 Backlog (filed as published child tasks of the epic): flat-verb `-w` honesty · streamed bundle
 channel + import-body streaming · delete-reconciliation refresh · G8 secondary-unique identity
 reconciliation · `bp dev pull` single verb · CI scratch-target HTTP round-trip job · per-member
-savepoint import error honesty.
+savepoint import error honesty · **wave-2 additions:** Bootstrap S3 cross-tenant workspace theft on
+nil-`dataset_id` rows · `/v1/data/counts` silently ignores `?perspective` (213 draft rows
+invisible) · `docs/setup/personal-local.md` staleness (D34's five traps documented nowhere) ·
+`plugin_doc_state` unreviewed `:copy` classification · pin the `webhook_deliveries` E2 INNER JOIN
+as a security invariant · no admin-token mint path on a fresh `bin/barkpark up` box · `bp search`
+verb absent from this CLI build.
 
 ## Wave log
 
