@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       PUT     /v1/notifications/channels admin  update per-channel transport settings
       PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      user send a rate-limited test email
+      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first)
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
       DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
@@ -3425,6 +3426,28 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         test_email(conn)
+    end
+  end
+
+  # GET /v1/notifications/deliveries → 200 {deliveries: [<delivery_json>]}, newest
+  # first, strictly team-scoped via conn.assigns.current_team. Pure read-only
+  # exposure of the durable notification_deliveries table — the delivery-log surface
+  # the Settings wave renders. ADMIN-gated (require_team_admin halts 401 with no
+  # session / 403 for a plain member) for parity with the other notifications admin
+  # routes. `?limit` caps the page via parse_int, hard-capped at 200 HERE (the
+  # /v1/audit precedent — list_audit_events caps in the context, but
+  # list_deliveries rides UNCHANGED per the wave brief, so the router owns the
+  # clamp); there is no `?before` — the log is a bounded backlog, not a
+  # keyset-paged trail like /v1/audit.
+  get "/v1/notifications/deliveries" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      limit = min(parse_int(conn.query_params["limit"], 50), 200)
+      deliveries = Notifications.list_deliveries(conn.assigns.current_team, limit)
+      json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
     end
   end
 
@@ -7288,6 +7311,25 @@ defmodule BarkparkCloud.Web.Router do
       target_id: e.target_id,
       metadata: e.metadata,
       inserted_at: e.inserted_at
+    }
+  end
+
+  # One delivery-log row for GET /v1/notifications/deliveries. Mirrors audit_json/1:
+  # the durable send record flattened to its observable fields. Nothing here is a
+  # secret — recipient / event / channel / status / last_error are all non-sensitive
+  # routing labels (the encrypted transport credentials never live on a Delivery).
+  defp delivery_json(d) do
+    %{
+      id: d.id,
+      recipient: d.recipient,
+      event: d.event,
+      channel: d.channel,
+      kind: d.kind,
+      status: d.status,
+      attempts: d.attempts,
+      last_error: d.last_error,
+      http_status: d.http_status,
+      inserted_at: d.inserted_at
     }
   end
 
