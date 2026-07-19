@@ -85,3 +85,25 @@ All six round-1 slices built green and survived adversarial review (gates indepe
 **Ledger:** clean, zero fixes — all built slices in_progress with evidence-stamped criteria, merge-gated criteria left open for the lead; backlog b1–b5 filed and published.
 
 **Next wave takes:** (1) merge round 1 — S7 FIRST (live outage), then S1/S2/S5 behind the Elixir Test gate, S3/S6 on Go gates; S3+S6 merge from their `-r` branches. (2) Lead closes merge-gated criteria on merge, then re-runs the charter byte probes on guerrilla (ready ≤15 KB, prime ≤5 KB incl. --worker, search ≤45 KB, MCP brief) and stamps the numbers. (3) Dispatch axi-s4-help-templates the moment S1 merges. (4) Then backlog by value: b3 (real body snippets), b1 (frontier/cmux brief+help), b5, b2, b4; standing deferrals R6/R8/R9/R10 stay parked.
+
+### Wave 2026-07-19 (wave 2, finishing) — round 1 built + reviewed, grade A-
+
+All seven round-1 slices built green and survived adversarial review (gates independently re-run from a clean review worktree). Only review fix anywhere: `omitempty` on `TaskNotice`'s marshal fields (axi-b1's frontier machine JSON shipped `"task_id":"","blockers":null` noise — against the wave's own nil-key-omission law). Debrief: Paper `axi-brief-views-wave-2026-07-19`.
+
+**Landed (merge-ready branches):**
+
+| Slice | Final branch | Proof |
+|---|---|---|
+| axi-w2-s1 compact machine JSON | `loop-epic/machine-json-output-goes-compact-renderj-0` | exactly the 7 pinned tests re-pinned; ready piped 28,565→21,889 B (== jq -c ±1) |
+| axi-w2-s2 brief card v2 nine-cut diet | `loop-epic/brief-card-v2-the-nine-cut-diet-lands-in-1` | 102 tests 0F; realistic 50-card page 11,005 B (≤15,360), hostile 28,594 B (≤30,720); help[] truncation-honesty line |
+| axi-b1 help[]/notices parity ×5 surfaces | `loop-epic/help-and-notices-parity-across-every-typ-2-r` | Go gates green; typed twins match the help:/notice: house vocabulary exactly |
+| axi-b2 counts endpoint (Elixir) | `loop-epic/bundled-per-type-counts-endpoint-get-v1--3` | 5 tests 0F + 80 manifest contract tests 0F; Scope fail-closed verified |
+| axi-w2-s5 bare-noun counts line (Go) | `loop-epic/bp-noun-bare-shows-a-live-counts-line-fo-4` | 16 unit tests incl. all degrade seams; consumes b2's frozen shape verbatim |
+| axi-b3 snippet NO-GO + highlight bounding | `loop-epic/search-snippets-stay-app-level-measured--5` | 41 tests 0F + 209 consumer tests; 50-hit heavyweight page 4.5 MB→<45 KB |
+| axi-b5 codegen protective options test | `loop-epic/js-sdk-options-decode-lock-the-clean-aud-6` | 66/66 vitest; premise refuted honestly, test-only, no changeset |
+
+**Stalled:** nothing. axi-b4 is round-2 by design (shares cli.go with s5) — open, unclaimed, honest.
+
+**Ledger:** one fix — axi-b5's claim lapsed post-build leaving lifecycle `open`; patched to `in_progress` + republished. Everything else clean: evidence stamped mid-work, merge-gated criteria open for the lead, wave-1 tasks untouched, b6/b7 filed.
+
+**Next wave takes (the lead, post-merge close-out):** (1) merge round 1 — file sets disjoint; b1 merges from its `-r` branch; b2 may red the api gate on the docs/openapi.json golden (regen via CI artifact); b1 overlaps the concurrent PDS cycle on internal/cli — resolve at merge. (2) Close each task's merge-gated criterion + CAS-close on merge. (3) Dispatch axi-b4 the moment s5 merges. (4) CLOSE-OUT per decision 23: fresh binary, live guerrilla probes (ready ≤15 KB, prime bare AND `--worker` with a REAL held claim ≤5 KB, search ≤45 KB, `--full` escape, MCP tool-text — name the measurement point), re-claim the epic FRESH (epoch 4 lapsed+reaped), stamp criterion 0 with exact stored wording + live numbers + disclosed worst case, update `/papers/axi-agent-ergonomics-review`'s after-table (fresh read then patch; CLI `--if-rev` is a silent no-op, b6), close the epic with the fresh worker+epoch CAS; never cite #4167. (5) Backlog open: b6, b7; deferrals R6/R8/R9/R10 parked.
