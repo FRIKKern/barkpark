@@ -24,9 +24,12 @@ defmodule BarkparkWeb.WorkspaceController do
   """
   use BarkparkWeb, :controller
 
+  require Logger
+
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -213,14 +216,18 @@ defmodule BarkparkWeb.WorkspaceController do
       409 `workspace_slug_conflict` (PDS-D9) instead of an opaque 25P02.
 
   Returns the import stats — `{tables, total_rows}` — as JSON (plus
-  `mode: "merge"` on the merge path).
+  `mode: "merge"` on the merge path), and a `provenance` receipt: pulled data
+  says WHERE it came from, both in the response and, durably, in the target
+  workspace's `settings["pull_provenance"]` (PDS-D15/D16).
+
+  An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
+  rather than the MatchError-driven 500 it used to raise (PDS-D50).
   """
   def import(conn, %{"workspace_slug" => _slug} = params) do
     case params["mode"] || "clean" do
       "clean" ->
         {bundle, conn} = read_full_body(conn)
-        {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
-        json(conn, %{tables: stats.tables, total_rows: stats.total_rows})
+        clean_import(conn, bundle)
 
       "merge" ->
         if Application.get_env(:barkpark, :allow_bundle_import, false) do
@@ -254,10 +261,27 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  defp clean_import(conn, bundle) do
+    {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
+
+    json(conn, %{
+      tables: stats.tables,
+      total_rows: stats.total_rows,
+      provenance: stamp_provenance(stats.manifest)
+    })
+  rescue
+    e in InvalidBundleError -> invalid_bundle(conn, e)
+  end
+
   defp merge_import(conn, bundle) do
     case WorkspaceBundle.import_bundle(bundle, mode: :merge) do
       {:ok, stats} ->
-        json(conn, %{tables: stats.tables, total_rows: stats.total_rows, mode: "merge"})
+        json(conn, %{
+          tables: stats.tables,
+          total_rows: stats.total_rows,
+          mode: "merge",
+          provenance: stamp_provenance(stats.manifest)
+        })
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
@@ -275,6 +299,108 @@ defmodule BarkparkWeb.WorkspaceController do
             }
           }
         })
+    end
+  rescue
+    e in InvalidBundleError -> invalid_bundle(conn, e)
+  end
+
+  # PDS-D50 — the engine RAISES on bytes that cannot be a bundle (empty,
+  # truncated, not a tar, no manifest). The HTTP edge answers an honest,
+  # machine-branchable 422 rather than an opaque 500 the caller cannot act on.
+  defp invalid_bundle(conn, %InvalidBundleError{} = e) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: e.code, message: e.message}})
+  end
+
+  # PDS-D15/D16 — stamp WHERE the imported data came from into the target
+  # workspace's `settings["pull_provenance"]`, keyed by dataset slug, and echo
+  # the same receipt in the response.
+  #
+  # A dataset-narrowed bundle stamps exactly its one dataset; a whole-workspace
+  # bundle stamps every dataset it carries (all of them were pulled). The stamp
+  # is also what `Plugins.Bootstrap`'s guard reads, so a miss here is reported
+  # honestly (`stamped: false` + a reason) instead of being swallowed — an
+  # unstamped dataset is one boot away from a plugin clobber.
+  defp stamp_provenance(manifest) when is_map(manifest) do
+    stamp = %{
+      "source_server" => manifest["source_server"],
+      "source_workspace" => manifest["source_workspace"] || manifest["workspace_slug"],
+      "source_dataset" => manifest["source_dataset"] || manifest["dataset"],
+      "exported_at" => manifest["exported_at"],
+      "profile" => manifest["profile"] || "full",
+      "pulled_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    slugs = provenance_slugs(manifest)
+    workspace_slug = manifest["workspace_slug"]
+
+    case Tenancy.get_workspace_by_slug(workspace_slug) do
+      %Tenancy.Workspace{} = workspace when slugs != [] ->
+        stamped =
+          Enum.filter(slugs, fn slug ->
+            # Re-read per slug: each write returns the updated workspace and the
+            # next stamp must merge into it, not into a stale settings map.
+            case Tenancy.set_pull_provenance(workspace.id, slug, stamp) do
+              {:ok, _ws} ->
+                true
+
+              {:error, reason} ->
+                Logger.warning(
+                  "WorkspaceController.import: could not stamp pull provenance for " <>
+                    "#{inspect(workspace_slug)}/#{inspect(slug)}: #{inspect(reason)}"
+                )
+
+                false
+            end
+          end)
+
+        %{
+          workspace: workspace_slug,
+          datasets: stamped,
+          stamped: stamped != [],
+          stamp: stamp
+        }
+
+      %Tenancy.Workspace{} ->
+        unstamped(workspace_slug, stamp, "no_dataset_in_manifest")
+
+      nil ->
+        unstamped(workspace_slug, stamp, "workspace_not_found")
+    end
+  end
+
+  defp unstamped(workspace_slug, stamp, reason) do
+    Logger.warning(
+      "WorkspaceController.import: imported bundle for #{inspect(workspace_slug)} was " <>
+        "NOT provenance-stamped (#{reason})"
+    )
+
+    %{workspace: workspace_slug, datasets: [], stamped: false, reason: reason, stamp: stamp}
+  end
+
+  # Which dataset slots this bundle covers: the narrowed one when the export was
+  # dataset-scoped, else every dataset the manifest carries.
+  #
+  # KNOWN GAP, stated rather than hidden (PDS-D45/D46). `dataset_slugs` is the
+  # workspace-EXCLUSIVE attribution set, NOT "the datasets in this bundle": a
+  # slug also owned by a sibling workspace is dropped by `dataset_slugs_for/1`
+  # under the D21 exclusivity rule. So a WHOLE-WORKSPACE pull whose source slug
+  # is shared cross-tenant (guerrilla's `production` is owned by two workspaces)
+  # can land with that dataset UNSTAMPED — and an unstamped dataset is one boot
+  # away from the Bootstrap clobber this stamp exists to guard. A
+  # dataset-narrowed pull (`?dataset=<slug>`, the PDS front door) is unaffected:
+  # it reads `manifest["dataset"]`, which is always the slug that was asked for.
+  # Tracked as `pds-bl-whole-workspace-shared-slug-stamp`.
+  defp provenance_slugs(manifest) do
+    case manifest["dataset"] || manifest["source_dataset"] do
+      slug when is_binary(slug) ->
+        [slug]
+
+      _ ->
+        manifest["dataset_slugs"]
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
     end
   end
 

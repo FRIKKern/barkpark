@@ -130,7 +130,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
-          total_rows: non_neg_integer()
+          total_rows: non_neg_integer(),
+          manifest: map()
         }
 
   @doc """
@@ -174,7 +175,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   def export(_nil_or_other, _opts), do: {:error, :workspace_id_required}
 
   @doc """
-  Re-import a bundle binary. Returns `{:ok, stats}` where `stats.tables` maps
+  Re-import a bundle binary. Returns `{:ok, stats}` where `stats.manifest` is
+  the bundle's own manifest (so the caller can stamp pull provenance without
+  re-inflating the tar) and `stats.tables` maps
   each table to the rows imported into it (rows already present via the
   ON-CONFLICT path are not double-counted at the SQL level but ARE included in
   the member's row_count — the return counts rows the bundle CARRIED, in BOTH
@@ -221,7 +224,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             n = import_member(entry, Map.get(dumps, entry["name"], ""), mode)
             {Map.put(acc, entry["name"], n), total + n}
           end)
-          |> then(fn {tables, total} -> %{tables: tables, total_rows: total} end)
+          |> then(fn {tables, total} ->
+            # The manifest rides back out so the caller can stamp pull
+            # provenance without unpacking (and re-inflating) the tar twice.
+            %{tables: tables, total_rows: total, manifest: manifest}
+          end)
         after
           set_replication_role!("DEFAULT")
         end

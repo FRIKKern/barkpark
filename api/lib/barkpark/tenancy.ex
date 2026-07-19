@@ -533,6 +533,119 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :not_found}
 
+  # ── Pull provenance (PDS-D15/D16 — where pulled data came from) ────────────
+  #
+  # A dataset pulled from another server (`bp dev pull`) records WHERE it came
+  # from, in the same `settings` jsonb bag as `theme` / `plugins` / `chat`,
+  # under the `"pull_provenance"` key. Zero migration.
+  #
+  # Unlike those three this bag is TWO levels deep — keyed by DATASET SLUG —
+  # because one workspace holds sibling datasets that are pulled independently
+  # and must never clobber each other's stamp:
+  #
+  #     settings["pull_provenance"]["production"] =>
+  #       %{"source_server" => …, "source_workspace" => …, "source_dataset" => …,
+  #         "exported_at" => …, "profile" => …, "pulled_at" => …}
+  #
+  # The stamp is also the KEY the boot-time plugin bootstrap guard reads
+  # (`Barkpark.Plugins.Bootstrap`): a schema row living in a stamped
+  # (workspace, dataset) slot is pulled data, so bootstrap logs drift instead of
+  # overwriting it.
+
+  @doc """
+  Read the pull-provenance stamp for one dataset slug of a workspace.
+
+  Returns the stored map when this workspace carries a stamp for `dataset_slug`,
+  else `%{}`. Guards a `nil` workspace, a workspace whose `settings` is
+  nil/not-a-map (a legacy row read before the column backfilled), a
+  non-map `"pull_provenance"` bag and a non-binary slug — every one degrades to
+  `%{}` rather than raising, because this read sits on the boot path.
+  """
+  @spec pull_provenance(Workspace.t() | nil, binary() | nil) :: map()
+  def pull_provenance(%Workspace{settings: settings}, dataset_slug)
+      when is_map(settings) and is_binary(dataset_slug) do
+    with bag when is_map(bag) <- settings["pull_provenance"],
+         stamp when is_map(stamp) <- bag[dataset_slug] do
+      stamp
+    else
+      _ -> %{}
+    end
+  end
+
+  def pull_provenance(_workspace, _dataset_slug), do: %{}
+
+  @doc """
+  Read the whole pull-provenance bag of a workspace (`%{slug => stamp}`).
+
+  Same guards as `pull_provenance/2` → `%{}` on anything unexpected.
+  """
+  @spec pull_provenance(Workspace.t() | nil) :: map()
+  def pull_provenance(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["pull_provenance"] do
+      bag when is_map(bag) -> bag
+      _ -> %{}
+    end
+  end
+
+  def pull_provenance(_workspace), do: %{}
+
+  @doc """
+  Persist the pull-provenance stamp for ONE dataset slug of a workspace.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Merges into the
+  existing `settings` map under `"pull_provenance"` and, INSIDE that, under
+  `dataset_slug` — so the theme, plugin overrides, chat prefs AND every sibling
+  dataset's stamp survive. A non-map `provenance` or a non-binary slug returns
+  `{:error, :invalid_provenance}` without touching the DB; a missing workspace
+  returns `{:error, :not_found}`.
+
+  CLEARING a stamp is writing an EMPTY map: `set_pull_provenance(ws, slug, %{})`.
+  That is the supported escape hatch out of the `Plugins.Bootstrap` guard — a
+  stamped slot never takes a plugin schema update again, so the operator needs a
+  way back. It is pinned by `bootstrap_guard_test.exs` ("CLEARING the stamp is a
+  real escape hatch"). There is no CLI/HTTP surface for it yet
+  (`pds-bl-clear-pull-provenance`); a remote console is the only front door.
+  """
+  @spec set_pull_provenance(Workspace.t() | binary(), binary(), map()) ::
+          {:ok, Workspace.t()}
+          | {:error, :invalid_provenance | :not_found | Ecto.Changeset.t()}
+  def set_pull_provenance(workspace_or_id, dataset_slug, provenance)
+      when is_binary(dataset_slug) and is_map(provenance) do
+    do_set_pull_provenance(workspace_or_id, dataset_slug, provenance)
+  end
+
+  def set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
+    do: {:error, :invalid_provenance}
+
+  defp do_set_pull_provenance(%Workspace{} = workspace, dataset_slug, provenance) do
+    bag = pull_provenance(workspace)
+
+    settings =
+      Map.put(
+        workspace.settings || %{},
+        "pull_provenance",
+        Map.put(bag, dataset_slug, provenance)
+      )
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  defp do_set_pull_provenance(id, dataset_slug, provenance) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_pull_provenance(workspace, dataset_slug, provenance)
+    end
+  end
+
+  defp do_set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
+    do: {:error, :not_found}
+
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil
