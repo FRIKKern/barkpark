@@ -1423,6 +1423,7 @@
       border-radius: 4px; flex-shrink: 0;
     }
     .bp-desk-crumb:hover { color: var(--fg); background: var(--bg-muted); }
+    .bp-desk-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .bp-desk-crumb-sep { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; user-select: none; }
     .bp-desk-crumb--current { color: var(--fg); font-weight: 600; cursor: default; }
     .bp-desk-crumb--current:hover { background: none; }
@@ -1575,6 +1576,21 @@
       transition: background 0.1s, width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
     }
     .pane-column--collapsed:hover { background: var(--bg-muted); }
+    /* PRE-PROVISIONED for spd-s6, which converts this strip from a <div
+       phx-click> into a real <button>. At narrow widths the strip is the
+       ONLY route back, so it has to be reachable by keyboard — and a
+       <button> arrives carrying UA chrome (centred text, a border, the UA
+       font) that would wreck a 44px vertical rail. The reset therefore has
+       to exist BEFORE the element changes, and it must target the EXISTING
+       class: studio_live_width_bucket_test matches this class attribute
+       exactly, so a new hook class would select nothing.
+       Reset idiom copied from .pane-section-header in this same file. */
+    button.pane-column--collapsed {
+      border: 0; padding: 0; text-align: left;
+      font-family: inherit; font-size: inherit; color: inherit;
+      -webkit-appearance: none; appearance: none;
+    }
+    .pane-column--collapsed:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     /* The strip's INNER subtree is replaced synchronously in the click tick —
        by the time the box starts shrinking, the vertical label is already
        mounted, so a bare width transition shows a tiny rotated label adrift in
@@ -1822,6 +1838,9 @@
       color: var(--fg-dim); display: inline-flex; align-items: center;
     }
     .bp-doc-sidebar__collapse:hover { color: var(--fg-muted); }
+    /* The only affordance that closes the inspector once it overlays the
+       document — it must be able to receive focus visibly. */
+    .bp-doc-sidebar__collapse:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
     .bp-doc-sidebar__title {
       font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted);
       text-transform: uppercase; letter-spacing: 0.04em;
