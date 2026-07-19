@@ -56,6 +56,15 @@ x-control-plane: &control_plane
     # cloud/.env to activate; VERCEL_TEAM_ID only for a team-scoped token.
     - VERCEL_PLATFORM_TOKEN
     - VERCEL_TEAM_ID
+    # Platform-operator allowlist (isu-w5 / GR60): comma-separated emails of
+    # REGISTERED accounts. Passthrough-only and optional — unset means `[]`,
+    # which fails CLOSED in BOTH directions: /v1/me reports
+    # platform_operator:false for everyone (the Operator console link hides and
+    # all /v1/operator/* routes 403), and the daily fleet digest stays a logged
+    # no-op. Without this bare line compose passes NOTHING (see the rule at the
+    # top of this file), so setting it in .env alone would set it on the HOST
+    # and leave the CONTAINER blind.
+    - PLATFORM_ADMIN_EMAILS
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own
