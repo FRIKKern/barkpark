@@ -2791,9 +2791,8 @@ defmodule Barkpark.CycleFleet do
                  successor_revision
                ),
              {:ok, authority} <- validate_gate_receipt(target, legacy_gate, receipt_digest),
-             false <-
-               Repo.exists?(from q in Quarantine, where: q.correction_wave_id == ^target.id),
              head <- Promotion.head(root.id),
+             :ok <- promotion_quarantine_gate(target, head),
              true <-
                nullable_uuid(payload["previous_event_id"]) == (head && head.id) ||
                  {:error, :stale_promotion_head},
@@ -2815,11 +2814,70 @@ defmodule Barkpark.CycleFleet do
             materialization
           )
         else
-          true -> Repo.rollback(:correction_quarantined)
           {:error, reason} -> Repo.rollback(reason)
         end
     end
   end
+
+  defp promotion_quarantine_gate(target, head) do
+    quarantines =
+      Repo.all(from quarantine in Quarantine, where: quarantine.correction_wave_id == ^target.id)
+
+    cond do
+      quarantines == [] ->
+        :ok
+
+      compensated_unavailable_head?(target, head) and
+          Enum.all?(quarantines, &unavailable_smoke_quarantine?(target, &1)) ->
+        :ok
+
+      true ->
+        {:error, :correction_quarantined}
+    end
+  end
+
+  defp compensated_unavailable_head?(target, %Event{action: "rollback"} = head) do
+    case Repo.get_by(PublicSmoke,
+           target_wave_id: target.id,
+           compensation_event_id: head.id,
+           state: "compensated"
+         ) do
+      %PublicSmoke{promotion_event_id: promotion_id, failure: failure} ->
+        promotion_id == head.previous_event_id and unavailable_smoke_failure?(failure)
+
+      nil ->
+        false
+    end
+  end
+
+  defp compensated_unavailable_head?(_target, _head), do: false
+
+  defp unavailable_smoke_quarantine?(target, quarantine) do
+    with [promotion_id] <-
+           Regex.run(
+             ~r/^public-reader-smoke:\/\/([0-9a-f-]{36})\/failed$/,
+             quarantine.evidence,
+             capture: :all_but_first
+           ),
+         %Event{target_wave_id: target_id, idempotency_key: promotion_key} <-
+           Repo.get(Event, promotion_id),
+         true <- target_id == target.id,
+         %PublicSmoke{state: "compensated", failure: failure} <-
+           Repo.get_by(PublicSmoke, promotion_event_id: promotion_id),
+         true <- unavailable_smoke_failure?(failure),
+         true <- quarantine.idempotency_key == "#{promotion_key}:public-smoke-quarantine",
+         true <- quarantine.evidence_revision == EpicFleet.canonical_digest(failure),
+         true <-
+           quarantine.reason ==
+             "post-promotion anonymous public Paper smoke failed: :public_release_smoke_unavailable" do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp unavailable_smoke_failure?(%{"reason" => ":public_release_smoke_unavailable"}), do: true
+  defp unavailable_smoke_failure?(_failure), do: false
 
   defp persist_promotion_event(
          root,

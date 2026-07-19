@@ -70,6 +70,9 @@ defmodule Barkpark.CycleReleaseGateHostileAdapter do
            "attempts" => put_in(attempts, [Access.at(1), "verdict"], "fail")
          }}
 
+      :public_smoke_unavailable ->
+        {:error, :public_release_smoke_unavailable}
+
       _ ->
         {:ok, %{"format" => "cycle-release-public-smoke-v1", "attempts" => attempts}}
     end
@@ -467,6 +470,16 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     assert Repo.aggregate(Quarantine, :count) == quarantine_count
     assert Repo.get!(PublicSmoke, smoke.id).state == "compensated"
 
+    Application.put_env(:barkpark, :cycle_release_capture_test_mode, :valid)
+
+    assert {:error, :correction_quarantined} =
+             promote(
+               fixture,
+               activation.receipt,
+               "#{fixture.promote_key}-content-retry",
+               smoke.compensation_event_id
+             )
+
     assert_sql_rejected(~r/invalid release public smoke state transition/, [
       sql_attack("SET session_replication_role = replica", []),
       sql_attack(
@@ -479,6 +492,56 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
         [dump(smoke.id), dump(event.id)]
       )
     ])
+  end
+
+  test "an unavailable smoke adapter can retry only through its exact compensated rollback" do
+    fixture = release_fixture!()
+    {:ok, _campaign} = stage_candidate(fixture, "campaign", fixture.campaign_document)
+    {:ok, _successor} = stage_candidate(fixture, "successor", fixture.successor_document)
+    {:ok, activation} = activate(fixture, fixture.activate_key)
+
+    Application.put_env(:barkpark, :cycle_release_capture_test_mode, :public_smoke_unavailable)
+
+    assert {:error, :public_release_smoke_failed} =
+             promote(fixture, activation.receipt, fixture.promote_key)
+
+    failed_event = Repo.get_by!(Event, idempotency_key: fixture.promote_key)
+    failed_smoke = Repo.get_by!(PublicSmoke, promotion_event_id: failed_event.id)
+    rollback = Repo.get!(Event, failed_smoke.compensation_event_id)
+    assert rollback.previous_event_id == failed_event.id
+
+    Application.put_env(:barkpark, :cycle_release_capture_test_mode, :valid)
+
+    assert {:error, :stale_promotion_head} =
+             promote(fixture, activation.receipt, "#{fixture.promote_key}-stale")
+
+    assert {:ok, promoted} =
+             promote(
+               fixture,
+               activation.receipt,
+               "#{fixture.promote_key}-retry",
+               rollback.id
+             )
+
+    retry_smoke = Repo.get_by!(PublicSmoke, promotion_event_id: promoted.id)
+    assert retry_smoke.state == "pass"
+
+    expected_prefix =
+      "#{BarkparkWeb.Endpoint.url()}/w/#{fixture.workspace.slug}/p/#{fixture.project.slug}/papers/"
+
+    assert Enum.all?(retry_smoke.request["documents"], fn document ->
+             String.starts_with?(document["url"], expected_prefix) and
+               length(String.split(document["url"], BarkparkWeb.Endpoint.url())) == 2
+           end)
+
+    assert Repo.get_by!(Quarantine,
+             root_wave_id: fixture.root.id,
+             correction_wave_id: fixture.target.id
+           )
+
+    assert {:ok, lifecycle} = CycleFleet.current_correction(fixture.root_scope)
+    assert lifecycle.current.wave_revision == fixture.target.id
+    assert Enum.any?(lifecycle.quarantines, &(&1.correction_wave_revision == fixture.target.id))
   end
 
   test "raw SQL cannot mutate authority rows or bypass role, capture, consumption, and promotion constraints" do
@@ -726,6 +789,8 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     b1_experiment = promotion_b1!(target_scope, target, summary, "task07-b1-#{unique}")
 
     %{
+      workspace: workspace,
+      project: project,
       root_scope: root_scope,
       target_scope: target_scope,
       root: root,
@@ -770,10 +835,10 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     })
   end
 
-  defp promote(fixture, receipt, key) do
+  defp promote(fixture, receipt, key, previous_event_id \\ nil) do
     CycleFleet.promote_correction(fixture.root_scope, %{
       idempotency_key: key,
-      previous_event_id: nil,
+      previous_event_id: previous_event_id,
       actor: actor(),
       evidence: "paper://task07/promotion",
       evidence_revision: String.duplicate("d", 64),
