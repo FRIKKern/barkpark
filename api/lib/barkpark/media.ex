@@ -533,13 +533,20 @@ defmodule Barkpark.Media do
 
     * `{:ok, relative_path}` — bytes written (parent dirs created).
     * `{:error, :invalid_path}` — the path is not a safe server-blob shape (422).
+    * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
+      empty; the common cause is a caller mislabeling the content-type (e.g.
+      `application/json`), which lets `Plug.Parsers` consume the body before the
+      controller reads it — refuse loudly instead of writing a 0-byte blob the
+      serve path would then happily stream.
     * `{:error, :storage_unavailable}` — a disk fault on write (503).
 
   Non-raising file ops mirror `upload/3`: a read-only mount / ENOSPC returns a
   typed error, never a bare 500.
   """
   @spec put_blob(String.t(), binary()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :storage_unavailable}
+          {:ok, String.t()} | {:error, :invalid_path | :empty_body | :storage_unavailable}
+  def put_blob(_relative_path, ""), do: {:error, :empty_body}
+
   def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
     if valid_blob_path?(relative_path) do
       full_path = file_path(relative_path)

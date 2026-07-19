@@ -215,7 +215,19 @@ defmodule BarkparkWeb.MediaController do
             |> json(%{written: written, bytes: byte_size(body)})
 
           {:error, :invalid_path} ->
-            unprocessable(conn, "invalid blob path")
+            unprocessable(conn, "invalid_path", "invalid blob path")
+
+          {:error, :empty_body} ->
+            # A zero-byte blob is never legitimate media. The common cause is a
+            # mislabeled content-type (e.g. application/json) letting
+            # Plug.Parsers consume the body before this controller reads it —
+            # refuse loudly instead of writing an empty file serve/2 would
+            # then happily stream.
+            unprocessable(
+              conn,
+              "empty_body",
+              "empty blob body — send the raw bytes as application/octet-stream"
+            )
 
           {:error, :storage_unavailable} ->
             {:error, :storage_unavailable}
@@ -245,12 +257,12 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  defp unprocessable(conn, message) do
+  defp unprocessable(conn, code, message) do
     # No canonical `:unprocessable` atom exists in Errors; build the 422 envelope
     # directly and stamp it so it still carries hint + request_id like every
     # other error on this surface.
     env =
-      %{code: "invalid_path", message: message, status: 422}
+      %{code: code, message: message, status: 422}
       |> Errors.stamp(conn)
 
     conn

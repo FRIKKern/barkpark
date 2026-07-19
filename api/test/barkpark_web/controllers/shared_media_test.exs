@@ -359,7 +359,9 @@ defmodule BarkparkWeb.SharedMediaTest do
       secret = Media.file_path("../pds-blob-escape-#{System.unique_integer([:positive])}.txt")
       on_exit(fn -> File.rm_rf(secret) end)
 
-      resp = admin_put_blob(conn, ws_a, "../#{Path.basename(secret)}", "EVIL") |> json_response(422)
+      resp =
+        admin_put_blob(conn, ws_a, "../#{Path.basename(secret)}", "EVIL") |> json_response(422)
+
       assert resp["error"]["code"] == "invalid_path"
       refute File.exists?(secret)
     end
@@ -369,6 +371,35 @@ defmodule BarkparkWeb.SharedMediaTest do
         admin_put_blob(conn, ws_a, "uploads/2026/.hidden/x.png", "X") |> json_response(422)
 
       assert resp["error"]["code"] == "invalid_path"
+    end
+
+    test "an empty body is rejected 422 empty_body and nothing is written", %{
+      conn: conn,
+      ws_a: ws_a
+    } do
+      rel = "uploads/shared-media-test/empty-#{System.unique_integer([:positive])}.png"
+
+      resp = admin_put_blob(conn, ws_a, rel, "") |> json_response(422)
+      assert resp["error"]["code"] == "empty_body"
+      refute File.exists?(Media.file_path(rel))
+    end
+
+    test "a mislabeled content-type (json) whose body Plug.Parsers consumed is refused, never a 0-byte blob",
+         %{conn: conn, ws_a: ws_a} do
+      # `application/json` routes the body through Plug.Parsers, which consumes
+      # it before the controller's read_body — the raw body arrives EMPTY. The
+      # guard refuses instead of writing an empty blob serve/2 would stream.
+      rel = "uploads/shared-media-test/mislabeled-#{System.unique_integer([:positive])}.png"
+
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @admin_token)
+        |> put_req_header("content-type", "application/json")
+        |> put("/api/workspaces/#{ws_a.slug}/media/blob/#{rel}", Jason.encode!(%{not: "bytes"}))
+        |> json_response(422)
+
+      assert resp["error"]["code"] == "empty_body"
+      refute File.exists?(Media.file_path(rel))
     end
 
     test "anonymous PUT is gated (no admin token)", %{conn: conn, ws_a: ws_a} do
