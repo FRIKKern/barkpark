@@ -15,14 +15,38 @@ config :barkpark, Barkpark.Repo,
   hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
   database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2,
+  # Flat, generous, env-overridable pool — was `System.schedulers_online() * 2`.
+  # On a cgroup-throttled CI runner schedulers_online() can report 1–2, giving a
+  # pool of only 2–4; a handful of legitimate boot-time holds (Indx monitor/
+  # recovery, the post-boot Sharing.refresh/check_pg_trgm probes, Postgrex
+  # reconnect churn) then starve it, and test_helper.exs's very first CREATE
+  # SCHEMA sits in the checkout queue until it is DROPPED — reddening the whole
+  # gate before a single test runs (run 29665467133: 89.7s in-queue, 0 tests).
+  # postgres:15's default max_connections is 100, so 20 is comfortably safe.
+  # DIAGNOSTIC VALUE: if the boot checkout STILL starves for ~90s at pool 20,
+  # the cause is a lock/held-connection or a wedged CI Postgres service — NOT
+  # pool math — and the fix belongs at the workflow/infra layer.
+  pool_size: String.to_integer(System.get_env("BARKPARK_TEST_POOL_SIZE", "20")),
   # Per-hold watchdog. At the 15s default, a legitimately long single hold
   # under saturated-suite CPU (the EDItEUR/Thema codelist seed's big JSONB
   # register) gets force-disconnected mid-query — killing a pool connection
   # and starving concurrent tests' setups (same poisoning as the orphan-task
   # leak drained by DataCase.setup_sandbox). 45s stays under ExUnit's 60s
   # test timeout so a truly hung test still fails as a test, not a disconnect.
-  timeout: 45_000
+  timeout: 45_000,
+  # Checkout-queue tolerance. The pool is only schedulers_online()*2 (≈8 on the
+  # 4-core CI runner) yet the async suite fans out schedulers_online() concurrent
+  # tests, each spawning $callers-scoped Tasks that also check out. Under that
+  # contention — plus a service-container Postgres still warming at job start —
+  # a checkout can miss the default 50ms target / 1000ms interval and get DROPPED
+  # after ~5s ("connection not available and request was dropped from queue"),
+  # reddening the WHOLE gate: at boot it kills test_helper's first CREATE SCHEMA
+  # before a single test runs; mid-suite it fails a random test. Widen the wait
+  # so a transient spike QUEUES instead of dropping. This never masks a real hang
+  # (that still hits :timeout above / ExUnit's 60s) — it only stops declaring a
+  # busy-but-healthy pool dead. Ecto's own remedy #4 for this exact error.
+  queue_target: 5_000,
+  queue_interval: 30_000
 
 # Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
