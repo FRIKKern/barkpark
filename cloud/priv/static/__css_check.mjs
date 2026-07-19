@@ -97,6 +97,8 @@ const ALLOW_PREFIXES = [
   "fleet-usage-cell",           // + toneCls (.fleet-usage-cell rules)
   "metric-card metric--",       // + esc(m.role) (.metric-card / .metric-- rules)
   "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
+  // gr-w3 (v4 shell): the sidebar instance-morph section links (paintInstanceSections)
+  "nav-link nav-sub",           // + (on ? " is-active" : "") (.sidebar .nav-link / .nav-sub / .is-active)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks

@@ -181,6 +181,16 @@ const MARKER_BEGIN =
   "/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */";
 const MARKER_END = "/* END GENERATED: tokens */";
 
+// The cloud SPA's BP_THEMES list (app.js) is GENERATED, not hand-kept (GR12):
+// the hand-list had already drifted (charple emitted in CSS but unreachable
+// because the JS enum omitted it). emit.mjs owns the theme-id enum now; a hand
+// edit reds design/check.mjs Part A the same way a stale CSS surface does. The
+// marker is a JS block comment (valid CSS-comment syntax too), so it rides the
+// same splice machinery — see the app.js artifact's markerBegin/markerEnd.
+const BP_THEMES_MARKER_BEGIN =
+  "/* BEGIN GENERATED: bp-theme ids (design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const BP_THEMES_MARKER_END = "/* END GENERATED: bp-theme ids */";
+
 // ── color helpers ───────────────────────────────────────────────────────────
 const hsl = (ch) => `hsl(${ch})`;
 const alpha = (a) => String(a); // 0.15 -> "0.15", 0.2 -> "0.2"
@@ -1885,11 +1895,29 @@ function bulldocsBlock(themes = loadThemes()) {
   ].join("\n");
 }
 
+// The cloud SPA theme-id enum (app.js `var BP_THEMES = [ … ]`). loadThemes()
+// leads with the default skin (evergreen) then dir order, so the emitted list is
+// the SAME ordering every other generated enumeration uses (Go Themes(), the
+// Studio picker, the CSS blocks). Indented 4 spaces to sit inside the array
+// literal in the IIFE; no trailing comma or newline (the marker's END line
+// carries the newline). This kills the GR12 drift: the SPA's identity picker
+// reads BP_THEMES at runtime, so a new design/themes/<id>.json reaches the picker
+// the moment `emit --write` runs — no second hand-list to forget.
+export function bpThemesList(themes = loadThemes()) {
+  return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
+}
+
 // ── artifact registry ────────────────────────────────────────────────────────
-// kind "css"             : splice content between the shared marker block.
+// kind "css"             : splice content between a marker block. The shared
+//                          BEGIN/END GENERATED: tokens marker by default; an
+//                          artifact may override with markerBegin/markerEnd to
+//                          own a DISTINCT marker in a file that also carries the
+//                          tokens block elsewhere (the cloud SPA's app.js).
 // kind "go"/"ts"/"elixir": the build() is the WHOLE file.
 export const ARTIFACTS = [
   { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
+  { name: "cloud SPA theme ids", path: "cloud/priv/static/app.js", kind: "css",
+    markerBegin: BP_THEMES_MARKER_BEGIN, markerEnd: BP_THEMES_MARKER_END, build: bpThemesList },
   { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
@@ -1950,11 +1978,16 @@ export function evaluate(a) {
     // whole-file artifacts (Go, TS): the build() output IS the entire file.
     return { ...a, abs, current, expected: content };
   }
-  // css: splice into the marker block of the CURRENT file
+  // css: splice into the marker block of the CURRENT file. Most surfaces share
+  // the tokens marker; an artifact may name its OWN marker (markerBegin/End) to
+  // splice a distinct region in a file that carries the tokens block elsewhere.
   const base = current == null ? "" : current;
-  const m = base.match(markerRe);
+  const re = a.markerBegin
+    ? new RegExp(`([ \\t]*${escapeRe(a.markerBegin)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(a.markerEnd)})`)
+    : markerRe;
+  const m = base.match(re);
   if (!m) {
-    return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: tokens marker in ${a.path}` };
+    return { ...a, abs, current, expected: null, error: `no ${a.markerBegin || "BEGIN/END GENERATED: tokens"} marker in ${a.path}` };
   }
   const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
   return { ...a, abs, current, expected };

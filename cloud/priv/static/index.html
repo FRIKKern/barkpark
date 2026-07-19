@@ -134,67 +134,122 @@
 
     <!-- ===================== APP SHELL (has token) ===================== -->
     <div id="app-shell" class="app-shell" hidden>
-      <!-- ---------- top bar ---------- -->
-      <header class="topbar">
-        <div class="topbar-left">
-          <a class="wordmark" href="#overview">
-            <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
-            <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+      <!-- ---------- sidebar (v4 shell — GR1/GR10) ----------
+           The sidebar is PRESENTATION over the unchanged 4-places-plus-Settings
+           IA: the primary nav-links keep class="nav-link" + data-view so
+           applyRoute() lights them exactly as before. It CONTEXT-MORPHS — three
+           <div class="nav-layer"> panes (root / instance / site); applyShellNav()
+           shows exactly one from the parsed route (shellNavLayer). -->
+      <aside class="sidebar" aria-label="Primary">
+        <!-- workspace switcher + plan chip → opens the Account modal -->
+        <button class="ws-switch" id="ws-switch" type="button" aria-label="Workspace and account">
+          <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
+          <span class="ws-name" id="account-team">My team</span>
+          <span class="ws-plan" id="ws-plan" hidden></span>
+          <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <!-- Find / ⌘K → the EXISTING command palette (never a fork) -->
+        <button class="nav-find" id="nav-find" type="button">
+          <svg class="nav-find-ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="7.8" y1="7.8" x2="11" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>Find</span>
+          <span class="nav-find-key">⌘K</span>
+        </button>
+
+        <!-- LAYER: workspace root (Overview / Fleet / Sites / Activity + Settings) -->
+        <div class="nav-layer" id="nav-layer-root">
+          <span class="nav-eyebrow">Workspace</span>
+          <a href="#overview" class="nav-link" data-view="overview">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><rect x="1" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor"/><rect x="8.5" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/><rect x="1" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/><rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/></svg>
+            <span>Overview</span>
           </a>
-          <span class="crumb-sep" aria-hidden="true">/</span>
-          <!-- Breadcrumb / org slot. P0 shows the team chip; later phases push
-               instance + site crumbs in here (Fleet / summer-lake / site). -->
-          <span class="org-chip" id="org-chip">
-            <span class="org-avatar" aria-hidden="true">B</span>
-            <span class="org-name" id="account-team">My team</span>
-          </span>
-          <!-- Drill-down crumbs (Fleet / instance) — filled by setBreadcrumb(). -->
-          <span class="crumbs" id="crumbs"></span>
-        </div>
-
-        <div class="topbar-right">
-          <a class="topbar-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" id="nav-docs">Docs</a>
-          <a class="topbar-link" href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener" id="nav-help">Help</a>
-          <!-- Theme IDENTITY picker — orthogonal to the light/dark toggle beside it
-               (theme-system D36). Options are hardcoded; an id whose CSS block is
-               absent falls back to the evergreen declarations, so it never breaks. -->
-          <select class="btn btn-ghost btn-sm" id="bp-theme-picker" aria-label="Theme palette">
-            <option value="evergreen">Evergreen</option>
-            <option value="ember">Ember</option>
-            <option value="fjord">Fjord</option>
-          </select>
-          <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
-            <span id="theme-label">Dark</span>
-          </button>
-          <button class="acct-btn" id="acct-btn" type="button" aria-label="Account menu">
-            <span class="acct-avatar" id="account-avatar" aria-hidden="true">B</span>
-          </button>
-        </div>
-      </header>
-
-      <!-- ---------- tab nav ---------- -->
-      <!-- IA reshape (charter decision 6): 4-place primary nav + a Settings
-           cluster. Launch is no longer a tab — it is an action on Overview and
-           the empty fleet. The <details> disclosure is a native, keyboard-
-           accessible menu; applyRoute() closes it after every navigation. -->
-      <nav class="tabnav" aria-label="Primary">
-        <div class="tabnav-primary">
-          <a href="#overview" class="nav-link" data-view="overview">Overview</a>
-          <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
-          <a href="#sites" class="nav-link" data-view="sites">Sites</a>
-          <a href="#activity" class="nav-link" data-view="activity">Activity</a>
-        </div>
-        <details class="nav-menu">
-          <summary class="nav-link nav-menu-trigger" data-view="settings">Settings<span class="nav-caret" aria-hidden="true"></span></summary>
-          <div class="nav-menu-list">
-            <a href="#settings/billing" class="nav-menu-item">Billing</a>
-            <a href="#settings/providers" class="nav-menu-item">Providers</a>
-            <a href="#settings/notifications" class="nav-menu-item">Notifications</a>
-            <a href="#settings/tokens" class="nav-menu-item">API tokens</a>
-            <a href="#settings/members" class="nav-menu-item">Members</a>
+          <a href="#fleet" class="nav-link" data-view="fleet">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><rect x="1" y="2" width="13" height="3.4" rx="1.5" fill="currentColor"/><rect x="1" y="9.6" width="13" height="3.4" rx="1.5" fill="currentColor" opacity="0.45"/></svg>
+            <span>Fleet</span>
+          </a>
+          <a href="#sites" class="nav-link" data-view="sites">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="1.5" y1="7.5" x2="13.5" y2="7.5" stroke="currentColor" stroke-width="1.2" opacity="0.6"/></svg>
+            <span>Sites</span>
+          </a>
+          <a href="#activity" class="nav-link" data-view="activity">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><polyline points="1,8 4.5,8 6.5,3 9,12 10.8,8 14,8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
+            <span>Activity</span>
+          </a>
+          <div class="nav-group">
+            <span class="nav-eyebrow">Settings</span>
+            <a href="#settings/billing" class="nav-link nav-sub" data-view="billing">Billing</a>
+            <a href="#settings/providers" class="nav-link nav-sub" data-view="providers">Providers</a>
+            <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
+            <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
+            <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
           </div>
-        </details>
-      </nav>
+        </div>
+
+        <!-- LAYER: instance morph — back row + ctx + the instance's sections
+             (built by paintInstanceSections → #instance/<id>/<tab>) -->
+        <div class="nav-layer" id="nav-layer-instance" hidden>
+          <a href="#fleet" class="nav-back">← Fleet</a>
+          <div class="nav-ctx"><span class="nav-ctx-dot" id="nav-instance-dot" aria-hidden="true"></span><span class="nav-ctx-name" id="nav-instance-name">Instance</span></div>
+          <span class="nav-eyebrow">Instance</span>
+          <div id="nav-instance-sections"></div>
+        </div>
+
+        <!-- LAYER: site morph -->
+        <div class="nav-layer" id="nav-layer-site" hidden>
+          <a href="#sites" class="nav-back">← All sites</a>
+          <div class="nav-ctx"><span class="nav-ctx-dot" id="nav-site-dot" aria-hidden="true"></span><span class="nav-ctx-name" id="nav-site-name">Site</span></div>
+          <span class="nav-eyebrow">Site</span>
+          <a href="#sites" class="nav-link nav-sub">All sites</a>
+        </div>
+
+        <div class="nav-spacer"></div>
+
+        <!-- footer cluster: role-gated Operator (fail-closed on platform_operator),
+             Docs, and the account block. -->
+        <div class="nav-foot">
+          <a href="#operator" class="nav-link nav-operator" id="nav-operator" hidden>
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.5 2.5"/></svg>
+            <span>Operator</span>
+          </a>
+          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" class="nav-link" id="nav-docs">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="1.5" width="10" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4.8" y1="5" x2="9.2" y2="5" stroke="currentColor" stroke-width="1.3"/><line x1="4.8" y1="8" x2="9.2" y2="8" stroke="currentColor" stroke-width="1.3"/></svg>
+            <span>Docs</span>
+          </a>
+          <button class="nav-account" id="acct-btn" type="button" aria-label="Account menu">
+            <span class="acct-avatar" id="acct-avatar" aria-hidden="true">B</span>
+            <span class="acct-id">
+              <span class="acct-name" id="acct-name">Account</span>
+              <span class="acct-email" id="acct-email"></span>
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- ---------- shell main (topbar + content) ---------- -->
+      <div class="shell-main">
+        <!-- topbar: instance-scope dropdown · live pulse (SSE chip mounts into
+             .topbar-right) · theme controls (5-identity picker + light/dark). -->
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="topbar-scope">
+              <button class="scope-switch" id="scope-switch" type="button" aria-haspopup="true" aria-expanded="false">
+                <span class="scope-label" id="scope-label">Workspace</span>
+                <svg class="scope-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><polyline points="1,1 4.5,4.5 8,1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </button>
+              <div class="scope-menu" id="scope-menu" role="menu" hidden></div>
+            </div>
+          </div>
+
+          <div class="topbar-right">
+            <!-- Theme IDENTITY picker — orthogonal to the light/dark toggle beside
+                 it (theme-system D36). Options are GENERATED from BP_THEMES at boot
+                 (renderThemePicker → bpThemeOptions), so all 5 identities appear. -->
+            <select class="btn btn-ghost btn-sm" id="bp-theme-picker" aria-label="Theme palette"></select>
+            <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+              <span id="theme-label">Dark</span>
+            </button>
+          </div>
+        </header>
 
       <main class="content">
         <!-- ---------- OVERVIEW (home) ---------- -->
@@ -356,15 +411,8 @@
           <div id="site-body" aria-live="polite"></div>
         </section>
       </main>
-
-      <!-- ---------- footer ---------- -->
-      <footer class="appfoot">
-        <span class="appfoot-brand">Barkpark Cloud &middot; <i>managed instances</i></span>
-        <nav class="appfoot-links" aria-label="Footer">
-          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">Docs</a><a href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener">Help</a>
-        </nav>
-      </footer>
-    </div>
+      </div><!-- /.shell-main -->
+    </div><!-- /#app-shell -->
 
     <!-- ===================== /new DEPLOY FLOW (dwb-6) =====================
          A REAL path (GET /new?template=<slug>, served by the router as the SPA
