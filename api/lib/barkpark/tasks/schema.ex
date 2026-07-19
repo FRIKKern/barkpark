@@ -72,6 +72,16 @@ defmodule Barkpark.Tasks.Schema do
 
       # Bookmarkable ?desk= filter chips over the task list pane.
       desk_groups: [
+        # Thought states at the ladder bottom (task-lifecycle-visibility):
+        # candidates being weighed or investigated, before they are felt ready
+        # (open). Mirrors the closed-chip `{"in":[...]}` grouping pattern.
+        %{
+          "name" => "thinking",
+          "title" => "Thinking",
+          "filter" => %{
+            "content.lifecycle_status" => %{"in" => ["considering", "researching"]}
+          }
+        },
         %{
           "name" => "open",
           "title" => "Open",
@@ -461,7 +471,7 @@ defmodule Barkpark.Tasks.Schema do
           "group" => "work",
           "validation" => %{"required" => true},
           "description" =>
-            "open | in_progress | blocked | done | cancelled. Engine-written by claim/close/sweep; agents do not set in_progress by hand."
+            "considering | researching | open | in_progress | blocked | done | cancelled. OPEN MEANS READY — only open|blocked is claimable. considering/researching are thought states (a candidate the strategizer names, or an investigation in flight) and carry their object in content.engagement. Engine-written by claim/close/sweep; agents do not set in_progress by hand."
         },
         %{
           "name" => "assignee",
@@ -545,7 +555,15 @@ defmodule Barkpark.Tasks.Schema do
               "name" => "resolution",
               "title" => "Resolution",
               "type" => "select",
-              "options" => ["shipped", "fixed", "partial", "wont_do", "duplicate", "superseded"]
+              "options" => [
+                "shipped",
+                "fixed",
+                "partial",
+                "wont_do",
+                "duplicate",
+                "superseded",
+                "discarded"
+              ]
             },
             %{
               "name" => "actual_size",

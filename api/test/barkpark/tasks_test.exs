@@ -73,8 +73,11 @@ defmodule Barkpark.TasksTest do
     end
 
     test "Tasks.lifecycle_statuses/0 and Tasks.kinds/0 are stable contract" do
+      # Five original states first (index-stable), then the two thought states
+      # appended (task-lifecycle-visibility 5→7). "open means ready" still holds:
+      # considering/researching are not in the ready/claim allowlist.
       assert Tasks.lifecycle_statuses() ==
-               ~w(open in_progress blocked done cancelled)
+               ~w(open in_progress blocked done cancelled considering researching)
 
       assert Tasks.kinds() == ~w(task)
     end
