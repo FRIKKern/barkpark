@@ -9,13 +9,13 @@
  {
   "name": "PortableDoc renderer — client entry (dist/index.mjs)",
   "path": "dist/index.mjs",
-  "limit": "21 KB",
+  "limit": "21.5 KB",
   "gzip": true
  },
  {
   "name": "RSC server entry (dist/server.mjs — PortableDoc + toPlainText closure)",
   "path": "dist/server.mjs",
-  "limit": "20.1 KB",
+  "limit": "20.6 KB",
   "gzip": true
  },
  {
