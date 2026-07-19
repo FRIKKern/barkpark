@@ -2066,6 +2066,73 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "json"
       ),
+      core_cmd(
+        "cycle.quarantine",
+        "cycle",
+        "quarantine",
+        "Append immutable evidence that a correction wave cannot be promoted.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable quarantine replay key."),
+          arg("reason", true, "string", "Durable quarantine reason."),
+          arg("correction_receipt_json", true, "string", "Canonical correction receipt JSON."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.promote",
+        "cycle",
+        "promote",
+        "Append a fenced event making one verified correction current.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable promotion replay key."),
+          arg("correction_receipt_json", true, "string", "Canonical correction receipt JSON."),
+          arg("gate_receipt_json", true, "string", "Canonical release-gate receipt JSON."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
+        ],
+        flags: [
+          flag(
+            "previous_event_id",
+            "string",
+            "Current promotion event UUID; omit only for the first promotion."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.rollback",
+        "cycle",
+        "rollback",
+        "Append a fenced pointer event restoring an earlier verified correction.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Ancestry-root wave id."),
+          arg("idempotency_key", true, "string", "Stable rollback replay key."),
+          arg("previous_event_id", true, "string", "Current promotion event UUID."),
+          arg("restore_event_id", true, "string", "Earlier event UUID or genesis."),
+          arg("evidence", true, "string", "Evidence URI or durable reference."),
+          arg("evidence_revision", true, "string", "Evidence revision.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
       # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
       # The seven non-streaming verbs behind the `/v1/chat` scope, which is
       # `pipe_through [:api, :require_admin]` — every route needs a data-plane

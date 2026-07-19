@@ -142,6 +142,64 @@ defmodule BarkparkWeb.CycleFleetController do
     end)
   end
 
+  def quarantine(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, correction_receipt} <-
+             required_json_object(params, "correction_receipt", "correction_receipt_json") do
+        attrs = %{
+          idempotency_key: params["idempotency_key"],
+          reason: params["reason"],
+          correction_receipt: correction_receipt,
+          actor: cycle_actor(conn),
+          evidence: params["evidence"],
+          evidence_revision: params["evidence_revision"]
+        }
+
+        respond_correction_mutation(conn, scope, CycleFleet.quarantine_correction(scope, attrs))
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def promote(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      with {:ok, correction_receipt} <-
+             required_json_object(params, "correction_receipt", "correction_receipt_json"),
+           {:ok, gate_receipt} <-
+             required_json_object(params, "gate_receipt", "gate_receipt_json") do
+        attrs = %{
+          idempotency_key: params["idempotency_key"],
+          previous_event_id: blank_to_nil(params["previous_event_id"]),
+          correction_receipt: correction_receipt,
+          gate_receipt: gate_receipt,
+          actor: cycle_actor(conn),
+          evidence: params["evidence"],
+          evidence_revision: params["evidence_revision"]
+        }
+
+        respond_correction_mutation(conn, scope, CycleFleet.promote_correction(scope, attrs))
+      else
+        {:error, reason} -> unprocessable(conn, reason)
+      end
+    end)
+  end
+
+  def rollback(conn, params) do
+    with_scope(conn, params, :write, fn scope ->
+      attrs = %{
+        idempotency_key: params["idempotency_key"],
+        previous_event_id: params["previous_event_id"],
+        restore_event_id: params["restore_event_id"],
+        actor: cycle_actor(conn),
+        evidence: params["evidence"],
+        evidence_revision: params["evidence_revision"]
+      }
+
+      respond_correction_mutation(conn, scope, CycleFleet.rollback_correction(scope, attrs))
+    end)
+  end
+
   defp with_scope(conn, %{"epic_id" => epic_id, "wave_id" => wave_id} = params, action, fun) do
     case conn.assigns[:current_workspace] do
       %{id: workspace_id} ->
@@ -187,6 +245,66 @@ defmodule BarkparkWeb.CycleFleetController do
   end
 
   defp maybe_decode_json(attrs, _key, _value), do: attrs
+
+  defp required_json_object(params, direct_key, encoded_key) do
+    case {params[direct_key], params[encoded_key]} do
+      {%{} = object, nil} ->
+        {:ok, object}
+
+      {nil, encoded} when is_binary(encoded) ->
+        case Jason.decode(encoded) do
+          {:ok, %{} = object} -> {:ok, object}
+          _ -> {:error, receipt_error(direct_key, :invalid)}
+        end
+
+      {nil, nil} ->
+        {:error, receipt_error(direct_key, :required)}
+
+      _ ->
+        {:error, receipt_error(direct_key, :ambiguous)}
+    end
+  end
+
+  defp receipt_error("correction_receipt", :invalid), do: :invalid_correction_receipt
+  defp receipt_error("correction_receipt", :required), do: :correction_receipt_required
+  defp receipt_error("correction_receipt", :ambiguous), do: :ambiguous_correction_receipt
+  defp receipt_error("gate_receipt", :invalid), do: :invalid_gate_receipt
+  defp receipt_error("gate_receipt", :required), do: :gate_receipt_required
+  defp receipt_error("gate_receipt", :ambiguous), do: :ambiguous_gate_receipt
+
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
+
+  defp cycle_actor(conn) do
+    token = conn.assigns[:api_token]
+    %{"type" => "api_token", "id" => token.id}
+  end
+
+  defp respond_correction_mutation(conn, scope, {:ok, _event}) do
+    case CycleFleet.projection(scope) do
+      {:ok, projection} -> json(conn, decorate_authority(conn, projection))
+      {:error, :wave_not_found} -> not_found(conn, "cycle wave not found")
+      {:error, reason} -> unprocessable(conn, reason)
+    end
+  end
+
+  defp respond_correction_mutation(conn, _scope, {:error, :wave_not_found}),
+    do: not_found(conn, "cycle wave not found")
+
+  defp respond_correction_mutation(conn, _scope, {:error, reason})
+       when reason in [
+              :quarantine_conflict,
+              :stale_promotion_head,
+              :promotion_conflict,
+              :already_current,
+              :current_wave_requires_rollback,
+              :idempotency_conflict
+            ],
+       do: conflict(conn, reason)
+
+  defp respond_correction_mutation(conn, _scope, {:error, reason}),
+    do: unprocessable(conn, reason)
 
   defp parse_integer(attrs, key) do
     case attrs[key] do

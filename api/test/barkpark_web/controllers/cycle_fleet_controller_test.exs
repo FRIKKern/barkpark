@@ -212,7 +212,9 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       |> Enum.filter(&String.starts_with?(&1["id"], "cycle."))
 
     assert MapSet.new(commands, & &1["id"]) ==
-             MapSet.new(~w(cycle.show cycle.open cycle.seal cycle.assign cycle.result))
+             MapSet.new(
+               ~w(cycle.show cycle.open cycle.seal cycle.assign cycle.result cycle.quarantine cycle.promote cycle.rollback)
+             )
 
     for command <- commands do
       assert String.starts_with?(
@@ -233,6 +235,93 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
              assign["flags"],
              &(&1["name"] == "task_id" and &1["type"] == "string")
            )
+
+    quarantine = Enum.find(commands, &(&1["id"] == "cycle.quarantine"))
+    promote = Enum.find(commands, &(&1["id"] == "cycle.promote"))
+    rollback = Enum.find(commands, &(&1["id"] == "cycle.rollback"))
+
+    assert required_arg?(quarantine, "correction_receipt_json")
+    assert required_arg?(promote, "gate_receipt_json")
+    refute required_arg?(promote, "previous_event_id")
+    assert required_arg?(rollback, "previous_event_id")
+    assert required_arg?(rollback, "restore_event_id")
+
+    refute Enum.any?(commands, fn command ->
+             Enum.any?(
+               List.wrap(command["args"]) ++ List.wrap(command["flags"]),
+               &(&1["name"] == "actor")
+             )
+           end)
+  end
+
+  test "correction lifecycle writes are scoped-only and reject non-object or ambiguous receipts",
+       %{
+         workspace: workspace,
+         project: project,
+         token: token
+       } do
+    epic_id = "correction-lifecycle-http-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    opened = open_epic(base, token, ["unit-1"])
+    immutable_revision = String.duplicate("d", 64)
+
+    assert opened["correction_lifecycle"]["format"] == "quarantine-promotion-v1"
+    assert opened["correction_lifecycle"]["promotion"] == nil
+    assert opened["correction_lifecycle"]["quarantines"] == []
+    assert opened["correction_lifecycle"]["superseded"] == []
+
+    malformed =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/quarantine", %{
+        "idempotency_key" => "quarantine-malformed",
+        "reason" => "gate failed",
+        "correction_receipt_json" => "[]",
+        "actor" => %{"type" => "forged", "id" => "caller", "extra" => true},
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert malformed["error"]["details"]["reason"] =~ "invalid_correction_receipt"
+
+    ambiguous =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/promote", %{
+        "idempotency_key" => "promote-ambiguous",
+        "correction_receipt" => %{},
+        "correction_receipt_json" => "{}",
+        "gate_receipt_json" => "{}",
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert ambiguous["error"]["details"]["reason"] =~ "ambiguous_correction_receipt"
+
+    invalid_rollback =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/rollback", %{
+        "idempotency_key" => "rollback-without-head",
+        "previous_event_id" => Ecto.UUID.generate(),
+        "restore_event_id" => "genesis",
+        "evidence" => "paper://gate",
+        "evidence_revision" => immutable_revision
+      })
+      |> json_response(422)
+
+    assert invalid_rollback["error"]["details"]["reason"] =~ "invalid_rollback_target"
+
+    flat_response =
+      build_conn()
+      |> bearer(token)
+      |> post("/v1/cycles/#{epic_id}/wave-1/quarantine", %{
+        "correction_receipt_json" => "{}"
+      })
+
+    assert flat_response.status == 404
   end
 
   test "scoped assignment freezes a same-project Task and replays without rebinding", %{

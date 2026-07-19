@@ -16,8 +16,17 @@ defmodule Barkpark.CycleFleetTest do
     )
   end
 
+  unless Code.ensure_loaded?(Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion) do
+    Code.require_file(
+      Path.expand(
+        "../../priv/repo/migrations/20260719010000_add_cycle_correction_quarantine_promotion.exs",
+        __DIR__
+      )
+    )
+  end
+
   alias Barkpark.CycleFleet
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{Document, Revision}
   alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, Wave}
   alias Barkpark.EpicFleet.{Assignment, Result}
   alias Barkpark.Tenancy
@@ -567,6 +576,135 @@ defmodule Barkpark.CycleFleetTest do
         refute Repo.get(Assignment, assignment.id)
         refute Repo.get_by(Result, assignment_id: assignment.id)
       end)
+    end
+
+    test "legacy published Papers deterministically backfill revision ownership and pointers", %{
+      scope: scope
+    } do
+      dataset =
+        Repo.one!(
+          from dataset in Barkpark.Tenancy.Dataset,
+            where: dataset.project_id == ^scope.project_id and dataset.slug == "production"
+        )
+
+      document =
+        %Document{}
+        |> Document.changeset(%{
+          doc_id: "legacy-paper-backfill",
+          type: "paper",
+          dataset: "production",
+          dataset_id: dataset.id,
+          workspace_id: scope.workspace_id,
+          project_id: scope.project_id,
+          title: "Legacy Paper",
+          status: "published",
+          content: %{"blocks" => [%{"type" => "paragraph", "text" => "released"}]},
+          rev: Ecto.UUID.generate()
+        })
+        |> Repo.insert!()
+
+      base_time =
+        DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.truncate(:microsecond)
+
+      insert_legacy_revision = fn action, content, seconds ->
+        %Revision{}
+        |> Revision.changeset(%{
+          doc_id: document.doc_id,
+          type: document.type,
+          dataset: document.dataset,
+          dataset_id: document.dataset_id,
+          workspace_id: document.workspace_id,
+          project_id: document.project_id,
+          title: document.title,
+          status: document.status,
+          action: action,
+          content: content
+        })
+        |> Ecto.Changeset.put_change(:inserted_at, DateTime.add(base_time, seconds, :second))
+        |> Repo.insert!()
+      end
+
+      _older_exact = insert_legacy_revision.("publish", document.content, 1)
+      newest_exact = insert_legacy_revision.("update", document.content, 2)
+      _newer_mismatch = insert_legacy_revision.("update", %{"blocks" => []}, 3)
+
+      assert Repo.get!(Document, document.id).current_revision_id == nil
+      assert Repo.get!(Document, document.id).released_revision_id == nil
+
+      Repo.query!("ALTER TABLE revisions DISABLE TRIGGER revisions_immutable")
+
+      Repo.query!("""
+      UPDATE revisions revision
+      SET document_id = document.id
+      FROM documents document
+      WHERE revision.document_id IS NULL AND revision.doc_id = document.doc_id AND
+        revision.type = document.type AND revision.dataset_id = document.dataset_id AND
+        revision.workspace_id = document.workspace_id AND
+        revision.project_id IS NOT DISTINCT FROM document.project_id
+      """)
+
+      Repo.query!("ALTER TABLE revisions ENABLE TRIGGER revisions_immutable")
+
+      Repo.query!(
+        """
+        UPDATE documents document
+        SET current_revision_id = (
+          SELECT revision.id FROM revisions revision
+          WHERE revision.document_id = document.id AND revision.content = document.content AND
+            revision.title IS NOT DISTINCT FROM document.title AND revision.status = document.status
+          ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
+        ), released_revision_id = (
+          SELECT revision.id FROM revisions revision
+          WHERE revision.document_id = document.id AND revision.status = 'published' AND
+            revision.content = document.content AND
+            revision.title IS NOT DISTINCT FROM document.title
+          ORDER BY revision.inserted_at DESC, revision.id DESC LIMIT 1
+        )
+        WHERE document.id = $1
+        """,
+        [Ecto.UUID.dump!(document.id)]
+      )
+
+      reloaded = Repo.get!(Document, document.id)
+      assert reloaded.current_revision_id == newest_exact.id
+      assert reloaded.released_revision_id == newest_exact.id
+
+      assert Repo.aggregate(
+               from(revision in Revision, where: revision.document_id == ^document.id),
+               :count
+             ) == 3
+    end
+
+    test "quarantine promotion migration refuses rollback after immutable correction history", %{
+      scope: scope
+    } do
+      assert {:ok, wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
+
+      Repo.query!(
+        """
+        INSERT INTO cycle_correction_roots
+          (root_wave_id, workspace_id, project_id, epic_id, inserted_at)
+        VALUES ($1, $2, $3, $4, now())
+        """,
+        [
+          Ecto.UUID.dump!(wave.id),
+          Ecto.UUID.dump!(scope.workspace_id),
+          Ecto.UUID.dump!(scope.project_id),
+          scope.epic_id
+        ]
+      )
+
+      assert_raise Postgrex.Error,
+                   ~r/cannot roll back quarantine-promotion-v1 after immutable correction history exists/,
+                   fn ->
+                     Ecto.Migrator.down(
+                       Repo,
+                       20_260_719_010_000,
+                       Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion,
+                       log: false,
+                       migration_lock: false
+                     )
+                   end
     end
 
     test "database keeps frozen waves and build plans append-only", %{scope: scope} do
@@ -1332,9 +1470,109 @@ defmodule Barkpark.CycleFleetTest do
   end
 
   describe "whole-fleet reconciliation" do
+    test "database serializes simultaneous genesis promotions with one canonical head" do
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        workspace = Barkpark.TenancyFixtures.create_workspace!()
+        project = Barkpark.TenancyFixtures.create_project!(workspace)
+
+        assert {:ok, _dataset} =
+                 Tenancy.create_dataset(project, %{slug: "production", name: "Production"})
+
+        try do
+          fixture = raw_promotion_race_fixture!(workspace, project)
+          assert {:error, missing_admission} = raw_promotion_without_admission(fixture)
+          assert missing_admission =~ "server-issued admission"
+
+          assert {:error, forged_paper} = raw_admission_with_failed_paper!(fixture)
+          assert forged_paper =~ "authority"
+
+          assert {:error, forged_b1} = raw_admission_with_forged_b1!(fixture)
+          assert forged_b1 =~ "B1 canonical ledger or bytes digest is invalid"
+
+          assert {:error, partial_b1} = raw_admission_with_partial_b1!(fixture)
+          assert partial_b1 =~ "B1 attempts do not exactly cover"
+
+          assert {:error, incomplete_live} =
+                   raw_promotion_with_incomplete_live_wave(fixture)
+
+          assert incomplete_live =~
+                   "Paper and B1 fleet is not backed by complete live Cycle rows"
+
+          assert {:error, invented_correction} =
+                   raw_promotion_with_invented_correction_transition(fixture)
+
+          assert invented_correction =~
+                   "live Cycle ownership or semantic outcome partition is invalid"
+
+          assert {:error, conflicting_paper} = raw_admission_with_conflicting_paper!(fixture)
+
+          assert conflicting_paper =~
+                   "B1 attempts do not exactly cover the authoritative Paper fleet"
+
+          for paper_failure <- [
+                raw_admission_with_orphan_paper_revision!(fixture),
+                raw_admission_with_unreleased_paper!(fixture),
+                raw_admission_with_stale_paper_pointer!(fixture)
+              ] do
+            assert {:error, stale_paper} = paper_failure
+            assert stale_paper =~ "Paper authority is stale or foreign"
+          end
+
+          assert_raise Postgrex.Error, ~r/revision history is append-only/, fn ->
+            Repo.query!("UPDATE revisions SET action = 'tampered' WHERE id = $1", [
+              Ecto.UUID.dump!(fixture.paper.id)
+            ])
+          end
+
+          assert_raise Postgrex.Error, ~r/revision history is append-only/, fn ->
+            Repo.query!("DELETE FROM revisions WHERE id = $1", [
+              Ecto.UUID.dump!(fixture.paper.id)
+            ])
+          end
+
+          parent = self()
+
+          tasks =
+            for key <- ["race-a", "race-b"] do
+              Task.async(fn ->
+                send(parent, {:promotion_race_ready, self()})
+
+                receive do
+                  :promotion_race_go ->
+                    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                      raw_genesis_promotion(fixture, key)
+                    end)
+                end
+              end)
+            end
+
+          pids =
+            Enum.map(tasks, fn _ ->
+              assert_receive {:promotion_race_ready, pid}, 1_000
+              pid
+            end)
+
+          Enum.each(pids, &send(&1, :promotion_race_go))
+          results = Task.await_many(tasks, 10_000)
+
+          assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+          assert Enum.count(results, &match?({:error, _}, &1)) == 1
+
+          assert %{rows: [[1]]} =
+                   Repo.query!(
+                     "SELECT count(*) FROM cycle_correction_promotion_events WHERE root_wave_id = $1",
+                     [Ecto.UUID.dump!(fixture.root_id)]
+                   )
+        after
+          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+        end
+      end)
+    end
+
     test "correction_of-v1 immutably repairs generic per-unit arithmetic and replays exactly", %{
       scope: scope
     } do
+      scope = %{scope | wave_id: "wave-3"}
       inventory = Enum.map(1..503, &"unit-#{&1}")
       assert {:ok, prior_wave} = CycleFleet.open_wave(epic_wave_attrs(scope, inventory))
 
@@ -1468,7 +1706,7 @@ defmodule Barkpark.CycleFleetTest do
         "after_counts" => %{"shipped" => 42, "stalled" => 291, "excluded" => 170}
       }
 
-      successor_scope = %{scope | wave_id: "wave-2"}
+      successor_scope = %{scope | wave_id: "wave-3-corrected"}
 
       attrs =
         Map.merge(successor_scope, %{
@@ -1630,7 +1868,7 @@ defmodule Barkpark.CycleFleetTest do
         "after_counts" => %{"shipped" => 42, "stalled" => 290, "excluded" => 171}
       }
 
-      wave3_scope = %{scope | wave_id: "wave-3"}
+      wave3_scope = %{scope | wave_id: "wave-3-adversarial"}
 
       partial_chain =
         put_in(chain_correction, ["ancestry"], [
@@ -1656,8 +1894,498 @@ defmodule Barkpark.CycleFleetTest do
       assert wave3.correction_of_wave_id == successor.id
       assert {:ok, wave3_projection} = CycleFleet.reconcile(wave3_scope)
 
+      assert wave3_projection.exact
+      assert wave3_projection.fleet_complete
+      assert wave3_projection.experiment.complete?
+
+      receipt = wave3_projection.correction_receipt
+
+      dataset =
+        Repo.one!(
+          from dataset in Barkpark.Tenancy.Dataset,
+            where: dataset.project_id == ^scope.project_id and dataset.slug == "production"
+        )
+
+      paper =
+        released_paper!(scope, dataset, "task06-wave3-paper", %{
+          "blocks" => [
+            %{
+              "type" => "callout",
+              "title" => "Agent fleet",
+              "cycle_ledger" => stringify_keys(wave3_projection),
+              "fleet" => stringify_keys(wave3_projection.canonical_fleet)
+            }
+          ]
+        })
+
+      b1_scope = promotion_b1_scope(wave3, wave3_projection)
+
+      assert {:ok, b1_experiment} =
+               Barkpark.EpicFleet.create_benchmark_experiment(%{
+                 workspace_id: scope.workspace_id,
+                 epic_id: scope.epic_id,
+                 wave_id: wave3_scope.wave_id,
+                 experiment_id: "task06-wave3-b1",
+                 phase: "epic",
+                 protocol_version: 1,
+                 manifest: %{
+                   "cycle_scope_fence" => b1_scope,
+                   "fleet_contract" => %{
+                     "version" => 1,
+                     "paper_fleet_digest" => b1_scope["fleet_digest"]
+                   }
+                 }
+               })
+
+      b1_assignments =
+        for phase <- ~w(survey verify experiment build review),
+            assignment <-
+              wave3_projection.canonical_fleet
+              |> Map.get(String.to_existing_atom(phase), %{assignments: []})
+              |> Map.get(:assignments, [])
+              |> Enum.sort_by(& &1.id) do
+          {phase, assignment}
+        end
+
+      for {{phase, assignment}, index} <- Enum.with_index(b1_assignments, 1) do
+        assert {:ok, _attempt} =
+                 Barkpark.EpicFleet.record_benchmark_attempt(b1_experiment, %{
+                   attempt_id: "cycle-#{phase}-#{assignment.id}",
+                   ordinal: index,
+                   treatment: "cyclefleet-reconciliation",
+                   status: "completed",
+                   costs: %{
+                     "wall_seconds" => %{
+                       "state" => "unsupported",
+                       "reason" => "not recorded"
+                     }
+                   },
+                   provenance: %{
+                     "wave_revision" => wave3.id,
+                     "scope_receipt_digest" => b1_scope["receipt_digest"]
+                   },
+                   payload: %{
+                     "fleet_assignment" => %{
+                       "phase" => phase,
+                       "assignment_id" => assignment.id,
+                       "agent_type" => assignment.agent_type,
+                       "evidence" => assignment.evidence,
+                       "model_reasoning_effort" =>
+                         if(phase in ["build", "review"], do: "high", else: "medium")
+                     }
+                   }
+                 })
+      end
+
+      gate = promotion_gate(wave3, wave3_projection, receipt, paper, b1_experiment)
+
+      correct_paper =
+        released_paper!(scope, dataset, "task06-wave2-correct-paper", %{
+          "blocks" => [
+            %{
+              "type" => "callout",
+              "title" => "Agent fleet",
+              "cycle_ledger" => stringify_keys(projected),
+              "fleet" => stringify_keys(projected.canonical_fleet)
+            }
+          ]
+        })
+
+      correct_b1_scope = promotion_b1_scope(successor, projected)
+
+      correct_b1_assignments =
+        for phase <- ~w(survey verify experiment build review),
+            assignment <-
+              projected.canonical_fleet
+              |> Map.get(String.to_existing_atom(phase), %{assignments: []})
+              |> Map.get(:assignments, [])
+              |> Enum.sort_by(& &1.id) do
+          {phase, assignment}
+        end
+
+      correct_b1_experiment =
+        create_promotion_b1!(
+          scope,
+          successor,
+          correct_b1_scope,
+          correct_b1_assignments,
+          "task06-wave2-correct-b1"
+        )
+
+      correct_gate =
+        promotion_gate(
+          successor,
+          projected,
+          projected.correction_receipt,
+          correct_paper,
+          correct_b1_experiment
+        )
+
+      transition = %{
+        actor: %{"type" => "agent", "id" => "task06-test"},
+        evidence: "paper://task06/promotion",
+        evidence_revision: String.duplicate("d", 64)
+      }
+
+      assert {:error, :invalid_transition_evidence} =
+               CycleFleet.promote_correction(
+                 scope,
+                 Map.merge(transition, %{
+                   idempotency_key: "mutable-evidence-revision",
+                   previous_event_id: nil,
+                   correction_receipt: receipt,
+                   gate_receipt: gate,
+                   evidence_revision: "latest"
+                 })
+               )
+
+      subset_experiment =
+        create_promotion_b1!(
+          scope,
+          wave3,
+          b1_scope,
+          Enum.drop(b1_assignments, -1),
+          "task06-wave3-b1-subset"
+        )
+
+      assert {:error, :invalid_gate_receipt} =
+               CycleFleet.promote_correction(
+                 scope,
+                 Map.merge(transition, %{
+                   idempotency_key: "subset-b1-attempts",
+                   previous_event_id: nil,
+                   correction_receipt: receipt,
+                   gate_receipt:
+                     promotion_gate(
+                       wave3,
+                       wave3_projection,
+                       receipt,
+                       paper,
+                       subset_experiment
+                     )
+                 })
+               )
+
+      foreign_experiment =
+        create_promotion_b1!(
+          scope,
+          wave3,
+          b1_scope,
+          b1_assignments,
+          "task06-wave3-b1-foreign",
+          fn attrs, index ->
+            if index == 1,
+              do: put_in(attrs, [:provenance, :wave_revision], Ecto.UUID.generate()),
+              else: attrs
+          end
+        )
+
+      assert {:error, :invalid_gate_receipt} =
+               CycleFleet.promote_correction(
+                 scope,
+                 Map.merge(transition, %{
+                   idempotency_key: "foreign-b1-provenance",
+                   previous_event_id: nil,
+                   correction_receipt: receipt,
+                   gate_receipt:
+                     promotion_gate(
+                       wave3,
+                       wave3_projection,
+                       receipt,
+                       paper,
+                       foreign_experiment
+                     )
+                 })
+               )
+
+      promote_attrs =
+        Map.merge(transition, %{
+          idempotency_key: "promote-wave-3",
+          previous_event_id: nil,
+          correction_receipt: receipt,
+          gate_receipt: gate
+        })
+
+      correct_promote_attrs =
+        Map.merge(transition, %{
+          idempotency_key: "promote-wave-2-correct",
+          previous_event_id: nil,
+          correction_receipt: projected.correction_receipt,
+          gate_receipt: correct_gate
+        })
+
+      assert {:ok, correct_promoted} =
+               CycleFleet.promote_correction(scope, correct_promote_attrs)
+
+      promote_attrs = %{promote_attrs | previous_event_id: correct_promoted.id}
+
+      assert {:ok, promoted} = CycleFleet.promote_correction(scope, promote_attrs)
+      assert {:ok, replayed} = CycleFleet.promote_correction(wave3_scope, promote_attrs)
+      assert replayed.id == promoted.id
+
+      assert {:error, :promotion_conflict} =
+               CycleFleet.promote_correction(
+                 scope,
+                 Map.put(promote_attrs, :evidence_revision, String.duplicate("e", 64))
+               )
+
+      assert {:error, :already_current} =
+               CycleFleet.promote_correction(
+                 scope,
+                 %{
+                   promote_attrs
+                   | idempotency_key: "double-promote",
+                     previous_event_id: promoted.id
+                 }
+               )
+
+      gate_without_semantic = Map.delete(gate, "semantic_digest")
+
+      assert {:error, :invalid_gate_receipt} =
+               CycleFleet.promote_correction(
+                 scope,
+                 %{
+                   promote_attrs
+                   | idempotency_key: "missing-semantic-gate",
+                     previous_event_id: promoted.id,
+                     gate_receipt: gate_without_semantic
+                 }
+               )
+
+      assert {:ok, root_current} = CycleFleet.current_correction(scope)
+      assert {:ok, successor_current} = CycleFleet.current_correction(wave3_scope)
+      assert root_current.current.wave_revision == wave3.id
+      assert successor_current.current == root_current.current
+
+      assert root_current.ancestry_root.wave_id == "wave-3"
+
+      assert Enum.map(root_current.historical_ancestry, & &1.wave_id) == [
+               "wave-3-corrected",
+               "wave-3-adversarial"
+             ]
+
+      assert {:ok, root_reader} = CycleFleet.projection(scope)
+      assert {:ok, successor_reader} = CycleFleet.projection(wave3_scope)
+      assert root_reader.correction_lifecycle.current.wave_revision == wave3.id
+      assert successor_reader.correction_lifecycle == root_reader.correction_lifecycle
+
+      original = root_reader.correction_lifecycle.ancestry_root
+      assert original.status == "superseded"
+      assert original.wave_id == "wave-3"
+      assert original.semantic_snapshot.shipped_count == 53
+      assert original.semantic_snapshot.stalled_count == 280
+      assert original.semantic_snapshot.excluded_count == 170
+
+      corrected = root_reader.correction_lifecycle.current
+      assert corrected.status == "current"
+      assert corrected.wave_id == "wave-3-adversarial"
+
+      assert corrected.before_counts == %{
+               "shipped" => 42,
+               "stalled" => 291,
+               "excluded" => 170
+             }
+
+      assert corrected.delta == %{"shipped" => 0, "stalled" => -1, "excluded" => 1}
+
+      assert corrected.after_counts == %{
+               "shipped" => 42,
+               "stalled" => 290,
+               "excluded" => 171
+             }
+
+      [first_correction, _current_correction] =
+        root_reader.correction_lifecycle.historical_ancestry
+
+      assert first_correction.status == "superseded"
+      assert first_correction.delta == %{"shipped" => -11, "stalled" => 11, "excluded" => 0}
+
+      assert first_correction.after_counts == %{
+               "shipped" => 42,
+               "stalled" => 291,
+               "excluded" => 170
+             }
+
+      reader_authority = root_reader.correction_lifecycle.authority_evidence
+      assert reader_authority.paper_revision_id == paper.id
+      assert reader_authority.b1_experiment_id == b1_experiment.id
+      assert reader_authority.b1_scope_receipt == b1_scope
+
+      rollback_attrs =
+        Map.merge(transition, %{
+          idempotency_key: "rollback-wave-3",
+          previous_event_id: promoted.id,
+          restore_event_id: correct_promoted.id
+        })
+
+      assert {:ok, rolled_back} = CycleFleet.rollback_correction(scope, rollback_attrs)
+
+      assert {:error, :stale_promotion_head} =
+               CycleFleet.promote_correction(
+                 scope,
+                 %{
+                   promote_attrs
+                   | idempotency_key: "stale-promote",
+                     previous_event_id: promoted.id
+                 }
+               )
+
+      promote_again_attrs = %{
+        promote_attrs
+        | idempotency_key: "promote-wave-3-again",
+          previous_event_id: rolled_back.id
+      }
+
+      assert {:ok, promoted_again} = CycleFleet.promote_correction(scope, promote_again_attrs)
+
+      assert {:ok, replayed_promote_after_advance} =
+               CycleFleet.promote_correction(scope, promote_attrs)
+
+      assert replayed_promote_after_advance.id == promoted.id
+
+      # Exact replay is canonical even after the linked head advances.
+      assert {:ok, replayed_rollback} =
+               CycleFleet.rollback_correction(wave3_scope, rollback_attrs)
+
+      assert replayed_rollback.id == rolled_back.id
+
+      quarantine_attrs =
+        Map.merge(transition, %{
+          idempotency_key: "quarantine-wave-3",
+          reason: "adversarial verification failed",
+          correction_receipt: receipt
+        })
+
+      assert {:error, :current_wave_requires_rollback} =
+               CycleFleet.quarantine_correction(scope, quarantine_attrs)
+
+      assert {:ok, final_rollback} =
+               CycleFleet.rollback_correction(
+                 scope,
+                 %{
+                   rollback_attrs
+                   | idempotency_key: "final-rollback",
+                     previous_event_id: promoted_again.id
+                 }
+               )
+
+      assert {:ok, quarantine} = CycleFleet.quarantine_correction(scope, quarantine_attrs)
+
+      assert {:ok, quarantine_replay} =
+               CycleFleet.quarantine_correction(wave3_scope, quarantine_attrs)
+
+      assert quarantine_replay.id == quarantine.id
+
+      assert {:ok, rolled_back_reader} = CycleFleet.projection(scope)
+      assert rolled_back_reader.correction_lifecycle.current.wave_revision == successor.id
+      assert rolled_back_reader.correction_lifecycle.current.status == "current"
+
+      restored_root = rolled_back_reader.correction_lifecycle.ancestry_root
+      assert restored_root.status == "superseded"
+      assert restored_root.wave_id == "wave-3"
+      assert restored_root.semantic_snapshot.shipped_count == 53
+      assert restored_root.semantic_snapshot.stalled_count == 280
+      assert restored_root.semantic_snapshot.excluded_count == 170
+
+      restored_correct = rolled_back_reader.correction_lifecycle.current
+      assert restored_correct.wave_id == "wave-3-corrected"
+
+      assert restored_correct.before_counts == %{
+               "shipped" => 53,
+               "stalled" => 280,
+               "excluded" => 170
+             }
+
+      assert restored_correct.delta == %{"shipped" => -11, "stalled" => 11, "excluded" => 0}
+
+      assert restored_correct.after_counts == %{
+               "shipped" => 42,
+               "stalled" => 291,
+               "excluded" => 170
+             }
+
+      assert Enum.map(rolled_back_reader.correction_lifecycle.superseded, & &1.wave_revision) == [
+               wave3.id
+             ]
+
+      [superseded_wave3] = rolled_back_reader.correction_lifecycle.superseded
+
+      assert superseded_wave3.before_counts == %{
+               "shipped" => 42,
+               "stalled" => 291,
+               "excluded" => 170
+             }
+
+      assert superseded_wave3.delta == %{"shipped" => 0, "stalled" => -1, "excluded" => 1}
+
+      assert superseded_wave3.after_counts == %{
+               "shipped" => 42,
+               "stalled" => 290,
+               "excluded" => 171
+             }
+
+      assert superseded_wave3.semantic_snapshot.shipped_count == 42
+      assert superseded_wave3.semantic_snapshot.stalled_count == 290
+      assert superseded_wave3.semantic_snapshot.excluded_count == 171
+
+      authority = rolled_back_reader.correction_lifecycle.authority_evidence
+      assert authority.target_wave_revision == successor.id
+      assert authority.b1_experiment_id == correct_b1_experiment.id
+      assert authority.b1_scope_receipt == correct_b1_scope
+      assert authority.paper_revision_id == correct_paper.id
+      assert authority.fleet_digest == correct_b1_scope["fleet_digest"]
+
+      assert Enum.map(
+               rolled_back_reader.correction_lifecycle.historical_ancestry,
+               & &1.wave_id
+             ) == ["wave-3-corrected", "wave-3-adversarial"]
+
+      assert {:error, :quarantine_conflict} =
+               CycleFleet.quarantine_correction(
+                 scope,
+                 Map.put(quarantine_attrs, :reason, "different evidence")
+               )
+
+      assert {:error, :correction_quarantined} =
+               CycleFleet.promote_correction(
+                 scope,
+                 %{
+                   promote_attrs
+                   | idempotency_key: "blocked-promote",
+                     previous_event_id: final_rollback.id
+                 }
+               )
+
+      assert_raise Postgrex.Error, ~r/append-only/, fn ->
+        Repo.query!("UPDATE cycle_correction_quarantines SET reason = 'tampered' WHERE id = $1", [
+          Ecto.UUID.dump!(quarantine.id)
+        ])
+      end
+
+      assert_raise Postgrex.Error, ~r/append-only/, fn ->
+        Repo.query!("DELETE FROM cycle_correction_promotion_events WHERE id = $1", [
+          Ecto.UUID.dump!(promoted.id)
+        ])
+      end
+
+      assert_raise Postgrex.Error, ~r/payload contradicts stored transition/, fn ->
+        Repo.query!(
+          """
+          INSERT INTO cycle_correction_promotion_events
+            (id, root_wave_id, target_wave_id, previous_event_id, restore_event_id,
+             workspace_id, project_id, epic_id, action, idempotency_key, actor,
+             evidence, evidence_revision, gate_receipt, event_payload, event_digest, inserted_at)
+          SELECT $1, root_wave_id, target_wave_id, previous_event_id, restore_event_id,
+                 workspace_id, project_id, epic_id, action, 'forged-sql-transition', actor,
+                 evidence, evidence_revision, gate_receipt, event_payload, event_digest, now()
+          FROM cycle_correction_promotion_events WHERE id = $2
+          """,
+          [Ecto.UUID.dump!(Ecto.UUID.generate()), Ecto.UUID.dump!(promoted.id)]
+        )
+      end
+
       assert Enum.map(wave3_projection.correction_ancestry, & &1["wave_id"]) ==
-               ["wave-1", "wave-2", "wave-3"]
+               ["wave-3", "wave-3-corrected", "wave-3-adversarial"]
 
       repeated_ancestry =
         put_in(
@@ -1775,6 +2503,39 @@ defmodule Barkpark.CycleFleetTest do
                    correction_of_digest: CycleFleet.digest(wrong_delta)
                  })
                )
+
+      survey_assignment = CycleFleet.get_assignment(scope, "survey-1")
+      survey_result = Repo.get_by!(Result, assignment_id: survey_assignment.id)
+
+      try do
+        Repo.query!("SET LOCAL session_replication_role = replica")
+
+        Repo.query!("UPDATE epic_assignment_results SET status = 'failed' WHERE id = $1", [
+          Ecto.UUID.dump!(survey_result.id)
+        ])
+      after
+        Repo.query!("SET LOCAL session_replication_role = origin")
+      end
+
+      assert {:error, :correction_not_ready} =
+               CycleFleet.promote_correction(
+                 scope,
+                 %{
+                   promote_attrs
+                   | idempotency_key: "failed-wave-promote",
+                     previous_event_id: final_rollback.id
+                 }
+               )
+
+      try do
+        Repo.query!("SET LOCAL session_replication_role = replica")
+
+        Repo.query!("UPDATE epic_assignment_results SET status = 'completed' WHERE id = $1", [
+          Ecto.UUID.dump!(survey_result.id)
+        ])
+      after
+        Repo.query!("SET LOCAL session_replication_role = origin")
+      end
 
       try do
         Repo.query!("SET LOCAL session_replication_role = replica")
@@ -1983,6 +2744,1187 @@ defmodule Barkpark.CycleFleetTest do
       stalled_unit_ids: stalled,
       excluded_unit_ids: excluded
     }
+  end
+
+  defp promotion_b1_scope(wave, reconciliation) do
+    fleet_digest = Barkpark.EpicFleet.canonical_digest(reconciliation.canonical_fleet)
+
+    b1_scope_receipt = %{
+      "version" => "b1-scope-fence-v1",
+      "workspace_id" => wave.workspace_id,
+      "project_id" => wave.project_id,
+      "epic_id" => wave.epic_id,
+      "wave_id" => wave.wave_id,
+      "wave_revision" => wave.id,
+      "inventory_digest" => wave.inventory_digest,
+      "plan_digest" => reconciliation.plan_digest,
+      "reconciliation_digest" => reconciliation.reconciliation_digest,
+      "fleet_digest" => fleet_digest
+    }
+
+    Map.put(
+      b1_scope_receipt,
+      "receipt_digest",
+      Barkpark.EpicFleet.canonical_digest(b1_scope_receipt)
+    )
+  end
+
+  defp released_paper!(scope, dataset, doc_id, content) do
+    document =
+      %Document{}
+      |> Document.changeset(%{
+        doc_id: doc_id,
+        type: "paper",
+        dataset: "production",
+        dataset_id: dataset.id,
+        workspace_id: scope.workspace_id,
+        project_id: scope.project_id,
+        title: "Cycle promotion authority",
+        status: "published",
+        content: content,
+        rev: Ecto.UUID.generate()
+      })
+      |> Repo.insert!()
+
+    revision =
+      %Revision{}
+      |> Revision.changeset(%{
+        document_id: document.id,
+        doc_id: document.doc_id,
+        type: document.type,
+        dataset: document.dataset,
+        dataset_id: document.dataset_id,
+        workspace_id: document.workspace_id,
+        project_id: document.project_id,
+        title: document.title,
+        status: document.status,
+        action: "publish",
+        content: document.content
+      })
+      |> Repo.insert!()
+
+    assert Repo.get!(Document, document.id).current_revision_id == revision.id
+    assert Repo.get!(Document, document.id).released_revision_id == revision.id
+    revision
+  end
+
+  defp promotion_gate(wave, reconciliation, receipt, paper, experiment) do
+    b1_scope_receipt = promotion_b1_scope(wave, reconciliation)
+    {:ok, b1_document} = Barkpark.EpicFleet.export_benchmark(experiment)
+    {:ok, b1_bytes} = Barkpark.EpicFleet.export_benchmark_json(experiment)
+
+    unsigned = %{
+      "format" => "cycle-promotion-gate-v1",
+      "wave_revision" => wave.id,
+      "inventory_digest" => wave.inventory_digest,
+      "plan_digest" => reconciliation.plan_digest,
+      "reconciliation_digest" => reconciliation.reconciliation_digest,
+      "correction_receipt_digest" => Barkpark.EpicFleet.canonical_digest(receipt),
+      "semantic_digest" => Barkpark.EpicFleet.canonical_digest(receipt["targets"]),
+      "b1_scope_receipt_digest" => b1_scope_receipt["receipt_digest"],
+      "b1_experiment_id" => experiment.id,
+      "b1_ledger_digest" => b1_document["ledger_digest"],
+      "b1_bytes_digest" => :sha256 |> :crypto.hash(b1_bytes) |> Base.encode16(case: :lower),
+      "paper_document_id" => paper.document_id,
+      "paper_revision_id" => paper.id,
+      "paper_doc_id" => paper.doc_id,
+      "paper_content_digest" => Barkpark.EpicFleet.canonical_digest(paper.content)
+    }
+
+    Map.put(unsigned, "receipt_digest", Barkpark.EpicFleet.canonical_digest(unsigned))
+  end
+
+  defp create_promotion_b1!(
+         scope,
+         wave,
+         b1_scope,
+         assignments,
+         experiment_id,
+         mutate_attempt \\ fn attrs, _index -> attrs end
+       ) do
+    {:ok, experiment} =
+      Barkpark.EpicFleet.create_benchmark_experiment(%{
+        workspace_id: scope.workspace_id,
+        epic_id: scope.epic_id,
+        wave_id: wave.wave_id,
+        experiment_id: experiment_id,
+        phase: "epic",
+        protocol_version: 1,
+        manifest: %{
+          "cycle_scope_fence" => b1_scope,
+          "fleet_contract" => %{
+            "version" => 1,
+            "paper_fleet_digest" => b1_scope["fleet_digest"]
+          }
+        }
+      })
+
+    for {{phase, assignment}, index} <- Enum.with_index(assignments, 1) do
+      attrs =
+        %{
+          attempt_id: "cycle-#{phase}-#{assignment.id}",
+          ordinal: index,
+          treatment: "cyclefleet-reconciliation",
+          status: "completed",
+          costs: %{
+            "wall_seconds" => %{"state" => "unsupported", "reason" => "not recorded"}
+          },
+          provenance: %{
+            wave_revision: wave.id,
+            scope_receipt_digest: b1_scope["receipt_digest"]
+          },
+          payload: %{
+            fleet_assignment: %{
+              phase: phase,
+              assignment_id: assignment.id,
+              agent_type: assignment.agent_type,
+              evidence: assignment.evidence,
+              model_reasoning_effort: if(phase in ["build", "review"], do: "high", else: "medium")
+            }
+          }
+        }
+        |> mutate_attempt.(index)
+
+      {:ok, _attempt} = Barkpark.EpicFleet.record_benchmark_attempt(experiment, attrs)
+    end
+
+    experiment
+  end
+
+  defp raw_promotion_race_fixture!(workspace, project) do
+    epic_id = "promotion-race-#{System.unique_integer([:positive])}"
+
+    root_scope = %{
+      workspace_id: workspace.id,
+      project_id: project.id,
+      epic_id: epic_id,
+      wave_id: "wave-1"
+    }
+
+    {:ok, root} = CycleFleet.open_wave(epic_wave_attrs(root_scope, ~w(unit-1 unit-2 unit-3)))
+
+    {:ok, corrected_assignment} =
+      CycleFleet.create_assignment(
+        assignment_attrs(root_scope, "build-1", "build", "epic-builder", ["unit-1"])
+      )
+
+    {:ok, _result} =
+      complete_result(corrected_assignment, "race-build-1", "completed", %{
+        completed_unit_ids: ["unit-1"]
+      })
+
+    stale_task = ensure_semantic_task!(corrected_assignment)
+    stale_task |> Ecto.Changeset.change(rev: Ecto.UUID.generate()) |> Repo.update!()
+
+    create_completed_builder(
+      root_scope,
+      "build-2",
+      ["unit-2"],
+      %{
+        completed_unit_ids: ["unit-2"]
+      },
+      "epic-builder"
+    )
+
+    create_completed_builder(
+      root_scope,
+      "build-3",
+      ["unit-3"],
+      %{
+        completed_unit_ids: ["unit-3"]
+      },
+      "epic-builder"
+    )
+
+    complete_phase(root_scope, "survey", "epic-surveyor", 12)
+    complete_phase(root_scope, "verify", "epic-verifier", 6)
+    complete_phase(root_scope, "review", "code-reviewer", 3)
+
+    {:ok, before} = CycleFleet.reconcile(root_scope)
+    corrected_result = Repo.get_by!(Result, assignment_id: corrected_assignment.id)
+
+    target_scope = %{root_scope | wave_id: "wave-2"}
+
+    target_pin = %{
+      "assignment_id" => corrected_assignment.assignment_id,
+      "assignment_revision" => corrected_assignment.id,
+      "snapshot_digest" => corrected_assignment.snapshot_digest,
+      "result_revision" => corrected_result.id,
+      "payload_digest" => corrected_result.payload_digest,
+      "evidence_revision" => corrected_result.evidence_revision,
+      "semantic_status" => "invalid",
+      "semantic_receipt_index_hash" => corrected_result.payload["semantic_receipt_index_hash"]
+    }
+
+    correction = %{
+      "version" => "correction_of-v1",
+      "prior" => %{
+        "workspace_id" => root.workspace_id,
+        "project_id" => root.project_id,
+        "epic_id" => root.epic_id,
+        "wave_id" => root.wave_id,
+        "wave_revision" => root.id,
+        "inventory_digest" => root.inventory_digest,
+        "effective_plan_digest" => before.plan_digest,
+        "reconciliation_digest" => before.reconciliation_digest
+      },
+      "ancestry" => [%{"wave_id" => root.wave_id, "wave_revision" => root.id}],
+      "targets" => [target_pin],
+      "changes" => [
+        %{
+          "unit_id" => "unit-1",
+          "assignment_id" => corrected_assignment.assignment_id,
+          "assignment_revision" => corrected_assignment.id,
+          "before" => "shipped",
+          "after" => "stalled"
+        }
+      ],
+      "inventory_count" => 3,
+      "before_counts" => %{"shipped" => 3, "stalled" => 0, "excluded" => 0},
+      "delta" => %{"shipped" => -1, "stalled" => 1, "excluded" => 0},
+      "after_counts" => %{"shipped" => 2, "stalled" => 1, "excluded" => 0}
+    }
+
+    {:ok, target} =
+      CycleFleet.open_wave(
+        Map.merge(target_scope, %{
+          correction_of: correction,
+          correction_of_digest: CycleFleet.digest(correction)
+        })
+      )
+
+    {:ok, reconciliation} = CycleFleet.reconcile(target_scope)
+    receipt = reconciliation.correction_receipt
+    dataset = Repo.one!(from d in Barkpark.Tenancy.Dataset, where: d.project_id == ^project.id)
+
+    paper =
+      released_paper!(target_scope, dataset, "race-paper", %{
+        "blocks" => [
+          %{
+            "cycle_ledger" => stringify_keys(reconciliation),
+            "fleet" => stringify_keys(reconciliation.canonical_fleet)
+          }
+        ]
+      })
+
+    b1_scope_receipt = promotion_b1_scope(target, reconciliation)
+
+    b1_assignments =
+      for phase <- ~w(survey verify experiment build review),
+          assignment <-
+            reconciliation.canonical_fleet
+            |> Map.get(String.to_existing_atom(phase), %{assignments: []})
+            |> Map.get(:assignments, [])
+            |> Enum.sort_by(& &1.id) do
+        {phase, assignment}
+      end
+
+    b1_experiment =
+      create_promotion_b1!(
+        target_scope,
+        target,
+        b1_scope_receipt,
+        b1_assignments,
+        "race-b1"
+      )
+
+    gate = promotion_gate(target, reconciliation, receipt, paper, b1_experiment)
+
+    Repo.query!(
+      "INSERT INTO cycle_correction_roots (root_wave_id,workspace_id,project_id,epic_id,inserted_at) VALUES ($1,$2,$3,$4,now())",
+      [
+        Ecto.UUID.dump!(root.id),
+        Ecto.UUID.dump!(workspace.id),
+        Ecto.UUID.dump!(project.id),
+        epic_id
+      ]
+    )
+
+    Repo.query!(
+      """
+      INSERT INTO cycle_correction_targets
+        (wave_id,root_wave_id,previous_wave_id,workspace_id,project_id,epic_id,
+         correction_receipt,correction_receipt_digest,semantic_digest,inserted_at)
+      VALUES ($1,$2,$2,$3,$4,$5,$6::jsonb,$7,$8,now())
+      """,
+      [
+        Ecto.UUID.dump!(target.id),
+        Ecto.UUID.dump!(root.id),
+        Ecto.UUID.dump!(workspace.id),
+        Ecto.UUID.dump!(project.id),
+        epic_id,
+        receipt,
+        Barkpark.EpicFleet.canonical_digest(receipt),
+        Barkpark.EpicFleet.canonical_digest(receipt["targets"])
+      ]
+    )
+
+    {:ok, b1_document} = Barkpark.EpicFleet.export_benchmark(b1_experiment)
+    {:ok, b1_bytes} = Barkpark.EpicFleet.export_benchmark_json(b1_experiment)
+
+    %{
+      root_id: root.id,
+      target_id: target.id,
+      workspace_id: workspace.id,
+      project_id: project.id,
+      epic_id: epic_id,
+      reconciliation_digest: reconciliation.reconciliation_digest,
+      fleet_digest: b1_scope_receipt["fleet_digest"],
+      b1_scope_receipt: b1_scope_receipt,
+      b1_experiment: b1_experiment,
+      b1_ledger_digest: b1_document["ledger_digest"],
+      b1_bytes_digest: :sha256 |> :crypto.hash(b1_bytes) |> Base.encode16(case: :lower),
+      paper: paper,
+      gate: gate
+    }
+  end
+
+  def raw_promotion_race_fixture_legacy!(workspace, project) do
+    root_id = Ecto.UUID.generate()
+    target_id = Ecto.UUID.generate()
+    epic_id = "promotion-race-#{System.unique_integer([:positive])}"
+    inventory = [%{"unit_id" => "unit-1"}]
+    plan = %{}
+    correction = %{"targets" => []}
+    correction_digest = CycleFleet.digest(correction)
+
+    Repo.query!(
+      """
+      INSERT INTO cycle_waves
+        (id, workspace_id, project_id, epic_id, wave_id, profile, inventory,
+         inventory_digest, plan, plan_digest, experiment_contract, scale_contract, inserted_at)
+      VALUES ($1, $2, $3, $4, 'wave-1', 'epic', $5, $6, $7::jsonb, $8,
+              '{}'::jsonb, '{}'::jsonb, now())
+      """,
+      [
+        Ecto.UUID.dump!(root_id),
+        Ecto.UUID.dump!(workspace.id),
+        Ecto.UUID.dump!(project.id),
+        epic_id,
+        inventory,
+        CycleFleet.digest(inventory),
+        plan,
+        CycleFleet.digest(plan)
+      ]
+    )
+
+    try do
+      Repo.query!("SET session_replication_role = replica")
+
+      Repo.query!(
+        """
+        INSERT INTO cycle_waves
+          (id, workspace_id, project_id, epic_id, wave_id, profile, inventory,
+           inventory_digest, plan, plan_digest, experiment_contract, scale_contract,
+           correction_of_wave_id, correction_of, correction_of_digest, inserted_at)
+        SELECT $1, workspace_id, project_id, epic_id, 'wave-2', profile, inventory,
+               inventory_digest, plan, plan_digest, experiment_contract, scale_contract,
+               id, $2::jsonb, $3, now()
+        FROM cycle_waves WHERE id = $4
+        """,
+        [
+          Ecto.UUID.dump!(target_id),
+          correction,
+          correction_digest,
+          Ecto.UUID.dump!(root_id)
+        ]
+      )
+    after
+      Repo.query!("SET session_replication_role = origin")
+    end
+
+    receipt = %{
+      "version" => "correction_receipt-v1",
+      "successor_wave_revision" => target_id,
+      "parent_wave_revision" => root_id,
+      "correction_of_digest" => correction_digest,
+      "targets" => []
+    }
+
+    receipt_digest = Barkpark.EpicFleet.canonical_digest(receipt)
+    semantic_digest = Barkpark.EpicFleet.canonical_digest([])
+    reconciliation_digest = String.duplicate("a", 64)
+
+    fleet = %{
+      "survey" => %{
+        "assignments" => [
+          %{
+            "id" => "race-survey",
+            "agent_type" => "epic-surveyor",
+            "evidence" => "paper://race-survey"
+          }
+        ]
+      },
+      "verify" => %{
+        "assignments" => [
+          %{
+            "id" => "race-verify",
+            "agent_type" => "epic-verifier",
+            "evidence" => "paper://race-verify"
+          }
+        ]
+      }
+    }
+
+    fleet_digest = Barkpark.EpicFleet.canonical_digest(fleet)
+
+    b1_scope_receipt = %{
+      "version" => "b1-scope-fence-v1",
+      "workspace_id" => workspace.id,
+      "project_id" => project.id,
+      "epic_id" => epic_id,
+      "wave_id" => "wave-2",
+      "wave_revision" => target_id,
+      "inventory_digest" => CycleFleet.digest(inventory),
+      "plan_digest" => CycleFleet.digest(plan),
+      "reconciliation_digest" => reconciliation_digest,
+      "fleet_digest" => fleet_digest
+    }
+
+    b1_scope_receipt =
+      Map.put(
+        b1_scope_receipt,
+        "receipt_digest",
+        Barkpark.EpicFleet.canonical_digest(b1_scope_receipt)
+      )
+
+    dataset = Repo.one!(from d in Barkpark.Tenancy.Dataset, where: d.project_id == ^project.id)
+
+    paper =
+      %Revision{}
+      |> Revision.changeset(%{
+        doc_id: "race-paper",
+        type: "paper",
+        dataset: dataset.slug,
+        dataset_id: dataset.id,
+        workspace_id: workspace.id,
+        project_id: project.id,
+        action: "promotion_gate",
+        content: %{
+          "blocks" => [
+            %{
+              "cycle_ledger" => %{
+                "scope" => %{
+                  "workspace_id" => workspace.id,
+                  "project_id" => project.id,
+                  "epic_id" => epic_id,
+                  "wave_id" => "wave-2"
+                },
+                "wave_revision" => target_id,
+                "inventory_digest" => CycleFleet.digest(inventory),
+                "plan_digest" => CycleFleet.digest(plan),
+                "reconciliation_digest" => reconciliation_digest,
+                "exact" => true,
+                "fleet_complete" => true,
+                "experiment" => %{"complete?" => true},
+                "correction_receipt" => receipt,
+                "duplicate_assignment_unit_ids" => [],
+                "unknown_assignment_unit_ids" => [],
+                "unknown_outcome_unit_ids" => [],
+                "outcome_overlap_unit_ids" => [],
+                "outcome_ownership_violation_unit_ids" => [],
+                "invalid_build_assignment_ids" => [],
+                "invalid_build_result_assignment_ids" => [],
+                "unassigned_unit_ids" => [],
+                "unaccounted_unit_ids" => []
+              },
+              "fleet" => fleet
+            }
+          ]
+        }
+      })
+      |> Repo.insert!()
+
+    {:ok, b1_experiment} =
+      Barkpark.EpicFleet.create_benchmark_experiment(%{
+        workspace_id: workspace.id,
+        epic_id: epic_id,
+        wave_id: "wave-2",
+        experiment_id: "race-b1",
+        phase: "epic",
+        protocol_version: 1,
+        manifest: %{
+          "cycle_scope_fence" => b1_scope_receipt,
+          "fleet_contract" => %{"version" => 1, "paper_fleet_digest" => fleet_digest}
+        }
+      })
+
+    for {phase, id, agent_type, ordinal} <- [
+          {"survey", "race-survey", "epic-surveyor", 1},
+          {"verify", "race-verify", "epic-verifier", 2}
+        ] do
+      {:ok, _attempt} =
+        Barkpark.EpicFleet.record_benchmark_attempt(b1_experiment, %{
+          attempt_id: "cycle-#{phase}-#{id}",
+          ordinal: ordinal,
+          treatment: "cyclefleet-reconciliation",
+          status: "completed",
+          costs: %{"wall_seconds" => %{"state" => "unsupported", "reason" => "race"}},
+          provenance: %{
+            "wave_revision" => target_id,
+            "scope_receipt_digest" => b1_scope_receipt["receipt_digest"]
+          },
+          payload: %{
+            "fleet_assignment" => %{
+              "phase" => phase,
+              "assignment_id" => id,
+              "agent_type" => agent_type,
+              "evidence" => "paper://#{id}",
+              "model_reasoning_effort" => "medium"
+            }
+          }
+        })
+    end
+
+    {:ok, b1_document} = Barkpark.EpicFleet.export_benchmark(b1_experiment)
+    {:ok, b1_bytes} = Barkpark.EpicFleet.export_benchmark_json(b1_experiment)
+
+    Repo.query!(
+      """
+      INSERT INTO cycle_correction_roots
+        (root_wave_id, workspace_id, project_id, epic_id, inserted_at)
+      VALUES ($1, $2, $3, $4, now())
+      """,
+      [
+        Ecto.UUID.dump!(root_id),
+        Ecto.UUID.dump!(workspace.id),
+        Ecto.UUID.dump!(project.id),
+        epic_id
+      ]
+    )
+
+    Repo.query!(
+      """
+      INSERT INTO cycle_correction_targets
+        (wave_id, root_wave_id, previous_wave_id, workspace_id, project_id, epic_id,
+         correction_receipt, correction_receipt_digest, semantic_digest, inserted_at)
+      VALUES ($1, $2, $2, $3, $4, $5, $6::jsonb, $7, $8, now())
+      """,
+      [
+        Ecto.UUID.dump!(target_id),
+        Ecto.UUID.dump!(root_id),
+        Ecto.UUID.dump!(workspace.id),
+        Ecto.UUID.dump!(project.id),
+        epic_id,
+        receipt,
+        receipt_digest,
+        semantic_digest
+      ]
+    )
+
+    unsigned_gate = %{
+      "format" => "cycle-promotion-gate-v1",
+      "wave_revision" => target_id,
+      "inventory_digest" => CycleFleet.digest(inventory),
+      "plan_digest" => CycleFleet.digest(plan),
+      "reconciliation_digest" => reconciliation_digest,
+      "correction_receipt_digest" => receipt_digest,
+      "semantic_digest" => semantic_digest,
+      "b1_scope_receipt_digest" => b1_scope_receipt["receipt_digest"],
+      "b1_experiment_id" => b1_experiment.id,
+      "b1_ledger_digest" => b1_document["ledger_digest"],
+      "b1_bytes_digest" => :sha256 |> :crypto.hash(b1_bytes) |> Base.encode16(case: :lower),
+      "paper_revision_id" => paper.id,
+      "paper_doc_id" => paper.doc_id,
+      "paper_content_digest" => Barkpark.EpicFleet.canonical_digest(paper.content)
+    }
+
+    %{
+      root_id: root_id,
+      target_id: target_id,
+      workspace_id: workspace.id,
+      project_id: project.id,
+      epic_id: epic_id,
+      reconciliation_digest: reconciliation_digest,
+      fleet_digest: fleet_digest,
+      b1_scope_receipt: b1_scope_receipt,
+      b1_experiment: b1_experiment,
+      b1_ledger_digest: b1_document["ledger_digest"],
+      b1_bytes_digest: :sha256 |> :crypto.hash(b1_bytes) |> Base.encode16(case: :lower),
+      paper: paper,
+      gate:
+        Map.put(
+          unsigned_gate,
+          "receipt_digest",
+          Barkpark.EpicFleet.canonical_digest(unsigned_gate)
+        )
+    }
+  end
+
+  defp raw_genesis_promotion(fixture, key) do
+    event_id = Ecto.UUID.generate()
+    admission_id = Ecto.UUID.generate()
+    actor = %{"type" => "agent", "id" => key}
+    evidence_revision = String.duplicate(if(key == "race-a", do: "a", else: "b"), 64)
+
+    payload = %{
+      "action" => "promote",
+      "admission_id" => admission_id,
+      "root_wave_revision" => fixture.root_id,
+      "target_wave_revision" => fixture.target_id,
+      "previous_event_id" => nil,
+      "restore_event_id" => nil,
+      "idempotency_key" => key,
+      "actor" => actor,
+      "evidence" => "paper://#{key}",
+      "evidence_revision" => evidence_revision,
+      "gate_receipt" => fixture.gate
+    }
+
+    try do
+      Repo.query!(
+        """
+        INSERT INTO cycle_correction_admissions
+          (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+           idempotency_key, reconciliation_digest, fleet_digest, b1_scope_receipt,
+           b1_scope_receipt_digest, b1_experiment_id, b1_ledger_digest, b1_bytes_digest,
+           paper_document_id, paper_revision_id, paper_doc_id, paper_content_digest,
+           gate_receipt, gate_receipt_digest, inserted_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,now())
+        """,
+        [
+          Ecto.UUID.dump!(admission_id),
+          Ecto.UUID.dump!(fixture.root_id),
+          Ecto.UUID.dump!(fixture.target_id),
+          Ecto.UUID.dump!(fixture.workspace_id),
+          Ecto.UUID.dump!(fixture.project_id),
+          fixture.epic_id,
+          key,
+          fixture.reconciliation_digest,
+          fixture.fleet_digest,
+          fixture.b1_scope_receipt,
+          fixture.b1_scope_receipt["receipt_digest"],
+          Ecto.UUID.dump!(fixture.b1_experiment.id),
+          fixture.b1_ledger_digest,
+          fixture.b1_bytes_digest,
+          Ecto.UUID.dump!(fixture.paper.document_id),
+          Ecto.UUID.dump!(fixture.paper.id),
+          fixture.paper.doc_id,
+          Barkpark.EpicFleet.canonical_digest(fixture.paper.content),
+          fixture.gate,
+          Barkpark.EpicFleet.canonical_digest(fixture.gate)
+        ]
+      )
+
+      result =
+        Repo.query!(
+          """
+          INSERT INTO cycle_correction_promotion_events
+            (id, admission_id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+             action, idempotency_key, actor, evidence, evidence_revision, gate_receipt,
+             event_payload, event_digest, inserted_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'promote', $8, $9::jsonb, $10, $11,
+                  $12::jsonb, $13::jsonb, $14, now())
+          RETURNING id
+          """,
+          [
+            Ecto.UUID.dump!(event_id),
+            Ecto.UUID.dump!(admission_id),
+            Ecto.UUID.dump!(fixture.root_id),
+            Ecto.UUID.dump!(fixture.target_id),
+            Ecto.UUID.dump!(fixture.workspace_id),
+            Ecto.UUID.dump!(fixture.project_id),
+            fixture.epic_id,
+            key,
+            actor,
+            "paper://#{key}",
+            evidence_revision,
+            fixture.gate,
+            payload,
+            Barkpark.EpicFleet.canonical_digest(payload)
+          ]
+        )
+
+      {:ok, result}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
+  end
+
+  defp raw_promotion_with_incomplete_live_wave(fixture) do
+    result =
+      Repo.transaction(fn ->
+        Repo.query!(
+          "ALTER TABLE epic_assignment_results DISABLE TRIGGER epic_assignment_results_no_update_delete"
+        )
+
+        Repo.query!(
+          """
+          DELETE FROM epic_assignment_results result
+          USING epic_assignments assignment
+          WHERE result.assignment_id = assignment.id AND assignment.workspace_id = $1 AND
+            assignment.epic_id = $2 AND assignment.phase = 'survey' AND
+            result.id = (
+              SELECT candidate_result.id
+              FROM epic_assignment_results candidate_result
+              JOIN epic_assignments candidate_assignment
+                ON candidate_assignment.id = candidate_result.assignment_id
+              WHERE candidate_assignment.workspace_id = $1 AND
+                candidate_assignment.epic_id = $2 AND candidate_assignment.phase = 'survey'
+              ORDER BY candidate_assignment.assignment_id LIMIT 1
+            )
+          """,
+          [Ecto.UUID.dump!(fixture.workspace_id), fixture.epic_id]
+        )
+
+        Repo.query!(
+          "ALTER TABLE epic_assignment_results ENABLE TRIGGER epic_assignment_results_no_update_delete"
+        )
+
+        Repo.rollback(raw_genesis_promotion(fixture, "incomplete-live"))
+      end)
+
+    case result do
+      {:error, admission_result} -> admission_result
+    end
+  end
+
+  defp raw_promotion_with_invented_correction_transition(fixture) do
+    result =
+      Repo.transaction(fn ->
+        Repo.query!("ALTER TABLE cycle_waves DISABLE TRIGGER cycle_waves_no_update_delete")
+
+        Repo.query!(
+          """
+          UPDATE cycle_waves
+          SET correction_of = jsonb_set(correction_of, '{changes,0,before}', '"excluded"')
+          WHERE id = $1
+          """,
+          [Ecto.UUID.dump!(fixture.target_id)]
+        )
+
+        Repo.query!("ALTER TABLE cycle_waves ENABLE TRIGGER cycle_waves_no_update_delete")
+        Repo.rollback(raw_genesis_promotion(fixture, "invented-correction-transition"))
+      end)
+
+    case result do
+      {:error, admission_result} -> admission_result
+    end
+  end
+
+  defp raw_promotion_without_admission(fixture) do
+    key = "missing-admission"
+    actor = %{"type" => "agent", "id" => key}
+    revision = String.duplicate("f", 64)
+
+    payload = %{
+      "action" => "promote",
+      "admission_id" => nil,
+      "root_wave_revision" => fixture.root_id,
+      "target_wave_revision" => fixture.target_id,
+      "previous_event_id" => nil,
+      "restore_event_id" => nil,
+      "idempotency_key" => key,
+      "actor" => actor,
+      "evidence" => "paper://#{key}",
+      "evidence_revision" => revision,
+      "gate_receipt" => fixture.gate
+    }
+
+    try do
+      {:ok,
+       Repo.query!(
+         """
+         INSERT INTO cycle_correction_promotion_events
+           (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+            action, idempotency_key, actor, evidence, evidence_revision, gate_receipt,
+            event_payload, event_digest, inserted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'promote',$7,$8::jsonb,$9,$10,$11::jsonb,$12::jsonb,$13,now())
+         """,
+         [
+           Ecto.UUID.dump!(Ecto.UUID.generate()),
+           Ecto.UUID.dump!(fixture.root_id),
+           Ecto.UUID.dump!(fixture.target_id),
+           Ecto.UUID.dump!(fixture.workspace_id),
+           Ecto.UUID.dump!(fixture.project_id),
+           fixture.epic_id,
+           key,
+           actor,
+           "paper://#{key}",
+           revision,
+           fixture.gate,
+           payload,
+           Barkpark.EpicFleet.canonical_digest(payload)
+         ]
+       )}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
+  end
+
+  defp raw_admission_with_failed_paper!(fixture) do
+    [block] = fixture.paper.content["blocks"]
+    failed_content = %{"blocks" => [put_in(block, ["cycle_ledger", "exact"], false)]}
+
+    failed_paper =
+      %Revision{}
+      |> Revision.changeset(%{
+        doc_id: "failed-race-paper",
+        type: "paper",
+        dataset: fixture.paper.dataset,
+        dataset_id: fixture.paper.dataset_id,
+        workspace_id: fixture.workspace_id,
+        project_id: fixture.project_id,
+        action: "promotion_gate",
+        content: failed_content
+      })
+      |> Repo.insert!()
+
+    unsigned_gate =
+      fixture.gate
+      |> Map.drop(["receipt_digest"])
+      |> Map.put("paper_revision_id", failed_paper.id)
+      |> Map.put("paper_doc_id", failed_paper.doc_id)
+      |> Map.put(
+        "paper_content_digest",
+        Barkpark.EpicFleet.canonical_digest(failed_paper.content)
+      )
+
+    gate =
+      Map.put(unsigned_gate, "receipt_digest", Barkpark.EpicFleet.canonical_digest(unsigned_gate))
+
+    try do
+      {:ok,
+       Repo.query!(
+         """
+         INSERT INTO cycle_correction_admissions
+           (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+            idempotency_key, reconciliation_digest, fleet_digest, b1_scope_receipt,
+            b1_scope_receipt_digest, b1_experiment_id, b1_ledger_digest, b1_bytes_digest,
+            paper_document_id, paper_revision_id, paper_doc_id, paper_content_digest, gate_receipt,
+            gate_receipt_digest, inserted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'failed-paper',$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,now())
+         """,
+         [
+           Ecto.UUID.dump!(Ecto.UUID.generate()),
+           Ecto.UUID.dump!(fixture.root_id),
+           Ecto.UUID.dump!(fixture.target_id),
+           Ecto.UUID.dump!(fixture.workspace_id),
+           Ecto.UUID.dump!(fixture.project_id),
+           fixture.epic_id,
+           fixture.reconciliation_digest,
+           fixture.fleet_digest,
+           fixture.b1_scope_receipt,
+           fixture.b1_scope_receipt["receipt_digest"],
+           Ecto.UUID.dump!(fixture.b1_experiment.id),
+           fixture.b1_ledger_digest,
+           fixture.b1_bytes_digest,
+           Ecto.UUID.dump!(fixture.paper.document_id),
+           Ecto.UUID.dump!(failed_paper.id),
+           failed_paper.doc_id,
+           Barkpark.EpicFleet.canonical_digest(failed_paper.content),
+           gate,
+           Barkpark.EpicFleet.canonical_digest(gate)
+         ]
+       )}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
+  end
+
+  defp raw_admission_with_conflicting_paper!(fixture) do
+    [authority] = fixture.paper.content["blocks"]
+    dataset = Repo.get!(Barkpark.Tenancy.Dataset, fixture.paper.dataset_id)
+
+    paper =
+      released_paper!(
+        %{workspace_id: fixture.workspace_id, project_id: fixture.project_id},
+        dataset,
+        "conflicting-race-paper",
+        %{"blocks" => [authority, authority]}
+      )
+
+    raw_admission_with_paper!(fixture, paper, "conflicting-paper")
+  end
+
+  defp raw_admission_with_orphan_paper_revision!(fixture) do
+    paper =
+      %Revision{}
+      |> Revision.changeset(%{
+        doc_id: "orphan-race-paper",
+        type: "paper",
+        dataset: "production",
+        dataset_id: fixture.paper.dataset_id,
+        workspace_id: fixture.workspace_id,
+        project_id: fixture.project_id,
+        title: "Orphan cycle authority",
+        status: "published",
+        action: "publish",
+        content: fixture.paper.content
+      })
+      |> Repo.insert!()
+
+    raw_admission_with_paper!(fixture, paper, "orphan-paper", fixture.paper.document_id)
+  end
+
+  defp raw_admission_with_unreleased_paper!(fixture) do
+    document =
+      %Document{}
+      |> Document.changeset(%{
+        doc_id: "unreleased-race-paper",
+        type: "paper",
+        dataset: "production",
+        dataset_id: fixture.paper.dataset_id,
+        workspace_id: fixture.workspace_id,
+        project_id: fixture.project_id,
+        title: "Unreleased cycle authority",
+        status: "published",
+        content: fixture.paper.content,
+        rev: Ecto.UUID.generate()
+      })
+      |> Repo.insert!()
+
+    paper =
+      %Revision{}
+      |> Revision.changeset(%{
+        document_id: document.id,
+        doc_id: document.doc_id,
+        type: document.type,
+        dataset: document.dataset,
+        dataset_id: document.dataset_id,
+        workspace_id: document.workspace_id,
+        project_id: document.project_id,
+        title: document.title,
+        status: document.status,
+        action: "update",
+        content: document.content
+      })
+      |> Repo.insert!()
+
+    assert Repo.get!(Document, document.id).current_revision_id == paper.id
+    assert Repo.get!(Document, document.id).released_revision_id == nil
+    raw_admission_with_paper!(fixture, paper, "unreleased-paper")
+  end
+
+  defp raw_admission_with_stale_paper_pointer!(fixture) do
+    {:error, admission_result} =
+      Repo.transaction(fn ->
+        document = Repo.get!(Document, fixture.paper.document_id)
+
+        current =
+          %Revision{}
+          |> Revision.changeset(%{
+            document_id: document.id,
+            doc_id: document.doc_id,
+            type: document.type,
+            dataset: document.dataset,
+            dataset_id: document.dataset_id,
+            workspace_id: document.workspace_id,
+            project_id: document.project_id,
+            title: document.title,
+            status: document.status,
+            action: "update",
+            content: document.content
+          })
+          |> Repo.insert!()
+
+        assert Repo.get!(Document, document.id).current_revision_id == current.id
+        assert Repo.get!(Document, document.id).released_revision_id == fixture.paper.id
+        Repo.rollback(raw_admission_with_paper!(fixture, fixture.paper, "stale-paper"))
+      end)
+
+    admission_result
+  end
+
+  defp raw_admission_with_paper!(fixture, paper, key, paper_document_id \\ nil) do
+    paper_document_id = paper_document_id || paper.document_id
+
+    unsigned_gate =
+      fixture.gate
+      |> Map.drop(["receipt_digest"])
+      |> Map.merge(%{
+        "paper_document_id" => paper_document_id,
+        "paper_revision_id" => paper.id,
+        "paper_doc_id" => paper.doc_id,
+        "paper_content_digest" => Barkpark.EpicFleet.canonical_digest(paper.content)
+      })
+
+    gate =
+      Map.put(unsigned_gate, "receipt_digest", Barkpark.EpicFleet.canonical_digest(unsigned_gate))
+
+    try do
+      {:ok,
+       Repo.query!(
+         """
+         INSERT INTO cycle_correction_admissions
+           (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+            idempotency_key, reconciliation_digest, fleet_digest, b1_scope_receipt,
+            b1_scope_receipt_digest, b1_experiment_id, b1_ledger_digest, b1_bytes_digest,
+            paper_document_id, paper_revision_id, paper_doc_id, paper_content_digest, gate_receipt,
+            gate_receipt_digest, inserted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,now())
+         """,
+         [
+           Ecto.UUID.dump!(Ecto.UUID.generate()),
+           Ecto.UUID.dump!(fixture.root_id),
+           Ecto.UUID.dump!(fixture.target_id),
+           Ecto.UUID.dump!(fixture.workspace_id),
+           Ecto.UUID.dump!(fixture.project_id),
+           fixture.epic_id,
+           key,
+           fixture.reconciliation_digest,
+           fixture.fleet_digest,
+           fixture.b1_scope_receipt,
+           fixture.b1_scope_receipt["receipt_digest"],
+           Ecto.UUID.dump!(fixture.b1_experiment.id),
+           fixture.b1_ledger_digest,
+           fixture.b1_bytes_digest,
+           Ecto.UUID.dump!(paper_document_id),
+           Ecto.UUID.dump!(paper.id),
+           paper.doc_id,
+           Barkpark.EpicFleet.canonical_digest(paper.content),
+           gate,
+           Barkpark.EpicFleet.canonical_digest(gate)
+         ]
+       )}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
+  end
+
+  defp raw_admission_with_forged_b1!(fixture) do
+    forged_digest = String.duplicate("0", 64)
+
+    unsigned_gate =
+      fixture.gate
+      |> Map.drop(["receipt_digest"])
+      |> Map.put("b1_ledger_digest", forged_digest)
+
+    gate =
+      Map.put(unsigned_gate, "receipt_digest", Barkpark.EpicFleet.canonical_digest(unsigned_gate))
+
+    try do
+      {:ok,
+       Repo.query!(
+         """
+         INSERT INTO cycle_correction_admissions
+           (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+            idempotency_key, reconciliation_digest, fleet_digest, b1_scope_receipt,
+            b1_scope_receipt_digest, b1_experiment_id, b1_ledger_digest, b1_bytes_digest,
+            paper_document_id, paper_revision_id, paper_doc_id, paper_content_digest, gate_receipt,
+            gate_receipt_digest, inserted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'forged-b1',$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,now())
+         """,
+         [
+           Ecto.UUID.dump!(Ecto.UUID.generate()),
+           Ecto.UUID.dump!(fixture.root_id),
+           Ecto.UUID.dump!(fixture.target_id),
+           Ecto.UUID.dump!(fixture.workspace_id),
+           Ecto.UUID.dump!(fixture.project_id),
+           fixture.epic_id,
+           fixture.reconciliation_digest,
+           fixture.fleet_digest,
+           fixture.b1_scope_receipt,
+           fixture.b1_scope_receipt["receipt_digest"],
+           Ecto.UUID.dump!(fixture.b1_experiment.id),
+           forged_digest,
+           fixture.b1_bytes_digest,
+           Ecto.UUID.dump!(fixture.paper.document_id),
+           Ecto.UUID.dump!(fixture.paper.id),
+           fixture.paper.doc_id,
+           Barkpark.EpicFleet.canonical_digest(fixture.paper.content),
+           gate,
+           Barkpark.EpicFleet.canonical_digest(gate)
+         ]
+       )}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
+  end
+
+  defp raw_admission_with_partial_b1!(fixture) do
+    {:ok, experiment} =
+      Barkpark.EpicFleet.create_benchmark_experiment(%{
+        workspace_id: fixture.workspace_id,
+        epic_id: fixture.epic_id,
+        wave_id: "wave-2",
+        experiment_id: "race-b1-partial",
+        phase: "epic",
+        protocol_version: 1,
+        manifest: %{
+          "cycle_scope_fence" => fixture.b1_scope_receipt,
+          "fleet_contract" => %{
+            "version" => 1,
+            "paper_fleet_digest" => fixture.fleet_digest
+          }
+        }
+      })
+
+    {:ok, _attempt} =
+      Barkpark.EpicFleet.record_benchmark_attempt(experiment, %{
+        attempt_id: "cycle-survey-race-survey",
+        ordinal: 1,
+        treatment: "cyclefleet-reconciliation",
+        status: "completed",
+        costs: %{"wall_seconds" => %{"state" => "unsupported", "reason" => "partial"}},
+        provenance: %{
+          "wave_revision" => fixture.target_id,
+          "scope_receipt_digest" => fixture.b1_scope_receipt["receipt_digest"]
+        },
+        payload: %{
+          "fleet_assignment" => %{
+            "phase" => "survey",
+            "assignment_id" => "race-survey",
+            "agent_type" => "epic-surveyor",
+            "evidence" => "paper://race-survey",
+            "model_reasoning_effort" => "medium"
+          }
+        }
+      })
+
+    {:ok, document} = Barkpark.EpicFleet.export_benchmark(experiment)
+    {:ok, bytes} = Barkpark.EpicFleet.export_benchmark_json(experiment)
+    bytes_digest = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+    unsigned_gate =
+      fixture.gate
+      |> Map.drop(["receipt_digest"])
+      |> Map.merge(%{
+        "b1_experiment_id" => experiment.id,
+        "b1_ledger_digest" => document["ledger_digest"],
+        "b1_bytes_digest" => bytes_digest
+      })
+
+    gate =
+      Map.put(unsigned_gate, "receipt_digest", Barkpark.EpicFleet.canonical_digest(unsigned_gate))
+
+    try do
+      {:ok,
+       Repo.query!(
+         """
+         INSERT INTO cycle_correction_admissions
+           (id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+            idempotency_key, reconciliation_digest, fleet_digest, b1_scope_receipt,
+            b1_scope_receipt_digest, b1_experiment_id, b1_ledger_digest, b1_bytes_digest,
+            paper_document_id, paper_revision_id, paper_doc_id, paper_content_digest, gate_receipt,
+            gate_receipt_digest, inserted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'partial-b1',$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,now())
+         """,
+         [
+           Ecto.UUID.dump!(Ecto.UUID.generate()),
+           Ecto.UUID.dump!(fixture.root_id),
+           Ecto.UUID.dump!(fixture.target_id),
+           Ecto.UUID.dump!(fixture.workspace_id),
+           Ecto.UUID.dump!(fixture.project_id),
+           fixture.epic_id,
+           fixture.reconciliation_digest,
+           fixture.fleet_digest,
+           fixture.b1_scope_receipt,
+           fixture.b1_scope_receipt["receipt_digest"],
+           Ecto.UUID.dump!(experiment.id),
+           document["ledger_digest"],
+           bytes_digest,
+           Ecto.UUID.dump!(fixture.paper.document_id),
+           Ecto.UUID.dump!(fixture.paper.id),
+           fixture.paper.doc_id,
+           Barkpark.EpicFleet.canonical_digest(fixture.paper.content),
+           gate,
+           Barkpark.EpicFleet.canonical_digest(gate)
+         ]
+       )}
+    rescue
+      error in Postgrex.Error -> {:error, error.postgres.message}
+    end
   end
 
   defp build_plan_attrs(capacity) do

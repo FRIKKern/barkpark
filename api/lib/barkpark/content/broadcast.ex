@@ -319,6 +319,7 @@ defmodule Barkpark.Content.Broadcast do
   def save_revision(doc, type, dataset, action, actor_user_id \\ nil) do
     %Revision{}
     |> Revision.changeset(%{
+      document_id: if(action == "delete", do: nil, else: doc.id),
       doc_id: DraftId.published_id(doc.doc_id),
       type: type,
       dataset: dataset,

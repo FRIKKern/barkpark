@@ -1076,6 +1076,7 @@ defmodule Barkpark.Tenancy do
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
     with :ok <- delete_workspace_string_keyed(ws_id),
          :ok <- delete_workspace_media(ws_id),
+         :ok <- prepare_workspace_cycle_teardown(ws_id),
          :ok <- delete_workspace_documents(ws_id),
          :ok <- delete_workspace_audit_sinks(ws_id),
          {:ok, _} <- Repo.delete(workspace) do
@@ -1083,6 +1084,11 @@ defmodule Barkpark.Tenancy do
     else
       {:error, _} = err -> err
     end
+  end
+
+  defp prepare_workspace_cycle_teardown(ws_id) do
+    Repo.query!("SELECT barkpark_prepare_workspace_cycle_teardown($1)", [Ecto.UUID.dump!(ws_id)])
+    :ok
   end
 
   # Sweep the 4 E3 string-keyed tables the keystone exporter copies

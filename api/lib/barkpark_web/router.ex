@@ -2107,6 +2107,9 @@ defmodule BarkparkWeb.Router do
 
     post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
     post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
+    post("/cycles/:epic_id/:wave_id/quarantine", CycleFleetController, :quarantine)
+    post("/cycles/:epic_id/:wave_id/promote", CycleFleetController, :promote)
+    post("/cycles/:epic_id/:wave_id/rollback", CycleFleetController, :rollback)
     post("/cycles/:epic_id/:wave_id/assignments", CycleFleetController, :create_assignment)
 
     post(

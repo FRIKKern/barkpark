@@ -9,10 +9,21 @@ defmodule Barkpark.CycleFleet do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.Content.Document
-  alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, RuntimeAttempt, Wave}
+  alias Barkpark.Content.{Document, Revision}
+
+  alias Barkpark.CycleFleet.{
+    AssignmentTask,
+    BuildPlan,
+    Profile,
+    Promotion,
+    Quarantine,
+    RuntimeAttempt,
+    Wave
+  }
+
+  alias Barkpark.CycleFleet.Promotion.{Admission, Event, Root, Target}
   alias Barkpark.EpicFleet
-  alias Barkpark.EpicFleet.{Assignment, Result}
+  alias Barkpark.EpicFleet.{Assignment, Experiment, Result}
   alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Recorder, Runtime}
@@ -26,6 +37,8 @@ defmodule Barkpark.CycleFleet do
     stalled: :stalled_unit_ids,
     excluded: :excluded_unit_ids
   }
+  @correction_receipt_keys ~w(version successor_wave_revision parent_wave_revision correction_of_digest targets)
+  @gate_receipt_keys ~w(format wave_revision inventory_digest plan_digest reconciliation_digest correction_receipt_digest semantic_digest b1_scope_receipt_digest b1_experiment_id b1_ledger_digest b1_bytes_digest paper_document_id paper_revision_id paper_doc_id paper_content_digest receipt_digest)
 
   @spec open_wave(map()) :: {:ok, Wave.t()} | {:error, Ecto.Changeset.t() | atom()}
   def open_wave(attrs) when is_map(attrs) do
@@ -925,7 +938,11 @@ defmodule Barkpark.CycleFleet do
       }
 
       summary = correction_summary(wave, rows, summary)
-      {:ok, Map.put(summary, :reconciliation_digest, digest(summary))}
+
+      {:ok,
+       summary
+       |> Map.put(:live_authority_digest, EpicFleet.canonical_digest(summary))
+       |> Map.put(:reconciliation_digest, digest(summary))}
     else
       nil -> {:error, :wave_not_found}
       {:error, :invalid_persisted_correction} -> {:error, :invalid_persisted_correction}
@@ -1003,16 +1020,246 @@ defmodule Barkpark.CycleFleet do
     }
   end
 
+  @doc "Append immutable evidence that a registered correction must never be promoted."
+  @spec quarantine_correction(map(), map()) ::
+          {:ok, Quarantine.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def quarantine_correction(scope, attrs) when is_map(scope) and is_map(attrs) do
+    with {:ok, common} <- normalize_transition_attrs(attrs),
+         {:ok, receipt} <- normalize_correction_receipt(value(attrs, :correction_receipt)) do
+      correction_transition(scope, receipt, fn root, target, receipt_digest ->
+        payload = %{
+          "action" => "quarantine",
+          "root_wave_revision" => root.id,
+          "target_wave_revision" => target.id,
+          "idempotency_key" => common.idempotency_key,
+          "reason" => value(attrs, :reason),
+          "actor" => common.actor,
+          "evidence" => common.evidence,
+          "evidence_revision" => common.evidence_revision,
+          "correction_receipt_digest" => receipt_digest
+        }
+
+        if nonempty?(payload["reason"]) do
+          event_digest = jsonb_digest(payload)
+
+          case Repo.get_by(Quarantine,
+                 root_wave_id: root.id,
+                 idempotency_key: common.idempotency_key
+               ) do
+            %Quarantine{event_digest: ^event_digest} = replay ->
+              replay
+
+            %Quarantine{} ->
+              Repo.rollback(:quarantine_conflict)
+
+            nil ->
+              current = Promotion.head(root.id)
+
+              if current && current.target_wave_id == target.id && current.action != "rollback" do
+                Repo.rollback(:current_wave_requires_rollback)
+              end
+
+              %{
+                root_wave_id: root.id,
+                correction_wave_id: target.id,
+                workspace_id: root.workspace_id,
+                project_id: root.project_id,
+                epic_id: root.epic_id,
+                idempotency_key: common.idempotency_key,
+                reason: payload["reason"],
+                actor: common.actor,
+                evidence: common.evidence,
+                evidence_revision: common.evidence_revision,
+                correction_receipt: receipt,
+                correction_receipt_digest: receipt_digest,
+                event_payload: payload,
+                event_digest: event_digest
+              }
+              |> Quarantine.insert_changeset()
+              |> Repo.insert()
+              |> case do
+                {:ok, quarantine} -> quarantine
+                {:error, changeset} -> Repo.rollback(changeset)
+              end
+          end
+        else
+          Repo.rollback(:invalid_quarantine_reason)
+        end
+      end)
+    end
+  end
+
+  def quarantine_correction(_scope, _attrs), do: {:error, :invalid_correction_receipt}
+
+  @doc "Promote one exact, complete correction behind a fully pinned immutable gate receipt."
+  @spec promote_correction(map(), map()) ::
+          {:ok, Event.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def promote_correction(scope, attrs) when is_map(scope) and is_map(attrs) do
+    with {:ok, common} <- normalize_transition_attrs(attrs),
+         {:ok, receipt} <- normalize_correction_receipt(value(attrs, :correction_receipt)),
+         {:ok, gate} <- normalize_gate_receipt(value(attrs, :gate_receipt)) do
+      correction_transition(scope, receipt, fn root, target, receipt_digest ->
+        previous_event_id = nullable_uuid(value(attrs, :previous_event_id))
+
+        payload = %{
+          "action" => "promote",
+          "admission_id" => nil,
+          "root_wave_revision" => root.id,
+          "target_wave_revision" => target.id,
+          "previous_event_id" => previous_event_id,
+          "restore_event_id" => nil,
+          "idempotency_key" => common.idempotency_key,
+          "actor" => common.actor,
+          "evidence" => common.evidence,
+          "evidence_revision" => common.evidence_revision,
+          "gate_receipt" => gate
+        }
+
+        insert_promotion_event(root, target, common, payload, gate, receipt_digest)
+      end)
+    end
+  end
+
+  def promote_correction(_scope, _attrs), do: {:error, :invalid_correction_receipt}
+
+  @doc "Append a rollback that restores an earlier promote in the same linked chain or genesis."
+  @spec rollback_correction(map(), map()) ::
+          {:ok, Event.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def rollback_correction(scope, attrs) when is_map(scope) and is_map(attrs) do
+    with {:ok, common} <- normalize_transition_attrs(attrs),
+         %Wave{} = queried <- get_wave(scope),
+         %Wave{} = root <- ancestry_root_wave(queried),
+         true <- not is_nil(root.project_id) || {:error, :project_scope_required} do
+      Repo.transaction(fn ->
+        with %Root{} <- ensure_locked_promotion_root(root),
+             {:ok, chain} <- Promotion.chain(root.id),
+             %Event{} = head <- List.last(chain),
+             previous when is_binary(previous) <- nullable_uuid(value(attrs, :previous_event_id)),
+             {:ok, restore_event_id, target} <-
+               rollback_target(root, chain, value(attrs, :restore_event_id)) do
+          payload = %{
+            "action" => "rollback",
+            "admission_id" => nil,
+            "root_wave_revision" => root.id,
+            "target_wave_revision" => target.id,
+            "previous_event_id" => previous,
+            "restore_event_id" => restore_event_id,
+            "idempotency_key" => common.idempotency_key,
+            "actor" => common.actor,
+            "evidence" => common.evidence,
+            "evidence_revision" => common.evidence_revision,
+            "gate_receipt" => nil
+          }
+
+          event_digest = jsonb_digest(payload)
+
+          case Promotion.event_by_key(root.id, common.idempotency_key) do
+            %Event{event_digest: ^event_digest} = replay ->
+              replay
+
+            %Event{} ->
+              Repo.rollback(:promotion_conflict)
+
+            nil ->
+              with true <- previous == head.id || {:error, :stale_promotion_head},
+                   false <-
+                     target.id != root.id and
+                       Repo.exists?(
+                         from q in Quarantine,
+                           where: q.correction_wave_id == ^target.id
+                       ) do
+                persist_promotion_event(root, target, common, payload, nil, restore_event_id)
+              else
+                true -> Repo.rollback(:correction_quarantined)
+                {:error, reason} -> Repo.rollback(reason)
+              end
+          end
+        else
+          nil -> Repo.rollback(:invalid_rollback_target)
+          {:error, reason} -> Repo.rollback(reason)
+          _ -> Repo.rollback(:invalid_rollback_target)
+        end
+      end)
+      |> unwrap_transaction()
+    else
+      nil -> {:error, :wave_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_rollback_target}
+    end
+  end
+
+  def rollback_correction(_scope, _attrs), do: {:error, :invalid_rollback_target}
+
+  @doc "Return the linked correction state for either an ancestry root or any successor wave."
+  @spec current_correction(map()) :: {:ok, map()} | {:error, atom()}
+  def current_correction(scope) when is_map(scope) do
+    with %Wave{} = queried <- get_wave(scope),
+         %Wave{} = root <- ancestry_root_wave(queried),
+         {:ok, events} <- Promotion.chain(root.id) do
+      targets = Repo.all(from target in Target, where: target.root_wave_id == ^root.id)
+      quarantines = Repo.all(from row in Quarantine, where: row.root_wave_id == ^root.id)
+      ancestry = linked_wave_ancestry(root, targets)
+      head = List.last(events)
+
+      current_wave = current_promoted_wave(head)
+      current_admission = effective_admission(head, events)
+      quarantined_wave_ids = MapSet.new(quarantines, & &1.correction_wave_id)
+
+      promoted_wave_ids =
+        events
+        |> Enum.filter(&(&1.action == "promote"))
+        |> Enum.map(& &1.target_wave_id)
+        |> Enum.uniq()
+
+      superseded =
+        promoted_wave_ids
+        |> Enum.reject(&(current_wave && &1 == current_wave.id))
+        |> Enum.map(&Repo.get!(Wave, &1))
+
+      lifecycle_status = fn wave ->
+        cond do
+          current_wave && wave.id == current_wave.id -> "current"
+          MapSet.member?(quarantined_wave_ids, wave.id) -> "quarantined"
+          wave.id == root.id && current_wave -> "superseded"
+          wave.id == root.id -> "current"
+          wave.id in promoted_wave_ids -> "superseded"
+          true -> "historical"
+        end
+      end
+
+      {:ok,
+       %{
+         format: "quarantine-promotion-v1",
+         ancestry_root: lifecycle_wave(root, lifecycle_status.(root)),
+         current: current_wave && lifecycle_wave(current_wave, "current"),
+         promotion: head && lifecycle_event(head),
+         authority_evidence: current_admission && lifecycle_admission(current_admission),
+         quarantines:
+           quarantines
+           |> Enum.sort_by(&{&1.inserted_at, &1.id})
+           |> Enum.map(&lifecycle_quarantine/1),
+         superseded: Enum.map(superseded, &lifecycle_wave(&1, lifecycle_status.(&1))),
+         historical_ancestry:
+           ancestry |> tl() |> Enum.map(&lifecycle_wave(&1, lifecycle_status.(&1)))
+       }}
+    else
+      nil -> {:error, :wave_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc "Return the canonical reader/validator projection for one cycle wave."
   @spec projection(map()) :: {:ok, map()} | {:error, atom()}
   def projection(scope) when is_map(scope) do
     with {:ok, reconciliation} <- reconcile(scope),
-         {:ok, fleet} <- reduce(scope) do
+         {:ok, fleet} <- reduce(scope),
+         {:ok, correction_lifecycle} <- current_correction(scope) do
       {:ok,
        %{
          cycle_ledger: reconciliation,
          fleet: Map.get(reconciliation, :canonical_fleet, fleet.fleet),
          own_fleet: fleet.fleet,
+         correction_lifecycle: correction_lifecycle,
          assignment_attributions: assignment_attributions(scope),
          authority: %{
            kind: "barkpark_cycle_fleet",
@@ -1055,6 +1302,638 @@ defmodule Barkpark.CycleFleet do
 
   @spec digest(term()) :: String.t()
   def digest(term), do: EpicFleet.digest(term)
+
+  defp correction_transition(scope, receipt, operation) do
+    with %Wave{} = target <- Repo.get(Wave, receipt["successor_wave_revision"]),
+         %Wave{} = root <- ancestry_root_wave(target),
+         true <- not is_nil(root.project_id) || {:error, :project_scope_required},
+         %Wave{} = queried <- get_wave(scope),
+         true <-
+           ancestry_root_wave(queried).id == root.id || {:error, :foreign_correction_ancestry} do
+      receipt_digest = EpicFleet.canonical_digest(receipt)
+
+      Repo.transaction(fn ->
+        with %Root{} <- ensure_locked_promotion_root(root),
+             {:ok, ^receipt_digest} <- validate_target_receipt(target, receipt),
+             %Target{} <- ensure_promotion_ancestry(root, target) do
+          operation.(root, target, receipt_digest)
+        else
+          {:error, reason} -> Repo.rollback(reason)
+          _ -> Repo.rollback(:invalid_correction_receipt)
+        end
+      end)
+      |> unwrap_transaction()
+    else
+      nil -> {:error, :wave_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_correction_receipt}
+    end
+  end
+
+  defp ensure_promotion_ancestry(root, target) do
+    root
+    |> correction_successors_to(target)
+    |> Enum.reduce(nil, fn wave, _registered ->
+      receipt = correction_receipt(wave)
+
+      ensure_promotion_target(
+        root,
+        wave,
+        receipt,
+        EpicFleet.canonical_digest(receipt)
+      )
+    end)
+  end
+
+  defp correction_successors_to(root, target), do: correction_successors_to(root.id, target, [])
+
+  defp correction_successors_to(root_id, %Wave{correction_of_wave_id: root_id} = wave, acc),
+    do: [wave | acc]
+
+  defp correction_successors_to(root_id, %Wave{correction_of_wave_id: parent_id} = wave, acc) do
+    correction_successors_to(root_id, Repo.get!(Wave, parent_id), [wave | acc])
+  end
+
+  defp ensure_locked_promotion_root(%Wave{} = root) do
+    attrs = %{
+      root_wave_id: root.id,
+      workspace_id: root.workspace_id,
+      project_id: root.project_id,
+      epic_id: root.epic_id
+    }
+
+    case Repo.insert(Root.insert_changeset(attrs),
+           on_conflict: :nothing,
+           conflict_target: [:root_wave_id]
+         ) do
+      {:ok, _} -> Promotion.lock_root(root.id)
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp ensure_promotion_target(root, target, receipt, receipt_digest) do
+    attrs = %{
+      wave_id: target.id,
+      root_wave_id: root.id,
+      previous_wave_id: target.correction_of_wave_id,
+      workspace_id: root.workspace_id,
+      project_id: root.project_id,
+      epic_id: root.epic_id,
+      correction_receipt: receipt,
+      correction_receipt_digest: receipt_digest,
+      semantic_digest: EpicFleet.canonical_digest(receipt["targets"])
+    }
+
+    case Repo.insert(Target.insert_changeset(attrs),
+           on_conflict: :nothing,
+           conflict_target: [:wave_id]
+         ) do
+      {:ok, _} ->
+        case Repo.get(Target, target.id) do
+          %Target{} = row ->
+            if Map.take(row, Map.keys(attrs)) == attrs,
+              do: row,
+              else: Repo.rollback(:correction_target_conflict)
+
+          nil ->
+            Repo.rollback(:correction_target_conflict)
+        end
+
+      {:error, changeset} ->
+        Repo.rollback(changeset)
+    end
+  end
+
+  defp insert_promotion_event(root, target, common, payload, gate, receipt_digest) do
+    case Promotion.event_by_key(root.id, common.idempotency_key) do
+      %Event{} = replay ->
+        replay_payload = Map.put(payload, "admission_id", replay.admission_id)
+
+        if replay.event_digest == jsonb_digest(replay_payload),
+          do: replay,
+          else: Repo.rollback(:promotion_conflict)
+
+      nil ->
+        current = Promotion.head(root.id) |> current_promoted_wave()
+
+        with true <- (is_nil(current) or current.id != target.id) || {:error, :already_current},
+             :ok <- correction_ready?(target),
+             {:ok, authority} <- validate_gate_receipt(target, gate, receipt_digest),
+             false <-
+               Repo.exists?(from q in Quarantine, where: q.correction_wave_id == ^target.id),
+             head <- Promotion.head(root.id),
+             true <-
+               nullable_uuid(payload["previous_event_id"]) == (head && head.id) ||
+                 {:error, :stale_promotion_head},
+             %Admission{} = admission <- persist_admission(root, target, common, gate, authority) do
+          persist_promotion_event(
+            root,
+            target,
+            common,
+            Map.put(payload, "admission_id", admission.id),
+            gate,
+            nil
+          )
+        else
+          true -> Repo.rollback(:correction_quarantined)
+          {:error, reason} -> Repo.rollback(reason)
+        end
+    end
+  end
+
+  defp persist_promotion_event(root, target, common, payload, gate, restore_event_id) do
+    event_digest = jsonb_digest(payload)
+
+    case Promotion.event_by_key(root.id, common.idempotency_key) do
+      %Event{event_digest: ^event_digest} = replay ->
+        replay
+
+      %Event{} ->
+        Repo.rollback(:promotion_conflict)
+
+      nil ->
+        %{
+          admission_id: payload["admission_id"],
+          root_wave_id: root.id,
+          target_wave_id: target.id,
+          previous_event_id: payload["previous_event_id"],
+          restore_event_id: restore_event_id,
+          workspace_id: root.workspace_id,
+          project_id: root.project_id,
+          epic_id: root.epic_id,
+          action: payload["action"],
+          idempotency_key: common.idempotency_key,
+          actor: common.actor,
+          evidence: common.evidence,
+          evidence_revision: common.evidence_revision,
+          gate_receipt: gate,
+          event_payload: payload,
+          event_digest: event_digest
+        }
+        |> Event.insert_changeset()
+        |> Repo.insert()
+        |> case do
+          {:ok, event} -> event
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+    end
+  end
+
+  defp correction_ready?(target) do
+    case reconcile(Map.take(target, @scope_fields)) do
+      {:ok, summary} ->
+        with true <- summary.exact || {:error, :correction_not_ready},
+             true <- summary.fleet_complete || {:error, :correction_not_ready},
+             true <- get_in(summary, [:experiment, :complete?]) || {:error, :correction_not_ready},
+             true <- correction_violation_lists_empty?(summary) || {:error, :correction_not_ready} do
+          :ok
+        end
+
+      _ ->
+        {:error, :correction_not_ready}
+    end
+  end
+
+  defp correction_violation_lists_empty?(summary) do
+    Enum.all?(
+      ~w(duplicate_assignment_unit_ids unknown_assignment_unit_ids unknown_outcome_unit_ids outcome_overlap_unit_ids outcome_ownership_violation_unit_ids invalid_build_assignment_ids invalid_build_result_assignment_ids unassigned_unit_ids unaccounted_unit_ids)a,
+      &(Map.get(summary, &1) == [])
+    )
+  end
+
+  defp validate_gate_receipt(target, gate, receipt_digest) do
+    with {:ok, summary} <- reconcile(Map.take(target, @scope_fields)),
+         %Revision{} = paper <- authoritative_gate_paper(target, gate),
+         true <-
+           contains_cycle_authority?(
+             paper.content,
+             stringify_keys(summary),
+             stringify_keys(summary.canonical_fleet)
+           ) do
+      fleet_digest = EpicFleet.canonical_digest(summary.canonical_fleet)
+      paper_content_digest = EpicFleet.canonical_digest(paper.content)
+
+      b1_scope_receipt = %{
+        "version" => "b1-scope-fence-v1",
+        "workspace_id" => target.workspace_id,
+        "project_id" => target.project_id,
+        "epic_id" => target.epic_id,
+        "wave_id" => target.wave_id,
+        "wave_revision" => target.id,
+        "inventory_digest" => target.inventory_digest,
+        "plan_digest" => effective_plan_digest(target),
+        "reconciliation_digest" => summary.reconciliation_digest,
+        "fleet_digest" => fleet_digest
+      }
+
+      b1_scope_receipt =
+        Map.put(
+          b1_scope_receipt,
+          "receipt_digest",
+          EpicFleet.canonical_digest(b1_scope_receipt)
+        )
+
+      with %Experiment{} = experiment <- authoritative_b1_experiment(target, gate),
+           {:ok, b1_document} <- EpicFleet.export_benchmark(experiment),
+           {:ok, b1_bytes} <- EpicFleet.export_benchmark_json(experiment),
+           true <-
+             valid_b1_document?(
+               b1_document,
+               b1_scope_receipt,
+               fleet_digest,
+               target,
+               summary.canonical_fleet
+             ) do
+        b1_ledger_digest = b1_document["ledger_digest"]
+        b1_bytes_digest = sha256_bytes(b1_bytes)
+
+        expected = %{
+          "format" => "cycle-promotion-gate-v1",
+          "wave_revision" => target.id,
+          "inventory_digest" => target.inventory_digest,
+          "plan_digest" => effective_plan_digest(target),
+          "reconciliation_digest" => summary.reconciliation_digest,
+          "correction_receipt_digest" => receipt_digest,
+          "semantic_digest" => EpicFleet.canonical_digest(summary.correction_receipt["targets"]),
+          "b1_scope_receipt_digest" => b1_scope_receipt["receipt_digest"],
+          "b1_experiment_id" => experiment.id,
+          "b1_ledger_digest" => b1_ledger_digest,
+          "b1_bytes_digest" => b1_bytes_digest,
+          "paper_document_id" => paper.document_id,
+          "paper_revision_id" => paper.id,
+          "paper_doc_id" => paper.doc_id,
+          "paper_content_digest" => paper_content_digest
+        }
+
+        if gate == Map.put(expected, "receipt_digest", EpicFleet.canonical_digest(expected)) do
+          {:ok,
+           %{
+             reconciliation_digest: summary.reconciliation_digest,
+             fleet_digest: fleet_digest,
+             b1_scope_receipt: b1_scope_receipt,
+             b1_scope_receipt_digest: b1_scope_receipt["receipt_digest"],
+             b1_experiment_id: experiment.id,
+             b1_ledger_digest: b1_ledger_digest,
+             b1_bytes_digest: b1_bytes_digest,
+             paper_document_id: paper.document_id,
+             paper_revision_id: paper.id,
+             paper_doc_id: paper.doc_id,
+             paper_content_digest: paper_content_digest
+           }}
+        else
+          {:error, :invalid_gate_receipt}
+        end
+      else
+        _ -> {:error, :invalid_gate_receipt}
+      end
+    else
+      _ -> {:error, :invalid_gate_receipt}
+    end
+  end
+
+  defp authoritative_b1_experiment(target, gate) do
+    with {:ok, id} <- Ecto.UUID.cast(gate["b1_experiment_id"]) do
+      Repo.one(
+        from experiment in Experiment,
+          where:
+            experiment.id == ^id and experiment.workspace_id == ^target.workspace_id and
+              experiment.epic_id == ^target.epic_id and experiment.wave_id == ^target.wave_id and
+              experiment.artifact_format == "barkpark-epic-benchmark-v1",
+          lock: "FOR SHARE"
+      )
+    else
+      _ -> nil
+    end
+  end
+
+  defp valid_b1_document?(document, scope_receipt, fleet_digest, target, fleet) do
+    expected_attempts =
+      for phase <- ~w(survey verify experiment build review),
+          assignment <-
+            fleet
+            |> stringify_keys()
+            |> get_in([phase, "assignments"])
+            |> Kernel.||([])
+            |> Enum.sort_by(& &1["id"]) do
+        {phase, assignment}
+      end
+
+    attempts = document["attempts"]
+
+    document["format"] == "barkpark-epic-benchmark-v1" and
+      document["experiment"]["workspace_id"] == target.workspace_id and
+      document["experiment"]["epic_id"] == target.epic_id and
+      document["experiment"]["wave_id"] == target.wave_id and
+      document["manifest"]["cycle_scope_fence"] == scope_receipt and
+      document["manifest"]["fleet_contract"] == %{
+        "version" => 1,
+        "paper_fleet_digest" => fleet_digest
+      } and length(attempts) == length(expected_attempts) and attempts != [] and
+      Enum.zip(attempts, expected_attempts)
+      |> Enum.with_index(1)
+      |> Enum.all?(fn {{attempt, {phase, assignment}}, ordinal} ->
+        attempt["attempt_id"] == "cycle-#{phase}-#{assignment["id"]}" and
+          attempt["ordinal"] == ordinal and attempt["status"] == "completed" and
+          attempt["treatment"] == "cyclefleet-reconciliation" and
+          attempt["provenance"]["wave_revision"] == target.id and
+          attempt["provenance"]["scope_receipt_digest"] == scope_receipt["receipt_digest"] and
+          attempt["payload"]["fleet_assignment"] == %{
+            "phase" => phase,
+            "assignment_id" => assignment["id"],
+            "agent_type" => assignment["agent_type"],
+            "evidence" => assignment["evidence"],
+            "model_reasoning_effort" =>
+              if(phase in ["build", "review"], do: "high", else: "medium")
+          }
+      end)
+  rescue
+    _ -> false
+  end
+
+  defp sha256_bytes(bytes),
+    do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+  defp authoritative_gate_paper(target, gate) do
+    with {:ok, id} <- Ecto.UUID.cast(gate["paper_revision_id"]),
+         {:ok, document_id} <- Ecto.UUID.cast(gate["paper_document_id"]),
+         doc_id when is_binary(doc_id) <- gate["paper_doc_id"] do
+      Repo.one(
+        from paper in Revision,
+          join: document in Document,
+          on:
+            document.id == paper.document_id and document.current_revision_id == paper.id and
+              document.released_revision_id == paper.id,
+          join: dataset in Dataset,
+          on: dataset.id == document.dataset_id and dataset.slug == "production",
+          where:
+            paper.id == ^id and document.id == ^document_id and
+              paper.workspace_id == ^target.workspace_id and
+              paper.project_id == ^target.project_id and paper.type == "paper" and
+              paper.dataset == "production" and paper.status == "published" and
+              paper.doc_id == ^doc_id and document.dataset == "production" and
+              document.status == "published" and document.content == paper.content and
+              document.title == paper.title,
+          lock: "FOR SHARE"
+      )
+    else
+      _ -> nil
+    end
+  end
+
+  defp contains_cycle_authority?(%{"blocks" => blocks}, ledger, fleet) when is_list(blocks) do
+    authority_blocks =
+      Enum.filter(blocks, &(Map.has_key?(&1, "cycle_ledger") or Map.has_key?(&1, "fleet")))
+
+    case authority_blocks do
+      [block] -> block["cycle_ledger"] == ledger and block["fleet"] == fleet
+      _ -> false
+    end
+  end
+
+  defp contains_cycle_authority?(_value, _ledger, _fleet), do: false
+
+  defp persist_admission(root, target, common, gate, authority) do
+    attrs =
+      authority
+      |> Map.merge(%{
+        root_wave_id: root.id,
+        target_wave_id: target.id,
+        workspace_id: root.workspace_id,
+        project_id: root.project_id,
+        epic_id: root.epic_id,
+        idempotency_key: common.idempotency_key,
+        gate_receipt: gate,
+        gate_receipt_digest: EpicFleet.canonical_digest(gate)
+      })
+
+    case Repo.insert(Admission.insert_changeset(attrs)) do
+      {:ok, admission} -> admission
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp normalize_transition_attrs(attrs) do
+    with {:ok, actor} <- normalize_actor(value(attrs, :actor)),
+         key when is_binary(key) <- value(attrs, :idempotency_key),
+         evidence when is_binary(evidence) <- value(attrs, :evidence),
+         revision when is_binary(revision) <- value(attrs, :evidence_revision),
+         true <- Enum.all?([key, evidence], &nonempty?/1),
+         true <- digest_string?(revision) do
+      {:ok,
+       %{
+         actor: actor,
+         idempotency_key: key,
+         evidence: evidence,
+         evidence_revision: revision
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_transition_evidence}
+    end
+  end
+
+  defp normalize_actor(actor) when is_map(actor) do
+    actor = stringify_keys(actor)
+
+    if Map.keys(actor) |> Enum.sort() == ["id", "type"] and nonempty?(actor["id"]) and
+         nonempty?(actor["type"]),
+       do: {:ok, actor},
+       else: {:error, :invalid_actor}
+  end
+
+  defp normalize_actor(_), do: {:error, :invalid_actor}
+
+  defp normalize_correction_receipt(receipt) when is_map(receipt) do
+    receipt = stringify_keys(receipt)
+
+    if Map.keys(receipt) |> Enum.sort() == Enum.sort(@correction_receipt_keys),
+      do: {:ok, receipt},
+      else: {:error, :invalid_correction_receipt}
+  rescue
+    _ -> {:error, :invalid_correction_receipt}
+  end
+
+  defp normalize_correction_receipt(_), do: {:error, :invalid_correction_receipt}
+
+  defp normalize_gate_receipt(receipt) when is_map(receipt) do
+    receipt = stringify_keys(receipt)
+
+    if Map.keys(receipt) |> Enum.sort() == Enum.sort(@gate_receipt_keys),
+      do: {:ok, receipt},
+      else: {:error, :invalid_gate_receipt}
+  rescue
+    _ -> {:error, :invalid_gate_receipt}
+  end
+
+  defp normalize_gate_receipt(_), do: {:error, :invalid_gate_receipt}
+
+  defp validate_target_receipt(target, receipt) do
+    with true <- not is_nil(target.correction_of_wave_id),
+         true <- correction_receipt(target) == receipt do
+      {:ok, EpicFleet.canonical_digest(receipt)}
+    else
+      _ -> {:error, :invalid_correction_receipt}
+    end
+  end
+
+  defp ancestry_root_wave(%Wave{correction_of_wave_id: nil} = wave), do: wave
+
+  defp ancestry_root_wave(%Wave{correction_of_wave_id: parent}),
+    do: Wave |> Repo.get!(parent) |> ancestry_root_wave()
+
+  defp rollback_target(root, _chain, "genesis"), do: {:ok, nil, root}
+
+  defp rollback_target(_root, chain, restore_id) when is_binary(restore_id) do
+    head = List.last(chain)
+
+    with {:ok, restore_id} <- Ecto.UUID.cast(restore_id),
+         %Event{action: "promote"} = event <- Enum.find(chain, &(&1.id == restore_id)),
+         true <- event.id != head.id,
+         %Wave{} = target <- Repo.get(Wave, event.target_wave_id) do
+      {:ok, restore_id, target}
+    else
+      _ -> {:error, :invalid_rollback_target}
+    end
+  end
+
+  defp rollback_target(_root, _chain, _restore), do: {:error, :invalid_rollback_target}
+
+  defp linked_wave_ancestry(root, targets) do
+    children = Map.new(targets, &{&1.previous_wave_id, &1.wave_id})
+    follow_wave_ancestry(root, children, [root], MapSet.new([root.id]))
+  end
+
+  defp follow_wave_ancestry(wave, children, acc, seen) do
+    case Map.get(children, wave.id) do
+      nil ->
+        Enum.reverse(acc)
+
+      id when is_binary(id) ->
+        if MapSet.member?(seen, id) do
+          Enum.reverse(acc)
+        else
+          child = Repo.get!(Wave, id)
+          follow_wave_ancestry(child, children, [child | acc], MapSet.put(seen, id))
+        end
+    end
+  end
+
+  defp lifecycle_wave(wave, status) do
+    correction = wave.correction_of || %{}
+
+    semantic =
+      case reconcile(Map.take(wave, @scope_fields)) do
+        {:ok, summary} ->
+          %{
+            reconciliation_digest: summary.reconciliation_digest,
+            inventory_count: summary.inventory_count,
+            shipped_count: summary.shipped_count,
+            stalled_count: summary.stalled_count,
+            excluded_count: summary.excluded_count,
+            exact: summary.exact,
+            fleet_complete: summary.fleet_complete
+          }
+
+        _ ->
+          nil
+      end
+
+    %{
+      status: status,
+      wave_id: wave.wave_id,
+      wave_revision: wave.id,
+      correction_of_digest: wave.correction_of_digest,
+      before_counts: correction["before_counts"],
+      delta: correction["delta"],
+      after_counts: correction["after_counts"],
+      semantic_snapshot: semantic
+    }
+  end
+
+  defp current_promoted_wave(nil), do: nil
+  defp current_promoted_wave(%Event{action: "rollback", restore_event_id: nil}), do: nil
+  defp current_promoted_wave(%Event{target_wave_id: id}), do: Repo.get!(Wave, id)
+
+  defp effective_admission(nil, _events), do: nil
+
+  defp effective_admission(%Event{action: "promote", admission_id: admission_id}, _events),
+    do: Repo.get!(Admission, admission_id)
+
+  defp effective_admission(%Event{action: "rollback", restore_event_id: nil}, _events), do: nil
+
+  defp effective_admission(%Event{action: "rollback", restore_event_id: restore_id}, events) do
+    with %Event{admission_id: admission_id} <- Enum.find(events, &(&1.id == restore_id)) do
+      Repo.get!(Admission, admission_id)
+    end
+  end
+
+  defp lifecycle_event(event) do
+    admission = event.admission_id && Repo.get(Admission, event.admission_id)
+
+    %{
+      event_id: event.id,
+      action: event.action,
+      target_wave_revision: event.target_wave_id,
+      previous_event_id: event.previous_event_id,
+      restore_event_id: event.restore_event_id,
+      actor: event.actor,
+      evidence: event.evidence,
+      evidence_revision: event.evidence_revision,
+      event_digest: event.event_digest,
+      admission: admission && lifecycle_admission(admission)
+    }
+  end
+
+  defp lifecycle_admission(admission) do
+    %{
+      admission_id: admission.id,
+      target_wave_revision: admission.target_wave_id,
+      b1_scope_receipt: admission.b1_scope_receipt,
+      b1_scope_receipt_digest: admission.b1_scope_receipt_digest,
+      b1_experiment_id: admission.b1_experiment_id,
+      b1_ledger_digest: admission.b1_ledger_digest,
+      b1_bytes_digest: admission.b1_bytes_digest,
+      paper_revision_id: admission.paper_revision_id,
+      paper_document_id: admission.paper_document_id,
+      paper_doc_id: admission.paper_doc_id,
+      paper_content_digest: admission.paper_content_digest,
+      fleet_digest: admission.fleet_digest,
+      reconciliation_digest: admission.reconciliation_digest
+    }
+  end
+
+  defp lifecycle_quarantine(row) do
+    %{
+      quarantine_id: row.id,
+      correction_wave_revision: row.correction_wave_id,
+      reason: row.reason,
+      actor: row.actor,
+      evidence: row.evidence,
+      evidence_revision: row.evidence_revision,
+      event_digest: row.event_digest
+    }
+  end
+
+  defp nullable_uuid(nil), do: nil
+
+  defp nullable_uuid(value) when is_binary(value) do
+    case Ecto.UUID.cast(value) do
+      {:ok, id} -> id
+      _ -> :invalid
+    end
+  end
+
+  defp nullable_uuid(_), do: :invalid
+
+  defp digest_string?(value),
+    do: is_binary(value) and String.match?(value, ~r/^[0-9a-f]{64}$/)
+
+  defp jsonb_digest(payload) do
+    EpicFleet.canonical_digest(payload)
+  end
+
+  defp unwrap_transaction({:ok, value}), do: {:ok, value}
+  defp unwrap_transaction({:error, reason}), do: {:error, reason}
 
   defp reconcile_wave_insert({:ok, wave}, _attrs), do: {:ok, wave}
 

@@ -66,6 +66,8 @@ defmodule Barkpark.Content.Document do
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+    belongs_to :current_revision, Barkpark.Content.Revision, type: :binary_id
+    belongs_to :released_revision, Barkpark.Content.Revision, type: :binary_id
 
     # W2 additive seam. Association is `:dataset_entity` because the legacy
     # `dataset` STRING field still owns the `:dataset` name (dual presence).
