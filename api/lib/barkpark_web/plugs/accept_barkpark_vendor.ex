@@ -20,6 +20,15 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   stream endpoint is reachable. Barkpark's own sync worker hit this and
   documents an `Accept: */*` client workaround in
   `lib/barkpark/sync/HANDOFF.md`; this makes the canonical header work too.
+
+  The SAME append happens for `application/x-tar`: `bp cloud workspace export`
+  sends the canonical tar Accept, but the bundle route rides the `:api`
+  pipeline (`plug(:accepts, ["json"])`), which would 406 that header before the
+  request reaches `WorkspaceController.export` (which sets its own
+  `application/x-tar` attachment response type). Appending `application/json`
+  makes JSON negotiable — identical to the SSE branch — so the export route is
+  reachable with its spec-compliant Accept.
+
   This runs before `:accepts` in both the `:api` and `:scoped_api`
   pipelines, so no router change is needed; only requests that would
   otherwise 406 are affected.
@@ -55,6 +64,14 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
           sse?(header) ->
             put_req_header(conn, "accept", header <> ", application/json")
 
+          # `application/x-tar` clients (the workspace bundle export) hit the same
+          # seam: `:accepts ["json"]` would 406 that header before the request
+          # reaches `WorkspaceController.export`, which sets its own
+          # `application/x-tar` attachment response type. Append (do NOT replace)
+          # so JSON is negotiable — identical to the SSE branch.
+          x_tar?(header) ->
+            put_req_header(conn, "accept", header <> ", application/json")
+
           true ->
             conn
         end
@@ -67,4 +84,6 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   end
 
   defp sse?(header), do: String.contains?(header, "text/event-stream")
+
+  defp x_tar?(header), do: String.contains?(header, "application/x-tar")
 end

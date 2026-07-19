@@ -31,6 +31,21 @@ func workspaceEnvIsolate(t *testing.T) {
 	}
 }
 
+// acceptNegotiatesJSON mirrors the server's `:accepts ["json"]` matcher: a set
+// Accept header must offer json (application/json or the */* wildcard) or the
+// request 406s in the `:api` pipeline BEFORE it reaches the controller. The
+// workspace export route rides that pipeline even though the controller answers
+// application/x-tar — AcceptBarkparkVendor appends json for a bare x-tar, and a
+// spec-clean client states both. The mock enforces the invariant so a regression
+// to a non-negotiable Accept (the class the 200-always mock hid since #3012)
+// fails the test instead of silently passing.
+func acceptNegotiatesJSON(accept string) bool {
+	if strings.TrimSpace(accept) == "" {
+		return true
+	}
+	return strings.Contains(accept, "application/json") || strings.Contains(accept, "*/*")
+}
+
 // runWorkspace drives the FULL runCloud dispatcher (case "workspace") with an
 // in-memory writer and the given globals, returning stdout, stderr, exit. Driving
 // runCloud (not runCloudWorkspace) proves the switch wiring, per the V3 pattern.
@@ -52,6 +67,17 @@ func TestCloudWorkspaceExportWritesFile(t *testing.T) {
 	var gotMethod, gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		// Mirror the server's `:accepts ["json"]` matcher: a bare
+		// `application/x-tar` Accept 406s in the `:api` pipeline before the
+		// controller runs. Enforcing it here means a regression to a
+		// non-json-negotiable export Accept FAILS this test instead of hiding
+		// behind a 200-always mock (the class latent since #3012).
+		if !acceptNegotiatesJSON(r.Header.Get("Accept")) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotAcceptable)
+			_, _ = w.Write([]byte(`{"error":{"code":"not_acceptable","message":"Accept cannot negotiate json"}}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/x-tar")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(tarBytes))
