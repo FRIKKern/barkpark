@@ -19,7 +19,7 @@ import {
   roleOf,
   labelForRole,
   meaningForRole,
-  STATUS_ROLES,
+  LEGEND_ROLES,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
@@ -838,7 +838,10 @@ function countRole(rows: Block[], r: string): number {
 }
 
 const statusLegend: Emit = () => {
-  const rows = STATUS_ROLES.map((r) => {
+  // LEGEND_ROLES (not STATUS_ROLES) — the manifest-scoped vocabulary key, frozen
+  // to the Elixir golden. The fail-open `unknown` sentinel and the not-yet-in-
+  // manifest thought states are excluded (see inline.tsx LEGEND_ROLES).
+  const rows = LEGEND_ROLES.map((r) => {
     const name = escapeHtml(labelForRole(r.role))
     const meaning = meaningForRole(r.role)
     return `<div class="bp-legend__r">${glyphHtml(r.role)}<span class="bp-legend__n">${name}</span><span class="bp-legend__d">${meaning}</span></div>`
