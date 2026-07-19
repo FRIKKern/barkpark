@@ -517,6 +517,28 @@ defmodule BarkparkCloud.Notifications do
     |> Repo.all()
   end
 
+  @doc """
+  The platform-wide FLEET-DIGEST delivery log — the Operator-console analogue of
+  `list_deliveries/2`, newest first, limit-capped.
+
+  Fleet-digest sends are recorded team-agnostic (`team_id: nil`,
+  `event: "fleet_digest"` — a platform-operator email belongs to no team), so
+  they are structurally INVISIBLE to the team-scoped `list_deliveries/2`
+  (`where team_id == ^tid` never matches a nil row). The `event` filter is
+  load-bearing, not cosmetic: user-scoped identity emails (password-reset /
+  verify) also carry a nil `team_id`, so `is_nil(team_id)` alone would leak them
+  — this surface is FLEET digests only. No team-scoping arg because these rows
+  belong to no team; the route gates on `require_platform_operator` instead.
+  """
+  @spec list_fleet_deliveries(pos_integer()) :: [Delivery.t()]
+  def list_fleet_deliveries(limit \\ 50) do
+    Delivery
+    |> where([d], is_nil(d.team_id) and d.event == "fleet_digest")
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   # Persist one send outcome. status/attempts/last_error follow the webhook
   # delivery precedent. A failed INSERT here is itself logged (never raised).
   defp record_delivery(team_id, recipient, event, kind, result) do
