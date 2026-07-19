@@ -78,6 +78,59 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       refute html =~ "hidden body"
     end
 
+    test "the collapsed strip is a real button, not a click-wired div (spd-s6)" do
+      # spd-s4 promoted this 44px strip to the desk's ONLY back affordance at
+      # narrow widths. As a <div phx-click> it was unreachable by keyboard
+      # (tabIndex -1, role null) and silent to a screen reader — the primary
+      # navigation control of a whole viewport band, invisible to anyone not
+      # using a mouse.
+      html =
+        render_component(&StudioComponents.pane_column/1, %{
+          title: "Post",
+          collapsed: true,
+          phx_click: "expand-pane",
+          phx_value_idx: "1",
+          inner_block: [%{inner_block: fn _, _ -> "hidden body" end}]
+        })
+
+      assert html =~ ~s(<button type="button")
+
+      # It expands the pane it names, and it says which one out loud — the
+      # hover `title` alone reaches neither keyboard nor screen-reader users.
+      assert html =~ ~s(aria-expanded="false")
+      assert html =~ ~s(aria-label="Back to Post")
+      assert html =~ ~s(title="Back to Post")
+
+      # The chevron is decoration on a labelled control, and it points the way
+      # the action actually goes: LEFT (`m15 18-6-6 6-6`), not right.
+      assert html =~ ~s(aria-hidden="true")
+      assert html =~ ~s(<path d="m15 18-6-6 6-6">)
+      refute html =~ ~s(d="m9 18 6-6-6-6")
+    end
+
+    test "the collapsed strip's class attribute is frozen byte-identical (D55)" do
+      # `studio_live_width_bucket_test.exs` counts strips with an exact regex
+      # INCLUDING the closing quote, and `.pane-column--collapsed` is the
+      # selector root.html.heex hangs the button UA reset and the
+      # :focus-visible ring off. New ATTRIBUTES are free; a new class token,
+      # a reorder or a `class={...}` interpolation is not.
+      html =
+        render_component(&StudioComponents.pane_column/1, %{
+          title: "Post",
+          collapsed: true,
+          last: true,
+          marker_class: "bp-doc-list",
+          inner_block: [%{inner_block: fn _, _ -> "" end}]
+        })
+
+      assert html =~ ~s(class="pane-column pane-column--collapsed")
+
+      # Even `last` and `marker_class` — which DO extend the expanded column's
+      # class string — leave the strip's frozen.
+      refute html =~ ~s(pane-column--collapsed pane-column--last)
+      refute html =~ ~s(pane-column--collapsed bp-doc-list)
+    end
+
     test "last=true adds the trailing-border-removal modifier" do
       html =
         render_component(&StudioComponents.pane_column/1, %{
