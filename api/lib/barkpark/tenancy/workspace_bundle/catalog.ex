@@ -371,6 +371,242 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
   end
 
+  # ── Dev-profile partition (PDS charter D4/D5 — classification data only) ─────
+  #
+  # A SECOND partition, orthogonal to the pinned E1/E2/E3 buckets above: every
+  # bundle-reachable table (root + E1 + E2 + E3 + allowlist) classified for the
+  # `--profile dev` pull as
+  #
+  #   * `:copy`                     — travels verbatim in a dev bundle
+  #   * `:deny`                     — never enters a dev bundle (secret /
+  #                                   credential / fleet / size classes)
+  #   * `{:scrub_fields, [field]}`  — travels with the named fields nulled at
+  #                                   export (empty in W1; the shape exists so a
+  #                                   future field-scrub needs no model change)
+  #
+  # `documents` alone carries an extra axis: `{:copy, deny_types: [type]}` —
+  # rows whose `type` is listed never travel (PDS-D5: tickets are customer PII
+  # conversations, full-denied per-type; the snapshot back door through
+  # `revisions` / `mutation_events` is closed by their table-level deny).
+  #
+  # This section is CLASSIFICATION DATA + SENTINEL only — the exporter does not
+  # read it yet (the dev export slice consumes it). The full-fidelity backup
+  # partition above and `assert_partition!/1` are untouched by design: the
+  # md5-parity suite in workspace_bundle_test.exs is the regression tripwire.
+  #
+  # Deny census (PDS-D4, verified live 2026-07-19):
+  #   * credential/secret stores: api_tokens, secrets, secrets_audit, data_keys,
+  #     access_grants, webhooks (live rows carry PLAINTEXT signing secrets),
+  #     webhook_deliveries (payload + signature trail of a denied parent),
+  #     audit_export_sinks (plaintext `secret` sink column), share_links,
+  #     shares (access-granting registry — copying would silently re-open
+  #     public surfaces on the target), registered_chat_hosts,
+  #     preview_token_jti.
+  #   * PII / conversation / audit trails: audit_events, workspace_memberships,
+  #     chat_execution_leases, chat_execution_events, search_intel_events
+  #     (raw user-typed `query` text + `actor_key`/`session_key` identity —
+  #     per-user behavioral telemetry; the DERIVED aggregates
+  #     search_intel_crystals / search_intel_merge_patterns carry only
+  #     normalized-query counts with no actor identity and stay copy).
+  #   * sync family: sync_* (all five), github_sync_conflicts (conflict
+  #     payloads snapshot foreign state that cannot converge on a dev target).
+  #   * cycle/epic fleet ledgers incl. FK children: cycle_*, epic_*,
+  #     chat_runtime_usage_receipts (fleet usage telemetry).
+  #   * SIZE denies: mutation_events (241MB live), revisions (192MB live) —
+  #     keeps a dev bundle ~42MB instead of ~475MB and closes the
+  #     ticket-snapshot cascade in the same stroke.
+
+  @dev_doc_type_deny ~w(ticket)
+
+  @dev_copy ~w(
+    authoring_exemptions content_edges datasets media_files paper_events
+    plugin_doc_state projects role_permissions roles schema_definitions
+    search_intel_crystals search_intel_merge_patterns
+    search_surface_config search_synonyms task_edges workspaces
+  )
+
+  @dev_deny ~w(
+    access_grants api_tokens audit_events audit_export_sinks
+    chat_execution_events chat_execution_leases chat_runtime_usage_receipts
+    cycle_build_plans cycle_correction_admissions
+    cycle_correction_promotion_events cycle_correction_quarantines
+    cycle_correction_roots cycle_correction_targets
+    cycle_release_gate_admissions cycle_release_gate_captures
+    cycle_release_gate_challenges cycle_release_gate_consumptions
+    cycle_release_paper_candidates cycle_release_public_smokes cycle_waves
+    data_keys epic_assignment_results epic_assignment_runtime_attempts
+    epic_assignment_tasks epic_assignments epic_benchmark_attempts
+    epic_benchmark_experiments github_sync_conflicts mutation_events
+    preview_token_jti registered_chat_hosts revisions search_intel_events
+    secrets secrets_audit
+    share_links shares sync_cursors sync_dead_letters sync_push_conflicts
+    sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
+    workspace_memberships
+  )
+
+  # W1 ships an empty scrub set; the key shape is `table => [field]`.
+  @dev_scrub %{}
+
+  # Traveling tables with a REVIEWED composite primary key. Live census
+  # (2026-07-19): 94/94 base tables carry a PK, but only 86/94 are
+  # single-column — `plugin_doc_state` (3-col) and `authoring_exemptions`
+  # (2-col) are traveling composites. The merge-import arbiter is the
+  # manifest's `order_columns` — the FULL pk column list — so a composite
+  # arbiter is valid (`ON CONFLICT (a, b) DO UPDATE`). What fails closed:
+  # a traveling table with NO pk, or a NEW composite nobody reviewed.
+  @dev_composite_pk_ok ~w(authoring_exemptions plugin_doc_state)
+
+  # Compile-time tripwire: a table listed in two source lists would silently
+  # last-write-win in the merged map — refuse to compile instead.
+  dev_sources = @dev_copy ++ ["documents"] ++ @dev_deny ++ Map.keys(@dev_scrub)
+
+  if dev_sources != Enum.uniq(dev_sources) do
+    raise "WorkspaceBundle.Catalog: dev partition source lists overlap — " <>
+            inspect(dev_sources -- Enum.uniq(dev_sources))
+  end
+
+  @dev_partition Map.new(@dev_copy, &{&1, :copy})
+                 |> Map.merge(Map.new(@dev_deny, &{&1, :deny}))
+                 |> Map.merge(
+                   Map.new(@dev_scrub, fn {table, fields} -> {table, {:scrub_fields, fields}} end)
+                 )
+                 |> Map.put("documents", {:copy, deny_types: @dev_doc_type_deny})
+
+  @doc "The dev-profile classification map: table => :copy | :deny | {:scrub_fields, fields} (PDS-D4)."
+  def dev_partition, do: @dev_partition
+
+  @doc "Document `type`s that never travel in a dev-profile bundle (PDS-D5)."
+  def dev_doc_type_deny do
+    {:copy, deny_types: types} = Map.fetch!(@dev_partition, "documents")
+    types
+  end
+
+  @doc """
+  The normalized dev-profile action for a table: `:copy`, `:deny`, or
+  `{:scrub_fields, fields}`. FAIL-CLOSED: an unclassified table is `:deny` —
+  the export path can never copy a table the partition has not reviewed
+  (the sentinel additionally RAISES on any unclassified reachable table, so
+  this branch is defense-in-depth, not the primary guard).
+  """
+  def dev_action(table) do
+    case Map.fetch(@dev_partition, table) do
+      {:ok, :copy} -> :copy
+      {:ok, {:copy, _axis}} -> :copy
+      {:ok, {:scrub_fields, fields}} -> {:scrub_fields, fields}
+      _deny_or_unclassified -> :deny
+    end
+  end
+
+  @doc "Tables that travel in a dev-profile bundle (`:copy` + `{:scrub_fields, _}`), sorted."
+  def dev_copy_tables do
+    for({table, classification} <- @dev_partition, classification != :deny, do: table)
+    |> Enum.sort()
+  end
+
+  @doc "Tables a dev-profile bundle never carries, sorted."
+  def dev_deny_tables do
+    for({table, :deny} <- @dev_partition, do: table) |> Enum.sort()
+  end
+
+  @doc "Traveling tables whose composite primary key is reviewed as a valid merge arbiter."
+  def dev_composite_pk_ok, do: @dev_composite_pk_ok
+
+  # ── The dev-profile sentinel (PDS-D4: deny-by-default, fail-closed) ──────────
+
+  @doc """
+  Assert the dev-profile partition covers the LIVE bundle-reachable catalog,
+  RAISING on any gap — the fail-closed mirror of `assert_partition!/1`.
+
+  Four checks, all fail-closed:
+
+    1. every classification value is well-formed (`:copy` / `:deny` /
+       `{:scrub_fields, [field]}` / documents' `{:copy, deny_types: [type]}`);
+    2. every bundle-reachable table (root + live E1/E2/E3 + allowlist) is
+       classified — an UNCLASSIFIED new table RAISES, so nothing ever travels
+       (or is silently dropped) unreviewed;
+    3. no phantom entries — a classified table that is no longer reachable
+       RAISES, keeping the map honest;
+    4. every traveling table (copy + scrub) has a primary key the merge-import
+       `ON CONFLICT (pk) DO UPDATE` arbiter (PDS-D8) can use — single-column,
+       unless the composite is on the reviewed `dev_composite_pk_ok/0` list
+       (live census: 94/94 base tables carry a PK; 86/94 single-column).
+
+  The second argument exists for protective tests (injecting a classification
+  the real map would never carry); production callers use the default.
+  """
+  def assert_dev_partition!(repo, partition \\ @dev_partition) do
+    malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
+
+    if malformed != [] do
+      raise "WorkspaceBundle.Catalog: dev partition entry for #{inspect(Enum.sort(malformed))} " <>
+              "is malformed — a classification is :copy | :deny | {:scrub_fields, [field]} " <>
+              "(documents alone may carry {:copy, deny_types: [type]})"
+    end
+
+    reachable =
+      ([@root_table] ++
+         live_e1(repo) ++ live_e2(repo) ++ live_e3(repo) ++ Map.keys(@allowlist))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    classified = partition |> Map.keys() |> Enum.sort()
+
+    unclassified = reachable -- classified
+
+    if unclassified != [] do
+      raise "WorkspaceBundle.Catalog: #{length(unclassified)} unclassified bundle-reachable " <>
+              "table(s) #{inspect(unclassified)} — the dev profile is deny-by-default and " <>
+              "FAILS CLOSED: classify each as copy | deny | scrub_fields before a dev " <>
+              "export can run"
+    end
+
+    phantom = classified -- reachable
+
+    if phantom != [] do
+      raise "WorkspaceBundle.Catalog: dev-classified table(s) #{inspect(phantom)} are not " <>
+              "bundle-reachable — remove the stale entry or fix the reachability drift"
+    end
+
+    traveling = for {table, c} <- partition, c != :deny, do: table
+    bad_pk = pk_arbiter_violations(repo, traveling)
+
+    if bad_pk != [] do
+      raise "WorkspaceBundle.Catalog: copy-classified table(s) #{inspect(Enum.sort(bad_pk))} " <>
+              "lack a single-column primary key and are not on the reviewed composite-PK " <>
+              "list — the merge-import ON CONFLICT (pk) DO UPDATE arbiter (PDS-D8) needs " <>
+              "a reviewed pk"
+    end
+
+    :ok
+  end
+
+  defp valid_dev_classification?(:copy), do: true
+  defp valid_dev_classification?(:deny), do: true
+
+  defp valid_dev_classification?({:copy, deny_types: types}) when is_list(types),
+    do: types != [] and Enum.all?(types, &is_binary/1)
+
+  defp valid_dev_classification?({:scrub_fields, fields}) when is_list(fields),
+    do: fields != [] and Enum.all?(fields, &is_binary/1)
+
+  defp valid_dev_classification?(_), do: false
+
+  defp pk_arbiter_violations(repo, tables) do
+    Enum.filter(tables, fn table ->
+      case query_col(repo, """
+           SELECT array_length(c.conkey, 1)
+           FROM pg_constraint c
+           JOIN pg_class cl ON cl.oid = c.conrelid
+           WHERE c.contype = 'p' AND cl.relname = '#{sql_ident(table)}'
+           """) do
+        [1] -> false
+        [n] when is_integer(n) and n > 1 -> table not in @dev_composite_pk_ok
+        # No primary key at all: never a valid merge arbiter.
+        _none -> true
+      end
+    end)
+  end
+
   # ── SQL literal helpers (COPY subqueries take no bind params) ────────────────
 
   @doc """
