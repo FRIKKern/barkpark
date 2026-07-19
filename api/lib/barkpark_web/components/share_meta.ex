@@ -119,8 +119,14 @@ defmodule BarkparkWeb.ShareMeta do
   def manifest(content, url, doc_type, fallback_title \\ nil)
 
   def manifest(content, url, doc_type, fallback_title) when is_map(content) do
-    content["preview"] || read_time_manifest(content, url, doc_type, fallback_title) ||
-      degraded_manifest(content, url, doc_type, fallback_title)
+    stamped = content["preview"]
+
+    if is_map(stamped) do
+      stamped
+    else
+      read_time_manifest(content, url, doc_type, fallback_title) ||
+        degraded_manifest(content, url, doc_type, fallback_title)
+    end
   end
 
   def manifest(_content, url, doc_type, fallback_title),

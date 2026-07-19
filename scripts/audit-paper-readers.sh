@@ -52,7 +52,7 @@ fi
 
 if ! jq -e '
   .documents | type == "array" and length > 0 and
-  all(.[]; (._id | type == "string" and length > 0))
+  all(.[]; ((._id // .id // .slug) | type == "string" and length > 0))
 ' "$inventory" >/dev/null 2>&1; then
   jq -n --arg server "$server" '{ok:false,error:"paper inventory must be a non-empty documents array with string ids",server:$server}'
   exit 2
@@ -60,7 +60,7 @@ fi
 
 inventory_count="$(jq '.documents | length' "$inventory")"
 inventory_ids="$tmp/inventory-ids.json"
-jq -c '[.documents[]._id] | sort' "$inventory" >"$inventory_ids"
+jq -c '[.documents[] | (._id // .id // .slug)] | sort' "$inventory" >"$inventory_ids"
 inventory_digest="$(shasum -a 256 "$inventory_ids" | awk '{print $1}')"
 if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
   if ! [[ "$BP_AUDIT_EXPECTED_COUNT" =~ ^[1-9][0-9]*$ ]] || ((inventory_count != BP_AUDIT_EXPECTED_COUNT)); then
@@ -72,7 +72,7 @@ if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
   fi
 fi
 
-jq -r '.documents[]._id' "$inventory" | while IFS= read -r id; do
+jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r id; do
   encoded="$(jq -rn --arg value "$id" '$value|@uri')"
   encoded_ws="$(jq -rn --arg value "$workspace" '$value|@uri')"
   encoded_project="$(jq -rn --arg value "$project" '$value|@uri')"
