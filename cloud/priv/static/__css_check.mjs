@@ -160,7 +160,7 @@ const CONTRAST_PAIRS = [
   { fg: "--primary", bg: "--bg", min: 4.5, why: "links" },
   { fg: "--primary", bg: "--surface", min: 4.5, why: "links on cards" },
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
-  { fg: "--ok", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip" },
+  { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
   { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
   { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },

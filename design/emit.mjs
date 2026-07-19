@@ -268,6 +268,97 @@ function providerVars(theme, indent) {
   const p = tokens.color.provider;
   return PROVIDERS.map((k) => indent + `--provider-${k}: ${p[k][theme]};`).join("\n");
 }
+
+// ── cloudChrome shell vocabulary (GUI-remake GR2) ────────────────────────────
+// The designer v4 shell's chrome roles, emitted --cc-<role> into the cloud SPA's
+// bare :root / [data-theme=dark] ONLY (identity-INVARIANT passthrough — the v4
+// applyTheme() only ever moves the 5 accent vars). check.mjs Part G D25 bans
+// --cc-* from every [data-bp-theme] identity block, so this NEVER runs there.
+export const CC_ROLES = [
+  "bg", "bg-side", "card", "card2", "modal", "toast", "toast-fg",
+  "fg", "fg2", "fg3", "fg4", "fg5", "spark-dim", "line-rgb", "backdrop",
+  "red", "red-strong", "on-red", "blue", "blue-hover", "amber",
+  "hetzner", "azure", "cloudflare", "github",
+];
+function cloudChromeVars(theme, indent) {
+  const cc = tokens.color.cloudChrome;
+  return CC_ROLES.map((r) => indent + `--cc-${r}: ${cc[r][theme]};`).join("\n");
+}
+
+// ── GR7 legacy alias bridge ──────────────────────────────────────────────────
+// One generated move retints the 123KB hand CSS: the ~consumed legacy shell vars
+// map role-for-role onto the designer ladder (GR6 rulings). Identity-INVARIANT,
+// so bare :root / [data-theme=dark] only. --dim→fg3 (NEVER fg4: fg4-as-text fails
+// 4.5:1 at 3.96/3.41 — fg4 is a meta-only token duty-capped at 3:1). --accent
+// STAYS the decorative amber (doctrine "warm highlight never brand"). --border is
+// a line-rgb/alpha judgment. --primary-hover is RETIRED (0 consumers, proven dead)
+// — deliberately absent here.
+function aliasBridge(theme, indent) {
+  const borderAlpha = theme === "light" ? "0.12" : "0.14";
+  const lines = [
+    `--bg: var(--cc-bg);`,
+    `--surface: var(--cc-card);`,
+    `--muted-surface: var(--cc-card2);`,
+    `--text: var(--cc-fg);`,
+    `--muted-text: var(--cc-fg2);`,
+    `--dim: var(--cc-fg3);`,
+    `--border: rgba(var(--cc-line-rgb), ${borderAlpha});`,
+    `--accent: var(--cc-amber);`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud status text-voices (GR6) ───────────────────────────────────────────
+// warn/danger/info -hsl channels drive the -soft PILL tints (status-hue machinery
+// preserved); the TEXT voices ride the designer ramp: --danger→red-strong,
+// --info→blue. --warn keeps the status amber (dot/glyph); its -strong TEXT voice
+// is a SOLID tuned tone (GR6: light #7d5500 4.10→5.44; dark the light amber that
+// reads on the dark pill) — NOT the translucent status tint that failed every
+// ramp state at 1.35–2.07:1. Identity-INVARIANT: bare :root / [data-theme=dark].
+const WARN_STRONG_SOLID = { light: "#7d5500", dark: "#e8b45a" };
+// --danger is red TEXT on a red -soft tint: light = dark-on-light → the DARKER
+// red-strong (#b23636, GR6 tuned; designer base #bb4040 fails at 4.31); dark =
+// light-on-dark → the LIGHTER plain red (#e57f7f) clears 4.5 where red-strong
+// #e56a6a lands at 4.48. Strong-per-direction, both the designer's danger red.
+const DANGER_TEXT = { light: "var(--cc-red-strong)", dark: "var(--cc-red)" };
+function cloudStatusVars(theme, indent) {
+  const st = tokens.color.status;
+  const a = alpha(softAlpha[theme]);
+  const lines = [
+    `--warn-hsl: ${st.warn[theme]}; --danger-hsl: ${st.danger[theme]}; --info-hsl: ${st.info[theme]};`,
+    `--warn: hsl(var(--warn-hsl)); --danger: ${DANGER_TEXT[theme]}; --info: var(--cc-blue);`,
+    `--warn-soft: hsl(var(--warn-hsl) / ${a}); --danger-soft: hsl(var(--danger-hsl) / ${a}); --info-soft: hsl(var(--info-hsl) / ${a});`,
+    `--warn-strong: ${WARN_STRONG_SOLID[theme]};`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud accent block (GR6: green IS the accent) ────────────────────────────
+// The per-identity 5-tuple: --primary + its -hsl/-soft machinery, the brand ring,
+// and the --ok family that now TRACKS accent.primary (no standalone green). NEW
+// --ok-strong = accent.hover is the text-on-tint voice (fixes the light evergreen
+// 4.06 / ember 4.23 pill-text fails). Emitted in the bare :root (evergreen
+// fallback) AND inside each [data-bp-theme] block — the ONLY per-identity vars.
+// Carries NO --cc-* and NO shell roles (D25 / GR2). primary/primary-fg/ring/
+// primary-hover are HSL channel strings in tokens; --ok-strong reads the hover
+// channel WITHOUT re-emitting the retired --primary-hover var.
+function cloudAccentVars(theme, indent, t = tokens) {
+  const a = alpha(softAlpha[theme]);
+  const p = t.color.primary[theme];
+  const hover = t.color["primary-hover"][theme];
+  const lines = [
+    `--primary: hsl(${p});`,
+    `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
+    `--ring: hsl(${t.color.ring[theme]});`,
+    `--primary-hsl: ${p};`,
+    `--primary-soft: hsl(var(--primary-hsl) / ${a});`,
+    `--ok-hsl: ${p};`,
+    `--ok: hsl(var(--ok-hsl));`,
+    `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
+    `--ok-strong: hsl(${hover});`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
 function instClasses() {
   const il = tokens.instanceLifecycle;
   return INST_ORDER
@@ -279,31 +370,33 @@ function instClasses() {
 // compound — equal-idiom to the bare :root/[data-theme=dark] pair, one step more
 // specific so the theme wins). Provider tints + .bp-inst-- glyph tones are
 // theme-INVARIANT passthrough (Part D counts them positionally) — NOT here (D25).
+// Identity block: ONLY the per-identity accent 5-tuple (GR2 — the shell
+// vocabulary + status pill machinery are identity-INVARIANT, declared once in the
+// bare :root above). Light and dark scopes carry the SAME var set (Part G D26
+// tone-pair nesting). No --cc-* / no shell roles reach here (D25).
 const cloudThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] {`,
-  baseVars("light", "  ", t),
-  primaryVars("light", "  ", t),
-  statusVars("light", "  ", t),
+  cloudAccentVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] {`,
-  baseVars("dark", "  ", t),
-  primaryVars("dark", "  ", t),
-  statusVars("dark", "  ", t),
+  cloudAccentVars("dark", "  ", t),
   "}",
 ].join("\n");
 
 function cloudBlock(themes = loadThemes()) {
   const lines = [
     ":root {",
-    baseVars("light", "  "),
-    primaryVars("light", "  "),
-    statusVars("light", "  "),
+    cloudChromeVars("light", "  "),
+    aliasBridge("light", "  "),
+    cloudStatusVars("light", "  "),
+    cloudAccentVars("light", "  "),
     providerVars("light", "  "),
     "}",
     '[data-theme="dark"] {',
-    baseVars("dark", "  "),
-    primaryVars("dark", "  "),
-    statusVars("dark", "  "),
+    cloudChromeVars("dark", "  "),
+    aliasBridge("dark", "  "),
+    cloudStatusVars("dark", "  "),
+    cloudAccentVars("dark", "  "),
     providerVars("dark", "  "),
     "}",
     "/* instance-lifecycle glyph tones — colour READ THROUGH the state's status",
