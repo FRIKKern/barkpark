@@ -287,6 +287,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   `task_edges`, `plugin_doc_state` — is reached through a type-BLIND join, so
   without this cascade those rows travel as orphans that violate the FK on
   import. Live-derived so a new child table inherits the cascade automatically.
+
+  The REFERENCED side is pinned to `documents.id`: the cascade predicate the
+  caller emits is `dtd.id = t.<col>`, so a hypothetical FK pointing at some
+  other `documents` key (or one leg of a composite FK) must NOT be returned —
+  it would either compare mismatched types (a loud SQL error) or, worse, join
+  the wrong row. What this returns is exactly what that predicate is valid for.
   """
   def document_fk_columns(repo, table) do
     query_col(repo, """
@@ -295,8 +301,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     JOIN pg_class cl ON cl.oid = c.conrelid
     JOIN pg_class pl ON pl.oid = c.confrelid
     JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON true
+    JOIN unnest(c.confkey) WITH ORDINALITY r(attnum, ord) ON r.ord = k.ord
     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-    WHERE c.contype = 'f' AND cl.relname = '#{sql_ident(table)}' AND pl.relname = 'documents'
+    JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = r.attnum
+    WHERE c.contype = 'f' AND cl.relname = '#{sql_ident(table)}'
+      AND pl.relname = 'documents' AND ra.attname = 'id'
     ORDER BY a.attname
     """)
   end
