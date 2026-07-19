@@ -1275,6 +1275,71 @@ const EXPECTATIONS = {
       assert.ok(log.includes("Couldn't load the delivery log"), "the log shows the honest error-degrade, never an infinite spinner");
     },
   },
+  // ── G-05 API tokens (GR34) ──────────────────────────────────────────────────
+  "tokens-populated": {
+    what: "the token list — one lean row per PAT, ability chips + created/expiry, per-row Revoke, revoked row flagged",
+    check(reg, hooks) {
+      const html = reg.get("token-list").innerHTML || "";
+      // Exactly one .token-row per fixture token (4), the revoked one flagged.
+      assert.equal(countMatches(html, 'class="token-row'), 4, "one lean row per token");
+      assert.ok(html.includes("is-revoked"), "the revoked token row is dimmed via is-revoked");
+      for (const name of ["CI deploy key", "Read-only dashboard", "Break-glass root", "Legacy writer"])
+        assert.ok(html.includes(name), "the row names the token: " + name);
+      // Real pat_json fields only — chips + created(inserted_at)/expiry/last-used.
+      assert.ok(html.includes("token-chip"), "abilities render as chips");
+      assert.ok(html.includes("created "), "created (inserted_at) renders");
+      assert.ok(html.includes("never used"), "a never-used token says so");
+      assert.ok(html.includes("no expiry"), "a no-expiry token says so");
+      assert.ok(html.includes(">Revoke<"), "an active row offers Revoke");
+      assert.ok(html.includes("Revoked"), "the revoked row shows the Revoked badge");
+      // NO faked prefix/preview — pat_json carries none; the list never invents one.
+      assert.ok(!html.includes("bpc_pat_"), "the list never shows a token prefix/plaintext");
+      // Owner picker: all four abilities as .set-check rows with consequence sub-lines.
+      const picker = hooks.tokenAbilitiesFieldHtml();
+      assert.equal(countMatches(picker, 'class="token-ab"'), 4, "owner sees all four ability checkboxes");
+      for (const v of ["read", "write", "deploy", "root"])
+        assert.ok(picker.includes('value="' + v + '"'), "owner can pick " + v);
+      assert.ok(picker.includes("set-check-sub"), "each ability carries its consequence sub-line");
+      assert.ok(picker.includes("exclusive"), "the deploy/root exclusivity consequence is stated");
+    },
+  },
+  "tokens-empty": {
+    what: "the empty state — no tokens yet, Create-token CTA",
+    container: "token-list",
+    includes: ["No API tokens yet", "empty-state", "Create token"],
+    excludes: ['class="token-row'],
+  },
+  "tokens-member": {
+    what: "plain-member picker — read-only scope stated up-front, no write/deploy/root pickers (anti-ghost)",
+    check(reg, hooks) {
+      // The list still renders the member's own read token.
+      const list = reg.get("token-list").innerHTML || "";
+      assert.ok(list.includes("My read token"), "the member sees their own token");
+      // The picker (gated on meCache.role) offers read-only scope — NO checkboxes
+      // for write/deploy/root, plus the honest ask-an-admin copy.
+      const picker = hooks.tokenAbilitiesFieldHtml();
+      assert.ok(picker.includes("set-check--scope"), "read scope is stated, not a pickable ghost");
+      assert.ok(picker.includes("Members can create read-only tokens"), "honest copy names the cap");
+      assert.ok(!picker.includes('class="token-ab"'), "no ability checkboxes are rendered for a member");
+      assert.ok(
+        !picker.includes('value="write"') && !picker.includes('value="deploy"') && !picker.includes('value="root"'),
+        "write/deploy/root are not offered to a member",
+      );
+    },
+  },
+  "tokens-reveal": {
+    what: "the plaintext-once reveal — amber only-time banner + mono input-affix (copy + show/hide)",
+    check(reg, hooks) {
+      const html = hooks.tokenRevealHtml("bpc_pat_3xampLEon1yShoWnoNCE", { name: "CI deploy key", abilities: ["deploy"] });
+      assert.ok(html.includes("notice notice-warn"), "the amber only-time banner frames the reveal");
+      assert.ok(html.toLowerCase().includes("only time"), "the banner says this is the only time");
+      assert.ok(html.includes("input-affix"), "the plaintext sits in an input-affix row");
+      assert.ok(html.includes("token-reveal-input"), "the value renders mono");
+      assert.ok(html.includes("bpc_pat_3xampLEon1yShoWnoNCE"), "the plaintext is shown once");
+      assert.ok(html.includes(">Copy<"), "a copy button is offered");
+      assert.ok(html.includes("token-eye"), "a show/hide toggle is offered");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

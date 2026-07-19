@@ -405,10 +405,15 @@
               <h1>API tokens</h1>
               <p class="dim">Personal Access Tokens authenticate the API on your behalf. Scope each one to the abilities it needs; revoke any time.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="token-add" type="button">New token</button>
+            <button class="btn btn-primary btn-sm" id="token-add" type="button">Create token&hellip;</button>
           </header>
 
-          <div id="token-list" class="token-list" aria-live="polite"></div>
+          <!-- GR33 ACTION page: the token list is ONE .set-section (not per-row
+               floating cards); rows are hairline-separated line items with a
+               per-row Revoke. No .set-save-row — a roster acts, it does not save. -->
+          <div class="set-section">
+            <div id="token-list" class="token-list" aria-live="polite"></div>
+          </div>
         </section>
 
         <!-- ---------- MEMBERS (C10 — team members & invitations) ---------- -->

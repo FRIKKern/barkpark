@@ -1570,7 +1570,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploy-console-text { flex: 1 1 auto; }
 
 /* ---------------------------------------------------------- API tokens */
-.token-list { display: flex; flex-direction: column; gap: 12px; }
+/* GR33 ACTION page: #token-list is ONE .set-section card; rows are hairline-
+   separated line items (no per-row surface — the card owns it, no card-in-card). */
+.token-list { display: flex; flex-direction: column; }
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.token-row:first-child { border-top: none; padding-top: 0; }
+.token-row:last-child { padding-bottom: 0; }
 .token-row.is-revoked { opacity: 0.62; }
 .token-meta { font-size: 12px; margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .token-dot { color: var(--dim); }
@@ -1582,21 +1593,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   background: rgba(127, 127, 127, 0.12);
   border: 1px solid var(--border);
 }
-.token-ability-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.token-ability {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-}
-.token-ability input { margin-top: 3px; }
-.token-ability-main { display: flex; flex-direction: column; }
-.token-ability-name { font-size: 13px; font-weight: 600; }
-.token-ability-sub { font-size: 12px; }
+/* The abilities picker rides GR34's shared .set-check grammar now (see the
+   .set-* anatomy block); the retired .token-ability* rules are gone. */
 .token-reveal { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
+.token-reveal .input-affix { flex: 1 1 auto; }
 .token-reveal-input { font-family: var(--mono); font-size: 12px; }
 
 /* ---- .notif-card / .notif-h: the GitHub-connection card in the Providers view
@@ -1670,6 +1670,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   cursor: pointer;
 }
 .set-check input { margin-top: 3px; accent-color: var(--primary); }
+/* Scope variant: a stated read-only scope (plain member), not a pickable row —
+   no checkbox, so no pointer affordance (G-05 anti-ghost). */
+.set-check--scope { cursor: default; }
 .set-check-main { display: flex; flex-direction: column; }
 .set-check-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
 .set-check-sub { font-size: var(--text-xs); color: var(--muted-text); }

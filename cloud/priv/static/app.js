@@ -2369,7 +2369,7 @@
       box.innerHTML =
         '<div class="empty-state"><h2>No API tokens yet</h2>' +
         "<p>Mint a Personal Access Token to call the Barkpark Cloud API from scripts and CI.</p>" +
-        '<button class="btn btn-primary" id="token-add-empty" type="button">New token</button></div>';
+        '<button class="btn btn-primary" id="token-add-empty" type="button">Create token&hellip;</button></div>';
       var b = $("#token-add-empty");
       if (b) b.addEventListener("click", openTokenModal);
       return;
@@ -2387,8 +2387,11 @@
     var abilities = (t.abilities || []).map(function (a) {
       return '<span class="token-chip">' + esc(a) + "</span>";
     }).join("");
-    var lastUsed = t.last_used_at ? fmtTokenDate(t.last_used_at) : "never used";
+    // Real pat_json fields only (id/name/abilities/last_used_at/expires_at/
+    // revoked_at/inserted_at) — no faked prefix/preview: the server never emits one.
+    var lastUsed = t.last_used_at ? "used " + fmtTokenDate(t.last_used_at) : "never used";
     var expiry = t.expires_at ? "expires " + fmtTokenDate(t.expires_at) : "no expiry";
+    var created = t.inserted_at ? "created " + fmtTokenDate(t.inserted_at) : "";
     var statusPill = revoked
       ? '<span class="badge"><span class="dot down"></span>Revoked</span>'
       : '<span class="badge"><span class="dot up"></span>Active</span>';
@@ -2396,26 +2399,55 @@
       ? ""
       : '<button class="btn btn-ghost btn-sm token-revoke" data-id="' + esc(t.id) +
         '" data-name="' + esc(t.name) + '" type="button">Revoke</button>';
+    var dot = '<span class="token-dot">&middot;</span>';
 
-    return '<div class="fleet-row token-row' + (revoked ? " is-revoked" : "") + '">' +
+    return '<div class="token-row' + (revoked ? " is-revoked" : "") + '">' +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(t.name) + "</div>" +
         '<div class="token-meta dim">' + abilities +
-          '<span class="token-dot">&middot;</span>' + esc(lastUsed) +
-          '<span class="token-dot">&middot;</span>' + esc(expiry) +
+          dot + esc(lastUsed) +
+          dot + esc(expiry) +
+          (created ? dot + esc(created) : "") +
         "</div>" +
       "</div>" +
       '<div class="fleet-badges">' + statusPill + action + "</div>" +
     "</div>";
   }
 
+  // A member may mint a READ-ONLY PAT only — the server's pat_abilities_allowed?
+  // caps anyone below owner/admin at ["read"]. The picker mirrors that truth
+  // UP-FRONT (GR34), never a post-click 403 toast.
+  function canMintAnyAbility() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
+  function tokenAbilitiesFieldHtml() {
+    if (canMintAnyAbility()) {
+      var abilityRows = TOKEN_ABILITIES.map(function (a) {
+        // GR34 .set-check grammar (generalized from the old .token-ability idiom):
+        // bordered card row + bold name + MANDATORY consequence sub-line.
+        return '<label class="set-check"><input type="checkbox" class="token-ab" value="' + esc(a.id) + '"' +
+          (a.id === "read" ? " checked" : "") + ' />' +
+          '<span class="set-check-main"><span class="set-check-name">' + esc(a.label) + "</span>" +
+          '<span class="set-check-sub">' + esc(a.sub) + "</span></span></label>";
+      }).join("");
+      return '<div class="field"><span class="label">Abilities</span>' +
+        '<div class="set-check-list">' + abilityRows + "</div></div>";
+    }
+    // Plain member: read-only scope stated as fact, not as a disabled ghost of
+    // write/deploy/root (anatomy law: never render an unpickable option).
+    return '<div class="field"><span class="label">Abilities</span>' +
+      '<div class="set-check-list">' +
+        '<div class="set-check set-check--scope" id="token-member-scope">' +
+          '<span class="set-check-main"><span class="set-check-name">Read</span>' +
+          '<span class="set-check-sub">Read control-plane resources</span></span></div>' +
+      "</div>" +
+      '<p class="field-hint dim" id="token-member-note">Members can create read-only tokens. Ask an admin for write, deploy, or root.</p>' +
+      "</div>";
+  }
+
   function openTokenModal() {
-    var abilityRows = TOKEN_ABILITIES.map(function (a) {
-      return '<label class="token-ability"><input type="checkbox" class="token-ab" value="' + esc(a.id) + '"' +
-        (a.id === "read" ? " checked" : "") + ' />' +
-        '<span class="token-ability-main"><span class="token-ability-name">' + esc(a.label) + "</span>" +
-        '<span class="token-ability-sub dim">' + esc(a.sub) + "</span></span></label>";
-    }).join("");
+    var privileged = canMintAnyAbility();
     var expiryOpts = TOKEN_EXPIRIES.map(function (e) {
       return '<option value="' + esc(e.v) + '"' + (e.v === "30" ? " selected" : "") + ">" + esc(e.label) + "</option>";
     }).join("");
@@ -2425,8 +2457,7 @@
       '<p class="modal-sub">Scope the token to the abilities it needs. You will see the token value once.</p>' +
       '<div class="field"><label class="label" for="token-name">Name</label>' +
         '<input class="form-input" id="token-name" type="text" placeholder="CI deploy key" /></div>' +
-      '<div class="field"><span class="label">Abilities</span>' +
-        '<div class="token-ability-list">' + abilityRows + "</div></div>" +
+      tokenAbilitiesFieldHtml() +
       '<div class="field"><label class="label" for="token-expiry">Expiry</label>' +
         '<select class="form-input" id="token-expiry">' + expiryOpts + "</select></div>" +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-submit" type="button">Create token</button></div>'
@@ -2434,31 +2465,40 @@
 
     // Client-side exclusivity mirror (the SERVER is authoritative via
     // normalize_abilities): checking root/deploy clears the others, and any
-    // other check clears root/deploy.
-    var boxes = $("#modal-body").querySelectorAll(".token-ab");
-    boxes.forEach(function (cb) {
-      cb.addEventListener("change", function () {
-        if (!cb.checked) return;
-        var v = cb.value;
-        boxes.forEach(function (other) {
-          if (other === cb) return;
-          var exclusive = v === "root" || v === "deploy" || other.value === "root" || other.value === "deploy";
-          if (exclusive) other.checked = false;
+    // other check clears root/deploy. Members render no checkboxes (scope is
+    // fixed to read), so this is a no-op for them.
+    if (privileged) {
+      var boxes = $("#modal-body").querySelectorAll(".token-ab");
+      boxes.forEach(function (cb) {
+        cb.addEventListener("change", function () {
+          if (!cb.checked) return;
+          var v = cb.value;
+          boxes.forEach(function (other) {
+            if (other === cb) return;
+            var exclusive = v === "root" || v === "deploy" || other.value === "root" || other.value === "deploy";
+            if (exclusive) other.checked = false;
+          });
         });
       });
-    });
+    }
     $("#token-submit").addEventListener("click", submitToken);
     $("#token-name").focus();
   }
 
   function submitToken() {
     var name = ($("#token-name").value || "").trim();
+    var privileged = canMintAnyAbility();
     var abilities = [];
-    $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
+    if (privileged) {
+      $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
+    } else {
+      // Member scope is fixed to read (no pickers rendered) — mirror the server cap.
+      abilities = ["read"];
+    }
     var expiry = $("#token-expiry").value;
 
     if (name.length < 3) { toast({ kind: "error", title: "Name must be at least 3 characters." }); return; }
-    if (!abilities.length) { toast({ kind: "error", title: "Pick at least one ability." }); return; }
+    if (privileged && !abilities.length) { toast({ kind: "error", title: "Pick at least one ability." }); return; }
 
     var btn = $("#token-submit");
     btn.disabled = true;
@@ -2478,21 +2518,41 @@
 
   // One-time reveal. The plaintext is shown here and NEVER again — closing
   // reloads the list (the new row shows, no plaintext).
-  function revealToken(plaintext, pat) {
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Token created</h2>' +
-      '<p class="modal-sub">Copy it now — <b>you will not see this token again.</b></p>' +
-      '<div class="token-reveal">' +
-        '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
-        '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+  // The reveal modal body. PURE (node-pinned) so smoke asserts the plaintext-once
+  // grammar without the click-opened modal: the amber only-time banner + a mono
+  // input-affix (copy + show/hide). pat_json carries no plaintext, so a refetch
+  // cannot recover it — this is the one moment.
+  function tokenRevealHtml(plaintext, pat) {
+    var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
+    return '<h2 class="modal-title" id="modal-title">Token created</h2>' +
+      '<div class="notice notice-warn" role="alert">This is the only time you’ll see this token. Copy it now and store it somewhere safe.</div>' +
+      '<div class="field"><label class="label" for="token-reveal-value">' + label + "</label>" +
+        '<div class="token-reveal">' +
+          '<div class="input-affix">' +
+            '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
+            '<button class="affix-btn" id="token-eye" type="button" tabindex="-1" aria-label="Hide token">' + EYE_SVG + "</button>" +
+          "</div>" +
+          '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+        "</div>" +
       "</div>" +
-      '<p class="field-hint dim">' + esc((pat && pat.name) || "") + '</p>' +
-      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>'
-    );
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>';
+  }
+
+  function revealToken(plaintext, pat) {
+    openModal(tokenRevealHtml(plaintext, pat));
     var input = $("#token-reveal-value");
     if (input) { input.focus(); input.select(); }
+    // Show/hide: revealed by default (it is the one moment), mask on demand for
+    // over-the-shoulder safety.
+    var shown = true;
+    var eye = $("#token-eye");
+    if (eye) eye.addEventListener("click", function () {
+      shown = !shown;
+      if (input) input.type = shown ? "text" : "password";
+      eye.setAttribute("aria-label", shown ? "Hide token" : "Show token");
+    });
     $("#token-copy").addEventListener("click", function () {
-      input.select();
+      if (input) input.select();
       var ok = false;
       try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
       if (!ok && navigator.clipboard) { navigator.clipboard.writeText(plaintext).then(function () {}); }
@@ -14863,6 +14923,13 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // G-05 API tokens (GR34): the .set-check picker gate + the two DOM mounts
+      // smoke drives directly (the modal is click-opened, so smoke's inert click()
+      // can't reach it — same seam as renderActivateResult). canMintAnyAbility
+      // mirrors the server's pat_abilities_allowed? (owner/admin vs member=read).
+      canMintAnyAbility: canMintAnyAbility, tokenAbilitiesFieldHtml: tokenAbilitiesFieldHtml,
+      tokenRevealHtml: tokenRevealHtml, openTokenModal: openTokenModal,
+      revealToken: revealToken, tokenRow: tokenRow,
       // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the
       // context-morph enum + fail-closed operator gate (both PURE, node-pinned;
       // the DOM appliers applyShellNav/applyOperatorGate are browser+smoke-driven),
