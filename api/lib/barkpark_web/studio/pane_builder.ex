@@ -21,6 +21,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   `{panes, editor}` where `panes` is a list of pane maps and `editor`
   is either `nil` or a map describing the open document editor.
 
+  Every pane map carries the ANATOMY keys (pane anatomy model, spd-s3):
+
+    * `role:` — `:nav` for the root desk pane, `:list` for every drilled
+      pane (`:list`, `:document_type_list`, `:plugin_document_list`).
+      Content/inspector are NOT panes — the editor renders from its own
+      map and never enters this list.
+    * `priority:` — `0` on the root, its pane index on intermediates, and
+      `:active` on the pane the nav path terminates in (the drilled-to
+      leaf — a document list, or a `:list` group opened as the last
+      segment). The responsive desk protects `:active` first when space
+      starves.
+
+  Both are DERIVED display metadata: never stored on `Structure.Node`,
+  never serialized on the `/v1/structure` wire (the Go TUI drops unknown
+  subtrees; the wire contract is pinned by structure_controller_test).
+
   Optional `opts`:
 
     * `:desk` — name of the active desk-group filter on a
@@ -64,6 +80,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
     root_pane = %{
       title: gated.title,
+      role: :nav,
+      priority: 0,
       items: list_items(gated, scope_prefix(opts)),
       selected: Enum.at(segments, 0)
     }
@@ -236,6 +254,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{type: :list} = node ->
         list_pane = %{
           title: node.title,
+          role: :list,
+          priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
           selected: Enum.at(rest, 0)
         }
@@ -261,6 +281,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          role: :list,
+          priority: :active,
           desk_groups: [],
           active_desk: nil,
           items: doc_items(docs, schema),
@@ -313,6 +335,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          role: :list,
+          priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
           items: doc_items(docs, schema),
@@ -725,6 +749,43 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def collapse?(idx, num_panes, has_editor?) do
     keep_full_nav_count = if has_editor?, do: 1, else: 2
     idx < num_panes - keep_full_nav_count
+  end
+
+  @doc """
+  Pane display state for a viewport bucket — the ONE table the responsive
+  desk reads (pane anatomy model, spd-s3). Pure: `(idx, num_panes,
+  has_editor?, bucket)` → `:full | :strip | :hidden`.
+
+  Buckets (matching the CSS breakpoint vocabulary):
+
+    * `"wide"` / `"standard"` — exactly today's behaviour: `:strip` iff
+      `collapse?/3`, else `:full`. `collapse?/3` survives VERBATIM as the
+      wide-bucket reducer, so every existing nav transition is
+      bit-identical (the wide sweep test pins this).
+    * `"narrow"`   — only the LAST pane stays `:full`; every earlier pane
+      drops to `:strip`. The editor squeeze is handled CSS-side; the pane
+      row keeps one full column.
+    * `"phone"`    — with an editor open EVERY pane is `:hidden` (the
+      document owns the viewport); without an editor the last pane is
+      `:full` and the rest `:hidden` (single-column drill navigation).
+
+  Derived display state only — never stored on `Structure.Node`, never
+  serialized on the `/v1/structure` wire.
+  """
+  @spec display_state(non_neg_integer(), pos_integer(), boolean(), String.t()) ::
+          :full | :strip | :hidden
+  def display_state(idx, num_panes, has_editor?, bucket) when bucket in ["wide", "standard"] do
+    if collapse?(idx, num_panes, has_editor?), do: :strip, else: :full
+  end
+
+  def display_state(idx, num_panes, _has_editor?, "narrow") do
+    if idx == num_panes - 1, do: :full, else: :strip
+  end
+
+  def display_state(_idx, _num_panes, true, "phone"), do: :hidden
+
+  def display_state(idx, num_panes, false, "phone") do
+    if idx == num_panes - 1, do: :full, else: :hidden
   end
 
   @doc """

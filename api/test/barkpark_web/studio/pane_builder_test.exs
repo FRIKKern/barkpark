@@ -552,4 +552,193 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert editor.doc.doc_id =~ "b1"
     end
   end
+
+  # spd-s3 — pane anatomy model. Every pane map returned by build/3 carries
+  # DERIVED display metadata: `role:` (:nav for the root desk pane, :list for
+  # every drilled pane) and `priority:` (0 on the root, the pane index on
+  # intermediates, :active on the pane the nav path terminates in). Derived
+  # only — never stored on Structure.Node, never serialized on the
+  # /v1/structure wire (structure_controller_test pins the node allowlist).
+  describe "pane anatomy — role + priority (spd-s3)" do
+    test "root-only desk: the nav pane is role :nav, priority 0" do
+      seed_basic("pb_anatomy_root")
+      {panes, editor} = PaneBuilder.build("pb_anatomy_root", [])
+
+      assert [%{role: :nav, priority: 0}] = panes
+      assert editor == nil
+    end
+
+    test "drilled doc list: :nav root + :active :list pane" do
+      seed_basic("pb_anatomy_list")
+      {panes, _editor} = PaneBuilder.build("pb_anatomy_list", ["post"])
+
+      assert [%{role: :nav, priority: 0}, %{role: :list, priority: :active}] = panes
+    end
+
+    test "an open document keeps the terminal list pane :active — the editor is NOT a pane" do
+      seed_basic("pb_anatomy_doc")
+      {panes, editor} = PaneBuilder.build("pb_anatomy_doc", ["post", "p1"])
+
+      assert [%{role: :nav, priority: 0}, %{role: :list, priority: :active}] = panes
+
+      # Content/inspector render from the editor map, outside the pane
+      # anatomy — it must never grow pane keys.
+      assert is_map(editor)
+      refute Map.has_key?(editor, :role)
+      refute Map.has_key?(editor, :priority)
+    end
+
+    test "a plugin-contributed doc list pane carries the same anatomy" do
+      dataset = "pb_anatomy_task"
+      insert_task_schema!(dataset)
+      create_task!(dataset, "t1", %{"kind" => "task", "lifecycle_status" => "open"})
+
+      # The Tasks plugin contributes a :plugin_document_list node — same
+      # anatomy as a host :document_type_list pane.
+      {panes, _editor} = PaneBuilder.build(dataset, ["task"])
+
+      assert %{role: :list, priority: :active} = List.last(panes)
+      assert %{role: :nav, priority: 0} = hd(panes)
+    end
+
+    test "intermediate :list panes take their pane index; only the leaf is :active" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "pb_anatomy_depth"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      insert_schema!(%{
+        name: "book",
+        title: "Books",
+        icon: "book",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      {:ok, _} =
+        Content.create_document(
+          "book",
+          %{"_id" => "b1", "title" => "Book 1"},
+          dataset,
+          source: :studio,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      # Enabled-but-:plugins placement → book nests under the Plugins node,
+      # so the walk drills root → Plugins → book (3 panes).
+      {:ok, _} =
+        Tenancy.set_workspace_plugin_settings(ws.id, %{"onixedit" => %{"enabled" => true}})
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["book", "b1"], scope: scope)
+
+      assert [
+               %{role: :nav, priority: 0},
+               %{role: :list, priority: 1},
+               %{role: :list, priority: :active}
+             ] = panes
+
+      # The same :list group opened AS the leaf segment is itself :active.
+      {panes2, _editor2} = PaneBuilder.build(dataset, ["plugins"], scope: scope)
+      assert [%{role: :nav, priority: 0}, %{role: :list, priority: :active}] = panes2
+    end
+
+    test "anatomy is deterministic for the same nav_path" do
+      seed_basic("pb_anatomy_det")
+      project = fn {panes, _editor} -> Enum.map(panes, &{&1.role, &1.priority}) end
+
+      a = project.(PaneBuilder.build("pb_anatomy_det", ["post", "p1"]))
+      b = project.(PaneBuilder.build("pb_anatomy_det", ["post", "p1"]))
+
+      assert a == b
+      assert a == [{:nav, 0}, {:list, :active}]
+    end
+  end
+
+  # spd-s3 — the ONE display-state table the responsive desk reads.
+  # wide/standard must be collapse?/3 verbatim (the pins above stay the
+  # wide-bucket regression lock); narrow protects the last pane; phone is
+  # editor-owned (all hidden) or single-column drill (last pane only).
+  describe "display_state/4" do
+    test "exhaustive table: 4 buckets x num_panes 1..5 x has_editor" do
+      table = %{
+        # wide, no editor — last 2 panes full (collapse?/3 verbatim)
+        {"wide", 1, false} => [:full],
+        {"wide", 2, false} => [:full, :full],
+        {"wide", 3, false} => [:strip, :full, :full],
+        {"wide", 4, false} => [:strip, :strip, :full, :full],
+        {"wide", 5, false} => [:strip, :strip, :strip, :full, :full],
+        # wide, editor open — last 1 pane full (collapse?/3 verbatim)
+        {"wide", 1, true} => [:full],
+        {"wide", 2, true} => [:strip, :full],
+        {"wide", 3, true} => [:strip, :strip, :full],
+        {"wide", 4, true} => [:strip, :strip, :strip, :full],
+        {"wide", 5, true} => [:strip, :strip, :strip, :strip, :full],
+        # standard — identical to wide by design
+        {"standard", 1, false} => [:full],
+        {"standard", 2, false} => [:full, :full],
+        {"standard", 3, false} => [:strip, :full, :full],
+        {"standard", 4, false} => [:strip, :strip, :full, :full],
+        {"standard", 5, false} => [:strip, :strip, :strip, :full, :full],
+        {"standard", 1, true} => [:full],
+        {"standard", 2, true} => [:strip, :full],
+        {"standard", 3, true} => [:strip, :strip, :full],
+        {"standard", 4, true} => [:strip, :strip, :strip, :full],
+        {"standard", 5, true} => [:strip, :strip, :strip, :strip, :full],
+        # narrow — only the last pane stays full, editor or not
+        {"narrow", 1, false} => [:full],
+        {"narrow", 2, false} => [:strip, :full],
+        {"narrow", 3, false} => [:strip, :strip, :full],
+        {"narrow", 4, false} => [:strip, :strip, :strip, :full],
+        {"narrow", 5, false} => [:strip, :strip, :strip, :strip, :full],
+        {"narrow", 1, true} => [:full],
+        {"narrow", 2, true} => [:strip, :full],
+        {"narrow", 3, true} => [:strip, :strip, :full],
+        {"narrow", 4, true} => [:strip, :strip, :strip, :full],
+        {"narrow", 5, true} => [:strip, :strip, :strip, :strip, :full],
+        # phone, no editor — single-column drill: last pane only
+        {"phone", 1, false} => [:full],
+        {"phone", 2, false} => [:hidden, :full],
+        {"phone", 3, false} => [:hidden, :hidden, :full],
+        {"phone", 4, false} => [:hidden, :hidden, :hidden, :full],
+        {"phone", 5, false} => [:hidden, :hidden, :hidden, :hidden, :full],
+        # phone, editor open — the document owns the viewport
+        {"phone", 1, true} => [:hidden],
+        {"phone", 2, true} => [:hidden, :hidden],
+        {"phone", 3, true} => [:hidden, :hidden, :hidden],
+        {"phone", 4, true} => [:hidden, :hidden, :hidden, :hidden],
+        {"phone", 5, true} => [:hidden, :hidden, :hidden, :hidden, :hidden]
+      }
+
+      # Exhaustiveness guard — the table really covers 4 x 5 x 2.
+      assert map_size(table) == 40
+
+      for {{bucket, num_panes, has_editor?}, expected} <- table do
+        actual =
+          for idx <- 0..(num_panes - 1),
+              do: PaneBuilder.display_state(idx, num_panes, has_editor?, bucket)
+
+        assert actual == expected,
+               "display_state mismatch: bucket=#{bucket} num_panes=#{num_panes} " <>
+                 "has_editor=#{has_editor?} — got #{inspect(actual)}, want #{inspect(expected)}"
+      end
+    end
+
+    test "wide/standard are bit-identical to collapse?/3 for every combination" do
+      # The 9-transition bit-identity guarantee: at wide (and standard),
+      # display_state is EXACTLY `not collapse?/3` — so every mapped nav
+      # transition renders unchanged from today.
+      for num_panes <- 1..8, has_editor? <- [true, false], idx <- 0..(num_panes - 1) do
+        expected =
+          if PaneBuilder.collapse?(idx, num_panes, has_editor?), do: :strip, else: :full
+
+        for bucket <- ["wide", "standard"] do
+          assert PaneBuilder.display_state(idx, num_panes, has_editor?, bucket) == expected,
+                 "bucket=#{bucket} idx=#{idx} num_panes=#{num_panes} " <>
+                   "has_editor=#{has_editor?} diverged from collapse?/3"
+        end
+      end
+    end
+  end
 end
