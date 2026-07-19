@@ -52,4 +52,47 @@ defmodule BarkparkWeb.Plugs.ErrorEnvelopeNegotiationTest do
 
     assert conn.assigns.error_envelope_version == :v2
   end
+
+  describe "AcceptBarkparkVendor x-tar negotiation (bp cloud workspace export)" do
+    # `bp cloud workspace export` sends `application/x-tar`, but the bundle route
+    # rides the `:api` pipeline (`plug :accepts ["json"]`), which would 406 that
+    # header before the request reaches `WorkspaceController.export` (which sets
+    # its own `application/x-tar` attachment response type). AcceptBarkparkVendor
+    # appends `application/json` — mirroring its `text/event-stream` branch — so
+    # the seam negotiates json instead. The latent 406 read as a server 500 on
+    # guerrilla (the CLI envelope rendered it as internal_error).
+
+    alias BarkparkWeb.Plugs.AcceptBarkparkVendor
+
+    test "a bare `application/x-tar` Accept 406s under `:accepts [\"json\"]` (pre-fix behavior)" do
+      conn =
+        :get
+        |> conn("/")
+        |> put_req_header("accept", "application/x-tar")
+        |> fetch_query_params()
+
+      assert_raise Phoenix.NotAcceptableError, fn ->
+        Phoenix.Controller.accepts(conn, ["json"])
+      end
+    end
+
+    test "AcceptBarkparkVendor rewrites `application/x-tar` so `:accepts` negotiates json" do
+      conn =
+        :get
+        |> conn("/")
+        |> put_req_header("accept", "application/x-tar")
+        |> AcceptBarkparkVendor.call(AcceptBarkparkVendor.init([]))
+
+      # Appended, NOT replaced — the tar type survives; json is negotiable.
+      assert get_req_header(conn, "accept") == ["application/x-tar, application/json"]
+
+      # The exact negotiation the `:api` pipeline runs no longer raises → the
+      # request reaches WorkspaceController.export (which sets its own x-tar
+      # attachment response type + 200) instead of 406-ing in the pipeline.
+      negotiated = Phoenix.Controller.accepts(conn, ["json"])
+      refute negotiated.halted
+      # NOT flagged as a vendor response — the controller owns its content-type.
+      refute negotiated.assigns[:barkpark_vendor_accept]
+    end
+  end
 end

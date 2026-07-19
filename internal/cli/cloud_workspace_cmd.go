@@ -126,7 +126,11 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "build request: "+rerr.Error(), exitGeneric)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/x-tar")
+	// `application/x-tar` is the bundle body type, but the route rides the `:api`
+	// pipeline's `:accepts ["json"]` matcher; offering `application/json` as the
+	// negotiable fallback keeps the request off the 406 path (AcceptBarkparkVendor
+	// appends json for a bare x-tar too, but a spec-clean Accept states both).
+	req.Header.Set("Accept", "application/x-tar, application/json")
 
 	resp, derr := newTransferClient().Do(req)
 	if derr != nil {
