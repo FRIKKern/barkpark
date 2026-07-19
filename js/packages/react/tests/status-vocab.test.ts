@@ -5,7 +5,7 @@
 // two thought states resolve to their own dim roles, an UNRECOGNIZED non-empty
 // status fails OPEN to a dim-neutral `unknown` role (never masquerading as the
 // bright `open` circle), an ABSENT/empty status still defaults to `open`, and the
-// legend key stays byte-frozen to the 6 canonical manifest roles.
+// legend key stays byte-frozen to the 8 canonical manifest roles.
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -57,9 +57,10 @@ describe('status vocabulary — thought states + fail-open', () => {
     expect(roleOf('cancelled')).toBe('cancel')
   })
 
-  it('the legend key stays scoped to the 6 canonical manifest roles', () => {
-    // The full role table carries the thought states + the unknown sentinel for
-    // resolution, but the legend (cross-surface parity key) must not.
+  it('the legend key stays scoped to the 8 canonical manifest roles', () => {
+    // The full role table carries the thought states + the unknown sentinel;
+    // the legend (cross-surface parity key) carries the manifest's eight —
+    // the JS-only `unknown` sentinel is never a legend row.
     expect(STATUS_ROLES.map((r) => r.role)).toEqual([
       'open',
       'ready',
@@ -78,6 +79,8 @@ describe('status vocabulary — thought states + fail-open', () => {
       'blocked',
       'done',
       'cancel',
+      'considering',
+      'researching',
     ])
   })
 })
