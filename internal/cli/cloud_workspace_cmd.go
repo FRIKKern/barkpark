@@ -26,12 +26,41 @@ package cli
 // refused write, a server error map onto the CLI's stable exit-code scheme
 // through the shared error seam, never a silent success.
 
+// PULL DIALECT (PDS wave 1). On top of the B2 bundle verbs the pair also speaks
+// the personal-development-server pull:
+//
+//	export --profile full|dev --dataset <slug>   ->  ?profile=&dataset= (scrub AT export)
+//	import --merge                               ->  ?mode=merge (fail-closed server-side)
+//	both   --with-blobs [--blobs <dir>]          ->  the media sidecar channel
+//
+// The bundle carries NO blob bytes — it is a DB-only tar — so media travels on a
+// second, explicitly-requested channel: export parses the tar's
+// `tables/media_files.copy` member for the server-generated relative paths and
+// GETs each one from `<source>/media/files/<path>` into `<bundle>.blobs/`;
+// import PUTs each sidecar file back path-verbatim to
+// `<target>/api/workspaces/<slug>/media/blob/<path>`. Every blob moves ONE AT A
+// TIME through io.Copy — a full bundle's media set is far too large to hold in
+// RAM — and the report is honest: fetched/uploaded/failed counts, every failure
+// NAMED, and a non-zero exit whenever any blob failed while --with-blobs was
+// asked for (a silent partial media set is the exact lie this channel exists to
+// prevent).
+//
+// The cloud-target line before an import is UX only — defense in depth, never
+// the enforcement. `bp migrate`'s --yes warning is likewise advisory; the real
+// refusal is server-side (403 `bundle_import_disabled` unless the operator opted
+// into `:allow_bundle_import`), and that is where it belongs.
+
 import (
+	"archive/tar"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -96,8 +125,8 @@ func validWorkspaceSlug(slug string) bool {
 // `-` for stdout). Read-only — a --dry-run prints the request it would make and
 // sends nothing.
 func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
-	const usage = "bp cloud workspace export <slug> [--file <out>]"
-	a, err := parseHzArgs(args, []string{"file"}, nil, usage)
+	const usage = "bp cloud workspace export <slug> [--file <out>] [--profile full|dev] [--dataset <slug>] [--with-blobs [--blobs <dir>]]"
+	a, err := parseHzArgs(args, []string{"file", "profile", "dataset", "blobs"}, []string{"with-blobs"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -112,12 +141,26 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	if outPath == "" {
 		outPath = slug + ".tar"
 	}
+	withBlobs := a.bools["with-blobs"]
+	// The blob sidecar re-READS the saved tar to learn its media paths, so it
+	// cannot ride a stdout pipe — refuse the combination up front rather than
+	// half-doing it.
+	if withBlobs && outPath == "-" {
+		return useError(out, "usage", "--with-blobs needs a --file on disk (the sidecar re-reads the bundle to find its media paths); drop --with-blobs to stream to stdout", exitUsage)
+	}
+	blobDir := strings.TrimSpace(a.val("blobs"))
+	if blobDir == "" {
+		blobDir = outPath + ".blobs"
+	}
 
 	base, token := workspaceBundleTarget(g)
-	url := base + "/api/workspaces/" + slug + "/export"
+	url := base + "/api/workspaces/" + slug + "/export" + bundleScopeQuery(a.val("profile"), a.val("dataset"))
 
 	if g.dryRun {
 		out.progressf("DRY RUN — would GET %s → %s", url, exportDest(outPath))
+		if withBlobs {
+			out.progressf("DRY RUN — would then fetch each media_files blob → %s", blobDir)
+		}
 		return exitOK
 	}
 
@@ -167,11 +210,44 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "write export file: "+cerr.Error(), exitGeneric)
 	}
 
-	if payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n}; out.emitStructured(payload) {
-		return exitOK
+	payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n}
+	if !out.machineOut() {
+		out.outf("Exported workspace %s → %s (%s)", slug, outPath, humanBytes(float64(n)))
 	}
-	out.outf("Exported workspace %s → %s (%s)", slug, outPath, humanBytes(float64(n)))
-	return exitOK
+
+	// Blob sidecar: DB rows are in the tar, the bytes are not. Run it after the
+	// bundle receipt so the human view reads in the order things happened, and
+	// fold its counts into the machine payload so a scripted caller sees one
+	// document describing the whole pull.
+	code := exitOK
+	if withBlobs {
+		rep := fetchWorkspaceBlobs(out, base, token, outPath, blobDir)
+		payload["blobs"] = rep.payload()
+		code = rep.exit
+	}
+
+	if out.emitStructured(payload) {
+		return code
+	}
+	return code
+}
+
+// bundleScopeQuery renders the export scope query string from --profile/--dataset.
+// Empty values are OMITTED entirely (not sent as blanks) so the server's own
+// defaults — profile=full, whole-workspace grain — stay the shape an un-flagged
+// export has always had, byte-identical to the shipped B2 request.
+func bundleScopeQuery(profile, dataset string) string {
+	q := url.Values{}
+	if p := strings.TrimSpace(profile); p != "" {
+		q.Set("profile", p)
+	}
+	if d := strings.TrimSpace(dataset); d != "" {
+		q.Set("dataset", d)
+	}
+	if len(q) == 0 {
+		return ""
+	}
+	return "?" + q.Encode()
 }
 
 // exportDest renders the export destination for the dry-run line: `-` reads as
@@ -191,8 +267,8 @@ func exportDest(path string) string {
 // previews the request and sends nothing; without --yes it refuses; with --yes
 // it posts the bytes and prints the {tables,total_rows} receipt.
 func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
-	const usage = "bp cloud workspace import <slug> --file <tar> --yes"
-	a, err := parseHzArgs(args, []string{"file"}, nil, usage)
+	const usage = "bp cloud workspace import <slug> --file <tar> --yes [--merge] [--with-blobs [--blobs <dir>]]"
+	a, err := parseHzArgs(args, []string{"file", "blobs"}, []string{"merge", "with-blobs"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -208,14 +284,28 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("missing --file <tar> (usage: %s)", usage), exitUsage)
 	}
 
+	withBlobs := a.bools["with-blobs"]
+	blobDir := strings.TrimSpace(a.val("blobs"))
+	if blobDir == "" {
+		blobDir = file + ".blobs"
+	}
+
 	base, token := workspaceBundleTarget(g)
 	url := base + "/api/workspaces/" + slug + "/import"
+	mode := "clean (restore)"
+	if a.bools["merge"] {
+		url += "?mode=merge"
+		mode = "merge"
+	}
 
 	// Preview default: --dry-run (or the global --dry-run) prints the request and
 	// sends nothing. This is checked BEFORE the --yes gate so an operator can
 	// always preview a destructive import without first arming it.
 	if g.dryRun {
-		out.progressf("DRY RUN — would POST %s (%s) → %s", file, url, "RESTORE into workspace "+slug)
+		out.progressf("DRY RUN — would POST %s (%s) → %s", file, url, "RESTORE into workspace "+slug+" [mode: "+mode+"]")
+		if withBlobs {
+			out.progressf("DRY RUN — would then PUT each blob under %s to %s/api/workspaces/%s/media/blob/<path>", blobDir, base, slug)
+		}
 		return exitOK
 	}
 
@@ -226,6 +316,14 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 		return useError(out, "usage",
 			fmt.Sprintf("refusing to import into workspace %q without --yes — this writes bundle content into it (a restore into a clean scope); pass --yes to proceed or --dry-run to preview", slug),
 			exitUsage)
+	}
+
+	// Cloud-target line: DEFENSE IN DEPTH, never the enforcement. Like `bp
+	// migrate`'s --yes warning it is advisory — it names what is about to be
+	// written and to where, and then proceeds. The actual refusal lives
+	// server-side (403 bundle_import_disabled unless :allow_bundle_import is on).
+	if warn := cloudTargetWarning(base, slug); warn != "" {
+		out.errf("%s", warn)
 	}
 
 	f, ferr := os.Open(file)
@@ -265,13 +363,87 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 	// Machine consumers get the response bytes verbatim (the receipt IS the
 	// contract). The human view names the workspace and the {tables,total_rows}
 	// the engine reported.
-	if out.output == "json" || out.output == "yaml" {
+	if out.machineOut() {
 		out.renderRaw(body)
+	} else {
+		tables, rows := importCounts(body)
+		out.outf("Imported workspace %s — %s across %s", slug, pluralize(rows, "row"), pluralize(tables, "table"))
+		// The provenance receipt is CONDITIONAL: a server that stamps it gets it
+		// printed, an older server that does not is silent — never a fabricated
+		// line. Machine consumers already have the key verbatim in the body.
+		printProvenanceReceipt(out, body)
+	}
+
+	if !withBlobs {
 		return exitOK
 	}
-	tables, rows := importCounts(body)
-	out.outf("Imported workspace %s — %s across %s", slug, pluralize(rows, "row"), pluralize(tables, "table"))
-	return exitOK
+	rep := uploadWorkspaceBlobs(out, base, token, slug, blobDir)
+	return rep.exit
+}
+
+// cloudTargetWarning returns the advisory line to print before writing into a
+// CLOUD-classified target, or "" for a local one. It reads the saved config's
+// explicit kind pin for the entry when the URL is a known server (cfg.KindOf),
+// falling back to the dependency-free host classifier (ServerKind) for a raw
+// URL. UX ONLY — it never refuses; the server's :allow_bundle_import opt-in is
+// the enforcement.
+func cloudTargetWarning(base, slug string) string {
+	kind := ServerKind(base)
+	if cfg, err := LoadConfig(); err == nil {
+		if e, ok := cfg.FindServer(base); ok {
+			kind = cfg.KindOf(e)
+		}
+	}
+	if kind != "cloud" {
+		return ""
+	}
+	return fmt.Sprintf("⚠ importing bundle content into workspace %q on %s [cloud] — this writes to a REMOTE server", slug, base)
+}
+
+// printProvenanceReceipt prints the import response's `provenance` block when the
+// server stamped one: where the bundle came from, at what grain, under which
+// scrub profile, and when it was pulled. Absent key → absolute silence (an older
+// server, or a route that does not stamp — either way there is nothing honest to
+// say). Known fields print in a fixed narrative order; anything else the server
+// adds later still prints, sorted, rather than being swallowed.
+func printProvenanceReceipt(out *writer, body []byte) {
+	var r struct {
+		Provenance map[string]any `json:"provenance"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil || len(r.Provenance) == 0 {
+		return
+	}
+	order := []string{"source_server", "source", "source_workspace", "workspace", "source_dataset", "dataset", "profile", "pulled_at"}
+	seen := map[string]bool{}
+	var lines []string
+	add := func(k string) {
+		v, ok := r.Provenance[k]
+		if !ok || seen[k] || v == nil {
+			return
+		}
+		seen[k] = true
+		lines = append(lines, fmt.Sprintf("  %-16s %v", k+":", v))
+	}
+	for _, k := range order {
+		add(k)
+	}
+	var rest []string
+	for k := range r.Provenance {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		add(k)
+	}
+	if len(lines) == 0 {
+		return
+	}
+	out.outf("Provenance")
+	for _, l := range lines {
+		out.outf("%s", l)
+	}
 }
 
 // importCounts pulls the {tables,total_rows} pair from the import receipt. A
@@ -307,19 +479,433 @@ func pluralize(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
+// ── Blob sidecar ─────────────────────────────────────────────────────────────
+
+// blobReport is the honest outcome of one sidecar run: how many blobs moved, how
+// many did NOT, the failures NAMED, and the exit code the command must carry.
+// The exit is the first failure's classified exit (so a 422 invalid_path stays a
+// validation exit, a 404 stays not-found) — never a blanket 1 that erases what
+// the server said.
+type blobReport struct {
+	verb     string // "fetched" | "uploaded"
+	moved    int
+	failed   int
+	bytes    int64
+	dir      string
+	failures []string
+	exit     int
+}
+
+// payload renders the report for -o json/-o yaml.
+func (r blobReport) payload() map[string]any {
+	return map[string]any{
+		r.verb:     r.moved,
+		"failed":   r.failed,
+		"bytes":    r.bytes,
+		"dir":      r.dir,
+		"failures": r.failures,
+	}
+}
+
+// fail records a NAMED per-blob failure and pins the exit to the first one seen.
+func (r *blobReport) fail(out *writer, blobPath, why string, exit int) {
+	r.failed++
+	r.failures = append(r.failures, blobPath+": "+why)
+	out.userErr("blob %s — %s", blobPath, why)
+	if r.exit == exitOK {
+		r.exit = exit
+	}
+}
+
+// render writes the per-run summary line. It is a progress line (stderr under
+// -o json/yaml) so machine stdout stays one parseable document.
+func (r blobReport) render(out *writer) {
+	out.progressf("Blobs: %d %s, %d failed → %s", r.moved, r.verb, r.failed, r.dir)
+}
+
+// fetchWorkspaceBlobs is the EXPORT half of the sidecar: read the bundle's
+// `tables/media_files.copy` member for the server-generated relative paths, then
+// GET each one from <source>/media/files/<path> into <dir>/<path>, streaming one
+// file at a time. A bundle with no media_files member (or no rows) is not an
+// error — it reports 0 and exits clean.
+func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobReport {
+	rep := blobReport{verb: "fetched", dir: dir, exit: exitOK}
+	paths, err := bundleMediaPaths(bundlePath)
+	if err != nil {
+		out.userErr("read media paths from %s: %v", bundlePath, err)
+		rep.exit = exitGeneric
+		rep.failed = 1
+		rep.failures = append(rep.failures, bundlePath+": "+err.Error())
+		return rep
+	}
+	if len(paths) == 0 {
+		rep.render(out)
+		return rep
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		out.userErr("create blob dir %s: %v", dir, err)
+		rep.exit = exitGeneric
+		rep.failed = 1
+		rep.failures = append(rep.failures, dir+": "+err.Error())
+		return rep
+	}
+
+	client := newTransferClient()
+	for _, p := range paths {
+		if !safeBlobPath(p) {
+			rep.fail(out, p, "refusing an unsafe media path (traversal/absolute/empty)", exitValidation)
+			continue
+		}
+		dest := filepath.Join(dir, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			rep.fail(out, p, "create directory: "+err.Error(), exitGeneric)
+			continue
+		}
+		n, ferr, exit := fetchOneBlob(client, base, token, p, dest)
+		if ferr != nil {
+			rep.fail(out, p, ferr.Error(), exit)
+			continue
+		}
+		rep.moved++
+		rep.bytes += n
+	}
+	rep.render(out)
+	return rep
+}
+
+// fetchOneBlob GETs a single blob and STREAMS it to dest — io.Copy, never the
+// whole file in memory. A non-2xx goes through the shared classifyError seam so
+// the server's coded envelope picks the exit, not the HTTP status.
+func fetchOneBlob(client *http.Client, base, token, blobPath, dest string) (int64, error, int) {
+	req, rerr := http.NewRequest(http.MethodGet, base+"/media/files/"+escapeBlobPath(blobPath), nil)
+	if rerr != nil {
+		return 0, rerr, exitGeneric
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, derr := client.Do(req)
+	if derr != nil {
+		return 0, derr, exitGeneric
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := readCapped(resp.Body, maxResponseBytes)
+		ae := classifyError(resp.StatusCode, body)
+		return 0, fmt.Errorf("%s", ae.errorMessage()), ae.exit
+	}
+	f, cerr := os.Create(dest)
+	if cerr != nil {
+		return 0, cerr, exitGeneric
+	}
+	n, copyErr := io.Copy(f, resp.Body)
+	if closeErr := f.Close(); closeErr != nil && copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		return 0, copyErr, exitGeneric
+	}
+	return n, nil, exitOK
+}
+
+// uploadWorkspaceBlobs is the IMPORT half: walk the sidecar dir and PUT every
+// file back path-verbatim (its path RELATIVE to the sidecar dir is exactly the
+// media_files.path the source served it under) to
+// <target>/api/workspaces/<slug>/media/blob/<path>, one at a time. A missing
+// sidecar dir is a NAMED failure, not a silent success — --with-blobs was asked
+// for, so an absent media set is a lie the operator must see.
+func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport {
+	rep := blobReport{verb: "uploaded", dir: dir, exit: exitOK}
+	paths, err := sidecarBlobPaths(dir)
+	if err != nil {
+		out.userErr("read blob dir %s: %v", dir, err)
+		rep.failed = 1
+		rep.failures = append(rep.failures, dir+": "+err.Error())
+		rep.exit = exitGeneric
+		return rep
+	}
+	if len(paths) == 0 {
+		rep.render(out)
+		return rep
+	}
+
+	client := newTransferClient()
+	for _, p := range paths {
+		if !safeBlobPath(p) {
+			rep.fail(out, p, "refusing an unsafe media path (traversal/absolute/empty)", exitValidation)
+			continue
+		}
+		n, uerr, exit := putOneBlob(client, base, token, slug, filepath.Join(dir, filepath.FromSlash(p)), p)
+		if uerr != nil {
+			rep.fail(out, p, uerr.Error(), exit)
+			continue
+		}
+		rep.moved++
+		rep.bytes += n
+	}
+	rep.render(out)
+	return rep
+}
+
+// putOneBlob streams ONE sidecar file to the blob-push route. The body is the
+// open file handle (net/http streams it; ContentLength comes from the stat), so
+// a 400MB video never lands in RAM. Non-2xx rides classifyError — which is why
+// `invalid_path` and `empty_body` now carry exitValidation in codeExit.
+func putOneBlob(client *http.Client, base, token, slug, localPath, blobPath string) (int64, error, int) {
+	f, oerr := os.Open(localPath)
+	if oerr != nil {
+		return 0, oerr, exitGeneric
+	}
+	defer f.Close()
+	fi, serr := f.Stat()
+	if serr != nil {
+		return 0, serr, exitGeneric
+	}
+	target := base + "/api/workspaces/" + slug + "/media/blob/" + escapeBlobPath(blobPath)
+	req, rerr := http.NewRequest(http.MethodPut, target, f)
+	if rerr != nil {
+		return 0, rerr, exitGeneric
+	}
+	req.ContentLength = fi.Size()
+	req.Header.Set("Authorization", "Bearer "+token)
+	// octet-stream is load-bearing: a JSON content-type lets Plug.Parsers eat the
+	// body and the route answers 422 empty_body.
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, derr := client.Do(req)
+	if derr != nil {
+		return 0, derr, exitGeneric
+	}
+	defer resp.Body.Close()
+	body, _ := readCapped(resp.Body, maxResponseBytes)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		ae := classifyError(resp.StatusCode, body)
+		return 0, fmt.Errorf("%s", ae.errorMessage()), ae.exit
+	}
+	return fi.Size(), nil, exitOK
+}
+
+// sidecarBlobPaths lists every regular file under dir as a SLASH-separated path
+// relative to dir — the shape the source served it under, and therefore the shape
+// the target must receive it under.
+func sidecarBlobPaths(dir string) ([]string, error) {
+	var paths []string
+	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(dir, p)
+		if rerr != nil {
+			return rerr
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// bundleMediaPaths reads a bp-export-v1 tar and returns the media_files.path
+// values it carries, de-duplicated and sorted. The COLUMN ORDER is taken from the
+// manifest's own member entry (never assumed positionally), and the dump is the
+// raw Postgres `COPY … TO STDOUT` text format, so fields are tab-separated with
+// backslash escapes and `\N` for NULL. A bundle with no media_files member — a
+// legitimate shape for a workspace that has never uploaded anything — yields an
+// empty list, not an error.
+func bundleMediaPaths(bundlePath string) ([]string, error) {
+	f, err := os.Open(bundlePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var manifestBytes, dumpBytes []byte
+	tr := tar.NewReader(f)
+	for {
+		h, nerr := tr.Next()
+		if nerr == io.EOF {
+			break
+		}
+		if nerr != nil {
+			return nil, fmt.Errorf("read bundle tar: %w", nerr)
+		}
+		name := path.Clean(h.Name)
+		switch name {
+		case "manifest.json":
+			b, rerr := readCapped(tr, maxResponseBytes)
+			if rerr != nil {
+				return nil, fmt.Errorf("read manifest.json: %w", rerr)
+			}
+			manifestBytes = b
+		case "tables/media_files.copy":
+			b, rerr := readCapped(tr, maxResponseBytes)
+			if rerr != nil {
+				return nil, fmt.Errorf("read tables/media_files.copy: %w", rerr)
+			}
+			dumpBytes = b
+		}
+	}
+	if len(manifestBytes) == 0 {
+		return nil, fmt.Errorf("bundle has no manifest.json — not a bp-export-v1 tar")
+	}
+	if len(dumpBytes) == 0 {
+		// No media member (or an empty one): honestly zero blobs.
+		return nil, nil
+	}
+	idx, err := manifestColumnIndex(manifestBytes, "media_files", "path")
+	if err != nil {
+		return nil, err
+	}
+	return copyColumnValues(dumpBytes, idx), nil
+}
+
+// manifestColumnIndex finds a column's position in a manifest table member's
+// declared column list — the arbiter of the dump's field order.
+func manifestColumnIndex(manifestBytes []byte, table, column string) (int, error) {
+	var m struct {
+		Tables []struct {
+			Name    string   `json:"name"`
+			Columns []string `json:"columns"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return 0, fmt.Errorf("parse manifest.json: %w", err)
+	}
+	for _, t := range m.Tables {
+		if t.Name != table {
+			continue
+		}
+		for i, c := range t.Columns {
+			if c == column {
+				return i, nil
+			}
+		}
+		return 0, fmt.Errorf("manifest %s member declares no %q column", table, column)
+	}
+	return 0, fmt.Errorf("manifest declares no %s member", table)
+}
+
+// copyColumnValues pulls one column out of a Postgres COPY-text dump: rows are
+// newline-separated (a literal newline inside a value is escaped as \n, so a raw
+// split is safe), fields are tab-separated, and `\N` is NULL (skipped — a media
+// row with no path has no blob to move).
+func copyColumnValues(dump []byte, idx int) []string {
+	seen := map[string]bool{}
+	var outv []string
+	for _, line := range strings.Split(string(dump), "\n") {
+		if line == "" || line == "\\." {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if idx >= len(fields) {
+			continue
+		}
+		raw := fields[idx]
+		if raw == "\\N" {
+			continue
+		}
+		v := unescapeCopyField(raw)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		outv = append(outv, v)
+	}
+	sort.Strings(outv)
+	return outv
+}
+
+// unescapeCopyField reverses the Postgres COPY-text backslash escapes.
+func unescapeCopyField(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case 'v':
+			b.WriteByte('\v')
+		case '\\':
+			b.WriteByte('\\')
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+// safeBlobPath is the CLIENT-side fence on a media path before it becomes a
+// filesystem destination or a URL segment: relative, non-empty, no traversal, no
+// Windows separator. The server's own per-segment allowlist is the authority
+// (422 invalid_path); this stops a hostile bundle from writing outside the
+// sidecar dir on the way there.
+func safeBlobPath(p string) bool {
+	if strings.TrimSpace(p) == "" || strings.HasPrefix(p, "/") || strings.ContainsAny(p, "\\\x00") {
+		return false
+	}
+	if strings.Contains(p, "://") {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// escapeBlobPath percent-escapes each segment of a media path for the URL while
+// keeping the `/` structure — the path the target stores must be byte-identical
+// to the source's, so nothing is normalised away.
+func escapeBlobPath(p string) string {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
+}
+
 // printCloudWorkspaceHelp writes `bp cloud workspace` usage.
 func printCloudWorkspaceHelp(out *writer) {
 	const help = `bp cloud workspace — export/import a single workspace as a portable bundle.
 
 USAGE
-  bp cloud workspace export <slug> [--file <out>]        download the bundle tar
-  bp cloud workspace import <slug>  --file <tar> --yes    restore the bundle (DESTRUCTIVE)
+  bp cloud workspace export <slug> [--file <out>] [--profile full|dev]
+                                   [--dataset <slug>] [--with-blobs [--blobs <dir>]]
+  bp cloud workspace import <slug>  --file <tar> --yes [--merge]
+                                   [--with-blobs [--blobs <dir>]]
 
 EXPORT
   GETs /api/workspaces/<slug>/export and streams the tar to <out> (default
   <slug>.tar, or ` + "`-`" + ` for stdout). Read-only. The bundle is a bp-export-v1 tar
   (manifest.json + per-table COPY dumps) scoped to the one workspace — the Go
   twin of the shipped Barkpark.Tenancy.WorkspaceBundle engine.
+    --profile dev    scrub secrets AT export (the personal-dev-server profile);
+                     ` + "`full`" + ` (the default) stays byte-identical to an unflagged pull
+    --dataset <slug> narrow the bundle to one dataset partition
+  Both map straight to server query params — omitted when not passed, so an
+  unflagged export sends the exact request it always has.
 
 IMPORT
   POSTs the tar body to /api/workspaces/<slug>/import, which RESTORES the bundle
@@ -329,7 +915,25 @@ IMPORT
   is gated:
     --dry-run   preview the request, send nothing (also honoured via the global --dry-run)
     --yes       required to actually apply — without it the command refuses
-  On success it prints the {tables,total_rows} the engine reported.
+    --merge     send ?mode=merge (upsert into a live workspace). The SERVER is the
+                enforcement: mode=merge is refused 403 bundle_import_disabled
+                unless the operator opted in via :allow_bundle_import.
+  On success it prints the {tables,total_rows} the engine reported, plus the
+  provenance receipt (source / dataset / profile / pulled_at) when the server
+  stamped one.
+  A cloud-classified target earns a warning line before the write. That warning
+  is ADVISORY — like ` + "`bp migrate --yes`" + ` it never refuses; the refusal is the
+  server-side opt-in above.
+
+BLOBS
+  The bundle is DB-only — it carries no media bytes. ` + "`--with-blobs`" + ` runs the
+  sidecar channel on either verb:
+    export  parses tables/media_files.copy, GETs each path from
+            <source>/media/files/<path> into <bundle>.blobs/ (or --blobs <dir>)
+    import  PUTs every file under that dir path-verbatim to
+            <target>/api/workspaces/<slug>/media/blob/<path>
+  One file at a time, streamed — never the whole set in RAM. The report names
+  every failure and the command exits NON-ZERO if any blob failed.
 
 TRANSPORT
   Plain HTTP to the CONTENT API — the configured server (` + "`-s`" + `/BARKPARK_API_URL)
