@@ -312,12 +312,12 @@ html[data-theme="dark"] .bp-paper-body {
    Defined at the surface so every task component inherits — no per-block copy,
    nothing drifts, and the toggle actually moves the status colours. ── */
 /* BEGIN GENERATED: status-tones (from design/status-manifest.json — do not edit by hand; run scripts/status-manifest-check.sh --write) */
-.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
 @media (prefers-color-scheme: dark) {
-  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
 }
-html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
-html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
 /* END GENERATED: status-tones */
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
@@ -689,6 +689,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
 .bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
 .bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--considering { color: var(--paper-ink); opacity: 0.35; } /* ◌ — dim: a candidate, below backlog on the ladder */
+.bp-paper-surface .bp-g--researching { color: var(--st-violet); }                /* ◎ — violet: active investigation, the wave's one new hue */
 .bp-paper-surface .bp-g--progress { color: var(--st-info); }
 /* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
 .bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }

@@ -146,14 +146,14 @@ export const STATUS_ROLES: StatusRole[] = [
     glyph: '◌', // U+25CC dotted circle — a candidate, not yet committed
     spinner: false,
     label: 'considering',
-    meaning: 'a candidate — weighing whether to pursue it',
+    meaning: 'a candidate being weighed',
   },
   {
     role: 'researching',
     glyph: '◎', // U+25CE bullseye — under investigation before it is ready
     spinner: false,
     label: 'researching',
-    meaning: 'under investigation before it is felt ready',
+    meaning: 'under active investigation',
   },
   // ── fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
   // a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
@@ -187,18 +187,26 @@ const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
 
-// The canonical manifest ladder — the SIX roles that live in
+// The canonical manifest ladder — the EIGHT roles that live in
 // design/status-manifest.json today. `LEGEND_ROLES` (below) is the cross-surface
 // parity KEY and must stay byte-frozen to what the Elixir StatusVocab emits.
-const MANIFEST_LADDER = new Set(['open', 'ready', 'progress', 'blocked', 'done', 'cancel'])
+const MANIFEST_LADDER = new Set([
+  'open',
+  'ready',
+  'progress',
+  'blocked',
+  'done',
+  'cancel',
+  'considering',
+  'researching',
+])
 
 /** The status-legend ladder — the cross-surface vocabulary KEY. Byte-frozen to
- * the Elixir StatusVocab / design/status-manifest.json (the 6 canonical states),
- * so the react legend stays shape-equal to the Elixir golden. Two roles are held
- * OUT deliberately: the fail-open `unknown` sentinel is JS-only and NEVER a real
- * lifecycle state (permanent exclusion); `considering`/`researching` join the
- * legend only once the manifest adopts them (the substrate slice — then the
- * regenerated golden carries them and MANIFEST_LADDER gains them in lockstep).
+ * the Elixir StatusVocab / design/status-manifest.json (the 8 canonical states),
+ * so the react legend stays shape-equal to the Elixir golden. The manifest has
+ * ADOPTED `considering`/`researching` (task-lifecycle-visibility substrate), so
+ * they are legend rows now. ONE role is held OUT deliberately: the fail-open
+ * `unknown` sentinel is JS-only and NEVER a real lifecycle state.
  * Everything else (roleOf, glyphHtml, the board columns) already resolves all
  * nine roles via ROLE_BY_NAME — only the legend key is manifest-scoped. */
 export const LEGEND_ROLES: StatusRole[] = STATUS_ROLES.filter((r) => MANIFEST_LADDER.has(r.role))

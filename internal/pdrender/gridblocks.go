@@ -339,12 +339,14 @@ type statusLegendRenderer struct{}
 // pdrender must NOT import internal/semrole or internal/taskboard (the
 // go-list-deps invariant in render_test.go), so the vocabulary is inlined here.
 var roleGlyph = map[string]string{
-	"open":     "○",
-	"ready":    "○",
-	"progress": "⠋",
-	"blocked":  "!",
-	"done":     "✓",
-	"cancel":   "✕",
+	"open":        "○",
+	"ready":       "○",
+	"progress":    "⠋",
+	"blocked":     "!",
+	"done":        "✓",
+	"cancel":      "✕",
+	"considering": "◌", // dotted circle — a candidate being weighed (dim)
+	"researching": "◎", // bullseye — under active investigation (violet on colour surfaces)
 }
 
 // roleLabel is the SINGLE source of the role→canonical (lowercase) display label,
@@ -352,30 +354,36 @@ var roleGlyph = map[string]string{
 // this, the board sentence-cases it (boardLabel). Byte-checked against the
 // manifest by scripts/status-manifest-check.sh Part 4 (like roleGlyph in Part 3).
 var roleLabel = map[string]string{
-	"open":     "open",
-	"ready":    "ready",
-	"progress": "in progress",
-	"blocked":  "blocked",
-	"done":     "done",
-	"cancel":   "cancelled",
+	"open":        "open",
+	"ready":       "ready",
+	"progress":    "in progress",
+	"blocked":     "blocked",
+	"done":        "done",
+	"cancel":      "cancelled",
+	"considering": "considering",
+	"researching": "researching",
 }
 
 // roleMeaning mirrors design/status-manifest.json's `roles[].meaning` — the
 // one-line legend gloss. Byte-checked against the manifest by Part 4.
 var roleMeaning = map[string]string{
-	"open":     "backlog — not ready yet",
-	"ready":    "unchecked — claim it now",
-	"progress": "being worked right now",
-	"blocked":  "something is required first",
-	"done":     "complete",
-	"cancel":   "abandoned or superseded",
+	"open":        "backlog — not ready yet",
+	"ready":       "unchecked — claim it now",
+	"progress":    "being worked right now",
+	"blocked":     "something is required first",
+	"done":        "complete",
+	"cancel":      "abandoned or superseded",
+	"considering": "a candidate being weighed",
+	"researching": "under active investigation",
 }
 
 // statusLadder is the ordered set of ladder role slugs (the "white ladder"). Each
 // rung's glyph/label/meaning is looked up from the shared maps at render time —
 // ONE place defines each, so a manifest drift can't leave the legend and the task
-// widgets disagreeing.
-var statusLadder = []string{"open", "ready", "progress", "blocked", "done", "cancel"}
+// widgets disagreeing. The two thought states (considering/researching) sit at the
+// BOTTOM of the ladder (charter D9 — the brightness ladder extends downward,
+// dimmer than open-backlog) so a reader sees the full arc from first thought to done.
+var statusLadder = []string{"open", "ready", "progress", "blocked", "done", "cancel", "considering", "researching"}
 
 // labelForRole returns the canonical lowercase display label (unknown → the slug).
 func labelForRole(role string) string {
@@ -424,6 +432,10 @@ func roleForStatus(status string) string {
 		return "done"
 	case "cancelled":
 		return "cancel"
+	case "considering":
+		return "considering"
+	case "researching":
+		return "researching"
 	default:
 		return "open"
 	}

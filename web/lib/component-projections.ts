@@ -100,13 +100,12 @@ const LABEL_BY_ROLE: Record<string, string> = Object.fromEntries(
   STATUS_LADDER.map((r) => [r.role, r.label]),
 );
 
-/** The SIX canonical manifest roles (design/status-manifest.json today). The
+/** The EIGHT canonical manifest roles (design/status-manifest.json). The
  * status-legend projection is the cross-surface parity KEY and must stay byte-
- * frozen to what Render.StatusVocab emits, so it renders THESE — not the two
- * appended thought states, which join the legend only once the manifest adopts
- * them (the substrate slice; then the regenerated golden carries them and this
- * set gains them in lockstep). The thought states still resolve everywhere else
- * (roleForStatus, labelForRole, the board columns) — only the legend is scoped. */
+ * frozen to what Render.StatusVocab emits. The manifest has now ADOPTED the two
+ * thought states (task-lifecycle-visibility substrate slice), so the regenerated
+ * golden carries them and this set gains them in lockstep. The JS-only fail-open
+ * `unknown` sentinel stays excluded permanently — it is never a lifecycle state. */
 const MANIFEST_LADDER = new Set([
   "open",
   "ready",
@@ -114,6 +113,8 @@ const MANIFEST_LADDER = new Set([
   "blocked",
   "done",
   "cancel",
+  "considering",
+  "researching",
 ]);
 
 export function labelForRole(role: string): string {

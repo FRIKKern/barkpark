@@ -55,3 +55,5 @@ source: tui
 !  blocked  — something is required first                   
 ✓  done  — complete                                         
 ✕  cancelled  — abandoned or superseded                     
+◌  considering  — a candidate being weighed                 
+◎  researching  — under active investigation                

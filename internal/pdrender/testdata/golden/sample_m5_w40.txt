@@ -63,3 +63,7 @@ source: tui
 first                                   
 ✓  done  — complete                     
 ✕  cancelled  — abandoned or superseded 
+◌  considering  — a candidate being     
+weighed                                 
+◎  researching  — under active          
+investigation                           

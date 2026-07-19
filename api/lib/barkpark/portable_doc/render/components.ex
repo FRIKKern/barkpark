@@ -558,8 +558,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   # The board's column roles, in white-ladder order (cancel folds to a tally, so
   # it is NOT a column). One place defines the order; labels are DERIVED, never a
-  # second hardcoded copy.
-  defp board_roles, do: ~w(open ready progress blocked done)
+  # second hardcoded copy. The two thought states are dim columns at the ladder
+  # BOTTOM (charter D12 — thought states ARE visible board columns); empty columns
+  # are dropped, so a board with no considering/researching rows is byte-stable.
+  defp board_roles, do: ~w(open ready progress blocked done considering researching)
 
   # A board column header: the canonical lowercase label sentence-cased at render
   # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
