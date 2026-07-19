@@ -391,21 +391,28 @@ const EXPECTATIONS = {
       assert.ok(panel.includes("data-wh-delete"), "the full action bar renders (delete present)");
     },
   },
-  // Wave 3: the Overview fleet usage strip. Unlike the Usage meter wall, the
-  // strip fills its OWN #overview-fleet-usage container (a real registry element
-  // the app writes to), so the async /v1/usage/summary fetch → render is fully
-  // observable here: the over-quota team headline + Manage-plan recovery, the
-  // fresh/stale "as of" stamps, and the honest no-sample cell all in one boot.
-  // Wave 5 (OC18/OC27): the per-instance CPU · RAM machine capacity cells, and a
-  // hot armed box (RAM at its ceiling) lighting its whole row accent (over).
+  // gr-p2 HOME TRIAGE (C-01): the v4 Overview folds the wave-3 fleet-usage strip
+  // into the instances grid + the page-header slots meter. The card stat pairs
+  // (DOCS/DISK/CPU/RAM) read the SAME /v1/usage/summary as the strip did (no
+  // per-instance fan-out); a box at its RAM ceiling tints that stat amber. The
+  // header slots meter reads the REAL team instance quota (10) — never hardcoded.
   "fleet-usage": {
-    what: "the fleet usage strip paints team headline + per-instance sample + CPU/RAM capacity cells",
-    container: "overview-fleet-usage",
-    includes: [
-      "Fleet usage", "usage-bar--over", ">Manage plan<", "fleet-usage-cell", "as of ", "No sample yet",
-      ">CPU</span>", ">RAM</span>", "100%", "fleet-usage-cell--over",
-    ],
-    excludes: ["Loading fleet usage"],
+    what: "the v4 instances grid paints real per-instance stats + the header slots meter reads the real quota",
+    check(reg) {
+      // Each Overview mount is its own registry element in this fake DOM: the
+      // grid paints #overview-instances, the slots meter #overview-slots.
+      const grid = (reg.get("overview-instances") || {}).innerHTML || "";
+      assert.ok(grid.includes('class="instances-grid"'), "the v4 instances grid renders");
+      assert.ok(grid.includes("instance-card--"), "cards carry their status accent");
+      assert.ok(grid.includes(">CPU</span>") && grid.includes(">RAM</span>"), "CPU/RAM stat pairs render");
+      assert.ok(grid.includes("100%"), "the hot box's RAM value (100%) renders from the real sample");
+      assert.ok(grid.includes("is-warn"), "an over-ceiling stat tints amber");
+      assert.ok(grid.includes("Open Studio"), "live cards carry the Open Studio link");
+      // The header slots meter reads count / REAL quota — the fixture's team
+      // ceiling is 10 with 3 boxes in the fleet.
+      const slots = (reg.get("overview-slots") || {}).innerHTML || "";
+      assert.ok(slots.includes("3 / 10 slots"), "slots meter shows count / real quota, never hardcoded");
+    },
   },
   // C8: the golden-path verify card renders from the events feed on Overview.
   "verify-pass": {
@@ -702,6 +709,49 @@ const EXPECTATIONS = {
       assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
       assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
       assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
+    },
+  },
+
+  // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
+  "overview-trial-runway": {
+    what: "the self-healing runway binds to onboarding: 2 of 3, the real instance-name hint, the Open Studio nudge",
+    check(reg) {
+      const state = (reg.get("overview-state") || {}).innerHTML || "";
+      assert.ok(state.includes("runway-card"), "the mint runway card renders");
+      assert.ok(state.includes("You're nearly set up"), "the runway heading renders");
+      assert.ok(state.includes("2 of 3 done"), "progress binds to onboarding server truth");
+      assert.ok(state.includes("Production is running"), "the instance step carries the real fleet-cache name");
+      assert.ok(state.includes("Publish your first document"), "the pending published_doc step renders");
+      assert.ok(state.includes("Open Studio"), "the pending step offers Open Studio");
+      assert.ok(!state.includes("dunning-banner"), "runway and past-due banner are mutually exclusive");
+    },
+  },
+  "overview-attention": {
+    what: "the attention queue leads with the degraded box + its real reason + a working Open Studio",
+    check(reg) {
+      const body = (reg.get("overview-body") || {}).innerHTML || "";
+      assert.ok(body.includes("Needs attention"), "the attention section heading renders");
+      assert.ok(body.includes("attention-row"), "an attention row renders");
+      assert.ok(body.includes(">Reporting</a>"), "the degraded box is named + linked");
+      assert.ok(/Health down|Agent offline/.test(body), "the row carries the real status reason");
+      assert.ok(body.includes("View instance"), "the row offers View instance");
+      assert.ok(body.includes("fleet-open-studio"), "the row offers a working Open Studio");
+      const grid = (reg.get("overview-instances") || {}).innerHTML || "";
+      assert.ok(grid.includes("instance-card--warn"), "the degraded card carries the amber accent");
+    },
+  },
+  "overview-past-due": {
+    what: "GR17 overview dunning banner + the suspended instance-card banner, verbatim, no runway",
+    check(reg) {
+      const state = (reg.get("overview-state") || {}).innerHTML || "";
+      assert.ok(state.includes("Your payment failed on"), "the GR17 overview banner lead sentence renders verbatim");
+      assert.ok(state.includes("they're suspended — not deleted"), "the GR17 keep-running sentence renders verbatim");
+      assert.ok(state.includes("Update payment method"), "the portal CTA renders");
+      assert.ok(!state.includes("runway-card"), "the runway is suppressed on the past-due path");
+      const grid = (reg.get("overview-instances") || {}).innerHTML || "";
+      assert.ok(grid.includes("suspended-card-banner"), "the suspended box carries the GR17 card banner");
+      assert.ok(grid.includes("The server is stopped, not destroyed"), "the suspended-card body renders verbatim");
+      assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
     },
   },
 };

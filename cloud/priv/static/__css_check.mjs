@@ -99,6 +99,12 @@ const ALLOW_PREFIXES = [
   "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
   // gr-w3 (v4 shell): the sidebar instance-morph section links (paintInstanceSections)
   "nav-link nav-sub",           // + (on ? " is-active" : "") (.sidebar .nav-link / .nav-sub / .is-active)
+  // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview's composed classes, each with
+  // a rule in app.css (verified via `.<family>` grep).
+  "instance-card instance-card--", // instanceCardHtml(): + statusOf role (.instance-card / .instance-card-- rules)
+  "instance-card-spark spark--",   // + statusOf role (.instance-card-spark / .spark-- rules)
+  "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
+  "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks

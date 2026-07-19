@@ -254,12 +254,15 @@
       <main class="content">
         <!-- ---------- OVERVIEW (home) ---------- -->
         <section class="view" id="view-overview" hidden>
-          <header class="view-head">
-            <div>
-              <h1>Overview</h1>
-              <p class="dim">Your fleet at a glance — and what needs you.</p>
+          <header class="view-head overview-head">
+            <div class="overview-greet">
+              <h1 id="overview-greeting">Overview</h1>
+              <p class="dim" id="overview-sub">Your fleet at a glance — and what needs you.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="overview-launch" type="button">Launch instance</button>
+            <div class="overview-head-right">
+              <div id="overview-chips" class="overview-chips" hidden></div>
+              <button class="btn btn-primary btn-sm" id="overview-launch" type="button">Launch instance</button>
+            </div>
           </header>
 
           <div id="overview-body" aria-live="polite"></div>
