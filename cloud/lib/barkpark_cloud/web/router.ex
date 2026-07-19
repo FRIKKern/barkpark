@@ -52,7 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
-      GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
+      GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
@@ -1505,10 +1505,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/audit?limit=&before=&target_type=&target_id= → 200 {events: [...]}.
+  # GET /v1/audit?limit=&before=&target_type=&target_id=&actor_user_id=&action_prefix=
+  # → 200 {events: [...]}.
   # The authenticated admin's team audit trail, newest first, keyset-paginated
   # (`?before=<oldest inserted_at>` walks the next page). Strictly team-scoped via
   # conn.assigns.current_team — an admin only ever sees their OWN team's events.
+  #
+  # The two narrowing filters answer the questions the trail is actually read
+  # for: `?actor_user_id=` is "what did this member do?" and `?action_prefix=` is
+  # "show me the webhook story" (a prefix of the closed `noun.verb` vocabulary,
+  # so `webhook` matches every `webhook.*`). Both are IGNORED when absent, empty,
+  # or unparseable — a garbage actor id is a no-op filter, never a 500 and never
+  # a silently wider result set. They compose with each other and with
+  # target_type/target_id; filtering happens INSIDE the limit, so a filtered page
+  # is a real page of matches, not a filtered slice of the newest 50.
   #
   # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
   # require_primary_team_admin halts 401 (no session) / 422 no_team / 403 (a plain
@@ -1525,7 +1535,9 @@ defmodule BarkparkCloud.Web.Router do
         limit: parse_int(conn.query_params["limit"], 50),
         before: parse_dt(conn.query_params["before"]),
         target_type: conn.query_params["target_type"],
-        target_id: conn.query_params["target_id"]
+        target_id: conn.query_params["target_id"],
+        actor_user_id: conn.query_params["actor_user_id"],
+        action_prefix: conn.query_params["action_prefix"]
       ]
 
       events = Accounts.list_audit_events(conn.assigns.current_team, opts)

@@ -207,6 +207,107 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert length(second_page) == 1
     end
 
+    test "?actor_user_id narrows the trail to one member's events" do
+      {owner, team, token} = logged_in()
+      {other, _other_token} = member_of(team, "admin")
+
+      {:ok, _} =
+        Accounts.record_audit(%{team_id: team.id, actor_user_id: owner.id, action: "site.created"})
+
+      {:ok, _} =
+        Accounts.record_audit(%{
+          team_id: team.id,
+          actor_user_id: other.id,
+          action: "site.deleted"
+        })
+
+      # A system/webhook event carries a NIL actor and must never be swept in.
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "barkpark.deleted"})
+
+      conn = call(:get, "/v1/audit?actor_user_id=" <> owner.id, nil, token)
+      assert conn.status == 200
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "site.created"
+      assert ev["actor"]["email"] == owner.email
+    end
+
+    test "a non-uuid ?actor_user_id is a no-op filter, never a 500" do
+      {_u, team, token} = logged_in()
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "site.created"})
+
+      # A raw binary in a :binary_id comparison would raise Ecto.Query.CastError;
+      # the cast guard turns it into "no filter" instead.
+      conn = call(:get, "/v1/audit?actor_user_id=not-a-uuid", nil, token)
+      assert conn.status == 200
+      assert %{"events" => [_]} = json_body(conn)
+    end
+
+    test "?action_prefix narrows to one noun of the action vocabulary" do
+      {_u, team, token} = logged_in()
+
+      for action <- ~w(webhook.created webhook.rotated site.created) do
+        {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: action})
+      end
+
+      conn = call(:get, "/v1/audit?action_prefix=webhook", nil, token)
+      assert conn.status == 200
+      assert %{"events" => events} = json_body(conn)
+      assert length(events) == 2
+      assert Enum.all?(events, &String.starts_with?(&1["action"], "webhook."))
+    end
+
+    test "?action_prefix treats LIKE metacharacters as literals (no wildcard widening)" do
+      {_u, team, token} = logged_in()
+
+      for action <- ~w(webhook.created site.created) do
+        {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: action})
+      end
+
+      # Unescaped, `%` would match everything and `_` would match any single
+      # character (`webhoo_` would sweep in `webhook.*`). Escaped, both are
+      # literals that match nothing in the closed vocabulary.
+      for probe <- ["%", "webhoo_"] do
+        conn = call(:get, "/v1/audit?action_prefix=" <> URI.encode_www_form(probe), nil, token)
+        assert conn.status == 200
+        assert json_body(conn) == %{"events" => []}, "prefix #{probe} widened its own match"
+      end
+
+      # `_` is a LEGITIMATE literal in the vocabulary and must still match.
+      {:ok, _} =
+        Accounts.record_audit(%{team_id: team.id, action: "notifications.channels_changed"})
+
+      conn = call(:get, "/v1/audit?action_prefix=notifications.channels_ch", nil, token)
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "notifications.channels_changed"
+    end
+
+    test "the filters compose, and empty filter values are ignored" do
+      {owner, team, token} = logged_in()
+
+      for action <- ~w(webhook.created webhook.rotated) do
+        {:ok, _} =
+          Accounts.record_audit(%{team_id: team.id, actor_user_id: owner.id, action: action})
+      end
+
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "webhook.deleted"})
+
+      conn =
+        call(
+          :get,
+          "/v1/audit?actor_user_id=#{owner.id}&action_prefix=webhook.rot",
+          nil,
+          token
+        )
+
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "webhook.rotated"
+
+      # Empty values must not degenerate into "match nothing".
+      conn2 = call(:get, "/v1/audit?actor_user_id=&action_prefix=", nil, token)
+      assert %{"events" => all} = json_body(conn2)
+      assert length(all) == 3
+    end
+
     test "an admin in team A never sees team B's events" do
       {_ua, _ta, token_a} = logged_in()
       team_b = team_fixture()
