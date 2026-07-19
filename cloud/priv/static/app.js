@@ -1033,6 +1033,25 @@
     });
   }
 
+  // Pure: one active-session row. Extracted from loadSessions so the TALL modal
+  // shape (9+ sessions — the shape that put Log out out of reach on live, GR63)
+  // is reachable from node without a fetch. The current device is badged and its
+  // Revoke button disabled: a signed-in user can never revoke themselves by
+  // accident from here.
+  function sessionRowHtml(x) {
+    return '<div class="session-row">' +
+      '<div class="session-main">' +
+        '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
+          (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
+        '<div class="session-meta">' + esc(x.ip_address || "unknown IP") +
+          " · active " + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
+      "</div>" +
+      (x.current
+        ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
+        : '<button class="btn btn-sm session-revoke" type="button" data-id="' + esc(x.id) + '">Revoke</button>') +
+    "</div>";
+  }
+
   // Fetch + render the active-sessions list into #sessions-box. The current row
   // is badged "This device" and its Revoke button disabled.
   function loadSessions() {
@@ -1043,19 +1062,7 @@
       if (!r.ok) { box.innerHTML = '<p class="muted">Couldn\'t load sessions.</p>'; return; }
       var rows = (r.data && r.data.sessions) || [];
       if (!rows.length) { box.innerHTML = '<p class="muted">No active sessions.</p>'; return; }
-      box.innerHTML = rows.map(function (x) {
-        return '<div class="session-row">' +
-          '<div class="session-main">' +
-            '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
-              (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
-            '<div class="session-meta">' + esc(x.ip_address || "unknown IP") +
-              " · active " + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
-          "</div>" +
-          (x.current
-            ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
-            : '<button class="btn btn-sm session-revoke" type="button" data-id="' + esc(x.id) + '">Revoke</button>') +
-          "</div>";
-      }).join("");
+      box.innerHTML = rows.map(sessionRowHtml).join("");
       box.querySelectorAll(".session-revoke").forEach(function (b) {
         b.addEventListener("click", function () {
           api("DELETE", "/v1/account/sessions/" + encodeURIComponent(b.getAttribute("data-id"))).then(function (r) {
@@ -4343,6 +4350,29 @@
   // The card stat pairs read the SAME cached /v1/usage/summary the slots meter
   // does — never a per-instance fan-out from Overview. Four honest stats (DOCS /
   // DISK / CPU / RAM); a warn/over meter tints its value amber.
+
+  // Resolve a meter's display spec out of the shared USAGE_METERS vocabulary, so
+  // a formatting change can never drift between two surfaces. An unknown key
+  // degrades to its own label + a count format rather than throwing.
+  // (GR51: these two lived in the retired wave-3 fleet-usage strip; the strip is
+  // gone but instanceCardStats below is their live consumer, so they moved here
+  // rather than dying with it.)
+  function usageMeterSpecFor(key) {
+    for (var i = 0; i < USAGE_METERS.length; i++) if (USAGE_METERS[i].key === key) return USAGE_METERS[i];
+    return { key: key, label: key, fmt: "count" };
+  }
+
+  // Resolve the display spec for a HEADLINE entry. The label/fmt come from the
+  // shared vocabulary, but a headline entry may PIN its own fmt (the machine
+  // meters carry fmt:"percent") — that wins, so a percent meter formats
+  // correctly even independent of the vocab spec. The tone/quota math in
+  // usageMeterDisplay reads the envelope's quota/warn_at, so the physical
+  // ceilings the sampler stamps light the warn/over tint for free (OC22).
+  function fleetHeadlineSpec(h) {
+    var spec = usageMeterSpecFor(h.key);
+    return h.fmt ? { key: spec.key, label: spec.label, fmt: h.fmt } : spec;
+  }
+
   var OVERVIEW_CARD_STATS = [
     { key: "documents", label: "DOCS" },
     { key: "disk", label: "DISK", fmt: "percent" },
@@ -13789,159 +13819,6 @@
     });
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ── Wave 3 (OC16/OC18/OC6): Overview fleet usage strip ────────────────────
-  // Open Overview and the WHOLE fleet's usage answers instantly — from CACHED
-  // sampler rows, NEVER a live per-instance fan-out (the ~15s hang disqualifies
-  // it, charter OC10/OC18). This region reads GET /v1/usage/summary (the pure
-  // sampler read shaped by BarkparkCloud.Usage) and paints: one team-level
-  // instances quota bar (reusing the C10 renderer, so ok/warn/over tones + the
-  // over-state Manage-plan recovery come for free) plus one compact cell per
-  // instance with its headline meters DOCS · DB · DISK · SEATS, each stamped with
-  // its OWN sample freshness. A null measured_at is the honest "no sample yet" —
-  // never a fake zero, never fake-fresh. Refresh rides the EXISTING `fleet` SSE
-  // (TYPE_ACTIONS.fleet → invalidateFleet re-runs loadOverview), so ZERO new SSE
-  // vocabulary (OC6/D2). Append-only: does not touch the C10 / Metrics regions.
-  // ══════════════════════════════════════════════════════════════════════════
-
-  // The headline meters shown per instance cell (a subset of the meter set), in
-  // the charter's order: DOCS · DB · DISK · SEATS · CPU · RAM (OC18/OC27). The
-  // count/byte meters pull their number format from the shared USAGE_METERS spec
-  // so a formatting change can never drift between the strip and the Usage tab.
-  // The MACHINE meters (cpu/ram — the on-box agent's capacity beat) pin
-  // their own `fmt: "percent"` on the headline entry: they land in the shared
-  // vocabulary via the machine-meters slice, and the headline fmt keeps the strip
-  // formatting them correctly regardless of that spec's presence. An un-armed box
-  // (no agent) has no cpu/ram meter → the cell renders the honest dimmed "—", the
-  // same "never a fake zero" state a quiet pipe gets (4 of 5 fleet boxes carry no
-  // agent today — that dimmed cell is CORRECT, not a bug).
-  var FLEET_STRIP_METERS = [
-    { key: "documents", label: "Docs" },
-    { key: "db_size", label: "DB" },
-    { key: "disk", label: "Disk" },
-    { key: "seats", label: "Seats" },
-    { key: "cpu", label: "CPU", fmt: "percent" },
-    { key: "ram", label: "RAM", fmt: "percent" }
-  ];
-
-  function fleetStripSpecFor(key) {
-    for (var i = 0; i < USAGE_METERS.length; i++) if (USAGE_METERS[i].key === key) return USAGE_METERS[i];
-    return { key: key, label: key, fmt: "count" };
-  }
-
-  // Resolve the display spec for a headline ENTRY. The label/fmt come from the
-  // shared USAGE_METERS vocabulary, but a headline entry may PIN its own fmt (the
-  // machine meters carry fmt:"percent") — that wins, so the strip formats a
-  // percent meter correctly even independent of the vocab spec. The tone/quota
-  // math in usageMeterDisplay reads the envelope's quota/warn_at, so the physical
-  // ceilings the sampler stamps light the worst-state fold for free (OC22).
-  function fleetHeadlineSpec(h) {
-    var spec = fleetStripSpecFor(h.key);
-    return h.fmt ? { key: spec.key, label: spec.label, fmt: h.fmt } : spec;
-  }
-
-  // Fold the quota tones of a row's headline cells to the worst present:
-  // over > warn > ok. Returns null when no headline cell carries a quota bar
-  // (nothing to accent). Since wave 5 the machine meters cpu/ram and disk carry
-  // real physical ceilings (100 / warn 70 / over 90), so an armed hot box folds
-  // to over/warn here; the billing meters (documents/db_size/seats) stay bar-less
-  // until plan truth lands (cloud-console-billing-live-gate), and the fold lights
-  // up for them too the moment a ceiling arrives.
-  function fleetStripWorst(meters) {
-    var order = { ok: 1, warn: 2, over: 3 };
-    var worst = null;
-    FLEET_STRIP_METERS.forEach(function (h) {
-      var d = usageMeterDisplay(fleetHeadlineSpec(h), (meters || {})[h.key]);
-      if (d.bar && (worst === null || order[d.bar.tone] > order[worst])) worst = d.bar.tone;
-    });
-    return worst;
-  }
-
-  // Pure: the strip's whole display model from the /v1/usage/summary `usage`
-  // object { team, instances }. teamMeter is the raw team.instances meter (fed
-  // straight to the shared usageMeterHtml). Each row carries its headline cells +
-  // its own sample freshness; a null measured_at → noSample (the honest "no
-  // sample yet" cell — an unmetered envelope with a real absence, not a zero).
-  function fleetStripModel(usage) {
-    usage = usage || {};
-    var team = usage.team || {};
-    var teamMeter = team.instances || null;
-    var list = Array.isArray(usage.instances) ? usage.instances : [];
-    var rows = list.map(function (inst) {
-      inst = inst || {};
-      var meters = inst.meters || {};
-      var measuredAt = inst.measured_at || null;
-      var noSample = !measuredAt;
-      var cells = FLEET_STRIP_METERS.map(function (h) {
-        var d = usageMeterDisplay(fleetHeadlineSpec(h), meters[h.key]);
-        // A compact cell shows a short em-dash for an unmetered meter rather than
-        // the full "Not yet metered" sentence the Usage tab uses.
-        return { key: h.key, label: h.label, value: d.unmetered ? "—" : d.value, unmetered: d.unmetered };
-      });
-      return {
-        id: inst.id != null ? String(inst.id) : "",
-        label: inst.name || inst.slug || inst.host || "Instance",
-        measured_at: measuredAt,
-        asOf: measuredAt ? relTime(measuredAt) : null,
-        noSample: noSample,
-        cells: cells,
-        worstState: noSample ? null : fleetStripWorst(meters)
-      };
-    });
-    var teamDisplay = teamMeter ? usageMeterDisplay(fleetStripSpecFor("instances"), teamMeter) : null;
-    return {
-      teamMeter: teamMeter,
-      // Surfaces the team bar's quota tone for a headline test without HTML.
-      teamState: teamDisplay && teamDisplay.bar ? teamDisplay.bar.tone : null,
-      rows: rows
-    };
-  }
-
-  // Pure: one instance cell. Native <a href="#instance/<id>/usage"> so the click
-  // is a plain hash navigation (no JS wiring). A no-sample instance renders the
-  // honest empty cell, never a wall of dashes.
-  function fleetStripCellHtml(row) {
-    var href = "#instance/" + encodeURIComponent(row.id) + "/usage";
-    if (row.noSample) {
-      return '<a class="fleet-usage-cell fleet-usage-cell--nosample" href="' + href + '">' +
-        '<div class="fleet-usage-cell-name">' + esc(row.label) + "</div>" +
-        '<div class="fleet-usage-cell-empty">No sample yet</div>' +
-      "</a>";
-    }
-    var metrics = row.cells.map(function (c) {
-      return '<span class="fleet-usage-metric">' +
-        '<span class="fleet-usage-metric-k">' + esc(c.label) + "</span>" +
-        '<span class="fleet-usage-metric-v' + (c.unmetered ? " dim" : "") + '">' + esc(c.value) + "</span>" +
-      "</span>";
-    }).join("");
-    var toneCls = row.worstState && row.worstState !== "ok" ? " fleet-usage-cell--" + row.worstState : "";
-    return '<a class="fleet-usage-cell' + toneCls + '" href="' + href + '">' +
-      '<div class="fleet-usage-cell-name">' + esc(row.label) + "</div>" +
-      '<div class="fleet-usage-cell-metrics">' + metrics + "</div>" +
-      '<div class="fleet-usage-cell-asof token-meta dim">as of ' + esc(row.asOf) + "</div>" +
-    "</a>";
-  }
-
-  // Pure: the whole strip. The team quota bar reuses usageMeterHtml with the
-  // `instances` spec — identical ok/warn/over tones and the over-state
-  // Manage-plan recovery (D25). No teamMeter → no bar (honest, never a fake).
-  function fleetStripHtml(model) {
-    var teamBar = model.teamMeter ? usageMeterHtml(fleetStripSpecFor("instances"), model.teamMeter) : "";
-    var cells = model.rows.map(fleetStripCellHtml).join("");
-    return '<section class="fleet-usage-strip" aria-label="Fleet usage">' +
-      '<div class="overview-sub"><h2>Fleet usage</h2></div>' +
-      teamBar +
-      '<div class="fleet-usage-grid">' + cells + "</div>" +
-    "</section>";
-  }
-
-  // The wave-3 fleet-usage strip renderer (fleetStripModel/fleetStripHtml) is
-  // node-pinned above. gr-p2 HOME TRIAGE (C-01) folds its two truths INTO the v4
-  // Overview — the team instance ceiling became the page-header slots meter
-  // (overviewSlotsModel) and the per-instance cells became the v4 instance-card
-  // stats (instanceCardStats) — both reading the SAME /v1/usage/summary, so no
-  // separate strip mount and no second fetch. The pure model/markup stay pinned.
-
   // ── Metrics tab (S12: the on-box agent vitals beat) ─────────────────────────
   // The Metrics tab renders the monitoring truth the on-box agent reports (charter
   // Decision 13/32): CPU / memory / disk / load sparklines over a rolling window +
@@ -16417,15 +16294,6 @@
       envScopeLabel: envScopeLabel, envVarsFailureCopy: envVarsFailureCopy,
       envVarWriteFailureCopy: envVarWriteFailureCopy, envVarRowHtml: envVarRowHtml,
       envVarsPanelHtml: envVarsPanelHtml, envAddFormHtml: envAddFormHtml,
-      // Wave 3 (OC16/OC18): the fleet usage strip's pure model + render helpers,
-      // still node-pinned. gr-p2 folded the strip's two truths into the v4
-      // Overview (team ceiling → header slots meter; per-instance cells → the
-      // instance-card stats), so there is no strip DOM mount now; fleetStripModel
-      // does the headline-subset selection + worst-state fold, and the meter
-      // subset is exported so the harness pins its names.
-      fleetStripMeters: FLEET_STRIP_METERS.map(function (m) { return m.key; }),
-      fleetStripModel: fleetStripModel, fleetStripWorst: fleetStripWorst,
-      fleetStripCellHtml: fleetStripCellHtml, fleetStripHtml: fleetStripHtml,
       // OC7: the registered Settings views, so the quota bar's "Manage plan"
       // recovery route can be proved to land on a real view (never a dead end).
       settingsViews: SETTINGS_VIEWS.slice(),
@@ -16447,6 +16315,9 @@
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
       accountModel: accountModel, accountIdentityLine: accountIdentityLine,
+      // GR63: one session row, pure — the seam that lets a node test build the
+      // TALL (9+ session) modal that broke on live without a browser.
+      sessionRowHtml: sessionRowHtml,
       // GR55: the QR encoder + its canonical text form. qrText IS the byte-match
       // oracle against __qr_fixture.json — never a self-written decoder.
       qrMatrix: qrMatrix, qrText: qrText, qrSvg: qrSvg,

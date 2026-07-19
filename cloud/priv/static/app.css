@@ -448,6 +448,7 @@ a:hover { text-decoration: underline; }
 .auth-tab:focus-visible,
 .inst-tab:focus-visible,
 .affix-btn:focus-visible,
+.btn-link:focus-visible,
 .modal-x:focus-visible,
 .toast-close:focus-visible,
 .topbar-link:focus-visible {
@@ -973,12 +974,27 @@ select.form-input {
 .tier-free .tier-price { color: var(--muted-text); }
 
 /* ========================================================== MODAL */
-.modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--space-6); }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
+/* GR63 OVERFLOW: the modal root is the ONLY scroll container a modal has —
+   `place-items: center` on a fixed, non-scrolling root silently amputates any
+   card taller than the viewport (the account modal with 9+ sessions renders
+   ~1655px in a 900px viewport, putting Log out and 2FA permanently out of
+   reach). `align-items: start` + `overflow-y: auto` gives the root a scroll
+   path, and a `margin: auto 0` on the card restores true vertical centring for
+   every card that still FITS. Shared primitive on purpose — every tall modal
+   (launch, env editor, confirm sheets) inherits the same bug, so a
+   `:has(.am-modal)`-scoped patch would only move it. */
+   REVIEW ADDENDUM: making the root a scroll container also opens a scroll-CHAIN
+   into the shell behind it — the shell is `inert` (pointer/keyboard) but inert
+   does not stop a wheel, so reaching the bottom of a tall modal would start
+   scrolling the page underneath. `overscroll-behavior: contain` closes that;
+   it is inert on every modal that fits. */
+.modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; justify-items: center; align-items: start; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-6); }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .modal-card {
   position: relative;
   z-index: 1;
   width: 100%;
+  margin: auto 0;
   max-width: 420px;
   padding: var(--space-6);
   box-shadow: var(--shadow);
@@ -1319,8 +1335,9 @@ select.form-input {
 /* The instance workspace rail hosts the per-host domain checklist (#instance-
    domains), which needs room for a rung's label + evidence code on one line — so
    its rail is wider than the shared 260px. SCOPED to the instance workspace: the
-   site-deploys grid (bare .detail-grid) is byte-identical. The ≤900px collapse
-   below still wins (it's later in source), so this only widens the desktop rail. */
+   site-deploys grid (bare .detail-grid) is byte-identical. The single-column
+   collapse below (GR65: ≤768px, moved up from 720) still wins — same specificity,
+   later in source — so this only widens the desktop rail. */
 .detail-grid--instance { grid-template-columns: 1fr 340px; }
 .detail-main h2 { margin-bottom: 12px; }
 .detail-rail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
@@ -1878,16 +1895,46 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 /* ---------------------------------------------------------- responsive */
+/* GR65 TABLET (768px): three layouts break BEFORE the 720px phone threshold,
+   and 768 is exactly the second width __preview__/shoot.sh shoots — so every
+   green screenshot pass was taken 48px above the break. Shot at 768 in both
+   themes: `.fleet-row` lands the "v0.9.2 available" badge on top of the
+   hostname (mixed-fleet), `.detail-grid` stays two-column and clips its right
+   column off-screen in BOTH consumers (panel-overview's Host row, rollback's
+   DETAILS card), and `.attention-row` hides instance names behind the View
+   instance / Open Studio buttons (fleet-usage). Only those three move up:
+   .topbar / .crumbs / .toast-stack / .detail-head / .site-row--global and the
+   webhooks + sites panels were shot at 768 and render cleanly, so they keep
+   the 720px phone threshold rather than going phone-shaped on a tablet. */
+@media (max-width: 768px) {
+  .fleet-row { flex-direction: column; align-items: stretch; }
+  .fleet-badges { justify-content: flex-start; }
+  /* minmax(0, …), NOT a bare 1fr: a 1fr track's automatic minimum is min-content,
+     so the stacked panels (whose min-content is ~572px of unbreakable host names
+     and code) blew the track back past the viewport and the "fix" clipped exactly
+     as much as the two-column layout did. Measured at 768: bare 1fr → track
+     572.5px, panel right edge 828.5 (viewport 768); minmax(0,1fr) → track 473px,
+     right edge 729. */
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  /* STACK, don't just wrap. `.attention-main` is flex:1 min-width:0, so a mere
+     flex-wrap lets it collapse instead of pushing the buttons to a new line:
+     measured at 768, the Staging row's .attention-name box shrank to 3px and its
+     text painted straight through the View instance / Open Studio buttons.
+     Stacking gives every name the full 435px row. (This supersedes the old
+     flex-wrap at 620 — the stack applies from 768 down.) */
+  .attention-row { flex-direction: column; align-items: flex-start; }
+  /* …but the name/reason column still takes the full row, or it re-collapses. */
+  .attention-row .attention-main { align-self: stretch; }
+}
+
 @media (max-width: 720px) {
   .topbar { padding: 0 14px; gap: 10px; }
   .topbar-right { gap: 8px; }
   .topbar-link, .crumb-sep { display: none; }
   .content { padding: 24px 16px; }
-  .fleet-row, .site-row--global { flex-direction: column; align-items: stretch; }
-  .fleet-badges { justify-content: flex-start; }
+  .site-row--global { flex-direction: column; align-items: stretch; }
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
   .crumbs { display: none; }
-  .detail-grid { grid-template-columns: 1fr; }
   /* Stack the detail header (title above badges + Retry/Remove) so the actions
      don't wrap awkwardly or clip on phones. */
   .detail-head { flex-direction: column; align-items: stretch; }
@@ -2674,7 +2721,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .instances-grid { grid-template-columns: 1fr; }
   .overview-head { flex-direction: column; }
   .overview-head-right { justify-content: flex-start; }
-  .attention-row { flex-wrap: wrap; }
+  /* .attention-row already STACKS from 768px down — see the GR65 tablet block
+     above; the old flex-wrap here would only re-collapse the name column. */
 }
 
 /* ============================================================ C6 INSTANCE TABS
@@ -3429,91 +3477,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .usage-bar-fill { transition: none; }
 }
 
-/* ── Wave 3: Overview fleet usage strip ─────────────────────────────────────
-   The whole fleet's usage from cached samples. The team quota bar reuses the
-   C10 .usage-bar chrome (already styled above); these rules cover the strip
-   frame + the per-instance sample cells. Append-only; no token-block edits. */
-.fleet-usage-strip {
-  margin-bottom: 8px;
-}
-.fleet-usage-loading {
-  color: var(--muted-text);
-  font-size: 13px;
-  padding: 8px 0;
-}
-.fleet-usage-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-.fleet-usage-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-left-color: var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  transition: border-color var(--t), box-shadow var(--t);
-}
-.fleet-usage-cell:hover {
-  text-decoration: none;
-  box-shadow: var(--shadow-sm);
-}
-.fleet-usage-cell--warn { border-left-color: var(--warn); }
-.fleet-usage-cell--warn:hover { border-color: hsl(var(--warn-hsl) / 0.4); }
-.fleet-usage-cell--over { border-left-color: var(--danger); }
-.fleet-usage-cell--over:hover { border-color: hsl(var(--danger-hsl) / 0.4); }
-.fleet-usage-cell--nosample {
-  border-left-color: var(--border);
-  opacity: 0.72;
-}
-.fleet-usage-cell-name {
-  font-weight: 600;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fleet-usage-cell-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px 12px;
-}
-.fleet-usage-metric {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  min-width: 0;
-}
-.fleet-usage-metric-k {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-text);
-}
-.fleet-usage-metric-v {
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fleet-usage-metric-v.dim { color: var(--muted-text); font-weight: 400; }
-.fleet-usage-cell-asof {
-  font-size: 11px;
-}
-.fleet-usage-cell-empty {
-  font-size: 12px;
-  color: var(--muted-text);
-  padding: 6px 0 2px;
-}
 
 
 /* ── Command palette (Cmd+K, wave 3) ───────────────────────────────────────
@@ -4240,7 +4203,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--pill);
   padding: 1px 8px;
 }
-.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* GR65 REVIEW: a rung is `white-space: nowrap` so its glyph + label never break
+   mid-phrase — but a FAILED rung also carries a server-authored reason ("No
+   A/AAAA record for acme.barkpark.cloud"), and an unbreakable 509px pill inside
+   a 340px rail pushed the whole DOCUMENT to scrollWidth 1533 in a 1440 viewport.
+   That is a horizontal page scroll on the instance workspace at DESKTOP width,
+   in every accent and both themes — not a tablet-only tightness. `max-width:
+   100%` bounds the pill to its flex line and the code span alone is allowed to
+   wrap (`anywhere`, because the reason ends in an unbreakable hostname); the
+   label chrome keeps its nowrap. Measured on the static harness, panel-overview:
+   1440 scrollWidth 1533 → 1440, 768 scrollWidth 797 → 768. */
 .dom-rung {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px;
@@ -4251,9 +4224,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
 }
 .dom-rung-glyph { font-size: 9px; line-height: 1; }
-.dom-rung-code { font-family: var(--mono); font-weight: 400; color: var(--dim); }
+.dom-rung-code {
+  font-family: var(--mono); font-weight: 400; color: var(--dim);
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left; /* a wrapped reason must read as a paragraph, not a centred blob */
+}
 .dom-rung--ok { color: var(--ok-strong); background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.3); }
 .dom-rung--ok .dom-rung-glyph { color: var(--ok); }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
