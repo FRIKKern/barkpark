@@ -132,6 +132,13 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 				continue
 			}
 			worker, epoch = w, outcome.Epoch
+			// Dispatch --claim bypasses runCommand, so the server's help[] next-command
+			// templates and rail-awareness notices — decoded on the outcome — would be
+			// dropped without this. Surface them to stderr (the house pattern), one
+			// line each, so the lead sees a blocker on the freshly-claimed task and the
+			// next-step commands the pane will run (charter D18).
+			emitTaskNoticeLines(out, outcome.Notices)
+			emitTaskHelpLines(out, outcome.Help)
 		}
 
 		cmd := cmuxCommandText(id, taskPrompt(p))

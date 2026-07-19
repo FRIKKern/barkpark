@@ -106,7 +106,7 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 				return exitGeneric
 			}
 			if outcome.OK {
-				return emitFrontierClaim(out, p, worker, outcome.Epoch, skips)
+				return emitFrontierClaim(out, p, worker, outcome.Epoch, skips, outcome.Help, outcome.Notices)
 			}
 			// A business rejection: record the skip and try the next non-colliding
 			// pick. A lost race is `not_ready` (the queue moved the task out of
@@ -152,19 +152,34 @@ func holderText(conflicts []apiclient.TaskConflict) string {
 	return strings.Join(parts, "; ")
 }
 
-func emitFrontierClaim(out *writer, p taskboard.Pick, worker string, epoch int, skips []frontierSkip) int {
+func emitFrontierClaim(out *writer, p taskboard.Pick, worker string, epoch int, skips []frontierSkip, help []string, notices []apiclient.TaskNotice) int {
 	id := taskboard.BareID(p.Task.DocID)
 	if out.machineOut() {
+		claimed := map[string]any{"id": id, "title": p.Task.Title, "worker": worker, "epoch": epoch}
 		payload := map[string]any{
 			"ok":      true,
-			"claimed": map[string]any{"id": id, "title": p.Task.Title, "worker": worker, "epoch": epoch},
+			"claimed": claimed,
 			"skipped": skipsJSON(skips),
+		}
+		// The frontier claim BYPASSES runCommand (which builds its own JSON via
+		// renderSuccess), so the server's help[]/notices — decoded on the outcome —
+		// would vanish from the machine shape unless carried here explicitly. Add
+		// them as fields (parity with renderSuccess echoing the raw body) only when
+		// present, so the empty-case shape is unchanged; ALSO mirror to stderr below
+		// so a piped agent gets the help: lines runCommand gives every other verb.
+		if len(help) > 0 {
+			payload["help"] = help
+		}
+		if len(notices) > 0 {
+			payload["notices"] = notices
 		}
 		if out.output == "yaml" {
 			out.renderYAML(payload)
 		} else {
 			out.renderJSON(payload)
 		}
+		emitTaskHelpLines(out, help)
+		emitTaskNoticeLines(out, notices)
 		return exitOK
 	}
 	// Human mode: name the losers first (so the reason we skipped past them is
@@ -174,6 +189,11 @@ func emitFrontierClaim(out *writer, p taskboard.Pick, worker string, epoch int, 
 	}
 	out.outf("✓ claimed %s  worker=%s  epoch=%d", id, worker, epoch)
 	out.outf("  %s", p.Task.Title)
+	// Rail-awareness heads-up + the server's next-command templates go to stderr
+	// (the emitNotices / emitHelpHints house pattern), so stdout stays the clean
+	// receipt while the claimer still learns what to run next (charter D18).
+	emitTaskNoticeLines(out, notices)
+	emitTaskHelpLines(out, help)
 	return exitOK
 }
 

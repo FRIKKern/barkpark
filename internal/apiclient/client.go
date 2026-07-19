@@ -1001,6 +1001,14 @@ type taskEnvelope struct {
 	Reason  string          `json:"reason"`
 	Doc     json.RawMessage `json:"doc"`
 	Notices []TaskNotice    `json:"notices"`
+	// Help is the top-level {"help":[…]} array a claim/close (also stamp/pulse/
+	// release) 2xx envelope carries — 1–3 concrete next-command templates the
+	// server authors beside its mutation emitters (AXI R5, mutation_help/3) with
+	// REAL ids/epochs. Advisory only, omitted when empty. Every typed helper below
+	// surfaces it so the frontier/cmux/board/desk-TUI claim paths reach the same
+	// next-step parity `runCommand` gives the manifest path (charter D18) — it was
+	// silently dropped before, decoded nowhere.
+	Help []string `json:"help"`
 	// Conflicts rides a 409 resource_conflict envelope: the tasks/workers that
 	// already hold one or more of the file resources this claim declared. The
 	// server's check_resources_free fence populates it; a frontier claimer names
@@ -1094,19 +1102,21 @@ func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*task
 // claim's fencing epoch (content.claim.epoch on the returned doc) — the token
 // TaskClose must echo back as observed_epoch.
 func (c *Client) TaskClaim(docID, workerID string) (int, error) {
-	epoch, _, err := c.TaskClaimN(docID, workerID)
+	epoch, _, _, err := c.TaskClaimN(docID, workerID)
 	return epoch, err
 }
 
 // TaskClaimN is TaskClaim plus the envelope's advisory rail-awareness notices
-// (blocked_while_claimed / rail_changed, nil when the server sent none). Callers
-// that want to surface the heads-up (the task board's status strip) use this;
-// TaskClaim stays the epoch-only convenience for callers that don't.
-func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
+// (blocked_while_claimed / rail_changed, nil when the server sent none) AND the
+// server's help[] next-command templates (charter D18, nil when the server sent
+// none). Callers that want to surface the heads-up (the task board's status
+// strip, the desk TUI, the cmux hook) use this; TaskClaim stays the epoch-only
+// convenience for callers that don't.
+func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
 		map[string]interface{}{"worker_id": workerID})
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	var doc struct {
 		Claim struct {
@@ -1114,9 +1124,9 @@ func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
 		} `json:"claim"`
 	}
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
-		return 0, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+		return 0, nil, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return doc.Claim.Epoch, env.Notices, nil
+	return doc.Claim.Epoch, env.Notices, env.Help, nil
 }
 
 // TaskClaimOutcome is the full result of a resources-declaring claim: on a
@@ -1130,6 +1140,7 @@ type TaskClaimOutcome struct {
 	Reason    string
 	Epoch     int
 	Notices   []TaskNotice
+	Help      []string
 	Conflicts []TaskConflict
 }
 
@@ -1159,7 +1170,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 		if reason == "" {
 			reason = "claim_rejected"
 		}
-		return TaskClaimOutcome{OK: false, Reason: reason, Conflicts: env.Conflicts, Notices: env.Notices}, nil
+		return TaskClaimOutcome{OK: false, Reason: reason, Conflicts: env.Conflicts, Notices: env.Notices, Help: env.Help}, nil
 	}
 	var doc struct {
 		Claim struct {
@@ -1169,7 +1180,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
 		return TaskClaimOutcome{}, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices}, nil
+	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices, Help: env.Help}, nil
 }
 
 // TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server
@@ -1177,22 +1188,23 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 // mismatch returns reason "fenced_off"); lifecycle lands on "done" (the server
 // default, sent explicitly).
 func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
-	_, err := c.TaskCloseN(docID, workerID, observedEpoch)
+	_, _, err := c.TaskCloseN(docID, workerID, observedEpoch)
 	return err
 }
 
 // TaskCloseN is TaskClose plus the envelope's advisory rail-awareness notices
-// (nil when the server sent none) — the notice-aware twin the board uses so a
-// clean close can still flag a blocker that landed on a sibling. On a fenced
-// 409 the reason rides the error (fenced_off / doc_changed_since_claim); notices
-// only accompany a 2xx.
+// AND the server's help[] next-command templates (both nil when the server sent
+// none) — the advisory-aware twin the board/desk-TUI use so a clean close can
+// still flag a blocker that landed on a sibling and point at the next task. On a
+// fenced 409 the reason rides the error (fenced_off / doc_changed_since_claim);
+// notices and help only accompany a 2xx.
 // TaskCloseRevN is TaskCloseN plus an observed_rev strict-CAS guard. When a
 // task's brief legitimately changed since claim — e.g. the worker marked its
 // own acceptance criteria met — the server's work-digest fence
 // (doc_changed_since_claim) rejects a plain close; passing the freshly-observed
 // rev is the sanctioned bypass (Tasks.close/3 :observed_rev). The worker match
 // still prevents theft.
-func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, error) {
+func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
@@ -1201,12 +1213,12 @@ func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observ
 			"lifecycle_status": "done",
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return env.Notices, nil
+	return env.Notices, env.Help, nil
 }
 
-func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, error) {
+func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
@@ -1214,9 +1226,9 @@ func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNo
 			"lifecycle_status": "done",
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return env.Notices, nil
+	return env.Notices, env.Help, nil
 }
 
 // TaskRelabel adds and/or removes content.labels on a task via

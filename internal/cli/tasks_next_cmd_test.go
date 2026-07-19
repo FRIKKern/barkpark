@@ -190,6 +190,79 @@ func TestNextFrontierExhaustedAfterBoundedRounds(t *testing.T) {
 	}
 }
 
+// TestNextFrontierClaimRendersHelpAndNotices pins charter D18: the frontier
+// claim BYPASSES runCommand, so the server's help[] next-command templates and
+// rail-awareness notices — decoded on the claim outcome but silently dropped
+// before this slice — must be surfaced explicitly. Human mode routes them to
+// stderr (the emitHelpHints / emitNotices house pattern), leaving stdout the
+// clean claim receipt.
+func TestNextFrontierClaimRendersHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":7}},` +
+			`"help":["bp task pulse task-a worker-1 --now \"...\"","bp task close task-a worker-1 7 done \"...\""],` +
+			`"notices":[{"type":"blocked_while_claimed","task_id":"task-q","blockers":["dep-1"]}]}`},
+	}, nil)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runTaskNextFrontierArgs(w, dispatchCtx(srv.URL), []string{"worker-1", "--frontier"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	// The claim receipt stays on stdout, clean.
+	if !strings.Contains(so.String(), "claimed task-a") {
+		t.Fatalf("stdout missing the claim receipt:\n%s", so.String())
+	}
+	// help[] + notices ride stderr, one line each.
+	if !strings.Contains(se.String(), "help: bp task pulse task-a worker-1") {
+		t.Errorf("stderr missing the server help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "help: bp task close task-a worker-1 7 done") {
+		t.Errorf("stderr missing the second help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "notice: blocked_while_claimed task=task-q blockers=dep-1") {
+		t.Errorf("stderr missing the rail-awareness notice:\n%s", se.String())
+	}
+	// The advisories must NOT leak onto stdout — it stays one parseable receipt.
+	if strings.Contains(so.String(), "help:") || strings.Contains(so.String(), "notice:") {
+		t.Errorf("advisories leaked onto stdout (must be stderr):\n%s", so.String())
+	}
+}
+
+// TestNextFrontierClaimJSONCarriesHelpAndNotices: in machine mode the frontier
+// claim's hand-built JSON must ALSO carry help/notices as fields (the frontier
+// bypasses renderSuccess, which would otherwise echo them from the raw body), so
+// a piped agent reads them off stdout — parity with every runCommand verb.
+func TestNextFrontierClaimJSONCarriesHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":7}},"help":["do X next"],` +
+			`"notices":[{"type":"rail_changed","parent_id":"epic-1","rail_rev":"r9"}]}`},
+	}, nil)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runTaskNextFrontier(w, globals{}, dispatchCtx(srv.URL), "worker-1", taskboard.FrontierOpts{})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	var env struct {
+		OK      bool     `json:"ok"`
+		Help    []string `json:"help"`
+		Notices []struct {
+			Type string `json:"type"`
+		} `json:"notices"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable: %v\n%s", err, so.String())
+	}
+	if !env.OK || len(env.Help) != 1 || env.Help[0] != "do X next" {
+		t.Errorf("json payload missing help[]:\n%s", so.String())
+	}
+	if len(env.Notices) != 1 || env.Notices[0].Type != "rail_changed" {
+		t.Errorf("json payload missing notices[]:\n%s", so.String())
+	}
+}
+
 // The `bp task ready` capacity header names the frontier size from the SAME
 // taskboard.Frontier the `frontier` verb reads (two distinct-neighborhood ready
 // tasks → 2 independent). A fetch error would drop the header silently.

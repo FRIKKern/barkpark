@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/mattn/go-isatty"
 )
@@ -1158,6 +1159,42 @@ func joinStrings(v any) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+// emitTaskHelpLines is the TYPED twin of emitHelpHints (which parses raw JSON):
+// it prints a claim/close outcome's already-decoded help[] templates to stderr,
+// one "help: …" line each, exactly as runCommand does for the manifest path.
+// The typed-helper claim/close surfaces (frontier, cmux dispatch) hold the help
+// as a []string on the apiclient outcome, not raw bytes, so they call this rather
+// than re-marshalling. Empty/absent help prints nothing (charter D18).
+func emitTaskHelpLines(out *writer, help []string) {
+	for _, h := range help {
+		if h == "" {
+			continue
+		}
+		out.errf("help: %s", h)
+	}
+}
+
+// emitTaskNoticeLines is the TYPED twin of emitNotices: it renders a claim/close
+// outcome's already-decoded rail-awareness notices to stderr in the same
+// "notice: <type> …" shape emitNotices prints from raw JSON. The frontier/cmux
+// claim paths decode notices into []apiclient.TaskNotice but never surfaced them
+// — this closes that gap without a second decode. Unknown future notice types
+// print their bare type (never guessed); an empty/nil slice prints nothing.
+func emitTaskNoticeLines(out *writer, notices []apiclient.TaskNotice) {
+	for _, n := range notices {
+		switch n.Type {
+		case "":
+			continue
+		case "blocked_while_claimed":
+			out.errf("notice: blocked_while_claimed task=%s blockers=%s", n.TaskID, strings.Join(n.Blockers, ","))
+		case "rail_changed":
+			out.errf("notice: rail_changed parent=%s rail_rev=%s", n.ParentID, n.RailRev)
+		default:
+			out.errf("notice: %s", n.Type)
+		}
+	}
 }
 
 // unwrapResult strips a top-level {"result": X} envelope, returning X's raw

@@ -343,13 +343,17 @@ func (m model) taskTarget() *Doc {
 // the epoch from) and the status bar shows the fencing epoch; an ok:false
 // envelope surfaces the server's reason string verbatim.
 func (m *model) claimTask(doc *Doc) {
-	epoch, err := m.ds.TaskClaim(doc.ID, m.workerID)
+	epoch, notices, help, err := m.ds.TaskClaimN(doc.ID, m.workerID)
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return
 	}
 	m.refreshDocViews()
-	m.setStatus(fmt.Sprintf("claimed (epoch %d)", epoch), false)
+	// The claim envelope carries advisory rail-awareness notices + the server's
+	// help[] next-command templates (charter D18); the desk TUI used to drop both.
+	// Fold them into the one-line status message so a blocker on the freshly-claimed
+	// task and the primary next step are visible without leaving the desk.
+	m.setStatus(fmt.Sprintf("claimed (epoch %d)", epoch)+taskAdvisorySuffix(notices, help), false)
 }
 
 // closeTask closes the targeted task via the flat POST /v1/tasks/:doc_id/close
@@ -363,12 +367,60 @@ func (m *model) closeTask(doc *Doc) {
 		m.setStatus("not claimed — claim first (c)", true)
 		return
 	}
-	if err := m.ds.TaskClose(doc.ID, m.workerID, epoch); err != nil {
+	notices, help, err := m.ds.TaskCloseN(doc.ID, m.workerID, epoch)
+	if err != nil {
 		m.setStatus(err.Error(), true)
 		return
 	}
 	m.refreshDocViews()
-	m.setStatus("closed", false)
+	m.setStatus("closed"+taskAdvisorySuffix(notices, help), false)
+}
+
+// taskAdvisorySuffix builds the compact tail the desk TUI appends to a claim/
+// close status line so the server's advisory notices + help[] templates are
+// surfaced, not dropped (charter D18). It shows the highest-priority rail notice
+// (blocked outranks rail_changed) and the PRIMARY help template (help[0] — the
+// pulse line after a claim); the status line clips on width like any long
+// message. Empty when the server sent neither.
+func taskAdvisorySuffix(notices []apiclient.TaskNotice, help []string) string {
+	var b strings.Builder
+	if n, ok := topDeskNotice(notices); ok {
+		switch n.Type {
+		case "blocked_while_claimed":
+			b.WriteString(" · blocked while claimed: " + n.TaskID)
+		case "rail_changed":
+			b.WriteString(" · rail changed: " + n.ParentID)
+		}
+	}
+	for _, h := range help {
+		if h != "" {
+			b.WriteString(" · next: " + h)
+			break
+		}
+	}
+	return b.String()
+}
+
+// topDeskNotice mirrors taskboard.topNotice's priority (a blocked_while_claimed
+// on your held task outranks a rail_changed) without importing the board's
+// unexported picker. Returns false when neither known shape is present — an
+// unknown future notice is ignored, never guessed.
+func topDeskNotice(notices []apiclient.TaskNotice) (apiclient.TaskNotice, bool) {
+	var rail *apiclient.TaskNotice
+	for i := range notices {
+		switch notices[i].Type {
+		case "blocked_while_claimed":
+			return notices[i], true
+		case "rail_changed":
+			if rail == nil {
+				rail = &notices[i]
+			}
+		}
+	}
+	if rail != nil {
+		return *rail, true
+	}
+	return apiclient.TaskNotice{}, false
 }
 
 // workerIdentity computes the desk TUI's task-claim worker id once per process.

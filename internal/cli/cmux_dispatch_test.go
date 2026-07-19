@@ -201,6 +201,37 @@ func TestDispatchClaimSpawnsOnlyWinners(t *testing.T) {
 	}
 }
 
+// TestDispatchClaimRendersHelpAndNotices pins charter D18 on the cmux --claim
+// path (which BYPASSES runCommand): on a won claim the server's help[] templates
+// and rail-awareness notices are surfaced to stderr, one line each, instead of
+// being silently dropped. stdout keeps the clean spawn receipt.
+func TestDispatchClaimRendersHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":5}},` +
+			`"help":["bp task pulse task-a w --now \"...\""],` +
+			`"notices":[{"type":"rail_changed","parent_id":"epic-1","rail_rev":"r3"}]}`},
+		"task-b": {body: `{"ok":true,"doc":{"claim":{"epoch":6}}}`},
+	}, nil)
+	withCmuxSeams(t, true, func(id, cwd, cmd string) error { return nil })
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runCmuxDispatch(w, globals{}, dispatchCtx(srv.URL), []string{"--claim"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	if !strings.Contains(se.String(), "help: bp task pulse task-a w") {
+		t.Errorf("dispatch --claim dropped the server help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "notice: rail_changed parent=epic-1 rail_rev=r3") {
+		t.Errorf("dispatch --claim dropped the rail-awareness notice:\n%s", se.String())
+	}
+	// The spawn receipt (stdout) stays clean — advisories are stderr-only.
+	if strings.Contains(so.String(), "help:") || strings.Contains(so.String(), "notice:") {
+		t.Errorf("advisories leaked onto stdout (must be stderr):\n%s", so.String())
+	}
+}
+
 // Default dispatch (no --claim) claims NOTHING — the pane derives and claims its
 // own lease at SessionStart. This asserts the byte-unchanged default path never
 // hits the /claim endpoint.
