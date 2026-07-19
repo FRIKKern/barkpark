@@ -422,7 +422,7 @@ const failedBeforeF = failed;
 // shadcn-zinc bytes no longer match the formula, so its 26 zinc rungs are
 // CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). A theme with no
 // entry here is not ratcheted (a fixture); every design/themes/*.json ships one.
-const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2 };
+const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
 // DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam

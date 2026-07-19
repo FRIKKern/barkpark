@@ -44,8 +44,8 @@
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
 :root {
-  --primary: hsl(163 46% 22%);
-  --primary-hover: hsl(163 46% 16%);
+  --primary: hsl(151.96 71.81% 29.22%);
+  --primary-hover: hsl(151.96 71.81% 23.22%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(0 0% 100%);
   --surface: hsl(0 0% 100%);
@@ -55,7 +55,7 @@
   --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
   --accent: hsl(30 92% 42%);
-  --primary-hsl: 163 46% 22%;
+  --primary-hsl: 151.96 71.81% 29.22%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
@@ -65,8 +65,8 @@
   --provider-azure: #0f6cbd;
 }
 [data-theme="dark"] {
-  --primary: hsl(160 42% 62%);
-  --primary-hover: hsl(160 42% 70%);
+  --primary: hsl(152.92 60% 52.94%);
+  --primary-hover: hsl(152.92 60% 60.94%);
   --primary-fg: hsl(163 45% 8%);
   --bg: hsl(240 10% 3.9%);
   --surface: hsl(240 10% 5.5%);
@@ -74,9 +74,9 @@
   --text: hsl(0 0% 95%);
   --muted-text: hsl(240 5% 64.9%);
   --border: hsl(240 3.7% 15.9%);
-  --ring: hsl(160 42% 62%);
+  --ring: hsl(152.92 60% 52.94%);
   --accent: hsl(33 92% 60%);
-  --primary-hsl: 160 42% 62%;
+  --primary-hsl: 152.92 60% 52.94%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
@@ -98,8 +98,8 @@
 .bp-inst--adopted { color: var(--info); }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] {
-  --primary: hsl(163 46% 22%);
-  --primary-hover: hsl(163 46% 16%);
+  --primary: hsl(151.96 71.81% 29.22%);
+  --primary-hover: hsl(151.96 71.81% 23.22%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(0 0% 100%);
   --surface: hsl(0 0% 100%);
@@ -109,7 +109,7 @@ html[data-bp-theme="evergreen"] {
   --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
   --accent: hsl(30 92% 42%);
-  --primary-hsl: 163 46% 22%;
+  --primary-hsl: 151.96 71.81% 29.22%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
@@ -117,8 +117,8 @@ html[data-bp-theme="evergreen"] {
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
-  --primary: hsl(160 42% 62%);
-  --primary-hover: hsl(160 42% 70%);
+  --primary: hsl(152.92 60% 52.94%);
+  --primary-hover: hsl(152.92 60% 60.94%);
   --primary-fg: hsl(163 45% 8%);
   --bg: hsl(240 10% 3.9%);
   --surface: hsl(240 10% 5.5%);
@@ -126,9 +126,9 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --text: hsl(0 0% 95%);
   --muted-text: hsl(240 5% 64.9%);
   --border: hsl(240 3.7% 15.9%);
-  --ring: hsl(160 42% 62%);
+  --ring: hsl(152.92 60% 52.94%);
   --accent: hsl(33 92% 60%);
-  --primary-hsl: 160 42% 62%;
+  --primary-hsl: 152.92 60% 52.94%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
@@ -136,115 +136,153 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 html[data-bp-theme="charple"] {
-  --primary: hsl(241 57% 45%);
-  --primary-hover: hsl(241 57% 39%);
+  --primary: hsl(282.39 44.23% 40.78%);
+  --primary-hover: hsl(282.39 44.23% 34.78%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(250 42% 98%);
   --surface: hsl(250 42% 98%);
-  --muted-surface: hsl(227.36 22.94% 96.02%);
+  --muted-surface: hsl(279.9 15.77% 95.84%);
   --text: hsl(249 10% 14%);
-  --muted-text: hsl(227.51 3.7% 41.92%);
-  --border: hsl(227.38 10.84% 88.43%);
-  --ring: hsl(241 57% 53%);
-  --accent: hsl(241 57% 45%);
-  --primary-hsl: 241 57% 45%;
+  --muted-text: hsl(280.01 2.7% 41.61%);
+  --border: hsl(279.92 7.63% 88.18%);
+  --ring: hsl(282.39 44.23% 48.78%);
+  --accent: hsl(282.39 44.23% 40.78%);
+  --primary-hsl: 282.39 44.23% 40.78%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 145.27 88.36% 28.41%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.15 59.33% 48.33%; --info-hsl: 221.63 58.56% 52.81%;
+  --ok-hsl: 137.37 45.8% 35.72%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.01 48.12% 48.54%; --info-hsl: 221.09 46.48% 51.51%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="charple"][data-theme="dark"] {
-  --primary: hsl(249 100% 66%);
-  --primary-hover: hsl(249 100% 74%);
-  --primary-fg: hsl(0 0% 100%);
+  --primary: hsl(282.56 58.11% 70.98%);
+  --primary-hover: hsl(282.56 58.11% 78.98%);
+  --primary-fg: hsl(282.56 45% 8%);
   --bg: hsl(249 10% 14%);
   --surface: hsl(249 12% 6%);
-  --muted-surface: hsl(235.81 10.46% 5.77%);
+  --muted-surface: hsl(281.67 8.96% 5.56%);
   --text: hsl(249 15% 93%);
-  --muted-text: hsl(235.41 4.56% 61.6%);
-  --border: hsl(235.69 7.63% 8.27%);
-  --ring: hsl(249 100% 66%);
-  --accent: hsl(249 100% 66%);
-  --primary-hsl: 249 100% 66%;
+  --muted-text: hsl(281.55 3.67% 61.01%);
+  --border: hsl(281.64 6.45% 8.05%);
+  --ring: hsl(282.56 58.11% 70.98%);
+  --accent: hsl(282.56 58.11% 70.98%);
+  --primary-hsl: 282.56 58.11% 70.98%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 136.37 45.27% 53.58%; --warn-hsl: 40.62 100% 42.95%; --danger-hsl: 4.54 100% 70.09%; --info-hsl: 220.77 100% 73.06%;
+  --ok-hsl: 133.37 34.29% 57.81%; --warn-hsl: 36.55 62.65% 53.22%; --danger-hsl: 5.58 76.29% 69.57%; --info-hsl: 220.48 78.3% 71.71%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 html[data-bp-theme="ember"] {
-  --primary: hsl(20 82% 42%);
-  --primary-hover: hsl(20 82% 36%);
+  --primary: hsl(19.33 71.29% 40.98%);
+  --primary-hover: hsl(19.33 71.29% 34.98%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(30 40% 99%);
   --surface: hsl(30 40% 99%);
-  --muted-surface: hsl(16.48 26.29% 95.68%);
+  --muted-surface: hsl(16.91 26.32% 95.67%);
   --text: hsl(22 24% 11%);
-  --muted-text: hsl(16.54 4.67% 41.31%);
-  --border: hsl(16.5 12.96% 87.95%);
-  --ring: hsl(20 82% 50%);
-  --accent: hsl(20 82% 42%);
-  --primary-hsl: 20 82% 42%;
+  --muted-text: hsl(16.98 4.69% 41.3%);
+  --border: hsl(16.93 12.99% 87.94%);
+  --ring: hsl(19.33 71.29% 48.98%);
+  --accent: hsl(19.33 71.29% 40.98%);
+  --primary-hsl: 19.33 71.29% 40.98%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 138.34 50.65% 34.78%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 3.67 50.42% 48.54%; --info-hsl: 221.2 49.02% 51.79%;
+  --ok-hsl: 136.56 41.81% 36.51%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.3 45.96% 48.52%; --info-hsl: 220.99 44.07% 51.23%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="ember"][data-theme="dark"] {
-  --primary: hsl(30 92% 60%);
-  --primary-hover: hsl(30 92% 68%);
-  --primary-fg: hsl(30 45% 8%);
+  --primary: hsl(19.01 75.53% 63.14%);
+  --primary-hover: hsl(19.01 75.53% 71.14%);
+  --primary-fg: hsl(19.01 45% 8%);
   --bg: hsl(24 22% 8%);
   --surface: hsl(24 26% 6%);
-  --muted-surface: hsl(26.83 17% 5.24%);
+  --muted-surface: hsl(18.16 16.09% 5.41%);
   --text: hsl(32 24% 92%);
-  --muted-text: hsl(26.68 6.42% 60.11%);
-  --border: hsl(26.78 12.03% 7.72%);
-  --ring: hsl(30 92% 60%);
-  --accent: hsl(30 92% 60%);
-  --primary-hsl: 30 92% 60%;
+  --muted-text: hsl(18.07 6.38% 60.58%);
+  --border: hsl(18.13 11.51% 7.89%);
+  --ring: hsl(19.01 75.53% 63.14%);
+  --accent: hsl(19.01 75.53% 63.14%);
+  --primary-hsl: 19.01 75.53% 63.14%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 134.02 37.1% 56.89%; --warn-hsl: 37.47 67.56% 50.7%; --danger-hsl: 5.31 83.22% 69.77%; --info-hsl: 220.6 86.84% 72.26%;
+  --ok-hsl: 133.24 33.65% 58.01%; --warn-hsl: 36.39 61.56% 53.68%; --danger-hsl: 5.64 74.73% 69.52%; --info-hsl: 220.45 76.42% 71.58%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 html[data-bp-theme="fjord"] {
-  --primary: hsl(222 58% 44%);
-  --primary-hover: hsl(222 58% 38%);
+  --primary: hsl(191.6 80.95% 28.82%);
+  --primary-hover: hsl(191.6 80.95% 22.82%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(210 36% 99%);
   --surface: hsl(210 36% 99%);
-  --muted-surface: hsl(219.67 25.15% 95.91%);
+  --muted-surface: hsl(195.16 24.3% 95.35%);
   --text: hsl(220 30% 11%);
-  --muted-text: hsl(219.7 4.2% 41.73%);
-  --border: hsl(219.67 12.06% 88.27%);
-  --ring: hsl(222 58% 52%);
-  --accent: hsl(222 58% 44%);
-  --primary-hsl: 222 58% 44%;
+  --muted-text: hsl(195.09 4.8% 40.74%);
+  --border: hsl(195.15 12.47% 87.49%);
+  --ring: hsl(191.6 80.95% 36.82%);
+  --accent: hsl(191.6 80.95% 28.82%);
+  --primary-hsl: 191.6 80.95% 28.82%;
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
-  --ok-hsl: 137.23 45.13% 35.85%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.05 47.78% 48.54%; --info-hsl: 221.08 46.09% 51.46%;
+  --ok-hsl: 133.06 24.42% 40.04%; --warn-hsl: 36.2 52.84% 37.17%; --danger-hsl: 5.71 33.01% 48.02%; --info-hsl: 220.42 30.54% 49.43%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] {
-  --primary: hsl(213 74% 66%);
-  --primary-hover: hsl(213 74% 74%);
-  --primary-fg: hsl(213 45% 8%);
+  --primary: hsl(193.27 62.43% 64.51%);
+  --primary-hover: hsl(193.27 62.43% 72.51%);
+  --primary-fg: hsl(193.27 45% 8%);
   --bg: hsl(220 28% 8%);
   --surface: hsl(216 30% 6%);
-  --muted-surface: hsl(213.45 15.36% 5.53%);
+  --muted-surface: hsl(194.22 17.11% 5.16%);
   --text: hsl(212 26% 92%);
-  --muted-text: hsl(213.51 6.24% 60.93%);
-  --border: hsl(213.47 11.04% 8.02%);
-  --ring: hsl(213 74% 66%);
-  --accent: hsl(213 74% 66%);
-  --primary-hsl: 213 74% 66%;
+  --muted-text: hsl(194.33 6.22% 59.89%);
+  --border: hsl(194.26 11.99% 7.63%);
+  --ring: hsl(193.27 62.43% 64.51%);
+  --accent: hsl(193.27 62.43% 64.51%);
+  --primary-hsl: 193.27 62.43% 64.51%;
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
-  --ok-hsl: 132.78 31.44% 58.66%; --warn-hsl: 35.93 57.77% 55.07%; --danger-hsl: 5.83 69.33% 69.33%; --info-hsl: 220.37 70.04% 71.14%;
+  --ok-hsl: 131.84 26.28% 60%; --warn-hsl: 35.21 48.85% 57.57%; --danger-hsl: 6.23 56.9% 68.81%; --info-hsl: 220.18 55.98% 70.09%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="iris"] {
+  --primary: hsl(248.75 63.72% 55.69%);
+  --primary-hover: hsl(248.75 63.72% 49.69%);
+  --primary-fg: hsl(0 0% 100%);
+  --bg: hsl(0 0% 100%);
+  --surface: hsl(0 0% 100%);
+  --muted-surface: hsl(235.46 20.43% 96.1%);
+  --text: hsl(240 10% 3.9%);
+  --muted-text: hsl(235.74 3.22% 42.05%);
+  --border: hsl(235.51 9.55% 88.53%);
+  --ring: hsl(248.75 63.72% 62%);
+  --accent: hsl(248.75 63.72% 55.69%);
+  --primary-hsl: 248.75 63.72% 55.69%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
+  --ok-hsl: 145.96 92.95% 27.76%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.06 59.77% 48.31%; --info-hsl: 221.65 59.02% 52.86%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="iris"][data-theme="dark"] {
+  --primary: hsl(248.87 100% 77.45%);
+  --primary-hover: hsl(248.87 100% 85.45%);
+  --primary-fg: hsl(248.87 45% 8%);
+  --bg: hsl(240 10% 3.9%);
+  --surface: hsl(244.25 31% 1.46%);
+  --muted-surface: hsl(243.29 9.75% 5.78%);
+  --text: hsl(0 0% 95%);
+  --muted-text: hsl(242.8 4.23% 61.64%);
+  --border: hsl(243.15 7.1% 8.28%);
+  --ring: hsl(248.87 100% 77.45%);
+  --accent: hsl(248.87 100% 77.45%);
+  --primary-hsl: 248.87 100% 77.45%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
+  --ok-hsl: 134.5 39.04% 56.2%; --warn-hsl: 38.55 77.19% 47.99%; --danger-hsl: 5.1 88.03% 69.88%; --info-hsl: 220.68 92.97% 72.65%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);

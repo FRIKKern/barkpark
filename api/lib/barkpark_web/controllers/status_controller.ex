@@ -126,6 +126,8 @@ defmodule BarkparkWeb.StatusController do
       @media (prefers-color-scheme: dark){ html[data-bp-theme="ember"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
       html[data-bp-theme="fjord"] { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
       @media (prefers-color-scheme: dark){ html[data-bp-theme="fjord"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
+      html[data-bp-theme="iris"] { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
+      @media (prefers-color-scheme: dark){ html[data-bp-theme="iris"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
       /* END GENERATED: tokens */
       body{ margin:0; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
       .wrap{ max-width:760px; margin:0 auto; padding:2.5rem 1.25rem; }

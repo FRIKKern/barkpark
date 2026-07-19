@@ -1,0 +1,32 @@
+{
+  "name": "iris",
+  "_note": "Iris violet — the 5th identity from the console-remake accepted designer ramps (charter GR2). Accent rides ~H249 (designer iris #5b46d6 light, luminous periwinkle #9d8cff dark). Rides evergreen's NEUTRAL spine (white/near-black zinc bg+ink) with the iris accent ONLY — 0 overrides, every one of the 160 slots derives natively (the fit-first proof the compiler is non-vacuous). The designer's per-identity chrome bg/ink (#f4f5f7/#0b0e13) belong to the cloudChrome passthrough family (round 2), NOT this derive spine (charter GR3).",
+  "modes": {
+    "light": {
+      "bg": "0 0% 100%",
+      "ink": "240 10% 3.9%",
+      "accent": "248.75 63.72% 55.69%"
+    },
+    "dark": {
+      "bg": "240 10% 3.9%",
+      "ink": "0 0% 95%",
+      "accent": "248.87 100% 77.45%"
+    }
+  },
+  "overrides": {},
+  "_overrideReasons": {},
+  "_aaExceptions": [],
+  "passthrough": [
+    "presence",
+    "sheetCf",
+    "matchQuality",
+    "provider",
+    "statusHealth",
+    "statusChrome",
+    "errorPage",
+    "readerInfo",
+    "lifecycle",
+    "instanceLifecycle",
+    "authButton"
+  ]
+}
