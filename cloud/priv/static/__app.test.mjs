@@ -6398,6 +6398,8 @@ test("tierCardHtml: a trial team's Free card never offers a doomed checkout (rev
   assert.ok(onTrial.includes("Yours when the trial ends"), "the honest inert label");
   // A genuinely free team still reads Free as its current plan.
   assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // gr-p2 launch theater (GR18): conditional rail proof, price-before-charge,
 // failure snap (skipped rows). Appended at the tail (OC9 append-only law).

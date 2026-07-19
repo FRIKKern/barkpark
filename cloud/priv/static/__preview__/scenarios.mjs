@@ -1237,6 +1237,9 @@ export const SCENARIOS = {
       me: null, barkparks: [], subscription: null, sites: [], audit: [],
       login: { status: 200, body: { two_factor_required: true, challenge_token: "demo-challenge" } },
       twoFactorChallenge: { status: 401, body: { error: "invalid_code" } },
+    },
+  },
+
   // ── gr-p2 plan & dunning (C-03/C-04): trial, past-due dunning, portal return.
   // The past-due subscription fixture is written FRESH here (tail-append law):
   // status past_due with current_period_end 3 days out — mid-grace, so the GR17
@@ -1298,6 +1301,9 @@ export const SCENARIOS = {
       },
       sites: [],
       audit: [],
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): the /new journey + the provisioning theater.
   // pathname "/new" unlocks isNewFlow(); ?template selects the starter and &bp=
   // resumes straight into the theater (the refresh-durable URL the flow writes).

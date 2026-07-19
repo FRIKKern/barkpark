@@ -561,6 +561,9 @@ const EXPECTATIONS = {
         assert.ok(!html.includes(needle),
           "#twofa-card must not import theater vocabulary " + JSON.stringify(needle));
       }
+    },
+  },
+
   // ── gr-p2 plan & dunning (C-03/C-04): trial CTA, GR17 dunning, portal return ─
   "billing-trial": {
     what: "the trial billing state — countdown chip, the RATIFIED CTA verbatim, quota-honest open plan grid, trial topbar chip",
@@ -629,6 +632,9 @@ const EXPECTATIONS = {
       assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
       // A healthy active sub shows NO topbar billing chip (trial XOR past-due only).
       assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
   "new-launch": {
     what: "/new signed-in — the template card + the one-field Launch step",
