@@ -548,6 +548,75 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     """
   end
 
+  # ── Phone drill breadcrumb (spd-s6) ─────────────────────────────────────────
+  #
+  # At the phone bucket the pane row has NO way back: `display_state/4` hides
+  # every nav column when a document is open, and hides all but the leaf when
+  # one is not — so the 44px strip spd-s4 made the primary back affordance is
+  # not on the page at all. Open a document on a phone and you are trapped.
+  # This crumb trail is that missing route.
+  #
+  # It renders as a SIBLING BEFORE `<.pane_layout>` (charter D27) — never
+  # inside the flex row (it would become a squeezed column) and never in the
+  # topbar, whose DOM identity is locked by `nav_parity_sweep` (D13).
+  #
+  # Zero new server events: a crumb click is the SAME `expand-pane` the strip
+  # fires, with the same `phx-value-idx` truncation (`Enum.take(nav_path, idx)`
+  # in `Handlers.Scope.expand_pane/2`), so crumb `idx` lands exactly where the
+  # strip for pane `idx` lands. Nothing to classify in `caps.ex`.
+  #
+  # The full CSS contract (`.bp-desk-crumbs` / `-crumb` / `-sep` / `--current`)
+  # already ships in root.html.heex under the "spd-s6 PRE-PROVISION" comment,
+  # hidden in every bucket but phone. The server ALSO gates on the bucket so
+  # the desktop first render stays byte-identical and the trail is testable
+  # without a stylesheet. It renders only when there is somewhere to go back
+  # to — an undrilled root desk gets no vestigial one-crumb trail.
+  attr(:panes, :list, required: true)
+  attr(:editor_doc, :any, default: nil)
+  attr(:width_bucket, :string, default: "wide")
+
+  defp desk_crumbs(assigns) do
+    assigns =
+      assigns
+      |> assign(:has_editor, assigns.editor_doc != nil)
+      |> assign(:leaf_idx, length(assigns.panes) - 1)
+
+    ~H"""
+    <nav
+      :if={@width_bucket == "phone" and (length(@panes) > 1 or @has_editor)}
+      class="bp-desk-crumbs"
+      aria-label="Desk breadcrumb"
+      data-test-id="desk-crumbs"
+    >
+      <%= for {pane, idx} <- Enum.with_index(@panes) do %>
+        <span :if={idx > 0} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
+        <%!-- The trail's last entry is where you already ARE: static text, not
+              a control. With a document open that entry is the document, so
+              every pane crumb — including the leaf list — stays clickable and
+              the way out of the editor is one tap. --%>
+        <span
+          :if={idx == @leaf_idx and not @has_editor}
+          class="bp-desk-crumb bp-desk-crumb--current"
+          aria-current="page"
+        ><%= pane.title %></span>
+        <button
+          :if={idx != @leaf_idx or @has_editor}
+          type="button"
+          class="bp-desk-crumb"
+          phx-click="expand-pane"
+          phx-value-idx={idx}
+        ><%= pane.title %></button>
+      <% end %>
+      <span :if={@has_editor} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
+      <span
+        :if={@has_editor}
+        class="bp-desk-crumb bp-desk-crumb--current"
+        aria-current="page"
+      ><%= @editor_doc.title || "Untitled" %></span>
+    </nav>
+    """
+  end
+
   # ── Studio shell (the full render/1 template, extracted) ────────────────────
   def studio_live_shell(assigns) do
     ~H"""
@@ -574,6 +643,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           from the WidthBucket hook on this container (root.html.heex) and
           stays "wide" until the client connects, so the static first render is
           byte-identical to pre-spd-s4 main. --%>
+    <%!-- The phone drill trail — a SIBLING BEFORE the pane row (D27), and at
+          the phone bucket the ONLY route back out of a drilled pane or an open
+          document. See `desk_crumbs/1` above. --%>
+    <.desk_crumbs panes={@panes} editor_doc={@editor_doc} width_bucket={@width_bucket} />
+
     <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>

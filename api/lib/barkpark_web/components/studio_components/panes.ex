@@ -57,6 +57,24 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   space-priority protections the width buckets rely on.
 
   Slots: :header_actions (optional inline right-aligned), :inner_block (body).
+
+  ## The collapsed strip is a real button (spd-s6)
+
+  `collapsed: true` renders a `<button type="button">`, not a `<div>`. spd-s4
+  promoted this 44px strip to the desk's PRIMARY back-navigation at narrow
+  widths (`PaneBuilder.display_state/4` collapses the whole nav row to it), and
+  a `phx-click` div is unreachable by keyboard and silent to a screen reader —
+  a nav dead end for anyone not using a mouse. It therefore carries
+  `aria-expanded="false"` (it expands the pane it names), an explicit
+  `aria-label` alongside the hover `title`, and `aria-hidden` on the decorative
+  chevron — which points LEFT, the direction the action actually goes.
+
+  Its `class` attribute is FROZEN byte-identical at
+  `class="pane-column pane-column--collapsed"` (charter D55): the width-bucket
+  suite counts strips with an exact regex including the closing quote, and
+  `.pane-column` / `.pane-column--collapsed` are the selectors the button UA
+  reset and the `:focus-visible` ring hang off in root.html.heex. Add
+  ATTRIBUTES freely; never add, reorder or interpolate a class token here.
   """
   attr :title, :string, required: true
   attr :last, :boolean, default: false
@@ -109,7 +127,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
     ~H"""
     <%= if @collapsed do %>
-      <div
+      <button
+        type="button"
         class="pane-column pane-column--collapsed"
         id={@id}
         data-role={@role_attr}
@@ -117,16 +136,18 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         phx-click={@phx_click}
         phx-value-idx={@phx_value_idx}
         title={"Back to #{@title}"}
+        aria-label={"Back to #{@title}"}
+        aria-expanded="false"
       >
         <div class="pane-header">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="display:inline-block;vertical-align:middle;flex-shrink:0;">
-            <path d="m9 18 6-6-6-6"/>
+            style="display:inline-block;vertical-align:middle;flex-shrink:0;" aria-hidden="true">
+            <path d="m15 18-6-6 6-6"/>
           </svg>
         </div>
         <div class="pane-column-collapsed-label"><%= @title %></div>
-      </div>
+      </button>
     <% else %>
       <div class={@col_class} id={@id} data-role={@role_attr} data-priority={@priority_attr}>
         <div class="pane-header">
