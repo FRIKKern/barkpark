@@ -138,6 +138,33 @@ export const STATUS_ROLES: StatusRole[] = [
     label: 'cancelled',
     meaning: 'abandoned or superseded',
   },
+  // ── thought states (task-lifecycle-visibility): a task is contemplated before
+  // it is ever ready. Dim, glyph-only, at the tail of the ladder. `considering` =
+  // a candidate the strategizer named; `researching` = under investigation.
+  {
+    role: 'considering',
+    glyph: '◌', // U+25CC dotted circle — a candidate, not yet committed
+    spinner: false,
+    label: 'considering',
+    meaning: 'a candidate — weighing whether to pursue it',
+  },
+  {
+    role: 'researching',
+    glyph: '◎', // U+25CE bullseye — under investigation before it is ready
+    spinner: false,
+    label: 'researching',
+    meaning: 'under investigation before it is felt ready',
+  },
+  // ── fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
+  // a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
+  // empty status still defaults to `open` (see roleOf).
+  {
+    role: 'unknown',
+    glyph: '◦', // U+25E6 white bullet — dim neutral, distinct from open's ○
+    spinner: false,
+    label: 'unknown',
+    meaning: 'unrecognized status — shown dim until the vocabulary catches up',
+  },
 ]
 
 const STATUS_TO_ROLE: Record<string, string> = {
@@ -148,16 +175,38 @@ const STATUS_TO_ROLE: Record<string, string> = {
   done: 'done',
   closed: 'done',
   cancelled: 'cancel',
+  considering: 'considering',
+  researching: 'researching',
 }
 
 const DEFAULT_ROLE = 'open'
+// The fail-open role for an unrecognized NON-EMPTY status (D11). Absent/empty
+// stays on DEFAULT_ROLE so nothing about today's blank-status rows changes.
+const UNKNOWN_ROLE = 'unknown'
 const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
 
+// The canonical manifest ladder — the SIX roles that live in
+// design/status-manifest.json today. `LEGEND_ROLES` (below) is the cross-surface
+// parity KEY and must stay byte-frozen to what the Elixir StatusVocab emits.
+const MANIFEST_LADDER = new Set(['open', 'ready', 'progress', 'blocked', 'done', 'cancel'])
+
+/** The status-legend ladder — the cross-surface vocabulary KEY. Byte-frozen to
+ * the Elixir StatusVocab / design/status-manifest.json (the 6 canonical states),
+ * so the react legend stays shape-equal to the Elixir golden. Two roles are held
+ * OUT deliberately: the fail-open `unknown` sentinel is JS-only and NEVER a real
+ * lifecycle state (permanent exclusion); `considering`/`researching` join the
+ * legend only once the manifest adopts them (the substrate slice — then the
+ * regenerated golden carries them and MANIFEST_LADDER gains them in lockstep).
+ * Everything else (roleOf, glyphHtml, the board columns) already resolves all
+ * nine roles via ROLE_BY_NAME — only the legend key is manifest-scoped. */
+export const LEGEND_ROLES: StatusRole[] = STATUS_ROLES.filter((r) => MANIFEST_LADDER.has(r.role))
+
 export function roleOf(status: unknown): string {
   const s = str(status)
-  return STATUS_TO_ROLE[s] ?? DEFAULT_ROLE
+  if (s === '') return DEFAULT_ROLE
+  return STATUS_TO_ROLE[s] ?? UNKNOWN_ROLE
 }
 
 const DEFAULT_STATUS_ROLE: StatusRole = STATUS_ROLES[0]!

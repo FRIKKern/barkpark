@@ -32,8 +32,11 @@ type Emit = (block: Block) => string
 /* ── task-board (kanban) — Components.task_board_html/1 ─────────────────────── */
 
 // The board column roles, in white-ladder order (cancel folds to a tally, so it
-// is NOT a column). Labels are DERIVED (sentence-cased), never a second copy.
-const BOARD_ROLES = ['open', 'ready', 'progress', 'blocked', 'done']
+// is NOT a column). The two thought states — `considering`/`researching` — trail
+// at the END (dim; empty columns collapse). Labels are DERIVED (sentence-cased),
+// never a second copy. `unknown` is NOT a column: fail-open rows home in `open`
+// (placement) while keeping their dim-neutral glyph (styling) — the two decouple.
+const BOARD_ROLES = ['open', 'ready', 'progress', 'blocked', 'done', 'considering', 'researching']
 
 function capitalize(s: string): string {
   return s === '' ? s : s.charAt(0).toUpperCase() + s.slice(1)
@@ -47,10 +50,15 @@ function boardCol(role: string, label: string, rows: Block[]): string {
   const cards = rows
     .map((r) => {
       const m: Record<string, unknown> = isMap(r) ? r : {}
+      // Glyph is per-ROW (its own resolved role), not per-column: a fail-open
+      // `unknown` row homed in the `open` column still paints the dim-neutral
+      // glyph. For a known row rowRole === the column role, so this is byte-
+      // identical to the prior column-role glyph (goldens unaffected).
+      const rowRole = roleOf(m.status)
       const title = escapeHtml(str(m.title))
       const meta = priorityHtml(m.priority) + criteriaHtml(m.criteria)
       const metaHtml = meta === '' ? '' : `<div class="bp-bcard__m">${meta}</div>`
-      return `<div class="bp-bcard">${glyphHtml(role)}<span class="bp-bcard__t">${title}</span>${metaHtml}</div>`
+      return `<div class="bp-bcard">${glyphHtml(rowRole)}<span class="bp-bcard__t">${title}</span>${metaHtml}</div>`
     })
     .join('')
   return `<div class="bp-board__col bp-board__col--${role}"><div class="bp-board__head"><span class="bp-board__label">${label}</span><span class="bp-board__count">${rows.length}</span></div><div class="bp-board__cards">${cards}</div></div>`
@@ -62,7 +70,11 @@ const taskBoard: Emit = (b) => {
   const byRole: Record<string, Block[]> = {}
   for (const r of rows) {
     const role = roleOf(isMap(r) ? r.status : undefined)
-    ;(byRole[role] ??= []).push(r)
+    // Placement decouples from styling: a role WITHOUT a column (the fail-open
+    // `unknown` sentinel) homes in `open` so a row never vanishes; its glyph
+    // stays the row's own role (see boardCol).
+    const col = BOARD_ROLES.includes(role) ? role : 'open'
+    ;(byRole[col] ??= []).push(r)
   }
   const cols = BOARD_ROLES.map((role) => boardCol(role, boardLabel(role), byRole[role] ?? []))
     .filter((c) => c !== '')

@@ -75,6 +75,46 @@ test("unknown / absent status fails soft to open (never dropped)", () => {
   );
 });
 
+test("considering/researching bucket to their OWN columns, not open (thought states)", () => {
+  const { columns } = taskBoardColumns([
+    { title: "c1", status: "considering" },
+    { title: "r1", status: "researching" },
+    { title: "o1", status: "open" },
+  ]);
+  assert.deepEqual(
+    columns.considering.map((r) => r.title),
+    ["c1"],
+  );
+  assert.deepEqual(
+    columns.researching.map((r) => r.title),
+    ["r1"],
+  );
+  // The thought states are NOT swept into open — only genuine open work is there.
+  assert.deepEqual(
+    columns.open.map((r) => r.title),
+    ["o1"],
+  );
+});
+
+test("thought states are OUT of the momentum denominator (never dilute pct)", () => {
+  // 1 done + 1 open = 2 committed; the two thought rows must not enter the total.
+  const { momentum } = taskBoardColumns([
+    { status: "done" },
+    { status: "open" },
+    { status: "considering" },
+    { status: "researching" },
+  ]);
+  assert.equal(momentum.pct, 50); // round(1 / 2 * 100), NOT 25 (would be 1/4)
+  // A board of ONLY thought states has zero committed work → pct is 0, never NaN.
+  assert.equal(
+    taskBoardColumns([
+      { status: "considering" },
+      { status: "researching" },
+    ]).momentum.pct,
+    0,
+  );
+});
+
 test("bucketing preserves per-column input order", () => {
   const { columns } = taskBoardColumns([
     { title: "d1", status: "done" },
@@ -147,13 +187,15 @@ test("momentum pct rounds half up (round, not truncate)", () => {
   );
 });
 
-test("column order mirrors the organizer open·ready·in_progress·blocked·done", () => {
+test("column order is the committed ladder then the trailing thought states", () => {
   assert.deepEqual(TASK_BOARD_COLUMN_ORDER, [
     "open",
     "ready",
     "in_progress",
     "blocked",
     "done",
+    "considering",
+    "researching",
   ]);
 });
 
@@ -164,6 +206,8 @@ test("glyphs are the §1 white-ladder codepoints verbatim (never an SVG)", () =>
   assert.equal(TASK_BOARD_GLYPHS.blocked, "!"); // !
   assert.equal(TASK_BOARD_GLYPHS.done, "✓"); // ✓
   assert.equal(TASK_BOARD_GLYPHS.cancelled, "✕"); // ✕
+  assert.equal(TASK_BOARD_GLYPHS.considering, "◌"); // ◌ dotted circle
+  assert.equal(TASK_BOARD_GLYPHS.researching, "◎"); // ◎ bullseye
 });
 
 test("non-array snapshot degrades to empty columns (never throws)", () => {
