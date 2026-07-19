@@ -8,7 +8,8 @@
 >
 > Epic anchor: bp task **`studio-space-priority-desk`** (published, guerrilla).
 > Wave 1 paper: **`studio-responsive-desk-wave-2026-07-19`** (style=article).
-> Decided 2026-07-19.
+> Wave 2 (LAND) paper: **`studio-space-priority-desk-land-2026-07-19`** (style=article).
+> Decided 2026-07-19; amended 2026-07-19 (LAND wave, D19–D32).
 
 ## Vision
 
@@ -35,20 +36,39 @@ The Studio desk becomes a layout system that visibly REASONS about space instead
 - **D17 — task-2532b0a2748e93ba is NOT a false-done baseline.** All 5 desk-structure fixes verified on main (commit 961e76d6f / PR #1186); the anatomy refactor assumes them safely. The unstamped criteria are a bookkeeping chore (backlogged), not missing work.
 - **D18 — docs-anchors-check.sh is NOT a local gate.** It hangs 15+ min on this contended checkout (unpruned find over node_modules/.omx — root-caused). CI runs it on clean checkouts; builders prove locally with literal-check + design/check.mjs + targeted mix test. A prune fix is backlogged.
 
+### LAND wave amendments (2026-07-19, D19–D32)
+
+- **D19 — Every builder runs on OPUS.** Fable 5 is spend-limited this session; a fable-assigned slice's builder dies instantly. This OVERRIDES the wave-1 roadmap table's `fable` marks on s1/s3/s4. `builder_model` is not a bp task field — the override is a dispatch-time argument, never a task mutation.
+- **D20 — RESCUE, not rebuild.** Round 1 was built and committed but never PR'd (s1 `059421d7e`, s2 `b3d6ac693`, s3 `7eb2e6d8f`). All three rebase onto `origin/main` with ZERO conflicts and pass every blocking gate individually AND stacked (union: 9 files, 554 insertions; 1867 Studio tests + 1096 portable_doc tests, 0 failures; `--warnings-as-errors` exit 0). Why: rebuilding proven, gate-green code is pure waste; from-charter rebuild survives only as a per-slice fallback that the evidence retired.
+- **D21 — The cross-epic collision is dead, not live.** #4392 never touched `root.html.heex`; #4393 did (4 `--life-*` token lines inside the GENERATED block) and MERGED mid-survey. No open PR touches `root.html.heex`, `pane_builder.ex`, or `structure.ex`. Why: there is no moving target to race — only a rebase onto a main that already moved.
+- **D22 — The true blocking-gate roster for `root.html.heex`.** `web-literal-check.sh` CANNOT see the file (its ROOTS are `web/app` + `web/components`). The real guards are `scripts/studio-literal-check.sh`, `node design/check.mjs` (Part E ratchet — `root.html.heex` pinned at 165, fails on growth AND shrink, and `lit-allow` does NOT exempt it), `scripts/paper-editor-mirror-check.sh` (`.bp-canvas-*` lockstep + generated-token byte compare), `scripts/studio-link-lint.sh` — all in the ONE `doc-gates` job — plus the `elixir` workflow. Why: a wrong roster makes builders prove the wrong things and miss a real gate.
+- **D23 — There is no workflow named "Elixir Test".** The workflow is `elixir`; the blocking job is `Test (Elixir 1.18.1 / OTP 27.0)`. `main` has NO branch protection, so "wait for the gate" is discipline, not mechanism. The `Format` job is advisory-by-design and is RED on main — it will be red on every PR of this epic and must never block a merge.
+- **D24 — main is GREEN and `434361b79` is NOT a prerequisite.** Its PR #1350 merged 2026-07-08 as `f1c17e8b9` (an ancestor of main); origin/main's test file is byte-identical to the branch's. Cherry-picking it is a no-op or a self-conflict. Why: a phantom prerequisite would serialize the rescue for nothing.
+- **D25 — Both bucket globals are canonical.** s1 ships `window.bpWidthBucket` and `window.__bpWidthBucket` as the SAME function `bucket(w, currentName?)`, deliberately aliased. The s1/s4 task-body disagreement is a documentation artifact — s4 may wire to either; do not "fix" it.
+- **D26 — D11 is factually false and stands PARTIALLY retired.** `api_tester_live.ex:468/487` are live `:flex` callers. s2 correctly retired only the dead `.pane-column--flex` class join and left its criterion 4 honestly unmet; `spd-bl-api-tester-flex-retire` owns the remainder. Never re-dispatch a builder to force full D11.
+- **D27 — The phone breadcrumb renders as a SIBLING before `<.pane_layout>`, never inside it.** `.pane-layout` is a nowrap ROW flex (`root.html.heex:1098`), so a crumbs child renders as a left sliver; its parent `.studio-shell` is a COLUMN flex where the pre-provisioned strip CSS (min-height 36px, border-bottom, overflow-x auto) is correct with zero new CSS. Why: this keeps s6 off `root.html.heex`, honoring D16 and letting Round 3 fan out.
+- **D28 — D16 held.** `.bp-desk-crumbs` / `-crumb` / `-sep` / `--current` ship complete in s1 with no server consumer. Round 3 therefore fans out: s5 owns `root.html.heex`, s6 touches only `.ex` + test files.
+- **D29 — `data-role="content"` stamps ALL FIVE `.editor-panel` roots.** paper (`components.ex:98`), media explorer (`:797`), beta (`:861`), classic (`editor.ex:367`), graph (`graph_view.ex:113`). Why: s1's CSS keys on the bare `.editor-panel` class, so the CSS authority has ALREADY classified all five — stamping only three creates a silent split where later `[data-role]` rules skip two panes that `.editor-panel` rules still hit. The floors are inert on media/graph (neither contains `.bp-paper-surface` or `.editor-body`), so inclusion costs one extra file and risks nothing.
+- **D30 — `data-role` selectors must be SCOPED.** 130 `data-role` values already exist on the Tasks board surface. Always write `.pane-layout > [data-role="…"]` or `html[data-width-bucket="…"] […]`, never a bare attribute selector. Why: bare selectors leak across surfaces the moment another plugin reuses a value.
+- **D31 — What lands is a FLAT 55ch floor, not a 55–70ch clamp.** The crush is fixed and measured (596px = 67.6ch at a 900px viewport vs 290px = 32.9ch on main); the upper clamp is UNBUILT and backlogged as `spd-b7-protected-measure-clamp`. Why: the epic's memory must not record a promise the code does not keep.
+- **D32 — Builders branch from `origin/main` explicitly, in isolated worktrees.** The primary checkout is routinely commits-behind and dirty with concurrent sessions' work; local `main` is not main. Why: a worktree cut from local main inherits a stale base plus phantom unpushed commits.
+
 ## Roadmap
 
-Wave 1 (this wave — 7 slices; ROUNDS ARE LAW, a slice never dispatches beside its unmerged dependency):
+Seven slices, four rounds. ROUNDS ARE LAW — a slice never dispatches beside its unmerged dependency, and `root.html.heex` has exactly one owner per round (D16). Per D19 every model column reads `opus` for the duration of this session.
 
 | # | Slice | Task | Round | Model | Size |
 |---|---|---|---|---|---|
-| 1 | CSS space-priority foundation — the crush fix; sole owner of root.html.heex this round | `spd-s1-css-foundation` | 1 | fable | large |
-| 2 | Width-bucket server seam, INERT (handle_event + caps + optional hook attr; no call-site activation) | `spd-s2-bucket-server-seam` | 1 | opus | medium |
-| 3 | Pane anatomy roles + display-state table (pane_builder.ex + its test only) | `spd-s3-pane-anatomy-roles` | 1 | fable | medium |
-| 4 | Reconciliation — activate the hook, stamp data-roles, server strips at narrow/phone | `spd-s4-bucket-reconciliation` | 2 (after 1,2,3) | fable | large |
-| 5 | Desk chrome restyle — type-scale consumption + Plex Mono + secondary-pane/sheet-toolbar responsiveness | `spd-s5-desk-restyle` | 3 (after 4) | opus | medium |
-| 6 | Phone drill + breadcrumb component (CSS pre-provisioned by S1) | `spd-s6-phone-drill-breadcrumb` | 3 (after 4) | opus | medium |
-| 7 | View↔edit parity guard + docs/cards/studio.md + wide-bucket regression pins | `spd-s7-parity-guard-card` | 4 (after 5,6) | opus | small |
+| 1 | CSS space-priority foundation — the crush fix; sole owner of `root.html.heex` this round | `spd-s1-css-foundation` | 1 | opus | large |
+| 2 | Width-bucket server seam, INERT (handle_event + caps entry + optional hook attr) | `spd-s2-bucket-server-seam` | 1 | opus | medium |
+| 3 | Pane anatomy roles + `display_state/4` table (`pane_builder.ex` + its test only) | `spd-s3-pane-anatomy-roles` | 1 | opus | medium |
+| 4 | Reconciliation — activate the hook, stamp `data-role` on all five content roots (D29), server strips at narrow/phone | `spd-s4-bucket-reconciliation` | 2 (after 1,2,3) | opus | large |
+| 5 | Desk chrome restyle — `--text-*` consumption + Plex Mono + peripheral-pane responsiveness | `spd-s5-desk-restyle` | 3 (after 4) | opus | medium |
+| 6 | Phone drill + breadcrumb component, rendered as a sibling before `<.pane_layout>` (D27) | `spd-s6-phone-drill-breadcrumb` | 3 (after 4) | opus | medium |
+| 7 | View↔edit + 720px measure-parity pins, `docs/cards/studio.md`, `docs/ops/merge-gates.md` currency | `spd-s7-parity-guard-card` | 4 (after 5,6) | opus | small |
 
-Backlog (filed as published children, future waves): `spd-b1-pane-state-persistence` (localStorage theme-pattern for bucket/inspector memory) · `spd-b2-docs-anchors-prune-fix` (find -prune for node_modules/.omx) · `spd-b3-dead-admin-shell-css` (root.html.heex:534–583 dead .sidebar/.main block) · `spd-b4-stamp-2532-criteria` (bookkeeping repair, evidence = commit 961e76d6f) · `spd-b5-navshell-wave2-triage` (3 unfiled nav-shell residue items — different epic, verify still-real) · `spd-b6-sub500-phone-proof` (true <500px verification; tooling floor blocked it).
+Backlog (filed as published children, future waves): `spd-b1-pane-state-persistence` · `spd-b2-docs-anchors-prune-fix` · `spd-b3-dead-admin-shell-css` · `spd-b4-stamp-2532-criteria` · `spd-b5-navshell-wave2-triage` · `spd-b6-sub500-phone-proof` · `spd-bl-api-tester-flex-retire` · `spd-b7-protected-measure-clamp` (the 55–70ch upper clamp D31 defers) · `spd-b8-editor-panel-blast-radius` (Sheets/Graph/Media inherit the 560px floor + inline-size container — unmeasured below 1024px) · `spd-b9-merge-gates-doc-currency` (`docs/ops/merge-gates.md` documents 2 of the 11 blocking doc-gates steps and names a workflow that does not exist).
 
 ## Wave log
+
+- **2026-07-19 — Wave 2 (LAND), Decide.** Ground truth reshaped the wave: the design was already ratified and Round 1 already BUILT on three unmerged branches. Ten verifiers proved all three rebase clean onto `origin/main@567bf6e39`, pass every blocking gate (Part E ratchet unmoved at 165/165), compose when stacked (1867 + 1096 tests, 0 failures), and that the feared tlv `root.html.heex` collision was already merged and harmless. main proven green; `434361b79` proven unnecessary. Decisions D19–D32 ratified. Wave cut: Round 1 = three file-disjoint RESCUE tracks (`spd-s1`/`spd-s2`/`spd-s3` — rebase, gate, PR, merge); Rounds 2–4 (`spd-s4`, then `spd-s5`+`spd-s6`, then `spd-s7`) deferred to the lead's post-merge dispatch. Paper: `studio-space-priority-desk-land-2026-07-19`.
