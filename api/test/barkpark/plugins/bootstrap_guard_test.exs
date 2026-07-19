@@ -124,6 +124,23 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
     assert row.list_preview == %{"title" => "pulled"}
   end
 
+  # The mirror of `assert_all_eight_pulled/1`: what the SAME eight columns look
+  # like once bootstrap has updated the row in place. The last three are the
+  # silent half of the clobber — the plugin declares nothing about
+  # cors_origins / desk_groups / list_preview, so they revert to bare
+  # plugin-struct defaults. Both polarities of the guard assert the same eight,
+  # or one of them is a spot check wearing a regression bar's name.
+  defp assert_all_eight_plugin(row) do
+    assert row.title == "Plugin Title"
+    assert row.icon == "plugin-icon"
+    assert row.visibility == "public"
+    assert row.owner_scoped == false
+    assert row.fields == [%{"name" => "plugin_field", "type" => "string"}]
+    assert row.cors_origins == []
+    assert row.desk_groups == []
+    assert row.list_preview == %{}
+  end
+
   setup do
     {default_ws, default_project} = TenancyFixtures.ensure_default_scope!()
     default_ds = ensure_dataset!(default_project, @dataset)
@@ -207,11 +224,10 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
 
     assert {:ok, 1} = run_bootstrap()
 
-    reloaded = Repo.get!(SchemaDefinition, pulled.id)
     assert length(rows()) == 1, "clearing must not insert a duplicate row"
-    assert reloaded.title == "Plugin Title"
-    assert reloaded.fields == [%{"name" => "plugin_field", "type" => "string"}]
-    assert reloaded.cors_origins == []
+    # The SAME eight columns the negative control asserts — the escape hatch has
+    # to restore today's behaviour exactly, not approximately.
+    assert_all_eight_plugin(Repo.get!(SchemaDefinition, pulled.id))
   end
 
   test "NEGATIVE CONTROL — an UNSTAMPED slot keeps today's clobber behaviour", ctx do
@@ -224,16 +240,8 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
 
     assert {:ok, 1} = run_bootstrap()
 
-    reloaded = Repo.get!(SchemaDefinition, pulled.id)
     assert length(rows()) == 1
-    assert reloaded.title == "Plugin Title"
-    assert reloaded.icon == "plugin-icon"
-    assert reloaded.visibility == "public"
-    assert reloaded.owner_scoped == false
-    assert reloaded.fields == [%{"name" => "plugin_field", "type" => "string"}]
-    assert reloaded.cors_origins == []
-    assert reloaded.desk_groups == []
-    assert reloaded.list_preview == %{}
+    assert_all_eight_plugin(Repo.get!(SchemaDefinition, pulled.id))
   end
 
   test "a stamp on a SIBLING dataset does NOT cover this one", ctx do
