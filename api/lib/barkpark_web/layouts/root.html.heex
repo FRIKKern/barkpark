@@ -3150,6 +3150,49 @@
       background: var(--bg-muted); border-radius: 4px;
     }
 
+    /* Secondary-picker modal shell (charter D80).
+       `.modal-backdrop` / `.modal-card` / `.modal-header` / `.modal-body` are
+       emitted by studio_components/editor_fields.ex `secondary_picker_modal/1`
+       and referenced by components/confirm_modal.ex, but NO rule for them has
+       ever existed in api/ — only `.bp-ae-modal-backdrop`. Unstyled, the
+       backdrop computed `position: static; display: block`, and because
+       components.ex renders it as a SIBLING of the editor shell inside
+       `.pane-layout` (`display: flex`) it became an in-flow flex ITEM of the
+       pane row: measured live at viewport 1280 on a classic doc, opening
+       "Open another" moved the row from [strip 44, list 260, editor-panel 976]
+       to [strip 44, list 230.4, editor-panel 560, modal-backdrop 445.6] — the
+       panel pinned to its own 560px floor, with rowOverflow 0 and no error.
+
+       ABSOLUTE, not fixed (charter D52). Neither `.pane-layout` nor
+       `.studio-shell` nor `body` is positioned, so this resolves against the
+       INITIAL containing block — which for a `height: 100vh` shell that never
+       scrolls the document is the viewport rect, i.e. exactly what `fixed`
+       would give — while staying out of `@fixed_css_inventory`, a census this
+       slice does not own. An absolutely-positioned box is also NOT clipped by
+       the overflow of an UNPOSITIONED ancestor, so `.pane-layout`'s
+       `overflow-x: auto` and `.studio-shell`'s `overflow: hidden` cannot crop
+       it. Colours use the `hsl(var(--x-hsl) / a)` form proven Δ0 on BOTH
+       colour gates (charter D53); an `rgba()` scrim would red design/check.mjs
+       Part E while studio-literal-check.sh stayed green. */
+    .modal-backdrop {
+      position: absolute; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+      background: hsl(var(--bp-scrim-hsl) / 0.45);
+    }
+    .modal-card {
+      position: relative; display: flex; flex-direction: column;
+      width: min(520px, 100%); max-height: min(80vh, 640px);
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: hidden;
+      box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25);
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-muted);
+    }
+    .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
+    .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
+
     .bp-secondary-candidates {
       list-style: none; margin: 12px 0 0 0; padding: 0;
       max-height: 320px; overflow-y: auto;
