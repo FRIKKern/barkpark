@@ -1033,11 +1033,15 @@ type TaskConflict struct {
 // fires when the parent rail you observed moved. Advisory only: they never fail
 // the request, and a consumer that ignores them loses nothing but the heads-up.
 type TaskNotice struct {
+	// omitempty matters on the MARSHAL side: the frontier claim's machine JSON
+	// re-serializes notices (axi-b1), and a rail_changed notice must not ship
+	// `"task_id":"","blockers":null` noise — the AXI nil-key-omission law.
+	// Decoding is unaffected.
 	Type     string   `json:"type"`
-	TaskID   string   `json:"task_id"`
-	Blockers []string `json:"blockers"`
-	ParentID string   `json:"parent_id"`
-	RailRev  string   `json:"rail_rev"`
+	TaskID   string   `json:"task_id,omitempty"`
+	Blockers []string `json:"blockers,omitempty"`
+	ParentID string   `json:"parent_id,omitempty"`
+	RailRev  string   `json:"rail_rev,omitempty"`
 }
 
 // taskPost POSTs a JSON payload to a FLAT /v1/tasks path. The task routes are
