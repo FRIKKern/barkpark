@@ -600,6 +600,11 @@ const EXPECTATIONS = {
       assert.ok(chip.className.includes("billing-chip--trial"), "topbar chip must ride the trial skin");
       assert.ok(!chip.className.includes("past_due"), "trial XOR past-due — never both");
       assert.equal(chip.href, "#billing", "the chip must route to #billing");
+      // G-01: a trial has no paid Stripe plan → no portal to manage, nothing to
+      // cancel; both owner action sections stay retired (their action is to
+      // subscribe, in the plan grid above).
+      assert.equal(reg.get("billing-manage-section").hidden, true, "a trial mounts no Manage-billing section");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "a trial mounts no Cancel section");
     },
   },
   "billing-past-due": {
@@ -615,7 +620,16 @@ const EXPECTATIONS = {
       assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
       assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
       assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
-      assert.ok(box.includes(">Manage billing<"), "the current-plan card must offer the portal");
+      // G-01 anatomy: Manage billing moved OUT of the state card into its own
+      // .set-section action row (the state card no longer buries a button).
+      assert.ok(!box.includes(">Manage billing<"), "the state card must NOT bury the portal button");
+      const manage = reg.get("billing-manage").innerHTML || "";
+      assert.ok(manage.includes(">Manage billing<"), "the Manage-billing action rides its own .set-section");
+      assert.ok(/download invoices/i.test(manage), "the invoice-less portal copy lives in the action section");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section is shown for a paid plan");
+      // Owner + paid + not-yet-cancelling → the Cancel section offers the danger action.
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "an owner may cancel a paid plan");
+      assert.ok((reg.get("billing-cancel").innerHTML || "").includes("Cancel plan"), "the Cancel-plan danger action renders");
       // The dead promises stay dead.
       assert.ok(!box.includes("retry twice more"), "the retry-count fiction must be gone");
       assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
@@ -634,8 +648,10 @@ const EXPECTATIONS = {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
-      assert.ok(box.includes(">Manage billing<"), "the portal CTA must render");
       assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      // G-01 anatomy: the portal CTA rides the Manage-billing .set-section now.
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section shows for the active plan");
       assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
       // A healthy active sub shows NO topbar billing chip (trial XOR past-due only).
       assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
@@ -1070,6 +1086,45 @@ const EXPECTATIONS = {
       assert.ok(body.includes("bob@acme.com"), "the second actor's singleton renders separately");
       // The keyset Load-more control survives the regrow.
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
+    },
+  },
+
+  // ── gr-p4-billing (G-01): plain-member gate + the post-cancel grace state ────
+  "billing-member": {
+    what: "a plain member of a paid team — read-only plan, the owner-gate copy, and NO billing write button anywhere",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The plan STATE reads honestly (real name + real ceiling) …
+      assert.ok(box.includes(">Supporter<"), "the member sees the real plan name");
+      assert.ok(box.includes("3 managed instances"), "the member sees the real quota-honest ceiling");
+      // … but with ZERO write affordances — never a disabled ghost (GR36).
+      assert.ok(!/<button/i.test(box), "the read-only plan card renders NO button");
+      assert.ok(!box.includes("plan-more") && !box.includes("plan-continue"), "no grid-toggle / subscribe CTA for a member");
+      assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed for a member");
+      // The honest owner-gate copy is the member's single explanation.
+      const manage = reg.get("billing-manage").innerHTML || "";
+      assert.ok(manage.includes("Only the team owner can manage billing."), "the honest owner-gate copy renders");
+      assert.ok(!/<button/i.test(manage), "the Manage section shows NO button for a member");
+      // The pin that PROVES the member view has no billing write button: neither
+      // section carries a Manage/Cancel action, and Cancel is retired entirely.
+      assert.ok(!manage.includes(">Manage billing<"), "no Manage-billing button for a member");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section for a member");
+    },
+  },
+  "billing-cancelling": {
+    what: "owner after an in-app cancel — the grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The plan card reads the grace end honestly via billingPeriodLine.
+      assert.ok(box.includes("Access until "), "a cancelling plan reads Access-until the period end");
+      assert.ok(box.includes(">Ending<"), "the status badge reads Ending");
+      // Manage billing stays available (resubscribe / portal) …
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "Manage billing stays for the owner");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage section stays shown");
+      // … but the Cancel section is GONE — a second cancel is a no-op.
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "the Cancel section retires once cancel_at_period_end is set");
     },
   },
 };

@@ -1245,6 +1245,18 @@ select.form-input {
 
 /* ===================================================== PLAN CARD (billing) */
 .plan-card { max-width: 460px; padding: 28px; }
+/* G-01 (GR33 reference composition): inside the Billing settings anatomy the
+   .set-section IS the surface, so the plan STATE card renders FLUSH — no nested
+   card chrome (a bordered card inside a bordered section double-frames). The tier
+   GRID keeps its own selectable cards; only the state card flattens. Text moves
+   from --card onto --surface, both already CONTRAST_PAIRS-covered. */
+#billing-recommended .plan-card {
+  max-width: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
 .plan-head { display: flex; align-items: center; gap: 10px; }
 .plan-name { font-size: 18px; font-weight: 700; }
 .plan-rec {

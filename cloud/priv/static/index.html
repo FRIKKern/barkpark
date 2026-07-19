@@ -299,16 +299,34 @@
              rendered inline as the empty-fleet welcome runway. -->
 
         <!-- ---------- BILLING ---------- -->
+        <!-- G-01: the NAMED REFERENCE COMPOSITION for the GR33 settings anatomy.
+             An ACTION page: the plan STATE card, then owner-gated action sections
+             (Manage billing / Cancel plan) on .set-section cards — no save-rows.
+             The Manage + Cancel sections default hidden; renderBilling() reveals
+             them per plan state + role (owner-only writes, GR36). -->
         <section class="view" id="view-billing" hidden>
           <header class="view-head">
             <div>
               <h1>Billing</h1>
-              <p class="dim">Pick a plan. An active subscription is required to launch a managed instance.</p>
+              <p class="dim">Your plan and payments for this team. An active subscription is required to launch a managed instance.</p>
             </div>
           </header>
 
-          <div id="billing-recommended"></div>
-          <div id="billing-tiers" class="tier-grid" hidden></div>
+          <div class="set-section" id="billing-plan-section">
+            <h2 class="set-h">Plan</h2>
+            <div id="billing-recommended"></div>
+            <div id="billing-tiers" class="tier-grid" hidden></div>
+          </div>
+
+          <div class="set-section" id="billing-manage-section" hidden>
+            <h2 class="set-h">Manage billing</h2>
+            <div id="billing-manage"></div>
+          </div>
+
+          <div class="set-section" id="billing-cancel-section" hidden>
+            <h2 class="set-h">Cancel plan</h2>
+            <div id="billing-cancel"></div>
+          </div>
         </section>
 
         <!-- ---------- PROVIDERS ---------- -->
