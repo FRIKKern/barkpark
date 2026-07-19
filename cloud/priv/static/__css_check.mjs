@@ -75,7 +75,7 @@ const ALLOW_PREFIXES = [
   "toast toast-",      // showToast(): kind ∈ success | error | info
   "choice-ico ",       // provider picker tile: + p.cls (brand-hetzner | brand-do | brand-aws | brand-vultr)
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
-  "fleet-row token-row", // token row: + (revoked ? " is-revoked" : "")
+  "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
   "dep-pill dep-",     // deployment status pill: + esc(st) (live | failed | building | pushing | queued)
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")

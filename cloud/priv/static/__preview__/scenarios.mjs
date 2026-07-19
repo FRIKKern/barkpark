@@ -566,6 +566,33 @@ const activeSub = {
   trial_days_remaining: null,
 };
 
+// ── G-06 members + env-vars fixtures ─────────────────────────────────────────
+// Envelope shapes are the real serializers: member_json {user_id, email, role,
+// joined_at}; invitation_json {id, email, role, expires_at, inserted_at};
+// env_var_json {id, key, scope, barkpark_id, is_secret, is_shown_once, comment,
+// inserted_at, updated_at} — the VALUE is never in the payload (sealed at rest).
+// usr_ada is the me() user, so the roster tags it "(you)" and never offers a
+// self-remove. THREE roles only (owner/admin/member).
+const teamMembers = [
+  { user_id: "usr_ada", email: "ada@acme.com", role: "owner", joined_at: tMinus(240 * 86400) },
+  { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: tMinus(120 * 86400) },
+  { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: tMinus(20 * 86400) },
+];
+const teamInvites = [
+  { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
+  { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
+];
+// Both scopes + a secret + a write-once + a comment row, so one shot proves the
+// whole grammar: DATABASE_URL (team secret, commented), STRIPE_SECRET_KEY (team,
+// write-once → sealed-and-unreplaceable note), PUBLIC_SITE_URL (team, non-secret,
+// commented), WORKER_TOKEN (instance-scoped secret).
+const teamEnvVars = [
+  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "Primary Postgres connection string", inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
+  { id: "env_stripe", key: "STRIPE_SECRET_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: true, comment: null, inserted_at: tMinus(60 * 86400), updated_at: tMinus(60 * 86400) },
+  { id: "env_url", key: "PUBLIC_SITE_URL", scope: "team", barkpark_id: null, is_secret: false, is_shown_once: false, comment: "Canonical URL used in outbound emails", inserted_at: tMinus(30 * 86400), updated_at: tMinus(30 * 86400) },
+  { id: "env_worker", key: "WORKER_TOKEN", scope: "barkpark", barkpark_id: IDS.liveInstance, is_secret: true, is_shown_once: false, comment: null, inserted_at: tMinus(5 * 86400), updated_at: tMinus(5 * 86400) },
+];
+
 // ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
 // Each meter is {value|"unmetered", quota, warn_at, source, measured_at}; a
 // numeric quota lights the SPA's OC7 bar (ok/warn/over), a nil quota is honestly
@@ -685,6 +712,52 @@ const lifecycleCapabilities = {
   },
   default_gap: "Not supported by this provider.",
 };
+
+// ── gr-p4 G-03: settings provider capabilities (GET /v1/providers/capabilities) ─
+// The honest-matrix source in the SERVER facet shape
+// {providers:{kind:{tier,capabilities,gaps}}} — mirrors __app.test.mjs CAP_PAYLOAD
+// MINUS default_gap (the server NEVER emits one). All 9 verbs × 3 providers:
+// hetzner + azure are prod (the two matrix columns), fake is dev-tier (FILTERED
+// out of the matrix). The false cells prove the honesty grammar: some carry the
+// server-owned gap reason (hetzner.pause, azure.adopt), some are a bare dash with
+// NO reason (hetzner.catalog, azure.audit) — the UI pads neither.
+const settingsProviderCapabilities = {
+  providers: {
+    hetzner: {
+      tier: "prod",
+      capabilities: {
+        core: true, catalog: false, labels: true, pause: false,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+    },
+    azure: {
+      tier: "prod",
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: false, audit: false,
+      },
+      gaps: { adopt: "Adopt needs an existing resource-group import." },
+    },
+    fake: {
+      tier: "dev",
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: {},
+    },
+  },
+};
+
+// ── gr-p4 G-02: connected providers (GET /v1/providers) ──────────────────────
+// Rows carry ONLY {id,kind,label,team_id,inserted_at} (router.ex provider row) —
+// there is NO health/verified field, so the roster shows kind + label + when it
+// was connected and never a live-validity badge.
+const connectedProviders = [
+  { id: "prov_h1", kind: "hetzner", label: "main", team_id: IDS.team, inserted_at: tMinus(86400 * 9) },
+  { id: "prov_a1", kind: "azure", label: "prod-sub", team_id: IDS.team, inserted_at: tMinus(3600 * 5) },
+];
 
 // ── domain status (GET /v1/barkparks/:id/domain-status — a DNS-pending host) ──
 // A platform host mid-propagation: DNS hasn't resolved (the failed front rung
@@ -903,6 +976,69 @@ const siteStatesDomains = {
     },
   ],
 };
+
+// ── G-04 notifications (the crown) ───────────────────────────────────────────
+// Backend-true settings_view: transport + masked SMTP secrets ("********" when
+// set), the 9 per-event email booleans, the chat half (channels report only
+// {type, enabled, configured} — credentials are NEVER echoed), event_routes, and
+// the server-owned vocabulary (chat_events = 9 + "test", channel_types = the 5
+// ChannelConfig types, chat_default_on = the 4 failure events).
+const NOTIF_EVENT_KEYS = [
+  "provision_succeeded", "provision_failed", "deployment_succeeded", "deployment_failed",
+  "agent_reachable", "agent_unreachable", "subscription_past_due", "member_invited", "token_expiring",
+];
+const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
+const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "agent_unreachable", "subscription_past_due"];
+function notifSettings(over) {
+  const base = {
+    transport: "instance",
+    alerts_enabled: true,
+    smtp_host: null, smtp_username: null, smtp_password: null,
+    smtp_port: null, smtp_encryption: "starttls",
+    api_key: null,
+    from_address: null, from_name: null,
+    last_test_sent_at: null,
+    channels: [],
+    event_routes: {},
+    chat_events: NOTIF_CHAT_EVENTS,
+    channel_types: NOTIF_CHANNEL_TYPES,
+    chat_default_on: NOTIF_DEFAULT_ON,
+  };
+  // Failures default ON, successes OFF (email hygiene, mirrors EmailSettings).
+  for (const k of NOTIF_EVENT_KEYS) base[k] = NOTIF_DEFAULT_ON.indexOf(k) !== -1;
+  return Object.assign(base, over);
+}
+const notifConfigured = notifSettings({
+  transport: "smtp",
+  smtp_host: "********", smtp_username: "********", smtp_password: "********",
+  smtp_port: 587, from_address: "alerts@acme.com", from_name: "Acme Alerts",
+  last_test_sent_at: tMinus(3600),
+  channels: [
+    { type: "discord", enabled: true, configured: true },
+    { type: "slack", enabled: true, configured: true },
+    { type: "telegram", enabled: false, configured: true },
+    { type: "pushover", enabled: false, configured: false },
+    { type: "webhook", enabled: true, configured: true },
+  ],
+  event_routes: {
+    provision_failed: ["discord", "slack"],
+    deployment_failed: ["discord"],
+    deployment_succeeded: ["slack"],
+  },
+  deployment_succeeded: true, // a customized email boolean
+});
+const notifEmpty = notifSettings({});
+// delivery_json rows: recipient/event/channel/kind/status/attempts/last_error/
+// http_status/inserted_at. Chat rows record the channel TYPE as recipient (never
+// a webhook URL); email rows carry the address. status ∈ pending|sent|failed.
+const notifDeliveries = [
+  { id: "del_5", recipient: "alerts@acme.com", event: "provision_failed", channel: "email", kind: "alert", status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null, inserted_at: tMinus(120) },
+  { id: "del_4", recipient: "discord", event: "deployment_failed", channel: "discord", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: 204, inserted_at: tMinus(600) },
+  { id: "del_3", recipient: "alerts@acme.com", event: "deployment_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
+  { id: "del_2", recipient: "slack", event: "provision_failed", channel: "slack", kind: "alert", status: "pending", attempts: 0, last_error: null, http_status: null, inserted_at: tMinus(4200) },
+  { id: "del_1", recipient: "alerts@acme.com", event: "subscription_past_due", channel: "email", kind: "transactional", status: "sent", attempts: 1, last_error: null, http_status: 200, inserted_at: tMinus(90000) },
+];
 
 export const SCENARIOS = {
   loggedout: {
@@ -1143,6 +1279,92 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: activityFeed,
+    },
+  },
+
+  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // The roster on the GR33 .set-* anatomy: mixed roles (owner "(you)" / admin /
+  // member), the admin-only pending-invitations card, per-manageable-row Change
+  // role + Remove (destroy-tier typed-confirm, click-driven).
+  "members-populated": {
+    label: "Members (admin) — roster with mixed roles + pending invitations",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // The plain-member seam (GR33 plain-member law): read-only roster, NO
+  // invitations card, NO Change-role/Remove affordances. me() role "member"
+  // makes assignableRoles([]) → canManage false throughout.
+  "members-member": {
+    label: "Members (member) — read-only roster, no manage affordances",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      // A member never fetches invitations (the client skips the admin-gated
+      // call), so no fixture — the panel renders the roster alone.
+    },
+  },
+  // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
+  // secret, a write-once (sealed, unreplaceable-in-place note), a comment, and
+  // the add-var FORM section with its .set-save-row.
+  "env-populated": {
+    label: "Environment variables (admin) — rows + add form (secret / write-once / scopes)",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
+    },
+  },
+  // The write-once 409: the same populated rows, but the add-form POST is pinned
+  // to the server's 409 write_once (the collision the form surfaces inline). The
+  // per-row sealed note renders regardless; the 409 copy is unit-pinned via
+  // envVarWriteFailureCopy (the submit is click-driven, inert in smoke).
+  "env-write-once-409": {
+    label: "Environment variables — write-once collision (POST → 409 write_once)",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
+      envPost: { status: 409, body: { error: "write_once" } },
+    },
+  },
+  // Env-vars (member): read-only rows, NO add form, NO Delete buttons (access
+  // model member-read/admin-write; E-03's any-member-write does NOT transfer).
+  "env-member": {
+    label: "Environment variables (member) — read-only rows, no add form",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
     },
   },
 
@@ -1548,6 +1770,68 @@ export const SCENARIOS = {
     },
   },
 
+  // ── G-05 API tokens (GR34). The list renders real pat_json fields only
+  // (id/name/abilities/last_used_at/expires_at/revoked_at/inserted_at) — there is
+  // no prefix/preview field, so the row never fakes one. `tokens-member` carries
+  // role:"member" so the picker proves the plain-member read-only truth up-front
+  // (smoke drives openTokenModal directly — the modal is click-opened).
+  "tokens-populated": {
+    label: "API tokens — a populated list: mixed abilities (deploy/read/root/write) incl. a revoked row, per-row Revoke",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_ci", name: "CI deploy key", abilities: ["deploy"], last_used_at: tMinus(3 * 3600), expires_at: tPlus(60 * 86400), revoked_at: null, inserted_at: tMinus(40 * 86400) },
+        { id: "tok_read", name: "Read-only dashboard", abilities: ["read"], last_used_at: null, expires_at: null, revoked_at: null, inserted_at: tMinus(10 * 86400) },
+        { id: "tok_root", name: "Break-glass root", abilities: ["root"], last_used_at: tMinus(2 * 86400), expires_at: tPlus(365 * 86400), revoked_at: null, inserted_at: tMinus(90 * 86400) },
+        { id: "tok_old", name: "Legacy writer", abilities: ["read", "write"], last_used_at: tMinus(50 * 86400), expires_at: tPlus(20 * 86400), revoked_at: tMinus(6 * 86400), inserted_at: tMinus(120 * 86400) },
+      ],
+    },
+  },
+  "tokens-empty": {
+    label: "API tokens — the empty state: no tokens minted yet, Create-token CTA",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [],
+    },
+  },
+  "tokens-member": {
+    label: "API tokens — plain member: the picker offers read-only scope up-front (no write/deploy/root pickers)",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_m_read", name: "My read token", abilities: ["read"], last_used_at: tMinus(6 * 3600), expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: tMinus(4 * 86400) },
+      ],
+    },
+  },
+  "tokens-reveal": {
+    label: "API tokens — the plaintext-once reveal: amber only-time banner + mono input-affix + copy",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [],
+      // The mint POST answers the plaintext ONCE + pat_json (no plaintext/hash on
+      // the row); smoke drives revealToken() directly with this shape.
+      tokenMint: {
+        status: 201,
+        body: {
+          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEF",
+          pat: { id: "tok_new", name: "CI deploy key", abilities: ["deploy"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
+        },
+      },
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): the /new journey + the provisioning theater.
   // pathname "/new" unlocks isNewFlow(); ?template selects the starter and &bp=
   // resumes straight into the theater (the refresh-durable URL the flow writes).
@@ -1905,6 +2189,184 @@ export const SCENARIOS = {
       siteDomainStatus: siteStatesDomains,
     },
   },
+
+  // ── gr-p4-billing (G-01): plain-member + cancel states (tail-append, OC9) ────
+  // A plain MEMBER of a PAID team: the billing surface must render read-only —
+  // the plan STATE with zero write CTAs (never a disabled ghost) and the honest
+  // "Only the team owner can manage billing." line. Role rides me()'s 3rd param
+  // (the hygiene seam); the subscription is a healthy Supporter so there IS a
+  // paid plan an owner could manage — proving the gate hides it for the member,
+  // not the absence of a plan.
+  "billing-member": {
+    label: "Billing — a plain member of a paid team: read-only plan, no manage/cancel CTA, owner-gate copy",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+  // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
+  // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
+  // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays
+  // (the owner can still open the portal / resubscribe). d.billingCancel drives
+  // the mock's cancel POST for the interactive preview; smoke exercises the
+  // SETTLED state (its clicks are inert).
+  "billing-cancelling": {
+    label: "Billing — owner after cancel: grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: true,
+        current_period_end: new Date(Date.parse(T) + 12 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(45 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+      // The failure variant the danger modal designs for: a wrong password re-poll
+      // answers 401 password_invalid (the mock's cancel POST for the preview).
+      billingCancel: { status: 401, body: { error: "password_invalid" } },
+    },
+  },
+  // ── gr-p4 G-02+G-03 provider settings — the honesty flagship (tail-append) ──
+  // Four states on the .set-* anatomy: a populated roster + hybrid connect card
+  // + the honest capability matrix; the empty roster; the connect-card verify-
+  // before-save remediation state; and the plain-member read-only view (roster +
+  // matrix, ZERO write affordances). GET /v1/providers is member-readable, so the
+  // member scenario still paints the roster + matrix — just no connect/disconnect.
+  "providers-connected": {
+    label: "Providers — roster (Hetzner + Azure), the hybrid connect card, and the honest capability matrix",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+      providers: connectedProviders,
+      capabilities: settingsProviderCapabilities,
+    },
+  },
+  "providers-empty": {
+    label: "Providers — nothing connected yet: the empty roster + the connect card armed on the first provider",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [], subscription: activeSub, sites: [], audit: [],
+      providers: [],
+      capabilities: settingsProviderCapabilities,
+    },
+  },
+  "providers-unverified": {
+    label: "Providers — the connect card's verify-before-save remediation (server names the exact console fix)",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [], subscription: activeSub, sites: [], audit: [],
+      providers: [],
+      capabilities: settingsProviderCapabilities,
+      // POST /v1/providers preflight fails → ALL causes collapse to the single
+      // provider_unverified + the server-owned remediation string, rendered
+      // verbatim in-card when the operator clicks Verify & connect.
+      providerConnect: {
+        status: 422,
+        body: {
+          error: "provider_unverified",
+          remediation: "We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, revoke the old token, then generate a fresh Read & Write token for this project.",
+        },
+      },
+    },
+  },
+  "providers-member": {
+    label: "Providers — a plain member: read-only roster + matrix, NO connect card and NO Disconnect (GR33 plain-member law)",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+      providers: connectedProviders,
+      capabilities: settingsProviderCapabilities,
+    },
+  },
+  // ── G-04 notifications: the crown, states-complete ─────────────────────────
+  "notif-configured": {
+    label: "Notifications — SMTP transport, chat channels wired, matrix customized, delivery log populated",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveries: notifDeliveries,
+    },
+  },
+  "notif-empty": {
+    label: "Notifications — first run: platform transport, no channels, empty delivery log",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifEmpty,
+      notifDeliveries: [],
+    },
+  },
+  "notif-member": {
+    label: "Notifications as a plain member — read-only email, no save-rows, no admin sections",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveries: notifDeliveries,
+    },
+  },
+  "notif-deliveries-error": {
+    label: "Notifications — the deliveries route errors: the log degrades honestly",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveriesError: true, // GET /v1/notifications/deliveries → 500
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2006,7 +2468,38 @@ export function route(name, method, path) {
   }
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
+  // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
+  // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
+  // to drive the failure variants (401 password_invalid, 403 forbidden, …). The
+  // cancel 200 mirrors the router EXACTLY — {status, cancel_at_period_end} only,
+  // NO current_period_end — so the SPA's re-poll of /v1/subscription (not this
+  // body) is what renders the "Access until {date}" line.
+  if (method === "POST" && p === "/v1/billing/portal") {
+    return d.billingPortal || { status: 200, body: { portal_url: "https://billing.stripe.example/session/preview" } };
+  }
+  if (method === "POST" && p === "/v1/billing/cancel") {
+    return d.billingCancel || { status: 200, body: { status: "active", cancel_at_period_end: true } };
+  }
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
+
+  // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
+  // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
+  // d.tokenMint); DELETE /v1/tokens/:id → revoke (200 {ok}). A member never mints
+  // beyond read (the UI offers only read-scope), so no 403 branch is reachable here.
+  if (p === "/v1/tokens") {
+    if (method === "GET") return { status: 200, body: { tokens: d.tokens || [] } };
+    if (method === "POST") {
+      return d.tokenMint || {
+        status: 201,
+        body: {
+          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEF",
+          pat: { id: "tok_new", name: "New token", abilities: ["read"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
+        },
+      };
+    }
+  }
+  if (/^\/v1\/tokens\/[^/]+$/.test(p) && method === "DELETE") return { status: 200, body: { ok: true } };
+
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).
   if (p === "/v1/audit") {
@@ -2120,6 +2613,23 @@ export function route(name, method, path) {
     return { status: 200, body: d.capabilities || {} };
   }
 
+  // gr-p4 G-02: the connected-providers collection. GET is member-readable (the
+  // roster + matrix render for every role); POST (connect) + DELETE /:kind
+  // (disconnect) are admin-only server-side. A scenario carries `providers` (the
+  // roster) and optionally `providerConnect` (a 422 preflight remediation);
+  // absent → an empty roster + a benign 201/200. MUST precede the catch-all AND
+  // the /:kind/catalog GET (those are two-segment; these are exact or one-segment
+  // DELETE, so they never collide with the capabilities/catalog reads above).
+  if (p === "/v1/providers" && method === "GET") {
+    return { status: 200, body: { providers: d.providers || [] } };
+  }
+  if (p === "/v1/providers" && method === "POST") {
+    return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
+  }
+  if (method === "DELETE" && /^\/v1\/providers\/[^/]+$/.test(p)) {
+    return { status: 200, body: { ok: true } };
+  }
+
   // S13: the per-host DNS/TLS checklist. A scenario without a `domainStatus`
   // fixture answers the honest no-attached-domains shape → the rail keeps its
   // static Domain row (no checklist card).
@@ -2149,6 +2659,65 @@ export function route(name, method, path) {
   // absent → the benign catch-all below (which archivesModel reads as a transient
   // error, exactly like today), so no non-archives scenario changes.
   if (p === "/v1/archives" && d.archives) return d.archives;
+
+  // G-04 notifications. GET settings is member-readable; the mutations (PUT
+  // settings/channels/events, POST test, GET deliveries) are admin-gated server-
+  // side — the harness echoes the fixture back on a write so a live click
+  // reconciles, and models the deliveries 500 so the log's honest-degrade path is
+  // observable. `notifSettings` absent → the benign empty 200 (older-CP shape).
+  if (p === "/v1/notifications/settings") {
+    if (method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+    return d.notifSettings ? { status: 200, body: { settings: d.notifSettings } } : { status: 200, body: {} };
+  }
+  if (p === "/v1/notifications/channels" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+  if (p === "/v1/notifications/events" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+  if (p === "/v1/notifications/test" && method === "POST") return { status: 202, body: { ok: true } };
+  if (p === "/v1/notifications/deliveries" && method === "GET") {
+    if (d.notifDeliveriesError) return { status: 500, body: { error: "internal" } };
+    return { status: 200, body: { deliveries: d.notifDeliveries || [] } };
+  }
+  // G-06 MEMBERS: the roster + invitations reads. Team-scoped under /v1/teams/:id.
+  // A scenario carries `members`/`invitations` fixtures; absent → honest empty
+  // lists (the panel never errors on an empty team). Invitations are admin-gated
+  // server-side, but the client already skips the call for a plain member, so a
+  // member scenario simply omits the fixture. POST/DELETE are click-driven (inert
+  // in smoke) — modelled here so a live/browser exercise reconciles.
+  if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
+    return { status: 200, body: { members: d.members || [] } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/members\/[^/]+$/.test(p) && (method === "DELETE" || method === "PATCH")) {
+    return d.memberWrite || { status: 200, body: { ok: true } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/invitations$/.test(p)) {
+    if (method === "POST") {
+      return d.invitePost || {
+        status: 201,
+        body: { invitation: { id: "inv_new", email: "new@acme.com", role: "member", expires_at: tPlus(7 * 86400), inserted_at: T }, accept_url: "http://localhost/#/invitations/accept?token=preview-new" },
+      };
+    }
+    return { status: 200, body: { invitations: d.invitations || [] } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/invitations\/[^/]+$/.test(p) && method === "DELETE") {
+    return { status: 200, body: { ok: true } };
+  }
+
+  // G-06 ENV-VARS: the ROW model (member-read / admin-write). GET is member-
+  // readable → a scenario's `envVars` fixture (absent → honest empty). POST is
+  // admin-only: `envPost` lets the env-write-once-409 scenario pin the write_once
+  // 409 the form surfaces inline; absent → a benign 201 echo. DELETE → 200.
+  if (p === "/v1/env-vars") {
+    if (method === "POST") {
+      return d.envPost || {
+        status: 201,
+        body: { env_var: { id: "env_new", key: "NEW_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: null, inserted_at: T, updated_at: T } },
+      };
+    }
+    if (d.envVarsDenied) return { status: 403, body: { error: "forbidden" } };
+    return { status: 200, body: { env_vars: d.envVars || [] } };
+  }
+  if (/^\/v1\/env-vars\/[^/]+$/.test(p) && method === "DELETE") {
+    return { status: 200, body: { ok: true } };
+  }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.

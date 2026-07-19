@@ -182,6 +182,7 @@
             <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
             <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
             <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
+            <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
           </div>
         </div>
 
@@ -299,16 +300,34 @@
              rendered inline as the empty-fleet welcome runway. -->
 
         <!-- ---------- BILLING ---------- -->
+        <!-- G-01: the NAMED REFERENCE COMPOSITION for the GR33 settings anatomy.
+             An ACTION page: the plan STATE card, then owner-gated action sections
+             (Manage billing / Cancel plan) on .set-section cards — no save-rows.
+             The Manage + Cancel sections default hidden; renderBilling() reveals
+             them per plan state + role (owner-only writes, GR36). -->
         <section class="view" id="view-billing" hidden>
           <header class="view-head">
             <div>
               <h1>Billing</h1>
-              <p class="dim">Pick a plan. An active subscription is required to launch a managed instance.</p>
+              <p class="dim">Your plan and payments for this team. An active subscription is required to launch a managed instance.</p>
             </div>
           </header>
 
-          <div id="billing-recommended"></div>
-          <div id="billing-tiers" class="tier-grid" hidden></div>
+          <div class="set-section" id="billing-plan-section">
+            <h2 class="set-h">Plan</h2>
+            <div id="billing-recommended"></div>
+            <div id="billing-tiers" class="tier-grid" hidden></div>
+          </div>
+
+          <div class="set-section" id="billing-manage-section" hidden>
+            <h2 class="set-h">Manage billing</h2>
+            <div id="billing-manage"></div>
+          </div>
+
+          <div class="set-section" id="billing-cancel-section" hidden>
+            <h2 class="set-h">Cancel plan</h2>
+            <div id="billing-cancel"></div>
+          </div>
         </section>
 
         <!-- ---------- PROVIDERS ---------- -->
@@ -318,20 +337,21 @@
               <h1>Providers</h1>
               <p class="dim">Connect a cloud provider so Barkpark can provision on your account.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="provider-add" type="button">Connect a provider</button>
           </header>
+
+          <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
+               hybrid connect card (admin-only, verify+save in a .set-save-row).
+               loadProviders() paints both; a member sees the roster without any
+               Disconnect… affordance and no connect card at all. -->
+          <div id="provider-roster" aria-live="polite"></div>
+          <div id="provider-connect"></div>
 
           <!-- gh-2: GitHub App connection card. Renders connected / connect /
                not-configured from GET /v1/github/installation. -->
-          <div id="github-card" class="provider-list" aria-live="polite"></div>
+          <div id="github-card" aria-live="polite"></div>
 
-          <div id="provider-list" class="provider-list">
-            <div class="empty-state">
-              <h2>No providers connected</h2>
-              <p>Connect Hetzner Cloud to launch managed instances on your own account.</p>
-              <button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button>
-            </div>
-          </div>
+          <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
+          <div id="provider-matrix" aria-live="polite"></div>
         </section>
 
         <!-- ---------- NOTIFICATIONS (tab) ---------- -->
@@ -339,12 +359,12 @@
           <header class="view-head">
             <div>
               <h1>Notifications</h1>
-              <p class="dim">Email alerts for your fleet, and the transport they're sent over.</p>
+              <p class="dim">How your fleet reaches you &mdash; email, chat channels, and what each event routes to.</p>
             </div>
-            <button class="btn btn-ghost btn-sm" id="notif-test" type="button">Send test email</button>
+            <button class="btn btn-ghost btn-sm" id="notif-test" type="button" hidden>Send test email</button>
           </header>
 
-          <div id="notif-body" class="provider-list" aria-live="polite">
+          <div id="notif-body" aria-live="polite">
             <div class="loading">Loading notification settings&hellip;</div>
           </div>
         </section>
@@ -386,10 +406,15 @@
               <h1>API tokens</h1>
               <p class="dim">Personal Access Tokens authenticate the API on your behalf. Scope each one to the abilities it needs; revoke any time.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="token-add" type="button">New token</button>
+            <button class="btn btn-primary btn-sm" id="token-add" type="button">Create token&hellip;</button>
           </header>
 
-          <div id="token-list" class="token-list" aria-live="polite"></div>
+          <!-- GR33 ACTION page: the token list is ONE .set-section (not per-row
+               floating cards); rows are hairline-separated line items with a
+               per-row Revoke. No .set-save-row — a roster acts, it does not save. -->
+          <div class="set-section">
+            <div id="token-list" class="token-list" aria-live="polite"></div>
+          </div>
         </section>
 
         <!-- ---------- MEMBERS (C10 — team members & invitations) ---------- -->
@@ -403,6 +428,18 @@
           </header>
 
           <div id="members-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- ENVIRONMENT VARIABLES (G-06 — team env-vars, row model) ---------- -->
+        <section class="view" id="view-env" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Environment variables</h1>
+              <p class="dim">Team-wide values injected into your instances at boot. Keys are visible; values are encrypted and never shown again.</p>
+            </div>
+          </header>
+
+          <div id="env-body" aria-live="polite"></div>
         </section>
 
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->

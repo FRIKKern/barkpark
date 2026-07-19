@@ -127,7 +127,12 @@
     // launch-time quota ceiling (registry.ex); billing_not_configured is the
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
-    billing_not_configured: "Billing isn't set up on this deployment yet."
+    billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // GR36: billing writes are owner-only (require_primary_team_owner). A residual
+    // 403 on the portal/cancel POSTs is an authority answer, NOT a transient
+    // failure — this honest copy keeps it from reading as "try again in a moment"
+    // (absorbs gr-backlog-portal-retry-sentence).
+    forbidden: "Only the team owner can manage billing."
   };
   // Precedence (GR19 fix): curated ERRORS copy → field-level details → the
   // caller's DESIGNED fallback → the humanized slug. (Previously any truthy
@@ -763,14 +768,14 @@
   }
 
   // Pure model for the lifecycle action row from the /v1/providers/capabilities
-  // conduit payload {providers:{kind:{tier,capabilities,gaps}}, default_gap} and
-  // the instance. Three honest degrade paths, none hidden / dead / faked:
+  // conduit payload {providers:{kind:{tier,capabilities,gaps}}} and the instance.
+  // Three honest degrade paths, none hidden / dead / faked:
   //   capPayload === undefined → loading shell (decommission live from frame 1)
   //   payload null/malformed / kind missing → "capabilities unavailable" + Retry
   //   provider tier === "dev"  → an fake/dev box we don't operate from the console
   // A wired provider yields one action per verb: capability true → CLI affordance,
   // capability false → disabled with the SERVER-OWNED gap reason (never invented;
-  // falls back only to the payload's own default_gap).
+  // the server emits no default_gap, so an absent per-verb gap shows no reason).
   function lifecycleActionsModel(capPayload, bp) {
     bp = bp || {};
     var kind = bp.provider || "hetzner";
@@ -793,14 +798,13 @@
 
     var caps = entry.capabilities || {};
     var gaps = entry.gaps || {};
-    var defaultGap = capPayload && typeof capPayload.default_gap === "string" ? capPayload.default_gap : "";
     var actions = LIFECYCLE_VERBS.map(function (v) {
       if (v.verb === "decommission") return decommission;
       if (caps[v.verb] === true) {
         return { verb: v.verb, label: v.label, mode: "cli",
           cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) };
       }
-      var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : defaultGap;
+      var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : "";
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
     });
     return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
@@ -1395,40 +1399,344 @@
     });
   }
 
-  // Fetch the team's connected providers from the server so they SURVIVE a
-  // reload (previously the connect flow was optimistic-only — a connected
-  // provider vanished on refresh).
+  // ============================================== PROVIDERS PAGE (gr-p4 G-02/G-03)
+  // The #view-providers page on the GR33 .set-* anatomy: a connected roster, the
+  // inline hybrid connect card (verify+save in a .set-save-row), and G-03's honest
+  // capability matrix. This is the wave's HONESTY FLAGSHIP — the roster never
+  // implies live validity, and the matrix never pads a cell or invents a reason.
+  // Every pure helper is node-pinned via __bpTestHook; the DOM mounts
+  // (loadProviders / renderProviderPage / loadCapabilityMatrix / disconnectProvider)
+  // are browser-verified. Whether the write affordances render is a role read
+  // (owner/admin), NOT a client degrade of a read: GET /v1/providers is
+  // member-readable, so a member still sees the roster + matrix (read-only), just
+  // without the connect card or any Disconnect… button (GR33 plain-member law).
+
+  function providerCanWrite() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
+  // A prod-tier provider's display name for a matrix column / roster row.
+  // providerMeta covers the connectable kinds; an unknown prod kind (a control
+  // plane that ships a new provider before the SPA learns its brand) falls back
+  // to the kind Title-cased — honest, never a fabricated brand name.
+  function providerDisplayName(kind) {
+    var k = String(kind || "");
+    var known = PROVIDERS.filter(function (p) { return p.kind === k; })[0];
+    if (known) return known.name;
+    return k ? k.charAt(0).toUpperCase() + k.slice(1) : "";
+  }
+
+  // The connected-roster rows. Each server row is {id,kind,label,team_id,
+  // inserted_at} — there is NO health/verified field, so a row shows kind + label
+  // + WHEN it was connected and NEVER a live-validity badge (backend truth: the
+  // roster cannot know whether the stored credential still works). `canDisconnect`
+  // gates the typed-confirm Disconnect… affordance (admin-only; a member sees none).
+  function providerRosterHtml(list, canDisconnect) {
+    var rows = Array.isArray(list) ? list : [];
+    if (!rows.length) return '<p class="set-empty">No providers connected yet.</p>';
+    return '<ul class="prov-roster">' + rows.map(function (p) {
+      var m = providerMeta(p.kind || "hetzner");
+      var when = p.inserted_at ? relTime(p.inserted_at) : "";
+      return '<li class="prov-row">' +
+        '<span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
+        '<span class="prov-row-main">' +
+          '<span class="prov-row-name">' + esc(m.name) +
+            (p.label ? ' <span class="prov-row-label">' + esc(p.label) + "</span>" : "") + "</span>" +
+          '<span class="prov-row-meta"><span class="prov-row-kind">' + esc(p.kind || "") + "</span>" +
+            (when ? '<span class="prov-row-when">connected ' + esc(when) + "</span>" : "") + "</span>" +
+        "</span>" +
+        (canDisconnect
+          ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
+            esc(p.kind || "") + '">Disconnect&hellip;</button>'
+          : "") +
+      "</li>";
+    }).join("") + "</ul>";
+  }
+
+  // Which available providers can still be connected. Duplicate connect is
+  // silently ADDITIVE server-side (no unique index, no 409), so the UI refuses a
+  // second connect: an already-connected kind is shown but NOT selectable
+  // ("Connected — disconnect to replace"; replace semantics = backlog
+  // gr-backlog-provider-reconnect). `selectable` = the first still-open kind (the
+  // default armed selection); allConnected → the card shows the replace note only.
+  function providerConnectModel(list) {
+    var connected = {};
+    (Array.isArray(list) ? list : []).forEach(function (p) { if (p && p.kind) connected[p.kind] = true; });
+    var options = PROVIDERS.filter(function (p) { return p.available; }).map(function (p) {
+      return { kind: p.kind, name: p.name, connected: !!connected[p.kind] };
+    });
+    var firstOpen = options.filter(function (o) { return !o.connected; })[0] || null;
+    return { options: options, selectable: firstOpen ? firstOpen.kind : null, allConnected: !firstOpen };
+  }
+
+  // The inline connect card body (GR33 hybrid: verify+save in a .set-save-row).
+  // A segmented provider picker (already-connected kinds shown but not selectable),
+  // the armed kind's credential subform (reused verbatim from the launch flow's
+  // builder so the two never drift), an in-card remediation slot, and the save-row.
+  // Pure — wireConnectCard() binds the picker + submit. `selected` is the armed
+  // kind, falling back to the first still-open provider.
+  function providerConnectCardHtml(list, selected) {
+    var model = providerConnectModel(list);
+    if (model.allConnected) {
+      return '<p class="set-empty">Every supported provider is connected. ' +
+        "Disconnect one above to replace its credentials.</p>";
+    }
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+      ? selected : model.selectable;
+    var p = providerMeta(armed);
+    var seg = model.options.map(function (o) {
+      return '<button class="seg-btn" type="button" data-connect-kind="' + esc(o.kind) + '"' +
+        (o.connected ? " disabled" : "") + ' aria-pressed="' + (o.kind === armed ? "true" : "false") + '">' +
+        esc(o.name) + (o.connected ? ' <span class="prov-seg-note">connected</span>' : "") + "</button>";
+    }).join("");
+    return '<div class="prov-connect-picker seg" role="group" aria-label="Provider to connect">' + seg + "</div>" +
+      '<div class="prov-connect-form">' +
+        '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
+          '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
+        credentialFieldsHtml(p) +
+        '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
+      "</div>" +
+      '<div class="set-save-row">' +
+        '<button class="btn btn-primary" id="cred-submit" type="button" data-connect-submit>Verify &amp; connect</button>' +
+      "</div>";
+  }
+
+  // The 9 lifecycle capabilities the matrix rows, in operator order (provision
+  // first, teardown in the middle, metadata last). Keys match the server
+  // capability facet 1:1; labels are the console's own plain-language gloss.
+  var CAPABILITY_VERBS = [
+    { key: "core", label: "Provision" },
+    { key: "catalog", label: "Size catalog" },
+    { key: "archive", label: "Archive" },
+    { key: "resurrect", label: "Resurrect" },
+    { key: "decommission", label: "Decommission" },
+    { key: "adopt", label: "Adopt existing" },
+    { key: "audit", label: "Audit" },
+    { key: "pause", label: "Pause" },
+    { key: "labels", label: "Labels" },
+  ];
+
+  // Pure model for the honest capability matrix from GET /v1/providers/
+  // capabilities {providers:{kind:{tier,capabilities,gaps}}}. The server NEVER
+  // emits a default_gap, so a false verb carries the server-owned gap reason when
+  // one exists and OTHERWISE a bare dash — the JS invents no reason and pads no
+  // cell. Dev-tier providers are FILTERED (the console does not operate them).
+  // Three honest states, mirroring the lifecycle conduit:
+  //   undefined            → loading
+  //   null / no providers  → unavailable (honest degrade, an older control plane)
+  //   {providers:{…}}       → the grid
+  function capabilityMatrixModel(capPayload) {
+    if (capPayload === undefined) return { loading: true, ok: false };
+    var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
+    if (!providers || typeof providers !== "object") return { loading: false, ok: false };
+    var cols = Object.keys(providers).filter(function (k) {
+      var e = providers[k];
+      return e && typeof e === "object" && e.tier !== "dev";
+    }).map(function (k) { return { kind: k, name: providerDisplayName(k) }; });
+    if (!cols.length) return { loading: false, ok: false };
+    var cells = {};
+    CAPABILITY_VERBS.forEach(function (v) {
+      cells[v.key] = {};
+      cols.forEach(function (c) {
+        var entry = providers[c.kind] || {};
+        var caps = entry.capabilities || {};
+        var gaps = entry.gaps || {};
+        var ok = caps[v.key] === true;
+        var reason = ok ? "" : (typeof gaps[v.key] === "string" && gaps[v.key].trim() !== "" ? gaps[v.key] : "");
+        cells[v.key][c.kind] = { ok: ok, reason: reason };
+      });
+    });
+    return { loading: false, ok: true, providers: cols, verbs: CAPABILITY_VERBS, cells: cells };
+  }
+
+  // Pure render of the matrix from its model. A supported cell is an affirmative
+  // mark; an unsupported cell is a dash + (only when the server owns one) the gap
+  // reason as a sub-line — NEVER an invented reason, never a padded cell.
+  function capabilityMatrixHtml(model) {
+    if (!model || model.loading) return '<p class="set-empty">Checking provider capabilities&hellip;</p>';
+    if (!model.ok) return '<p class="set-empty">Provider capabilities are unavailable right now.</p>';
+    var head = '<tr><th class="cap-corner" scope="col"><span class="visually-hidden">Capability</span></th>' +
+      model.providers.map(function (c) { return '<th class="cap-col" scope="col">' + esc(c.name) + "</th>"; }).join("") +
+      "</tr>";
+    var body = model.verbs.map(function (v) {
+      var cellsRow = model.providers.map(function (c) {
+        var cell = model.cells[v.key][c.kind];
+        if (cell.ok) {
+          return '<td class="cap-cell cap-cell--yes"><span class="cap-mark" aria-hidden="true">&#10003;</span>' +
+            '<span class="visually-hidden">Supported</span></td>';
+        }
+        return '<td class="cap-cell cap-cell--no">' +
+          '<span class="cap-dash" aria-hidden="true">&ndash;</span>' +
+          '<span class="visually-hidden">Not supported' + (cell.reason ? ": " + esc(cell.reason) : "") + "</span>" +
+          (cell.reason ? '<span class="cap-gap">' + esc(cell.reason) + "</span>" : "") +
+        "</td>";
+      }).join("");
+      return '<tr><th class="cap-verb" scope="row"><span class="cap-verb-key">' + esc(v.key) + "</span>" +
+        '<span class="cap-verb-label">' + esc(v.label) + "</span></th>" + cellsRow + "</tr>";
+    }).join("");
+    return '<div class="cap-scroll"><table class="cap-matrix"><thead>' + head + "</thead><tbody>" + body +
+      "</tbody></table></div>";
+  }
+
+  // Fetch the team's connected providers (they SURVIVE a reload — the connect
+  // flow is not optimistic-only) and repaint the roster + connect card.
   function loadProviders() {
-    var box = $("#provider-list");
-    if (!box) return;
-    box.innerHTML = '<div class="loading">Loading providers&hellip;</div>';
+    var roster = $("#provider-roster");
+    if (!roster) return;
+    roster.innerHTML = '<div class="set-section"><h2 class="set-h">Connected providers</h2>' +
+      '<div class="loading">Loading providers&hellip;</div></div>';
     api("GET", "/v1/providers").then(function (r) {
       var list = (r.ok && r.data && r.data.providers) || [];
-      renderProviderList(list);
+      renderProviderPage(list, providerCanWrite());
     });
   }
 
-  // Re-renders the Providers view body from a list (server- or optimistically-
-  // sourced).
-  function renderProviderList(list) {
-    var box = $("#provider-list");
-    if (!box) return;
-    if (!list || !list.length) {
-      box.innerHTML =
-        '<div class="empty-state"><h2>No providers connected</h2>' +
-        "<p>Connect Hetzner Cloud to launch managed instances on your own account.</p>" +
-        '<button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button></div>';
-      var b = $("#provider-add-empty");
-      if (b) b.addEventListener("click", openProviderPicker);
+  function renderProviderPage(list, canWrite) {
+    var roster = $("#provider-roster");
+    if (roster) {
+      roster.innerHTML = '<div class="set-section">' +
+        '<h2 class="set-h">Connected providers</h2>' +
+        '<p class="set-purpose">Credentials Barkpark uses to provision on your account, encrypted at rest and never shown again. ' +
+          "We show when each was connected — not a live-validity check.</p>" +
+        providerRosterHtml(list, canWrite) + "</div>";
+      if (canWrite) wireProviderDisconnect();
+    }
+    var connect = $("#provider-connect");
+    if (connect) {
+      if (canWrite) renderConnectCard(list, null);
+      else connect.innerHTML = "";
+    }
+  }
+
+  function renderConnectCard(list, selected) {
+    var connect = $("#provider-connect");
+    if (!connect) return;
+    connect.innerHTML = '<div class="set-section">' +
+      '<h2 class="set-h">Connect a provider</h2>' +
+      '<p class="set-purpose">We verify the credential before saving it. If it can’t be verified we show you exactly ' +
+        "how to mint a fresh one.</p>" +
+      providerConnectCardHtml(list, selected) + "</div>";
+    wireConnectCard(list, selected);
+  }
+
+  function wireConnectCard(list, selected) {
+    var connect = $("#provider-connect");
+    if (!connect) return;
+    var model = providerConnectModel(list);
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+      ? selected : model.selectable;
+    connect.querySelectorAll("[data-connect-kind]").forEach(function (btn) {
+      if (btn.disabled) return;
+      btn.addEventListener("click", function () {
+        renderConnectCard(list, btn.getAttribute("data-connect-kind"));
+        var f = $("#cred-token") || $("#cred-az-tenant_id");
+        if (f && f.focus) f.focus();
+      });
+    });
+    var eye = $("#cred-eye");
+    if (eye) eye.addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
+    var azEye = $("#cred-az-eye");
+    if (azEye) azEye.addEventListener("click", function () { toggleEye("#cred-az-client_secret", "#cred-az-eye"); });
+    var submit = connect.querySelector("[data-connect-submit]");
+    if (submit) submit.addEventListener("click", function () { submitInlineProviderCred(armed, list); });
+  }
+
+  // The inline verify-before-save submit (GR33 hybrid). Reuses the launch flow's
+  // pure builders so the credential shape + server-owned remediation copy never
+  // fork. On 201 the whole page repaints (the roster gains the kind, the connect
+  // picker drops it, the matrix is unaffected but refreshed for good measure); a
+  // 422 provider_unverified renders the server remediation IN the card verbatim.
+  function submitInlineProviderCred(kind, list) {
+    var p = providerMeta(kind);
+    var fields = readCredentialFields(p);
+    var label = (($("#cred-label") || {}).value || "").trim();
+    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
+    if (!valid) {
+      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
       return;
     }
-    box.innerHTML = list.map(function (p) {
-      var m = providerMeta(p.kind || "hetzner");
-      return '<div class="fleet-row"><div class="fleet-main">' +
-        '<div class="fleet-name"><span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
-          esc(m.name) + (p.label ? " &middot; " + esc(p.label) : "") + "</div>" +
-        '</div><div class="fleet-badges"><span class="badge"><span class="dot up"></span>Connected</span></div></div>';
-    }).join("");
+    var rem = $("#cred-remediation");
+    if (rem) { rem.hidden = true; rem.innerHTML = ""; }
+    var btn = $("#cred-submit");
+    if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
+    api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
+      if (r.status === 201) {
+        toast({ kind: "success", title: "Provider connected",
+          body: "Connected " + p.name + (label ? " (" + label + ")" : "") + "." });
+        loadProviders();
+        loadCapabilityMatrix();
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Verify & connect"; }
+      // Verify-before-save failure carries server-owned remediation (naming the
+      // exact console fix). ALL preflight failures collapse server-side to one
+      // provider_unverified, so the copy frames the honest single cause and
+      // renders the server string verbatim (never through friendly(), which
+      // provably drops .remediation).
+      var copy = remediationCopy(r.data);
+      if (copy) showCredRemediation(copy);
+      else toast({ kind: "error", title: "Couldn't verify those credentials",
+        body: friendly(r.data, "Check the details and try again.") });
+    });
+  }
+
+  function wireProviderDisconnect() {
+    var roster = $("#provider-roster");
+    if (!roster) return;
+    roster.querySelectorAll("[data-prov-disconnect]").forEach(function (btn) {
+      btn.addEventListener("click", function () { disconnectProvider(btn.getAttribute("data-prov-kind")); });
+    });
+  }
+
+  // Typed-confirm destroy grammar (openConfirmModal destroy tier): disconnect
+  // deletes EVERY stored credential of that kind (the server DELETE /:kind is a
+  // per-kind destroy, not per-row), so the operator types the kind to confirm.
+  // 404 is non-leaky (already gone → treat as success); 200 {ok:true} succeeds.
+  function disconnectProvider(kind) {
+    var m = providerMeta(kind);
+    openConfirmModal({
+      tier: "destroy",
+      title: "Disconnect " + m.name + "?",
+      consequences: [
+        "This deletes every stored " + m.name + " credential for this team.",
+        "Instances already running keep running, but new provisioning on " + m.name + " will need a fresh connection.",
+      ],
+      resourceName: kind,
+      confirmLabel: "Disconnect",
+      busyLabel: "Disconnecting…",
+      onConfirm: function run(ctl) {
+        api("DELETE", "/v1/providers/" + encodeURIComponent(kind)).then(function (r) {
+          if (r.ok || r.status === 404) {
+            ctl.succeed();
+            toast({ kind: "success", title: m.name + " disconnected" });
+            loadProviders();
+            loadCapabilityMatrix();
+          } else {
+            ctl.fail(friendly(r.data, "Couldn't disconnect. Try again."), "Try again", run);
+          }
+        });
+      },
+    });
+  }
+
+  // G-03: the honest capability matrix. GET /v1/providers/capabilities is
+  // member-readable, so this renders for every role. Loading → unavailable →
+  // grid, all honest (an older control plane that answers {} degrades to
+  // "unavailable", never a fabricated grid).
+  function loadCapabilityMatrix() {
+    var box = $("#provider-matrix");
+    if (!box) return;
+    function paint(model) {
+      box.innerHTML = '<div class="set-section">' +
+        '<h2 class="set-h">What each provider can do</h2>' +
+        '<p class="set-purpose">The honest matrix — a dash means we won’t pretend. Where a provider can’t do ' +
+          "something, the reason is the server’s own.</p>" +
+        capabilityMatrixHtml(model) + "</div>";
+    }
+    paint(capabilityMatrixModel(undefined));
+    api("GET", "/v1/providers/capabilities").then(function (r) {
+      paint(capabilityMatrixModel(r.ok && r.data ? r.data : null));
+    });
   }
 
   // ====================================================== GITHUB (gh-2)
@@ -1475,7 +1783,7 @@
           "<div class=\"dim\">GitHub deploys aren't configured on this Barkpark yet.</div>" +
         '</div><div class="fleet-badges"><span class="badge">Not configured</span></div></div>';
     }
-    box.innerHTML = '<div class="notif-card"><h2 class="notif-h">GitHub</h2>' + row + "</div>";
+    box.innerHTML = '<div class="set-section"><h2 class="set-h">GitHub</h2>' + row + "</div>";
     var d = $("#github-disconnect");
     if (d) d.addEventListener("click", disconnectGithub);
   }
@@ -1492,8 +1800,24 @@
   }
 
   // ====================================================== NOTIFICATIONS
+  // G-04 (the crown), GR33/GR34/GR36. The settings-page anatomy in full: the
+  // Notifications view is a FORM page of `.set-section` cards, each independently-
+  // PERSISTED buffered section carrying its OWN `.set-save-row` mapping to its
+  // real endpoint (email → PUT /settings, chat channels → PUT /channels). The
+  // event×channel routing matrix is a LIVE toggle grid, not a buffered form: each
+  // cell persists to its true endpoint the instant it flips (email column → PUT
+  // /settings, chat columns → PUT /events), so per GR33's own atomicity rule it
+  // carries NO save-row (a single button spanning two endpoints would lie). The
+  // delivery log is read-only. Everything below is backend-true: chat credentials
+  // are write-only (the server echoes only `configured:bool`), the four failure
+  // events render their `chat_default_on` fan-out as an honest default (never as an
+  // explicit choice), and the always-send `test` event is stated, never faked as a
+  // toggle. Reads are member-visible; every write is admin-gated — a plain member
+  // sees the email settings READ-ONLY with no save-rows and no admin affordances.
+
   // The per-event alert toggles, in display order. Labels mirror the server's
-  // EmailSettings columns 1:1.
+  // EmailSettings columns 1:1 (Notifications.@chat_events minus the always-send
+  // "test", which the matrix renders as its own honest info row).
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
@@ -1506,6 +1830,332 @@
     ["token_expiring", "API token expiring"]
   ];
 
+  // The email transport single-select (GR34: pill()/`.seg` segmented control).
+  var NOTIF_TRANSPORTS = [
+    { v: "instance", label: "Barkpark platform" },
+    { v: "smtp", label: "SMTP" },
+    { v: "api", label: "API" }
+  ];
+
+  // The chat channel roster (ChannelConfig.@types) + per-shape credential fields.
+  // discord/slack/webhook take one {url}; telegram {token, chat_id, thread_id?};
+  // pushover {user_key, api_token}. `off` is the MANDATORY consequence sub-line
+  // (GR34 .set-check grammar). Credentials are write-only: never pre-filled.
+  var NOTIF_CHANNELS = [
+    { type: "discord", label: "Discord", off: "Off = Discord stops receiving routed events.",
+      fields: [{ k: "url", label: "Webhook URL", ph: "https://discord.com/api/webhooks/…" }] },
+    { type: "slack", label: "Slack", off: "Off = Slack stops receiving routed events.",
+      fields: [{ k: "url", label: "Webhook URL", ph: "https://hooks.slack.com/services/…" }] },
+    { type: "telegram", label: "Telegram", off: "Off = Telegram stops receiving routed events.",
+      fields: [
+        { k: "token", label: "Bot token", ph: "123456:ABC-…" },
+        { k: "chat_id", label: "Chat ID", ph: "-1001234567890" },
+        { k: "thread_id", label: "Thread ID (optional)", ph: "leave blank for the main chat" }
+      ] },
+    { type: "pushover", label: "Pushover", off: "Off = Pushover stops receiving routed events.",
+      fields: [
+        { k: "user_key", label: "User key", ph: "u…" },
+        { k: "api_token", label: "API token", ph: "a…" }
+      ] },
+    { type: "webhook", label: "Webhook", off: "Off = this endpoint stops receiving routed events.",
+      fields: [{ k: "url", label: "Endpoint URL", ph: "https://example.com/hook" }] }
+  ];
+
+  // Last-known settings envelope, held so a live matrix toggle can materialize the
+  // current effective channel set before flipping one cell (see notifEventChannels).
+  var notifCache = null;
+
+  // ── Pure builders (node-pinned) ──────────────────────────────────────────────
+
+  function notifTransportLabel(v) {
+    for (var i = 0; i < NOTIF_TRANSPORTS.length; i++) if (NOTIF_TRANSPORTS[i].v === v) return NOTIF_TRANSPORTS[i].label;
+    return v || "instance";
+  }
+
+  // The 6 routing-matrix columns: email + the 5 chat channels. Email is a real
+  // channel whose per-event control is the settings boolean; the chat channels'
+  // per-event control is event_routes. Each column writes to its OWN endpoint.
+  function notifMatrixColumns() {
+    return [{ type: "email", label: "Email" }].concat(
+      NOTIF_CHANNELS.map(function (c) { return { type: c.type, label: c.label }; })
+    );
+  }
+
+  // A channel's {enabled, configured} truth from the settings view, defaulting to
+  // an unconfigured/disabled channel when the team has never touched it.
+  function notifChannelState(settings, type) {
+    var list = (settings && settings.channels) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].type === type) return list[i];
+    return { type: type, enabled: false, configured: false };
+  }
+
+  // The honest per-cell state for event×channel. Email cell = the per-event
+  // boolean. Chat cell = explicitly routed (event_routes carries the event), OR a
+  // `chat_default_on` failure event with no custom route yet AND the channel is
+  // enabled — the latter is flagged `isDefault` so the UI never paints a default
+  // fan-out as an explicit choice. A disabled chat channel can't receive, so its
+  // cells read off + not-toggleable.
+  function notifCellState(settings, event, type) {
+    settings = settings || {};
+    if (type === "email") return { on: settings[event] === true, isDefault: false, endpoint: "email", enabled: true };
+    var ch = notifChannelState(settings, type);
+    var routes = settings.event_routes || {};
+    if (Object.prototype.hasOwnProperty.call(routes, event)) {
+      var arr = routes[event] || [];
+      return { on: arr.indexOf(type) !== -1, isDefault: false, endpoint: "chat", enabled: ch.enabled };
+    }
+    var defaults = settings.chat_default_on || [];
+    var def = defaults.indexOf(event) !== -1 && ch.enabled === true;
+    return { on: def, isDefault: def, endpoint: "chat", enabled: ch.enabled };
+  }
+
+  // The new channel-type list for PUT /v1/notifications/events when flipping
+  // `type` on `event`. If the event is on its default fan-out (no explicit route),
+  // the current set is MATERIALIZED from every enabled channel first, so the first
+  // edit doesn't silently drop the other default-on channels.
+  function notifEventChannels(settings, event, type, on) {
+    settings = settings || {};
+    var routes = settings.event_routes || {};
+    var current;
+    if (Object.prototype.hasOwnProperty.call(routes, event)) {
+      current = (routes[event] || []).slice();
+    } else if ((settings.chat_default_on || []).indexOf(event) !== -1) {
+      current = NOTIF_CHANNELS
+        .filter(function (c) { return notifChannelState(settings, c.type).enabled === true; })
+        .map(function (c) { return c.type; });
+    } else {
+      current = [];
+    }
+    var idx = current.indexOf(type);
+    if (on && idx === -1) current.push(type);
+    if (!on && idx !== -1) current.splice(idx, 1);
+    return current;
+  }
+
+  // The semantic tone of a delivery — sent→ok, failed→danger, pending→info, with
+  // an http_status override (2xx→ok, 4xx/5xx→danger) mirroring the webhook grammar.
+  function notifDeliveryTone(d) {
+    d = d || {};
+    if (d.http_status != null) {
+      var code = Number(d.http_status);
+      if (code >= 200 && code < 300) return "ok";
+      if (code >= 400) return "danger";
+      return "info";
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "sent") return "ok";
+    if (s === "failed") return "danger";
+    return "info";
+  }
+
+  // The status-pill label: an http_status reads "200 OK" / "HTTP 500"; otherwise
+  // the capitalized delivery status (pending|sent|failed).
+  function notifDeliveryStatusLabel(d) {
+    d = d || {};
+    if (d.http_status != null) {
+      var n = Number(d.http_status);
+      return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "sent") return "Sent";
+    if (s === "failed") return "Failed";
+    return "Pending";
+  }
+
+  // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
+  // recipient leads (mono), a toned status pill, then channel · event · attempts,
+  // the relative time, and — on a failure — the verbatim last_error on its own line.
+  function notifDeliveryRowHtml(d) {
+    d = d || {};
+    var tone = notifDeliveryTone(d);
+    var recipient = d.recipient ? esc(d.recipient) : "&mdash;";
+    var channel = esc(d.channel || "email");
+    var event = esc(d.event || "—");
+    var attempts = d.attempts != null
+      ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
+      : null;
+    var meta = [channel, event].concat(attempts ? [attempts] : []).join(" &middot; ");
+    var err = d.last_error != null && String(d.last_error) !== ""
+      ? '<span class="wh-del-err">' + esc(d.last_error) + "</span>"
+      : "";
+    return '<div class="wh-del-row">' +
+      '<span class="wh-del-event">' + recipient + "</span>" +
+      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(notifDeliveryStatusLabel(d)) + "</span>" +
+      '<span class="wh-del-meta">' + meta + "</span>" +
+      '<span class="wh-del-spacer"></span>' +
+      '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
+      err +
+      "</div>";
+  }
+
+  // Delivery-log body states: populated card / honest empty line.
+  function notifDeliveriesHtml(list) {
+    if (!list || !list.length) return '<div class="wh-del-empty dim">No notifications have been delivered yet.</div>';
+    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+  }
+
+  // The honest degrade when the deliveries route is absent (older control plane) or
+  // errors — the log is ABOUT the send record, not served by it, so it never spins.
+  function notifDeliveriesErrorHtml() {
+    return '<div class="wh-del-empty dim">Couldn\'t load the delivery log &mdash; it may be momentarily unavailable. Try again shortly.</div>';
+  }
+
+  // A masked secret ("********" when stored, null when unset) → the stored-or-empty
+  // placeholder. Secrets are never echoed, so the input starts blank either way.
+  function notifSecretFieldHtml(id, label, masked, ph, type) {
+    var stored = masked != null && masked !== "";
+    return '<div class="field"><label class="label" for="' + id + '">' + esc(label) + "</label>" +
+      '<input class="form-input" id="' + id + '" type="' + (type || "text") + '" placeholder="' +
+      esc(stored ? "•••••••• (stored)" : ph) + '"></div>';
+  }
+
+  function notifTransportSegHtml(transport) {
+    return '<div class="seg" id="notif-transport-seg" role="group" aria-label="Email transport">' +
+      NOTIF_TRANSPORTS.map(function (t) {
+        return '<button class="seg-btn" type="button" data-value="' + esc(t.v) + '" aria-pressed="' +
+          (t.v === transport ? "true" : "false") + '">' + esc(t.label) + "</button>";
+      }).join("") + "</div>";
+  }
+
+  // The email-delivery card. Admin: a buffered form (transport seg + from + SMTP)
+  // with its own save-row → PUT /settings. Member: a read-only definition list —
+  // no inputs, no save-row, no affordances (GR33 plain-member law).
+  function notifEmailSectionHtml(s, canManage) {
+    s = s || {};
+    var transport = s.transport || "instance";
+    if (!canManage) {
+      return '<section class="set-section">' +
+        '<h3 class="set-h">Email delivery</h3>' +
+        '<p class="set-purpose">Your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<dl class="set-readonly">' +
+          "<div><dt>Email alerts</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
+          "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
+          "<div><dt>From address</dt><dd>" + esc(s.from_address || "—") + "</dd></div>" +
+        "</dl></section>";
+    }
+    var smtp =
+      '<div id="notif-smtp"' + (transport !== "smtp" ? " hidden" : "") + ">" +
+        notifSecretFieldHtml("notif-smtp-host", "SMTP host", s.smtp_host, "smtp.example.com") +
+        notifSecretFieldHtml("notif-smtp-user", "SMTP username", s.smtp_username, "username") +
+        notifSecretFieldHtml("notif-smtp-pass", "SMTP password", s.smtp_password, "password", "password") +
+        '<div class="field"><label class="label" for="notif-smtp-port">SMTP port</label>' +
+          '<input class="form-input" id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
+      "</div>";
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Email delivery</h3>' +
+      '<p class="set-purpose">The transport your team\'s alert email is sent over, and who it comes from.</p>' +
+      '<div class="field"><label class="set-toggle"><input type="checkbox" id="notif-alerts"' +
+        (s.alerts_enabled !== false ? " checked" : "") + "> Email alerts enabled</label></div>" +
+      '<div class="field"><span class="label">Transport</span>' + notifTransportSegHtml(transport) + "</div>" +
+      '<div class="field"><label class="label" for="notif-from-addr">From address</label>' +
+        '<input class="form-input" id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
+      smtp +
+      '<div class="set-save-row"><span class="set-ack dim" id="notif-email-ack" aria-live="polite"></span>' +
+        '<button class="btn btn-primary" id="notif-email-save" type="button">Save email settings</button></div>' +
+      "</section>";
+  }
+
+  // One chat-channel row: a `.set-check` enable (name + configured tag + mandatory
+  // consequence sub-line) plus the write-only credential fields for its shape, and
+  // a "Send test" affordance only when the channel is enabled AND configured.
+  function notifChannelRowHtml(s, ch) {
+    var st = notifChannelState(s, ch.type);
+    var tag = st.configured
+      ? '<span class="set-cred-tag">configured</span>'
+      : '<span class="set-cred-tag set-cred-tag--empty">not configured</span>';
+    var creds = ch.fields.map(function (f) {
+      return '<div class="field"><label class="label">' + esc(f.label) + "</label>" +
+        '<input class="form-input" type="text" data-cred data-channel="' + esc(ch.type) + '" data-key="' + esc(f.k) + '" placeholder="' +
+        esc(st.configured ? "•••••••• (stored)" : f.ph) + '"></div>';
+    }).join("");
+    var test = st.enabled && st.configured
+      ? '<button class="btn btn-ghost btn-sm" type="button" data-notif-chan-test="' + esc(ch.type) + '">Send test</button>'
+      : "";
+    return '<div class="set-channel" data-channel-row="' + esc(ch.type) + '">' +
+      '<label class="set-check"><input type="checkbox" data-chan-enable data-channel="' + esc(ch.type) + '" data-initial="' +
+        (st.enabled ? "1" : "0") + '"' + (st.enabled ? " checked" : "") + ">" +
+        '<span class="set-check-main"><span class="set-check-name">' + esc(ch.label) + " " + tag + "</span>" +
+        '<span class="set-check-sub">' + esc(ch.off) + "</span></span></label>" +
+      '<div class="set-channel-creds">' + creds + test + "</div>" +
+      "</div>";
+  }
+
+  // The chat-channels card — a buffered form; the save-row PUTs only the touched
+  // channels (each to the same /channels endpoint, so one button is honest).
+  function notifChannelsSectionHtml(s) {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Chat channels</h3>' +
+      '<p class="set-purpose">Route alerts to Discord, Slack, Telegram, Pushover, or a raw webhook. Credentials are write-only &mdash; we seal them and never show them again.</p>' +
+      NOTIF_CHANNELS.map(function (ch) { return notifChannelRowHtml(s, ch); }).join("") +
+      '<div class="set-save-row"><span class="set-ack dim" id="notif-channels-ack" aria-live="polite"></span>' +
+        '<button class="btn btn-primary" id="notif-channels-save" type="button">Save channels</button></div>' +
+      "</section>";
+  }
+
+  function notifMatrixCellHtml(s, event, col) {
+    var st = notifCellState(s, event, col.type);
+    var cls = "set-matrix-cell" + (st.isDefault ? " set-matrix-cell--default" : "");
+    var dis = col.type !== "email" && st.enabled === false ? " disabled" : "";
+    return '<label class="' + cls + '"><input type="checkbox" data-notif-cell data-event="' + esc(event) +
+      '" data-channel="' + esc(col.type) + '"' + (st.on ? " checked" : "") + dis +
+      ' aria-label="' + esc(event) + " via " + esc(col.label) + '"></label>';
+  }
+
+  // The event×channel routing matrix — a LIVE grid (no save-row; each cell writes
+  // on toggle). Columns = email + 5 chat channels; rows = the 9 events; the
+  // always-send `test` row is stated, never a lying toggle.
+  function notifMatrixSectionHtml(s) {
+    var cols = notifMatrixColumns();
+    var head = '<div class="set-matrix-corner"></div>' + cols.map(function (c) {
+      var off = c.type !== "email" && notifChannelState(s, c.type).enabled !== true;
+      return '<div class="set-matrix-col">' + esc(c.label) + (off ? '<span class="set-matrix-off">off</span>' : "") + "</div>";
+    }).join("");
+    var rows = NOTIF_EVENTS.map(function (pair) {
+      return '<div class="set-matrix-event">' + esc(pair[1]) + "</div>" +
+        cols.map(function (c) { return notifMatrixCellHtml(s, pair[0], c); }).join("");
+    }).join("");
+    var testRow = '<div class="set-matrix-event">Test</div>' +
+      '<div class="set-matrix-testcell dim">Always sent to every enabled channel &mdash; fire one with &ldquo;Send test&rdquo;.</div>';
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Event routing</h3>' +
+      '<p class="set-purpose">Which channels each event notifies. Failure events fan to every enabled channel by default; changes save the instant you toggle.</p>' +
+      '<div class="set-matrix"><div class="set-matrix-grid" id="notif-matrix">' + head + rows + testRow + "</div></div>" +
+      '<div class="set-matrix-legend dim">Dashed cells are on by default for failure events until you customize them.</div>' +
+      '<div class="set-matrix-ack dim" id="notif-matrix-ack" aria-live="polite"></div>' +
+      "</section>";
+  }
+
+  function notifDeliveriesShellHtml() {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Delivery log</h3>' +
+      '<p class="set-purpose">The last 50 notification sends, newest first. Filtering isn\'t available yet.</p>' +
+      '<div id="notif-deliveries-body"><div class="loading">Loading delivery log&hellip;</div></div>' +
+      "</section>";
+  }
+
+  // The plain-member notice: channels, routing, and the delivery log are admin-only
+  // — an honest line, never a disabled ghost or a silent-403 button (GR33).
+  function notifMemberAdminNoticeHtml() {
+    return '<section class="set-section">' +
+      '<h3 class="set-h">Channels, routing &amp; delivery log</h3>' +
+      '<p class="set-purpose">Chat channels, the event-routing matrix, and the delivery log are managed by team admins.</p>' +
+      "</section>";
+  }
+
+  // The whole page: admin gets every section; a member gets read-only email + the
+  // admin-only notice (no save-rows, no write affordances).
+  function notifPageHtml(s, opts) {
+    opts = opts || {};
+    if (!opts.canManage) return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml();
+    return notifEmailSectionHtml(s, true) + notifChannelsSectionHtml(s) + notifMatrixSectionHtml(s) + notifDeliveriesShellHtml();
+  }
+
+  // ── DOM mounts (browser + smoke verified) ────────────────────────────────────
+
+  function notifCanManage() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
   function loadNotifications() {
     var box = $("#notif-body");
     if (!box) return;
@@ -1516,87 +2166,164 @@
     });
   }
 
-  // Render the settings form. Secrets arrive MASKED ("********") — a placeholder
-  // stands in for a stored value; leaving the field blank on save keeps it.
   function renderNotifications(s) {
+    notifCache = s;
     var box = $("#notif-body");
     if (!box) return;
-    var transports = ["instance", "smtp", "api"];
-    var transportOpts = transports.map(function (t) {
-      return '<option value="' + t + '"' + (s.transport === t ? " selected" : "") + ">" +
-        (t === "instance" ? "Barkpark platform" : t.toUpperCase()) + "</option>";
-    }).join("");
+    var canManage = notifCanManage();
+    box.innerHTML = notifPageHtml(s, { canManage: canManage });
 
-    var toggles = NOTIF_EVENTS.map(function (pair) {
-      var key = pair[0], label = pair[1];
-      var on = s[key] === true;
-      return '<label class="notif-toggle"><input type="checkbox" data-event="' + key + '"' +
-        (on ? " checked" : "") + "> " + esc(label) + "</label>";
-    }).join("");
+    // The header "Send test email" action is admin-only (email test is a mutation).
+    var testBtn = $("#notif-test");
+    if (testBtn) testBtn.hidden = !canManage;
+    if (!canManage) return; // member: read-only, nothing to wire.
 
-    box.innerHTML =
-      '<div class="notif-card">' +
-      '<label class="notif-toggle"><input type="checkbox" id="notif-alerts"' +
-        (s.alerts_enabled !== false ? " checked" : "") + "> <b>Email alerts enabled</b></label>" +
-      '<div class="notif-row"><label>Transport</label>' +
-        '<select id="notif-transport" class="form-input">' + transportOpts + "</select></div>" +
-      '<div class="notif-row"><label>From address</label>' +
-        '<input id="notif-from-addr" class="form-input" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
-      '<div class="notif-smtp">' +
-        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" class="form-input" placeholder="' +
-          (s.smtp_host ? "•••••••• (stored)" : "smtp.example.com") + '"></div>' +
-        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" class="form-input" placeholder="' +
-          (s.smtp_username ? "•••••••• (stored)" : "username") + '"></div>' +
-        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" class="form-input" type="password" placeholder="' +
-          (s.smtp_password ? "•••••••• (stored)" : "password") + '"></div>' +
-        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" class="form-input" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
-      "</div>" +
-      '<h2 class="notif-h">Events</h2><div class="notif-toggles">' + toggles + "</div>" +
-      '<button class="btn btn-primary" id="notif-save" type="button">Save settings</button>' +
-      '<span id="notif-status" class="dim"></span>' +
-      "</div>";
+    // Email section: transport seg toggles SMTP visibility + drives the save.
+    var seg = $("#notif-transport-seg");
+    if (seg) {
+      seg.querySelectorAll(".seg-btn").forEach(function (b) {
+        b.addEventListener("click", function () {
+          seg.querySelectorAll(".seg-btn").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+          var smtp = $("#notif-smtp");
+          if (smtp) smtp.hidden = b.getAttribute("data-value") !== "smtp";
+        });
+      });
+    }
+    var emailSave = $("#notif-email-save");
+    if (emailSave) emailSave.addEventListener("click", saveNotifEmail);
 
-    var save = $("#notif-save");
-    if (save) save.addEventListener("click", saveNotifications);
+    // Channels section: one save-row for all touched channels + per-channel test.
+    var chanSave = $("#notif-channels-save");
+    if (chanSave) chanSave.addEventListener("click", saveNotifChannels);
+    document.querySelectorAll("[data-notif-chan-test]").forEach(function (b) {
+      b.addEventListener("click", function () { sendChatTest(b.getAttribute("data-notif-chan-test")); });
+    });
 
-    // SMTP fields only apply to the "smtp" transport — hide them otherwise.
-    // (Blank secret fields keep stored values on save, so hiding is safe.)
-    var transport = $("#notif-transport");
-    var smtp = box.querySelector(".notif-smtp");
-    function syncSmtpVisibility() { smtp.hidden = transport.value !== "smtp"; }
-    transport.addEventListener("change", syncSmtpVisibility);
-    syncSmtpVisibility();
+    // Routing matrix: each cell persists on toggle.
+    document.querySelectorAll("[data-notif-cell]").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        onNotifCellToggle(cb.getAttribute("data-event"), cb.getAttribute("data-channel"), cb.checked, cb);
+      });
+    });
+
+    loadNotifDeliveries();
   }
 
-  function saveNotifications() {
+  function loadNotifDeliveries() {
+    var box = $("#notif-deliveries-body");
+    if (!box) return;
+    api("GET", "/v1/notifications/deliveries").then(function (r) {
+      if (r.ok && r.data && Array.isArray(r.data.deliveries)) box.innerHTML = notifDeliveriesHtml(r.data.deliveries);
+      else box.innerHTML = notifDeliveriesErrorHtml();
+    });
+  }
+
+  function notifReadTransport() {
+    var seg = $("#notif-transport-seg");
+    if (!seg) return "instance";
+    var on = seg.querySelector(".seg-btn[aria-pressed='true']");
+    return (on && on.getAttribute("data-value")) || "instance";
+  }
+
+  function saveNotifEmail() {
+    var ack = $("#notif-email-ack");
     var body = {
       alerts_enabled: $("#notif-alerts").checked,
-      transport: $("#notif-transport").value,
-      from_address: $("#notif-from-addr").value.trim()
+      transport: notifReadTransport(),
+      from_address: ($("#notif-from-addr").value || "").trim()
     };
-    // Only send a secret when the user actually typed one (blank keeps stored).
-    var host = $("#notif-smtp-host").value.trim();
-    var user = $("#notif-smtp-user").value.trim();
+    // Only send a secret the user actually typed — a blank field keeps the sealed one.
+    var host = ($("#notif-smtp-host").value || "").trim();
+    var user = ($("#notif-smtp-user").value || "").trim();
     var pass = $("#notif-smtp-pass").value;
-    var port = $("#notif-smtp-port").value.trim();
+    var port = ($("#notif-smtp-port").value || "").trim();
     if (host) body.smtp_host = host;
     if (user) body.smtp_username = user;
     if (pass) body.smtp_password = pass;
     if (port) body.smtp_port = parseInt(port, 10);
-    NOTIF_EVENTS.forEach(function (pair) {
-      var el = document.querySelector('input[data-event="' + pair[0] + '"]');
-      if (el) body[pair[0]] = el.checked;
-    });
-
-    var status = $("#notif-status");
-    setText(status, "Saving…");
+    setText(ack, "Saving…");
     api("PUT", "/v1/notifications/settings", body).then(function (r) {
-      if (r.ok && r.data && r.data.settings) {
-        renderNotifications(r.data.settings);
-        setText($("#notif-status"), "Saved.");
-      } else {
-        setText($("#notif-status"), friendly(r.data, "Couldn't save."));
+      if (r.ok && r.data && r.data.settings) { notifCache = r.data.settings; setText(ack, "Saved."); }
+      else setText(ack, friendly(r.data, "Couldn't save."));
+    });
+  }
+
+  function saveNotifChannels() {
+    var ack = $("#notif-channels-ack");
+    var jobs = [];
+    document.querySelectorAll("[data-channel-row]").forEach(function (row) {
+      var type = row.getAttribute("data-channel-row");
+      var enableCb = row.querySelector("[data-chan-enable]");
+      var enabled = !!(enableCb && enableCb.checked);
+      var initial = !!(enableCb && enableCb.getAttribute("data-initial") === "1");
+      var creds = {}, typed = false;
+      row.querySelectorAll("[data-cred]").forEach(function (inp) {
+        var v = (inp.value || "").trim();
+        if (v) { creds[inp.getAttribute("data-key")] = v; typed = true; }
+      });
+      // PUT only channels the user touched — an untouched channel would re-hit the
+      // 422 "enable with no credentials" guard for no reason.
+      if (enabled !== initial || typed) {
+        var body = { type: type, enabled: enabled };
+        if (typed) body.credentials = creds;
+        jobs.push(body);
       }
+    });
+    if (!jobs.length) { setText(ack, "No changes."); return; }
+    setText(ack, "Saving…");
+    var i = 0, lastErr = null;
+    (function next() {
+      if (i >= jobs.length) {
+        if (lastErr) setText(ack, lastErr);
+        else { setText(ack, "Saved."); loadNotifications(); } // re-read: configured/enabled truth + matrix columns
+        return;
+      }
+      var body = jobs[i++];
+      api("PUT", "/v1/notifications/channels", body).then(function (r) {
+        if (r.ok && r.data && r.data.settings) notifCache = r.data.settings;
+        else lastErr = friendly(r.data, "Couldn't save " + body.type + ".");
+        next();
+      });
+    })();
+  }
+
+  // A live matrix cell: email column → PUT /settings {event: bool}; chat column →
+  // PUT /events {event, channels} over the materialized set. A failed write reverts
+  // the checkbox (never a UI that lies about a change the server didn't accept).
+  function onNotifCellToggle(event, type, on, cb) {
+    var ack = $("#notif-matrix-ack");
+    setText(ack, "Saving…");
+    var done = function (r) {
+      if (r.ok && r.data && r.data.settings) { notifCache = r.data.settings; setText(ack, "Saved."); }
+      else { cb.checked = !on; setText(ack, friendly(r.data, "Couldn't save.")); }
+    };
+    if (type === "email") {
+      var body = {}; body[event] = on;
+      api("PUT", "/v1/notifications/settings", body).then(done);
+    } else {
+      api("PUT", "/v1/notifications/events", { event: event, channels: notifEventChannels(notifCache, event, type, on) }).then(done);
+    }
+  }
+
+  function sendChatTest(type) {
+    api("POST", "/v1/notifications/test", { channel: type }).then(function (r) {
+      if (r.ok || r.status === 202) toast({ kind: "success", title: "Test queued", body: "Sent to " + type + "." });
+      else toast({ kind: "error", title: "Couldn't send test", body: friendly(r.data, "Try again shortly.") });
+    });
+  }
+
+  // The header "Send test email" action — the wave's one sanctioned cross-region
+  // move (it physically lived inside the TOKENS span). Email test over the platform
+  // transport, rate-limited server-side to one per 10s; every failure mode gets an
+  // honest toast (rate_limited retry_after, no_recipient, generic).
+  function sendTestNotification() {
+    api("POST", "/v1/notifications/test", {}).then(function (r) {
+      if (r.ok) { toast({ kind: "success", title: "Test email sent" }); return; }
+      var msg;
+      if (r.data && r.data.error === "rate_limited") msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
+      else if (r.data && r.data.error === "no_recipient") msg = "No team member has a confirmed email to send to.";
+      else msg = friendly(r.data, "Couldn't send a test.");
+      toast({ kind: "error", title: "Test not sent", body: msg });
     });
   }
 
@@ -1642,7 +2369,7 @@
       box.innerHTML =
         '<div class="empty-state"><h2>No API tokens yet</h2>' +
         "<p>Mint a Personal Access Token to call the Barkpark Cloud API from scripts and CI.</p>" +
-        '<button class="btn btn-primary" id="token-add-empty" type="button">New token</button></div>';
+        '<button class="btn btn-primary" id="token-add-empty" type="button">Create token&hellip;</button></div>';
       var b = $("#token-add-empty");
       if (b) b.addEventListener("click", openTokenModal);
       return;
@@ -1660,8 +2387,11 @@
     var abilities = (t.abilities || []).map(function (a) {
       return '<span class="token-chip">' + esc(a) + "</span>";
     }).join("");
-    var lastUsed = t.last_used_at ? fmtTokenDate(t.last_used_at) : "never used";
+    // Real pat_json fields only (id/name/abilities/last_used_at/expires_at/
+    // revoked_at/inserted_at) — no faked prefix/preview: the server never emits one.
+    var lastUsed = t.last_used_at ? "used " + fmtTokenDate(t.last_used_at) : "never used";
     var expiry = t.expires_at ? "expires " + fmtTokenDate(t.expires_at) : "no expiry";
+    var created = t.inserted_at ? "created " + fmtTokenDate(t.inserted_at) : "";
     var statusPill = revoked
       ? '<span class="badge"><span class="dot down"></span>Revoked</span>'
       : '<span class="badge"><span class="dot up"></span>Active</span>';
@@ -1669,26 +2399,55 @@
       ? ""
       : '<button class="btn btn-ghost btn-sm token-revoke" data-id="' + esc(t.id) +
         '" data-name="' + esc(t.name) + '" type="button">Revoke</button>';
+    var dot = '<span class="token-dot">&middot;</span>';
 
-    return '<div class="fleet-row token-row' + (revoked ? " is-revoked" : "") + '">' +
+    return '<div class="token-row' + (revoked ? " is-revoked" : "") + '">' +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(t.name) + "</div>" +
         '<div class="token-meta dim">' + abilities +
-          '<span class="token-dot">&middot;</span>' + esc(lastUsed) +
-          '<span class="token-dot">&middot;</span>' + esc(expiry) +
+          dot + esc(lastUsed) +
+          dot + esc(expiry) +
+          (created ? dot + esc(created) : "") +
         "</div>" +
       "</div>" +
       '<div class="fleet-badges">' + statusPill + action + "</div>" +
     "</div>";
   }
 
+  // A member may mint a READ-ONLY PAT only — the server's pat_abilities_allowed?
+  // caps anyone below owner/admin at ["read"]. The picker mirrors that truth
+  // UP-FRONT (GR34), never a post-click 403 toast.
+  function canMintAnyAbility() {
+    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+  }
+
+  function tokenAbilitiesFieldHtml() {
+    if (canMintAnyAbility()) {
+      var abilityRows = TOKEN_ABILITIES.map(function (a) {
+        // GR34 .set-check grammar (generalized from the old .token-ability idiom):
+        // bordered card row + bold name + MANDATORY consequence sub-line.
+        return '<label class="set-check"><input type="checkbox" class="token-ab" value="' + esc(a.id) + '"' +
+          (a.id === "read" ? " checked" : "") + ' />' +
+          '<span class="set-check-main"><span class="set-check-name">' + esc(a.label) + "</span>" +
+          '<span class="set-check-sub">' + esc(a.sub) + "</span></span></label>";
+      }).join("");
+      return '<div class="field"><span class="label">Abilities</span>' +
+        '<div class="set-check-list">' + abilityRows + "</div></div>";
+    }
+    // Plain member: read-only scope stated as fact, not as a disabled ghost of
+    // write/deploy/root (anatomy law: never render an unpickable option).
+    return '<div class="field"><span class="label">Abilities</span>' +
+      '<div class="set-check-list">' +
+        '<div class="set-check set-check--scope" id="token-member-scope">' +
+          '<span class="set-check-main"><span class="set-check-name">Read</span>' +
+          '<span class="set-check-sub">Read control-plane resources</span></span></div>' +
+      "</div>" +
+      '<p class="field-hint dim" id="token-member-note">Members can create read-only tokens. Ask an admin for write, deploy, or root.</p>' +
+      "</div>";
+  }
+
   function openTokenModal() {
-    var abilityRows = TOKEN_ABILITIES.map(function (a) {
-      return '<label class="token-ability"><input type="checkbox" class="token-ab" value="' + esc(a.id) + '"' +
-        (a.id === "read" ? " checked" : "") + ' />' +
-        '<span class="token-ability-main"><span class="token-ability-name">' + esc(a.label) + "</span>" +
-        '<span class="token-ability-sub dim">' + esc(a.sub) + "</span></span></label>";
-    }).join("");
+    var privileged = canMintAnyAbility();
     var expiryOpts = TOKEN_EXPIRIES.map(function (e) {
       return '<option value="' + esc(e.v) + '"' + (e.v === "30" ? " selected" : "") + ">" + esc(e.label) + "</option>";
     }).join("");
@@ -1698,8 +2457,7 @@
       '<p class="modal-sub">Scope the token to the abilities it needs. You will see the token value once.</p>' +
       '<div class="field"><label class="label" for="token-name">Name</label>' +
         '<input class="form-input" id="token-name" type="text" placeholder="CI deploy key" /></div>' +
-      '<div class="field"><span class="label">Abilities</span>' +
-        '<div class="token-ability-list">' + abilityRows + "</div></div>" +
+      tokenAbilitiesFieldHtml() +
       '<div class="field"><label class="label" for="token-expiry">Expiry</label>' +
         '<select class="form-input" id="token-expiry">' + expiryOpts + "</select></div>" +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-submit" type="button">Create token</button></div>'
@@ -1707,31 +2465,40 @@
 
     // Client-side exclusivity mirror (the SERVER is authoritative via
     // normalize_abilities): checking root/deploy clears the others, and any
-    // other check clears root/deploy.
-    var boxes = $("#modal-body").querySelectorAll(".token-ab");
-    boxes.forEach(function (cb) {
-      cb.addEventListener("change", function () {
-        if (!cb.checked) return;
-        var v = cb.value;
-        boxes.forEach(function (other) {
-          if (other === cb) return;
-          var exclusive = v === "root" || v === "deploy" || other.value === "root" || other.value === "deploy";
-          if (exclusive) other.checked = false;
+    // other check clears root/deploy. Members render no checkboxes (scope is
+    // fixed to read), so this is a no-op for them.
+    if (privileged) {
+      var boxes = $("#modal-body").querySelectorAll(".token-ab");
+      boxes.forEach(function (cb) {
+        cb.addEventListener("change", function () {
+          if (!cb.checked) return;
+          var v = cb.value;
+          boxes.forEach(function (other) {
+            if (other === cb) return;
+            var exclusive = v === "root" || v === "deploy" || other.value === "root" || other.value === "deploy";
+            if (exclusive) other.checked = false;
+          });
         });
       });
-    });
+    }
     $("#token-submit").addEventListener("click", submitToken);
     $("#token-name").focus();
   }
 
   function submitToken() {
     var name = ($("#token-name").value || "").trim();
+    var privileged = canMintAnyAbility();
     var abilities = [];
-    $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
+    if (privileged) {
+      $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
+    } else {
+      // Member scope is fixed to read (no pickers rendered) — mirror the server cap.
+      abilities = ["read"];
+    }
     var expiry = $("#token-expiry").value;
 
     if (name.length < 3) { toast({ kind: "error", title: "Name must be at least 3 characters." }); return; }
-    if (!abilities.length) { toast({ kind: "error", title: "Pick at least one ability." }); return; }
+    if (privileged && !abilities.length) { toast({ kind: "error", title: "Pick at least one ability." }); return; }
 
     var btn = $("#token-submit");
     btn.disabled = true;
@@ -1749,36 +2516,43 @@
     });
   }
 
-  function sendTestNotification() {
-    var status = $("#notif-status");
-    if (status) setText(status, "Sending test…");
-    api("POST", "/v1/notifications/test", {}).then(function (r) {
-      var msg;
-      if (r.ok) msg = "Test email sent.";
-      else if (r.data && r.data.error === "rate_limited")
-        msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
-      else msg = friendly(r.data, "Couldn't send a test.");
-      if ($("#notif-status")) setText($("#notif-status"), msg);
-    });
-  }
-
   // One-time reveal. The plaintext is shown here and NEVER again — closing
   // reloads the list (the new row shows, no plaintext).
-  function revealToken(plaintext, pat) {
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Token created</h2>' +
-      '<p class="modal-sub">Copy it now — <b>you will not see this token again.</b></p>' +
-      '<div class="token-reveal">' +
-        '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
-        '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+  // The reveal modal body. PURE (node-pinned) so smoke asserts the plaintext-once
+  // grammar without the click-opened modal: the amber only-time banner + a mono
+  // input-affix (copy + show/hide). pat_json carries no plaintext, so a refetch
+  // cannot recover it — this is the one moment.
+  function tokenRevealHtml(plaintext, pat) {
+    var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
+    return '<h2 class="modal-title" id="modal-title">Token created</h2>' +
+      '<div class="notice notice-warn" role="alert">This is the only time you’ll see this token. Copy it now and store it somewhere safe.</div>' +
+      '<div class="field"><label class="label" for="token-reveal-value">' + label + "</label>" +
+        '<div class="token-reveal">' +
+          '<div class="input-affix">' +
+            '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
+            '<button class="affix-btn" id="token-eye" type="button" tabindex="-1" aria-label="Hide token">' + EYE_SVG + "</button>" +
+          "</div>" +
+          '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+        "</div>" +
       "</div>" +
-      '<p class="field-hint dim">' + esc((pat && pat.name) || "") + '</p>' +
-      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>'
-    );
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>';
+  }
+
+  function revealToken(plaintext, pat) {
+    openModal(tokenRevealHtml(plaintext, pat));
     var input = $("#token-reveal-value");
     if (input) { input.focus(); input.select(); }
+    // Show/hide: revealed by default (it is the one moment), mask on demand for
+    // over-the-shoulder safety.
+    var shown = true;
+    var eye = $("#token-eye");
+    if (eye) eye.addEventListener("click", function () {
+      shown = !shown;
+      if (input) input.type = shown ? "text" : "password";
+      eye.setAttribute("aria-label", shown ? "Hide token" : "Show token");
+    });
     $("#token-copy").addEventListener("click", function () {
-      input.select();
+      if (input) input.select();
       var ok = false;
       try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
       if (!ok && navigator.clipboard) { navigator.clipboard.writeText(plaintext).then(function () {}); }
@@ -2239,8 +3013,8 @@
   // longer a view at all (A4/D66): it is the launchFlow() component, opened in a
   // modal or rendered as the empty-fleet welcome runway. Its old #launch bookmark
   // remaps to Overview (legacyRoute) and auto-opens the flow (wantsLaunchFlow).
-  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "activity"];
-  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members"];
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "env", "activity"];
+  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members", "env"];
 
   // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
   // #site/<id>), or the invitation-accept landing (#invitations/accept —
@@ -2401,11 +3175,12 @@
     }
     if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
-    if (r.view === "billing") renderRecommended();
-    if (r.view === "providers") { loadProviders(); loadGithub(); }
+    if (r.view === "billing") renderBilling();
+    if (r.view === "providers") { loadProviders(); loadGithub(); loadCapabilityMatrix(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
     if (r.view === "members") loadMembers(); // C10: the team Members settings panel
+    if (r.view === "env") loadEnvVars(); // G-06: the team environment-variables panel
     if (r.view === "activity") loadActivity();
   }
 
@@ -8703,7 +9478,30 @@
   }
   function activePlan() { return planFromSub(subCache); }
 
-  function renderRecommended() {
+  // GR36: billing WRITES (Stripe portal + cancel) are owner-only —
+  // `require_primary_team_owner`, stricter than every other settings gate. The
+  // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
+  // node test pins the gate; the DOM branch reads it via billingIsOwner().
+  function billingCanManage(role) { return role === "owner"; }
+  function billingIsOwner() { return !!(meCache && billingCanManage(meCache.role)); }
+
+  // Pure: does the team hold a REAL paid subscription (a catalog plan that isn't
+  // Free) in a state the Stripe portal can act on? A trial (plan "trial", not in
+  // the catalog) and Free both answer false — neither has a portal to open or a
+  // plan to cancel. Reuses catalogPlan verbatim.
+  function billingHasPaidPlan(sub) {
+    if (!sub || (sub.status !== "active" && sub.status !== "past_due")) return false;
+    var t = catalogPlan(sub.plan);
+    return !!t && !t.free;
+  }
+
+  // GR33 anatomy: billing is an ACTION page composed of .set-section cards — the
+  // plan STATE card, then the Manage-billing (portal) and Cancel-plan action
+  // sections. renderBilling() is the orchestrator: it owns the subscription
+  // guard (moved off renderPlanState) and, for a non-owner, swaps the whole
+  // surface to the read-only view. Owners get the interactive plan state + the
+  // two owner-gated action sections.
+  function renderBilling() {
     var box = $("#billing-recommended");
     if (!box) return;
 
@@ -8711,7 +9509,9 @@
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
       box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
-      loadSubscription().then(renderRecommended);
+      showBillingSection("#billing-manage-section", false);
+      showBillingSection("#billing-cancel-section", false);
+      loadSubscription().then(renderBilling);
       return;
     }
 
@@ -8724,14 +9524,182 @@
         '<div class="empty-state"><h2>Couldn\'t load your plan</h2>' +
           "<p>Check your connection and retry.</p>" +
           '<p><button class="btn btn-primary btn-sm" id="sub-retry" type="button">Retry</button></p></div>';
+      showBillingSection("#billing-manage-section", false);
+      showBillingSection("#billing-cancel-section", false);
       var rb = $("#sub-retry");
       if (rb) rb.addEventListener("click", function () {
         subError = false;
-        renderRecommended();
+        renderBilling();
       });
       return;
     }
 
+    // GR36 plain-member law: a non-owner (admin OR member) sees the plan state
+    // read-only with NO write CTA anywhere — never a disabled ghost. The honest
+    // "Only the team owner can manage billing." copy lives in the Manage section.
+    if (!billingIsOwner()) { renderBillingReadOnly(box); return; }
+
+    renderPlanState(box);
+    renderBillingManage(true);
+    renderBillingCancel(true);
+  }
+
+  function showBillingSection(sel, on) {
+    var s = $(sel);
+    if (s) s.hidden = !on;
+  }
+
+  // The non-owner surface: a read-only plan summary (pure models, ZERO buttons),
+  // no plan grid, and the Manage section carrying only the honest owner-gate
+  // copy. The Cancel section stays hidden — a member has nothing to cancel.
+  function renderBillingReadOnly(box) {
+    box.innerHTML = readOnlyPlanCardHtml(subCache);
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    renderBillingManage(false);
+    renderBillingCancel(false);
+  }
+
+  // A button-free plan card for the read-only (non-owner) view. Reuses the same
+  // pure models as the owner card — planFromSub / billingStatusBadge /
+  // billingStatusLabel / billingPeriodLine / priceFor / planFeatsHtml — so the
+  // numbers never diverge; it just omits every affordance.
+  function readOnlyPlanCardHtml(sub) {
+    var isTrial = !!sub && sub.plan === "trial";
+    if (isTrial) {
+      var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
+      var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
+      return '<div class="card plan-card">' +
+          '<div class="plan-head"><span class="plan-name">Free trial</span>' +
+            '<span class="trial-chip">' + esc(chip) + "</span></div>" +
+          '<p class="plan-tagline">A real dedicated instance, free while your trial runs.</p>' +
+        "</div>";
+    }
+    var plan = planFromSub(sub);
+    var periodLine = sub ? billingPeriodLine(sub) : "";
+    return '<div class="card plan-card">' +
+        '<div class="plan-head"><span class="plan-name">' + esc(planName(plan)) + "</span>" +
+          (sub
+            ? (sub.status === "past_due"
+                ? '<span class="plan-rec plan-rec--due">'
+                : '<span class="plan-rec">') + esc(billingStatusBadge(sub)) + "</span>"
+            : "") +
+        "</div>" +
+        '<div class="plan-price">' + esc(priceFor(plan)) + "<small>/mo</small></div>" +
+        planFeatsHtml(catalogPlan(plan)) +
+        (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
+        (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+      "</div>";
+  }
+
+  // The owner-gated Manage-billing (Stripe portal) section — GR36 invoice-less
+  // honesty: no invoice table ever exists server-side, so the copy points at the
+  // portal. Non-owner → the honest owner-gate line, no button. Owner without a
+  // paid plan (trial/free) → the section hides (nothing to manage; their action
+  // is to pick a plan in the state card above).
+  function renderBillingManage(owner) {
+    var body = $("#billing-manage");
+    if (!body) return;
+    if (!owner) {
+      showBillingSection("#billing-manage-section", true);
+      body.innerHTML = '<p class="set-purpose">Only the team owner can manage billing.</p>';
+      return;
+    }
+    if (!billingHasPaidPlan(subCache)) {
+      showBillingSection("#billing-manage-section", false);
+      body.innerHTML = "";
+      return;
+    }
+    showBillingSection("#billing-manage-section", true);
+    body.innerHTML =
+      '<p class="set-purpose">Update your card, download invoices, change or cancel your plan &mdash; all in the secure Stripe billing portal.</p>' +
+      '<button class="btn" id="plan-portal" type="button">Manage billing</button>';
+    var mp = $("#plan-portal");
+    if (mp) mp.addEventListener("click", function () { openBillingPortal(mp); });
+  }
+
+  // The owner-gated Cancel-plan action, in the danger grammar (GR36). Only shown
+  // when there is a paid plan to cancel and it is not ALREADY cancelling at the
+  // period end (a second cancel would be a no-op). "Cancel plan…" opens the
+  // password-reconfirm modal.
+  function renderBillingCancel(owner) {
+    var body = $("#billing-cancel");
+    if (!body) return;
+    var sub = subCache;
+    var canCancel = owner && billingHasPaidPlan(sub) && !(sub && sub.cancel_at_period_end);
+    if (!canCancel) {
+      showBillingSection("#billing-cancel-section", false);
+      body.innerHTML = "";
+      return;
+    }
+    showBillingSection("#billing-cancel-section", true);
+    body.innerHTML =
+      '<p class="set-purpose">Cancelling keeps your instances running until the end of the current billing period, then stops them &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<button class="btn btn-danger" id="plan-cancel" type="button">Cancel plan&hellip;</button>';
+    var cb = $("#plan-cancel");
+    if (cb) cb.addEventListener("click", openCancelPlanModal);
+  }
+
+  // GR36: the in-app cancel — a password-reconfirm modal riding the LIVE
+  // POST /v1/billing/cancel (owner + password gated; grace default, so the team
+  // stays entitled until the period end). Built on the openModal primitive (the
+  // confirm-modal grammar is typed-echo, not password, so this is its own thin
+  // modal) with the decision-25 failure contract: a wrong password renders an
+  // inline sentence, never a toast, and the button re-arms in place. A 401
+  // password_invalid is special-cased to honest wrong-password copy — the shared
+  // ERRORS slug means "new password too short" for registration, which would
+  // misread here.
+  function openCancelPlanModal() {
+    var body = openModal(
+      '<h2 class="modal-title" id="modal-title">Cancel your plan?</h2>' +
+      '<p class="modal-sub">Your instances keep running until the end of the current billing period, then they\'re stopped &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<div class="field"><label class="label" for="cancel-pw">Confirm your password</label>' +
+        '<input class="form-input" id="cancel-pw" type="password" autocomplete="current-password" /></div>' +
+      '<div class="cm-error" id="cancel-err" role="alert" hidden><p class="cm-error-msg" id="cancel-err-msg"></p></div>' +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Keep my plan</button>' +
+        '<button class="btn btn-danger" type="button" id="cancel-go">Cancel plan</button></div>'
+    );
+    if (!body) return;
+    var pw = $("#cancel-pw");
+    var go = $("#cancel-go");
+    var errBox = $("#cancel-err");
+    var errMsg = $("#cancel-err-msg");
+    function showErr(m) { if (errMsg) setText(errMsg, m); show(errBox); }
+
+    if (go) go.addEventListener("click", function () {
+      var password = pw ? pw.value : "";
+      if (!password) { showErr("Enter your password to confirm."); if (pw) pw.focus(); return; }
+      var prev = go.textContent;
+      go.disabled = true;
+      go.textContent = "Cancelling…";
+      hide(errBox);
+      api("POST", "/v1/billing/cancel", { password: password }).then(function (r) {
+        if (r.status === 200) {
+          closeModal();
+          toast({ kind: "success", title: "Plan cancelled",
+            body: "Your access continues until the end of the current billing period." });
+          // The cancel response carries {status, cancel_at_period_end} but NOT
+          // current_period_end — re-poll the real subscription so the plan card's
+          // billingPeriodLine renders the honest "Access until {date}". The server
+          // also pushed a "subscription" SSE event; this makes the update
+          // deterministic for the acting tab.
+          loadSubscription().then(function () {
+            if (currentView() === "billing") renderBilling();
+          });
+        } else {
+          go.disabled = false;
+          go.textContent = prev;
+          var msg = r.status === 401
+            ? "That password didn't match. Try again."
+            : friendly(r.data, "Couldn't cancel your plan. Please try again.");
+          showErr(msg);
+          if (r.status === 401 && pw) { pw.value = ""; pw.focus(); }
+        }
+      });
+    });
+  }
+
+  function renderPlanState(box) {
     // dwb-13: a team on its free trial gets a days-remaining badge + a
     // one-click upgrade CTA, ahead of the paid-plan state below.
     if (subCache && subCache.plan === "trial") {
@@ -8875,8 +9843,11 @@
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
-        '<button class="btn btn-block" id="plan-portal" type="button">Manage billing</button>' +
-        '<p class="plan-meta dim">Update your card, download invoices, change or cancel your plan — all in the secure Stripe billing portal.</p>' +
+        // GR33: this card is STATE only — the Manage-billing (portal) action and
+        // the invoice-less portal copy live in their own .set-section below, so
+        // an ACTION section carries the action (never a save-row, never a button
+        // buried in a status card). "See all plans" stays: it toggles the grid,
+        // a read affordance the card owns.
         '<a class="plan-more" id="plan-more">See all plans</a>' +
       "</div>";
   }
@@ -8887,8 +9858,6 @@
     if (grid) grid.hidden = true;
     var dp = $("#dunning-portal");
     if (dp) dp.addEventListener("click", function () { openBillingPortal(dp); });
-    var mp = $("#plan-portal");
-    if (mp) mp.addEventListener("click", function () { openBillingPortal(mp); });
     $("#plan-more").addEventListener("click", function () {
       var nowHidden = !grid.hidden;
       grid.hidden = nowHidden;
@@ -9057,6 +10026,12 @@
         // platform_operator is known, and refresh the scope label's team name.
         applyOperatorGate();
         setScopeLabel(parseHash(), shellNavLayer(parseHash()));
+        // G-01: billing gates its write affordances on meCache.role (owner-only,
+        // GR36). If the user deep-linked to #billing, the first render ran before
+        // /v1/me resolved — meCache was null and it fell to the read-only view.
+        // Re-render now that the real role is known so an owner isn't stranded on
+        // the member surface (mirrors loadSubscription's re-render seam).
+        if (currentView() === "billing") renderBilling();
       }
     });
   }
@@ -9620,7 +10595,7 @@
     fleet: invalidateFleet,
     subscription: function (v) {
       loadSubscription().then(function () {
-        if (v === "billing") renderRecommended();
+        if (v === "billing") renderBilling();
         // A4: the welcome runway's trial subline reads the same cache — keep any
         // mounted runway honest when the subscription flips (no-op otherwise).
         refreshRunwaySubline(document);
@@ -9707,7 +10682,7 @@
     loadSubscription().then(function (sub) {
       if (sub && sub.status === "active") {
         toast({ kind: "success", title: "Subscription active", body: planName(sub.plan) + " is live — you can launch now." });
-        if (currentView() === "billing") renderRecommended();
+        if (currentView() === "billing") renderBilling();
       } else if (attempt < 6) {
         // Webhook may lag a few seconds; retry, then give up gracefully (SSE
         // will still flip it when the webhook lands).
@@ -9744,7 +10719,7 @@
     var before = JSON.stringify(subCache);
     loadSubscription().then(function () {
       if (JSON.stringify(subCache) !== before) {
-        if (currentView() === "billing") renderRecommended();
+        if (currentView() === "billing") renderBilling();
       } else if (attempt < 6) {
         setTimeout(function () { pollSubscriptionRefresh(attempt + 1); }, 1500);
       }
@@ -12442,9 +13417,19 @@
       '</p><p><button class="btn btn-primary btn-sm" data-members-retry type="button">Retry</button></p></div>';
   }
 
-  // Pure: one member row. The current user is tagged "(you)" and never carries
-  // manage controls (you can't demote/remove yourself here); non-managers see
-  // no controls at all.
+  // Pure: the two-letter avatar initials for an email (before the @, first char;
+  // falls back to the first character of the whole string). Upper-cased.
+  function memberInitials(email) {
+    var s = String(email || "").trim();
+    var local = s.split("@")[0] || s;
+    return (local.charAt(0) || "?").toUpperCase();
+  }
+
+  // Pure: one member row on the GR33 roster anatomy — avatar, email (+ "(you)"),
+  // a mono joined-at line, a role chip, and (for managers, never on yourself) the
+  // Change-role / Remove actions. THREE roles only (owner/admin/member); the chip
+  // reads straight off ROLE_LABELS, which already matches the server's 3-role
+  // vocabulary — no invented "operator"/"supporter" tiers (GR36/gr-backlog-role-vocabulary).
   function memberRowHtml(m, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
     var isSelf = ctx.userId != null && String(m.user_id) === String(ctx.userId);
@@ -12454,39 +13439,55 @@
         '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
           '" data-email="' + esc(m.email) + '" type="button">Remove</button>'
       : "";
-    return '<div class="fleet-row">' +
-      '<div class="fleet-main"><div class="fleet-name">' + esc(m.email) +
+    return '<div class="set-row">' +
+      '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(m.email)) + "</span>" +
+      '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
-        '<div class="token-meta dim">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
-      '<div class="fleet-badges">' + badge(ROLE_LABELS[m.role] || m.role, "up") + actions + "</div></div>";
+        '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
+      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[m.role] || m.role) + "</span>" +
+        actions + "</div></div>";
   }
 
-  // Pure: one pending-invitation row.
+  // Pure: one pending-invitation row — email, a mono "invited as <role> · expires
+  // <date>" line, a Pending chip, and (for managers) Revoke. The expiry is the
+  // 7-day, single-use truth the invite copy states.
   function invitationRowHtml(inv, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
     var action = canManage
       ? '<button class="btn btn-ghost btn-sm" data-invite-revoke="' + esc(inv.id) +
           '" data-email="' + esc(inv.email) + '" type="button">Revoke</button>'
       : "";
-    return '<div class="fleet-row">' +
-      '<div class="fleet-main"><div class="fleet-name">' + esc(inv.email) + "</div>" +
-        '<div class="token-meta dim">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
+    return '<div class="set-row">' +
+      '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(inv.email)) + "</span>" +
+      '<div class="set-row-main"><div class="set-row-name">' + esc(inv.email) + "</div>" +
+        '<div class="set-row-meta">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
           " &middot; expires " + esc(fmtTokenDate(inv.expires_at)) + "</div></div>" +
-      '<div class="fleet-badges">' + badge("Pending", "warn") + action + "</div></div>";
+      '<div class="set-row-side"><span class="set-chip">Pending</span>' + action + "</div></div>";
   }
 
-  // Pure: the whole panel body — members section + (for managers) a pending-
-  // invitations section. Empty member lists never happen (you're always a
-  // member), but the invitations block collapses to a quiet line when empty.
+  // Pure: the whole panel body — a roster .set-section + (for managers) a pending-
+  // invitations .set-section. Empty member lists never happen (you're always a
+  // member); the invitations block collapses to a quiet empty line. A plain member
+  // sees only the read-only roster — no invitations card, no affordances (GR33
+  // plain-member law).
   function membersPanelHtml(members, invitations, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
-    var out = "";
-    out += members.map(function (m) { return memberRowHtml(m, ctx); }).join("");
+    var out = '<section class="set-section">' +
+      '<h2 class="set-h">Team members</h2>' +
+      '<p class="set-purpose">Everyone with access to this team. A member\'s role decides what they can do.</p>' +
+      '<div class="set-list">' +
+        members.map(function (m) { return memberRowHtml(m, ctx); }).join("") +
+      "</div></section>";
     if (canManage) {
-      out += '<h2 class="fleet-name" style="margin:20px 0 8px">Pending invitations</h2>';
-      out += invitations.length
-        ? invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("")
-        : '<p class="dim">No pending invitations.</p>';
+      out += '<section class="set-section">' +
+        '<h2 class="set-h">Pending invitations</h2>' +
+        '<p class="set-purpose">Invitation links are emailed, work once, and expire after 7 days.</p>' +
+        (invitations.length
+          ? '<div class="set-list">' +
+              invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("") +
+            "</div>"
+          : '<p class="set-empty">No pending invitations.</p>') +
+        "</section>";
     }
     return out;
   }
@@ -12581,6 +13582,15 @@
     $("#invite-email").focus();
   }
 
+  // Pure: honest copy for a failed invite. The server splits the collision into
+  // already_member (they're on the team) vs already_invited (a live invite exists)
+  // — both are surfaced truthfully instead of a generic "try again".
+  function inviteFailureCopy(data) {
+    if (data && data.error === "already_member") return "That person is already on your team.";
+    if (data && data.error === "already_invited") return "There's already a pending invitation for that address — revoke it first to re-send.";
+    return friendly(data, "Check the address and try again.");
+  }
+
   function submitInvite(ctx) {
     var email = ($("#invite-email").value || "").trim();
     var role = $("#invite-role").value;
@@ -12595,7 +13605,7 @@
       } else {
         btn.disabled = false;
         btn.textContent = "Send invitation";
-        toast({ kind: "error", title: "Couldn't send invitation", body: friendly(r.data, "Check the address and try again.") });
+        toast({ kind: "error", title: "Couldn't send invitation", body: inviteFailureCopy(r.data) });
       }
     });
   }
@@ -12605,8 +13615,9 @@
   function revealInvite(url, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Invitation sent</h2>' +
-      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link:</p>" +
+      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
       '<div class="field"><input class="form-input" id="invite-link" type="text" readonly value="' + esc(url || "") + '" /></div>' +
+      '<p class="set-row-note">This is the only time we\'ll show the link here. If the email doesn\'t arrive, share it directly.</p>' +
       '<div class="modal-actions">' +
         '<button class="btn btn-ghost" id="invite-copy" type="button">Copy link</button>' +
         '<button class="btn btn-primary" type="button" data-close>Done</button>' +
@@ -12650,31 +13661,60 @@
       api("PATCH", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId), { role: role }).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Role updated" });
-        else toast({ kind: "error", title: "Couldn't change role", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't change role",
+          body: (r.status === 409 && r.data && r.data.error === "last_owner")
+            ? "You're the last owner — promote another member to owner first."
+            : friendly(r.data) });
         loadMembers();
       });
     });
   }
 
-  // Remove a member: DELETE /v1/teams/:id/members/:user_id.
+  // Pure: honest copy for a failed member removal. The server's 409 last_owner is
+  // surfaced verbatim in meaning ("You are the last owner…") so the operator knows
+  // WHY the destroy was refused, not just that it failed (charter G-06 ruling).
+  function removeMemberFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "last_owner") {
+      return "You're the last owner — promote another member to owner before removing this one.";
+    }
+    if (status === 404) return "That member is no longer on the team.";
+    return friendly(data, "Please try again.");
+  }
+
+  // Remove a member = destroy-tier typed-confirm (DELETE /v1/teams/:id/members/
+  // :user_id). Removal evicts the member's sessions immediately and can't be
+  // undone, so it rides the same proof-of-attention echo as Decommission: the
+  // operator types the member's email to arm the button. A 409 last_owner is an
+  // honest in-modal recovery sentence, never a silent toast (confirmModal fail
+  // contract).
   function confirmRemoveMember(ctx, userId, email) {
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Remove member?</h2>' +
-      '<p class="modal-sub">Removing <b>' + esc(email || "this member") + "</b> ends their access to the team immediately.</p>" +
-      '<div class="modal-actions">' +
-        '<button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" id="member-remove-go" type="button">Remove</button>' +
-      "</div>"
-    );
-    $("#member-remove-go").addEventListener("click", function () {
-      var btn = $("#member-remove-go");
-      btn.disabled = true;
-      btn.textContent = "Removing…";
-      api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId)).then(function (r) {
-        closeModal();
-        if (r.ok) toast({ kind: "success", title: "Member removed" });
-        else toast({ kind: "error", title: "Couldn't remove member", body: friendly(r.data) });
+    var name = String(email || "");
+    openConfirmModal({
+      tier: "destroy",
+      title: "Remove member?",
+      resourceName: name,
+      consequences: [
+        "Ends " + (name || "this member") + "'s access to the team immediately.",
+        "Any active sessions are signed out.",
+        "This can't be undone (you can re-invite them later).",
+      ],
+      confirmLabel: "Remove member",
+      busyLabel: "Removing…",
+      onConfirm: function (ctl) { runRemoveMember(ctx, userId, ctl); },
+    });
+  }
+
+  function runRemoveMember(ctx, userId, ctl) {
+    api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId)).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        toast({ kind: "success", title: "Member removed" });
         loadMembers();
+        return;
+      }
+      ctl.fail(removeMemberFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runRemoveMember(ctx, userId, c);
       });
     });
   }
@@ -12709,6 +13749,225 @@
   function onMembersEvent(v) {
     fleetCache = null;
     if (v === "members") loadMembers();
+  }
+
+  // ── Environment variables panel (Settings view) ─────────────────────────────
+  // The team's env-var ROWS off /v1/env-vars (GR36 / E-03 write-only doctrine
+  // transferred to rows). This is NOT the per-site env blob editor: each var is a
+  // row {key, scope, is_secret, is_shown_once, comment, timestamps} whose VALUE is
+  // sealed forever — no reveal route exists over HTTP, so the UI never renders a
+  // reveal affordance. Access model: member-read / admin-write (list is member-
+  // readable; POST/DELETE are owner/admin-only). A plain member sees the rows
+  // read-only with no add form and no delete controls (GR33 plain-member law).
+
+  // Pure: the human scope label. A barkpark-scoped var carries a barkpark_id and
+  // applies to one instance; otherwise it's team-wide.
+  function envScopeLabel(v) {
+    return (v && (v.scope === "barkpark" || v.barkpark_id)) ? "Instance" : "Team";
+  }
+
+  // Pure: honest copy for a failed env-vars fetch (member-readable, so a 403 here
+  // means teamless/permission drift rather than the normal member case).
+  function envVarsFailureCopy(status) {
+    if (status === 0) return "Network error — is the control plane reachable? Retry in a moment.";
+    if (status === 422) return "Your account isn't part of a team, so there are no environment variables.";
+    if (status === 403) return "You don't have permission to view this team's environment variables.";
+    return "We couldn't load your environment variables. Retry in a moment.";
+  }
+
+  // Pure: honest copy for a failed env-var write. write_once is the per-row truth
+  // (a shown-once key can't be overwritten — delete and recreate); the rest map to
+  // human sentences instead of raw error codes.
+  function envVarWriteFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "write_once") {
+      return "A write-once variable with that key already exists. Delete it first, then create it again.";
+    }
+    if (status === 403) return "Only team owners and admins can change environment variables.";
+    if (status === 422 && data && data.error === "key_required") return "Enter a key.";
+    return friendly(data, "Check the values and try again.");
+  }
+
+  function envVarsErrorHtml(status) {
+    return '<div class="empty-state"><h2>Couldn\'t load environment variables</h2><p>' +
+      esc(envVarsFailureCopy(status)) +
+      '</p><p><button class="btn btn-primary btn-sm" data-env-retry type="button">Retry</button></p></div>';
+  }
+
+  // Pure: one env-var row — the mono key, the scope + secret + write-once chips,
+  // an optional comment, and (for admins) Delete. is_shown_once rows carry an
+  // honest note that they can't be changed in place (a POST would 409); the value
+  // is NEVER shown or revealable. `canWrite` gates the destructive affordance —
+  // a member row renders exactly the same metadata with no Delete button.
+  function envVarRowHtml(v, canWrite) {
+    var chips = '<span class="set-chip">' + esc(envScopeLabel(v)) + "</span>";
+    if (v.is_secret) chips += '<span class="set-chip">Secret</span>';
+    if (v.is_shown_once) chips += '<span class="set-chip">Write-once</span>';
+    var comment = v.comment
+      ? '<div class="set-row-note">' + esc(v.comment) + "</div>"
+      : "";
+    var once = v.is_shown_once
+      ? '<div class="set-row-note">Write-once — its value is sealed. Delete and recreate to change it.</div>'
+      : "";
+    var action = canWrite
+      ? '<button class="btn btn-ghost btn-sm" data-env-delete="' + esc(v.id) +
+          '" data-key="' + esc(v.key) + '" type="button">Delete</button>'
+      : "";
+    return '<div class="set-row">' +
+      '<div class="set-row-main"><div class="set-row-key">' + esc(v.key) + "</div>" +
+        '<div class="set-row-tags">' + chips + "</div>" +
+        comment + once + "</div>" +
+      '<div class="set-row-side">' + action + "</div></div>";
+  }
+
+  // Pure: the add-var form section (admin-only). A single independently-persisted
+  // FORM section, so it owns its own .set-save-row at the card foot (GR33 save
+  // law). Write-only: there is no value read-back anywhere, matching E-03.
+  function envAddFormHtml() {
+    return '<section class="set-section">' +
+      '<h2 class="set-h">Add a variable</h2>' +
+      '<p class="set-purpose">Values are encrypted at rest and never shown again after you save. ' +
+        'Mark a value <b>write-once</b> if it must never be readable or replaceable in place.</p>' +
+      '<div class="field"><label class="label" for="env-key">Key</label>' +
+        '<input class="form-input" id="env-key" type="text" placeholder="DATABASE_URL" autocapitalize="off" autocomplete="off" spellcheck="false" /></div>' +
+      '<div class="field"><label class="label" for="env-value">Value</label>' +
+        '<input class="form-input" id="env-value" type="text" placeholder="Paste the value" autocomplete="off" spellcheck="false" /></div>' +
+      '<div class="field"><label class="label" for="env-scope">Scope</label>' +
+        '<select class="form-input" id="env-scope">' +
+          '<option value="team" selected>Team — every instance</option>' +
+        "</select></div>" +
+      '<label class="set-toggle"><input type="checkbox" id="env-secret" checked /> Secret (mask everywhere it appears)</label>' +
+      '<label class="set-toggle"><input type="checkbox" id="env-once" /> Write-once (can never be read or replaced — only deleted)</label>' +
+      '<div class="field"><label class="label" for="env-comment">Comment (optional)</label>' +
+        '<input class="form-input" id="env-comment" type="text" placeholder="What this is for" autocomplete="off" /></div>' +
+      '<div class="cm-error" id="env-error" role="alert" hidden><p class="cm-error-msg" id="env-error-msg"></p></div>' +
+      '<div class="set-save-row">' +
+        '<button class="btn btn-primary" id="env-save" type="button">Add variable</button>' +
+      "</div></section>";
+  }
+
+  // Pure: the whole panel body — the existing-vars .set-section (member-readable)
+  // plus, for admins only, the add-var FORM section. `ctx.role` decides write
+  // access via assignableRoles (owner/admin → non-empty; member → empty).
+  function envVarsPanelHtml(vars, ctx) {
+    var canWrite = assignableRoles(ctx.role).length > 0;
+    var out = '<section class="set-section">' +
+      '<h2 class="set-h">Variables</h2>' +
+      '<p class="set-purpose">Injected into your instances at boot. Keys are visible; values are sealed once saved.</p>' +
+      (vars.length
+        ? '<div class="set-list">' +
+            vars.map(function (v) { return envVarRowHtml(v, canWrite); }).join("") +
+          "</div>"
+        : '<p class="set-empty">No environment variables yet.' +
+            (canWrite ? " Add one below." : "") + "</p>") +
+      "</section>";
+    if (canWrite) out += envAddFormHtml();
+    return out;
+  }
+
+  // Load the env-vars panel: resolve the team context (reusing membersContext —
+  // both settings pages key off the same /v1/me role), then fetch the rows.
+  function loadEnvVars() {
+    var box = $("#env-body");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading environment variables&hellip;</div>';
+    var ctx = membersContext();
+    if (ctx) { fetchEnvVars(ctx); return; }
+    api("GET", "/v1/me").then(function (r) {
+      if (r.ok && r.data) meCache = r.data;
+      var c = membersContext();
+      if (!c) {
+        box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
+          "<p>Your account isn't part of a team, so there are no environment variables.</p></div>";
+        return;
+      }
+      fetchEnvVars(c);
+    });
+  }
+
+  function fetchEnvVars(ctx) {
+    var box = $("#env-body");
+    if (!box) return;
+    api("GET", "/v1/env-vars").then(function (r) {
+      if (box.isConnected === false) return;
+      if (!r.ok) {
+        box.innerHTML = envVarsErrorHtml(r.status);
+        var rb = box.querySelector("[data-env-retry]");
+        if (rb) rb.addEventListener("click", loadEnvVars);
+        return;
+      }
+      var vars = (r.data && r.data.env_vars) || [];
+      box.innerHTML = envVarsPanelHtml(vars, ctx);
+      wireEnvPanel(box, ctx);
+    });
+  }
+
+  function wireEnvPanel(box, ctx) {
+    var save = box.querySelector("#env-save");
+    if (save) save.addEventListener("click", function () { submitEnvVar(ctx); });
+    box.querySelectorAll("[data-env-delete]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        confirmDeleteEnvVar(ctx, b.getAttribute("data-env-delete"), b.getAttribute("data-key"));
+      });
+    });
+  }
+
+  // Create a var: POST /v1/env-vars. On 201 the row is added (value never echoed);
+  // a 409 write_once / 422 renders inline at the form (the honest per-row truth),
+  // never a bare toast.
+  function submitEnvVar(ctx) {
+    var key = ($("#env-key").value || "").trim();
+    var value = $("#env-value").value || "";
+    var errBox = $("#env-error");
+    var errMsg = $("#env-error-msg");
+    function showErr(msg) { if (errMsg) setText(errMsg, msg); if (errBox) show(errBox); }
+    if (!key) { showErr("Enter a key."); return; }
+    var btn = $("#env-save");
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+    if (errBox) hide(errBox);
+    var body = {
+      key: key,
+      value: value,
+      scope: ($("#env-scope") && $("#env-scope").value) || "team",
+      is_secret: !!($("#env-secret") && $("#env-secret").checked),
+      is_shown_once: !!($("#env-once") && $("#env-once").checked),
+      comment: ($("#env-comment") && $("#env-comment").value.trim()) || null,
+    };
+    api("POST", "/v1/env-vars", body).then(function (r) {
+      if (r.status === 201 && r.data && r.data.env_var) {
+        toast({ kind: "success", title: "Variable added" });
+        loadEnvVars();
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = "Add variable";
+      showErr(envVarWriteFailureCopy(r.status, r.data));
+    });
+  }
+
+  // Delete a var = standard confirm (recoverable by re-adding, but the value is
+  // gone — the confirm copy states that loss). DELETE /v1/env-vars/:id.
+  function confirmDeleteEnvVar(ctx, id, key) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Delete variable?</h2>' +
+      '<p class="modal-sub">Deleting <b>' + esc(key || "this variable") + "</b> removes it from every instance at the next boot. " +
+        "Its value is sealed, so it can't be recovered — you'd re-enter it to add it back.</p>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" id="env-delete-go" type="button">Delete</button>' +
+      "</div>"
+    );
+    $("#env-delete-go").addEventListener("click", function () {
+      var btn = $("#env-delete-go");
+      btn.disabled = true;
+      btn.textContent = "Deleting…";
+      api("DELETE", "/v1/env-vars/" + encodeURIComponent(id)).then(function (r) {
+        closeModal();
+        if (r.ok) toast({ kind: "success", title: "Variable deleted" });
+        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data) });
+        loadEnvVars();
+      });
+    });
   }
 
   // =========================================================== DEVICE LOGIN (/activate)
@@ -13262,6 +14521,7 @@
   var PAL_SETTINGS_LABEL = {
     billing: "Billing", providers: "Providers",
     notifications: "Notifications", tokens: "Tokens", members: "Members",
+    env: "Environment variables",
   };
 
   // Pure: the STATIC nav registry — the frozen IA (D17) plus the three Fleet lenses
@@ -13535,8 +14795,6 @@
         );
       }
     });
-    $("#provider-add").addEventListener("click", openProviderPicker);
-    $("#provider-add-empty").addEventListener("click", openProviderPicker);
     $("#token-add").addEventListener("click", openTokenModal);
     // C10: the Members panel's invite button — reads the team context at click.
     var membersInvite = $("#members-invite");
@@ -13739,6 +14997,14 @@
       catalogSizeRowsHtml: catalogSizeRowsHtml, catalogPanelHtml: catalogPanelHtml,
       azureFieldKeys: AZURE_FIELDS.map(function (f) { return f.key; }),
       availableProviderKinds: PROVIDERS.filter(function (p) { return p.available; }).map(function (p) { return p.kind; }),
+      // gr-p4 G-02/G-03 — the providers page (roster + hybrid connect card) and
+      // the honest capability matrix. Pure; the DOM mounts (loadProviders /
+      // renderProviderPage / renderConnectCard / disconnectProvider /
+      // loadCapabilityMatrix) are browser-verified.
+      providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
+      providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
+      capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
+      capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure
       // helpers — the S4 pill state mapper, the conduit-driven action model, its
       // render, the fleet infra line, the row gate, and the optimistic reducer.
@@ -13916,7 +15182,14 @@
       usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
-      membersPanelHtml: membersPanelHtml,
+      membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
+      removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
+      // G-06 env-vars page: the pure row/panel model + honest failure copy. The
+      // value is sealed forever — envVarRowHtml never renders a reveal affordance;
+      // is_shown_once rows carry the write-once note; canWrite gates Delete only.
+      envScopeLabel: envScopeLabel, envVarsFailureCopy: envVarsFailureCopy,
+      envVarWriteFailureCopy: envVarWriteFailureCopy, envVarRowHtml: envVarRowHtml,
+      envVarsPanelHtml: envVarsPanelHtml, envAddFormHtml: envAddFormHtml,
       // Wave 3 (OC16/OC18): the fleet usage strip's pure model + render helpers,
       // still node-pinned. gr-p2 folded the strip's two truths into the v4
       // Overview (team ceiling → header slots meter; per-instance cells → the
@@ -13943,6 +15216,13 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // G-05 API tokens (GR34): the .set-check picker gate + the two DOM mounts
+      // smoke drives directly (the modal is click-opened, so smoke's inert click()
+      // can't reach it — same seam as renderActivateResult). canMintAnyAbility
+      // mirrors the server's pat_abilities_allowed? (owner/admin vs member=read).
+      canMintAnyAbility: canMintAnyAbility, tokenAbilitiesFieldHtml: tokenAbilitiesFieldHtml,
+      tokenRevealHtml: tokenRevealHtml, openTokenModal: openTokenModal,
+      revealToken: revealToken, tokenRow: tokenRow,
       // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the
       // context-morph enum + fail-closed operator gate (both PURE, node-pinned;
       // the DOM appliers applyShellNav/applyOperatorGate are browser+smoke-driven),
@@ -13967,6 +15247,13 @@
       planInstanceLimit: planInstanceLimit,
       planFeatures: planFeatures,
       planFromSub: planFromSub,
+      // gr-p4-billing (G-01, GR36): the owner-honest gate + the paid-plan test
+      // that drive which billing sections/CTAs render. Pure, node-pinned; the
+      // section mounts (renderBillingManage/renderBillingCancel/openCancelPlanModal)
+      // are smoke+browser-verified.
+      billingCanManage: billingCanManage,
+      billingHasPaidPlan: billingHasPaidPlan,
+      readOnlyPlanCardHtml: readOnlyPlanCardHtml,
       dunningDates: dunningDates,
       dunningBannerHtml: dunningBannerHtml,
       currentPlanCardHtml: currentPlanCardHtml,
@@ -14021,6 +15308,22 @@
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,
+      // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
+      // settings-anatomy page — cell/channel state, the matrix + roster + email +
+      // delivery-log markup, and the routing-write helpers. DOM mounts
+      // (loadNotifications/renderNotifications/save*/onNotifCellToggle) are
+      // browser+smoke-verified.
+      notifChannels: NOTIF_CHANNELS.map(function (c) { return c.type; }),
+      notifMatrixColumns: notifMatrixColumns, notifChannelState: notifChannelState,
+      notifCellState: notifCellState, notifEventChannels: notifEventChannels,
+      notifTransportLabel: notifTransportLabel,
+      notifDeliveryTone: notifDeliveryTone, notifDeliveryStatusLabel: notifDeliveryStatusLabel,
+      notifDeliveryRowHtml: notifDeliveryRowHtml, notifDeliveriesHtml: notifDeliveriesHtml,
+      notifDeliveriesErrorHtml: notifDeliveriesErrorHtml,
+      notifEmailSectionHtml: notifEmailSectionHtml, notifChannelsSectionHtml: notifChannelsSectionHtml,
+      notifChannelRowHtml: notifChannelRowHtml, notifMatrixSectionHtml: notifMatrixSectionHtml,
+      notifMatrixCellHtml: notifMatrixCellHtml, notifDeliveriesShellHtml: notifDeliveriesShellHtml,
+      notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
     });
   }
 })();

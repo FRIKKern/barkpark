@@ -3767,6 +3767,108 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
+// ── G-06 Members restyle + greenfield env-vars page (Settings wave, phase 4) ──
+
+test("G-06: the members + env-vars helpers are exported", () => {
+  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy",
+    "envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
+    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("G-06: memberInitials — first letter of the local part, upper-cased, total", () => {
+  assert.equal(hooks.memberInitials("ada@acme.com"), "A");
+  assert.equal(hooks.memberInitials("Zed"), "Z");
+  assert.equal(hooks.memberInitials(""), "?");
+  assert.equal(hooks.memberInitials(null), "?");
+});
+
+test("G-06: memberRowHtml — GR33 anatomy with the 3 real role chips, no fiction", () => {
+  const owner = { user_id: "u1", email: "ada@acme.com", role: "owner", joined_at: "2026-01-01T00:00:00Z" };
+  const html = hooks.memberRowHtml(owner, { role: "admin", userId: "u2" });
+  assert.match(html, /set-row/);          // rides the roster anatomy
+  assert.match(html, /set-ava/);          // avatar
+  assert.match(html, /set-chip">Owner</);  // the role chip is the real label
+  // The 5-role design fiction must never render as a team role (GR36/GR14).
+  for (const role of ["owner", "admin", "member"]) {
+    const chip = hooks.memberRowHtml({ user_id: "x", email: "x@y.io", role }, { role: "owner", userId: "z" });
+    assert.ok(!/Operator|Supporter/.test(chip), role + " row must not render an invented tier");
+  }
+});
+
+test("G-06: removeMemberFailureCopy — last_owner 409 is surfaced honestly", () => {
+  assert.match(hooks.removeMemberFailureCopy(409, { error: "last_owner" }), /last owner/i);
+  assert.match(hooks.removeMemberFailureCopy(404, {}), /no longer on the team/i);
+  assert.equal(typeof hooks.removeMemberFailureCopy(500, {}), "string");
+});
+
+test("G-06: inviteFailureCopy — already_member vs already_invited each get true copy", () => {
+  assert.match(hooks.inviteFailureCopy({ error: "already_member" }), /already on your team/i);
+  assert.match(hooks.inviteFailureCopy({ error: "already_invited" }), /pending invitation/i);
+  assert.equal(typeof hooks.inviteFailureCopy({ error: "other" }), "string");
+});
+
+test("G-06: envScopeLabel — barkpark scope OR a barkpark_id reads Instance, else Team", () => {
+  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: null }), "Team");
+  assert.equal(hooks.envScopeLabel({ scope: "barkpark", barkpark_id: "bp1" }), "Instance");
+  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: "bp1" }), "Instance"); // id wins
+  assert.equal(hooks.envScopeLabel({}), "Team");
+});
+
+test("G-06: envVarsFailureCopy + envVarWriteFailureCopy — honest per-status copy", () => {
+  assert.match(hooks.envVarsFailureCopy(0), /Network error/i);
+  assert.match(hooks.envVarsFailureCopy(422), /isn't part of a team/i);
+  assert.match(hooks.envVarsFailureCopy(403), /permission/i);
+  // The write-once 409 is the honest per-row truth — delete + recreate.
+  assert.match(hooks.envVarWriteFailureCopy(409, { error: "write_once" }), /write-once.*[Dd]elete/i);
+  assert.match(hooks.envVarWriteFailureCopy(403, {}), /owners and admins/i);
+  assert.match(hooks.envVarWriteFailureCopy(422, { error: "key_required" }), /Enter a key/i);
+});
+
+test("G-06: envVarRowHtml — value sealed forever (no reveal), write-once note, canWrite gates Delete", () => {
+  const secret = { id: "e1", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "pg" };
+  const admin = hooks.envVarRowHtml(secret, true);
+  assert.match(admin, /set-row-key">DATABASE_URL/); // mono key visible
+  assert.match(admin, /set-chip">Secret</);
+  assert.match(admin, /set-chip">Team</);
+  assert.match(admin, /data-env-delete="e1"/);       // admin gets Delete
+  // The value is NEVER rendered or revealable — no reveal/show affordance at all.
+  assert.ok(!/Reveal|Show value|reveal/i.test(admin), "no reveal affordance may exist");
+  // A member gets the SAME metadata, zero Delete.
+  const member = hooks.envVarRowHtml(secret, false);
+  assert.ok(!member.includes("data-env-delete"), "a member row carries no Delete");
+  // A write-once row states it can't be changed in place (a POST would 409).
+  const once = hooks.envVarRowHtml({ id: "e2", key: "STRIPE", scope: "team", is_secret: true, is_shown_once: true }, true);
+  assert.match(once, /set-chip">Write-once</);
+  assert.match(once, /Delete and recreate to change/i);
+});
+
+test("G-06: envVarsPanelHtml — admin gets the add FORM + save-row; a member is read-only", () => {
+  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
+  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
+  assert.match(admin, /Add a variable/);
+  assert.match(admin, /set-save-row/);
+  assert.match(admin, /data-env-delete="e1"/);
+  // Member-read / admin-write: E-03's any-member-write does NOT transfer here.
+  const member = hooks.envVarsPanelHtml(vars, { role: "member" });
+  assert.ok(!member.includes("Add a variable"), "a member sees no add form");
+  assert.ok(!member.includes("set-save-row"), "a member sees no save-row");
+  assert.ok(!member.includes("data-env-delete"), "a member sees no Delete");
+  // The empty-state copy invites an admin, stays quiet for a member.
+  assert.match(hooks.envVarsPanelHtml([], { role: "admin" }), /Add one below/);
+  assert.ok(!hooks.envVarsPanelHtml([], { role: "member" }).includes("Add one below"));
+});
+
+test("G-06: envAddFormHtml — write-only (never a value read-back affordance)", () => {
+  const html = hooks.envAddFormHtml();
+  assert.match(html, /id="env-key"/);
+  assert.match(html, /id="env-value"/);
+  assert.match(html, /id="env-once"/);   // the write-once toggle
+  assert.match(html, /set-save-row/);
+  assert.ok(!/Reveal|Show value/i.test(html), "the add form never offers a value read-back");
+});
+
 // ── Wave 3 (OC16/OC18): Overview fleet usage strip ──────────────────────────
 // Pure model + render helpers only (the DOM mount loadFleetUsageStrip is browser-
 // verified). These pin the four honest states — fresh / stale / no-sample /
@@ -4160,7 +4262,9 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
 // internal/cli/cloud/providers_capabilities.json (S1) evolved to the facet shape;
 // the conduit slice owns cloud/priv/static/__fixtures__/providers_capabilities.json.
 const CAP_PAYLOAD = {
-  default_gap: "Not available on this provider yet.",
+  // The server emits NO default_gap (gr-p4 removed the dead client fallback): a
+  // false verb shows the SERVER-OWNED per-verb gap when one exists, otherwise no
+  // reason at all — never invented, never a generic filler.
   providers: {
     // hetzner: every lifecycle verb is a seam capability EXCEPT pause (no
     // primitive) — so the wired-later verbs are CLI affordances and pause is a
@@ -4173,7 +4277,7 @@ const CAP_PAYLOAD = {
       gaps: { pause: "Hetzner has no pause primitive." },
     },
     // azure: adopt carries an explicit gap reason; audit is false WITHOUT a
-    // per-verb gap → the model falls back to the payload's own default_gap.
+    // per-verb gap → no reason (there is no default_gap to fall back to).
     azure: {
       capabilities: {
         core: true, catalog: true, labels: true, pause: true,
@@ -4293,15 +4397,16 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   assert.equal(byVerb.decommission.resourceName, "web");
 });
 
-test("S11b: azure model — a false verb with no per-verb gap falls back to the payload default_gap, never invented", () => {
+test("S11b: azure model — a false verb with no per-verb gap shows NO reason (no default_gap, never invented)", () => {
   const bp = { provider: "azure", host: "h", name: "az1" };
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   assert.equal(byVerb.adopt.mode, "disabled");
   assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
-  // audit: capability false, NO per-verb gap → the payload's own default_gap.
+  // audit: capability false, NO per-verb gap, and the server emits no default_gap
+  // → NO reason at all (gr-p4 removed the dead fallback; the cell is never padded).
   assert.equal(byVerb.audit.mode, "disabled");
-  assert.equal(byVerb.audit.reason, "Not available on this provider yet.");
+  assert.equal(byVerb.audit.reason, "");
   // pause is a capability here → a CLI affordance, not disabled.
   assert.equal(byVerb.pause.mode, "cli");
 });
@@ -4362,6 +4467,118 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
   assert.equal(rolled._rollback, undefined);
   // rollback with nothing remembered is a no-op (total, never throws).
   assert.equal(hooks.lifecycleOptimistic(base, "rollback"), base);
+});
+
+// ── gr-p4 G-02/G-03: the providers page (roster + hybrid connect + honest matrix)
+// The capability facet in SERVER shape (minus default_gap) — mirrors the settings
+// scenario fixture. hetzner/azure are prod (matrix columns); fake is dev-tier.
+const PROV_CAP = {
+  providers: {
+    hetzner: { tier: "prod", gaps: { pause: "Hetzner has no pause primitive." },
+      capabilities: { core: true, catalog: false, labels: true, pause: false, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
+    azure: { tier: "prod", gaps: { adopt: "Adopt needs an existing resource-group import." },
+      capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: false, audit: false } },
+    fake: { tier: "dev", gaps: {},
+      capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
+  },
+};
+
+test("gr-p4: providers-page pure helpers are exported with the 9-verb order", () => {
+  for (const n of ["providerDisplayName", "providerRosterHtml", "providerConnectModel",
+    "providerConnectCardHtml", "capabilityMatrixModel", "capabilityMatrixHtml"]) {
+    assert.equal(typeof hooks[n], "function", n + " must be exported");
+  }
+  assert.deepEqual([...hooks.capabilityVerbs],
+    ["core", "catalog", "archive", "resurrect", "decommission", "adopt", "audit", "pause", "labels"]);
+});
+
+test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; disconnect gates on admin", () => {
+  const list = [{ id: "p1", kind: "hetzner", label: "main", inserted_at: new Date(Date.now() - 9 * 86400000).toISOString() }];
+  const admin = hooks.providerRosterHtml(list, true);
+  assert.match(admin, /Hetzner/);
+  assert.match(admin, /main/);
+  assert.match(admin, /connected /); // a connected-at line
+  assert.ok(admin.indexOf("Connected</span>") === -1); // never an implied live-validity badge
+  assert.match(admin, /data-prov-disconnect/);
+  assert.match(admin, /data-prov-kind="hetzner"/);
+  // a member (canDisconnect false) sees NO disconnect affordance
+  assert.ok(hooks.providerRosterHtml(list, false).indexOf("data-prov-disconnect") === -1);
+  // empty → an honest note, no rows
+  assert.match(hooks.providerRosterHtml([], true), /No providers connected/);
+  assert.ok(hooks.providerRosterHtml([], true).indexOf("prov-row") === -1);
+});
+
+test("gr-p4: connect model refuses a second connect for an already-connected kind (additive-duplicate guard)", () => {
+  const empty = hooks.providerConnectModel([]);
+  assert.equal(empty.allConnected, false);
+  assert.equal(empty.selectable, "hetzner"); // first available kind armed
+  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.ok(empty.options.every((o) => !o.connected));
+  const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
+  assert.equal(partial.selectable, "azure"); // hetzner taken → azure armed
+  assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
+  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
+  assert.equal(full.allConnected, true);
+  assert.equal(full.selectable, null);
+});
+
+test("gr-p4: connect card is the GR33 hybrid — picker + subform + save-row; already-connected is disabled", () => {
+  const card = hooks.providerConnectCardHtml([{ kind: "hetzner" }], null);
+  assert.match(card, /data-connect-kind="hetzner"[^>]*disabled/); // connected → not selectable
+  assert.match(card, /data-connect-kind="azure"/);
+  assert.match(card, /aria-pressed="true"/); // azure armed
+  assert.match(card, /set-save-row/); // verify+save in a save-row
+  assert.match(card, /data-connect-submit/);
+  assert.match(card, /cred-remediation/); // the in-card remediation slot
+  // all connected → the replace note, and NO second connect is offered
+  const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
+  assert.match(replace, /Every supported provider is connected/);
+  assert.ok(replace.indexOf("data-connect-submit") === -1);
+});
+
+test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
+  const m = hooks.capabilityMatrixModel(PROV_CAP);
+  assert.equal(m.ok, true);
+  assert.deepEqual(plain(m.providers.map((p) => p.kind)), ["hetzner", "azure"]); // fake (dev) filtered
+  assert.equal(m.verbs.length, 9);
+  // false WITH a server gap → the reason is the server's own, verbatim
+  assert.equal(m.cells.pause.hetzner.ok, false);
+  assert.equal(m.cells.pause.hetzner.reason, "Hetzner has no pause primitive.");
+  assert.equal(m.cells.adopt.azure.reason, "Adopt needs an existing resource-group import.");
+  // false with NO gap → a bare cell, NO reason (never padded, no default_gap)
+  assert.equal(m.cells.catalog.hetzner.ok, false);
+  assert.equal(m.cells.catalog.hetzner.reason, "");
+  assert.equal(m.cells.audit.azure.reason, "");
+  // a true cell carries no reason
+  assert.equal(m.cells.core.hetzner.ok, true);
+  assert.equal(m.cells.core.hetzner.reason, "");
+});
+
+test("gr-p4: capability matrix render — mark on yes, dash + verbatim reason on no, honest degrade states", () => {
+  const html = hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(PROV_CAP));
+  assert.match(html, /cap-matrix/);
+  assert.match(html, />core</);
+  assert.match(html, />pause</);
+  assert.match(html, />labels</);
+  assert.match(html, /Hetzner/);
+  assert.match(html, /Azure/);
+  assert.ok(html.indexOf(">Fake<") === -1); // dev-tier filtered from the render
+  assert.match(html, /cap-mark/); // a supported mark
+  assert.match(html, /cap-dash/); // an unsupported dash
+  assert.match(html, /Hetzner has no pause primitive\./); // reason verbatim
+  // honest degrade states
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(undefined)), /Checking provider capabilities/);
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(null)), /unavailable/);
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel({})), /unavailable/);
+  // a payload with ONLY a dev-tier provider → unavailable (nothing to operate)
+  assert.equal(hooks.capabilityMatrixModel({ providers: { fake: { tier: "dev", capabilities: {}, gaps: {} } } }).ok, false);
+});
+
+test("gr-p4: providerDisplayName — known brand or honest Title-case fallback, never a fabricated brand", () => {
+  assert.equal(hooks.providerDisplayName("hetzner"), "Hetzner Cloud");
+  assert.equal(hooks.providerDisplayName("azure"), "Microsoft Azure");
+  assert.equal(hooks.providerDisplayName("gcp"), "Gcp"); // unknown prod kind → Title-case, never invented
+  assert.equal(hooks.providerDisplayName(""), "");
 });
 
 // ── S13 domainStages: the per-host DNS/TLS checklist fold ────────────────────
@@ -6586,14 +6803,19 @@ test("billingChipModel: trial countdown XOR past-due alarm; silent otherwise (GR
   assert.equal(hooks.billingChipModel({ plan: "free", status: "active" }), null);
 });
 
-test("currentPlanCardHtml: dunning banner only when past_due; portal CTA always", () => {
+test("currentPlanCardHtml: STATE only — dunning banner only when past_due; the portal CTA moved to its own action section (G-01 anatomy)", () => {
   const due = hooks.currentPlanCardHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
   assert.ok(due.includes("dunning-banner"), "past_due carries the banner");
-  assert.ok(due.includes(">Manage billing<"), "the portal CTA renders");
   const ok = hooks.currentPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
   assert.ok(!ok.includes("dunning-banner"), "active carries no banner");
-  assert.ok(ok.includes(">Manage billing<"), "the portal CTA renders for active too");
+  // GR33: billing is an ACTION page — the state card no longer buries the
+  // Manage-billing button (it rides the #billing-manage .set-section now), and
+  // the invoice-less portal copy moved with it. The card stays STATE only.
+  assert.ok(!ok.includes(">Manage billing<") && !due.includes(">Manage billing<"), "the portal CTA is NOT in the state card");
+  assert.ok(!/download invoices/i.test(ok + due), "the invoice-less portal copy moved to the action section");
   assert.ok(!/contact support/i.test(ok + due), "no support-mail denial copy anywhere");
+  // "See all plans" (a read affordance the card owns) stays.
+  assert.ok(ok.includes("See all plans"), "the state card keeps its grid toggle");
 });
 
 test("billingPortalFlag matches the gateway's pinned return_url flag exactly", () => {
@@ -7509,4 +7731,233 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
     assert.match(html, /19s/);
     assert.match(html, /deploy-fail-dot/);
   }
+});
+
+// ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
+test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
+  // Owner-only writes: only the literal "owner" role manages billing (stricter
+  // than admin — require_primary_team_owner).
+  assert.equal(hooks.billingCanManage("owner"), true);
+  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
+  assert.equal(hooks.billingCanManage("member"), false);
+  assert.equal(hooks.billingCanManage(undefined), false);
+  // A real paid plan (a non-free catalog plan in an active/past_due state) has a
+  // portal to open and a plan to cancel; a trial / free / canceled does not.
+  assert.equal(hooks.billingHasPaidPlan({ plan: "supporter", status: "active" }), true);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "support_plus", status: "past_due" }), true);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "trial", status: "active" }), false, "a trial is not a paid Stripe plan");
+  assert.equal(hooks.billingHasPaidPlan({ plan: "free", status: "active" }), false);
+  assert.equal(hooks.billingHasPaidPlan({ plan: "supporter", status: "canceled" }), false, "canceled has no live portal");
+  assert.equal(hooks.billingHasPaidPlan(null), false);
+});
+
+test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing the pure models (GR36 plain-member law)", () => {
+  const paid = hooks.readOnlyPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.ok(paid.includes(">Supporter<"), "reads the real plan name");
+  assert.ok(paid.includes("3 managed instances"), "reuses the quota-honest features verbatim");
+  assert.ok(paid.includes("Renews "), "reuses billingPeriodLine");
+  // Never a write affordance — no buttons, no grid toggle, no portal copy.
+  assert.ok(!/<button/i.test(paid), "no buttons in the read-only card");
+  assert.ok(!paid.includes("plan-more") && !/Manage billing/i.test(paid), "no CTAs at all");
+  // A cancelling paid plan surfaces "Access until" honestly, still button-free.
+  const ending = hooks.readOnlyPlanCardHtml({ plan: "supporter", status: "active", cancel_at_period_end: true, current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.ok(ending.includes("Access until ") && ending.includes(">Ending<"), "a cancelling plan reads Access-until + the Ending badge");
+  const trial = hooks.readOnlyPlanCardHtml({ plan: "trial", status: "active", trial_days_remaining: 9 });
+  assert.ok(trial.includes("Free trial") && trial.includes("9 days left"), "trial summary carries the countdown");
+  assert.ok(!/<button/i.test(trial) && !/Pick a plan below/i.test(trial), "no CTA and no misleading 'pick a plan below' (the grid is hidden for members)");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// G-04 — Notifications (the crown): the settings-anatomy pure builders
+// (GR33 form-page anatomy, GR34 check grammars, GR36 per-page rulings)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("G-04: the notification builders + routing helpers are exported", () => {
+  for (const name of ["notifMatrixColumns", "notifChannelState", "notifCellState",
+    "notifEventChannels", "notifTransportLabel", "notifDeliveryTone", "notifDeliveryStatusLabel",
+    "notifDeliveryRowHtml", "notifDeliveriesHtml", "notifDeliveriesErrorHtml",
+    "notifEmailSectionHtml", "notifChannelsSectionHtml", "notifChannelRowHtml",
+    "notifMatrixSectionHtml", "notifMatrixCellHtml", "notifDeliveriesShellHtml",
+    "notifMemberAdminNoticeHtml", "notifPageHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  // The 6 matrix columns are email + the 5 ChannelConfig chat types, in order.
+  assert.deepEqual([...hooks.notifMatrixColumns()].map((c) => c.type),
+    ["email", "discord", "slack", "telegram", "pushover", "webhook"]);
+  assert.deepEqual([...hooks.notifChannels], ["discord", "slack", "telegram", "pushover", "webhook"]);
+});
+
+// ── notifCellState: the honest per-cell truth ───────────────────────────────
+
+test("G-04 notifCellState: email column reads the per-event boolean", () => {
+  const s = { deployment_failed: true, provision_succeeded: false };
+  assert.equal(hooks.notifCellState(s, "deployment_failed", "email").on, true);
+  assert.equal(hooks.notifCellState(s, "provision_succeeded", "email").on, false);
+  // never flagged default — email is an explicit boolean either way.
+  assert.equal(hooks.notifCellState(s, "deployment_failed", "email").isDefault, false);
+});
+
+test("G-04 notifCellState: an explicit chat route wins over the default", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }],
+    event_routes: { provision_failed: ["discord"] },
+    chat_default_on: ["provision_failed"],
+  };
+  const st = hooks.notifCellState(s, "provision_failed", "discord");
+  assert.equal(st.on, true);
+  assert.equal(st.isDefault, false, "an explicit route is NOT a default");
+});
+
+test("G-04 notifCellState: a chat_default_on failure event fans to enabled channels as an honest DEFAULT", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }, { type: "slack", enabled: false, configured: false }],
+    event_routes: {}, // never customized
+    chat_default_on: ["provision_failed"],
+  };
+  const on = hooks.notifCellState(s, "provision_failed", "discord");
+  assert.equal(on.on, true);
+  assert.equal(on.isDefault, true, "an un-customized failure event renders as a default, not a choice");
+  // A disabled channel can't receive — off, even for a default-on event.
+  assert.equal(hooks.notifCellState(s, "provision_failed", "slack").on, false);
+  // A non-default event with no route is simply off.
+  assert.equal(hooks.notifCellState(s, "deployment_succeeded", "discord").on, false);
+});
+
+// ── notifEventChannels: the PUT /events body over the materialized set ───────
+
+test("G-04 notifEventChannels: the first edit of a default event materializes the whole fan-out", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true }, { type: "slack", enabled: true }, { type: "webhook", enabled: false }],
+    event_routes: {},
+    chat_default_on: ["provision_failed"],
+  };
+  // Turning discord OFF must keep slack (the other default) — not silently drop it.
+  assert.deepEqual([...hooks.notifEventChannels(s, "provision_failed", "discord", false)].sort(), ["slack"]);
+  // Turning a third channel ON extends the materialized set.
+  assert.deepEqual([...hooks.notifEventChannels(s, "provision_failed", "webhook", true)].sort(), ["discord", "slack", "webhook"]);
+});
+
+test("G-04 notifEventChannels: an explicitly-routed event edits its stored list", () => {
+  const s = { event_routes: { deployment_failed: ["discord"] }, channels: [], chat_default_on: [] };
+  assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "slack", true)].sort(), ["discord", "slack"]);
+  assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "discord", false)], []);
+  // A non-default event with no route starts empty.
+  assert.deepEqual([...hooks.notifEventChannels(s, "member_invited", "discord", true)], ["discord"]);
+});
+
+// ── delivery-log grammar ─────────────────────────────────────────────────────
+
+test("G-04 notifDeliveryTone: sent→ok, failed→danger, pending→info, http_status overrides", () => {
+  assert.equal(hooks.notifDeliveryTone({ status: "sent" }), "ok");
+  assert.equal(hooks.notifDeliveryTone({ status: "failed" }), "danger");
+  assert.equal(hooks.notifDeliveryTone({ status: "pending" }), "info");
+  assert.equal(hooks.notifDeliveryTone({ status: "sent", http_status: 500 }), "danger");
+  assert.equal(hooks.notifDeliveryTone({ http_status: 204 }), "ok");
+});
+
+test("G-04 notifDeliveryStatusLabel: http code → '204 OK'/'HTTP 500', else the status word", () => {
+  assert.equal(hooks.notifDeliveryStatusLabel({ http_status: 200 }), "200 OK");
+  assert.equal(hooks.notifDeliveryStatusLabel({ http_status: 500 }), "HTTP 500");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "failed" }), "Failed");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "pending" }), "Pending");
+});
+
+test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error", () => {
+  const row = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null,
+    inserted_at: "2026-07-19T10:00:00Z",
+  });
+  assert.match(row, /wh-del-row/);
+  assert.match(row, /alerts@acme\.com/);
+  assert.match(row, /wh-del-status--danger/);
+  assert.match(row, /Failed/);
+  assert.match(row, /3 attempts/);
+  assert.match(row, /wh-del-err/);
+  assert.match(row, /smtp 550 mailbox unavailable/);
+  // A chat row records the channel type as recipient — never a leaked URL.
+  const chat = hooks.notifDeliveryRowHtml({ recipient: "discord", channel: "discord", event: "deployment_failed", status: "sent", attempts: 1, http_status: 204 });
+  assert.match(chat, /204 OK/);
+  assert.match(chat, /wh-del-status--ok/);
+  assert.doesNotMatch(chat, /wh-del-err/);
+});
+
+test("G-04 notifDeliveriesHtml: populated card vs honest empty; error degrade is distinct", () => {
+  assert.match(hooks.notifDeliveriesHtml([{ recipient: "x", status: "sent" }]), /wh-del-card/);
+  assert.match(hooks.notifDeliveriesHtml([]), /No notifications have been delivered yet/);
+  assert.match(hooks.notifDeliveriesErrorHtml(), /Couldn't load the delivery log/);
+});
+
+// ── channel roster (GR34 .set-check) ─────────────────────────────────────────
+
+test("G-04 notifChannelRowHtml: configured honesty, write-only creds, consequence sub-line, gated test", () => {
+  const s = { channels: [{ type: "discord", enabled: true, configured: true }] };
+  const discord = { type: "discord", label: "Discord", off: "Off = Discord stops receiving routed events.",
+    fields: [{ k: "url", label: "Webhook URL", ph: "https://discord.com/api/webhooks/…" }] };
+  const row = hooks.notifChannelRowHtml(s, discord);
+  assert.match(row, /set-check/);
+  assert.match(row, /set-cred-tag">configured/);
+  assert.match(row, /Off = Discord stops receiving routed events\./, "the mandatory consequence sub-line renders");
+  // Write-only: a configured channel shows the sealed placeholder, never the value.
+  assert.match(row, /stored/);
+  assert.match(row, /data-notif-chan-test="discord"/, "an enabled+configured channel offers a test");
+
+  // Not configured: the empty tag + the real placeholder + NO test affordance.
+  const empty = hooks.notifChannelRowHtml({ channels: [] }, discord);
+  assert.match(empty, /set-cred-tag--empty">not configured/);
+  assert.match(empty, /discord\.com\/api\/webhooks/);
+  assert.doesNotMatch(empty, /data-notif-chan-test/);
+});
+
+// ── the routing matrix (GR36) ────────────────────────────────────────────────
+
+test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-send test row", () => {
+  const s = {
+    channels: [{ type: "discord", enabled: true, configured: true }],
+    event_routes: {}, chat_default_on: ["provision_failed"],
+  };
+  const html = hooks.notifMatrixSectionHtml(s);
+  assert.match(html, /set-matrix-grid/);
+  // One label column header (corner) + 6 channel columns.
+  assert.equal((html.match(/set-matrix-col/g) || []).length, 6, "6 channel columns render");
+  assert.match(html, /set-matrix-cell--default/, "a default-on failure cell is dashed");
+  assert.match(html, /Always sent to every enabled channel/, "the test row states always-send");
+  assert.doesNotMatch(html, /data-event="test"/, "the test row is NOT a lying toggle");
+  // A disabled/absent chat channel column is flagged off in its header.
+  assert.match(html, /set-matrix-off/);
+});
+
+// ── email section + page composition (GR33 plain-member law) ─────────────────
+
+test("G-04 notifEmailSectionHtml: admin gets a save-row + seg; member is read-only", () => {
+  const s = { transport: "smtp", alerts_enabled: true, from_address: "a@acme.com", smtp_host: "********" };
+  const admin = hooks.notifEmailSectionHtml(s, true);
+  assert.match(admin, /notif-transport-seg/);
+  assert.match(admin, /set-save-row/);
+  assert.match(admin, /notif-email-save/);
+  assert.match(admin, /stored/, "a stored SMTP secret shows the sealed placeholder, never a value");
+
+  const member = hooks.notifEmailSectionHtml(s, false);
+  assert.match(member, /set-readonly/);
+  assert.doesNotMatch(member, /set-save-row/, "member email section has NO save-row");
+  assert.doesNotMatch(member, /notif-email-save/, "member email section has NO save button");
+  assert.doesNotMatch(member, /form-input/, "member email section has NO inputs");
+  assert.match(member, /a@acme\.com/, "the read-only view still shows the value");
+});
+
+test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
+  const s = { transport: "instance", channels: [], event_routes: {}, chat_default_on: [] };
+  const admin = hooks.notifPageHtml(s, { canManage: true });
+  for (const needle of ["Email delivery", "Chat channels", "Event routing", "Delivery log"]) {
+    assert.ok(admin.includes(needle), "admin page includes " + needle);
+  }
+  const member = hooks.notifPageHtml(s, { canManage: false });
+  assert.match(member, /managed by team admins/);
+  assert.doesNotMatch(member, /set-save-row/, "member page has ZERO save-rows");
+  assert.doesNotMatch(member, /set-matrix-grid/, "member page has no routing matrix");
+});
+
+test("G-04 notifTransportLabel: the platform transport reads friendly", () => {
+  assert.equal(hooks.notifTransportLabel("instance"), "Barkpark platform");
+  assert.equal(hooks.notifTransportLabel("smtp"), "SMTP");
 });

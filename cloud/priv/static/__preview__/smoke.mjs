@@ -600,6 +600,11 @@ const EXPECTATIONS = {
       assert.ok(chip.className.includes("billing-chip--trial"), "topbar chip must ride the trial skin");
       assert.ok(!chip.className.includes("past_due"), "trial XOR past-due — never both");
       assert.equal(chip.href, "#billing", "the chip must route to #billing");
+      // G-01: a trial has no paid Stripe plan → no portal to manage, nothing to
+      // cancel; both owner action sections stay retired (their action is to
+      // subscribe, in the plan grid above).
+      assert.equal(reg.get("billing-manage-section").hidden, true, "a trial mounts no Manage-billing section");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "a trial mounts no Cancel section");
     },
   },
   "billing-past-due": {
@@ -615,7 +620,16 @@ const EXPECTATIONS = {
       assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
       assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
       assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
-      assert.ok(box.includes(">Manage billing<"), "the current-plan card must offer the portal");
+      // G-01 anatomy: Manage billing moved OUT of the state card into its own
+      // .set-section action row (the state card no longer buries a button).
+      assert.ok(!box.includes(">Manage billing<"), "the state card must NOT bury the portal button");
+      const manage = reg.get("billing-manage").innerHTML || "";
+      assert.ok(manage.includes(">Manage billing<"), "the Manage-billing action rides its own .set-section");
+      assert.ok(/download invoices/i.test(manage), "the invoice-less portal copy lives in the action section");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section is shown for a paid plan");
+      // Owner + paid + not-yet-cancelling → the Cancel section offers the danger action.
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "an owner may cancel a paid plan");
+      assert.ok((reg.get("billing-cancel").innerHTML || "").includes("Cancel plan"), "the Cancel-plan danger action renders");
       // The dead promises stay dead.
       assert.ok(!box.includes("retry twice more"), "the retry-count fiction must be gone");
       assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
@@ -634,8 +648,10 @@ const EXPECTATIONS = {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
-      assert.ok(box.includes(">Manage billing<"), "the portal CTA must render");
       assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      // G-01 anatomy: the portal CTA rides the Manage-billing .set-section now.
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section shows for the active plan");
       assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
       // A healthy active sub shows NO topbar billing chip (trial XOR past-due only).
       assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
@@ -1070,6 +1086,336 @@ const EXPECTATIONS = {
       assert.ok(body.includes("bob@acme.com"), "the second actor's singleton renders separately");
       // The keyset Load-more control survives the regrow.
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
+    },
+  },
+
+  // ── gr-p4-billing (G-01): plain-member gate + the post-cancel grace state ────
+  "billing-member": {
+    what: "a plain member of a paid team — read-only plan, the owner-gate copy, and NO billing write button anywhere",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The plan STATE reads honestly (real name + real ceiling) …
+      assert.ok(box.includes(">Supporter<"), "the member sees the real plan name");
+      assert.ok(box.includes("3 managed instances"), "the member sees the real quota-honest ceiling");
+      // … but with ZERO write affordances — never a disabled ghost (GR36).
+      assert.ok(!/<button/i.test(box), "the read-only plan card renders NO button");
+      assert.ok(!box.includes("plan-more") && !box.includes("plan-continue"), "no grid-toggle / subscribe CTA for a member");
+      assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed for a member");
+      // The honest owner-gate copy is the member's single explanation.
+      const manage = reg.get("billing-manage").innerHTML || "";
+      assert.ok(manage.includes("Only the team owner can manage billing."), "the honest owner-gate copy renders");
+      assert.ok(!/<button/i.test(manage), "the Manage section shows NO button for a member");
+      // The pin that PROVES the member view has no billing write button: neither
+      // section carries a Manage/Cancel action, and Cancel is retired entirely.
+      assert.ok(!manage.includes(">Manage billing<"), "no Manage-billing button for a member");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section for a member");
+    },
+  },
+  "billing-cancelling": {
+    what: "owner after an in-app cancel — the grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The plan card reads the grace end honestly via billingPeriodLine.
+      assert.ok(box.includes("Access until "), "a cancelling plan reads Access-until the period end");
+      assert.ok(box.includes(">Ending<"), "the status badge reads Ending");
+      // Manage billing stays available (resubscribe / portal) …
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "Manage billing stays for the owner");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage section stays shown");
+      // … but the Cancel section is GONE — a second cancel is a no-op.
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "the Cancel section retires once cancel_at_period_end is set");
+    },
+  },
+  // ── gr-p4 G-02+G-03 Providers — the honesty flagship ───────────────────────
+  // roster (kind + label + connected-at, no implied validity) + the hybrid
+  // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
+  // gap reasons, bare dash where the server owns no reason).
+  "providers-connected": {
+    what: "the roster (2 kinds, Disconnect…), the all-connected replace state, and the honest capability matrix render",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
+      assert.ok(roster.includes("prov-roster") && roster.includes("prov-row"), "roster rows render");
+      assert.ok(roster.includes("Hetzner") && roster.includes("Azure"), "both connected kinds render");
+      assert.ok(roster.includes("connected "), "each row shows a connected-at (never a validity badge)");
+      assert.ok(!/\bConnected<\/span>/.test(roster), "the roster never implies live validity");
+      assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
+
+      // Both connectable providers are already connected → the connect card is in
+      // the "disconnect to replace" state: it offers NO second connect (the
+      // additive-duplicate guard, GR36 already-connected ruling).
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("set-section") && connect.includes("Connect a provider"), "the connect card renders");
+      assert.ok(connect.includes("Every supported provider is connected"), "the all-connected replace note renders");
+      assert.ok(!connect.includes("data-connect-submit"), "no second connect is offered for already-connected kinds");
+
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
+      for (const verb of ["core", "catalog", "archive", "resurrect", "decommission", "adopt", "audit", "pause", "labels"]) {
+        assert.ok(matrix.includes(">" + verb + "<"), "the matrix rows verb " + JSON.stringify(verb));
+      }
+      assert.ok(matrix.includes("cap-mark"), "a supported cell shows an affirmative mark");
+      assert.ok(matrix.includes("cap-dash"), "an unsupported cell shows a dash");
+      assert.ok(matrix.includes("Hetzner has no pause primitive"), "a false cell carries the server-owned gap reason verbatim");
+      assert.ok(matrix.includes("Adopt needs an existing resource-group import"), "the azure adopt gap renders verbatim");
+      // dev-tier `fake` is FILTERED — it is never a matrix column.
+      assert.ok(!matrix.includes(">Fake<"), "the dev-tier provider is filtered out of the matrix");
+    },
+  },
+  "providers-empty": {
+    what: "the empty roster + the connect card armed on the first provider; the matrix still renders",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("set-section"), "the empty roster still rides the anatomy");
+      assert.ok(roster.includes("No providers connected yet"), "the honest empty note renders");
+      assert.ok(!roster.includes("prov-row"), "no roster rows when nothing is connected");
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("data-connect-submit"), "the connect card is armed even with an empty roster");
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the matrix renders regardless of connected providers");
+    },
+  },
+  "providers-unverified": {
+    what: "the connect card's remediation slot + the server-owned remediation copy verbatim (node-pinned)",
+    check(reg, hooks) {
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("cred-remediation"), "the connect card carries the remediation slot (filled on submit)");
+      // The remediation is click-driven (submit → 422). Prove the honest path
+      // node-pinned: the scenario's POST returns the single provider_unverified
+      // + a remediation string, and remediationCopy() extracts it verbatim (never
+      // routed through friendly(), which drops .remediation).
+      const res = route("providers-unverified", "POST", "/v1/providers");
+      assert.equal(res.status, 422, "connect preflight fails");
+      assert.equal(res.body.error, "provider_unverified", "all causes collapse to one provider_unverified");
+      const copy = hooks.remediationCopy(res.body);
+      assert.ok(copy && copy.includes("Hetzner Cloud console"), "the server remediation names the exact console fix, verbatim");
+      assert.equal(hooks.friendly(res.body, "fallback").indexOf(copy), -1, "friendly() provably drops the remediation");
+    },
+  },
+  "providers-member": {
+    what: "a plain member sees a read-only roster + matrix with ZERO write affordances",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("prov-row"), "the member still sees the roster (GET is member-readable)");
+      assert.ok(!roster.includes("data-prov-disconnect"), "a member roster has NO Disconnect affordance");
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(!connect.includes("data-connect-submit"), "a member sees NO connect card");
+      assert.ok(!connect.includes("set-section"), "the connect region is empty for a member");
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the honest matrix still renders read-only for a member");
+    },
+  },
+  // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
+  "notif-configured": {
+    what: "the full notifications page — email + chat channels + routing matrix + delivery log, all backend-true",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      // GR33 anatomy: .set-section cards, each buffered section its own save-row;
+      // the loose #notif-status span is GONE, and the superseded .notif-card too.
+      assert.ok(html.includes("set-section"), "sections use the GR33 .set-section card");
+      assert.ok(!html.includes('id="notif-status"'), "the loose #notif-status span is retired");
+      assert.ok(!html.includes("notif-card"), "the superseded .notif-card is gone from this view");
+      // Email section: transport seg (single-select) + its own save-row.
+      assert.ok(html.includes("Email delivery") && html.includes("notif-transport-seg"), "email section with the transport seg");
+      assert.ok(html.includes('id="notif-email-save"'), "email section owns its save-row button");
+      // Channels roster: 6 channels (email transport + 5 chat), configured honesty,
+      // consequence sub-lines, its own save-row.
+      assert.ok(html.includes("Chat channels") && html.includes("set-channel"), "chat-channel roster renders");
+      for (const label of ["Discord", "Slack", "Telegram", "Pushover", "Webhook"]) {
+        assert.ok(html.includes(">" + label + " "), "roster lists " + label);
+      }
+      assert.ok(html.includes("configured"), "channels render their configured:bool truth");
+      assert.ok(html.includes('id="notif-channels-save"'), "channels section owns its save-row");
+      // Routing matrix: the event×channel grid on .set-toggle-weight cells + the
+      // always-send test row (stated, never a lying toggle).
+      assert.ok(html.includes("Event routing") && html.includes("set-matrix-grid"), "the routing matrix renders");
+      assert.ok(html.includes("set-matrix-cell"), "matrix cells render as toggles");
+      assert.ok(html.includes("Always sent to every enabled channel"), "the test row is stated as always-send, not a toggle");
+      // Delivery log: the async sub-mount populated the last-50 rows in the webhook
+      // grammar (mono recipient + toned status pill), with no fake filter UI.
+      assert.ok(html.includes("Delivery log") && html.includes("last 50"), "the delivery-log section frames the last 50");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("wh-del-row"), "the log renders rows in the webhook-deliveries grammar");
+      assert.ok(log.includes("wh-del-status--danger"), "a failed delivery reads danger-toned");
+      assert.ok(log.includes("Failed"), "a failure with no http_status reads 'Failed'");
+      assert.ok(log.includes("204 OK"), "a chat delivery with an http_status reads its code");
+    },
+  },
+  "notif-empty": {
+    what: "first-run notifications — no channels configured, empty delivery log, honest defaults",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("Email delivery") && html.includes("Event routing"), "the page still composes all sections");
+      assert.ok(html.includes("not configured"), "an untouched channel reads not-configured");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("No notifications have been delivered yet"), "the empty log states the honest empty case");
+    },
+  },
+  "notif-member": {
+    what: "plain-member notifications — read-only email, ZERO save-rows, no admin sections, no test button",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("set-readonly"), "the member sees read-only email settings");
+      assert.ok(html.includes("managed by team admins"), "the admin-only sections degrade to an honest line");
+      // The plain-member proof: no write affordances anywhere.
+      assert.ok(!html.includes("set-save-row"), "member view has NO save-rows");
+      assert.ok(!html.includes("notif-email-save"), "member view has NO save buttons");
+      assert.ok(!html.includes("set-matrix-grid"), "member view has NO routing matrix");
+      assert.ok(!html.includes("set-channel-creds"), "member view has NO credential inputs");
+      assert.equal(reg.get("notif-test").hidden, true, "the header Send-test button is hidden for a member");
+    },
+  },
+  "notif-deliveries-error": {
+    what: "the deliveries route errors — the delivery log degrades honestly, the rest of the page survives",
+    check(reg) {
+      const html = reg.get("notif-body").innerHTML || "";
+      assert.ok(html.includes("Event routing"), "the admin page still renders when deliveries fail");
+      const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
+      assert.ok(log.includes("Couldn't load the delivery log"), "the log shows the honest error-degrade, never an infinite spinner");
+    },
+  },
+  // ── G-05 API tokens (GR34) ──────────────────────────────────────────────────
+  "tokens-populated": {
+    what: "the token list — one lean row per PAT, ability chips + created/expiry, per-row Revoke, revoked row flagged",
+    check(reg, hooks) {
+      const html = reg.get("token-list").innerHTML || "";
+      // Exactly one .token-row per fixture token (4), the revoked one flagged.
+      assert.equal(countMatches(html, 'class="token-row'), 4, "one lean row per token");
+      assert.ok(html.includes("is-revoked"), "the revoked token row is dimmed via is-revoked");
+      for (const name of ["CI deploy key", "Read-only dashboard", "Break-glass root", "Legacy writer"])
+        assert.ok(html.includes(name), "the row names the token: " + name);
+      // Real pat_json fields only — chips + created(inserted_at)/expiry/last-used.
+      assert.ok(html.includes("token-chip"), "abilities render as chips");
+      assert.ok(html.includes("created "), "created (inserted_at) renders");
+      assert.ok(html.includes("never used"), "a never-used token says so");
+      assert.ok(html.includes("no expiry"), "a no-expiry token says so");
+      assert.ok(html.includes(">Revoke<"), "an active row offers Revoke");
+      assert.ok(html.includes("Revoked"), "the revoked row shows the Revoked badge");
+      // NO faked prefix/preview — pat_json carries none; the list never invents one.
+      assert.ok(!html.includes("bpc_pat_"), "the list never shows a token prefix/plaintext");
+      // Owner picker: all four abilities as .set-check rows with consequence sub-lines.
+      const picker = hooks.tokenAbilitiesFieldHtml();
+      assert.equal(countMatches(picker, 'class="token-ab"'), 4, "owner sees all four ability checkboxes");
+      for (const v of ["read", "write", "deploy", "root"])
+        assert.ok(picker.includes('value="' + v + '"'), "owner can pick " + v);
+      assert.ok(picker.includes("set-check-sub"), "each ability carries its consequence sub-line");
+      assert.ok(picker.includes("exclusive"), "the deploy/root exclusivity consequence is stated");
+    },
+  },
+  "tokens-empty": {
+    what: "the empty state — no tokens yet, Create-token CTA",
+    container: "token-list",
+    includes: ["No API tokens yet", "empty-state", "Create token"],
+    excludes: ['class="token-row'],
+  },
+  "tokens-member": {
+    what: "plain-member picker — read-only scope stated up-front, no write/deploy/root pickers (anti-ghost)",
+    check(reg, hooks) {
+      // The list still renders the member's own read token.
+      const list = reg.get("token-list").innerHTML || "";
+      assert.ok(list.includes("My read token"), "the member sees their own token");
+      // The picker (gated on meCache.role) offers read-only scope — NO checkboxes
+      // for write/deploy/root, plus the honest ask-an-admin copy.
+      const picker = hooks.tokenAbilitiesFieldHtml();
+      assert.ok(picker.includes("set-check--scope"), "read scope is stated, not a pickable ghost");
+      assert.ok(picker.includes("Members can create read-only tokens"), "honest copy names the cap");
+      assert.ok(!picker.includes('class="token-ab"'), "no ability checkboxes are rendered for a member");
+      assert.ok(
+        !picker.includes('value="write"') && !picker.includes('value="deploy"') && !picker.includes('value="root"'),
+        "write/deploy/root are not offered to a member",
+      );
+    },
+  },
+  "tokens-reveal": {
+    what: "the plaintext-once reveal — amber only-time banner + mono input-affix (copy + show/hide)",
+    check(reg, hooks) {
+      const html = hooks.tokenRevealHtml("bpc_pat_3xampLEon1yShoWnoNCE", { name: "CI deploy key", abilities: ["deploy"] });
+      assert.ok(html.includes("notice notice-warn"), "the amber only-time banner frames the reveal");
+      assert.ok(html.toLowerCase().includes("only time"), "the banner says this is the only time");
+      assert.ok(html.includes("input-affix"), "the plaintext sits in an input-affix row");
+      assert.ok(html.includes("token-reveal-input"), "the value renders mono");
+      assert.ok(html.includes("bpc_pat_3xampLEon1yShoWnoNCE"), "the plaintext is shown once");
+      assert.ok(html.includes(">Copy<"), "a copy button is offered");
+      assert.ok(html.includes("token-eye"), "a show/hide toggle is offered");
+    },
+  },
+  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
+  // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
+  "members-populated": {
+    what: "Members (admin) — roster + invitations on the .set-* anatomy, 3 real roles",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const body = reg.get("members-body").innerHTML || "";
+      assert.ok(body.includes("set-section"), "the roster rides the .set-section anatomy");
+      assert.ok(body.includes("Team members"), "the roster card heading renders");
+      assert.ok(body.includes("Pending invitations"), "the admin-only invitations card renders");
+      assert.ok(body.includes("ada@acme.com") && body.includes("lin@acme.com") && body.includes("rex@acme.com"), "every member row renders");
+      assert.ok(body.includes("(you)"), "the acting owner is self-tagged and gets no self-remove");
+      assert.ok(body.includes("sky@partner.io"), "a pending invitation renders");
+      // THREE roles only — the chips read Owner/Admin/Member; NO invented tiers.
+      assert.ok(body.includes(">Owner<") && body.includes(">Admin<") && body.includes(">Member<"), "the 3 real role chips render");
+      assert.ok(!body.includes("Operator") && !body.includes("Supporter"), "no design-fiction 5-role vocabulary is rendered");
+      // Manage affordances present for the admin; Remove is the destroy path.
+      assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "manager rows carry Change role + Remove");
+    },
+  },
+  // The plain-member seam (GR33 plain-member law): read-only roster, no
+  // invitations card, no manage affordances — proven by their ABSENCE.
+  "members-member": {
+    what: "Members (member) — read-only roster, zero manage affordances",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const body = reg.get("members-body").innerHTML || "";
+      assert.ok(body.includes("Team members") && body.includes("rex@acme.com"), "the roster still renders for a member");
+      assert.ok(!body.includes("Pending invitations"), "a member sees no invitations card");
+      assert.ok(!body.includes(">Change role<") && !body.includes(">Remove<"), "a member sees no manage affordances");
+      // The header Invite button stays hidden for a plain member.
+      assert.equal(reg.get("members-invite").hidden, true, "the Invite button is hidden for a member");
+    },
+  },
+  // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
+  // secret + write-once chips, the sealed write-once note) + the add FORM.
+  "env-populated": {
+    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
+      assert.ok(body.includes("DATABASE_URL") && body.includes("STRIPE_SECRET_KEY") && body.includes("WORKER_TOKEN"), "every var key renders");
+      assert.ok(body.includes(">Secret<"), "a secret chip renders");
+      assert.ok(body.includes(">Write-once<"), "a write-once chip renders");
+      assert.ok(body.includes(">Team<") && body.includes(">Instance<"), "both scope chips render");
+      // The value is sealed forever — NEVER a reveal affordance anywhere.
+      assert.ok(!body.includes("Reveal") && !body.includes("Show value") && !body.includes("value=\"env"), "no reveal affordance — the value is sealed");
+      // The write-once row carries the honest sealed-and-unreplaceable note.
+      assert.ok(body.includes("Delete and recreate to change"), "the write-once row states it can't be changed in place");
+      // The admin add-var FORM section with its own save-row.
+      assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
+      assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
+    },
+  },
+  // The write-once 409 twin renders the same sealed note; the POST-collision copy
+  // itself is unit-pinned (envVarWriteFailureCopy) since the submit is click-driven.
+  "env-write-once-409": {
+    what: "Environment variables — the write-once row's sealed state (409 copy unit-pinned)",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("STRIPE_SECRET_KEY") && body.includes("Write-once"), "the write-once var renders");
+      assert.ok(body.includes("Delete and recreate to change"), "the sealed per-row note renders");
+    },
+  },
+  // Env-vars (member): read-only rows, NO add form, NO Delete (member-read law).
+  "env-member": {
+    what: "Environment variables (member) — read-only rows, no add form",
+    check(reg) {
+      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
+      const body = reg.get("env-body").innerHTML || "";
+      assert.ok(body.includes("DATABASE_URL"), "the rows still render for a member");
+      assert.ok(!body.includes("Add a variable") && !body.includes("set-save-row"), "a member sees no add form");
+      assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
     },
   },
 };
