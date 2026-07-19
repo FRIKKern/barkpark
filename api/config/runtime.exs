@@ -20,6 +20,31 @@ if System.get_env("PHX_SERVER") do
   config :barkpark, BarkparkWeb.Endpoint, server: true
 end
 
+# Server-owned CycleFleet release capture. The bearer token is passed only to
+# the isolated reader processes and is never persisted in the challenge. The
+# executable paths must be absolute; the adapter rejects relative/path-search
+# execution so a user-controlled working directory cannot select a binary.
+for {env_name, config_key} <- [
+      {"BARKPARK_RELEASE_CAPTURE_TOKEN", :cycle_release_capture_token},
+      {"BARKPARK_RELEASE_CAPTURE_BP_PATH", :cycle_release_capture_bp_path},
+      {"BARKPARK_DEPLOYMENT_DIGEST", :release_deployment_digest}
+    ] do
+  case System.get_env(env_name) do
+    value when is_binary(value) and value != "" -> config :barkpark, config_key, value
+    _ -> :ok
+  end
+end
+
+case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
+  secret when is_binary(secret) and byte_size(secret) >= 32 ->
+    config :barkpark, :cycle_release_capture_hmac_secret, secret
+
+  _ ->
+    if config_env() == :prod do
+      raise "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET must contain at least 32 bytes"
+    end
+end
+
 # Continuous-canvas editor cutover: ON by default in PRODUCTION (the unified
 # <bp-paper-canvas> Obsidian-style editor). Dev/test stay OFF (the per-block
 # <bp-paper-editor>) so the flag-OFF byte-identical guarantee and its tests hold.

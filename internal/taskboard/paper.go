@@ -65,7 +65,15 @@ func paperMeasure(width int) int {
 // shell sets it true on the placeholder state while this call is in flight.
 func FetchPaper(c *apiclient.Client, dataset, slug string) (PaperState, error) {
 	ps := PaperState{Slug: slug}
-	source, err := c.PaperSource(dataset, slug, c.Perspective)
+	var source apiclient.PaperSource
+	releaseRef, releaseRead, err := apiclient.ParseReleasePaperRef(slug)
+	if err == nil && releaseRead {
+		var pinned apiclient.ReleasePaperSource
+		pinned, err = c.PaperReleaseSource(releaseRef)
+		source = pinned.PaperSource
+	} else if err == nil {
+		source, err = c.PaperSource(dataset, slug, c.Perspective)
+	}
 	if err != nil {
 		ps.Err = err.Error()
 		return ps, err

@@ -2,6 +2,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Ecto.Query
 
   alias Barkpark.{CycleFleet, Repo, Tenancy}
   alias Barkpark.Auth.ApiToken
@@ -30,6 +31,24 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       TenancyAuth.create_membership(workspace.id, token.id, "admin", "api_token")
 
     %{workspace: workspace, project: project, token: raw}
+  end
+
+  test "public Paper verification failures return a stable 503 without internal details" do
+    for reason <- [
+          :public_release_smoke_failed,
+          :public_release_smoke_pending,
+          {:public_release_smoke_compensation_failed, {:database, "sensitive detail"}}
+        ] do
+      response =
+        build_conn()
+        |> BarkparkWeb.CycleFleetController.release_verification_unavailable(reason)
+
+      assert response.status == 503
+      body = Jason.decode!(response.resp_body)
+      assert body["error"]["code"] == "release_verification_unavailable"
+      refute response.resp_body =~ "sensitive"
+      refute response.resp_body =~ "compensation_failed"
+    end
   end
 
   test "flat routes are token-bound projectless legacy routes distinct from canonical scoped routes",
@@ -213,7 +232,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
     assert MapSet.new(commands, & &1["id"]) ==
              MapSet.new(
-               ~w(cycle.show cycle.open cycle.seal cycle.assign cycle.result cycle.quarantine cycle.promote cycle.rollback)
+               ~w(cycle.show cycle.open cycle.release-gate-open cycle.release-paper-stage cycle.release-gate-activate cycle.seal cycle.assign cycle.result cycle.quarantine cycle.promote cycle.rollback)
              )
 
     for command <- commands do
@@ -658,7 +677,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       "excluded_unit_ids" => []
     }
 
-    valid_payload = semantic_http_payload("build-1", completed_outcomes)
+    valid_payload = semantic_http_payload(base, "build-1", completed_outcomes)
 
     missing_receipts = %{
       "idempotency_key" => "terminal-build-1",
@@ -697,7 +716,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
           result_params,
           "payload_json",
           Jason.encode!(
-            semantic_http_payload("build-1", %{
+            semantic_http_payload(base, "build-1", %{
               "completed_unit_ids" => [],
               "stalled_unit_ids" => ["unit-1"],
               "excluded_unit_ids" => []
@@ -1109,7 +1128,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   defp create_http_result(base, token, assignment_id, status, payload) do
     payload =
       if status == "completed" do
-        semantic_http_payload(assignment_id, payload)
+        semantic_http_payload(base, assignment_id, payload)
       else
         payload
       end
@@ -1126,8 +1145,22 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     |> json_response(201)
   end
 
-  defp semantic_http_payload(assignment_id, payload) do
-    assignment = Repo.get_by!(Assignment, assignment_id: assignment_id)
+  defp semantic_http_payload(base, assignment_id, payload) do
+    segments = base |> URI.parse() |> Map.fetch!(:path) |> String.split("/", trim: true)
+    cycle_index = Enum.find_index(segments, &(&1 == "cycles"))
+    epic_id = Enum.at(segments, cycle_index + 1)
+    wave_key = Enum.at(segments, cycle_index + 2)
+
+    assignment =
+      Repo.one!(
+        from assignment in Assignment,
+          join: wave in Wave,
+          on: wave.id == assignment.cycle_wave_id,
+          where:
+            assignment.assignment_id == ^assignment_id and wave.epic_id == ^epic_id and
+              wave.wave_id == ^wave_key
+      )
+
     task = ensure_semantic_http_task!(assignment)
     wave = Repo.get!(Wave, assignment.cycle_wave_id)
 

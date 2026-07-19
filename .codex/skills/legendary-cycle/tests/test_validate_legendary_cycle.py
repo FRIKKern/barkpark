@@ -303,7 +303,10 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         return {
             "kind": "barkpark_cycle_fleet",
             "workspace_id": scope["workspace_id"],
+            "workspace_slug": "default",
             "project_id": scope["project_id"],
+            "project_slug": "default",
+            "canonical_origin": "https://guerrilla.barkpark.cloud",
             "epic_id": scope["epic_id"],
             "wave_id": scope["wave_id"],
             "wave_revision": cycle_ledger["wave_revision"],

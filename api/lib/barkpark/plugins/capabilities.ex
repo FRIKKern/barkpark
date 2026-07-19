@@ -1980,7 +1980,68 @@ defmodule Barkpark.Plugins.Capabilities do
             "correction_of_digest",
             "string",
             "Correction open only: SHA-256 digest of the canonical correction_of-v1 JSON."
+          ),
+          flag(
+            "release_gate_receipt_json",
+            "string",
+            "Correction open only: exact admitted cycle-release-gate-v1 open receipt."
           )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-gate-open",
+        "cycle",
+        "release-gate-open",
+        "Admit and reserve the immutable pre-open contract for one correction.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("idempotency_key", true, "string", "Stable admission replay key."),
+          arg("correction_of_json", true, "string", "Canonical correction_of-v1 JSON."),
+          arg("correction_of_digest", true, "string", "Canonical correction digest.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-paper-stage",
+        "cycle",
+        "release-paper-stage",
+        "Stage one immutable campaign or successor Paper candidate for an admitted release gate.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("release_gate_id", true, "string", "Admitted release gate UUID."),
+          arg("role", true, "string", "campaign | successor"),
+          arg("document_id", true, "string", "Stable Paper document id."),
+          arg("title", true, "string", "Paper title."),
+          arg("content_json", true, "string", "Canonical Paper content JSON object.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "cycle.release-gate-activate",
+        "cycle",
+        "release-gate-activate",
+        "Capture every required reader and activate one fully staged release gate.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate",
+        "write",
+        args: [
+          arg("epic_id", true, "string", "Epic id."),
+          arg("wave_id", true, "string", "Prospective correction wave id."),
+          arg("release_gate_id", true, "string", "Fully staged release gate UUID."),
+          arg("idempotency_key", true, "string", "Stable activation replay key."),
+          arg("b1_experiment_id", true, "string", "Exact accepted B1 experiment identifier.")
         ],
         writes: true,
         default_output: "json"

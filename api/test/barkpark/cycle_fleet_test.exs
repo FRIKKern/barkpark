@@ -1,3 +1,39 @@
+defmodule Barkpark.CycleFleetTestReleaseAdapter do
+  @behaviour Barkpark.CycleFleet.ReleaseCaptureAdapter
+
+  @impl true
+  def capture(_request), do: {:error, :capture_not_used_by_seeded_gate}
+
+  def public_smoke(request) do
+    {:ok,
+     %{
+       "format" => "cycle-release-public-smoke-v1",
+       "attempts" =>
+         Enum.map(request["documents"], fn document ->
+           %{
+             "role" => document["role"],
+             "document_id" => document["document_id"],
+             "doc_id" => document["doc_id"],
+             "url" => document["url"],
+             "status" => 200,
+             "redirect_count" => 0,
+             "response_headers" => %{
+               "content_type" => "text/html; charset=utf-8",
+               "etag" => ~s("sha256:#{document["content_digest"]}"),
+               "x_barkpark_paper_revision" => document["revision_id"]
+             },
+             "byte_count" => 256,
+             "response_digest" =>
+               :crypto.hash(:sha256, "#{document["role"]}-public-reader")
+               |> Base.encode16(case: :lower),
+             "deployment_digest" => request["deployment_digest"],
+             "verdict" => "pass"
+           }
+         end)
+     }}
+  end
+end
+
 defmodule Barkpark.CycleFleetTest do
   use Barkpark.DataCase, async: false
 
@@ -28,6 +64,8 @@ defmodule Barkpark.CycleFleetTest do
   alias Barkpark.CycleFleet
   alias Barkpark.Content.{Document, Revision}
   alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, Wave}
+  alias Barkpark.CycleFleet.ReleaseGate
+  alias Barkpark.CycleFleet.ReleaseGate.{Consumption, PaperCandidate}
   alias Barkpark.EpicFleet.{Assignment, Result}
   alias Barkpark.Tenancy
 
@@ -234,20 +272,23 @@ defmodule Barkpark.CycleFleetTest do
       scope: scope
     } do
       migration = Barkpark.Repo.Migrations.CreateCycleWaves
-      assert %{safe?: true} = migration.rollback_blockers()
+      baseline = migration.rollback_blockers()
 
       assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 1))
-      assert %{safe?: false, cycle_waves: 1} = migration.rollback_blockers()
+      after_wave = migration.rollback_blockers()
+      refute after_wave.safe?
+      assert after_wave.cycle_waves == baseline.cycle_waves + 1
+      assert after_wave.cycle_build_plans == baseline.cycle_build_plans
+      assert after_wave.cycle_bound_assignments == baseline.cycle_bound_assignments
 
       complete_experiments(scope)
       assert {:ok, _plan} = CycleFleet.seal_build_plan(scope, build_plan_attrs(2))
 
-      assert %{
-               safe?: false,
-               cycle_waves: 1,
-               cycle_build_plans: 1,
-               cycle_bound_assignments: 15
-             } = migration.rollback_blockers()
+      after_plan = migration.rollback_blockers()
+      refute after_plan.safe?
+      assert after_plan.cycle_waves == baseline.cycle_waves + 1
+      assert after_plan.cycle_build_plans == baseline.cycle_build_plans + 1
+      assert after_plan.cycle_bound_assignments == baseline.cycle_bound_assignments + 15
     end
 
     test "Legendary open freezes the complete scale contract and seal waits for Pilot", %{
@@ -295,8 +336,22 @@ defmodule Barkpark.CycleFleetTest do
       assert {:error, :build_plan_conflict} =
                CycleFleet.seal_build_plan(scope, %{build_plan_attrs(10) | chosen_format: "other"})
 
-      assert Repo.aggregate(Wave, :count) == 1
-      assert Repo.aggregate(BuildPlan, :count) == 1
+      wave_query =
+        from wave in Wave,
+          where:
+            wave.workspace_id == ^scope.workspace_id and wave.project_id == ^scope.project_id and
+              wave.epic_id == ^scope.epic_id
+
+      plan_query =
+        from plan in BuildPlan,
+          join: wave in Wave,
+          on: wave.id == plan.wave_id,
+          where:
+            wave.workspace_id == ^scope.workspace_id and wave.project_id == ^scope.project_id and
+              wave.epic_id == ^scope.epic_id
+
+      assert Repo.aggregate(wave_query, :count) == 1
+      assert Repo.aggregate(plan_query, :count) == 1
     end
 
     test "assignments require a wave and Legendary build requires a seal", %{scope: scope} do
@@ -1572,6 +1627,22 @@ defmodule Barkpark.CycleFleetTest do
     test "correction_of-v1 immutably repairs generic per-unit arithmetic and replays exactly", %{
       scope: scope
     } do
+      prior_adapter = Application.get_env(:barkpark, :cycle_release_capture_adapter)
+      prior_deployment = Application.get_env(:barkpark, :release_deployment_digest)
+
+      Application.put_env(
+        :barkpark,
+        :cycle_release_capture_adapter,
+        Barkpark.CycleFleetTestReleaseAdapter
+      )
+
+      Application.put_env(:barkpark, :release_deployment_digest, String.duplicate("a", 64))
+
+      on_exit(fn ->
+        restore_test_env(:cycle_release_capture_adapter, prior_adapter)
+        restore_test_env(:release_deployment_digest, prior_deployment)
+      end)
+
       scope = %{scope | wave_id: "wave-3"}
       inventory = Enum.map(1..503, &"unit-#{&1}")
       assert {:ok, prior_wave} = CycleFleet.open_wave(epic_wave_attrs(scope, inventory))
@@ -1713,6 +1784,16 @@ defmodule Barkpark.CycleFleetTest do
           correction_of: correction,
           correction_of_digest: CycleFleet.digest(correction)
         })
+
+      {:ok, open_gate} =
+        CycleFleet.admit_open_release_gate(successor_scope, %{
+          target_wave_id: successor_scope.wave_id,
+          idempotency_key: "open-wave-3-corrected",
+          correction_of: correction,
+          correction_of_digest: CycleFleet.digest(correction)
+        })
+
+      attrs = Map.put(attrs, :release_gate_receipt, open_gate.receipt)
 
       raw_wrong_delta =
         put_in(correction, ["delta"], %{
@@ -1883,11 +1964,20 @@ defmodule Barkpark.CycleFleetTest do
         )
       end
 
+      {:ok, chain_gate} =
+        CycleFleet.admit_open_release_gate(wave3_scope, %{
+          target_wave_id: wave3_scope.wave_id,
+          idempotency_key: "open-wave-3-adversarial",
+          correction_of: chain_correction,
+          correction_of_digest: CycleFleet.digest(chain_correction)
+        })
+
       assert {:ok, wave3} =
                CycleFleet.open_wave(
                  Map.merge(wave3_scope, %{
                    correction_of: chain_correction,
-                   correction_of_digest: CycleFleet.digest(chain_correction)
+                   correction_of_digest: CycleFleet.digest(chain_correction),
+                   release_gate_receipt: chain_gate.receipt
                  })
                )
 
@@ -1979,18 +2069,6 @@ defmodule Barkpark.CycleFleetTest do
 
       gate = promotion_gate(wave3, wave3_projection, receipt, paper, b1_experiment)
 
-      correct_paper =
-        released_paper!(scope, dataset, "task06-wave2-correct-paper", %{
-          "blocks" => [
-            %{
-              "type" => "callout",
-              "title" => "Agent fleet",
-              "cycle_ledger" => stringify_keys(projected),
-              "fleet" => stringify_keys(projected.canonical_fleet)
-            }
-          ]
-        })
-
       correct_b1_scope = promotion_b1_scope(successor, projected)
 
       correct_b1_assignments =
@@ -2012,12 +2090,12 @@ defmodule Barkpark.CycleFleetTest do
           "task06-wave2-correct-b1"
         )
 
-      correct_gate =
-        promotion_gate(
+      correct_release_gate =
+        seed_promotable_release_authority!(
+          successor_scope,
+          prior_wave,
           successor,
-          projected,
-          projected.correction_receipt,
-          correct_paper,
+          open_gate,
           correct_b1_experiment
         )
 
@@ -2048,7 +2126,9 @@ defmodule Barkpark.CycleFleetTest do
           "task06-wave3-b1-subset"
         )
 
-      assert {:error, :invalid_gate_receipt} =
+      # Promotion now accepts only a consumed Task07 activate receipt. A caller-authored
+      # legacy gate is rejected at that stronger outer boundary before legacy validation.
+      assert {:error, :invalid_activate_release_gate} =
                CycleFleet.promote_correction(
                  scope,
                  Map.merge(transition, %{
@@ -2080,7 +2160,7 @@ defmodule Barkpark.CycleFleetTest do
           end
         )
 
-      assert {:error, :invalid_gate_receipt} =
+      assert {:error, :invalid_activate_release_gate} =
                CycleFleet.promote_correction(
                  scope,
                  Map.merge(transition, %{
@@ -2098,26 +2178,33 @@ defmodule Barkpark.CycleFleetTest do
                  })
                )
 
-      promote_attrs =
-        Map.merge(transition, %{
-          idempotency_key: "promote-wave-3",
-          previous_event_id: nil,
-          correction_receipt: receipt,
-          gate_receipt: gate
-        })
-
       correct_promote_attrs =
         Map.merge(transition, %{
           idempotency_key: "promote-wave-2-correct",
           previous_event_id: nil,
           correction_receipt: projected.correction_receipt,
-          gate_receipt: correct_gate
+          gate_receipt: correct_release_gate.receipt
         })
 
       assert {:ok, correct_promoted} =
                CycleFleet.promote_correction(scope, correct_promote_attrs)
 
-      promote_attrs = %{promote_attrs | previous_event_id: correct_promoted.id}
+      wave3_release_gate =
+        seed_promotable_release_authority!(
+          wave3_scope,
+          prior_wave,
+          wave3,
+          chain_gate,
+          b1_experiment
+        )
+
+      promote_attrs =
+        Map.merge(transition, %{
+          idempotency_key: "promote-wave-3",
+          previous_event_id: correct_promoted.id,
+          correction_receipt: receipt,
+          gate_receipt: wave3_release_gate.receipt
+        })
 
       assert {:ok, promoted} = CycleFleet.promote_correction(scope, promote_attrs)
       assert {:ok, replayed} = CycleFleet.promote_correction(wave3_scope, promote_attrs)
@@ -2207,7 +2294,11 @@ defmodule Barkpark.CycleFleetTest do
              }
 
       reader_authority = root_reader.correction_lifecycle.authority_evidence
-      assert reader_authority.paper_revision_id == paper.id
+
+      successor_candidate =
+        Enum.find(wave3_release_gate.receipt["papers"], &(&1["role"] == "successor"))
+
+      assert reader_authority.paper_revision_id == successor_candidate["candidate_id"]
       assert reader_authority.b1_experiment_id == b1_experiment.id
       assert reader_authority.b1_scope_receipt == b1_scope
 
@@ -2332,7 +2423,11 @@ defmodule Barkpark.CycleFleetTest do
       assert authority.target_wave_revision == successor.id
       assert authority.b1_experiment_id == correct_b1_experiment.id
       assert authority.b1_scope_receipt == correct_b1_scope
-      assert authority.paper_revision_id == correct_paper.id
+
+      correct_successor_candidate =
+        Enum.find(correct_release_gate.receipt["papers"], &(&1["role"] == "successor"))
+
+      assert authority.paper_revision_id == correct_successor_candidate["candidate_id"]
       assert authority.fleet_digest == correct_b1_scope["fleet_digest"]
 
       assert Enum.map(
@@ -2402,7 +2497,7 @@ defmodule Barkpark.CycleFleetTest do
                  })
                )
 
-      assert {:error, :wave_conflict} =
+      assert {:error, :invalid_open_release_gate} =
                CycleFleet.open_wave(
                  Map.merge(%{successor_scope | wave_id: "competing-successor"}, %{
                    correction_of: correction,
@@ -2985,13 +3080,22 @@ defmodule Barkpark.CycleFleetTest do
       "after_counts" => %{"shipped" => 2, "stalled" => 1, "excluded" => 0}
     }
 
+    correction_attrs =
+      Map.merge(target_scope, %{
+        correction_of: correction,
+        correction_of_digest: CycleFleet.digest(correction)
+      })
+
+    {:ok, open_gate} =
+      CycleFleet.admit_open_release_gate(target_scope, %{
+        target_wave_id: target_scope.wave_id,
+        idempotency_key: "race-open-#{target_scope.wave_id}",
+        correction_of: correction,
+        correction_of_digest: CycleFleet.digest(correction)
+      })
+
     {:ok, target} =
-      CycleFleet.open_wave(
-        Map.merge(target_scope, %{
-          correction_of: correction,
-          correction_of_digest: CycleFleet.digest(correction)
-        })
-      )
+      CycleFleet.open_wave(Map.put(correction_attrs, :release_gate_receipt, open_gate.receipt))
 
     {:ok, reconciliation} = CycleFleet.reconcile(target_scope)
     receipt = reconciliation.correction_receipt
@@ -3029,6 +3133,9 @@ defmodule Barkpark.CycleFleetTest do
       )
 
     gate = promotion_gate(target, reconciliation, receipt, paper, b1_experiment)
+
+    release_authority =
+      seed_raw_release_authority!(target_scope, root, target, paper, b1_experiment)
 
     Repo.query!(
       "INSERT INTO cycle_correction_roots (root_wave_id,workspace_id,project_id,epic_id,inserted_at) VALUES ($1,$2,$3,$4,now())",
@@ -3075,7 +3182,310 @@ defmodule Barkpark.CycleFleetTest do
       b1_ledger_digest: b1_document["ledger_digest"],
       b1_bytes_digest: :sha256 |> :crypto.hash(b1_bytes) |> Base.encode16(case: :lower),
       paper: paper,
-      gate: gate
+      gate: gate,
+      release_gate_admission_id: release_authority.admission_id,
+      release_materialization: release_authority.materialization,
+      public_smoke_request: release_authority.public_smoke_request
+    }
+  end
+
+  defp seed_raw_release_authority!(scope, root, target, successor, b1_experiment) do
+    dataset =
+      Repo.get!(Barkpark.Tenancy.Dataset, Repo.get!(Document, successor.document_id).dataset_id)
+
+    campaign =
+      released_paper!(scope, dataset, "race-campaign", %{
+        "blocks" => [%{"type" => "paragraph", "text" => "race campaign"}]
+      })
+
+    candidates =
+      [{"campaign", campaign}, {"successor", successor}]
+      |> Enum.map(fn {role, revision} ->
+        document = Repo.get!(Document, revision.document_id)
+        source = %{"kind" => "blocks", "blocks" => revision.content["blocks"]}
+
+        attrs = %{
+          target_wave_id: target.id,
+          role: role,
+          document_id: document.id,
+          doc_id: document.doc_id,
+          base_document_rev: document.rev,
+          base_current_revision_id: document.current_revision_id,
+          base_released_revision_id: document.released_revision_id,
+          title: document.title,
+          status: "published",
+          content: revision.content,
+          content_digest: Barkpark.EpicFleet.canonical_digest(revision.content),
+          source_digest: Barkpark.EpicFleet.canonical_digest(source)
+        }
+
+        attrs
+        |> PaperCandidate.changeset()
+        |> Ecto.Changeset.put_change(:id, revision.id)
+        |> Repo.insert!()
+      end)
+
+    paper_receipts = Enum.map(candidates, &raw_candidate_receipt/1)
+    admission_id = Ecto.UUID.generate()
+
+    receipt = %{
+      "format" => "cycle-release-gate-receipt-v1",
+      "stage" => "activate",
+      "admission_id" => admission_id,
+      "root_wave_revision" => root.id,
+      "target_wave_revision" => target.id,
+      "b1_experiment_id" => b1_experiment.id,
+      "papers" => paper_receipts
+    }
+
+    receipt = Map.put(receipt, "receipt_digest", Barkpark.EpicFleet.canonical_digest(receipt))
+
+    try do
+      Repo.query!("SET session_replication_role = replica")
+
+      %{
+        stage: "activate",
+        root_wave_id: root.id,
+        parent_wave_id: root.id,
+        target_wave_id: target.id,
+        reserved_target_revision: target.id,
+        workspace_id: target.workspace_id,
+        project_id: target.project_id,
+        epic_id: target.epic_id,
+        target_wave_key: target.wave_id,
+        idempotency_key: "race-activate",
+        evidence_bundle: %{"format" => "raw-race-release-authority-v1"},
+        receipt: receipt,
+        bundle_digest: String.duplicate("c", 64),
+        receipt_digest: receipt["receipt_digest"]
+      }
+      |> ReleaseGate.changeset()
+      |> Ecto.Changeset.put_change(:id, admission_id)
+      |> Repo.insert!()
+
+      %{
+        admission_id: admission_id,
+        wave_id: target.id,
+        kind: "activate"
+      }
+      |> Consumption.changeset()
+      |> Repo.insert!()
+    after
+      Repo.query!("SET session_replication_role = origin")
+    end
+
+    documents = Enum.map(candidates, &raw_materialization_document/1)
+
+    unsigned_materialization = %{
+      "format" => "cycle-release-materialization-v1",
+      "release_gate_admission_id" => admission_id,
+      "documents" => documents
+    }
+
+    materialization =
+      Map.put(
+        unsigned_materialization,
+        "digest",
+        Barkpark.EpicFleet.canonical_digest(unsigned_materialization)
+      )
+
+    workspace = Repo.get!(Barkpark.Tenancy.Workspace, target.workspace_id)
+    project = Repo.get!(Barkpark.Tenancy.Project, target.project_id)
+    origin = "https://race.barkpark.test"
+
+    public_smoke_request = %{
+      "format" => "cycle-release-public-smoke-request-v1",
+      "root_wave_revision" => root.id,
+      "target_wave_revision" => target.id,
+      "canonical_origin" => origin,
+      "workspace_slug" => workspace.slug,
+      "project_slug" => project.slug,
+      "deployment_digest" => String.duplicate("d", 64),
+      "documents" =>
+        Enum.map(documents, fn row ->
+          %{
+            "role" => row["role"],
+            "document_id" => row["document_id"],
+            "doc_id" => row["doc_id"],
+            "title" => row["title"],
+            "content_digest" => row["content_digest"],
+            "revision_id" => row["after"]["released_revision_id"],
+            "url" => "#{origin}/w/#{workspace.slug}/p/#{project.slug}/papers/#{row["doc_id"]}"
+          }
+        end)
+    }
+
+    %{
+      admission_id: admission_id,
+      materialization: materialization,
+      public_smoke_request: public_smoke_request
+    }
+  end
+
+  defp seed_promotable_release_authority!(scope, root, target, open_gate, b1_experiment) do
+    dataset =
+      Repo.one!(
+        from dataset in Barkpark.Tenancy.Dataset,
+          where: dataset.project_id == ^target.project_id and dataset.slug == "production"
+      )
+
+    {:ok, lifecycle} = CycleFleet.prospective_correction_lifecycle(scope)
+    {:ok, summary} = CycleFleet.reconcile(scope)
+
+    content = %{
+      "blocks" => [
+        %{
+          "type" => "paragraph",
+          "text" => "503 total 42 shipped 291 stalled 170 excluded current superseded -11 +11"
+        },
+        %{
+          "type" => "callout",
+          "cycle_ledger" => stringify_keys(summary),
+          "fleet" => stringify_keys(summary.canonical_fleet),
+          "correction_lifecycle" => stringify_keys(lifecycle)
+        }
+      ]
+    }
+
+    candidates =
+      Enum.map(~w(campaign successor), fn role ->
+        base =
+          released_paper!(
+            scope,
+            dataset,
+            "#{target.wave_id}-#{role}-#{System.unique_integer([:positive])}",
+            %{"blocks" => [%{"type" => "paragraph", "text" => "base"}]}
+          )
+
+        document = Repo.get!(Document, base.document_id)
+        source = %{"kind" => "blocks", "blocks" => content["blocks"]}
+
+        %{
+          target_wave_id: target.id,
+          role: role,
+          document_id: document.id,
+          doc_id: document.doc_id,
+          base_document_rev: document.rev,
+          base_current_revision_id: document.current_revision_id,
+          base_released_revision_id: document.released_revision_id,
+          title: "Cycle #{role}",
+          status: "published",
+          content: content,
+          content_digest: Barkpark.EpicFleet.canonical_digest(content),
+          source_digest: Barkpark.EpicFleet.canonical_digest(source)
+        }
+        |> PaperCandidate.changeset()
+        |> Repo.insert!()
+      end)
+
+    admission_id = Ecto.UUID.generate()
+    paper_receipts = Enum.map(candidates, &raw_candidate_receipt/1)
+
+    evidence = %{"papers" => paper_receipts, "captures" => %{}}
+
+    unsigned_receipt = %{
+      "format" => "cycle-release-gate-v1",
+      "stage" => "activate",
+      "authority" => %{
+        "workspace_id" => target.workspace_id,
+        "project_id" => target.project_id,
+        "epic_id" => target.epic_id,
+        "root_wave_revision" => root.id,
+        "target_wave_revision" => target.id,
+        "open_gate_id" => open_gate.id
+      },
+      "projection" => %{
+        "inventory_count" => 503,
+        "assigned_count" => 503,
+        "shipped_count" => 42,
+        "stalled_count" => 291,
+        "excluded_count" => 170,
+        "exact" => true,
+        "fleet_complete" => true
+      },
+      "authorities" => %{},
+      "b1_experiment_id" => b1_experiment.id,
+      "papers" => paper_receipts,
+      "captures" => %{},
+      "correction_lifecycle_digest" => Barkpark.EpicFleet.canonical_digest(lifecycle),
+      "bundle_digest" => Barkpark.EpicFleet.canonical_digest(evidence)
+    }
+
+    receipt =
+      Map.put(
+        unsigned_receipt,
+        "receipt_digest",
+        Barkpark.EpicFleet.canonical_digest(unsigned_receipt)
+      )
+
+    try do
+      Repo.query!("SET session_replication_role = replica")
+
+      %{
+        stage: "activate",
+        root_wave_id: root.id,
+        parent_wave_id: open_gate.parent_wave_id,
+        target_wave_id: target.id,
+        reserved_target_revision: target.id,
+        workspace_id: target.workspace_id,
+        project_id: target.project_id,
+        epic_id: target.epic_id,
+        target_wave_key: target.wave_id,
+        idempotency_key: "seed-activate-#{target.id}",
+        evidence_bundle: evidence,
+        receipt: receipt,
+        bundle_digest: unsigned_receipt["bundle_digest"],
+        receipt_digest: receipt["receipt_digest"]
+      }
+      |> ReleaseGate.changeset()
+      |> Ecto.Changeset.put_change(:id, admission_id)
+      |> Repo.insert!()
+
+      %{admission_id: admission_id, wave_id: target.id, kind: "activate"}
+      |> Consumption.changeset()
+      |> Repo.insert!()
+    after
+      Repo.query!("SET session_replication_role = origin")
+    end
+
+    %{id: admission_id, receipt: receipt}
+  end
+
+  defp raw_candidate_receipt(candidate) do
+    %{
+      "candidate_id" => candidate.id,
+      "role" => candidate.role,
+      "document_id" => candidate.document_id,
+      "doc_id" => candidate.doc_id,
+      "title" => candidate.title,
+      "base_document_rev" => candidate.base_document_rev,
+      "base_current_revision_id" => candidate.base_current_revision_id,
+      "base_released_revision_id" => candidate.base_released_revision_id,
+      "content_digest" => candidate.content_digest,
+      "source_digest" => candidate.source_digest
+    }
+  end
+
+  defp raw_materialization_document(candidate) do
+    %{
+      "role" => candidate.role,
+      "candidate_id" => candidate.id,
+      "document_id" => candidate.document_id,
+      "doc_id" => candidate.doc_id,
+      "title" => candidate.title,
+      "status" => candidate.status,
+      "content_digest" => candidate.content_digest,
+      "source_digest" => candidate.source_digest,
+      "before" => %{
+        "rev" => candidate.base_document_rev,
+        "current_revision_id" => candidate.base_current_revision_id,
+        "released_revision_id" => candidate.base_released_revision_id
+      },
+      "after" => %{
+        "rev" => candidate.id,
+        "current_revision_id" => candidate.id,
+        "released_revision_id" => candidate.id
+      }
     }
   end
 
@@ -3406,36 +3816,59 @@ defmodule Barkpark.CycleFleetTest do
         ]
       )
 
-      result =
+      Repo.transaction(fn ->
+        result =
+          Repo.query!(
+            """
+            INSERT INTO cycle_correction_promotion_events
+              (id, admission_id, release_gate_admission_id, release_materialization,
+               root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
+               action, idempotency_key, actor, evidence, evidence_revision, gate_receipt,
+               event_payload, event_digest, inserted_at)
+            VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,'promote',$10,$11::jsonb,$12,$13,
+                    $14::jsonb,$15::jsonb,$16,now())
+            RETURNING id
+            """,
+            [
+              Ecto.UUID.dump!(event_id),
+              Ecto.UUID.dump!(admission_id),
+              Ecto.UUID.dump!(fixture.release_gate_admission_id),
+              fixture.release_materialization,
+              Ecto.UUID.dump!(fixture.root_id),
+              Ecto.UUID.dump!(fixture.target_id),
+              Ecto.UUID.dump!(fixture.workspace_id),
+              Ecto.UUID.dump!(fixture.project_id),
+              fixture.epic_id,
+              key,
+              actor,
+              "paper://#{key}",
+              evidence_revision,
+              fixture.gate,
+              payload,
+              Barkpark.EpicFleet.canonical_digest(payload)
+            ]
+          )
+
+        smoke_request = Map.put(fixture.public_smoke_request, "promotion_event_id", event_id)
+
         Repo.query!(
           """
-          INSERT INTO cycle_correction_promotion_events
-            (id, admission_id, root_wave_id, target_wave_id, workspace_id, project_id, epic_id,
-             action, idempotency_key, actor, evidence, evidence_revision, gate_receipt,
-             event_payload, event_digest, inserted_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'promote', $8, $9::jsonb, $10, $11,
-                  $12::jsonb, $13::jsonb, $14, now())
-          RETURNING id
+          INSERT INTO cycle_release_public_smokes
+            (id,promotion_event_id,root_wave_id,target_wave_id,state,request,inserted_at,updated_at)
+          VALUES ($1,$2,$3,$4,'pending',$5::jsonb,now(),now())
           """,
           [
+            Ecto.UUID.dump!(Ecto.UUID.generate()),
             Ecto.UUID.dump!(event_id),
-            Ecto.UUID.dump!(admission_id),
             Ecto.UUID.dump!(fixture.root_id),
             Ecto.UUID.dump!(fixture.target_id),
-            Ecto.UUID.dump!(fixture.workspace_id),
-            Ecto.UUID.dump!(fixture.project_id),
-            fixture.epic_id,
-            key,
-            actor,
-            "paper://#{key}",
-            evidence_revision,
-            fixture.gate,
-            payload,
-            Barkpark.EpicFleet.canonical_digest(payload)
+            smoke_request
           ]
         )
 
-      {:ok, result}
+        Repo.query!("SET CONSTRAINTS ALL IMMEDIATE")
+        result
+      end)
     rescue
       error in Postgrex.Error -> {:error, error.postgres.message}
     end
@@ -4274,4 +4707,7 @@ defmodule Barkpark.CycleFleetTest do
 
   defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
   defp stringify_keys(value), do: value
+
+  defp restore_test_env(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore_test_env(key, value), do: Application.put_env(:barkpark, key, value)
 end

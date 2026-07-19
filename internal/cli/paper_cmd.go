@@ -50,13 +50,19 @@ const paperWidthFallback = 80
 
 // parsedPaperArgs holds the resolved `paper view` flags + the positional slug.
 type parsedPaperArgs struct {
-	slug        string
-	theme       string // dark | light | auto   (default auto)
-	perspective string // published | drafts | raw (default published)
-	width       int    // 0 = auto-detect
-	widthSet    bool
-	profile     string // auto | none | ansi256 | truecolor (default auto)
-	server      string // -s/--server: a saved name or URL
+	slug          string
+	theme         string // dark | light | auto   (default auto)
+	perspective   string // published | drafts | raw (default published)
+	width         int    // 0 = auto-detect
+	widthSet      bool
+	profile       string // auto | none | ansi256 | truecolor (default auto)
+	server        string // -s/--server: a saved name or URL
+	epicID        string
+	waveID        string
+	releaseGateID string
+	revisionID    string
+	candidateID   string
+	paperRole     string
 }
 
 // runPaper is the `bp paper <verb> [args]` built-in entry. v1 ships exactly one
@@ -83,6 +89,12 @@ func runPaper(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runPaperView(out, g, args[1:])
+	case "capture":
+		if g.help && len(args) == 1 {
+			usagePaperCapture(out, true)
+			return exitOK
+		}
+		return runPaperCapture(out, g, args[1:])
 	case "help":
 		usagePaper(out, true)
 		return exitOK
@@ -182,13 +194,33 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Dataset:     ctx.Dataset,
 		Perspective: perspective,
 	})
+	releaseRef, pinned, pinErr := releasePaperRef(opt)
+	if pinErr != nil {
+		return paperError(out, jsonOut, "invalid_release_pin", pinErr.Error(), exitUsage)
+	}
+	if pinned && target.share != "" {
+		return paperError(out, jsonOut, "invalid_release_pin", "release-pinned Paper reads cannot use a mutable share URL", exitUsage)
+	}
 
 	// A Paper link already names canonical document identity. Read its narrow,
 	// fail-closed source projection so the CLI cannot render a mixed blocks +
 	// body_html document that the browser/email readers reject.
 	var raw []byte
 	var qerr error
-	if target.share != "" {
+	if pinned {
+		var source apiclient.ReleasePaperSource
+		source, qerr = client.PaperReleaseSource(releaseRef)
+		if qerr == nil && source.DocID != opt.slug {
+			qerr = fmt.Errorf("release Paper doc_id %q does not match requested slug %q", source.DocID, opt.slug)
+		}
+		if qerr == nil {
+			if jsonOut {
+				raw = source.Raw
+			} else {
+				raw, qerr = source.DocumentJSON(opt.slug)
+			}
+		}
+	} else if target.share != "" {
 		raw, qerr = fetchSharedPaper(ctx.Server, target)
 	} else if jsonOut {
 		// Machine output is a compatibility surface: preserve the complete raw
@@ -1074,6 +1106,26 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 			}
 			p.server = v
 			i = ni
+		case "--epic-id", "--wave-id", "--release-gate-id", "--revision-id", "--candidate-id", "--paper-role":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, key)
+			if err != nil {
+				return p, err
+			}
+			switch key {
+			case "--epic-id":
+				p.epicID = v
+			case "--wave-id":
+				p.waveID = v
+			case "--release-gate-id":
+				p.releaseGateID = v
+			case "--revision-id":
+				p.revisionID = v
+			case "--candidate-id":
+				p.candidateID = v
+			case "--paper-role":
+				p.paperRole = v
+			}
+			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return p, fmt.Errorf("unknown paper flag %q", a)
@@ -1089,6 +1141,36 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 		p.slug = pos[0]
 	}
 	return p, nil
+}
+
+func releasePaperRef(opt parsedPaperArgs) (apiclient.ReleasePaperRef, bool, error) {
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"--epic-id", opt.epicID},
+		{"--wave-id", opt.waveID},
+		{"--release-gate-id", opt.releaseGateID},
+		{"--revision-id", opt.revisionID},
+		{"--candidate-id", opt.candidateID},
+		{"--paper-role", opt.paperRole},
+	}
+	pinned := false
+	for _, field := range values {
+		pinned = pinned || strings.TrimSpace(field.value) != ""
+	}
+	if !pinned {
+		return apiclient.ReleasePaperRef{}, false, nil
+	}
+	for _, field := range values {
+		if strings.TrimSpace(field.value) == "" {
+			return apiclient.ReleasePaperRef{}, true, fmt.Errorf("%s is required with release-pinned Paper reads", field.name)
+		}
+	}
+	return apiclient.ReleasePaperRef{
+		EpicID: opt.epicID, WaveID: opt.waveID, ReleaseGateID: opt.releaseGateID,
+		RevisionID: opt.revisionID, CandidateID: opt.candidateID, Role: opt.paperRole,
+	}, true, nil
 }
 
 // validPaperTheme reports whether v names a theme paperResolveTheme understands,
@@ -1312,6 +1394,7 @@ func usagePaper(out *writer, toStdout bool) {
 	p("verbs:")
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
+	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
 }
 
 // usagePaperView prints the `bp paper view` command signature. An explicit
@@ -1334,6 +1417,12 @@ func usagePaperView(out *writer, toStdout bool) {
 	p("                             read view (default published; papers are public)")
 	p("  -o json                    emit the raw paper document (default: rendered ANSI)")
 	p("  -s, --server <name|url>    target a saved server or URL")
+	p("  --epic-id <id>              release gate epic (requires all release pins)")
+	p("  --wave-id <id>              release gate Wave key")
+	p("  --release-gate-id <uuid>    immutable open admission")
+	p("  --revision-id <uuid>        immutable Wave revision (wire: wave_revision)")
+	p("  --candidate-id <uuid>       exact immutable Paper candidate")
+	p("  --paper-role campaign|successor")
 }
 
 // paperImageResolver is the image-bytes seam (pdrender-terminal-images): given

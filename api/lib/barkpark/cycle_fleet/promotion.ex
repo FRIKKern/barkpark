@@ -87,6 +87,8 @@ defmodule Barkpark.CycleFleet.Promotion do
 
     schema "cycle_correction_promotion_events" do
       field :admission_id, :binary_id
+      field :release_gate_admission_id, :binary_id
+      field :release_materialization, :map
       field :root_wave_id, :binary_id
       field :target_wave_id, :binary_id
       field :previous_event_id, :binary_id
@@ -110,6 +112,8 @@ defmodule Barkpark.CycleFleet.Promotion do
       |> cast(attrs, [
         :root_wave_id,
         :admission_id,
+        :release_gate_admission_id,
+        :release_materialization,
         :target_wave_id,
         :previous_event_id,
         :restore_event_id,
@@ -197,6 +201,52 @@ defmodule Barkpark.CycleFleet.Promotion do
       |> unique_constraint([:root_wave_id, :idempotency_key],
         name: :cycle_correction_admissions_idempotency_index
       )
+    end
+  end
+
+  defmodule PublicSmoke do
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key {:id, :binary_id, autogenerate: true}
+    @foreign_key_type :binary_id
+
+    schema "cycle_release_public_smokes" do
+      belongs_to :promotion_event, Barkpark.CycleFleet.Promotion.Event
+      field :root_wave_id, :binary_id
+      field :target_wave_id, :binary_id
+      field :state, :string
+      field :request, :map
+      field :proof, :map
+      field :proof_digest, :string
+      field :failure, :map
+      field :compensation_event_id, :binary_id
+      timestamps(type: :utc_datetime_usec)
+    end
+
+    def insert_changeset(attrs) do
+      %__MODULE__{}
+      |> cast(attrs, [
+        :promotion_event_id,
+        :root_wave_id,
+        :target_wave_id,
+        :state,
+        :request,
+        :proof,
+        :proof_digest,
+        :failure,
+        :compensation_event_id
+      ])
+      |> validate_required([
+        :promotion_event_id,
+        :root_wave_id,
+        :target_wave_id,
+        :state,
+        :request
+      ])
+      |> validate_inclusion(:state, ~w(pending pass failed compensated))
+      |> validate_format(:proof_digest, ~r/^[0-9a-f]{64}$/)
+      |> unique_constraint(:promotion_event_id)
     end
   end
 

@@ -25,6 +25,7 @@ defmodule Barkpark.CycleFleet.Wave do
     belongs_to :correction_of_wave, __MODULE__
     field :correction_of, :map
     field :correction_of_digest, :string
+    field :release_gate_required, :boolean, read_after_writes: true
     has_one :build_plan, Barkpark.CycleFleet.BuildPlan
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

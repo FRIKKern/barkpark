@@ -430,6 +430,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
     plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
   end
 
   pipeline :api_unlimited do
@@ -2100,12 +2101,43 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :require_token])
 
     get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
+
+    get(
+      "/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/source",
+      CycleFleetController,
+      :release_paper_source
+    )
+
+    get(
+      "/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/render",
+      CycleFleetController,
+      :release_paper_render
+    )
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
     pipe_through([:scoped_api, :require_token, :require_write])
 
     post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
+
+    post(
+      "/cycles/:epic_id/:wave_id/release-gates/open",
+      CycleFleetController,
+      :admit_open_release_gate
+    )
+
+    post(
+      "/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage",
+      CycleFleetController,
+      :stage_release_paper
+    )
+
+    post(
+      "/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate",
+      CycleFleetController,
+      :activate_release_gate
+    )
+
     post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
     post("/cycles/:epic_id/:wave_id/quarantine", CycleFleetController, :quarantine)
     post("/cycles/:epic_id/:wave_id/promote", CycleFleetController, :promote)

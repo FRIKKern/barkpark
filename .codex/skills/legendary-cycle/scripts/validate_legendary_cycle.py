@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import importlib.util
+import html
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, quote, urlsplit
 
 
 EPIC_VALIDATOR = Path(__file__).parents[2] / "epic-cycle" / "scripts" / "validate_epic_cycle.py"
@@ -119,6 +121,545 @@ B1_SCOPE_FENCE_KEYS = {
     "fleet_digest",
     "receipt_digest",
 }
+
+RELEASE_GATE_FORMAT = "cycle-release-gate-v1"
+RELEASE_BUNDLE_FORMAT = "cycle-release-evidence-bundle-v1"
+RELEASE_COUNTS = {
+    "inventory_count": 503,
+    "assigned_count": 503,
+    "shipped_count": 42,
+    "stalled_count": 291,
+    "excluded_count": 170,
+}
+RELEASE_AUTHORITY_FORMATS = {
+    "queue_gate": "queue-gate-v1",
+    "ordering": "closure-nearest-order-v1",
+    "semantic_receipt": "semantic_receipt-index-v1",
+    "correction_of": "correction_of-v1",
+    "b1_scope": "b1-scope-fence-v1",
+    "quarantine": "quarantine-promotion-v1",
+    "promotion": "quarantine-promotion-v1",
+}
+RELEASE_READER_SURFACES = ("source_json", "public_html", "cli", "task_board", "tui")
+RELEASE_DEFECT_LISTS = (
+    "duplicate_assignment_unit_ids",
+    "unknown_assignment_unit_ids",
+    "unknown_outcome_unit_ids",
+    "outcome_overlap_unit_ids",
+    "outcome_ownership_violation_unit_ids",
+    "invalid_build_assignment_ids",
+    "invalid_build_result_assignment_ids",
+    "unassigned_unit_ids",
+    "unaccounted_unit_ids",
+)
+
+
+class ReleaseGateError(ValueError):
+    """A fail-closed release artifact validation error."""
+
+
+def _release_require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ReleaseGateError(message)
+
+
+def _release_digest(value: Any) -> str:
+    return EPIC.canonical_digest(value)
+
+
+def _release_paper_identity(paper: dict[str, Any]) -> tuple[str, str]:
+    doc = paper.get("doc") if isinstance(paper.get("doc"), dict) else paper
+    paper_id = doc.get("doc_id") or doc.get("_id") or doc.get("id")
+    revision = doc.get("rev") or doc.get("_rev") or doc.get("revision")
+    _release_require(EPIC.nonempty_string(paper_id), "Paper identity is missing")
+    _release_require(EPIC.nonempty_string(revision), f"Paper {paper_id} immutable revision is missing")
+    _release_require(str(revision).casefold() != "latest", f"Paper {paper_id} revision cannot be latest")
+    return str(paper_id), str(revision)
+
+
+def _release_paper_blocks(paper: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks = EPIC.paper_blocks(EPIC.paper_doc(paper))
+    _release_require(isinstance(blocks, list) and bool(blocks), "Paper has no meaningful block source")
+    _release_require(all(isinstance(block, dict) for block in blocks), "Paper blocks are not objects")
+    return blocks
+
+
+def _release_paper_authority(
+    role: str,
+    paper: dict[str, Any],
+    live_ledger: dict[str, Any],
+    live_fleet: dict[str, Any],
+) -> dict[str, Any]:
+    paper_id, revision = _release_paper_identity(paper)
+    blocks = _release_paper_blocks(paper)
+    matches = [
+        block
+        for block in blocks
+        if block.get("cycle_ledger") == live_ledger and block.get("fleet") == live_fleet
+    ]
+    _release_require(
+        len(matches) == 1,
+        f"{role} Paper must contain exactly one live cycle_ledger/fleet authority block",
+    )
+
+    doc = paper.get("doc") if isinstance(paper.get("doc"), dict) else paper
+    for field, expected in (("cycle_ledger", live_ledger), ("fleet", live_fleet)):
+        if field in doc:
+            _release_require(doc[field] == expected, f"{role} Paper top-level {field} drifted")
+
+    return {
+        "id": paper_id,
+        "revision": revision,
+        "content_digest": _release_digest(blocks),
+    }
+
+
+def _release_prior_authorities(
+    authorities: dict[str, Any], cycle_authority: dict[str, Any]
+) -> dict[str, str]:
+    _release_require(
+        set(authorities) == set(RELEASE_AUTHORITY_FORMATS),
+        "prior-authorities manifest has an invalid exact shape",
+    )
+    result: dict[str, str] = {}
+    for name, expected_format in RELEASE_AUTHORITY_FORMATS.items():
+        receipt = authorities.get(name)
+        _release_require(isinstance(receipt, dict), f"{name} authority receipt is not an object")
+        _release_require(receipt.get("format") == expected_format, f"{name} authority format mismatch")
+        _release_require(
+            receipt.get("epic_id") == cycle_authority.get("epic_id"),
+            f"{name} authority epic scope mismatch",
+        )
+        _release_require(
+            receipt.get("wave_revision") == cycle_authority.get("wave_revision"),
+            f"{name} authority wave revision mismatch",
+        )
+        digest = receipt.get("receipt_digest")
+        _release_require(
+            isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) is not None,
+            f"{name} authority receipt digest is invalid",
+        )
+        unsigned = {key: value for key, value in receipt.items() if key != "receipt_digest"}
+        _release_require(digest == _release_digest(unsigned), f"{name} authority receipt digest mismatch")
+        result[name] = digest
+    return result
+
+
+def _release_cycle(cycle: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    ledger = cycle.get("cycle_ledger")
+    fleet = cycle.get("fleet")
+    authority = cycle.get("authority")
+    lifecycle = cycle.get("correction_lifecycle")
+    _release_require(isinstance(ledger, dict), "live Cycle has no cycle_ledger")
+    _release_require(isinstance(fleet, dict) and bool(fleet), "live Cycle has no fleet")
+    _release_require(isinstance(authority, dict), "live Cycle has no authority")
+    _release_require(authority.get("kind") == "barkpark_cycle_fleet", "live Cycle authority kind mismatch")
+    for field in ("workspace_slug", "project_slug"):
+        _release_require(
+            EPIC.nonempty_string(authority.get(field)),
+            f"live Cycle authority {field} is invalid",
+        )
+    canonical_origin = urlsplit(str(authority.get("canonical_origin", "")))
+    _release_require(
+        canonical_origin.scheme in {"http", "https"}
+        and bool(canonical_origin.netloc)
+        and canonical_origin.username is None
+        and canonical_origin.password is None
+        and canonical_origin.path in {"", "/"}
+        and not canonical_origin.query
+        and not canonical_origin.fragment,
+        "live Cycle canonical origin is invalid",
+    )
+    _release_require(isinstance(lifecycle, dict), "live Cycle has no correction_lifecycle")
+    for field, expected in RELEASE_COUNTS.items():
+        _release_require(ledger.get(field) == expected, f"live Cycle {field} must equal {expected}")
+    _release_require(ledger.get("exact") is True, "live Cycle exact flag is not true")
+    _release_require(ledger.get("fleet_complete") is True, "live Cycle fleet is not complete")
+    for field in RELEASE_DEFECT_LISTS:
+        _release_require(ledger.get(field) == [], f"live Cycle {field} is not empty")
+    for field in ("reconciliation_digest", "correction_of_digest", "correction_receipt_digest"):
+        _release_require(
+            isinstance(ledger.get(field), str)
+            and re.fullmatch(r"[0-9a-f]{64}", ledger[field]) is not None,
+            f"live Cycle {field} is invalid",
+        )
+
+    current = lifecycle.get("current")
+    superseded = lifecycle.get("superseded")
+    _release_require(isinstance(current, dict), "release Cycle has no current correction")
+    target_revision = authority.get("wave_revision")
+    ancestry = lifecycle.get("historical_ancestry")
+    target_is_current = current.get("wave_revision") == target_revision
+    target_is_candidate = isinstance(ancestry, list) and any(
+        isinstance(row, dict) and row.get("wave_revision") == target_revision for row in ancestry
+    )
+    _release_require(
+        target_is_current or target_is_candidate,
+        "Cycle authority is neither the current nor a linked candidate correction",
+    )
+    quarantines = lifecycle.get("quarantines")
+    _release_require(isinstance(quarantines, list), "release Cycle quarantines are invalid")
+    _release_require(
+        not any(
+            isinstance(row, dict) and row.get("target_wave_revision") == target_revision
+            for row in quarantines
+        ),
+        "release candidate is quarantined",
+    )
+    _release_require(isinstance(lifecycle.get("promotion"), dict), "release Cycle has no promotion authority")
+    _release_require(
+        isinstance(lifecycle.get("authority_evidence"), dict),
+        "release Cycle has no immutable promotion admission",
+    )
+    _release_require(isinstance(superseded, list) and bool(superseded), "release Cycle has no superseded evidence")
+    historical = next(
+        (
+            row
+            for row in superseded
+            if isinstance(row, dict)
+            and isinstance(row.get("semantic_snapshot"), dict)
+            and row["semantic_snapshot"].get("shipped_count") == 53
+            and row["semantic_snapshot"].get("stalled_count") == 280
+            and row["semantic_snapshot"].get("excluded_count") == 170
+        ),
+        None,
+    )
+    _release_require(historical is not None, "superseded Wave 3 semantic snapshot 53/280/170 is missing")
+    delta = historical.get("delta")
+    _release_require(
+        isinstance(delta, dict)
+        and delta.get("shipped") == -11
+        and delta.get("stalled") == 11
+        and delta.get("excluded") == 0,
+        "superseded Wave 3 -11/+11 correction delta is missing",
+    )
+    scope_fields = ("workspace_id", "project_id", "epic_id", "wave_id", "wave_revision")
+    for field in scope_fields:
+        _release_require(EPIC.nonempty_string(authority.get(field)), f"Cycle authority {field} is empty")
+    markers = [
+        "candidate" if target_is_candidate and not target_is_current else "current",
+        str(authority["wave_id"]),
+        str(target_revision),
+        "current",
+        str(current.get("wave_id", "")),
+        str(current.get("wave_revision", "")),
+        "503",
+        "42",
+        "291",
+        "170",
+        "superseded",
+        str(historical.get("wave_id", "wave 3")),
+        "53",
+        "280",
+        "-11",
+        "+11",
+    ]
+    return {
+        "inventory_count": 503,
+        "assigned_count": 503,
+        "shipped_count": 42,
+        "stalled_count": 291,
+        "excluded_count": 170,
+        "reconciliation_digest": ledger["reconciliation_digest"],
+        "fleet_digest": _release_digest(fleet),
+        "correction_lifecycle_digest": _release_digest(lifecycle),
+        "candidate_state": "current" if target_is_current else "candidate",
+    }, markers
+
+
+def _release_visible_text(raw: bytes, capture_name: str) -> str:
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ReleaseGateError(f"{capture_name} capture is not UTF-8") from error
+    if "html" in capture_name:
+        decoded = html.unescape(re.sub(r"<[^>]+>", " ", decoded))
+    return " ".join(decoded.split()).casefold()
+
+
+def _release_reader_capture(
+    role: str,
+    surface: str,
+    capture: dict[str, Any],
+    paper: dict[str, Any],
+    paper_pin: dict[str, Any],
+    gate_digest: str,
+    gate_id: str,
+    wave_revision: str,
+    cycle_authority: dict[str, Any],
+    expected_projection: dict[str, Any],
+    markers: list[str],
+) -> None:
+    _release_require(
+        set(capture)
+        == {
+            "producer",
+            "gate_id",
+            "challenge_id",
+            "capture_id",
+            "address",
+            "document_id",
+            "revision",
+            "content_digest",
+            "gate_digest",
+            "raw",
+            "normalized_projection",
+        },
+        f"{role} {surface} capture has an invalid exact shape",
+    )
+    _release_require(
+        capture["producer"] == "barkpark-server-capture-v1",
+        f"{role} {surface} is not a stored server capture",
+    )
+    for field in ("gate_id", "challenge_id", "capture_id"):
+        _release_require(
+            EPIC.nonempty_string(capture[field]) and str(capture[field]).casefold() != "latest",
+            f"{role} {surface} {field} is invalid",
+        )
+    _release_require(capture["document_id"] == paper_pin["id"], f"{role} {surface} document drifted")
+    _release_require(capture["revision"] == paper_pin["revision"], f"{role} {surface} revision drifted")
+    _release_require(
+        capture["content_digest"] == paper_pin["content_digest"],
+        f"{role} {surface} content digest drifted",
+    )
+    _release_require(capture["gate_digest"] == gate_digest, f"{role} {surface} gate digest drifted")
+    address = capture["address"]
+    _release_require(EPIC.nonempty_string(address), f"{role} {surface} address is empty")
+    parsed = urlsplit(address)
+    canonical_origin = urlsplit(cycle_authority["canonical_origin"])
+    route = "render" if surface == "public_html" else "source"
+    expected_path = (
+        f"/w/{quote(str(cycle_authority['workspace_slug']), safe='')}"
+        f"/p/{quote(str(cycle_authority['project_slug']), safe='')}"
+        f"/v1/cycles/{quote(str(cycle_authority['epic_id']), safe='')}"
+        f"/{quote(str(cycle_authority['wave_id']), safe='')}"
+        f"/release-gates/{quote(gate_id, safe='')}/papers/{quote(role, safe='')}/{route}"
+    )
+    _release_require(
+        parsed.scheme == canonical_origin.scheme
+        and parsed.netloc == canonical_origin.netloc
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.fragment
+        and parsed.path == expected_path
+        and parse_qs(parsed.query, strict_parsing=True)
+        == {
+            "candidate_id": [paper_pin["revision"]],
+            "wave_revision": [wave_revision],
+        },
+        f"{role} {surface} is not revision/gate addressed",
+    )
+    _release_require(
+        capture["normalized_projection"] == expected_projection,
+        f"{role} {surface} normalized projection drifted",
+    )
+    raw = capture["raw"]
+    if surface == "source_json":
+        _release_require(isinstance(raw, dict), f"{role} source_json raw capture is not an object")
+        source_id = raw.get("id") or raw.get("_id")
+        source_revision = raw.get("_rev") or raw.get("rev")
+        source_arm = raw.get("source")
+        _release_require(source_id == paper_pin["id"], f"{role} source_json identity drifted")
+        _release_require(source_revision == paper_pin["revision"], f"{role} source_json revision drifted")
+        _release_require(
+            isinstance(source_arm, dict)
+            and source_arm.get("kind") == "blocks"
+            and source_arm.get("blocks") == _release_paper_blocks(paper),
+            f"{role} source_json blocks drifted from immutable Paper",
+        )
+    else:
+        _release_require(isinstance(raw, str), f"{role} {surface} raw capture is not text")
+        visible = _release_visible_text(raw.encode("utf-8"), surface)
+        _release_require(
+            len(re.sub(r"[^\w]+", "", visible, flags=re.UNICODE)) >= 32,
+            f"{role} {surface} capture is not meaningful",
+        )
+        missing = [marker for marker in markers if marker.casefold() not in visible]
+        _release_require(
+            not missing,
+            f"{role} {surface} capture is missing markers: {', '.join(missing)}",
+        )
+
+
+def build_release_gate_bundle(stage: str, evidence: dict[str, Any]) -> dict[str, Any]:
+    """Validate and retain the complete raw evidence used by one release gate."""
+    _release_require(stage in {"open", "activate"}, "release stage must be open or activate")
+    _release_require(
+        set(evidence)
+        == {
+            "gate_id",
+            "challenge_id",
+            "gate_digest",
+            "proposed_successor",
+            "cycle",
+            "cycle_cli",
+            "prior_authorities",
+            "papers",
+            "readers",
+        },
+        "release evidence has an invalid exact shape",
+    )
+    cycle = evidence["cycle"]
+    _release_require(isinstance(cycle, dict), "release Cycle evidence is not an object")
+    _release_require(evidence["cycle_cli"] == cycle, "cycle_cli drifted from actual live Cycle")
+    cycle_record, markers = _release_cycle(cycle)
+    if stage == "open":
+        _release_require(cycle_record["candidate_state"] == "current", "open gate must target current Cycle")
+        _release_require(evidence["gate_digest"] is None, "open gate digest must be null")
+        _release_require(evidence["gate_id"] is None, "open gate id must be null")
+        _release_require(evidence["challenge_id"] is None, "open challenge id must be null")
+    else:
+        _release_require(
+            isinstance(evidence["gate_digest"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", evidence["gate_digest"]) is not None,
+            "activate gate digest is invalid",
+        )
+        for field in ("gate_id", "challenge_id"):
+            _release_require(
+                EPIC.nonempty_string(evidence[field]) and str(evidence[field]).casefold() != "latest",
+                f"activate {field} is invalid",
+            )
+
+    proposed = evidence["proposed_successor"]
+    _release_require(
+        isinstance(proposed, dict)
+        and set(proposed)
+        == {"epic_id", "wave_id", "profile", "inventory_digest", "plan_digest", "correction_of_digest"},
+        "proposed successor has an invalid exact shape",
+    )
+    _release_require(proposed["epic_id"] == cycle["authority"]["epic_id"], "proposed successor epic drifted")
+    _release_require(proposed["profile"] == "legendary", "proposed successor profile is not legendary")
+    for field in ("inventory_digest", "plan_digest", "correction_of_digest"):
+        _release_require(
+            isinstance(proposed[field], str) and re.fullmatch(r"[0-9a-f]{64}", proposed[field]) is not None,
+            f"proposed successor {field} is invalid",
+        )
+    _release_require(
+        proposed["inventory_digest"] == cycle["cycle_ledger"].get("inventory_digest"),
+        "proposed successor inventory digest drifted",
+    )
+    if stage == "open":
+        _release_require(
+            proposed["wave_id"] != cycle["authority"]["wave_id"],
+            "proposed successor wave must differ from current wave",
+        )
+    else:
+        _release_require(
+            proposed["wave_id"] == cycle["authority"]["wave_id"]
+            and proposed["correction_of_digest"] == cycle["cycle_ledger"].get("correction_of_digest"),
+            "live candidate does not match proposed successor contract",
+        )
+
+    papers = evidence["papers"]
+    _release_require(
+        isinstance(papers, dict) and set(papers) == {"campaign", "successor"},
+        "release Papers have an invalid exact shape",
+    )
+    campaign = papers["campaign"]
+    _release_require(isinstance(campaign, dict), "campaign Paper is missing")
+    paper_records: dict[str, Any] = {
+        "campaign": _release_paper_authority(
+            "campaign", campaign, cycle["cycle_ledger"], cycle["fleet"]
+        ),
+        "successor": None,
+    }
+
+    if stage == "open":
+        _release_require(papers["successor"] is None, "open evidence successor Paper must be null")
+        _release_require(evidence["readers"] is None, "open evidence readers must be null")
+        readers_digest = None
+    else:
+        successor = papers["successor"]
+        _release_require(isinstance(successor, dict), "activate evidence successor Paper is missing")
+        paper_records["successor"] = _release_paper_authority(
+            "successor", successor, cycle["cycle_ledger"], cycle["fleet"]
+        )
+        _release_require(
+            paper_records["campaign"]["id"] != paper_records["successor"]["id"]
+            and paper_records["campaign"]["revision"] != paper_records["successor"]["revision"],
+            "campaign and successor Paper identities and revisions must differ",
+        )
+        readers = evidence["readers"]
+        _release_require(
+            isinstance(readers, dict) and set(readers) == {"campaign", "successor"},
+            "activate readers have an invalid exact role shape",
+        )
+        expected_projection = {
+            "cycle_ledger": cycle["cycle_ledger"],
+            "fleet": cycle["fleet"],
+            "correction_context": cycle["correction_lifecycle"],
+        }
+        capture_ids: set[str] = set()
+        for role, paper in (("campaign", campaign), ("successor", successor)):
+            captures = readers[role]
+            _release_require(
+                isinstance(captures, dict) and set(captures) == set(RELEASE_READER_SURFACES),
+                f"{role} readers have an invalid exact surface shape",
+            )
+            for surface in RELEASE_READER_SURFACES:
+                _release_require(
+                    isinstance(captures[surface], dict), f"{role} {surface} capture is not an object"
+                )
+                _release_reader_capture(
+                    role,
+                    surface,
+                    captures[surface],
+                    paper,
+                    paper_records[role],
+                    evidence["gate_digest"],
+                    evidence["gate_id"],
+                    cycle["authority"]["wave_revision"],
+                    cycle["authority"],
+                    expected_projection,
+                    markers,
+                )
+                _release_require(
+                    captures[surface]["gate_id"] == evidence["gate_id"]
+                    and captures[surface]["challenge_id"] == evidence["challenge_id"],
+                    f"{role} {surface} server capture challenge drifted",
+                )
+                capture_id = captures[surface]["capture_id"]
+                _release_require(
+                    capture_id not in capture_ids,
+                    f"{role} {surface} reuses server capture id {capture_id}",
+                )
+                capture_ids.add(capture_id)
+        readers_digest = _release_digest(readers)
+
+    authority = {
+        field: cycle["authority"][field]
+        for field in (
+            "workspace_id",
+            "workspace_slug",
+            "project_id",
+            "project_slug",
+            "canonical_origin",
+            "epic_id",
+            "wave_id",
+            "wave_revision",
+        )
+    }
+    receipt = {
+        "format": RELEASE_GATE_FORMAT,
+        "stage": stage,
+        "authority": authority,
+        "cycle": cycle_record,
+        "authorities": _release_prior_authorities(evidence["prior_authorities"], cycle["authority"]),
+        "papers": paper_records,
+        "gate_id": evidence["gate_id"],
+        "challenge_id": evidence["challenge_id"],
+        "proposed_successor_digest": _release_digest(proposed),
+        "readers_digest": readers_digest,
+        "evidence_digest": _release_digest(evidence),
+    }
+    receipt["receipt_digest"] = _release_digest(receipt)
+    return {
+        "format": RELEASE_BUNDLE_FORMAT,
+        "stage": stage,
+        "purpose": "non-authoritative-preflight",
+        "evidence": evidence,
+        "receipt": receipt,
+    }
 
 
 def _scale_profile(paper: dict[str, Any]) -> dict[str, Any] | None:
