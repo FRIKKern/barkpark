@@ -618,10 +618,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # An export is an explicit admin-initiated backup, never a request-path query:
   # its natural bound is "as long as the dump takes", so it gets the same
   # `:infinity` import already had rather than a new arbitrary number to
-  # re-tune. The value is read from config so a test can drive a REAL
-  # DBConnection failure through this path (see workspace_bundle_test.exs) —
-  # nothing in prod sets it, and `:export_copy_fault` (below) is the test-only
-  # seam that reproduces the failure itself.
+  # re-tune. The value is read from config so an operator can cap it on a
+  # constrained box without a deploy; nothing sets it in prod, and the test that
+  # pins this reads the option OFF the driver call (`:erlang.trace` on
+  # `Repo.query!/3`) rather than driving a real timeout — a pool timeout under
+  # the SQL sandbox arrives as an ownership-shutdown EXIT, not a rescuable
+  # raise. `:export_copy_fault` (below) is the separate test-only seam that
+  # reproduces the FAILURE for the envelope proof.
   #
   # PDS-D44, BUDGET: the one-export memory budget counts ATTEMPTS, not
   # successes. Measured on the ACTIVE green slot (blue is inactive and reports
