@@ -76,6 +76,11 @@ type StatusCardInfo struct {
 	Project     string
 	Dataset     string
 	SchemaCount int
+	// Counts is the published per-type document tally (type → total) from
+	// GET /v1/data/counts/:dataset. Optional and best-effort: an empty or nil
+	// map (an offline / pre-counts server) simply drops the "documents:" line —
+	// the card is complete and honest without it.
+	Counts map[string]int
 }
 
 // RenderStatusCard builds the compact AXI-style status card a bare `bp` prints
@@ -99,6 +104,9 @@ func RenderStatusCard(info StatusCardInfo) string {
 	fmt.Fprintf(&b, "server:   %s\n", server)
 	fmt.Fprintf(&b, "scope:    %s\n", scope)
 	fmt.Fprintf(&b, "schemas:  %d loaded\n", info.SchemaCount)
+	if line := formatDatasetCountsLine(info.Counts); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	b.WriteString("No interactive terminal — the desk needs a TTY. From here:\n")
 	b.WriteString("help[1]:  `bp task ready`      — the ready work queue\n")
 	b.WriteString("help[2]:  `bp doc ls <type>`   — list documents of a type\n")
@@ -184,4 +192,146 @@ func fetchTaskCounts(ctx manifest.Context) (map[string]int, error) {
 		return nil, err
 	}
 	return env.Counts, nil
+}
+
+// formatNounCountsLine renders the ONE honest count line a bare `bp <noun>` prints
+// above its verb list, from the dataset-wide published counts map (type → total).
+// It returns "" when the noun has no entry — a pre-counts server, or a command noun
+// that is not a stored content type (`bp doc`, `bp search`) — so the caller drops
+// the line and prints the bare verb list exactly as before. A present-but-zero
+// count DOES render ("0 published"): "this type exists and is empty" is honest,
+// scannable information, distinct from "this server does not report counts".
+func formatNounCountsLine(noun string, counts map[string]int) string {
+	n, ok := counts[noun]
+	if !ok {
+		return ""
+	}
+	unit := "documents"
+	if n == 1 {
+		unit = "document"
+	}
+	return fmt.Sprintf("%s: %d published %s", noun, n, unit)
+}
+
+// formatDatasetCountsLine renders the compact per-type summary the non-TTY status
+// card shows (it stands in for a specific noun, so it aggregates every type). Types
+// order by count (desc, then name) so the heaviest are first; zero-count types are
+// omitted; a grand total closes the line and the list caps at datasetCountsCap with
+// a "+N more" tail so a schema-rich dataset never floods the card. "" for an empty
+// map so the card simply omits the line — the same best-effort discipline.
+func formatDatasetCountsLine(counts map[string]int) string {
+	type row struct {
+		typ string
+		n   int
+	}
+	var rows []row
+	total := 0
+	for t, n := range counts {
+		if n <= 0 {
+			continue
+		}
+		rows = append(rows, row{t, n})
+		total += n
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].n != rows[j].n {
+			return rows[i].n > rows[j].n
+		}
+		return rows[i].typ < rows[j].typ
+	})
+	overflow := len(rows) - datasetCountsCap
+	var parts []string
+	for i, r := range rows {
+		// Collapse the tail into "+N more" only when it hides more than one row —
+		// a "+1 more" is wider than the single "N type" it replaces, so a lone
+		// trailing type is shown, not hidden.
+		if i >= datasetCountsCap && overflow > 1 {
+			parts = append(parts, fmt.Sprintf("+%d more", overflow))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", r.n, r.typ))
+	}
+	return fmt.Sprintf("documents: %s  (%d total)", strings.Join(parts, " · "), total)
+}
+
+// datasetCountsCap bounds how many per-type rows the status card's documents line
+// shows before collapsing the rest into "+N more" — enough to be informative, few
+// enough to stay one scannable line on a dataset with dozens of content types.
+const datasetCountsCap = 6
+
+// fetchDatasetCounts issues ONE best-effort GET /v1/data/counts/:dataset against
+// the resolved target and returns its published per-type counts. Same short-fused
+// discipline as fetchTaskCounts: a 2s timeout so a bare `bp <noun>` against a dead
+// or pre-counts server (no data.counts route) degrades in two seconds, and every
+// error path returns (nil, err) so the caller simply omits the counts line. Frozen
+// response shape (charter decision 19 — do not improvise):
+// {"ok":true,"dataset":"<ds>","perspective":"published","counts":{"<type>":N,...}}.
+func fetchDatasetCounts(ctx manifest.Context) (map[string]int, error) {
+	dataset := ctx.Dataset
+	if dataset == "" {
+		return nil, fmt.Errorf("no dataset resolved")
+	}
+	client := apiclient.New(apiclient.Config{
+		BaseURL:   ctx.Server,
+		Token:     ctx.Token,
+		Workspace: ctx.Workspace,
+		Project:   ctx.Project,
+		Dataset:   dataset,
+		Timeout:   2 * time.Second,
+	})
+	res, err := client.GetConditional(client.BaseURL()+"/v1/data/counts/"+url.PathEscape(dataset), "")
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("GET /v1/data/counts/%s: status %d", dataset, res.StatusCode)
+	}
+	var env struct {
+		Counts map[string]int `json:"counts"`
+	}
+	// Non-strict decode: the envelope also carries ok/dataset/perspective; we want
+	// only counts and must not fail on the surrounding keys.
+	if err := json.Unmarshal(res.Body, &env); err != nil {
+		return nil, err
+	}
+	return env.Counts, nil
+}
+
+// nounCountsLine resolves the single best-effort counts line for a bare `bp <noun>`
+// at the shared usage block, or "" when it must be omitted. Keeping the omission
+// rules here (not inline in the dispatcher) makes every branch unit-testable without
+// a live Execute: machine output (-o json|yaml) carries no line; the `task` noun is
+// excluded because it prints its own richer lifecycle line above the verb list; and
+// any fetch or shape failure against the resolved server drops the line silently so
+// the verb usage still renders. counts[noun] present → the line; absent → "".
+func nounCountsLine(noun string, machineOut bool, ctx manifest.Context) string {
+	if machineOut || noun == "task" {
+		return ""
+	}
+	counts, err := fetchDatasetCounts(ctx)
+	if err != nil {
+		return ""
+	}
+	return formatNounCountsLine(noun, counts)
+}
+
+// BestEffortDatasetCounts fetches the published per-type counts for the non-TTY
+// status card. Exported so cmd/barkpark's headless path can populate
+// StatusCardInfo.Counts without reaching into the unexported fetch; it returns nil
+// on any error (offline / pre-counts server) so the card simply omits the line.
+func BestEffortDatasetCounts(server, token, workspace, project, dataset string) map[string]int {
+	counts, err := fetchDatasetCounts(manifest.Context{
+		Server:    server,
+		Token:     token,
+		Workspace: workspace,
+		Project:   project,
+		Dataset:   dataset,
+	})
+	if err != nil {
+		return nil
+	}
+	return counts
 }

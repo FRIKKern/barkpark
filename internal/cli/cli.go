@@ -514,6 +514,21 @@ func Execute(args []string) int {
 				return exitOK
 			}
 		}
+		// Bare `bp <noun>` (AXI R7 / charter decision 19): prepend ONE best-effort
+		// counts line from GET /v1/data/counts/:dataset so the incomplete-usage view
+		// still answers "how much of this content type is there?" instead of only
+		// listing verbs. `task` is excluded — it prints its own richer lifecycle line
+		// above (the `case "task"` bare branch). Human output only and silent-degrade:
+		// a pre-counts / offline server, or a command noun that is not a stored type,
+		// drops the line and the verb list prints exactly as before. Skipped for the
+		// `-h` help request (g.help) — that is documentation, not a board glance.
+		// Then FALL THROUGH to usageNoun (no return) so usage renders as before.
+		if verb == "" && !g.help {
+			if line := nounCountsLine(noun, out.machineOut(), ctx); line != "" {
+				out.errf("%s", line)
+				out.errf("")
+			}
+		}
 		usageNoun(out, tree, noun)
 		if verb == "" {
 			return exitUsage // a noun with no verb is incomplete usage

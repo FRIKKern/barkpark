@@ -144,6 +144,10 @@ func headlessStatusCard(w io.Writer, cfg apiclient.Config, ds *apiclient.Client,
 	if err != nil || bin == "" {
 		bin = os.Args[0]
 	}
+	// Best-effort published per-type counts for the "documents:" line. Same short-
+	// fused discipline as the bare-noun path: a pre-counts / offline server returns
+	// nil and the card simply omits the line — never blocking the healthy status.
+	counts := cli.BestEffortDatasetCounts(cfg.BaseURL, cfg.Token, ds.Workspace, ds.Project, ds.Dataset)
 	fmt.Fprintln(w, cli.RenderStatusCard(cli.StatusCardInfo{
 		Bin:         bin,
 		BaseURL:     cfg.BaseURL,
@@ -152,6 +156,7 @@ func headlessStatusCard(w io.Writer, cfg apiclient.Config, ds *apiclient.Client,
 		Project:     ds.Project,
 		Dataset:     ds.Dataset,
 		SchemaCount: schemaCount,
+		Counts:      counts,
 	}))
 	return 0
 }
