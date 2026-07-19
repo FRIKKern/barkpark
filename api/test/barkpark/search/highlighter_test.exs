@@ -301,6 +301,68 @@ defmodule Barkpark.Search.HighlighterTest do
     end
   end
 
+  # AXI b3: brief hit cards reuse the sealed highlights map, but highlight_text
+  # marks up the ENTIRE field — a schema-configured `content.body` highlight
+  # would echo a full field per hit. clamp_brief_highlights/1 windows each
+  # already-sealed highlight so a brief card can never re-inflate.
+  describe "clamp_brief_highlights/1 (brief re-inflation guard)" do
+    test "windows a heavyweight marked field around the first match, keeping <mark>" do
+      lead = String.duplicate("x", 5000)
+      tail = String.duplicate("y", 5000)
+      doc = %FakeDoc{doc_id: "d1", title: "t", content: %{"slug" => lead <> " needle " <> tail}}
+      parsed = %{terms: ["needle"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      config = %{"highlight_fields" => ["content.slug"]}
+
+      full = Highlighter.highlight_documents([doc], parsed, config, admin)["d1"]
+      assert byte_size(full["content.slug"]) > 10_000
+
+      val = Highlighter.clamp_brief_highlights(full)["content.slug"]
+      assert val =~ "<mark>needle</mark>"
+      assert byte_size(val) <= 256
+      assert String.starts_with?(val, "…")
+      assert String.ends_with?(val, "…")
+    end
+
+    test "a window ending inside a long match stays balanced (appends </mark>)" do
+      marked = "<mark>" <> String.duplicate("z", 400) <> "</mark>"
+      val = Highlighter.clamp_brief_highlights(%{"content.body" => marked})["content.body"]
+
+      assert String.starts_with?(val, "<mark>")
+      assert String.contains?(val, "</mark>")
+      assert String.ends_with?(val, "…")
+      assert byte_size(val) <= 256
+    end
+
+    test "HTML entities are never split by the window cut" do
+      amps = String.duplicate("&", 400)
+      doc = %FakeDoc{doc_id: "d1", title: "t", content: %{"slug" => amps <> " needle"}}
+      parsed = %{terms: ["needle"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      config = %{"highlight_fields" => ["content.slug"]}
+
+      full = Highlighter.highlight_documents([doc], parsed, config, admin)["d1"]
+      val = Highlighter.clamp_brief_highlights(full)["content.slug"]
+
+      # Every `&` in the window is a whole `&amp;` entity — no dangling `&am`.
+      assert Regex.run(~r/&(?!amp;|lt;|gt;|quot;|#39;)/, val) == nil
+      # Bounded: the window is ~160 VISIBLE units; entities are multi-byte so the
+      # byte size is larger than a plain window, but still can't re-inflate to the
+      # full field (400 entities ≈ 2 KB) — a comfortable per-field cap.
+      assert byte_size(val) <= 1024
+      assert byte_size(val) < byte_size(full["content.slug"])
+    end
+
+    test "a short marked field passes through unchanged (no ellipsis)" do
+      assert Highlighter.clamp_brief_highlights(%{"title" => "<mark>hi</mark> there"}) ==
+               %{"title" => "<mark>hi</mark> there"}
+    end
+
+    test "an empty highlights map clamps to an empty map" do
+      assert Highlighter.clamp_brief_highlights(%{}) == %{}
+    end
+  end
+
   describe "highlight_media/4" do
     test "highlights filename when it contains the needle" do
       file = %FakeFile{id: 42, original_name: "photo.jpg", filename: "elixir-logo.png"}
