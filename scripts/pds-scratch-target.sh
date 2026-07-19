@@ -9,9 +9,11 @@
 #   scripts/pds-scratch-target.sh verify      prove the isolation is REAL
 #   scripts/pds-scratch-target.sh status      where is it, is it up
 #   scripts/pds-scratch-target.sh env         print the sourceable scratch.env
-#   scripts/pds-scratch-target.sh teardown    stop everything, remove the tree,
-#                                             assert both ports released and
-#                                             zero orphan postgres
+#   scripts/pds-scratch-target.sh teardown    stop everything, assert both ports
+#                                             released and zero orphan postgres,
+#                                             THEN remove the tree — a failed
+#                                             assert leaves the root standing so
+#                                             the leak is still diagnosable
 #
 # Every guard below exists because a verification run HIT the failure. Read the
 # TRAP comments before "simplifying" any of them away.
@@ -293,8 +295,12 @@ cmd_verify() {
 
   hr "1. negative control — Barkpark.Media.upload_dir(), isolated vs NOT"
   local isolated unisolated expected_unisolated
-  isolated="$(upload_dir_probe)"   # BARKPARK_MEDIA_DIR is exported by scratch.env
-  unisolated="$(env -u BARKPARK_MEDIA_DIR bash -c "cd '$API_DIR' && MIX_ENV=dev mix run --no-start -e 'IO.puts(Barkpark.Media.upload_dir())'" 2>/dev/null | tail -1)"
+  # `|| true` on BOTH probes on purpose: a probe that fails to run must show up
+  # as a FAIL line below (with the empty value printed), never as `set -e`
+  # killing verify mid-section with no output — a silent exit reads exactly like
+  # "nothing to report", which is the one thing a control may never look like.
+  isolated="$(upload_dir_probe || true)"   # BARKPARK_MEDIA_DIR is exported by scratch.env
+  unisolated="$(env -u BARKPARK_MEDIA_DIR bash -c "cd '$API_DIR' && MIX_ENV=dev mix run --no-start -e 'IO.puts(Barkpark.Media.upload_dir())'" 2>/dev/null | tail -1 || true)"
   expected_unisolated="$API_DIR/uploads"
 
   printf '  WITH  BARKPARK_MEDIA_DIR -> %s\n' "$isolated"
@@ -401,10 +407,29 @@ cmd_teardown() {
   pg_port="${BARKPARK_PG_PORT:-}"
 
   export BARKPARK_HOME="$home"
-  [ -n "$port" ] && export PORT="$port"
-  [ -n "$pg_port" ] && export BARKPARK_PG_PORT="$pg_port"
+  # `if`, not `[ … ] && export` — under `set -e` a false test as a bare command
+  # aborts teardown right here, and a root whose scratch.env is missing or
+  # truncated is EXACTLY when you most need the stop + the asserts to run.
+  # THE PORT IS NOT OPTIONAL HERE. `bin/barkpark stop` → stop_server falls back
+  # to `listener_pid` when its pidfile is stale or missing, and listener_pid
+  # reads $PORT, which DEFAULTS TO 4000. So a teardown that does not know this
+  # root's own port does not tear down nothing — it kills whatever holds port
+  # 4000, i.e. the host's shared dev server, the one thing this script's header
+  # promises never to touch. (Reproduced during review: a scratch root with a
+  # truncated scratch.env killed the dev server on 4000 and still printed PASS.)
+  # Refuse instead, and say what to do.
+  if [ -z "$port" ] || [ -z "$pg_port" ]; then
+    die "refusing to tear down $home — its scratch.env does not name both ports (PORT='${port:-}', BARKPARK_PG_PORT='${pg_port:-}').
+  Without this root's OWN port, \`barkpark stop\` falls back to whatever listens
+  on the default 4000 and would kill the host's dev server.
+  FIX: re-run with the real values, e.g.
+    PORT=<this root's http port> BARKPARK_PG_PORT=<its pg port> $0 teardown
+  or remove the root by hand once you have confirmed nothing is using it."
+  fi
+  export PORT="$port"
+  export BARKPARK_PG_PORT="$pg_port"
 
-  log "stopping server + postgres under $home"
+  log "stopping server + postgres under $home (PORT=$port, PG=$pg_port)"
   "$BARKPARK_BIN" stop || warn "barkpark stop reported an error — continuing to the asserts"
 
   local p
@@ -420,13 +445,29 @@ cmd_teardown() {
 
   # Orphan check BEFORE the tree goes away — a postgres still holding this data
   # dir is exactly the leak we are looking for.
+  # FIXED-STRING, not `pgrep -f "postgres.*$home"`: pgrep's pattern is a regex,
+  # so a caller-supplied BARKPARK_HOME containing `.`/`+`/`(` would quietly match
+  # the wrong set (or nothing) and report a clean teardown over a live orphan.
   local orphans
-  orphans="$(pgrep -f "postgres.*$home" 2>/dev/null || true)"
+  # shellcheck disable=SC2009  # deliberate: pgrep -f is a REGEX, see above
+  orphans="$(ps -Ao pid=,command= 2>/dev/null | grep -F -- "$home" | grep -F -- postgres | awk '{print $1}' | tr '\n' ' ' | sed 's/ *$//' || true)"
   if [ -n "$orphans" ]; then
     printf 'pds-scratch: FAIL orphan postgres processes for %s: %s\n' "$home" "$orphans" >&2
     fails=$((fails + 1))
   else
     log "zero orphan postgres for this scratch root"
+  fi
+
+  # A still-listening port or a live orphan postgres means something is STILL
+  # USING this data dir. Yanking the tree out from under it turns a diagnosable
+  # leak into a corrupted process with no evidence left to look at, so stop here
+  # and leave the root standing — the operator re-runs teardown after killing it,
+  # or removes it by hand. Nothing is silently swallowed: the FAIL lines above
+  # already named the offending listener/pid, and the exit stays non-zero.
+  if [ "$fails" -gt 0 ]; then
+    warn "NOT removing $home — $fails assert(s) failed above and something may still be holding this data dir. Kill the offender and re-run: $0 teardown"
+    hr "teardown: FAIL ($fails) — scratch root left at $home"
+    return 1
   fi
 
   # Refuse to rm -rf anything that is not a scratch root we created/were given.
