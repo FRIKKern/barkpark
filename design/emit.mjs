@@ -302,10 +302,12 @@ function cloudChromeVars(theme, indent) {
 // One generated move retints the 123KB hand CSS: the ~consumed legacy shell vars
 // map role-for-role onto the designer ladder (GR6 rulings). Identity-INVARIANT,
 // so bare :root / [data-theme=dark] only. --dim→fg3 (NEVER fg4: fg4-as-text fails
-// 4.5:1 at 3.96/3.41 — fg4 is a meta-only token duty-capped at 3:1). --accent
-// STAYS the decorative amber (doctrine "warm highlight never brand"). --border is
+// 4.5:1 at 3.96/3.41 — fg4 is a meta-only token duty-capped at 3:1). --border is
 // a line-rgb/alpha judgment. --primary-hover is RETIRED (0 consumers, proven dead)
-// — deliberately absent here.
+// — deliberately absent here. --accent is RETIRED too (GUI-remake GR7 endgame,
+// gr-p3-site-detail): its sole consumer (.previews .deploy-row.preview-row
+// border) now reads --cc-amber directly — the identical bytes the alias resolved
+// to — so the decorative-amber alias carries zero consumers and dies.
 function aliasBridge(theme, indent) {
   const borderAlpha = theme === "light" ? "0.12" : "0.14";
   const lines = [
@@ -316,7 +318,6 @@ function aliasBridge(theme, indent) {
     `--muted-text: var(--cc-fg2);`,
     `--dim: var(--cc-fg3);`,
     `--border: rgba(var(--cc-line-rgb), ${borderAlpha});`,
-    `--accent: var(--cc-amber);`,
   ];
   return lines.map((l) => indent + l).join("\n");
 }

@@ -65,7 +65,6 @@
   --muted-text: var(--cc-fg2);
   --dim: var(--cc-fg3);
   --border: rgba(var(--cc-line-rgb), 0.12);
-  --accent: var(--cc-amber);
   --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red-strong); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -103,7 +102,6 @@
   --muted-text: var(--cc-fg2);
   --dim: var(--cc-fg3);
   --border: rgba(var(--cc-line-rgb), 0.14);
-  --accent: var(--cc-amber);
   --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
@@ -237,9 +235,11 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
      (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
      status roles (--ok / --warn / --danger / --info / --warn-strong families), --ring,
-     --accent, and the brand --primary/--primary-fg are now OWNED by the
+     and the brand --primary/--primary-fg are now OWNED by the
      GENERATED block above (design/tokens.json → color.cloudChrome + the
-     per-identity accent, mapped role-for-role onto the designer ladder). One
+     per-identity accent, mapped role-for-role onto the designer ladder).
+     --accent is RETIRED (gr-p3-site-detail): its sole consumer reads
+     --cc-amber directly. One
      generated move retints this whole file. Freeze-by-generation (GR11): tune
      values in tokens.json, NEVER here. Only tokens the emitter does not yet own
      stay hand-authored below. */
@@ -320,7 +320,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 }
 
 [data-theme="dark"] {
-  /* GR7 alias bridge (GUI-remake wave 2): shell + status + --ring + --accent +
+  /* GR7 alias bridge (GUI-remake wave 2): shell + status + --ring +
      brand --primary/--primary-fg are OWNED by the generated [data-theme="dark"]
      block above (color.cloudChrome + per-identity accent). The re-declarations
      below stay hand-authored ONLY for the tokens the emitter does not yet own,
@@ -1389,32 +1389,66 @@ select.form-input {
 .site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
 a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
-/* ===================================================== DEPLOYMENTS */
-.deploys { display: flex; flex-direction: column; gap: 8px; }
-/* gh-6: branch previews — own section, faintly set apart from production. */
-.previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
+/* ===================================================== DEPLOYMENTS
+   gr-p3-site-detail (v4, screens2/05): the deploy ladder is ONE card — hairline-
+   separated rows inside a single surface — instead of a stack of boxed rows.
+   Row anatomy: mono ref · status pill (.dep-pill CONSUMED, never restyled here —
+   GR11/D24) · environment · trigger provenance (Manual / Content update, GR27:
+   never a named human) · duration · when. */
+.deploys {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+/* Inside the card the shared empty-state sheds its own dashed frame. */
+.deploys .empty-state { border: none; border-radius: 0; }
+/* gh-6: branch previews — own card, each row edged in the decorative amber.
+   Reads --cc-amber DIRECTLY (the --accent alias is retired, GR7 endgame). */
+.previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; margin-bottom: 12px; }
 .previews-count {
   font-size: 12px; font-weight: 500; color: var(--muted-text);
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 999px; padding: 1px 8px;
 }
-.previews .deploy-row.preview-row { border-left: 3px solid var(--accent); }
+.previews .deploy-row.preview-row { border-left: 3px solid var(--cc-amber); }
 .preview-url { text-decoration: none; }
 .preview-url:hover { text-decoration: underline; }
 .deploy-row {
   display: flex; flex-direction: column;
   padding: 12px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid var(--border);
 }
+.deploy-row:last-child { border-bottom: none; }
 .deploy-head { display: flex; align-items: center; gap: 14px; }
 .deploy-main { flex: 1; min-width: 0; }
 .deploy-ref { font-size: 13px; font-weight: 500; }
 .deploy-ref .mono { font-family: var(--mono); }
 .deploy-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
-.deploy-fail { font-size: 12px; color: var(--destructive); margin-top: 4px; }
+.deploy-meta .mono { font-family: var(--mono); }
+/* The v4 failure panel (v4.dc.html:569-575): a red-bordered box carrying the
+   server's failure copy behind a danger dot. A SNAP state — deliberately no
+   transition/animation anywhere on it (failed never eases, deploy-ladder law). */
+.deploy-fail {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid hsl(var(--danger-hsl) / 0.35);
+  border-radius: var(--radius);
+  background: hsl(var(--danger-hsl) / 0.06);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.deploy-fail-dot {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--danger);
+}
 /* dwb-webhook-deploy / D11: BLOCKED tone — a born-failed GitHub-push deploy is a
    capability that isn't enabled yet, not a crash. Calm amber/informational, NOT
    error-red. Warn tokens are theme-invariant (status hues are shared across
@@ -1423,10 +1457,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploy-fail--blocked {
   color: var(--warn-strong);
   background: var(--warn-soft);
-  border: 1px solid hsl(var(--warn-hsl) / 0.3);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  border-color: hsl(var(--warn-hsl) / 0.3);
 }
+.deploy-fail--blocked .deploy-fail-dot { background: var(--warn); }
 /* dwb-19: the "last step before it broke" caption on the failed /new screen. */
 .new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; }
 
@@ -3437,8 +3470,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .deploys-head h2 { margin: 0; }
 /* D28: the honest capped-history footer — "Showing the N most recent deployments."
-   Muted + small; never a "full history" claim. */
-.deploys-note { font-size: 12px; color: var(--muted-text); margin: 8px 2px 0; }
+   Muted + small; never a "full history" claim. Lives INSIDE the v4 ladder card
+   (gr-p3-site-detail), so it reads as the card's own footer row. */
+.deploys-note { font-size: 12px; color: var(--muted-text); margin: 0; padding: 9px 16px 11px; }
 /* The restored "Now live" chip — distinguished from a plain restore-free current
    chip by an info tint so "rolled back" reads as an intentional state, not a fault.
    Info tokens are theme-invariant (shared status hues), so no [data-theme] override. */
@@ -3862,3 +3896,73 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 @media (max-width: 720px) {
   .tlv-coalesce-meta { white-space: normal; }
 }
+/* ═══════════════════════════ DOMAIN CHECKLIST (gr-p3-site-detail, v4 rungs)
+   The shared per-host DNS/TLS checklist restyled onto the v4 rung-pill grammar
+   (v4.dc.html:605-617 + 2025-2033): one bordered host card, the 4 ordered rungs
+   as tinted pills (● ok / ✕ failed / ◐ in-flight / · waiting / ● proxied), the
+   server's remediation verbatim underneath. ONE component, two mounts — the
+   instance rail (#instance-domains) and the site detail (#site-domains) consume
+   the same domainChecklistHtml unchanged. Status roles ride the shared token
+   families; the informational `proxied` rung reads info (Cloudflare fronting is
+   a mode, never a fault). Append-only tail (OC9). */
+.dom-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.dom-card + .dom-card { margin-top: 10px; }
+.dom-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; min-width: 0; }
+.dom-host {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.dom-kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted-text);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 1px 8px;
+}
+.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dom-rung {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+  color: var(--muted-text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dom-rung-glyph { font-size: 9px; line-height: 1; }
+.dom-rung-code { font-family: var(--mono); font-weight: 400; color: var(--dim); }
+.dom-rung--ok { color: var(--ok-strong); background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.3); }
+.dom-rung--ok .dom-rung-glyph { color: var(--ok); }
+.dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
+.dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
+.dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* The server's remediation line — amber note, rendered verbatim (the SPA never
+   invents fix text). */
+.dom-note {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.dom-meta { margin-top: 7px; font-size: 11px; color: var(--dim); }
+/* The site-detail Domains section: painted only when the site has attached
+   domains (the mount leaves it empty otherwise — no empty shell, D17). */
+.site-domains { margin-top: 22px; }
+/* The v4 site-detail headline: domain + honest state chip on one line. */
+.site-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

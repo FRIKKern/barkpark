@@ -6152,27 +6152,34 @@
 
   // ================================================== DOMAIN CHECKLIST (S13)
   // The per-host DNS/TLS checklist — DNS found → points here → TLS issued →
-  // serving — for the azure-hetzner hosting parity work. The CLI (`bp cloud
-  // domain status`) and this rail render the SAME control-plane envelope (GET
-  // /v1/barkparks/:id/domain-status); NEITHER surface probes — the CP owns the
-  // truth. domainStages is the ONE pure fold, node-pinned in __app.test.mjs;
-  // the DOM mount + 4s poll (loadInstanceDomains) are browser-verified.
+  // serving. ONE shared component, TWO mounts: the instance rail
+  // (#instance-domains ⇐ GET /v1/barkparks/:id/domain-status) and the site
+  // detail (#site-domains ⇐ GET /v1/sites/:id/domain-status, gr-p3-site-detail).
+  // The CLI (`bp cloud domain status`) renders the SAME control-plane envelope;
+  // NO surface probes — the CP owns the truth. domainStages is the ONE pure
+  // fold, node-pinned in __app.test.mjs; the DOM mounts + 4s poll are
+  // browser-verified. Rendered in the v4 rung-pill grammar (.dom-*).
 
   // Fold one host's stage array into display rows. Roles: ok/failed pass
-  // through; a pending rung is "pending" (waiting) EXCEPT the first pending rung
-  // after at least one ok rung, which becomes "active" (the front currently
-  // being established) — the checklist shows honest motion (the markNextStep
-  // idiom). showRemediation is true ONLY under a non-ok rung that carries a
-  // server remediation string (server-owned copy, rendered verbatim — the SPA
-  // never invents fix text).
+  // through; `proxied` (the CF-orange-cloud informational classification of
+  // points_here — a MODE, never a fault) passes through as its own settled
+  // role; a pending rung is "pending" (waiting) EXCEPT the first pending rung
+  // after at least one settled-forward rung, which becomes "active" (the front
+  // currently being established) — the checklist shows honest motion (the
+  // markNextStep idiom). showRemediation is true ONLY under a failed/waiting
+  // rung that carries a server remediation string (server-owned copy, rendered
+  // verbatim — the SPA never invents fix text; a proxied rung is informational
+  // and never carries one).
   function domainStageRows(stages) {
     stages = Array.isArray(stages) ? stages : [];
     var rows = [], seenOk = false, sawActive = false;
     for (var i = 0; i < stages.length; i++) {
       var s = stages[i] || {};
       var status = typeof s.status === "string" ? s.status : "";
-      var role = status === "ok" ? "ok" : status === "failed" ? "failed" : "pending";
-      if (role === "ok") seenOk = true;
+      var role = status === "ok" ? "ok"
+        : status === "failed" ? "failed"
+        : status === "proxied" ? "proxied" : "pending";
+      if (role === "ok" || role === "proxied") seenOk = true;
       if (role === "pending" && seenOk && !sawActive) { role = "active"; sawActive = true; }
       var remediation = typeof s.remediation === "string" ? s.remediation : "";
       var label = (typeof s.label === "string" && s.label) ? s.label
@@ -6184,7 +6191,7 @@
         status: status,
         evidence: typeof s.evidence === "string" ? s.evidence : "",
         remediation: remediation,
-        showRemediation: role !== "ok" && !!remediation,
+        showRemediation: role !== "ok" && role !== "proxied" && !!remediation,
       });
     }
     return rows;
@@ -6220,8 +6227,9 @@
         // must fix; a genuinely-terminal DNS/points failure already keeps polling
         // via its trailing skipped-pending rungs, so this stays narrow — never
         // broaden it to every failed rung or a real dead-end infinite-polls).
+        // `proxied` is settled (an informational mode, nothing left to change).
         if (r.role === "failed" && r.stage === "serving") return false;
-        return r.role === "ok" || r.role === "failed";
+        return r.role === "ok" || r.role === "failed" || r.role === "proxied";
       });
     });
     return {
@@ -6242,43 +6250,46 @@
     return kind || "";
   }
 
-  // Pure: one rung chip. Reuses the verify-card chip vocabulary (.vf-chip) so it
-  // is styled without new CSS: ok → pass (✓), failed → fail (✗), pending/active
-  // → the neutral "unknown" chip (·). The accessible name carries the state in
-  // WORDS, never colour alone.
+  // Pure: one rung chip in the v4 rung-pill grammar (.dom-rung, gr-p3): ok → ●,
+  // failed → ✕, active → ◐, waiting → ·, proxied → ● info (informational — the
+  // domain is fronted by a proxy, so origin-pointing is a mode, not a check).
+  // The accessible name carries the state in WORDS, never colour alone.
   function domainRungChip(row, showEvidence) {
     if (showEvidence === undefined) showEvidence = true;
-    var vfRole = row.role === "ok" ? "pass" : row.role === "failed" ? "fail" : "unknown";
-    var glyph = vfRole === "pass" ? "&#10003;" : vfRole === "fail" ? "&#10007;" : "&middot;";
+    var glyph = row.role === "ok" || row.role === "proxied" ? "&#9679;"
+      : row.role === "failed" ? "&#10007;"
+      : row.role === "active" ? "&#9684;" : "&middot;";
     var state = row.role === "ok" ? "done"
       : row.role === "failed" ? "failed"
+      : row.role === "proxied" ? "proxied"
       : row.role === "active" ? "in progress" : "waiting";
-    return '<span class="vf-chip vf-chip--' + vfRole + '" role="listitem" aria-label="' +
+    return '<span class="dom-rung dom-rung--' + esc(row.role) + '" role="listitem" aria-label="' +
       esc(row.label + " — " + state) + '">' +
-      '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
+      '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
       esc(row.label) +
-      (showEvidence && row.evidence ? '<span class="vf-chip-code">' + esc(row.evidence) + "</span>" : "") +
+      (showEvidence && row.evidence ? '<span class="dom-rung-code">' + esc(row.evidence) + "</span>" : "") +
       "</span>";
   }
 
-  // Pure: the whole rail checklist. Empty (no attached domains) degrades to the
-  // original single Domain rail row. Otherwise one .vf-card per host — head
-  // (host + kind), the rung chips, then the server's remediation lines under any
-  // non-ok rung, verbatim.
+  // Pure: the whole checklist. Empty (no attached domains) degrades to the
+  // original single Domain rail row (the instance-rail mount's static state).
+  // Otherwise one .dom-card per host — head (mono host + kind chip), the v4
+  // rung pills, then the server's remediation lines under any non-ok rung,
+  // verbatim. Shared verbatim by BOTH mounts (instance rail + site detail).
   function domainChecklistHtml(model, bp) {
     if (!model || model.empty) {
       return railRow("Domain", (bp && bp.custom_host) || "—");
     }
     return model.domains.map(function (d) {
-      var head = esc(d.host) +
-        (domainKindChip(d.kind) ? ' <span class="vf-chip-code">' + esc(domainKindChip(d.kind)) + "</span>" : "");
-      // Evidence dedup: keep it on ok / failed / the FRONT non-ok rung; drop the
-      // repeated "…an earlier step isn't passing." filler on downstream pending
-      // rungs (render layer only — the pure domainStageRows model is untouched).
+      var kind = domainKindChip(d.kind);
+      // Evidence dedup: keep it on ok / failed / proxied / the FRONT non-ok
+      // rung; drop the repeated "…an earlier step isn't passing." filler on
+      // downstream pending rungs (render layer only — the pure domainStageRows
+      // model is untouched).
       var frontSeen = false;
       var rungs = d.rows.map(function (row) {
         var showEvidence = true;
-        if (row.role !== "ok") {
+        if (row.role !== "ok" && row.role !== "proxied") {
           if (frontSeen && row.role === "pending") showEvidence = false;
           frontSeen = true;
         }
@@ -6290,13 +6301,15 @@
       var remedies = d.rows.filter(function (r) { return r.showRemediation; })
         .map(function (r) { return r.remediation; })
         .filter(function (t) { if (seenRem[t]) return false; seenRem[t] = true; return true; })
-        .map(function (t) { return '<div class="vf-note">' + esc(t) + "</div>"; }).join("");
+        .map(function (t) { return '<div class="dom-note">' + esc(t) + "</div>"; }).join("");
       var when = model.checkedAt
-        ? '<div class="vf-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
+        ? '<div class="dom-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
         : "";
-      return '<div class="vf-card">' +
-        '<div class="vf-head"><h2>' + head + "</h2></div>" +
-        '<div class="vf-chips" role="list" aria-label="Domain checks for ' + esc(d.host) + '">' +
+      return '<div class="dom-card">' +
+        '<div class="dom-head"><span class="dom-host">' + esc(d.host) + "</span>" +
+          (kind ? '<span class="dom-kind">' + esc(kind) + "</span>" : "") +
+        "</div>" +
+        '<div class="dom-rungs" role="list" aria-label="Domain checks for ' + esc(d.host) + '">' +
           rungs +
         "</div>" +
         remedies + when +
@@ -6333,6 +6346,37 @@
         domainPollTimer = setTimeout(function () {
           if (seq !== domainSeq) return;
           loadInstanceDomains(bp);
+        }, 4000);
+      }
+    });
+  }
+
+  // gr-p3-site-detail: the SITE mount of the same checklist — the domains rungs
+  // on site detail, against GET /v1/sites/:id/domain-status (same envelope,
+  // CF-mode-aware: a proxied site's points_here rung reads `proxied`). Paints
+  // into #site-domains ONLY when the site has attached domains (no empty shell,
+  // D17); a 404 (older control plane) / error leaves the section empty. Shares
+  // the instance mount's seq + poll slot — the two views never coexist, and a
+  // navigation to either bumps the seq to invalidate stale polls.
+  function loadSiteDomains(site) {
+    var box = $("#site-domains");
+    if (!box) return;
+    var seq = ++domainSeq;
+    clearTimeout(domainPollTimer);
+    api("GET", "/v1/sites/" + encodeURIComponent(site.id) + "/domain-status").then(function (r) {
+      if (seq !== domainSeq) return; // a newer load owns the slot
+      var b = $("#site-domains");
+      if (!b) return;
+      if (!r.ok || !r.data) return; // leave the section empty on 404/error
+      var model = domainStages(r.data, Date.now());
+      if (model.empty) { b.innerHTML = ""; return; }
+      b.innerHTML = '<div class="deploys-head"><h2>Domains</h2></div>' +
+        domainChecklistHtml(model, null);
+      if (!model.terminal) {
+        clearTimeout(domainPollTimer);
+        domainPollTimer = setTimeout(function () {
+          if (seq !== domainSeq) return;
+          loadSiteDomains(site);
         }, 4000);
       }
     });
@@ -6503,6 +6547,9 @@
       // W4: mount the live six-stage rail for the in-flight deployment (if any),
       // driven by the site.deploy.stage SSE push — not a poll.
       mountDeployRail(box, site, bp, deployments);
+      // gr-p3: the domains rungs — the shared checklist against the site's own
+      // domain-status endpoint (painted only when domains are attached).
+      loadSiteDomains(site);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
       var themeSel = $("#site-theme-select");
@@ -6572,6 +6619,27 @@
     return { theme: value || "" };
   }
 
+  // gr-p3: the site's honest headline state chip, derived from server truth —
+  // the deployment the production pointer names. Live → the ok pill; an
+  // in-flight build → Deploying; a failed CURRENT pointer never happens (the
+  // pointer only moves to live rows), so absence of a live current row simply
+  // renders no chip (never an invented status). Consumes .dep-pill (GR11).
+  function siteStatusChip(site, deployments) {
+    var arr = deployments || [];
+    for (var i = 0; i < arr.length; i++) {
+      if (deployIsActive(arr[i].status || "queued")) {
+        return '<span class="dep-pill dep-building">Deploying</span>';
+      }
+    }
+    if (site && site.current_deployment_id) {
+      var cur = arr.filter(function (d) {
+        return String(d.id) === String(site.current_deployment_id) && (d.status || "") === "live";
+      })[0];
+      if (cur) return '<span class="dep-pill dep-live">Live</span>';
+    }
+    return "";
+  }
+
   function siteDetailHtml(site, bp, deployments, domain, previews) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
@@ -6597,7 +6665,11 @@
         ? '<button class="btn btn-ghost btn-sm" id="site-rollback" type="button">Roll back</button>'
         : "") +
       "</div>";
-    var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
+    // gr-p3 (v4 header): a connected site's GitHub button IS the repo name in
+    // mono (screens2/05's `owner/repo ↗` chip); unconnected keeps the verb.
+    var githubLabel = site.github_repo
+      ? '<span class="mono">' + esc(site.github_repo) + "</span>"
+      : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
@@ -6611,7 +6683,8 @@
     var liveLine = live
       ? ' &middot; <a class="site-open" href="' + esc(live) + '" target="_blank" rel="noopener">' + esc(live) + "&nbsp;&#8599;</a>"
       : "";
-    return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
+    return '<div class="detail-head"><div><h1 class="site-title">' + esc(domain) +
+        siteStatusChip(site, deployments) + "</h1>" +
         '<div class="fleet-url">' + sub + liveLine + "</div></div>" +
         '<div class="fleet-badges">' +
           (live ? '<a class="btn btn-ghost btn-sm site-open" href="' + esc(live) + '" target="_blank" rel="noopener">Visit&nbsp;&#8599;</a>' : "") +
@@ -6620,7 +6693,11 @@
       '<div class="detail-grid">' +
         '<div class="detail-main"><div id="deploy-rail-slot"></div>' + deploysHead + rollbackBanner +
           '<div class="deploys" id="site-deploys">' + list + "</div>" +
-          previewSection + "</div>" +
+          previewSection +
+          // gr-p3: the domains rungs mount — loadSiteDomains paints it only
+          // when the site has attached domains (no empty shell, D17).
+          '<div class="site-domains" id="site-domains"></div>' +
+        "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
           railRow("Framework", site.framework || "—") +
@@ -6687,6 +6764,34 @@
     return isGithubPushBlocked(reason) ? "blocked" : "crashed";
   }
 
+  // gr-p3 (v4): the ONE failure panel both deploy-row families render — the
+  // red-bordered box carrying the server's failure copy behind a danger dot
+  // (v4.dc.html:569-575). Blocked (github-push family) keeps its calm amber
+  // tone. A snap state: the CSS carries no transition/animation (failed never
+  // eases). Empty reason → no panel. Pure.
+  function deployFailHtml(reason) {
+    if (!reason) return "";
+    return '<div class="deploy-fail' +
+      (failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
+      '<span class="deploy-fail-dot" aria-hidden="true"></span>' +
+      "<span>" + esc(failureCopy(reason)) + "</span></div>";
+  }
+
+  // gr-p3 (v4): a settled deployment's honest duration — the two server stamps
+  // only (inserted_at → became_live_at for a live row; inserted_at → updated_at
+  // for failed/cancelled). In-flight rows and rows missing a stamp return null
+  // (no guessed duration, no NaN). Pure; rendered through fmtDur.
+  function deployDuration(d) {
+    if (!d || !d.inserted_at) return null;
+    var st = d.status || "";
+    var end = st === "live" ? d.became_live_at
+      : (st === "failed" || st === "cancelled") ? d.updated_at
+      : null;
+    if (!end) return null;
+    var ms = Date.parse(end) - Date.parse(d.inserted_at);
+    return isFinite(ms) && ms >= 0 ? ms : null;
+  }
+
   // gh-6: one branch-preview row — its branch, a click-through to the preview
   // URL, status pill, and the same live build console as a production deploy.
   function previewRow(d) {
@@ -6698,11 +6803,17 @@
           esc(d.preview_host || url) + "</a>"
       : '<span class="dim">pending routing</span>';
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
+    // gr-p3 (v4 anatomy): environment · trigger provenance (GR27) · duration ·
+    // when — the same meta grammar as a production row.
+    var pmeta = ["preview"];
+    if (d.trigger) pmeta.push(esc(deployTriggerLabel(d.trigger)));
+    var pdur = deployDuration(d);
+    if (pdur != null) pmeta.push(esc(fmtDur(pdur)));
+    pmeta.push(esc(fmtWhen(when)));
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
-        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        '<div class="deploy-meta">' + pmeta.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
       '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
@@ -6959,17 +7070,16 @@
   // state directly; we NEVER poll (the async 202+poll of the INSTANCE rollback,
   // rollbackInstance app.js:~3237, is the named regression trap).
 
-  // Human label for how a deployment shipped. Only rendered when the server sent a
-  // trigger; unknown values pass through humanized (_/- → spaces). Pure.
+  // Human label for a deployment's PROVENANCE — the trigger, and ONLY the
+  // trigger (GR27/GR28: a deployment row carries no actor; never a named
+  // human). The backend vocabulary is exactly manual | content-auto
+  // (Registry.Deployment @triggers); anything else passes through humanized
+  // (_/- → spaces) so an unknown future value degrades honestly instead of
+  // being re-mapped to copy the server never said. Pure.
   function deployTriggerLabel(trigger) {
     switch (trigger) {
-      case "content-auto": return "auto";
-      case "github_webhook":
-      case "github-push": return "GitHub push";
-      case "manual": return "manual";
-      case "cli": return "CLI";
-      case "rollback": return "rollback";
-      case "promote": return "promote";
+      case "content-auto": return "Content update";
+      case "manual": return "Manual";
       default: return trigger ? String(trigger).replace(/[_-]+/g, " ") : "";
     }
   }
@@ -7472,18 +7582,20 @@
     var rolledBack = isCurrent && flash && flash.kind === "restored" &&
       flash.deploymentId != null && String(flash.deploymentId) === String(d.id);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    // Git meta the row already carries (D7): branch, trigger (how it shipped), sha
-    // (when the headline is an image tag), and WHEN — "live since" once it went live.
-    var metaBits = [];
+    // gr-p3 (v4 anatomy, screens2/05): environment · branch · trigger
+    // provenance (GR27 — trigger ONLY, never a named human) · sha (when the
+    // headline is an image tag) · duration · WHEN — "live since" once live.
+    var metaBits = [esc(d.environment || "production")];
     if (d.branch) metaBits.push(esc(d.branch));
     if (d.trigger) metaBits.push(esc(deployTriggerLabel(d.trigger)));
     if (d.git_ref && d.image_tag) metaBits.push('<span class="mono">' + esc(shortSha(d.git_ref)) + "</span>");
+    var dur = deployDuration(d);
+    if (dur != null) metaBits.push(esc(fmtDur(dur)));
     metaBits.push(esc((st === "live" && d.became_live_at ? "live since " : "") + fmtWhen(when)));
     // The restored row keeps its ORIGINAL became_live_at, so name it a restore or the
     // old time reads as staleness (D25). Static prefix — only the time is server data.
     if (rolledBack) metaBits.push("restored build from " + esc(fmtWhen(d.became_live_at || when)));
-    var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
     var action = promoteActionFor(d, currentId);
     var actionBtn = action
       ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
@@ -13176,7 +13288,7 @@
   //     S5 four-surface coherence harness — the human sign-off gate for the
   //     Unified Aesthetic. >>>
   var COHERENCE_TOKENS = [
-    "--primary", "--primary-fg", "--accent",
+    "--primary", "--primary-fg", "--cc-amber",
     "--ok", "--warn", "--danger", "--info",
     "--bg", "--surface", "--text", "--muted-text", "--border",
   ];
@@ -13592,6 +13704,16 @@
       tlvBadgeMod: tlvBadgeMod,
       tlvGroupBadgeMod: tlvGroupBadgeMod,
       tlvGroupRowHtml: tlvGroupRowHtml,
+      // gr-p3-site-detail (E-02): the v4 site-detail pure helpers — the shared
+      // failure panel (deployFailHtml), the honest two-stamp duration
+      // (deployDuration), the header state chip (siteStatusChip), and the full
+      // detail markup (siteDetailHtml) so the harness can pin the domains mount,
+      // the read-only Scale row and the mono repo button. The site domains DOM
+      // mount (loadSiteDomains) + 4s poll are smoke+browser-verified.
+      deployFailHtml: deployFailHtml,
+      deployDuration: deployDuration,
+      siteStatusChip: siteStatusChip,
+      siteDetailHtml: siteDetailHtml,
     });
   }
 })();

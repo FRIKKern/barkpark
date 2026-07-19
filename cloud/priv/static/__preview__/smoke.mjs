@@ -942,6 +942,41 @@ const EXPECTATIONS = {
       assert.ok(panel.indexOf("<svg") === -1, "no fabricated chart in the absent state");
     },
   },
+  // gr-p3-site-detail (E-02): the states-complete v4 ladder + previews + the
+  // domains rungs painted by the SITE domain-status mount.
+  "site-states": {
+    what: "v4 site detail — every settled ladder state, trigger-only provenance, previews, domains rungs",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      // States-complete: live current / crash / blocked / cancelled pills.
+      assert.ok(body.includes("dep-pill dep-live"), "live pill renders");
+      assert.ok(body.includes("dep-pill dep-failed"), "failed pill renders");
+      assert.ok(body.includes("dep-pill dep-cancelled"), "cancelled pill renders");
+      assert.ok(body.includes("dep-current"), "the Now-live chip marks the current row");
+      assert.ok(body.includes(">Roll back to this<"), "the prior live row offers rollback");
+      // The v4 failure panels: crash red + blocked amber, dot included.
+      assert.ok(body.includes("deploy-fail-dot"), "the failure panel carries its dot");
+      assert.ok(body.includes("deploy-fail--blocked"), "the born-failed github push reads blocked amber");
+      assert.ok(body.includes("npm run build exited 1"), "the crash reason renders verbatim");
+      // GR27 provenance: trigger words only, never a named human.
+      assert.ok(body.includes("Content update"), "content-auto renders as Content update");
+      assert.ok(body.includes("Manual"), "manual renders as Manual");
+      // Previews section: one live + one failed branch row.
+      assert.ok(body.includes("Branch previews"), "the previews section renders");
+      assert.ok(body.includes("preview-row"), "preview rows render");
+      assert.ok(body.includes("draft/nav"), "the live preview names its branch");
+      // The domains mount slot is in the detail markup…
+      assert.ok(body.includes('id="site-domains"'), "the domains mount slot renders");
+      // …and the SITE domain-status fetch painted the v4 rungs into it.
+      const domains = (reg.get("site-domains") || {}).innerHTML || "";
+      assert.ok(domains.includes("dom-card"), "the domain host card renders");
+      assert.ok(domains.includes("acme.com"), "the apex host renders");
+      assert.ok(domains.includes("dom-rung--proxied"), "the proxied rung renders informationally");
+      assert.ok(domains.includes("dom-rung--active"), "the front in-flight rung shows honest motion");
+      assert.ok(domains.includes("certificate usually issues"), "the server remediation renders verbatim");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
