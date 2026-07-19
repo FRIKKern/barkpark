@@ -1230,7 +1230,9 @@ test("timelineHtml: ONE component — the instance timeline renders the SHARED .
   const html = hooks.timelineHtml(rows, { failed: true, failureDetail: "SECRET_KEY_BASE was 32 bytes" });
   // The unified rows: same markup family as /new — ring dots, pace column, probes.
   assert.match(html, /<li class="new-step failed" data-step="create">/);
-  assert.match(html, /<li class="new-step pending" data-step="secure">/);
+  // gr-p2 (GR18(4)) pin update: unstarted steps BEHIND a failure render
+  // `skipped` (dashed hollow, no plan hint), never a live `pending`.
+  assert.match(html, /<li class="new-step skipped" data-step="secure">/);
   assert.match(html, /new-step-time">3s</); // the failed step's real elapsed
   assert.match(html, /new-step-probe">verify\.login: 401 in 182ms/);
   assert.doesNotMatch(html, /bp-tl-step|bp-tl-dot|bp-tl-elapsed/); // the old row family is GONE
@@ -6212,4 +6214,123 @@ test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the es
   assert.ok(p > 0.1 && p < 0.9, "mid-build ring should be partway filled, got " + p);
   // Without an estimate (the pre-fix state) it was flat 0.
   assert.equal(hooks.stepRingProgress(30000, undefined), 0);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// gr-p2 launch theater (GR18): conditional rail proof, price-before-charge,
+// failure snap (skipped rows). Appended at the tail (OC9 append-only law).
+// ════════════════════════════════════════════════════════════════════════════
+
+test("GR18(1): conditional rail — 5 rows without freshen/content, 7 when the server reports both", () => {
+  // The typical warm-path run: neither optional step reported → exactly the 5
+  // planned rows (the design render's 7 static rows over-promise; code wins).
+  const bare = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+  ] }, NOW);
+  assert.equal(bare.length, 5);
+  assert.deepEqual([...bare.map((r) => r.step)], ["create", "secure", "configure", "verify", "ready"]);
+  // A stale-box templated run: the server reported freshen AND content → both
+  // slot into their places and the rail grows to 7.
+  const full = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(1) },
+    { step: "freshen", status: "started", at: T(1) },
+    { step: "freshen", status: "done", at: T(3) },
+    { step: "secure", status: "started", at: T(3) },
+    { step: "secure", status: "done", at: T(4) },
+    { step: "configure", status: "started", at: T(4) },
+    { step: "configure", status: "done", at: T(5) },
+    { step: "content", status: "started", at: T(5) },
+  ] }, NOW);
+  assert.equal(full.length, 7);
+  assert.deepEqual([...full.map((r) => r.step)],
+    ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
+});
+
+// A priced catalog fixture shaped like the real /v1/providers/:kind/catalog
+// payload (server_types[].monthly_price, regions[].{slug,name}, currency).
+const THEATER_CATALOG = {
+  currency: "EUR",
+  regions: [{ slug: "fsn1", name: "Falkenstein" }, { slug: "hel1", name: "Helsinki" }],
+  server_types: [
+    { slug: "cx22", cores: 2, ram_gb: 4, disk_gb: 40, monthly_price: 4.9 },
+    { slug: "cx32", cores: 4, ram_gb: 8, disk_gb: 80, monthly_price: null }, // honest unpriced row
+  ],
+};
+const THEATER_BP = { provider: "hetzner", region: "fsn1", server_type: "cx22" };
+
+test("GR18(3): price-before-charge — the REAL catalog price via formatMonthlyPrice, provider + human region", () => {
+  const m = hooks.theaterPriceModel(THEATER_BP, THEATER_CATALOG);
+  // The price IS formatMonthlyPrice's output for the catalog row — never
+  // plan-grid digits, never an invented number.
+  assert.equal(m.price, hooks.formatMonthlyPrice(4.9, "hetzner", "EUR"));
+  assert.equal(m.price, "€4.9/mo");
+  assert.equal(m.provider, "Hetzner Cloud"); // providerMeta's honest display name
+  assert.equal(m.location, "Falkenstein"); // the region NAME, slug as fallback
+  const html = hooks.theaterPriceLineHtml(THEATER_BP, THEATER_CATALOG);
+  assert.match(html, /data-price-line/);
+  assert.match(html, /€4\.9\/mo/);
+  assert.match(html, /on Hetzner Cloud · Falkenstein/);
+  assert.match(html, /price confirmed before anything is charged\./);
+});
+
+test("GR18(3): the price line is OMITTED when no real price exists (nil-safe, never fabricated)", () => {
+  // The catalog row exists but carries no price (nil monthly_price).
+  const unpriced = Object.assign({}, THEATER_BP, { server_type: "cx32" });
+  assert.equal(hooks.theaterPriceModel(unpriced, THEATER_CATALOG), null);
+  assert.equal(hooks.theaterPriceLineHtml(unpriced, THEATER_CATALOG), "");
+  // No catalog at all (managed launch → 404 no_provider), no server_type, an
+  // unknown type, and garbage — all omit, never throw, never "Price unavailable".
+  assert.equal(hooks.theaterPriceLineHtml(THEATER_BP, null), "");
+  assert.equal(hooks.theaterPriceLineHtml({ provider: "hetzner" }, THEATER_CATALOG), "");
+  assert.equal(hooks.theaterPriceLineHtml(Object.assign({}, THEATER_BP, { server_type: "nope" }), THEATER_CATALOG), "");
+  assert.equal(hooks.theaterPriceLineHtml(null, null), "");
+  assert.equal(hooks.theaterPriceLineHtml(THEATER_BP, { server_types: "garbled" }), "");
+});
+
+test("GR18(3): a region the catalog does not know falls back to the slug; azure frames its floor price", () => {
+  const m = hooks.theaterPriceModel(Object.assign({}, THEATER_BP, { region: "xyz9" }), THEATER_CATALOG);
+  assert.equal(m.location, "xyz9");
+  const az = hooks.theaterPriceModel(
+    { provider: "azure", region: "westeurope", server_type: "b2s" },
+    { currency: "USD", regions: [], server_types: [{ slug: "b2s", monthly_price: 30.4 }] },
+  );
+  assert.equal(az.price, "from ~$30/mo compute"); // Decision 6 azure floor framing (≥10 rounds whole)
+  assert.equal(az.provider, "Microsoft Azure");
+});
+
+test("GR18(4): failure snap — rows behind the failed step render `skipped` with no plan hint, no caption", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(1) },
+    { step: "secure", status: "started", at: T(1), detail: "Requesting certificate" },
+    { step: "secure", status: "failed", at: T(4) },
+  ] }, NOW);
+  const html = hooks.newStepsHtml(rows);
+  assert.match(html, /<li class="new-step done" data-step="create">/);
+  assert.match(html, /<li class="new-step failed" data-step="secure">/);
+  // Everything behind the break is skipped — dashed hollow, and NEVER the
+  // pending "~30s" plan hint (promising a plan for a step that won't run).
+  assert.match(html, /<li class="new-step skipped" data-step="configure">/);
+  assert.match(html, /<li class="new-step skipped" data-step="verify">/);
+  assert.match(html, /<li class="new-step skipped" data-step="ready">/);
+  assert.doesNotMatch(html, /new-step pending/);
+  const skippedChunk = html.slice(html.indexOf('data-step="configure"'));
+  assert.doesNotMatch(skippedChunk, /new-step-time/); // no pace column on skipped rows
+  assert.doesNotMatch(skippedChunk, /new-step-detail/); // no caption either
+  // The failed row keeps its truth: real elapsed + its last caption.
+  assert.match(html, /new-step failed[\s\S]*?new-step-detail[^>]*>Requesting certificate/);
+  assert.match(html, /new-step failed[\s\S]*?new-step-time">3s</);
+});
+
+test("GR18(4): a step the server DID report after a break stays truthful (never blanket-skipped)", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "failed", at: T(2) },
+    { step: "verify", status: "started", at: T(3) },
+  ] }, NOW);
+  const html = hooks.newStepsHtml(rows);
+  assert.match(html, /<li class="new-step failed" data-step="create">/);
+  assert.match(html, /<li class="new-step active" data-step="verify">/); // reported → truthful
+  assert.match(html, /<li class="new-step skipped" data-step="secure">/);
 });

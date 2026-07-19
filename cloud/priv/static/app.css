@@ -85,7 +85,6 @@
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -135,7 +134,6 @@
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -160,7 +158,6 @@ html[data-bp-theme="evergreen"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -171,7 +168,6 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -182,7 +178,6 @@ html[data-bp-theme="charple"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(282.39 44.23% 48.78%);
   --primary-hsl: 282.39 44.23% 40.78%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 282.39 44.23% 40.78%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -193,7 +188,6 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-fg: hsl(282.56 45% 8%);
   --ring: hsl(282.56 58.11% 70.98%);
   --primary-hsl: 282.56 58.11% 70.98%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 282.56 58.11% 70.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -204,7 +198,6 @@ html[data-bp-theme="ember"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(19.33 71.29% 48.98%);
   --primary-hsl: 19.33 71.29% 40.98%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 19.33 71.29% 40.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -215,7 +208,6 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-fg: hsl(19.01 45% 8%);
   --ring: hsl(19.01 75.53% 63.14%);
   --primary-hsl: 19.01 75.53% 63.14%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 19.01 75.53% 63.14%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -226,7 +218,6 @@ html[data-bp-theme="fjord"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(191.6 80.95% 36.82%);
   --primary-hsl: 191.6 80.95% 28.82%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 191.6 80.95% 28.82%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -237,7 +228,6 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-fg: hsl(193.27 45% 8%);
   --ring: hsl(193.27 62.43% 64.51%);
   --primary-hsl: 193.27 62.43% 64.51%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 193.27 62.43% 64.51%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -248,7 +238,6 @@ html[data-bp-theme="iris"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(248.75 63.72% 62%);
   --primary-hsl: 248.75 63.72% 55.69%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 248.75 63.72% 55.69%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -259,7 +248,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-fg: hsl(248.87 45% 8%);
   --ring: hsl(248.87 100% 77.45%);
   --primary-hsl: 248.87 100% 77.45%;
-  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 248.87 100% 77.45%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -270,7 +258,10 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 :root {
   /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
      (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
-     status roles (--ok*/--warn*/--danger*/--info*/--warn-strong), --ring,
+     status roles (the --ok, --warn, --danger, --info families + --warn-strong;
+     never spell them star-slash-star here — "*" + "/" inside this comment
+     TERMINATED it early and the junk swallowed the next declaration, leaving
+     --btn-bg undefined and every .btn-primary transparent), --ring,
      --accent, and the brand --primary/--primary-fg are now OWNED by the
      GENERATED block above (design/tokens.json → color.cloudChrome + the
      per-identity accent, mapped role-for-role onto the designer ladder). One
@@ -1153,7 +1144,10 @@ select.form-input {
   cursor: pointer;
 }
 .size-opt:hover { border-color: var(--dim); }
-.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
+/* GR22: --primary-soft retired (this was its sole consumer) — the selected tint
+   reads --ok-soft, the same accent channel/alpha by GR6 law (the --ok family
+   TRACKS accent.primary), so the bytes painted are identical. */
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--ok-soft); }
 .size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
 .size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -1566,6 +1560,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   padding: 48px 20px;
 }
 .new-body { width: 100%; max-width: 560px; }
+/* GR18 theater (v4, screens/09): the progress + failed screens open into the
+   two-column stage, so their host body widens; the form steps (auth/launch/
+   pricing) keep the focused 560px column. */
+.new-body:has(.new-progress), .new-body:has(.new-failed) { max-width: 920px; }
 .new-card { padding: 32px; }
 .new-eyebrow {
   display: inline-block;
@@ -1576,7 +1574,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--muted-text);
   margin-bottom: 10px;
 }
-.new-eyebrow.ok { color: var(--success); }
+.new-eyebrow.ok { color: var(--ok); } /* ladder voice (legacy --success alias retired in-region) */
 .new-title { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 8px; }
 .new-desc { color: var(--muted-text); margin: 0 0 18px; line-height: 1.5; }
 .new-gets {
@@ -1598,7 +1596,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   position: absolute;
   left: 0;
   top: 0;
-  color: var(--success);
+  color: var(--ok);
   font-weight: 700;
 }
 .new-fineprint { font-size: 13px; margin: 12px 0 0; text-align: center; }
@@ -1640,8 +1638,38 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-tier-price .dim { font-size: 13px; font-weight: 400; }
 .new-tier .btn { margin-top: 12px; }
 
-/* progress step */
-.new-progress h2 { font-size: 20px; margin: 0 0 4px; }
+/* ── GR18 theater (v4, screens/09): head + price line + two-column stage ─────
+   The progress/failed screens share the theater shell: a centred head (title +
+   pace + the price-before-charge line), the master bar, then the stage — step
+   rail beside the live console. Phone contract (styleguide 10): the rail
+   stacks ABOVE the console (DOM order already rail-first), the console caps at
+   40vh, and no theater text falls below 13px. */
+.new-theater-head { text-align: center; }
+.new-theater-head .new-title { font-size: 24px; margin: 0 0 6px; }
+.new-theater-head .new-desc { margin: 0; font-size: 13.5px; }
+.theater-price {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted-text);
+  line-height: 1.5;
+}
+.theater-price-amount { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.new-theater-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-top: 18px;
+}
+.new-theater-rail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+}
+.new-theater-rail .new-steps { margin-top: 0; }
+.new-theater-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.new-theater-side .new-console { margin-top: 0; }
+.new-theater-note { margin: 0; font-size: 13px; }
 .new-elapsed { font-variant-numeric: tabular-nums; }
 
 /* ── Overall progress (the headline master bar; shared /new + instance timeline).
@@ -1686,10 +1714,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--primary-fg);
+  /* Styleguide motion contract: state advance eases 250ms… */
+  transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
 }
-.new-step.done .new-step-dot { background: var(--success); border-color: var(--success); }
+.new-step-label { transition: color 250ms ease; }
+/* …and failure SNAPS (0ms) — a break is never eased in (ladder snap law). */
+.new-step.failed .new-step-dot,
+.new-step.failed .new-step-label { transition: none; }
+.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = mint (--ok tracks the accent, GR6) */
 /* The active dot IS the per-phase loading bar: a conic ring filled by --p
    (stepRingProgress over the phase's expected duration, ticked in place every
    second). Registered as a <percentage> so the fill animates smoothly between
@@ -1703,7 +1737,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   transition: --p 0.9s linear;
 }
 /* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
-.new-step.failed .new-step-dot { background: var(--destructive); border-color: var(--destructive); }
+.new-step.failed .new-step-dot { background: var(--danger); border-color: var(--danger); }
+/* GR18(4): steps behind a failure never ran and never will — dashed hollow,
+   dimmed, no plan hint (markup drops it), clearly distinct from live pending. */
+.new-step.skipped .new-step-dot { border-style: dashed; background: transparent; }
+.new-step.skipped .new-step-label { color: var(--dim); }
 /* Between-steps honesty: the `next` row (previous step done, this one about to
    report — e.g. the SSH boot wait) pulses instead of sitting frozen. */
 .new-step.next .new-step-dot { border-color: var(--primary); animation: new-next-pulse 1.4s ease-in-out infinite; }
@@ -1713,11 +1751,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   0%, 100% { box-shadow: 0 0 0 0 var(--ring-soft); }
   50% { box-shadow: 0 0 0 4px var(--ring-soft); }
 }
-.new-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.new-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .new-step-label { color: var(--muted-text); }
 .new-step.active .new-step-label { color: var(--text); font-weight: 600; }
 .new-step.done .new-step-label { color: var(--text); }
-.new-step.failed .new-step-label { color: var(--destructive); font-weight: 600; }
+.new-step.failed .new-step-label { color: var(--danger); font-weight: 600; }
 /* dwb-19: the live sub-caption under the active step — muted, smaller, with a
    subtle fade/translate that re-plays each time the caption element re-mounts
    (its text changed). A done/failed step keeps its final caption, dimmer. */
@@ -1816,9 +1854,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
 .new-ready .mono { font-family: var(--mono); font-size: 13px; }
 
-/* failed step */
-.new-failed h2 { font-size: 20px; margin: 0 0 10px; }
-.new-failed .notice { margin-bottom: 12px; }
+/* failed step — the theater's failure stage (GR18(4)): head carries the honest
+   server-owned failCopy; the rail shows the snap (failed red, rest skipped);
+   ONE recovery action below the stage. */
+.new-fail-copy {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  border: 1px solid hsl(var(--danger-hsl) / 0.3);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+.new-failed .new-actions { margin: 18px 0 0; }
+.new-failed .new-failed-caption {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-text);
+  min-height: 18px;
+}
 
 /* dwb-16: live provisioning console — dark, monospace, auto-scrolling, visible by
    default during provisioning, collapsible. Stays on the failed screen too. */
@@ -1869,6 +1925,32 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* dwb-16: connection-lost banner in the progress screen. */
 .new-conn-lost { margin: 0 0 14px; }
 
+/* Theater/phone (styleguide contract 10): the stage stacks — rail above the
+   console (DOM order is already rail-first) — the console caps at 40vh, the
+   done-banner buttons go full-width, and no theater text falls below 13px. */
+@media (max-width: 720px) {
+  .new-theater-grid { grid-template-columns: 1fr; gap: 16px; }
+  .new-console-body, .bp-console-body { max-height: 40vh; }
+  .new-ready .new-actions .btn { width: 100%; }
+  .new-step-detail, .new-step-probe, .new-step-time,
+  .new-console-toggle, .new-console-body,
+  .bp-console-toggle, .bp-console-body { font-size: 13px; }
+}
+
+/* Reduced motion (styleguide contract 10): nothing conveys information through
+   motion alone — the glyphs/colours already carry every state, so the next-row
+   pulse goes static (full opacity), state changes cut instead of easing, the
+   caption fade is dropped, and the ring stops tweening between ticks. The
+   .new-step-spin spinner keeps its literal duration by house law: a loading
+   indicator is state, not decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .new-step.next .new-step-dot { animation: none; }
+  .new-step-dot, .new-step-label { transition: none; }
+  .new-step.active .new-step-dot { transition: none; }
+  .new-step-detail { animation: none; }
+  .prov-overall-fill { transition: none; }
+}
+
 /* ========================================================= C3 PROVISION TIMELINE
    ONE component, every mount (unified-provision-view): the instance-detail
    timeline renders the SAME .new-step rows as the /new progress screen — ring,
@@ -1879,10 +1961,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .bp-timeline {
   margin: 0 0 20px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 16px 18px;
   background: var(--surface);
 }
+/* GR18(3): the price-before-charge line inside the fold sits under the head,
+   left-aligned (the fold has no centred theater head). */
+.bp-timeline .theater-price { margin: 6px 0 0; }
 .bp-tl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .bp-tl-title { font-size: 15px; margin: 0; }
 .bp-tl-total { font-size: 13px; color: var(--muted-text); font-variant-numeric: tabular-nums; }

@@ -497,6 +497,76 @@ const EXPECTATIONS = {
       assert.equal(reg.get("bp-theme-picker").value, "iris", "the restored bp_theme=iris is the active option");
     },
   },
+
+  // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
+  "new-launch": {
+    what: "/new signed-in — the template card + the one-field Launch step",
+    check(reg) {
+      assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "the app shell stays hidden on /new");
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.length > 0, "#new-body rendered empty");
+      for (const needle of ['class="new-title">Astro Blog', "new-gets", 'id="new-launch-btn"', ">Launch<", "no card required"]) {
+        assert.ok(body.includes(needle), "#new-body missing " + JSON.stringify(needle));
+      }
+    },
+  },
+  "theater-midflight": {
+    what: "the /new theater mid-flight — conditional 5-row rail, the price line, the open console",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-progress"), "the progress theater must be mounted");
+      assert.ok(body.includes("Launching Hugin"), "the head names the instance (v4 copy)");
+      // GR18(1): the conditional rail — the warm path reports no freshen/content,
+      // so EXACTLY the 5 planned rows render (never the render's 7 static rows).
+      assert.equal(countMatches(body, '<li class="new-step '), 5, "typical run renders 5 rail rows");
+      assert.ok(!body.includes('data-step="freshen"'), "unreported freshen stays hidden");
+      assert.ok(!body.includes('data-step="content"'), "unreported content stays hidden");
+      assert.ok(body.includes('class="new-step active" data-step="configure"'), "configure is the live step");
+      // GR18(3): the price-before-charge line — the REAL catalog row via
+      // formatMonthlyPrice, never plan-grid digits.
+      assert.ok(body.includes("data-price-line"), "the price line renders above the rail");
+      assert.ok(body.includes("€4.9/mo"), "the price is the catalog row (formatMonthlyPrice)");
+      assert.ok(body.includes("price confirmed before anything is charged."), "the ratified price copy renders");
+      assert.ok(body.includes("Falkenstein"), "the human region name renders");
+      // GR18(5): console open-by-default with the worker's redacted narration.
+      assert.ok(body.includes("new-console"), "the console panel mounts");
+      assert.ok(!body.includes("new-console is-collapsed"), "the console is open by default");
+      assert.ok(body.includes("configure: docker compose up -d"), "the live console lines render");
+    },
+  },
+  "theater-failed": {
+    what: "the /new theater failed — the snap: red failed step, skipped rest, ONE recovery action",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-failed"), "the failed theater must be mounted");
+      assert.ok(body.includes("Setup didn&#39;t finish"), "the honest headline renders");
+      // GR18(4): the honest server-owned failCopy, verbatim.
+      assert.ok(body.includes("the TLS certificate was never issued"), "provision_error renders verbatim");
+      // The snap: the failing step is failed, everything behind it is skipped —
+      // never a live pending row, never a plan hint.
+      assert.ok(body.includes('class="new-step failed" data-step="secure"'), "secure renders failed");
+      assert.equal(countMatches(body, '<li class="new-step skipped"'), 3, "configure/verify/ready render skipped");
+      assert.ok(!body.includes('class="new-step pending"'), "no live pending rows behind a failure");
+      // ONE recovery action (parent D25) + the console stays for the read-out.
+      assert.equal(countMatches(body, 'id="new-retry"'), 1, "exactly one Retry recovery action");
+      assert.ok(body.includes(">Retry setup<"), "the recovery action is Retry setup");
+      assert.ok(body.includes("new-console"), "the console stays on the failed screen");
+      assert.ok(body.includes("provision FAILED after 3 attempts"), "the console carries the failure tail");
+    },
+  },
+  "theater-ready": {
+    what: "the /new ready hero — the SHARED readyHeroHtml: Live eyebrow, Open Studio, deploy handoff",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("new-ready"), "the shared ready hero must render");
+      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      assert.ok(body.includes('id="new-open-studio"'), "Open Studio is the primary action");
+      assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
+      assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
+      assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

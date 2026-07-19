@@ -664,6 +664,54 @@ const metricsLive = {
 // authed:   whether mock.js should seed a session token (false = logged out).
 // deepLink: the hash a shot / smoke should open to exercise the scenario's view.
 // data:     the fixtures route() answers /v1/* from.
+// ── gr-p2 launch theater fixtures (GR18) ─────────────────────────────────────
+// Stable ids for the /new resume deep-links (mirrors IDS, kept local to the
+// theater scenarios at the tail).
+const THEATER_IDS = {
+  mid: "5b2c1e00-0000-4000-8000-0000000000e1",
+  failed: "5b2c1e00-0000-4000-8000-0000000000e2",
+  ready: "5b2c1e00-0000-4000-8000-0000000000e3",
+};
+// Template envelope ⇐ GET /v1/templates (slug/title/description/what_you_get
+// drive the /new card; deployable gates the GitHub affordance on ready).
+const theaterTemplate = {
+  slug: "astro-blog",
+  title: "Astro Blog",
+  description: "A fast content blog on Astro, wired to a fully-managed Barkpark.",
+  what_you_get: [
+    "A managed Barkpark instance with Studio",
+    "The Astro blog starter, content included",
+    "Instant content updates on your live site",
+  ],
+  deployable: true,
+};
+// Catalog envelope ⇐ GET /v1/providers/hetzner/catalog (router.ex: regions[] +
+// server_types[].monthly_price + currency). cx22 is the priced row the theater
+// resolves for the mid-flight box.
+const theaterCatalog = {
+  currency: "EUR",
+  regions: [{ slug: "fsn1", name: "Falkenstein" }, { slug: "hel1", name: "Helsinki" }],
+  server_types: [
+    { slug: "cx22", cores: 2, ram_gb: 4, disk_gb: 40, monthly_price: 4.9 },
+    { slug: "cx32", cores: 4, ram_gb: 8, disk_gb: 80, monthly_price: 8.9 },
+  ],
+};
+// A theater-shaped failure MID-run: secure broke, so configure/verify/ready
+// never ran — the rail must snap (failed red, the rest skipped/dashed).
+const theaterFailedSteps = [
+  { step: "create", status: "started", at: tMinus(220) },
+  { step: "create", status: "done", at: tMinus(180) },
+  { step: "secure", status: "started", at: tMinus(180), detail: "issuing TLS for hugin.barkpark.cloud" },
+  { step: "secure", status: "failed", at: tMinus(60) },
+];
+const theaterFailedConsole = [
+  { line: "provisioning hugin.barkpark.cloud…", at: tMinus(220) },
+  { line: "create: server cx22 fsn1 — ok (188.245.0.87)", at: tMinus(180) },
+  { line: "secure: publishing DNS A/AAAA", at: tMinus(170) },
+  { line: "secure: ACME order pending — DNS never propagated", at: tMinus(80) },
+  { line: "provision FAILED after 3 attempts", at: tMinus(60) },
+];
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -1163,6 +1211,94 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
     },
   },
+
+  // ── gr-p2 launch theater (GR18): the /new journey + the provisioning theater.
+  // pathname "/new" unlocks isNewFlow(); ?template selects the starter and &bp=
+  // resumes straight into the theater (the refresh-durable URL the flow writes).
+  // The mid-flight fixture reports NO freshen/content → the conditional rail's
+  // typical 5 rows; the catalog fixture carries the REAL priced row the
+  // price-before-charge line resolves (hetzner cx22, €4.9/mo, Falkenstein).
+  "new-launch": {
+    label: "/new — the signed-in launch step: template card + name + Launch",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
+  "theater-midflight": {
+    label: "/new theater mid-flight — conditional rail (5 rows), price line, live console",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.mid,
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [bpBase({
+        id: THEATER_IDS.mid,
+        name: "Hugin",
+        slug: "hugin",
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "claimed",
+        provision_steps: provisioningSteps,
+        provision_console: provisioningConsole,
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+    },
+  },
+  "theater-failed": {
+    label: "/new theater failed — the snap: failed step red, rest skipped, one Retry",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.failed,
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [bpBase({
+        id: THEATER_IDS.failed,
+        name: "Munin",
+        slug: "munin",
+        provision_status: "failed",
+        provision_error: "Couldn't secure hugin.barkpark.cloud — the TLS certificate was never issued (DNS didn't propagate). The server exists but isn't serving; nothing else was set up.",
+        provision_steps: theaterFailedSteps,
+        provision_console: theaterFailedConsole,
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
+  "theater-ready": {
+    label: "/new theater ready — the shared ready hero: Open Studio + deploy handoff",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.ready,
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [bpBase({
+        id: THEATER_IDS.ready,
+        name: "Hugin",
+        slug: "hugin",
+        url: "hugin-5b2c1e.barkpark.cloud",
+        host: "hugin-5b2c1e.barkpark.cloud",
+        health_status: "up",
+        agent_status: "online",
+        version: "0.9.2",
+        last_seen_at: tMinus(20),
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "succeeded",
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1179,6 +1315,10 @@ export function route(name, method, path) {
 
   // OAuth provider list is fetched unauthenticated on the sign-in screen.
   if (p === "/v1/auth/oauth/providers") return { status: 200, body: { providers: [] } };
+
+  // gr-p2 launch theater: the /new flow's template read — unauthenticated on
+  // the real server too (the badge lands logged-out visitors here).
+  if (p === "/v1/templates") return { status: 200, body: { templates: d.templates || [] } };
 
   // Invitation preview — unauthenticated on the real server too (the accept
   // landing and the sign-in banner both read it before any login).
@@ -1334,6 +1474,17 @@ export function route(name, method, path) {
   // answers empty → the tab shows the honest "waiting for the first beat" panel.
   if (/^\/v1\/barkparks\/[^/]+\/metrics$/.test(p)) {
     return { status: 200, body: d.metrics || {} };
+  }
+
+  // gr-p2 launch theater (GR18(3)): the provider catalog the price-before-charge
+  // line resolves against. A scenario without a `catalog` fixture answers the
+  // honest 404 no_provider (a managed launch) → the line is OMITTED, exactly as
+  // live. MUST precede the /v1/ catch-all (its 200 {} would also omit, but then
+  // no scenario could pin the priced state).
+  if (method === "GET" && /^\/v1\/providers\/[^/]+\/catalog$/.test(p)) {
+    return d.catalog
+      ? { status: 200, body: d.catalog }
+      : { status: 404, body: { error: "no_provider" } };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
