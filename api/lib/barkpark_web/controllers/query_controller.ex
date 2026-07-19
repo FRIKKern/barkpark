@@ -1,10 +1,16 @@
 defmodule BarkparkWeb.QueryController do
   use BarkparkWeb, :controller
 
+  import Ecto.Query, only: [from: 2, where: 3]
+
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
+  alias Barkpark.Content.Scope
+  alias Barkpark.Repo
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -106,6 +112,75 @@ defmodule BarkparkWeb.QueryController do
       })
     else
       {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Bundled per-type published-document counts for a dataset (AXI charter
+  decision 19 / `data.counts`). ONE `GROUP BY d.type` aggregate — never a
+  per-type loop — over the tenancy-scoped, published set, so a bare `bp <noun>`
+  can show live counts across every type in a single cheap round trip
+  (index-covered by `documents_workspace_project_type_dataset_id_index`).
+
+  Perspective is fixed to `:published` (the single perspective agents care
+  about; per-perspective counts change the query shape). FROZEN response shape,
+  which the CLI slice consumes verbatim:
+
+      {"ok": true, "dataset": "<ds>", "perspective": "published",
+       "counts": {"<type>": N, ...}}
+
+  Tenancy FAILS CLOSED: the aggregate pipes through
+  `Scope.scope_to_workspace/3` (a `nil` workspace yields zero rows, never every
+  tenant's counts) + project narrowing. An unscoped `GROUP BY` would be a
+  cross-tenant existence-count leak — the exact class the batch-count helpers
+  guard against. Auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`) — a per-type census across ALL types
+  must not surface private-type existence to an anonymous caller.
+  """
+  def counts(conn, %{"dataset" => dataset}) do
+    if preview?(conn) or authed?(conn) do
+      json(conn, %{
+        ok: true,
+        dataset: dataset,
+        perspective: "published",
+        counts: published_type_counts(conn, dataset)
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  # ONE grouped aggregate: published docs (drafts.-prefixed ids excluded, the
+  # `apply_perspective(:published)` clause), scoped to the tenant + dataset,
+  # grouped by type. Returns `%{type => count}`; an empty scope is `%{}`.
+  defp published_type_counts(conn, dataset) do
+    opts = scope_opts(conn)
+    prefix = DraftId.drafts_prefix() <> "%"
+
+    from(d in Document,
+      where: not like(d.doc_id, ^prefix),
+      group_by: d.type,
+      select: {d.type, count(d.id)}
+    )
+    |> Scope.scope_to_workspace(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> scope_counts_to_dataset(dataset, opts)
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # Same dataset discriminator `Content.Query.list_documents` applies (resolve
+  # the dataset_id, else fall back to the dataset string), so counts see exactly
+  # the rows a list read of the same dataset would.
+  defp scope_counts_to_dataset(query, dataset, opts) do
+    case Content.resolve_read_dataset_id(dataset, opts) do
+      id when is_binary(id) ->
+        where(query, [d], d.dataset_id == ^id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
+
+      _ ->
+        where(query, [d], d.dataset == ^dataset)
     end
   end
 

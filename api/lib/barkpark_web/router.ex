@@ -1630,6 +1630,10 @@ defmodule BarkparkWeb.Router do
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
+    # Bundled per-type published-document counts — ONE GROUP BY d.type aggregate
+    # (AXI charter decision 19 / manifest `data.counts`). Token/preview only
+    # (existence-hiding, like backlinks); tenancy fail-closed in the controller.
+    get("/counts/:dataset", QueryController, :counts)
   end
 
   # ── Localhost fast-path search (Barkpark Cloud P4 / Move B) ──────────────
@@ -2162,6 +2166,9 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/query/:dataset/:type", QueryController, :index)
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
+    # Scoped mirror of the flat bundled-counts read (AXI decision 19) — a scoped
+    # caller resolves its real workspace/project, so counts stay tenant-true.
+    get("/v1/data/counts/:dataset", QueryController, :counts)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
