@@ -506,6 +506,54 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                  "#{m0["md5"]} -> #{m1["md5"]}"
       end
     end
+
+    test "media_files.size survives the round-trip IDENTICALLY — the independent witness the blob proof compares against" do
+      %{ws_a: ws_a, proj_a: proj_a} = seed_two_workspaces!()
+
+      # The crown proof convicts a truncated blob by comparing the SERVED
+      # content-length against the target's stored `media_files.size`. That
+      # comparison only means anything because `size` is an independent witness:
+      # it is stamped once at upload from `File.stat` and recomputed nowhere, and
+      # the blob-push route never touches the DB. So the bundle must carry the
+      # number itself, unchanged. Distinct, non-default sizes (the fixture default
+      # is 1): a column that silently vanished and defaulted would still "match"
+      # if every row shared one value.
+      for bytes <- [4_097, 65_536, 1_048_577] do
+        {:ok, _} =
+          create_media_file_in!(
+            ws_a,
+            proj_a,
+            %{size: bytes, path: "sized/#{unique("m")}-#{bytes}.bin"},
+            "prod-a"
+          )
+      end
+
+      source = media_path_sizes!(ws_a.id)
+      assert length(source) == 4
+      assert Enum.uniq(Enum.map(source, &elem(&1, 1))) |> length() == 4
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      entry = table_index(manifest)["media_files"]
+
+      # (a) export side: `size` is in the carried column list at all…
+      assert "size" in entry["columns"],
+             "media_files exported without `size` — the blob-fidelity witness is gone"
+
+      # …and (b) the BUNDLE BYTES carry every seeded value, not just the DB.
+      assert media_pairs_from_copy(dumps["media_files"], entry["columns"]) == source
+
+      # (c) import side: a clean target reconstructs the pairs IDENTICALLY.
+      purge_workspace!(ws_a.id, manifest)
+      assert media_path_sizes!(ws_a.id) == []
+
+      {:ok, _stats} = WorkspaceBundle.import_bundle(bundle)
+
+      assert media_path_sizes!(ws_a.id) == source,
+             "media_files (path, size) drifted across the round-trip — a truncated-blob " <>
+               "proof built on the imported size would silently pass"
+    end
   end
 
   # ── merge import mode (PDS-D8/D9) ─────────────────────────────────────────────
@@ -974,6 +1022,33 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   end
 
   defp table_index(manifest), do: Map.new(manifest["tables"], &{&1["name"], &1})
+
+  # (path, size) straight from the database, sorted — the target-side reading the
+  # blob-fidelity proof does.
+  defp media_path_sizes!(ws_id) do
+    Repo.query!("SELECT path, size FROM media_files WHERE workspace_id = $1::text::uuid", [ws_id]).rows
+    |> Enum.map(fn [path, size] -> {path, size} end)
+    |> Enum.sort()
+  end
+
+  # The same pairs read out of the bundle's own COPY-text payload (tab-separated,
+  # `\N` for NULL), so an export-side drop is convicted in the BYTES.
+  defp media_pairs_from_copy(dump, columns) do
+    path_idx = Enum.find_index(columns, &(&1 == "path"))
+    size_idx = Enum.find_index(columns, &(&1 == "size"))
+
+    dump
+    |> String.split("\n", trim: true)
+    |> Enum.map(fn line ->
+      fields = String.split(line, "\t")
+      {Enum.at(fields, path_idx), Enum.at(fields, size_idx)}
+    end)
+    |> Enum.map(fn
+      {path, "\\N"} -> {path, nil}
+      {path, size} -> {path, String.to_integer(size)}
+    end)
+    |> Enum.sort()
+  end
 
   defp scalar(sql, params), do: Repo.query!(sql, params).rows |> hd() |> hd()
 
