@@ -712,127 +712,6 @@ const theaterFailedConsole = [
   { line: "provision FAILED after 3 attempts", at: tMinus(60) },
 ];
 
-// ── gr-p3-site-detail (E-02): the states-complete v4 ladder fixtures ─────────
-// One site whose history shows every settled deployment state at once — live
-// (current), crash-failed (red panel + console), born-failed github-push
-// (blocked amber panel), cancelled (neutral pill) and a prior live row
-// (rollback affordance) — plus branch previews (one live, one failed) and the
-// domains rungs (a proxied custom apex + a www still waiting on TLS).
-// Triggers are ONLY the backend vocabulary (manual | content-auto — GR27).
-const stLive = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f1",
-  status: "live",
-  git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
-  branch: "main",
-  trigger: "content-auto",
-  became_live_at: tMinus(7200),
-  inserted_at: tMinus(7248),
-  updated_at: tMinus(7200),
-});
-const stCrash = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f2",
-  status: "failed",
-  git_ref: "b23aa017c9d8e2f4a6b1305c8d9e0f1a2b3c4d5e",
-  branch: "main",
-  trigger: "manual",
-  failure_reason: "npm run build exited 1",
-  inserted_at: tMinus(21600),
-  updated_at: tMinus(21581),
-  console: [
-    { line: "cloning acme/marketing @ b23aa01", at: tMinus(21600) },
-    { line: "npm run build — TypeError: window is not defined", at: tMinus(21584) },
-    { line: "build: exited with code 1", at: tMinus(21581) },
-  ],
-});
-const stBlocked = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f3",
-  status: "failed",
-  git_ref: "5f0a9dd41c2b3e4f5a6b7c8d9e0f1a2b3c4d5e6f",
-  branch: "main",
-  // The humanized born-failed github-push copy exactly as FailureCopy.humanize
-  // emits it at the JSON boundary (the client re-map is idempotent on it).
-  failure_reason: "GitHub pushes are recorded but can’t be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.",
-  inserted_at: tMinus(90000),
-  updated_at: tMinus(90000),
-});
-const stCancelled = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f4",
-  status: "cancelled",
-  git_ref: "4e7d0c9b3a5f18e2d6c4b0a9f8e7d6c5b4a39281",
-  branch: "main",
-  trigger: "manual",
-  inserted_at: tMinus(172800),
-  updated_at: tMinus(172740),
-});
-const stPrior = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f5",
-  status: "live",
-  git_ref: "8c00e1b9f8e7d6c5b4a392817061f5e4d3c2b1a0",
-  branch: "main",
-  trigger: "manual",
-  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-8c00e1b.tar.gz",
-  became_live_at: tMinus(259200),
-  inserted_at: tMinus(259244),
-  updated_at: tMinus(259200),
-});
-const siteStatesDeployments = [stLive, stCrash, stBlocked, stCancelled, stPrior];
-const siteStatesSite = Object.assign({}, marketingSite, {
-  current_deployment_id: stLive.id,
-});
-const previewLiveRow = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f6",
-  status: "live",
-  environment: "preview",
-  branch: "draft/nav",
-  git_ref: "b7e21c94a5f18e2d6c4b0a9f8e7d6c5b4a392817",
-  trigger: "manual",
-  preview_host: "draft-nav--marketing.preview.barkpark.cloud",
-  preview_url: "https://draft-nav--marketing.preview.barkpark.cloud",
-  became_live_at: tMinus(18000),
-  inserted_at: tMinus(18052),
-  updated_at: tMinus(18000),
-});
-const previewFailedRow = deployment({
-  id: "5b2c1e00-0000-4000-8000-0000000000f7",
-  status: "failed",
-  environment: "preview",
-  branch: "fix/nav-overflow",
-  git_ref: "c31de8a2b4f5061728394a5b6c7d8e9f0a1b2c3d",
-  trigger: "manual",
-  failure_reason: "npm run build exited 1",
-  inserted_at: tMinus(9000),
-  updated_at: tMinus(8981),
-});
-const siteStatesPreviews = [previewLiveRow, previewFailedRow];
-// The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
-// apex (points_here classified `proxied` — informational, GR27) and a www
-// whose TLS is still issuing, with the server-owned remediation verbatim.
-const siteStatesDomains = {
-  ok: false,
-  checked_at: T,
-  instance: { id: IDS.siteMarketing, host: "production-5b2c1e.barkpark.cloud" },
-  domains: [
-    {
-      host: "acme.com", kind: "custom", overall: "ok",
-      stages: [
-        { stage: "dns_found", label: "DNS resolves", status: "ok", evidence: "104.21.4.18", remediation: "" },
-        { stage: "points_here", label: "Points to this instance", status: "proxied", evidence: "fronted by Cloudflare", remediation: "" },
-        { stage: "tls", label: "TLS certificate", status: "ok", evidence: "valid, renews automatically", remediation: "" },
-        { stage: "serving", label: "Serving traffic", status: "ok", evidence: "200 in 84ms", remediation: "" },
-      ],
-    },
-    {
-      host: "www.acme.com", kind: "custom", overall: "pending",
-      stages: [
-        { stage: "dns_found", label: "DNS resolves", status: "ok", evidence: "91.98.12.44", remediation: "" },
-        { stage: "points_here", label: "Points to this instance", status: "ok", evidence: "matches this box", remediation: "" },
-        { stage: "tls", label: "TLS certificate", status: "pending", evidence: "ACME order pending", remediation: "Nothing to do — the certificate usually issues within a few minutes of DNS settling." },
-        { stage: "serving", label: "Serving traffic", status: "pending", evidence: "blocked on TLS", remediation: "" },
-      ],
-    },
-  ],
-};
-
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -1761,27 +1640,6 @@ export const SCENARIOS = {
       metrics: { ok: true, beat: { status: "absent" }, series: {} },
     },
   },
-  // ── gr-p3-site-detail (E-02): the v4 site detail, states-complete ─────────
-  // The whole ladder in one shot: live current (Redeploy + Now live), a crash
-  // failure (red panel + console), a born-failed github push (blocked amber),
-  // a cancelled row (neutral pill), a prior live row (Roll back to this) —
-  // plus branch previews (live + failed) and the domains rungs (proxied apex,
-  // www waiting on TLS with the server's remediation verbatim).
-  "site-states": {
-    label: "Site detail v4 — states-complete ladder + previews + domains rungs",
-    authed: true,
-    deepLink: "#site/" + IDS.siteMarketing,
-    data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [liveInstance],
-      subscription: activeSub,
-      sites: [siteStatesSite, docsSite],
-      audit: [],
-      deployments: siteStatesDeployments,
-      previews: siteStatesPreviews,
-      siteDomainStatus: siteStatesDomains,
-    },
-  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -1979,16 +1837,7 @@ export function route(name, method, path) {
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
   }
   if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: d.deployments || [] } };
-  // gr-p3: branch previews now come from the scenario (d.previews) so the
-  // preview-rows section is observable; absent → the honest empty list.
-  if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
-  // gr-p3: the site domain-status checklist (same envelope as the instance
-  // sibling, CF-mode-aware). MUST precede the /v1/ catch-all (its 200 {} would
-  // read as "no domains" and no scenario could pin the rungs). Absent fixture →
-  // the honest no-attached-domains shape (the section stays unpainted).
-  if (/^\/v1\/sites\/[^/]+\/domain-status$/.test(p)) {
-    return { status: 200, body: d.siteDomainStatus || { ok: true, domains: [] } };
-  }
+  if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: [] } };
 
   // S11b: the lifecycle-capabilities conduit. A scenario without a `capabilities`
   // fixture answers the empty shape → the row degrades to "capabilities

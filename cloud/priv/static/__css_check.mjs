@@ -40,6 +40,15 @@
 //       the property is DECLARED, so such an alias freezes the LIGHT value in
 //       any subtree that scopes [data-theme="dark"] onto a non-root element
 //       (the styleguide panes). Re-declare the alias in the dark block.
+//   E9  swallowed declaration (parse-completeness, regression #4251): a `--x:`
+//       the FLAT token scan trusts but the browser's `;`-delimited declaration
+//       parse rejects inside a token block. A `*/` embedded in comment TEXT
+//       (`… --ok*/ …`) ends the comment early, so the browser eats the garbage
+//       that follows as one malformed declaration up to the next `;` — silently
+//       dropping the real declaration that `;` belonged to (there,
+//       `--btn-bg: var(--primary);`). The flat scan still "saw" `--btn-bg:`, so
+//       the contract missed it. Fixture: __css_check.fixture.css; targeted run:
+//       `node __css_check.mjs --swallow-check __css_check.fixture.css` (exit 1).
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -105,6 +114,8 @@ const ALLOW_PREFIXES = [
   "instance-card-spark spark--",   // + statusOf role (.instance-card-spark / .spark-- rules)
   "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
   "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
+  // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
+  "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -203,7 +214,7 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--muted-surface", min: 3, why: "warn status dot on badge" },
   { fg: "--danger", bg: "--muted-surface", min: 3, why: "danger status dot" },
   { fg: "--info", bg: "--surface", min: 3, why: "active-step ring / probe dot" },
-  { fg: "--accent", bg: "--surface", min: 3, why: "branch-preview accent border" },
+  { fg: "--cc-amber", bg: "--surface", min: 3, why: "branch-preview amber edge (--accent retired, reads --cc-amber directly)" },
   { fg: "--ring", bg: "--bg", min: 3, why: "focus-ring visibility" },
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
   { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
@@ -245,6 +256,77 @@ const stripCssComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(
 const css = stripCssComments(cssRaw);
 
 const lineOf = (src, index) => src.slice(0, index).split("\n").length;
+
+// ── E9: parse-completeness guard (swallowed declarations, regression #4251) ──
+// definedTokens (below) scans the comment-stripped text with a FLAT `--x:`
+// regex, so a declaration the BROWSER dropped can still register as "defined".
+// #4251: a `*/` inside comment TEXT (`… --ok*/ …`) ended the GR7 comment early;
+// the parser then consumed garbage up to the next `;`, swallowing the real
+// `--btn-bg: var(--primary);` — every light .btn-primary rendered invisible, yet
+// the checker was green. This guard compares the FLAT view against a proper
+// `;`-delimited declaration parse (what the browser actually keeps): a `--x:`
+// the flat scan sees but the declaration parse rejects = swallowed = E9.
+// stripCssComments blanks comments to SPACES (byte-preserving), so a legitimate
+// `--x:` written inside a comment vanishes here and never false-fires.
+export function swallowedTokenErrors(cssRawText) {
+  const stripped = stripCssComments(cssRawText);
+  const lineAt = (i) => stripped.slice(0, i).split("\n").length;
+  // Bare token blocks only — :root, [data-theme="dark"], and the identity ramps
+  // html[data-bp-theme="X"](…[data-theme="dark"]) — carry `--x:` custom-property
+  // declarations at column 0. Component rules deeper in the file set real CSS
+  // properties, not the custom props this swallow analysis is about.
+  const BLOCK_RES = [
+    /^:root\s*\{([\s\S]*?)\}/gm,
+    /^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm,
+    /^html\[data-bp-theme="[a-z0-9-]+"\](?:\[data-theme="dark"\])?\s*\{([\s\S]*?)\}/gm,
+  ];
+  const errs = [];
+  const seen = new Set(); // one E9 per (token, line) across the three regexes
+  for (const re of BLOCK_RES) {
+    for (const m of stripped.matchAll(re)) {
+      const body = m[1];
+      const bodyStart = m.index + m[0].indexOf("{") + 1;
+      // VALIDATED — the browser's view: a `;` segment is a real custom property
+      // only when the text before its first `:` is exactly `--name`.
+      const validated = new Set();
+      for (const seg of body.split(";")) {
+        const c = seg.indexOf(":");
+        if (c === -1) continue;
+        const lhs = seg.slice(0, c);
+        if (/^\s*--[A-Za-z0-9_-]+\s*$/.test(lhs)) validated.add(lhs.trim());
+      }
+      // FLAT — definedTokens' view: every `--x:` the flat regex would trust.
+      for (const d of body.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) {
+        const tok = d[1];
+        if (validated.has(tok)) continue;
+        const ln = lineAt(bodyStart + d.index);
+        const key = `${tok}@${ln}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        errs.push(
+          `E9 app.css:${ln}  ${tok}: reads as a declaration to the flat token scan but the ` +
+            `browser's ;-delimited parse rejects it — an early-terminated comment ` +
+            `(a '*/' inside comment text, e.g. '… --ok*/ …') likely swallowed it (#4251)`,
+        );
+      }
+    }
+  }
+  return errs;
+}
+
+// Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
+// ONLY the E9 parse-completeness guard against one file and exits non-zero if it
+// fires — the committed #4251 regression proof (see __css_check.fixture.css).
+{
+  const i = process.argv.indexOf("--swallow-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
 
 // ── app.css: defined tokens, consumed tokens, defined classes ───────────────
 
@@ -702,6 +784,9 @@ for (const b of badTokens) {
 
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
+
+// E9 — parse-completeness: declarations a comment mis-close swallowed (#4251).
+for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 
 // E8 — scoped-theme alias integrity. var() inside a custom property substitutes
 // where the property is DECLARED, so a :root-only alias whose value references

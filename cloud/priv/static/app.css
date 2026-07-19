@@ -49,26 +49,15 @@
   --cc-card: #ffffff;
   --cc-card2: #eceef2;
   --cc-modal: #ffffff;
-  --cc-toast: #212936;
-  --cc-toast-fg: #f4f5f7;
   --cc-fg: #1a2330;
   --cc-fg2: #3d4859;
   --cc-fg3: #5f6a7b;
   --cc-fg4: #76818f;
-  --cc-fg5: #c6ccd6;
-  --cc-spark-dim: #a8b0bd;
   --cc-line-rgb: 20,30,48;
-  --cc-backdrop: rgba(18,26,40,0.4);
   --cc-red: #bb4040;
   --cc-red-strong: #b23636;
-  --cc-on-red: #ffffff;
   --cc-blue: #2560bd;
-  --cc-blue-hover: #1c4c99;
   --cc-amber: #96660f;
-  --cc-hetzner: #e06a55;
-  --cc-azure: #2f7fce;
-  --cc-cloudflare: #e8a34e;
-  --cc-github: var(--cc-fg3);
   --bg: var(--cc-bg);
   --surface: var(--cc-card);
   --muted-surface: var(--cc-card2);
@@ -76,7 +65,6 @@
   --muted-text: var(--cc-fg2);
   --dim: var(--cc-fg3);
   --border: rgba(var(--cc-line-rgb), 0.12);
-  --accent: var(--cc-amber);
   --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red-strong); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -98,26 +86,15 @@
   --cc-card: #10141b;
   --cc-card2: #161b24;
   --cc-modal: #12161d;
-  --cc-toast: #1a2029;
-  --cc-toast-fg: #e9edf3;
   --cc-fg: #e9edf3;
   --cc-fg2: #c3cad5;
   --cc-fg3: #8d96a5;
   --cc-fg4: #626c7c;
-  --cc-fg5: #3a4150;
-  --cc-spark-dim: #5a6372;
   --cc-line-rgb: 255,255,255;
-  --cc-backdrop: rgba(4,6,10,0.7);
   --cc-red: #e57f7f;
   --cc-red-strong: #e56a6a;
-  --cc-on-red: #1a0808;
   --cc-blue: #7fb4ff;
-  --cc-blue-hover: #a8ccff;
   --cc-amber: #e8b45a;
-  --cc-hetzner: #e06a55;
-  --cc-azure: #62aaf4;
-  --cc-cloudflare: #e8a34e;
-  --cc-github: var(--cc-fg3);
   --bg: var(--cc-bg);
   --surface: var(--cc-card);
   --muted-surface: var(--cc-card2);
@@ -125,7 +102,6 @@
   --muted-text: var(--cc-fg2);
   --dim: var(--cc-fg3);
   --border: rgba(var(--cc-line-rgb), 0.14);
-  --accent: var(--cc-amber);
   --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
@@ -259,9 +235,11 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
      (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
      status roles (--ok / --warn / --danger / --info / --warn-strong families), --ring,
-     --accent, and the brand --primary/--primary-fg are now OWNED by the
+     and the brand --primary/--primary-fg are now OWNED by the
      GENERATED block above (design/tokens.json → color.cloudChrome + the
-     per-identity accent, mapped role-for-role onto the designer ladder). One
+     per-identity accent, mapped role-for-role onto the designer ladder).
+     --accent is RETIRED (gr-p3-site-detail): its sole consumer reads
+     --cc-amber directly. One
      generated move retints this whole file. Freeze-by-generation (GR11): tune
      values in tokens.json, NEVER here. Only tokens the emitter does not yet own
      stay hand-authored below. */
@@ -302,15 +280,13 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --text-2xl: 26px;  --leading-2xl: 1.2;
 
   /* Space scale — the 4px grid (decision 29). --step stays as a legacy alias
-     (= --space-2) until the decision-24 sweep retires it. */
-  --space-1: 4px;
+     (= --space-2) until the decision-24 sweep retires it. --space-1/7/8 retired
+     GR29 (gr-p3-hygiene-guard) — zero consumers; the used steps are 2–6. */
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
-  --space-7: 28px;
-  --space-8: 32px;
   --step: 8px;
 
   /* Motion (decision 29) — durations + easing; the reduced-motion media block
@@ -344,7 +320,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 }
 
 [data-theme="dark"] {
-  /* GR7 alias bridge (GUI-remake wave 2): shell + status + --ring + --accent +
+  /* GR7 alias bridge (GUI-remake wave 2): shell + status + --ring +
      brand --primary/--primary-fg are OWNED by the generated [data-theme="dark"]
      block above (color.cloudChrome + per-identity accent). The re-declarations
      below stay hand-authored ONLY for the tokens the emitter does not yet own,
@@ -620,8 +596,9 @@ select.form-input {
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
 
-/* a failed provision reads in the destructive colour, not the muted url style */
-.fleet-url.failed { color: var(--destructive); font-family: var(--font); font-style: italic; }
+/* a failed provision reads in the danger colour, not the muted url style
+   (gr-p3: retired the legacy --destructive alias for the direct --danger role) */
+.fleet-url.failed { color: var(--danger); font-family: var(--font); font-style: italic; }
 
 /* billing: small meta lines under the plan card, and the active-tier highlight */
 .plan-meta { font-size: 12px; margin: 6px 0 0; }
@@ -886,12 +863,34 @@ select.form-input {
   transition: border-color var(--t);
 }
 .fleet-row:hover { border-color: var(--dim); }
+/* v4 screens/01: the lifecycle pill LEADS the row in its own column so names
+   align down the list; the pill's detail truncates via the existing .status-pill
+   rules (never edited here — charter GR11/GR25). */
+.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
 .fleet-main { min-width: 0; flex: 1; }
-.fleet-name { font-size: 14px; font-weight: 600; }
+.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; }
 .fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
+/* The mono metadata line: region · size · version · channel · autoupdate. */
+.fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
 .fleet-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .fleet-version { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+/* The inline update chip (v4 "vX available"). Orthogonal to the status pill —
+   ready = accent (the box is behind), busy = info (a rollout is landing). */
+.fleet-update-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: var(--pill);
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  white-space: nowrap; color: var(--text);
+}
+.fleet-update-dot { width: 6px; height: 6px; border-radius: var(--pill); background: var(--dim); flex: 0 0 auto; }
+.fleet-update-chip--ready { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
+.fleet-update-chip--ready .fleet-update-dot { background: var(--ok); }
+.fleet-update-chip--busy { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
+.fleet-update-chip--busy .fleet-update-dot { background: var(--info); }
+[data-theme="dark"] .fleet-update-chip--ready { background: hsl(var(--ok-hsl) / 0.2); }
+[data-theme="dark"] .fleet-update-chip--busy { background: hsl(var(--info-hsl) / 0.2); }
 
 /* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
    while a content-auto rebuild is in flight; a settled status·trigger·when pill
@@ -1390,32 +1389,66 @@ select.form-input {
 .site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
 a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
-/* ===================================================== DEPLOYMENTS */
-.deploys { display: flex; flex-direction: column; gap: 8px; }
-/* gh-6: branch previews — own section, faintly set apart from production. */
-.previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
+/* ===================================================== DEPLOYMENTS
+   gr-p3-site-detail (v4, screens2/05): the deploy ladder is ONE card — hairline-
+   separated rows inside a single surface — instead of a stack of boxed rows.
+   Row anatomy: mono ref · status pill (.dep-pill CONSUMED, never restyled here —
+   GR11/D24) · environment · trigger provenance (Manual / Content update, GR27:
+   never a named human) · duration · when. */
+.deploys {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+/* Inside the card the shared empty-state sheds its own dashed frame. */
+.deploys .empty-state { border: none; border-radius: 0; }
+/* gh-6: branch previews — own card, each row edged in the decorative amber.
+   Reads --cc-amber DIRECTLY (the --accent alias is retired, GR7 endgame). */
+.previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; margin-bottom: 12px; }
 .previews-count {
   font-size: 12px; font-weight: 500; color: var(--muted-text);
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 999px; padding: 1px 8px;
 }
-.previews .deploy-row.preview-row { border-left: 3px solid var(--accent); }
+.previews .deploy-row.preview-row { border-left: 3px solid var(--cc-amber); }
 .preview-url { text-decoration: none; }
 .preview-url:hover { text-decoration: underline; }
 .deploy-row {
   display: flex; flex-direction: column;
   padding: 12px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid var(--border);
 }
+.deploy-row:last-child { border-bottom: none; }
 .deploy-head { display: flex; align-items: center; gap: 14px; }
 .deploy-main { flex: 1; min-width: 0; }
 .deploy-ref { font-size: 13px; font-weight: 500; }
 .deploy-ref .mono { font-family: var(--mono); }
 .deploy-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
-.deploy-fail { font-size: 12px; color: var(--destructive); margin-top: 4px; }
+.deploy-meta .mono { font-family: var(--mono); }
+/* The v4 failure panel (v4.dc.html:569-575): a red-bordered box carrying the
+   server's failure copy behind a danger dot. A SNAP state — deliberately no
+   transition/animation anywhere on it (failed never eases, deploy-ladder law). */
+.deploy-fail {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid hsl(var(--danger-hsl) / 0.35);
+  border-radius: var(--radius);
+  background: hsl(var(--danger-hsl) / 0.06);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.deploy-fail-dot {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--danger);
+}
 /* dwb-webhook-deploy / D11: BLOCKED tone — a born-failed GitHub-push deploy is a
    capability that isn't enabled yet, not a crash. Calm amber/informational, NOT
    error-red. Warn tokens are theme-invariant (status hues are shared across
@@ -1424,10 +1457,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploy-fail--blocked {
   color: var(--warn-strong);
   background: var(--warn-soft);
-  border: 1px solid hsl(var(--warn-hsl) / 0.3);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  border-color: hsl(var(--warn-hsl) / 0.3);
 }
+.deploy-fail--blocked .deploy-fail-dot { background: var(--warn); }
 /* dwb-19: the "last step before it broke" caption on the failed /new screen. */
 .new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; }
 
@@ -2421,6 +2453,26 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .metric--info .metric-spark { color: var(--info); }
 .metric--ok .metric-spark { color: var(--ok); }
 .metric--warn .metric-spark { color: var(--warn); }
+/* D-07 (GR27): the request-level signals the agent doesn't report yet — honest
+   DASHED stubs beneath the vitals grid. The dashed border reads "planned, not
+   present" against the solid vitals cards; the value is dimmed "Not yet metered"
+   (never a fabricated number — GR28 killed the 24h-warmup fiction). */
+.metrics-stubs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.metrics-stub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+.metrics-stub-label { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; }
+.metrics-stub-value { font-size: 12px; }
 .metrics-health { margin-top: 12px; }
 
 /* ---------- Webhooks tab ---------- */
@@ -2485,7 +2537,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 .wh-autodisable { align-items: center; }
 .wh-autodisable-text { min-width: 0; }
-.wh-autodisable-count { font-weight: 600; }
 
 .wh-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
 .wh-meta-fail { color: var(--danger); font-weight: 500; }
@@ -2520,46 +2571,76 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   text-overflow: ellipsis;
 }
 
+/* v4 "Recent deliveries" card (D-05 / screens2-06 + v4.dc.html:1286-1300): a
+   heading over a bordered, hairline-divided card of delivery rows. */
 .wh-deliveries {
   margin-top: 14px;
-  padding-top: 12px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .wh-del-hint { font-size: 12px; }
 .wh-del-empty { font-size: 13px; padding: 6px 0; }
-.wh-delivery {
+.wh-del-heading { font-size: 13px; font-weight: 600; color: var(--text); }
+.wh-del-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.wh-del-row {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
 }
-.wh-del-status {
-  flex: 0 0 auto;
-  min-width: 46px;
-  text-align: center;
+.wh-del-card > .wh-del-row:last-child { border-bottom: none; }
+.wh-del-event {
   font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--muted-surface);
   color: var(--text);
 }
-.wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
-.wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
-.wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
-.wh-del-meta {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 12px;
+/* The status PILL — a rounded, toned capsule carrying the v4 "HTTP 500" / "200
+   OK" label. The failed tone leans on the danger colour for the text (the
+   designed red treatment); soft-tint bg stays inside the frozen alpha ladder. */
+.wh-del-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
   color: var(--muted-text);
 }
+.wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
+.wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); color: var(--danger); }
+.wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); color: var(--info); }
+.wh-del-meta { font-size: 12px; color: var(--muted-text); }
+.wh-del-spacer { flex: 1 1 auto; }
+.wh-del-when { font-size: 12px; color: var(--muted-text); }
+/* Replay — the blue text affordance from the designed row (v4 --blue → --info). */
+.wh-del-replay {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--info);
+}
+.wh-del-replay:hover { text-decoration: underline; }
+.wh-del-replay:disabled { opacity: 0.55; cursor: not-allowed; text-decoration: none; }
 /* The verbatim last_error_text of a failed delivery — wraps to its own full-
-   width line under the status/meta row (flex-basis:100% inside the wrap row). */
+   width line under the row (flex-basis:100% inside the wrap row). */
 .wh-del-err {
   flex-basis: 100%;
   font-family: var(--mono);
@@ -2943,6 +3024,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .archives-note p { margin: 0; }
 .archives-note--warn { color: var(--text); }
+/* storage-unconfigured: a distinct, non-transient state (amber dot + docs +
+   Retry), not a red outage. The server owns the copy verbatim. */
+.archives-note--unconfigured { color: var(--text); }
+.archives-note-dot { width: 8px; height: 8px; border-radius: var(--pill); background: var(--warn); flex: 0 0 auto; }
+.archives-docs-link { font-size: 13px; color: var(--primary); text-decoration: none; }
+.archives-docs-link:hover { text-decoration: underline; }
 
 .archive-list {
   display: flex;
@@ -3383,8 +3470,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .deploys-head h2 { margin: 0; }
 /* D28: the honest capped-history footer — "Showing the N most recent deployments."
-   Muted + small; never a "full history" claim. */
-.deploys-note { font-size: 12px; color: var(--muted-text); margin: 8px 2px 0; }
+   Muted + small; never a "full history" claim. Lives INSIDE the v4 ladder card
+   (gr-p3-site-detail), so it reads as the card's own footer row. */
+.deploys-note { font-size: 12px; color: var(--muted-text); margin: 0; padding: 9px 16px 11px; }
 /* The restored "Now live" chip — distinguished from a plain restore-free current
    chip by an info tint so "rolled back" reads as an intentional state, not a fault.
    Info tokens are theme-invariant (shared status hues), so no [data-theme] override. */
@@ -3657,3 +3745,224 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-color: hsl(var(--warn-hsl) / 0.4);
   background: hsl(var(--warn-hsl) / 0.1);
 }
+
+/* ============================================================================
+   GR24 — INSTANCE WORKSPACE v4 (D-02 header + D-03 Overview, screens/02)
+   The persistent header (H1 + the two-axis compound pill, mono address + copy,
+   Open Studio / Attach domain / the bp CLI disclosure), the collapsible bp-CLI
+   card (conduit-driven; the pause sentence is server copy), and the composed
+   Overview (golden path + updates + sites cards left; identity / runtime /
+   platform / activity card rail right). .status-pill and the domain-checklist
+   internals are CONSUMED as-is (GR25/GR31) — no rule of theirs is edited here.
+   ========================================================================== */
+
+/* ── header (screens/02) ── */
+.detail-head--inst { align-items: flex-start; }
+.detail-head-main { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.detail-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.detail-title-row h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.detail-head--inst .detail-actions {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto;
+}
+.detail-url { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.detail-url-text {
+  font-family: var(--mono); font-size: 12.5px; color: var(--muted-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.inst-cli-toggle { font-family: var(--mono); gap: 6px; }
+.inst-cli-caret { font-size: 10px; line-height: 1; display: inline-block; transition: transform var(--t); }
+.inst-cli-toggle.is-open { background: var(--muted-surface); }
+.inst-cli-toggle.is-open .inst-cli-caret { transform: rotate(180deg); }
+
+/* ── the bp CLI card (disclosed by #inst-cli-toggle) ── */
+.inst-lifecycle-actions { margin: 0 0 20px; }
+.cli-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 18px;
+}
+.cli-card-title { flex: 1; min-width: 160px; font-size: 13px; font-weight: 600; color: var(--muted-text); }
+.cli-card .inst-life-head { margin-bottom: 12px; }
+.cli-card .inst-life-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+}
+.cli-card .inst-life-cli {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+}
+.cli-card .inst-life-verb { flex: 0 0 auto; font-size: 12.5px; }
+.cli-card .inst-life-cli .cli-chip { flex: 1; min-width: 0; justify-content: space-between; border: none; background: transparent; padding: 0; }
+.cli-card .inst-life-disabled { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+.cli-card-foot {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.inst-life-footnote { flex: 1; font-size: 12px; color: var(--muted-text); line-height: 1.5; }
+
+/* ── overview cards (D-03) ── */
+.inst-sites-card { padding: 16px 18px; }
+.inst-sites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.inst-sites-head h2 { margin: 0; }
+.inst-sites-card .site-row { border: none; box-shadow: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+.inst-sites-card .site-row + .site-row { margin-top: 0; }
+.inst-sites-card .empty-state { border: none; padding: 8px 0 4px; }
+
+/* The rail as v4 cards: the aside itself goes transparent; each labelled
+   sub-section becomes its own card with a mono eyebrow. */
+.detail-rail--cards { background: transparent; border: none; box-shadow: none; padding: 0; }
+.detail-rail--cards .rail-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+.detail-rail--cards .rail-group + .rail-group { margin-top: 14px; padding-top: 14px; border-top: none; }
+.detail-rail--cards .rail-group-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+/* Golden-path card head: heading + the verdict subtitle left, the one action right.
+   Inside the Overview main column the rhythm comes from .inst-overview, so the
+   card's own bottom margin is dropped (no double gap above the Updates card). */
+.inst-overview .vf-card { margin-bottom: 0; }
+.vf-head-main { flex: 1; min-width: 0; }
+.vf-head-main h2 { margin: 0; font-size: 14px; }
+.vf-head-main .vf-meta { margin: 3px 0 0; }
+
+@media (max-width: 620px) {
+  .detail-head--inst { flex-direction: column; }
+  .detail-head--inst .detail-actions { justify-content: flex-start; }
+   D-04 — Timeline event-coalescing grammar (gr-p3, GR26, styleguide §07).
+   "<thing> × N · cadence · shared verdict" with an expand affordance. The
+   tlv-coalesce family EXTENDS the tlv-* feed row — new classes, never sg-*
+   imports (the .notice/.sg-banner precedent). Appended per the OC9 tail law.
+   ========================================================================== */
+.tlv-coalesce { position: relative; }
+/* The "× N" count rides the title in mono — repetition reads as a figure. */
+.tlv-coalesce-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-text);
+}
+/* "every ~1m for 9m · all reporting health: down" — the §07 meta segment. */
+.tlv-coalesce-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dim);
+}
+/* "Show all N" / "Collapse" — the §07 link affordance, button-for-a11y. */
+.tlv-coalesce-toggle {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  color: var(--info);
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.tlv-coalesce-toggle:hover { text-decoration: underline; }
+/* Expanded members sit on an inset rail; the summary row stays the anchor. */
+.tlv-coalesce-members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid hsl(var(--info-hsl) / 0.25);
+}
+.tlv-coalesce-members .tlv-row { background: var(--muted-surface); }
+@media (max-width: 720px) {
+  .tlv-coalesce-meta { white-space: normal; }
+}
+/* ═══════════════════════════ DOMAIN CHECKLIST (gr-p3-site-detail, v4 rungs)
+   The shared per-host DNS/TLS checklist restyled onto the v4 rung-pill grammar
+   (v4.dc.html:605-617 + 2025-2033): one bordered host card, the 4 ordered rungs
+   as tinted pills (● ok / ✕ failed / ◐ in-flight / · waiting / ● proxied), the
+   server's remediation verbatim underneath. ONE component, two mounts — the
+   instance rail (#instance-domains) and the site detail (#site-domains) consume
+   the same domainChecklistHtml unchanged. Status roles ride the shared token
+   families; the informational `proxied` rung reads info (Cloudflare fronting is
+   a mode, never a fault). Append-only tail (OC9). */
+.dom-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.dom-card + .dom-card { margin-top: 10px; }
+.dom-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; min-width: 0; }
+.dom-host {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.dom-kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted-text);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 1px 8px;
+}
+.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dom-rung {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+  color: var(--muted-text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dom-rung-glyph { font-size: 9px; line-height: 1; }
+.dom-rung-code { font-family: var(--mono); font-weight: 400; color: var(--dim); }
+.dom-rung--ok { color: var(--ok-strong); background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.3); }
+.dom-rung--ok .dom-rung-glyph { color: var(--ok); }
+.dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
+.dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
+.dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* The server's remediation line — amber note, rendered verbatim (the SPA never
+   invents fix text). */
+.dom-note {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.dom-meta { margin-top: 7px; font-size: 11px; color: var(--dim); }
+/* The site-detail Domains section: painted only when the site has attached
+   domains (the mount leaves it empty otherwise — no empty shell, D17). */
+.site-domains { margin-top: 22px; }
+/* The v4 site-detail headline: domain + honest state chip on one line. */
+.site-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

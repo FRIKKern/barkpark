@@ -2233,14 +2233,9 @@ test("deployRow: a 'restored' flash on the current row → 'Now live — rolled 
   assert.doesNotMatch(priorHtml, /rolled back/);
 });
 
-test("deployRow renders trigger provenance (GR27: Manual / Content update, never a named human); unknowns humanize", () => {
-  // Pin UPDATED deliberately (gr-p3-site-detail): the backend trigger vocabulary
-  // is exactly manual | content-auto (Registry.Deployment @triggers); the old
-  // "GitHub push" mapping re-labelled a value the server can never store.
-  assert.match(hooks.deployRow({ id: "d1", status: "live", trigger: "content-auto" }, null), /Content update/);
-  assert.match(hooks.deployRow({ id: "d1b", status: "live", trigger: "manual" }, null), /Manual/);
-  // An unknown future value passes through humanized, never re-mapped.
-  assert.match(hooks.deployRow({ id: "d2", status: "live", trigger: "github_webhook" }, null), /github webhook/);
+test("deployRow renders the trigger when present, humanized; absent trigger adds nothing", () => {
+  assert.match(hooks.deployRow({ id: "d1", status: "live", trigger: "content-auto" }, null), /auto/);
+  assert.match(hooks.deployRow({ id: "d2", status: "live", trigger: "github_webhook" }, null), /GitHub push/);
   // A hostile trigger is escaped.
   const evil = hooks.deployRow({ id: "d3", status: "live", trigger: "<b>x</b>" }, null);
   assert.doesNotMatch(evil, /<b>x<\/b>/);
@@ -4508,18 +4503,14 @@ test("S13: domainStages is TOTAL — a null/garbage payload never throws", () =>
   assert.deepEqual([...m.domains[0].rows], []);
 });
 
-test("S13: domainChecklistHtml renders one v4 dom-card per host with escaped, role-mapped rung pills", () => {
-  // Pin UPDATED deliberately (gr-p3-site-detail): the shared checklist restyled
-  // off the borrowed .vf-chip vocabulary onto its own v4 .dom-* family.
+test("S13: domainChecklistHtml renders one vf-card per host with escaped, role-mapped chips", () => {
   const m = hooks.domainStages(DOMAIN_PENDING, 0);
   const html = hooks.domainChecklistHtml(m, {});
-  assert.match(html, /dom-card/);
+  assert.match(html, /vf-card/);
   assert.match(html, /blog-22222222\.barkpark\.cloud/);
-  assert.match(html, /dom-rung--ok/);      // the two ok rungs
-  assert.match(html, /dom-rung--active/);  // the front in-flight rung
-  assert.match(html, /dom-rung--pending/); // the waiting rung
+  assert.match(html, /vf-chip--pass/);    // the two ok rungs
+  assert.match(html, /vf-chip--unknown/); // active + pending render as neutral chips
   assert.match(html, /issued and renewed automatically by the platform/); // remediation surfaced verbatim
-  assert.match(html, /dom-note/);          // …in the amber note component
   // The kind chip is present.
   assert.match(html, /platform/);
 });
@@ -4530,7 +4521,7 @@ test("S13: domainRungChip escapes a hostile label + evidence (no raw markup leak
   });
   assert.ok(chip.indexOf("<b>x</b>") === -1, "label must be escaped");
   assert.ok(chip.indexOf("<script>") === -1, "evidence must be escaped");
-  assert.match(chip, /dom-rung--failed/);
+  assert.match(chip, /vf-chip--fail/);
 });
 
 test("S13: domainKindChip maps the two known kinds and passes an unknown through", () => {
@@ -7225,146 +7216,4 @@ test("D-04: total over junk — nulls, garbled stamps, junk payloads never throw
   assert.equal(hooks.tlvVerdictOf({ type: "health", payload: {} }), null);
   assert.equal(hooks.tlvCoalesceKey(null), null);
   assert.equal(hooks.tlvCoalesceKeyByTarget(null), null);
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// gr-p3-site-detail (E-02): the v4 site detail — deploy ladder provenance,
-// honest duration, the shared failure panel, the proxied domain rung, and the
-// siteDetailHtml pins (domains mount, read-only Scale, mono repo button).
-// Appended at the tail (OC9).
-
-test("gr-p3: deployTriggerLabel is trigger-only provenance (GR27) — Manual / Content update, never a named human", () => {
-  assert.equal(hooks.deployTriggerLabel("manual"), "Manual");
-  assert.equal(hooks.deployTriggerLabel("content-auto"), "Content update");
-  // Unknown future values humanize (never re-mapped to copy the server didn't say).
-  assert.equal(hooks.deployTriggerLabel("some_new-thing"), "some new thing");
-  assert.equal(hooks.deployTriggerLabel(null), "");
-});
-
-test("gr-p3: deployDuration — two server stamps only; in-flight/missing → null, never a guess", () => {
-  const live = { status: "live", inserted_at: "2026-07-19T10:00:00Z", became_live_at: "2026-07-19T10:00:48Z" };
-  assert.equal(hooks.deployDuration(live), 48000);
-  const failed = { status: "failed", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:00:19Z" };
-  assert.equal(hooks.deployDuration(failed), 19000);
-  const cancelled = { status: "cancelled", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" };
-  assert.equal(hooks.deployDuration(cancelled), 60000);
-  // In-flight: no settled stamp → null (no ticking guess).
-  assert.equal(hooks.deployDuration({ status: "building", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:00:30Z" }), null);
-  // Missing stamps / negative math → null.
-  assert.equal(hooks.deployDuration({ status: "live", inserted_at: "2026-07-19T10:00:00Z" }), null);
-  assert.equal(hooks.deployDuration({ status: "live", inserted_at: "2026-07-19T11:00:00Z", became_live_at: "2026-07-19T10:00:00Z" }), null);
-  assert.equal(hooks.deployDuration(null), null);
-});
-
-test("gr-p3: deployRow meta reads env · trigger · duration · when — and NEVER a named human", () => {
-  const d = {
-    id: "d1", status: "live", git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
-    environment: "production", trigger: "manual",
-    inserted_at: "2026-07-19T10:00:00Z", became_live_at: "2026-07-19T10:00:48Z",
-  };
-  const html = hooks.deployRow(d, "d1");
-  assert.match(html, /production/);
-  assert.match(html, /Manual/);
-  assert.match(html, /48s/);
-  assert.match(html, /live since /);
-  // GR27/GR28: no actor identity anywhere in the row — provenance is the
-  // trigger word alone (an actor field doesn't even exist in deployment_json,
-  // and the renderer must never grow one).
-  assert.doesNotMatch(html, /actor|@/i);
-});
-
-test("gr-p3: deployFailHtml — the v4 red-bordered panel with dot; blocked keeps amber; empty → none", () => {
-  const crash = hooks.deployFailHtml("npm run build exited 1");
-  assert.match(crash, /class="deploy-fail"/);
-  assert.match(crash, /deploy-fail-dot/);
-  assert.match(crash, /npm run build exited 1/);
-  const blocked = hooks.deployFailHtml("github push builds require the GitHub App integration (not yet available)");
-  assert.match(blocked, /deploy-fail--blocked/);
-  assert.match(blocked, /can&#39;t be built yet/); // failureCopy still threads through (esc'd)
-  assert.equal(hooks.deployFailHtml(""), "");
-  assert.equal(hooks.deployFailHtml(null), "");
-  // Escaped server copy.
-  assert.doesNotMatch(hooks.deployFailHtml("<img src=x>"), /<img src=x>/);
-});
-
-test("gr-p3: a cancelled row states its state through the pill, no invented copy", () => {
-  const html = hooks.deployRow({ id: "dc", status: "cancelled", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" }, null);
-  assert.match(html, /dep-pill dep-cancelled/);
-  assert.match(html, /Cancelled/);
-  assert.doesNotMatch(html, /deploy-fail/); // cancelled is not a failure panel
-});
-
-test("gr-p3: domainStageRows — proxied is its own settled informational role", () => {
-  const rows = hooks.domainStageRows([
-    { stage: "dns_found", status: "ok", label: "DNS found" },
-    { stage: "points_here", status: "proxied", label: "Points here", evidence: "via Cloudflare" },
-    { stage: "tls", status: "pending", label: "TLS" },
-    { stage: "serving", status: "pending", label: "Serving" },
-  ]);
-  assert.equal(rows[1].role, "proxied");
-  assert.equal(rows[1].showRemediation, false); // informational, never a fix prompt
-  // The rung AFTER a proxied front still gets the honest active motion.
-  assert.equal(rows[2].role, "active");
-  assert.equal(rows[3].role, "pending");
-});
-
-test("gr-p3: domainStages — an all-settled host with a proxied rung is terminal (poll stops)", () => {
-  const m = hooks.domainStages({
-    ok: true, checked_at: "2026-07-19T10:00:00Z",
-    domains: [{ host: "acme.com", kind: "custom", overall: "ok", stages: [
-      { stage: "dns_found", status: "ok", label: "DNS found" },
-      { stage: "points_here", status: "proxied", label: "Points here" },
-      { stage: "tls", status: "ok", label: "TLS" },
-      { stage: "serving", status: "ok", label: "Serving" },
-    ] }],
-  }, 0);
-  assert.equal(m.terminal, true);
-  const html = hooks.domainChecklistHtml(m, {});
-  assert.match(html, /dom-rung--proxied/);
-  assert.match(html, /aria-label="Points here — proxied"/);
-});
-
-test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, repo button is the mono repo name", () => {
-  const site = {
-    id: "s1", framework: "astro", domains: ["acme.com"], scale_mode: "always_on",
-    port: 4321, current_deployment_id: "d1", github_repo: "acme/site",
-    github_branch: "main", github_webhook_configured: true, inserted_at: "2026-07-01T10:00:00Z",
-  };
-  const deployments = [{ id: "d1", status: "live", environment: "production", inserted_at: "2026-07-19T10:00:00Z", became_live_at: "2026-07-19T10:00:40Z" }];
-  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", []);
-  assert.match(html, /id="site-domains"/);            // the domains rungs mount
-  assert.match(html, /id="deploy-rail-slot"/);        // the live rail slot survives
-  // Scale: a read-only rail value — no input/select/toggle control for it (GR28).
-  assert.match(html, /Scale<\/span><span class="v">always_on/);
-  assert.doesNotMatch(html, /id="site-scale|name="scale/);
-  // The connected GitHub button carries the mono repo name (v4 header), not a bare verb.
-  assert.match(html, /id="site-github"[^>]*><span class="mono">acme\/site<\/span>/);
-  // The headline chip is honest: current live row → Live.
-  assert.match(html, /dep-pill dep-live/);
-});
-
-test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
-  const site = { current_deployment_id: "d1" };
-  const live = [{ id: "d1", status: "live" }];
-  assert.match(hooks.siteStatusChip(site, live), /dep-live/);
-  const building = [{ id: "d2", status: "building" }, { id: "d1", status: "live" }];
-  assert.match(hooks.siteStatusChip(site, building), /dep-building">Deploying/);
-  // Pointer names a row that is not in the list (stale) → no chip, never invented.
-  assert.equal(hooks.siteStatusChip({ current_deployment_id: "dx" }, live), "");
-  assert.equal(hooks.siteStatusChip({}, []), "");
-});
-
-test("gr-p3: previewRow meta carries preview env + provenance + duration; failed preview gets the shared panel", () => {
-  const d = {
-    id: "p1", status: "failed", branch: "draft/nav", trigger: "manual",
-    failure_reason: "npm run build exited 1",
-    inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:00:19Z",
-  };
-  const html = hooks.previewRow ? hooks.previewRow(d) : null;
-  if (html !== null) {
-    assert.match(html, /preview/);
-    assert.match(html, /Manual/);
-    assert.match(html, /19s/);
-    assert.match(html, /deploy-fail-dot/);
-  }
 });

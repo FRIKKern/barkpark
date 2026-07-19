@@ -833,13 +833,14 @@
   function lifecycleActionHtml(a) {
     if (!a) return "";
     if (a.mode === "live") {
+      // The destroy-tier console verb (Decommission) — the trailing ellipsis is
+      // the typed-confirm promise (screens/02): a modal follows, never a direct fire.
       return '<button class="btn btn-danger btn-sm" type="button" data-life-verb="' + esc(a.verb) +
-        '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "</button>";
+        '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "&hellip;</button>";
     }
     if (a.mode === "cli") {
       // Capability true but console-unwired: the verb label + the exact command
-      // chip. The "via the bp CLI" caption is rendered ONCE at the row level
-      // (lifecycleActionRowHtml) instead of repeated per verb — density cut.
+      // chip (screens/02: one boxed row per verb, copy affordance on the chip).
       return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
         cliChipHtml(a.cli) + "</div>";
     }
@@ -850,7 +851,13 @@
       (a.reason ? '<span class="inst-life-reason">' + esc(a.reason) + "</span>" : "") + "</div>";
   }
 
-  // Pure render of the whole action row from its model.
+  // Pure render of the whole "bp CLI" card from its model (GR24, screens/02):
+  // a head (title + lifecycle pill + conduit status), the command grid, then a
+  // foot where the pause verb's SERVER-OWNED gap sentence (on Hetzner: "a
+  // stopped server still bills — archive instead", failure_copy.ex owns the
+  // words) sits beside the destroy-tier Decommission…. A provider whose pause
+  // IS a capability gets pause as a normal command row and no foot sentence —
+  // the copy is always the conduit's, never invented here.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
     // The label sits in its own span so it stays neutral (--text) while the dot
@@ -871,15 +878,31 @@
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
 
-    // One "via the bp CLI" caption for the whole row when any verb is a CLI
-    // affordance — replaces the per-verb repetition (four → one).
-    var hasCli = (model.actions || []).some(function (a) { return a && a.mode === "cli"; });
-    var via = hasCli ? '<div class="inst-life-via">via the bp CLI</div>' : "";
+    var actions = model.actions || [];
+    // The disabled PAUSE verb moves to the foot as the server's own sentence
+    // (screens/02's Hetzner-billing line IS capability_gap_reason("hetzner",
+    // "pause") — rendered verbatim, no client fork of it). Every other verb
+    // stays in the grid; decommission anchors the foot.
+    var pausedGap = null;
+    var live = null;
+    var gridRows = actions.filter(function (a) {
+      if (!a) return false;
+      if (a.mode === "live") { live = a; return false; }
+      if (a.verb === "pause" && a.mode === "disabled") { pausedGap = a; return false; }
+      return true;
+    }).map(lifecycleActionHtml).join("");
 
-    return '<div class="inst-life-head">' + pill +
-      (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
-      '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>" +
-      via;
+    var foot = (pausedGap && pausedGap.reason
+        ? '<span class="inst-life-footnote">' + esc(pausedGap.reason) + "</span>"
+        : '<span class="inst-life-footnote"></span>') +
+      (live ? lifecycleActionHtml(live) : "");
+
+    return '<div class="cli-card">' +
+      '<div class="inst-life-head"><span class="cli-card-title">Manage this instance via the bp CLI</span>' +
+        pill + (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
+      (gridRows ? '<div class="inst-life-actions">' + gridRows + "</div>" : "") +
+      '<div class="cli-card-foot">' + foot + "</div>" +
+    "</div>";
   }
 
   // ---- S14 portable-archives pure helpers (azure-hetzner hosting) ------------
@@ -899,6 +922,12 @@
   //   {ok:true, archives}  → one row per bundle, each with a copy-paste resurrect
   //                          command `bp cloud instance resurrect <slug> --provider <kind>`
   // Order is the server's (newest-first); this stays a faithful projection.
+  //
+  // The EXACT server-owned copy GET /v1/archives emits for an unconfigured store
+  // (router.ex archive_store_error(:not_configured)). Matching it drives the
+  // DISTINCT storage-unconfigured panel state; a changed server string degrades
+  // safely to the generic transient-outage error.
+  var ARCHIVES_UNCONFIGURED_MSG = "Archive storage isn't configured for this deployment.";
   function archivesModel(payload) {
     if (payload === undefined) return { loading: true, error: false, rows: [] };
     if (!payload || payload.ok !== true) {
@@ -908,6 +937,12 @@
       // message — never a raw internal token surfaced as if the server sent it.
       var serverMsg = payload && payload.ok === false && typeof payload.error === "string" &&
         payload.error.trim() !== "" ? payload.error : null;
+      // An unconfigured store is a DISTINCT, non-transient state (docs + Retry),
+      // not a "try again shortly" outage — matched on the exact backend copy so it
+      // reads honestly. Any other error stays the generic transient branch.
+      if (serverMsg === ARCHIVES_UNCONFIGURED_MSG) {
+        return { loading: false, error: true, notConfigured: true, message: serverMsg, rows: [] };
+      }
       return { loading: false, error: true,
         message: serverMsg || "Couldn't load your archives — try again shortly.", rows: [] };
     }
@@ -1082,6 +1117,16 @@
   function archivesPanelHtml(model) {
     if (!model || model.loading) {
       return '<div class="loading">Loading archives&hellip;</div>';
+    }
+    // Storage unconfigured (deployment never wired object storage): a DISTINCT
+    // state — the server-owned copy verbatim, a "How archives work" docs link,
+    // and a Retry (harmless once storage IS wired). Amber dot, not a red error.
+    if (model.notConfigured) {
+      return '<div class="archives-note archives-note--unconfigured">' +
+        '<span class="archives-note-dot" aria-hidden="true"></span>' +
+        "<p>" + esc(model.message) + "</p>" +
+        '<a class="archives-docs-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">How archives work</a>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
     }
     if (model.error) {
       return '<div class="archives-note archives-note--warn"><p>' + esc(model.message) + "</p>" +
@@ -2652,6 +2697,71 @@
     "</span>";
   }
 
+  // ---- v4 fleet-row anatomy (screens/01) — pure, node-pinned via __bpTestHook.
+
+  // The mono metadata line under a row's name: region · size · running version ·
+  // channel · autoupdate policy. Every segment is BACKEND-TRUE and blank-tolerant
+  // (a pre-S6 / older-CP row that carries none renders nothing, never a dangling
+  // "·"). Distinct from fleetInfraLine (region · size only — the Overview card's
+  // denser slot): the fleet list gets the fuller mono line the v4 design shows.
+  function fleetAutoupdateText(bp) {
+    bp = bp || {};
+    if (!hasAutoupdatePolicy(bp)) return ""; // older CP sends no policy block
+    if (bp.pinned_release) return "pinned " + vRel(bp.pinned_release);
+    if (bp.autoupdate_paused) return "autoupdate paused";
+    if (bp.autoupdate_enabled === false) return "autoupdate off";
+    return "autoupdate on";
+  }
+  function fleetMetaHtml(bp) {
+    bp = bp || {};
+    var parts = [];
+    if (bp.region) parts.push(esc(String(bp.region)));
+    if (bp.server_type) parts.push(esc(String(bp.server_type)));
+    if (bp.version) parts.push(esc(vRel(bp.version)));
+    if (bp.channel) parts.push(esc(String(bp.channel)));
+    var au = fleetAutoupdateText(bp);
+    if (au) parts.push(esc(au));
+    return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
+  }
+
+  // The inline update chip (v4 screens/01: the "v0.2.25 available" affordance).
+  // BACKEND-TRUE ONLY — an in-flight rollout (autoupdate_triggered_at) outranks a
+  // stale cached "behind" (mirrors updateBadge); a settled "behind" names the
+  // real target release (update_latest_release). Any other state → null (no chip,
+  // no invented "up to date" badge in the list). It is ORTHOGONAL to the status
+  // pill: update availability never masquerades as a lifecycle state.
+  function fleetUpdateChip(bp) {
+    bp = bp || {};
+    if (bp.autoupdate_triggered_at) return { state: "in-flight", label: "Updating" };
+    if (bp.update_state === "behind") {
+      var rel = bp.update_latest_release;
+      return { state: "behind", label: (rel ? vRel(rel) : "A newer release") + " available" };
+    }
+    return null;
+  }
+  function fleetUpdateChipHtml(bp) {
+    var u = fleetUpdateChip(bp);
+    if (!u) return "";
+    // Static per-branch class strings (never a concat head) so __css_check
+    // resolves every modifier to a real rule.
+    if (u.state === "in-flight")
+      return '<span class="fleet-update-chip fleet-update-chip--busy">' +
+        '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
+    return '<span class="fleet-update-chip fleet-update-chip--ready">' +
+      '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
+  }
+
+  // A shallow bp view with update_state cleared — the fleet pill's OWN input when
+  // an update chip is showing, so a live+behind box reads its lifecycle
+  // ("Healthy") beside the chip instead of the pill doubling as "Update
+  // available". The shared classifyBp/statusOf/attentionRank spine (which Overview
+  // reads) is NEVER mutated — only this per-row copy.
+  function withoutUpdateState(bp) {
+    var c = Object.assign({}, bp || {});
+    c.update_state = null;
+    return c;
+  }
+
   function fleetRow(bp) {
     // host (not url) is the "box is actually up" signal: go_live now sets url at
     // launch (the FQDN is deterministic <slug>-<teamid>), so !bp.url would never
@@ -2678,12 +2788,18 @@
     // platform stopped it — folded into statusOf()'s single pill below.
     var live = !removing && !removeFailed && !failed && !provisioning && !bp.suspended && bp.host;
 
-    // The whole provision/suspend/health/agent/update collapse is now ONE pill
-    // (charter decision 6); the health/agent/update breakdown moved to the
-    // instance-detail rail only. S11b: the pill also carries its S4 lifecycle
-    // token class so the fleet row's status IS the lifecycle pill (identity chip
-    // stays separate — never a status stand-in).
-    var pill = statusPill(bp, instanceLifecycleClass(lifecyclePillState(bp)));
+    // v4 screens/01: update availability is the ORTHOGONAL chip, so the leading
+    // lifecycle pill never doubles as "Update available". The shared classifyBp/
+    // statusOf/attentionRank spine that Overview reads stays UNTOUCHED — we only
+    // strip update_state from the pill's OWN per-row input, so a live+behind box
+    // reads "Healthy" beside a "vX available" chip (never a double signal).
+    var upd = fleetUpdateChip(bp);
+    var pillBp = upd && upd.state === "behind" ? withoutUpdateState(bp) : bp;
+
+    // The whole provision/suspend/health/agent collapse is ONE pill (charter
+    // decision 6). S11b: the pill also carries its S4 lifecycle token class so the
+    // fleet row's status IS the lifecycle pill (identity chip stays separate).
+    var pill = statusPill(pillBp, instanceLifecycleClass(lifecyclePillState(bp)));
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -2693,18 +2809,21 @@
       : "";
 
     return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
+      // The lifecycle pill LEADS the row (v4 anatomy); its detail truncates inside
+      // the fixed lead column via the existing .status-pill rules (never edited).
+      '<div class="fleet-status">' + pill + "</div>" +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
-        // Region · size, server-stamped (S6). Blank-tolerant: pre-S6 rows carry
-        // no region/server_type and render nothing here.
-        fleetInfraLine(bp) +
+        // The mono metadata line: region · size · version · channel · autoupdate,
+        // every segment backend-true + blank-tolerant.
+        fleetMetaHtml(bp) +
       "</div>" +
       '<div class="fleet-badges">' +
-        // Provider IDENTITY chip — renders ONLY when the payload carries
-        // `provider` (S6 stamps it); never a fabricated identity, and never a
-        // stand-in for the status pill beside it.
-        providerChipHtml(bp.provider) + pill + openStudioBtn +
+        // The NEW backend-true update chip, then the provider IDENTITY chip (only
+        // when the payload carries `provider` — never a fabricated identity), then
+        // the one-click Studio entry.
+        fleetUpdateChipHtml(bp) + providerChipHtml(bp.provider) + openStudioBtn +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
@@ -3404,15 +3523,22 @@
   // Overview panel is the pre-C6 detail body verbatim; the Timeline and Webhooks
   // panels are filled by their mount fns after the shell paints. opts.ready folds
   // the timeline slot into the shared ready panel (A4 — the provision→live moment).
+  // GR24 (screens/02): whether the bp CLI card is disclosed. Module state (not
+  // DOM state) so the operator's open card survives the frequent SSE-driven
+  // full re-renders of this view — the instanceConsoleCollapsed precedent.
+  var instanceCliOpen = false;
+
   function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
-    // S11b: the persistent lifecycle action row sits between the header and the
-    // tabs — a workspace affordance visible on every tab. The slot is filled
-    // async by wireLifecycleActions (the /v1/providers/capabilities conduit); it
-    // renders ONLY where teardown makes sense (showLifecycleRow), so a clean
-    // provisioning box keeps the timeline as its sole surface.
+    // S11b + GR24: the lifecycle surface between the header and the tabs is now
+    // the collapsible "bp CLI" card (screens/02), disclosed by the header's
+    // #inst-cli-toggle. The slot is filled async by wireLifecycleActions (the
+    // /v1/providers/capabilities conduit); it renders ONLY where teardown makes
+    // sense (showLifecycleRow), so a clean provisioning box keeps the timeline
+    // as its sole surface.
     var lifeSlot = showLifecycleRow(bp)
-      ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"></div>'
+      ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"' +
+        (instanceCliOpen ? "" : " hidden") + "></div>"
       : "";
     return instanceHeaderHtml(bp) +
       lifeSlot +
@@ -3464,6 +3590,10 @@
   function instanceHeaderHtml(bp) {
     var lc = instanceLifecycle(bp);
 
+    // The address line (screens/02): mono URL + the shared [data-copy]
+    // affordance for an up box; the in-flight / failed states keep their
+    // honest chips (the SSE fast path in loadInstance patches
+    // .fleet-url.provisioning in place — that class stays load-bearing).
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
@@ -3472,11 +3602,14 @@
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="fleet-url">' + esc(publicUrl(bp)) + "</div>";
+            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
 
-    // The header collapses to ONE pill (charter decision 6). The health / agent
-    // breakdown that USED to be badge-soup now lives only in the Details rail.
-    var badges = statusPill(bp);
+    // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
+    // already carries label + detail ("Degraded · Health down"); its rules are
+    // consumed, never edited here (GR25 quarantine).
+    var pill = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
     var updateBtn = lc.live && bp.update_state === "behind"
@@ -3489,23 +3622,42 @@
       ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
       : "";
 
-    // S11b: the bare Remove button is SUPERSEDED by the lifecycle action row's
-    // typed-confirm Decommission (one teardown affordance, not two). The header
-    // keeps Retry removal (a distinct retry of a FAILED teardown, which the
-    // conduit doesn't cover). Failed provisions get their teardown from the
-    // action row + Retry from the timeline, so the header stays action-free.
+    // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
+    // (#inst-lifecycle-actions, the conduit-driven lifecycle surface). Renders
+    // exactly when the card itself does (showLifecycleRow), so the toggle can
+    // never point at an absent panel; open state persists across SSE repaints
+    // via instanceCliOpen (the instanceConsoleCollapsed precedent).
+    // (Two full static literals, not a composed class head — the __css_check
+    // E3 contract wants every class string statically resolvable.)
+    var cliToggle = !showLifecycleRow(bp)
+      ? ""
+      : instanceCliOpen
+        ? '<button class="btn btn-ghost btn-sm inst-cli-toggle is-open" id="inst-cli-toggle" type="button" aria-expanded="true"' +
+          ' aria-controls="inst-lifecycle-actions">bp CLI <span class="inst-cli-caret" aria-hidden="true">&#9662;</span></button>'
+        : '<button class="btn btn-ghost btn-sm inst-cli-toggle" id="inst-cli-toggle" type="button" aria-expanded="false"' +
+          ' aria-controls="inst-lifecycle-actions">bp CLI <span class="inst-cli-caret" aria-hidden="true">&#9662;</span></button>';
+
+    // S11b: the bare Remove button is SUPERSEDED by the CLI card's typed-confirm
+    // Decommission (one teardown affordance, not two). The header keeps Retry
+    // removal (a distinct retry of a FAILED teardown, which the conduit doesn't
+    // cover). A failed provision keeps the CLI-card toggle (its teardown home);
+    // Retry lives in the timeline (data-tl-retry).
     var actions =
       lc.removing
         ? ""
         : lc.removeFailed
           ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
           : lc.failed
-            ? "" // teardown lives in the lifecycle action row; Retry in the timeline (data-tl-retry)
-            : bp.host
-              ? updateBtn +
-                '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
-                domainBtn
-              : "";
+            ? cliToggle
+            : lc.suspended
+              // A suspended server is STOPPED — an Open Studio button here
+              // would be a dead click. Teardown stays reachable via the card.
+              ? cliToggle
+              : bp.host
+                ? updateBtn +
+                  '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
+                  domainBtn + cliToggle
+                : "";
 
     // The failed case is owned by the timeline now (its fail block shows the
     // verbatim provision_error), so no duplicate "provisioning failed" banner.
@@ -3518,8 +3670,9 @@
             esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
           : "";
 
-    return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
-      '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
+    return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
+      '<div class="detail-title-row"><h1>' + esc(bp.name) + "</h1>" + pill + "</div>" + url + "</div>" +
+      (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div>" +
       failBanner;
   }
 
@@ -3553,33 +3706,39 @@
     // A4/D60: pre-host the timeline is the primary surface — the whole Sites
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
-    // The rail is grouped into labelled sub-sections instead of one flat list, so
-    // it scans as chunks (identity / runtime / platform / activity). railGroup is
-    // a thin local wrapper — same railRow* helpers, same #instance-domains slot.
+    // GR24 (D-03, v4): the rail's labelled sub-sections render as CARDS —
+    // same railRow* helpers, same #instance-domains slot, mono eyebrow labels.
     var railGroup = function (label, rows) {
       return '<div class="rail-group"><div class="rail-group-label">' + esc(label) + "</div>" + rows + "</div>";
     };
-    return timeline + verifySlot +
+    return timeline +
       // detail-grid--instance widens the rail (the domain checklist lives there);
       // the site-deploys grid keeps the bare .detail-grid (byte-identical).
       '<div class="detail-grid detail-grid--instance">' +
         // .inst-overview gives the main column a uniform vertical rhythm so the
-        // update panel + Sites read as evenly-spaced sections, not a flat stack.
+        // golden-path + update + Sites cards read as evenly-spaced sections.
         '<div class="detail-main inst-overview">' +
-          // isu-w5: the operator update panel is the face of the Overview for a
-          // live box — update truth + policy controls sit above Sites.
+          // GR24 (D-03): the golden-path verify card leads the main column
+          // (screens/02 overview), then update truth, then Sites. The verify
+          // slot is filled async by loadInstanceVerify — empty renders nothing.
+          verifySlot +
           (hasHost
             ? updatePanelHtml(bp) +
-              '<section><h2 style="display:flex;align-items:center;justify-content:space-between">Sites ' +
-                '<button class="btn" id="site-new-btn" type="button" style="font-size:.85em">+ New site</button></h2>' +
+              '<section class="card inst-sites-card"><div class="inst-sites-head"><h2>Sites</h2>' +
+                '<button class="btn btn-ghost btn-sm" id="site-new-btn" type="button">+ New site</button></div>' +
                 '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
             : '<div id="instance-sites"></div>') +
         "</div>" +
-        '<aside class="detail-rail">' +
+        // GR24 (D-03): the identity/runtime rail — every value a REAL fleet
+        // field (S6 stamps provider/region/server_type; blank-tolerant "—").
+        '<aside class="detail-rail detail-rail--cards">' +
           railGroup("Identity",
             railRowCopy("ID", bp.id) +
             railRowCopy("Host", bp.host || "—") +
-            railRow("Slug", bp.slug || "—")) +
+            railRow("Slug", bp.slug || "—") +
+            railRow("Provider", bp.provider ? cap(String(bp.provider)) : "—") +
+            railRow("Region", bp.region || "—") +
+            railRow("Size", bp.server_type || "—")) +
           railGroup("Runtime",
             railRow("Mode", bp.mode || "—") +
             railRow("Health", railValue(cap(health), hasHost)) +
@@ -3590,6 +3749,8 @@
           // per-host DNS/TLS checklist. The slot renders the static value first
           // (no layout jump); loadInstanceDomains replaces it with the checklist
           // when the box has attached domains (GET /v1/barkparks/:id/domain-status).
+          // Component consumed AS-IS (gr-p3-site-detail owns its internals); an
+          // instance carries at most 2 domains ever (GR27), so the card never grows.
           '<div class="rail-group"><div class="rail-group-label">Platform</div>' +
             '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div></div>" +
           railGroup("Activity",
@@ -3607,6 +3768,16 @@
     wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
+    // GR24: the "bp CLI ▾" disclosure — show/hide the CLI card and remember the
+    // choice across SSE repaints (module state, see instanceCliOpen).
+    var cliT = $("#inst-cli-toggle");
+    if (cliT) cliT.addEventListener("click", function () {
+      instanceCliOpen = !instanceCliOpen;
+      var card = $("#inst-lifecycle-actions");
+      if (card) card.hidden = !instanceCliOpen;
+      cliT.setAttribute("aria-expanded", instanceCliOpen ? "true" : "false");
+      cliT.classList.toggle("is-open", instanceCliOpen);
+    });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     // The bare Remove button is superseded by the lifecycle action row's typed
@@ -4091,7 +4262,7 @@
     // — data-rollback, never data-au — and the SERVER owns whether a previous slot
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
-    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back</button>';
+    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>';
     var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
 
     return '<div class="card update-panel">' +
@@ -4535,26 +4706,26 @@
   }
 
   // Pure: the AUTODISABLE banner (charter #1013 substrate). Renders ONLY when the
-  // row carries `auto_disabled_at` AND is still inactive, and prints
-  // `disable_reason` + `consecutive_failures` VERBATIM from the row (never a
-  // client re-derivation) — the honest reason the instance's dispatcher gave up.
-  // The Re-enable button PUTs {active:true} through the update capability (there
-  // is NO toggle route). The `active` gate matters: the instance's update path
-  // can't clear the server-managed `auto_disabled_at` stamp (not castable), so a
-  // re-enabled row keeps the old stamp — without the gate, Re-enable would
-  // "succeed" and the reconciled card would STILL shout Auto-disabled next to an
-  // Active pill, forever.
+  // row carries `auto_disabled_at` AND is still inactive. COUNT-FREE by design
+  // (D-05 criterion): the disable THRESHOLD is live instance config, never a
+  // client-hardcoded number, so the tab authors no failure count of its own —
+  // the honest, stable sentence is "repeated delivery failures". `disable_reason`
+  // is still shown VERBATIM when the instance sent one (server truth, its own
+  // words), but the client never re-derives or echoes `consecutive_failures`
+  // beside it. The Re-enable button PUTs {active:true} through the update
+  // capability (there is NO toggle route). The `active` gate matters: the
+  // instance's update path can't clear the server-managed `auto_disabled_at`
+  // stamp (not castable), so a re-enabled row keeps the old stamp — without the
+  // gate, Re-enable would "succeed" and the reconciled card would STILL shout
+  // Auto-disabled next to an Active pill, forever.
   function webhookBannerHtml(wh) {
     wh = wh || {};
     if (!wh.auto_disabled_at || wh.active) return "";
     var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
       ? esc(wh.disable_reason)
       : "This endpoint was auto-disabled after repeated delivery failures.";
-    var count = wh.consecutive_failures != null
-      ? ' <span class="wh-autodisable-count">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
-      : "";
     return '<div class="notice notice-error wh-autodisable" role="alert">' +
-      '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + count + "</span>" +
+      '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + "</span>" +
       '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>' +
       "</div>";
   }
@@ -4573,7 +4744,12 @@
     var toggleBtn = active
       ? '<button class="btn btn-sm" type="button" data-wh-toggle>Disable</button>'
       : '<button class="btn btn-sm" type="button" data-wh-toggle>Enable</button>';
-    var fails = wh.consecutive_failures != null && wh.consecutive_failures > 0
+    // The failing-streak meta is honest signal on an ACTIVE-but-degrading
+    // endpoint. Once the row is auto-disabled the count-free banner owns that
+    // state (D-05), so the count is suppressed here — the card never shows a
+    // failure count beside its own Auto-disabled banner.
+    var bannerShowing = !!wh.auto_disabled_at && !active;
+    var fails = !bannerShowing && wh.consecutive_failures != null && wh.consecutive_failures > 0
       ? '<span class="wh-meta-fail">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
       : "";
     var updated = wh.updated_at ? "Updated " + esc(fmtWhen(wh.updated_at)) : "";
@@ -4626,39 +4802,68 @@
     return "info"; // 3xx / 0 / other
   }
 
-  // Pure: one delivery-log row — status code (toned), latency, when, attempts,
-  // plus a per-row Replay button and, when the instance recorded one, the
-  // verbatim `last_error_text` (the WHY of a failure — connection refused, TLS,
-  // 500 body — not just the tone). `delivered_at`/`status_code` are read
-  // defensively (the instance's render_delivery names them updated_at /
-  // last_status_code today; a future rename won't blank the row).
+  // Pure: the v4 status-PILL label for a delivery (screens2/06 + v4.dc.html
+  // 1290-1297). A 2xx reads "<code> OK" (mint pill), a 4xx/5xx reads
+  // "HTTP <code>" (the designed failed treatment, red pill), a code-less terminal
+  // give-up reads "failed", anything mid-flight "pending". The raw
+  // `failed_giveup` token is NEVER surfaced (no instance jargon on screen).
+  function deliveryStatusLabel(d) {
+    d = d || {};
+    var code = d.status_code != null ? d.status_code : d.last_status_code;
+    if (code != null) {
+      var n = Number(code);
+      return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
+    }
+    var s = String(d.status || "").toLowerCase();
+    if (s === "delivered" || s === "success" || s === "ok") return "OK";
+    if (s === "failed_giveup" || s === "failed" || s === "error" || s === "giveup") return "failed";
+    return "pending";
+  }
+
+  // Pure: one delivery-log row in the v4 "Recent deliveries" card grammar —
+  // event id (mono) + a toned status pill ("HTTP 500" / "200 OK") + attempts and
+  // latency meta + the relative time, then a blue Replay affordance and, when the
+  // instance recorded one, the verbatim `last_error_text` (the WHY of a failure —
+  // connection refused, TLS, 500 body — not just the tone) on its own line.
+  // `delivered_at`/`status_code` are read defensively (the instance's
+  // render_delivery names them updated_at / last_status_code today; a future
+  // rename won't blank the row).
   function deliveryRowHtml(d, instance, dataset) {
     d = d || {};
     var tone = deliveryTone(d);
-    var code = d.status_code != null ? d.status_code : d.last_status_code;
-    // A code-less row falls back to the status word; "failed_giveup" (the
-    // instance's terminal status token) reads "failed" — same truth, no jargon.
-    var codeLabel = code != null
-      ? String(code)
-      : (d.status ? (String(d.status) === "failed_giveup" ? "failed" : String(d.status)) : "pending");
-    var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : "&mdash;";
+    var label = deliveryStatusLabel(d);
     var when = esc(fmtWhen(d.delivered_at || d.updated_at || d.created_at));
+    var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : null;
     var attempts = d.attempts != null
       ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
-      : "&mdash;";
+      : null;
+    var meta = [attempts, latency].filter(Boolean).join(" &middot; ");
     var evId = d.event_id != null && d.event_id !== "" ? d.event_id : null;
     var errText = d.last_error_text != null && String(d.last_error_text) !== ""
       ? '<span class="wh-del-err">' + esc(d.last_error_text) + "</span>"
       : "";
-    return '<div class="wh-delivery">' +
-      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(codeLabel) + "</span>" +
-      '<span class="wh-del-meta">' +
-        (evId !== null ? "event #" + esc(evId) + " &middot; " : "") +
-        latency + " &middot; " + when + " &middot; " + attempts +
-      "</span>" +
-      (evId !== null ? '<button class="btn btn-sm" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
+    return '<div class="wh-del-row">' +
+      '<span class="wh-del-event">' + (evId !== null ? "event #" + esc(evId) : "&mdash;") + "</span>" +
+      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(label) + "</span>" +
+      (meta ? '<span class="wh-del-meta">' + meta + "</span>" : "") +
+      '<span class="wh-del-spacer"></span>' +
+      '<span class="wh-del-when">' + when + "</span>" +
+      (evId !== null ? '<button class="wh-del-replay" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
       errText +
       "</div>";
+  }
+
+  // Pure: the Replay-outcome toast body, built from the REAL delivery the
+  // instance returned (never the prototype's hardcoded "200 OK in 91 ms"). A
+  // clean re-attempt reads "Delivery replayed · 200 OK in N ms"; a failed target
+  // reads the honest "HTTP 500 in N ms". An older instance that echoes no delivery
+  // detail degrades to the plain event ack rather than inventing a status.
+  function replayToastBody(delivery, eventId) {
+    var d = delivery || {};
+    var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
+    if (!hasDetail) return eventId != null && eventId !== "" ? "event #" + eventId : "Delivery replayed";
+    var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
+    return "Delivery replayed · " + deliveryStatusLabel(d) + latency;
   }
 
   // Pure: the enable/disable toggle's rendered state under the D18 optimistic
@@ -5174,7 +5379,11 @@
         box.innerHTML = hint + '<div class="wh-del-empty muted">No deliveries yet.</div>';
         return;
       }
-      box.innerHTML = hint + rows.map(function (d) { return deliveryRowHtml(d, cliInstance(bp), ds); }).join("");
+      box.innerHTML = hint +
+        '<div class="wh-del-heading">Recent deliveries</div>' +
+        '<div class="wh-del-card">' +
+          rows.map(function (d) { return deliveryRowHtml(d, cliInstance(bp), ds); }).join("") +
+        "</div>";
       box.querySelectorAll("[data-wh-replay]").forEach(function (b) {
         b.addEventListener("click", function () {
           replayDelivery(listBox, bp, ds, wh, b.getAttribute("data-wh-replay"), b);
@@ -5187,7 +5396,11 @@
     if (btn) { btn.disabled = true; btn.textContent = "Replaying…"; }
     api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries/" + encodeURIComponent(eventId) + "/replay", ds), {}).then(function (r) {
       if (r.ok) {
-        toast({ kind: "success", title: "Replayed", body: "event #" + eventId });
+        // Reconcile on the RESPONSE: the proxy envelope nests the freshly-
+        // attempted delivery under data.data.delivery — the toast names its REAL
+        // status + latency, never a canned string (D-05 criterion / D18).
+        var delivery = r.data && r.data.data && r.data.data.delivery;
+        toast({ kind: "success", title: "Replayed", body: replayToastBody(delivery, eventId) });
         loadDeliveries(listBox, bp, ds, wh);
         return;
       }
@@ -5248,10 +5461,14 @@
   }
 
   // Pure: merge the two feeds into one newest-first timeline. Each entry:
-  // { source: "event"|"verify"|"audit", key, at, type, payload, actor }.
-  // Ordering is TOTAL and stable: timestamp desc; at equal timestamps the
-  // instance event outranks its audit attribution (the event is the primary
-  // record); final tiebreak on key so two repaints can never reorder.
+  // { source: "event"|"verify"|"audit", key, at, type, payload, actor, target }.
+  // `target` ("<target_type>:<target_id>", audit rows only) exists for the
+  // PARAMETERIZED coalesce key (tlvCoalesceKeyByTarget) — an instance feed is
+  // single-target so its events carry null; a team-wide feed (I-01) must not
+  // fold unrelated targets together. Ordering is TOTAL and stable: timestamp
+  // desc; at equal timestamps the instance event outranks its audit
+  // attribution (the event is the primary record); final tiebreak on key so
+  // two repaints can never reorder.
   function mergeTimeline(events, audits) {
     events = Array.isArray(events) ? events : [];
     audits = Array.isArray(audits) ? audits : [];
@@ -5265,6 +5482,7 @@
         type: String(e.type || ""),
         payload: e.payload || null,
         actor: null,
+        target: null,
       });
     });
     audits.forEach(function (a) {
@@ -5277,6 +5495,9 @@
         type: String(a.action || ""),
         payload: a.metadata || null,
         actor: (a.actor && a.actor.email) || null,
+        target: a.target_type && a.target_id != null
+          ? String(a.target_type) + ":" + String(a.target_id)
+          : null,
       });
     });
     entries.sort(function (x, y) {
@@ -5287,6 +5508,213 @@
       return x.key < y.key ? -1 : x.key > y.key ? 1 : 0;
     });
     return entries;
+  }
+
+  // ── D-04: THE event-coalescing grammar (GR26, styleguide §07) ─────────────
+  // "<thing> × N · cadence · shared verdict" — consecutive same-key runs fold
+  // into ONE summary row with an expand affordance. Repetition is summarised,
+  // never hidden, and the summary states the WORST verdict in the group. The
+  // fold sits between mergeTimeline (normalization) and the render, PURE all
+  // the way down; the group key is PARAMETERIZED so this same component serves
+  // the instance timeline (fold by type) and the team-wide Activity feed
+  // (I-01: fold by type+target so unrelated targets never merge).
+
+  // Pure: the instance timeline's default group key — source+type, plus the
+  // actor for audit rows (folding two people's actions into one attributed
+  // row would credit the wrong person). null = never coalesce.
+  function tlvCoalesceKey(entry) {
+    if (!entry) return null;
+    var k = String(entry.source || "") + "|" + String(entry.type || "");
+    if (entry.source === "audit") k += "|" + String(entry.actor || "");
+    return k;
+  }
+
+  // Pure: the I-01 variant — same key, further split by the entry's target
+  // ("site:12" vs "site:14"), so a team feed only folds repeats of the same
+  // action ON the same thing. Entries without a target degrade to the type key.
+  function tlvCoalesceKeyByTarget(entry) {
+    if (!entry) return null;
+    return tlvCoalesceKey(entry) + "|" + String(entry.target || "");
+  }
+
+  // Pure: fold a newest-first entry list into a render list. Singletons pass
+  // through UNCHANGED (===, so the caller's row cache/keys survive); a run of
+  // 2+ consecutive same-key entries folds to one group item:
+  //   { group: true, key, groupKey, entries, count, source, type, at }.
+  // The group's identity anchors on its OLDEST member — a live tick that
+  // prepends a new beat GROWS the group without re-keying it, so an operator's
+  // open group stays open across SSE repaints.
+  function coalesceEntries(entries, groupKeyFn) {
+    entries = Array.isArray(entries) ? entries : [];
+    var keyOf = typeof groupKeyFn === "function" ? groupKeyFn : tlvCoalesceKey;
+    var out = [];
+    var i = 0;
+    while (i < entries.length) {
+      var e = entries[i];
+      if (!e) { i++; continue; }
+      var k = keyOf(e);
+      var j = i + 1;
+      var run = [e];
+      while (k != null && j < entries.length && entries[j] && keyOf(entries[j]) === k) {
+        run.push(entries[j]);
+        j++;
+      }
+      if (run.length < 2) {
+        out.push(e);
+      } else {
+        out.push({
+          group: true,
+          key: "g:" + String(k) + ":" + String(run[run.length - 1].key),
+          groupKey: k,
+          entries: run,
+          count: run.length,
+          source: e.source,
+          type: e.type,
+          at: e.at, // newest member fronts the group
+        });
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  // Pure: one comparable verdict per entry — { text, sev } (sev 0 fine / 1
+  // neutral / 2 bad) or null where the type carries none (tls, content,
+  // audit, unknown: their rows summarise by count alone, never an invented
+  // verdict). The texts are written to compose after "all …" / "N of M …".
+  function tlvVerdictOf(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "verify") {
+      return p.ok ? { text: "passed", sev: 0 } : { text: "failed", sev: 2 };
+    }
+    if (entry.type === "health") {
+      if (p.health == null) return null;
+      var h = String(p.health);
+      return { text: "reporting health: " + h, sev: h === "up" ? 0 : 2 };
+    }
+    if (entry.type === "status") {
+      return p.transition ? { text: "→ " + String(p.transition), sev: 1 } : null;
+    }
+    if (entry.type === "backup") {
+      if (p.status == null) return null;
+      var s = String(p.status);
+      return s === "ok" ? { text: "completed", sev: 0 } : { text: s, sev: 2 };
+    }
+    return null;
+  }
+
+  // Pure: the shared-verdict segment. Every member agreeing → "all <text>";
+  // anything mixed → "<k> of <N> <worst text>" — the WORST is stated outright
+  // (highest sev; ties break to the newest member), never averaged away.
+  // Verdict-less groups return "" and the segment is omitted.
+  function tlvGroupVerdictText(entries) {
+    entries = Array.isArray(entries) ? entries : [];
+    var verdicts = [];
+    entries.forEach(function (e) {
+      var v = tlvVerdictOf(e);
+      if (v) verdicts.push(v);
+    });
+    if (!verdicts.length) return "";
+    var worst = verdicts[0]; // newest-first, so a sev tie keeps the newest
+    for (var i = 1; i < verdicts.length; i++) {
+      if (verdicts[i].sev > worst.sev) worst = verdicts[i];
+    }
+    var unanimous = verdicts.length === entries.length &&
+      verdicts.every(function (v) { return v.text === worst.text; });
+    if (unanimous) return "all " + worst.text;
+    var k = 0;
+    verdicts.forEach(function (v) { if (v.text === worst.text) k++; });
+    return k + " of " + entries.length + " " + worst.text;
+  }
+
+  // Pure: "~1m" durations — ONE rounded unit, never false precision.
+  function tlvApproxDur(ms) {
+    if (!(ms > 0)) return "0s";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.round(s / 60);
+    if (m < 60) return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 48) return h + "h";
+    return Math.round(h / 24) + "d";
+  }
+
+  // Pure: the cadence segment — "every ~1m for 9m" (mean interval + true
+  // span, both from the members' own stamps). A same-second burst (or junk
+  // stamps) yields "" rather than a fabricated rhythm.
+  function tlvGroupCadenceText(entries) {
+    entries = Array.isArray(entries) ? entries : [];
+    if (entries.length < 2) return "";
+    var span = tlvTs(entries[0].at) - tlvTs(entries[entries.length - 1].at);
+    if (!(span > 0)) return "";
+    return "every ~" + tlvApproxDur(span / (entries.length - 1)) + " for " + tlvApproxDur(span);
+  }
+
+  // Pure: the group's base title (the "× N" rides in the markup). Audit runs
+  // keep their actor only while the WHOLE run shares one (the default key
+  // guarantees it; a custom key that folds mixed actors drops the attribution
+  // rather than crediting the wrong person). Event groups read the base kind
+  // — never one member's enriched title stretched over the rest.
+  function tlvGroupTitle(group) {
+    group = group || {};
+    var entries = group.entries || [];
+    var first = entries[0] || {};
+    if (group.source === "audit") {
+      var actor = first.actor || null;
+      var mixed = false;
+      entries.forEach(function (e) { if (((e && e.actor) || null) !== actor) mixed = true; });
+      return (mixed ? "" : (actor || "system") + " ") + humanAction(group.type);
+    }
+    return TLV_EVENT_TITLES[group.type] || group.type || "Event";
+  }
+
+  // Pure: the badge tone for one entry — verify colours by OUTCOME (a green
+  // VERIFY chip over a failed run would be the badge lying), everything else
+  // by source. Shared by the single row and the group fold below.
+  function tlvBadgeMod(entry) {
+    return entry.source === "verify" && !(entry.payload && entry.payload.ok)
+      ? "verify-fail"
+      : entry.source;
+  }
+
+  // Pure: a group's badge inherits the WORST member tone — one failed run in
+  // a folded verify burst turns the whole summary badge red.
+  function tlvGroupBadgeMod(group) {
+    var entries = (group && group.entries) || [];
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i] && tlvBadgeMod(entries[i]) === "verify-fail") return "verify-fail";
+    }
+    return group.source;
+  }
+
+  // Pure: one coalesced row (tlv-coalesce family, styleguide §07). Closed:
+  // badge + "<title> × N" + "cadence · shared verdict" + "Show all N". Open:
+  // the SAME summary line (expanding adds, never swaps) with "Collapse" and
+  // every member row — each keeping its own Details toggle — on an inset rail.
+  function tlvGroupRowHtml(group, opts) {
+    opts = opts || {};
+    var open = !!opts.open;
+    var meta = [tlvGroupCadenceText(group.entries), tlvGroupVerdictText(group.entries)]
+      .filter(Boolean)
+      .join(" · ");
+    var expandedKeys = opts.expandedKeys || [];
+    return '<div class="tlv-row tlv-coalesce" data-tlv-group="' + esc(group.key) + '">' +
+      '<div class="tlv-head">' +
+        '<span class="tlv-badge tlv-badge--' + esc(tlvGroupBadgeMod(group)) + '">' + esc(group.source) + "</span>" +
+        '<span class="tlv-title">' + esc(tlvGroupTitle(group)) +
+          ' <span class="tlv-coalesce-count">&times; ' + group.count + "</span></span>" +
+        (meta ? '<span class="tlv-coalesce-meta">' + esc(meta) + "</span>" : "") +
+        '<span class="tlv-when" title="' + esc(fmtWhen(group.at)) + '">' + esc(relTime(group.at)) + "</span>" +
+        '<button class="tlv-coalesce-toggle" type="button" data-tlv-group-toggle aria-expanded="' +
+          (open ? "true" : "false") + '">' + (open ? "Collapse" : "Show all " + group.count) + "</button>" +
+      "</div>" +
+      (open
+        ? '<div class="tlv-coalesce-members">' + group.entries.map(function (e) {
+            return tlvRowHtml(e, expandedKeys.indexOf(e.key) !== -1);
+          }).join("") + "</div>"
+        : "") +
+      "</div>";
   }
 
   // Pure: one human title per entry. Audit rows read like the Activity tab
@@ -5344,13 +5772,11 @@
 
   // Pure: one feed row. `expanded` re-applies the operator's open details
   // across live repaints (an SSE tick must never fold what they were reading).
-  // The verify badge colours by OUTCOME (ok → green, anything else → red):
-  // a green VERIFY chip over "Verification failed" would be the badge lying.
+  // The badge tone comes from tlvBadgeMod (verify colours by OUTCOME: a green
+  // VERIFY chip over "Verification failed" would be the badge lying).
   function tlvRowHtml(entry, expanded) {
     var hasDetail = tlvHasDetail(entry);
-    var badgeMod = entry.source === "verify" && !(entry.payload && entry.payload.ok)
-      ? "verify-fail"
-      : entry.source;
+    var badgeMod = tlvBadgeMod(entry);
     return '<div class="tlv-row" data-tlv-key="' + esc(entry.key) + '">' +
       '<div class="tlv-head">' +
         '<span class="tlv-badge tlv-badge--' + esc(badgeMod) + '">' + esc(entry.source) + "</span>" +
@@ -5367,9 +5793,13 @@
       "</div>";
   }
 
-  // Pure: the whole feed. opts.quietLine is the ONE honest degradation line
-  // (audit 403 → "visible to team admins"); opts.expandedKeys re-opens rows.
-  // Empty teaches rather than apologises.
+  // Pure: the whole feed, coalesced through THE grammar (D-04): consecutive
+  // same-key runs render as one tlv-coalesce summary row; singletons render
+  // as before. opts.quietLine is the ONE honest degradation line (audit 403 →
+  // "visible to team admins"); opts.expandedKeys re-opens member details;
+  // opts.openGroups re-opens expanded groups (an SSE tick must never fold
+  // what the operator was reading); opts.groupKey swaps the fold key (I-01
+  // passes tlvCoalesceKeyByTarget). Empty teaches rather than apologises.
   function timelineFeedHtml(entries, opts) {
     opts = opts || {};
     entries = Array.isArray(entries) ? entries : [];
@@ -5382,8 +5812,15 @@
         "verification runs, and team actions, in order.</p></div>";
     }
     var open = opts.expandedKeys || [];
-    return quiet + entries.map(function (e) {
-      return tlvRowHtml(e, open.indexOf(e.key) !== -1);
+    var openGroups = opts.openGroups || [];
+    return quiet + coalesceEntries(entries, opts.groupKey).map(function (item) {
+      if (item && item.group) {
+        return tlvGroupRowHtml(item, {
+          open: openGroups.indexOf(item.key) !== -1,
+          expandedKeys: open,
+        });
+      }
+      return tlvRowHtml(item, open.indexOf(item.key) !== -1);
     }).join("");
   }
 
@@ -5395,6 +5832,11 @@
   // SSE-driven remount (loadInstance repaints the whole workspace) re-opens
   // exactly what the operator had open. In-memory: a refresh forgets.
   var tlvExpanded = {};
+  // Open-group memory, keyed "<bp.id>|<group.key>" — the same law for the
+  // coalesced rows: a live repaint re-opens exactly the groups the operator
+  // expanded (the group key anchors on its oldest member, so a fresh beat
+  // joining the run never re-keys it shut).
+  var tlvGroupOpen = {};
   // Last painted feed per instance — an SSE remount paints this instantly
   // instead of flashing "Loading…" on every live tick.
   var tlvCache = null;
@@ -5456,16 +5898,40 @@
     entries.forEach(function (e) {
       if (tlvExpanded[String(bp.id) + "|" + e.key]) open.push(e.key);
     });
-    box.innerHTML = timelineFeedHtml(entries, { quietLine: quietLine, expandedKeys: open });
+    var openGroups = [];
+    var prefix = String(bp.id) + "|";
+    Object.keys(tlvGroupOpen).forEach(function (k) {
+      if (k.indexOf(prefix) === 0) openGroups.push(k.slice(prefix.length));
+    });
+    box.innerHTML = timelineFeedHtml(entries, {
+      quietLine: quietLine,
+      expandedKeys: open,
+      openGroups: openGroups,
+    });
   }
 
   // ONE delegated listener per mount (the panel node lives for the tab's whole
-  // life; paints only swap its inner feed) — details toggle + error Retry.
+  // life; paints only swap its inner feed) — group Show-all/Collapse + details
+  // toggle + error Retry.
   function wireTimelineFeed(root, bp) {
     if (!root || !root.addEventListener) return; // fake-DOM smoke
     root.addEventListener("click", function (e) {
       var t = e.target;
       if (!t || !t.closest) return;
+      var gbtn = t.closest("[data-tlv-group-toggle]");
+      if (gbtn) {
+        var grow = gbtn.closest("[data-tlv-group]");
+        if (!grow) return;
+        var gkey = String(bp.id) + "|" + grow.getAttribute("data-tlv-group");
+        if (tlvGroupOpen[gkey]) delete tlvGroupOpen[gkey];
+        else tlvGroupOpen[gkey] = true;
+        // Repaint from the cached feed — the member rows only exist in the
+        // markup while their group is open (100 folded beats stay cheap).
+        if (tlvCache && String(tlvCache.id) === String(bp.id)) {
+          paintTimeline(root, bp, tlvCache.entries, tlvCache.quietLine);
+        }
+        return;
+      }
       var btn = t.closest("[data-tlv-toggle]");
       if (btn) {
         var row = btn.closest("[data-tlv-key]");
@@ -5581,12 +6047,14 @@
     var runBtn = model.ran
       ? '<button class="btn btn-sm" type="button" data-vf-run>Check now</button>'
       : '<button class="btn btn-sm btn-primary" type="button" data-vf-run>Run first check</button>';
+    // GR24 (D-03, v4): the verdict line reads as the card's subtitle under the
+    // heading (screens/02 overview) — same honest verifySummaryText, chips below.
     return '<div class="vf-card">' +
-      '<div class="vf-head"><h2>Golden path</h2>' + runBtn + "</div>" +
+      '<div class="vf-head"><div class="vf-head-main"><h2>Golden path</h2>' +
+        '<p class="vf-meta">' + esc(verifySummaryText(model)) + "</p></div>" + runBtn + "</div>" +
       '<div class="vf-chips" role="list" aria-label="Verification checks">' +
         model.chips.map(verifyChipHtml).join("") +
       "</div>" +
-      '<div class="vf-meta">' + esc(verifySummaryText(model)) + "</div>" +
       (noteHtml || "") +
       "</div>";
   }
@@ -5684,27 +6152,34 @@
 
   // ================================================== DOMAIN CHECKLIST (S13)
   // The per-host DNS/TLS checklist — DNS found → points here → TLS issued →
-  // serving — for the azure-hetzner hosting parity work. The CLI (`bp cloud
-  // domain status`) and this rail render the SAME control-plane envelope (GET
-  // /v1/barkparks/:id/domain-status); NEITHER surface probes — the CP owns the
-  // truth. domainStages is the ONE pure fold, node-pinned in __app.test.mjs;
-  // the DOM mount + 4s poll (loadInstanceDomains) are browser-verified.
+  // serving. ONE shared component, TWO mounts: the instance rail
+  // (#instance-domains ⇐ GET /v1/barkparks/:id/domain-status) and the site
+  // detail (#site-domains ⇐ GET /v1/sites/:id/domain-status, gr-p3-site-detail).
+  // The CLI (`bp cloud domain status`) renders the SAME control-plane envelope;
+  // NO surface probes — the CP owns the truth. domainStages is the ONE pure
+  // fold, node-pinned in __app.test.mjs; the DOM mounts + 4s poll are
+  // browser-verified. Rendered in the v4 rung-pill grammar (.dom-*).
 
   // Fold one host's stage array into display rows. Roles: ok/failed pass
-  // through; a pending rung is "pending" (waiting) EXCEPT the first pending rung
-  // after at least one ok rung, which becomes "active" (the front currently
-  // being established) — the checklist shows honest motion (the markNextStep
-  // idiom). showRemediation is true ONLY under a non-ok rung that carries a
-  // server remediation string (server-owned copy, rendered verbatim — the SPA
-  // never invents fix text).
+  // through; `proxied` (the CF-orange-cloud informational classification of
+  // points_here — a MODE, never a fault) passes through as its own settled
+  // role; a pending rung is "pending" (waiting) EXCEPT the first pending rung
+  // after at least one settled-forward rung, which becomes "active" (the front
+  // currently being established) — the checklist shows honest motion (the
+  // markNextStep idiom). showRemediation is true ONLY under a failed/waiting
+  // rung that carries a server remediation string (server-owned copy, rendered
+  // verbatim — the SPA never invents fix text; a proxied rung is informational
+  // and never carries one).
   function domainStageRows(stages) {
     stages = Array.isArray(stages) ? stages : [];
     var rows = [], seenOk = false, sawActive = false;
     for (var i = 0; i < stages.length; i++) {
       var s = stages[i] || {};
       var status = typeof s.status === "string" ? s.status : "";
-      var role = status === "ok" ? "ok" : status === "failed" ? "failed" : "pending";
-      if (role === "ok") seenOk = true;
+      var role = status === "ok" ? "ok"
+        : status === "failed" ? "failed"
+        : status === "proxied" ? "proxied" : "pending";
+      if (role === "ok" || role === "proxied") seenOk = true;
       if (role === "pending" && seenOk && !sawActive) { role = "active"; sawActive = true; }
       var remediation = typeof s.remediation === "string" ? s.remediation : "";
       var label = (typeof s.label === "string" && s.label) ? s.label
@@ -5716,7 +6191,7 @@
         status: status,
         evidence: typeof s.evidence === "string" ? s.evidence : "",
         remediation: remediation,
-        showRemediation: role !== "ok" && !!remediation,
+        showRemediation: role !== "ok" && role !== "proxied" && !!remediation,
       });
     }
     return rows;
@@ -5752,8 +6227,9 @@
         // must fix; a genuinely-terminal DNS/points failure already keeps polling
         // via its trailing skipped-pending rungs, so this stays narrow — never
         // broaden it to every failed rung or a real dead-end infinite-polls).
+        // `proxied` is settled (an informational mode, nothing left to change).
         if (r.role === "failed" && r.stage === "serving") return false;
-        return r.role === "ok" || r.role === "failed";
+        return r.role === "ok" || r.role === "failed" || r.role === "proxied";
       });
     });
     return {
@@ -5774,43 +6250,46 @@
     return kind || "";
   }
 
-  // Pure: one rung chip. Reuses the verify-card chip vocabulary (.vf-chip) so it
-  // is styled without new CSS: ok → pass (✓), failed → fail (✗), pending/active
-  // → the neutral "unknown" chip (·). The accessible name carries the state in
-  // WORDS, never colour alone.
+  // Pure: one rung chip in the v4 rung-pill grammar (.dom-rung, gr-p3): ok → ●,
+  // failed → ✕, active → ◐, waiting → ·, proxied → ● info (informational — the
+  // domain is fronted by a proxy, so origin-pointing is a mode, not a check).
+  // The accessible name carries the state in WORDS, never colour alone.
   function domainRungChip(row, showEvidence) {
     if (showEvidence === undefined) showEvidence = true;
-    var vfRole = row.role === "ok" ? "pass" : row.role === "failed" ? "fail" : "unknown";
-    var glyph = vfRole === "pass" ? "&#10003;" : vfRole === "fail" ? "&#10007;" : "&middot;";
+    var glyph = row.role === "ok" || row.role === "proxied" ? "&#9679;"
+      : row.role === "failed" ? "&#10007;"
+      : row.role === "active" ? "&#9684;" : "&middot;";
     var state = row.role === "ok" ? "done"
       : row.role === "failed" ? "failed"
+      : row.role === "proxied" ? "proxied"
       : row.role === "active" ? "in progress" : "waiting";
-    return '<span class="vf-chip vf-chip--' + vfRole + '" role="listitem" aria-label="' +
+    return '<span class="dom-rung dom-rung--' + esc(row.role) + '" role="listitem" aria-label="' +
       esc(row.label + " — " + state) + '">' +
-      '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
+      '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
       esc(row.label) +
-      (showEvidence && row.evidence ? '<span class="vf-chip-code">' + esc(row.evidence) + "</span>" : "") +
+      (showEvidence && row.evidence ? '<span class="dom-rung-code">' + esc(row.evidence) + "</span>" : "") +
       "</span>";
   }
 
-  // Pure: the whole rail checklist. Empty (no attached domains) degrades to the
-  // original single Domain rail row. Otherwise one .vf-card per host — head
-  // (host + kind), the rung chips, then the server's remediation lines under any
-  // non-ok rung, verbatim.
+  // Pure: the whole checklist. Empty (no attached domains) degrades to the
+  // original single Domain rail row (the instance-rail mount's static state).
+  // Otherwise one .dom-card per host — head (mono host + kind chip), the v4
+  // rung pills, then the server's remediation lines under any non-ok rung,
+  // verbatim. Shared verbatim by BOTH mounts (instance rail + site detail).
   function domainChecklistHtml(model, bp) {
     if (!model || model.empty) {
       return railRow("Domain", (bp && bp.custom_host) || "—");
     }
     return model.domains.map(function (d) {
-      var head = esc(d.host) +
-        (domainKindChip(d.kind) ? ' <span class="vf-chip-code">' + esc(domainKindChip(d.kind)) + "</span>" : "");
-      // Evidence dedup: keep it on ok / failed / the FRONT non-ok rung; drop the
-      // repeated "…an earlier step isn't passing." filler on downstream pending
-      // rungs (render layer only — the pure domainStageRows model is untouched).
+      var kind = domainKindChip(d.kind);
+      // Evidence dedup: keep it on ok / failed / proxied / the FRONT non-ok
+      // rung; drop the repeated "…an earlier step isn't passing." filler on
+      // downstream pending rungs (render layer only — the pure domainStageRows
+      // model is untouched).
       var frontSeen = false;
       var rungs = d.rows.map(function (row) {
         var showEvidence = true;
-        if (row.role !== "ok") {
+        if (row.role !== "ok" && row.role !== "proxied") {
           if (frontSeen && row.role === "pending") showEvidence = false;
           frontSeen = true;
         }
@@ -5822,13 +6301,15 @@
       var remedies = d.rows.filter(function (r) { return r.showRemediation; })
         .map(function (r) { return r.remediation; })
         .filter(function (t) { if (seenRem[t]) return false; seenRem[t] = true; return true; })
-        .map(function (t) { return '<div class="vf-note">' + esc(t) + "</div>"; }).join("");
+        .map(function (t) { return '<div class="dom-note">' + esc(t) + "</div>"; }).join("");
       var when = model.checkedAt
-        ? '<div class="vf-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
+        ? '<div class="dom-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
         : "";
-      return '<div class="vf-card">' +
-        '<div class="vf-head"><h2>' + head + "</h2></div>" +
-        '<div class="vf-chips" role="list" aria-label="Domain checks for ' + esc(d.host) + '">' +
+      return '<div class="dom-card">' +
+        '<div class="dom-head"><span class="dom-host">' + esc(d.host) + "</span>" +
+          (kind ? '<span class="dom-kind">' + esc(kind) + "</span>" : "") +
+        "</div>" +
+        '<div class="dom-rungs" role="list" aria-label="Domain checks for ' + esc(d.host) + '">' +
           rungs +
         "</div>" +
         remedies + when +
@@ -5865,6 +6346,37 @@
         domainPollTimer = setTimeout(function () {
           if (seq !== domainSeq) return;
           loadInstanceDomains(bp);
+        }, 4000);
+      }
+    });
+  }
+
+  // gr-p3-site-detail: the SITE mount of the same checklist — the domains rungs
+  // on site detail, against GET /v1/sites/:id/domain-status (same envelope,
+  // CF-mode-aware: a proxied site's points_here rung reads `proxied`). Paints
+  // into #site-domains ONLY when the site has attached domains (no empty shell,
+  // D17); a 404 (older control plane) / error leaves the section empty. Shares
+  // the instance mount's seq + poll slot — the two views never coexist, and a
+  // navigation to either bumps the seq to invalidate stale polls.
+  function loadSiteDomains(site) {
+    var box = $("#site-domains");
+    if (!box) return;
+    var seq = ++domainSeq;
+    clearTimeout(domainPollTimer);
+    api("GET", "/v1/sites/" + encodeURIComponent(site.id) + "/domain-status").then(function (r) {
+      if (seq !== domainSeq) return; // a newer load owns the slot
+      var b = $("#site-domains");
+      if (!b) return;
+      if (!r.ok || !r.data) return; // leave the section empty on 404/error
+      var model = domainStages(r.data, Date.now());
+      if (model.empty) { b.innerHTML = ""; return; }
+      b.innerHTML = '<div class="deploys-head"><h2>Domains</h2></div>' +
+        domainChecklistHtml(model, null);
+      if (!model.terminal) {
+        clearTimeout(domainPollTimer);
+        domainPollTimer = setTimeout(function () {
+          if (seq !== domainSeq) return;
+          loadSiteDomains(site);
         }, 4000);
       }
     });
@@ -6035,6 +6547,9 @@
       // W4: mount the live six-stage rail for the in-flight deployment (if any),
       // driven by the site.deploy.stage SSE push — not a poll.
       mountDeployRail(box, site, bp, deployments);
+      // gr-p3: the domains rungs — the shared checklist against the site's own
+      // domain-status endpoint (painted only when domains are attached).
+      loadSiteDomains(site);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
       var themeSel = $("#site-theme-select");
@@ -6104,6 +6619,27 @@
     return { theme: value || "" };
   }
 
+  // gr-p3: the site's honest headline state chip, derived from server truth —
+  // the deployment the production pointer names. Live → the ok pill; an
+  // in-flight build → Deploying; a failed CURRENT pointer never happens (the
+  // pointer only moves to live rows), so absence of a live current row simply
+  // renders no chip (never an invented status). Consumes .dep-pill (GR11).
+  function siteStatusChip(site, deployments) {
+    var arr = deployments || [];
+    for (var i = 0; i < arr.length; i++) {
+      if (deployIsActive(arr[i].status || "queued")) {
+        return '<span class="dep-pill dep-building">Deploying</span>';
+      }
+    }
+    if (site && site.current_deployment_id) {
+      var cur = arr.filter(function (d) {
+        return String(d.id) === String(site.current_deployment_id) && (d.status || "") === "live";
+      })[0];
+      if (cur) return '<span class="dep-pill dep-live">Live</span>';
+    }
+    return "";
+  }
+
   function siteDetailHtml(site, bp, deployments, domain, previews) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
@@ -6129,7 +6665,11 @@
         ? '<button class="btn btn-ghost btn-sm" id="site-rollback" type="button">Roll back</button>'
         : "") +
       "</div>";
-    var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
+    // gr-p3 (v4 header): a connected site's GitHub button IS the repo name in
+    // mono (screens2/05's `owner/repo ↗` chip); unconnected keeps the verb.
+    var githubLabel = site.github_repo
+      ? '<span class="mono">' + esc(site.github_repo) + "</span>"
+      : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
@@ -6143,7 +6683,8 @@
     var liveLine = live
       ? ' &middot; <a class="site-open" href="' + esc(live) + '" target="_blank" rel="noopener">' + esc(live) + "&nbsp;&#8599;</a>"
       : "";
-    return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
+    return '<div class="detail-head"><div><h1 class="site-title">' + esc(domain) +
+        siteStatusChip(site, deployments) + "</h1>" +
         '<div class="fleet-url">' + sub + liveLine + "</div></div>" +
         '<div class="fleet-badges">' +
           (live ? '<a class="btn btn-ghost btn-sm site-open" href="' + esc(live) + '" target="_blank" rel="noopener">Visit&nbsp;&#8599;</a>' : "") +
@@ -6152,7 +6693,11 @@
       '<div class="detail-grid">' +
         '<div class="detail-main"><div id="deploy-rail-slot"></div>' + deploysHead + rollbackBanner +
           '<div class="deploys" id="site-deploys">' + list + "</div>" +
-          previewSection + "</div>" +
+          previewSection +
+          // gr-p3: the domains rungs mount — loadSiteDomains paints it only
+          // when the site has attached domains (no empty shell, D17).
+          '<div class="site-domains" id="site-domains"></div>' +
+        "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
           railRow("Framework", site.framework || "—") +
@@ -6219,6 +6764,34 @@
     return isGithubPushBlocked(reason) ? "blocked" : "crashed";
   }
 
+  // gr-p3 (v4): the ONE failure panel both deploy-row families render — the
+  // red-bordered box carrying the server's failure copy behind a danger dot
+  // (v4.dc.html:569-575). Blocked (github-push family) keeps its calm amber
+  // tone. A snap state: the CSS carries no transition/animation (failed never
+  // eases). Empty reason → no panel. Pure.
+  function deployFailHtml(reason) {
+    if (!reason) return "";
+    return '<div class="deploy-fail' +
+      (failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
+      '<span class="deploy-fail-dot" aria-hidden="true"></span>' +
+      "<span>" + esc(failureCopy(reason)) + "</span></div>";
+  }
+
+  // gr-p3 (v4): a settled deployment's honest duration — the two server stamps
+  // only (inserted_at → became_live_at for a live row; inserted_at → updated_at
+  // for failed/cancelled). In-flight rows and rows missing a stamp return null
+  // (no guessed duration, no NaN). Pure; rendered through fmtDur.
+  function deployDuration(d) {
+    if (!d || !d.inserted_at) return null;
+    var st = d.status || "";
+    var end = st === "live" ? d.became_live_at
+      : (st === "failed" || st === "cancelled") ? d.updated_at
+      : null;
+    if (!end) return null;
+    var ms = Date.parse(end) - Date.parse(d.inserted_at);
+    return isFinite(ms) && ms >= 0 ? ms : null;
+  }
+
   // gh-6: one branch-preview row — its branch, a click-through to the preview
   // URL, status pill, and the same live build console as a production deploy.
   function previewRow(d) {
@@ -6230,11 +6803,17 @@
           esc(d.preview_host || url) + "</a>"
       : '<span class="dim">pending routing</span>';
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
+    // gr-p3 (v4 anatomy): environment · trigger provenance (GR27) · duration ·
+    // when — the same meta grammar as a production row.
+    var pmeta = ["preview"];
+    if (d.trigger) pmeta.push(esc(deployTriggerLabel(d.trigger)));
+    var pdur = deployDuration(d);
+    if (pdur != null) pmeta.push(esc(fmtDur(pdur)));
+    pmeta.push(esc(fmtWhen(when)));
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
-        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        '<div class="deploy-meta">' + pmeta.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
       '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
@@ -6491,17 +7070,16 @@
   // state directly; we NEVER poll (the async 202+poll of the INSTANCE rollback,
   // rollbackInstance app.js:~3237, is the named regression trap).
 
-  // Human label for how a deployment shipped. Only rendered when the server sent a
-  // trigger; unknown values pass through humanized (_/- → spaces). Pure.
+  // Human label for a deployment's PROVENANCE — the trigger, and ONLY the
+  // trigger (GR27/GR28: a deployment row carries no actor; never a named
+  // human). The backend vocabulary is exactly manual | content-auto
+  // (Registry.Deployment @triggers); anything else passes through humanized
+  // (_/- → spaces) so an unknown future value degrades honestly instead of
+  // being re-mapped to copy the server never said. Pure.
   function deployTriggerLabel(trigger) {
     switch (trigger) {
-      case "content-auto": return "auto";
-      case "github_webhook":
-      case "github-push": return "GitHub push";
-      case "manual": return "manual";
-      case "cli": return "CLI";
-      case "rollback": return "rollback";
-      case "promote": return "promote";
+      case "content-auto": return "Content update";
+      case "manual": return "Manual";
       default: return trigger ? String(trigger).replace(/[_-]+/g, " ") : "";
     }
   }
@@ -7004,18 +7582,20 @@
     var rolledBack = isCurrent && flash && flash.kind === "restored" &&
       flash.deploymentId != null && String(flash.deploymentId) === String(d.id);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    // Git meta the row already carries (D7): branch, trigger (how it shipped), sha
-    // (when the headline is an image tag), and WHEN — "live since" once it went live.
-    var metaBits = [];
+    // gr-p3 (v4 anatomy, screens2/05): environment · branch · trigger
+    // provenance (GR27 — trigger ONLY, never a named human) · sha (when the
+    // headline is an image tag) · duration · WHEN — "live since" once live.
+    var metaBits = [esc(d.environment || "production")];
     if (d.branch) metaBits.push(esc(d.branch));
     if (d.trigger) metaBits.push(esc(deployTriggerLabel(d.trigger)));
     if (d.git_ref && d.image_tag) metaBits.push('<span class="mono">' + esc(shortSha(d.git_ref)) + "</span>");
+    var dur = deployDuration(d);
+    if (dur != null) metaBits.push(esc(fmtDur(dur)));
     metaBits.push(esc((st === "live" && d.became_live_at ? "live since " : "") + fmtWhen(when)));
     // The restored row keeps its ORIGINAL became_live_at, so name it a restore or the
     // old time reads as staleness (D25). Static prefix — only the time is server data.
     if (rolledBack) metaBits.push("restored build from " + esc(fmtWhen(d.became_live_at || when)));
-    var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
     var action = promoteActionFor(d, currentId);
     var actionBtn = action
       ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
@@ -11243,6 +11823,17 @@
     { key: "load", label: "Load", unit: "", role: "info" },
   ];
 
+  // GR27/D-07: the request-level signals the on-box agent does NOT yet report.
+  // Rendered as honest DASHED stubs beneath the live vitals grid — a promise of
+  // WHAT (not WHEN, and never a fabricated number: GR28 killed the "unlocks after
+  // 24h" fiction outright). Each carries the same "Not yet metered" wording the
+  // Usage tab uses for an unmetered meter, so the two tabs read as one honesty.
+  var METRIC_STUBS = [
+    { key: "req_per_s", label: "Req/s" },
+    { key: "p95_ms", label: "p95 latency" },
+    { key: "api_requests", label: "API requests" },
+  ];
+
   // Pure: an honest human age from the beat's age_seconds. Deterministic (no
   // Date.now dependency — the server already computed the age at collection), so
   // the reducer is node-pinnable. A negative/absent/garbage age → "".
@@ -11415,6 +12006,20 @@
       '<div class="fleet-badges">' + line + "</div></div>";
   }
 
+  // Pure: the dashed request-level stubs beneath the vitals grid. Constant (no
+  // model input) — these signals are honestly not-yet-metered, so the row states
+  // WHAT is coming, never a fabricated number or an ETA (GR28). Rendered only
+  // alongside a real read (live/stale); the absent panel owns its own empty state.
+  function metricsStubsHtml() {
+    var cells = METRIC_STUBS.map(function (s) {
+      return '<div class="metrics-stub">' +
+        '<span class="metrics-stub-label">' + esc(s.label) + "</span>" +
+        '<span class="metrics-stub-value dim">Not yet metered</span>' +
+      "</div>";
+    }).join("");
+    return '<div class="metrics-stubs" aria-label="Request-level metrics">' + cells + "</div>";
+  }
+
   // Pure: the freshness / stale banner above the grid.
   function metricsHeadHtml(model) {
     if (model.stale) {
@@ -11436,6 +12041,7 @@
     var grid = model.metrics.map(metricsCardHtml).join("");
     return metricsHeadHtml(model) +
       '<div class="metrics-grid">' + grid + "</div>" +
+      metricsStubsHtml() +
       metricsHealthHtml(model.health);
   }
 
@@ -11469,6 +12075,11 @@
   var metricsSeq = 0;
   var metricsPollTimer = null;
   function mountMetricsTab(panel, bp) {
+    // Defensive re-acquire by id (the mountUsageTab idiom): the caller passes the
+    // freshly-rendered tabpanel, but a lost ref still resolves through
+    // getElementById — so the vitals render (and stay observable to the preview
+    // harness) rather than no-op.
+    if (!panel && typeof document !== "undefined" && document.getElementById) panel = document.getElementById("instance-tabpanel");
     if (!panel) return;
     panel.innerHTML = metricsTabShellHtml();
     var seq = ++metricsSeq;
@@ -11476,7 +12087,10 @@
     function tick() {
       api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/metrics?points=" + METRICS_POINTS).then(function (r) {
         if (seq !== metricsSeq) return; // a newer mount owns the tab
-        var box = panel.querySelector(".metrics-body");
+        // The shell's .metrics-body is the swap target in the live DOM; fall back
+        // to the panel itself if a harness can't resolve the sub-query (the
+        // mountUsageTab `.fleet-body || panel` idiom — same element the grid lands in).
+        var box = panel.querySelector(".metrics-body") || panel;
         if (!box || box.isConnected === false) return; // navigated away mid-flight
         if (!r.ok || !r.data) {
           box.innerHTML = metricsErrorHtml(r.status);
@@ -12674,7 +13288,7 @@
   //     S5 four-surface coherence harness — the human sign-off gate for the
   //     Unified Aesthetic. >>>
   var COHERENCE_TOKENS = [
-    "--primary", "--primary-fg", "--accent",
+    "--primary", "--primary-fg", "--cc-amber",
     "--ok", "--warn", "--danger", "--info",
     "--bg", "--surface", "--text", "--muted-text", "--border",
   ];
@@ -12887,7 +13501,8 @@
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
-      deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
+      deliveryStatusLabel: deliveryStatusLabel, deliveryRowHtml: deliveryRowHtml,
+      replayToastBody: replayToastBody, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
       // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.
@@ -12959,6 +13574,7 @@
       metricsAgeText: metricsAgeText, metricsValueText: metricsValueText,
       metricsPanelHtml: metricsPanelHtml, metricsCardHtml: metricsCardHtml,
       metricsHealthHtml: metricsHealthHtml, metricsKeys: METRIC_SPECS.map(function (s) { return s.key; }),
+      metricsStubsHtml: metricsStubsHtml, metricsStubKeys: METRIC_STUBS.map(function (s) { return s.key; }),
       // S14 (azure-hetzner hosting): the archives panel. Only the pure projection
       // (archivesModel) + its render helpers are node-pinned; the DOM mount
       // (loadArchives) is browser-verified.
@@ -13057,6 +13673,47 @@
       // newRenderPriceLine) is browser+smoke-driven.
       theaterPriceModel: theaterPriceModel,
       theaterPriceLineHtml: theaterPriceLineHtml,
+      // gr-p3 D-01 fleet + archives (v4 screens/01): the v4 row anatomy — the
+      // mono metadata line, its autoupdate segment, the orthogonal update chip
+      // (model + markup), the pill's update-state strip, and the whole row — all
+      // pure/node-pinned. The DOM mounts (loadFleet/wireFleetRows/loadArchives)
+      // stay browser-verified. archivesModel now carries the notConfigured state.
+      fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
+      fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
+      withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
+      // gr-p3 instance workspace (GR24, screens/02): the v4 header (two-axis
+      // compound pill + address copy + bp CLI disclosure) and the composed
+      // Overview pass — both pure string builders; the toggle wiring
+      // (wireInstanceActions #inst-cli-toggle) is browser+smoke-verified.
+      instanceHeaderHtml: instanceHeaderHtml,
+      instanceOverviewHtml: instanceOverviewHtml,
+      instanceLifecycle: instanceLifecycle,
+      // gr-p3 D-04 (GR26): THE event-coalescing grammar — the pure fold, its
+      // two parameterized group keys (instance type-key vs I-01 type+target),
+      // the worst-verdict/cadence copy, and the tlv-coalesce row render. The
+      // Show-all/Collapse wiring (wireTimelineFeed) is browser-verified; the
+      // toggle's two markup states are node-pinned via tlvGroupRowHtml.
+      coalesceEntries: coalesceEntries,
+      tlvCoalesceKey: tlvCoalesceKey,
+      tlvCoalesceKeyByTarget: tlvCoalesceKeyByTarget,
+      tlvVerdictOf: tlvVerdictOf,
+      tlvGroupVerdictText: tlvGroupVerdictText,
+      tlvGroupCadenceText: tlvGroupCadenceText,
+      tlvApproxDur: tlvApproxDur,
+      tlvGroupTitle: tlvGroupTitle,
+      tlvBadgeMod: tlvBadgeMod,
+      tlvGroupBadgeMod: tlvGroupBadgeMod,
+      tlvGroupRowHtml: tlvGroupRowHtml,
+      // gr-p3-site-detail (E-02): the v4 site-detail pure helpers — the shared
+      // failure panel (deployFailHtml), the honest two-stamp duration
+      // (deployDuration), the header state chip (siteStatusChip), and the full
+      // detail markup (siteDetailHtml) so the harness can pin the domains mount,
+      // the read-only Scale row and the mono repo button. The site domains DOM
+      // mount (loadSiteDomains) + 4s poll are smoke+browser-verified.
+      deployFailHtml: deployFailHtml,
+      deployDuration: deployDuration,
+      siteStatusChip: siteStatusChip,
+      siteDetailHtml: siteDetailHtml,
     });
   }
 })();
