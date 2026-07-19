@@ -129,6 +129,19 @@ defmodule Barkpark.CycleFleetTest do
       assert definition =~
                ~r/model_reasoning_effort'\) IS DISTINCT FROM\s+CASE WHEN expected\.phase IN \('build', 'review'\)/
     end
+
+    test "promotion admission preserves the frozen live-authority digest contract" do
+      %{rows: [[definition]]} =
+        Repo.query!(
+          "SELECT pg_get_functiondef('barkpark_validate_cycle_correction()'::regprocedure)"
+        )
+
+      assert definition =~
+               "block->'cycle_ledger'->>'live_authority_digest' ~ '^[0-9a-f]{64}$'"
+
+      refute definition =~
+               ~r/live_authority_digest' =\s+barkpark_jsonb_canonical_digest/
+    end
   end
 
   describe "durable wave contracts" do

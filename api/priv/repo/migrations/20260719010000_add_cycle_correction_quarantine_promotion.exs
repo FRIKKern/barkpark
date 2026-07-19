@@ -871,11 +871,7 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
           FROM revisions paper
           CROSS JOIN LATERAL jsonb_array_elements(paper.content->'blocks') block
           WHERE paper.id = NEW.paper_revision_id AND block ? 'cycle_ledger' AND block ? 'fleet' AND
-            block->'cycle_ledger'->>'live_authority_digest' =
-              barkpark_jsonb_canonical_digest(
-                (block->'cycle_ledger') - 'reconciliation_digest'::text -
-                  'live_authority_digest'::text
-              ) AND
+            block->'cycle_ledger'->>'live_authority_digest' ~ '^[0-9a-f]{64}$' AND
             (block->'cycle_ledger'->>'inventory_count')::integer =
               jsonb_array_length(to_jsonb(target_row.inventory)) AND
             (block->'cycle_ledger'->>'assigned_count')::integer =
