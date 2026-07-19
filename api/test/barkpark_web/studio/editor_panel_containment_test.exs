@@ -58,6 +58,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   server-rendered *inside* the panel with viewport coordinates. It is cheap
   cross-engine insurance. Do not "clean it up" — and do not "fix" it either.
 
+  ## What the census reads (spd-b10f)
+
+  A census that skips a source certifies safety it never checked, so the four
+  places a `position: fixed` can enter the Studio are all read here:
+  `root.html.heex`, inline `style=` in the studio `.ex`/`.heex` sources, shipped
+  `priv/static/assets/*.js`, and `assets/paper-editor/src/styles.css` — the last
+  of which spd-b10 named as its own gap in #4471 and this slice closed.
+
   This slice READS `root.html.heex`; it never edits it (file-disjoint from spd-s4).
   """
   use ExUnit.Case, async: true
@@ -67,6 +75,15 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   @root Path.expand("../../../lib/barkpark_web/layouts/root.html.heex", __DIR__)
   @lib Path.expand("../../../lib/barkpark_web", __DIR__)
   @static_js Path.expand("../../../priv/static/assets", __DIR__)
+
+  # The paper editor's own stylesheet — spd-b10 shipped the census WITHOUT it and
+  # said so (spd-b10f closes that gap). It is a fourth source of `position: fixed`
+  # and the most dangerous one: the `<bp-paper-editor>` custom element mounts
+  # INSIDE the `studio-paper-editor` `.editor-panel` root, so anything this sheet
+  # positions that does not portal renders under a panel. esbuild emits it to
+  # `priv/static/assets/bp-paper-editor.css` (index.js `ensureStyles/0` links it),
+  # which the `*.js` glob below never sees — the SOURCE is the honest census input.
+  @paper_editor_css Path.expand("../../../assets/paper-editor/src/styles.css", __DIR__)
 
   # The SIX `.editor-panel` roots (charter D42 — D29 listed only five).
   # A seventh root means the inventory below has to be re-audited, so the set is
@@ -119,6 +136,18 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     ".history-modal" => :layout_sibling,
     ".delete-modal" => :layout_sibling,
     ".profile-modal" => :layout_sibling
+  }
+
+  # Every selector in the paper-editor stylesheet whose rule block declares
+  # `position: fixed`, with the same placement vocabulary as above. The default
+  # placement for anything added here is :under_panel — the element mounts inside
+  # the paper `.editor-panel` root — so a new surface earns :body_portal only when
+  # its builder is shown to append to `document.body`.
+  @paper_editor_fixed_inventory %{
+    # wikilink-menu.js:117-120 names the node `.bp-wikilink-menu` and immediately
+    # `document.body.appendChild(el)`s it — portalled out of the panel before it
+    # is ever shown, so no containing block the panel grows can reach it.
+    ".bp-wikilink-menu" => :body_portal
   }
 
   # Server-rendered INLINE `position: fixed` (style="…"), by file, with the
@@ -328,6 +357,74 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       assert MapSet.difference(known, found) == MapSet.new([]),
              "inventoried selectors no longer declare position: fixed: " <>
                inspect(MapSet.to_list(MapSet.difference(known, found)))
+    end
+
+    test "the paper-editor stylesheet declares position:fixed for exactly the inventoried selectors" do
+      found = fixed_position_selectors(File.read!(@paper_editor_css))
+      known = MapSet.new(Map.keys(@paper_editor_fixed_inventory))
+
+      assert MapSet.difference(found, known) == MapSet.new([]),
+             """
+             A NEW `position: fixed` selector appeared in
+             assets/paper-editor/src/styles.css:
+
+               #{found |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n  ")}
+
+             Classify it in @paper_editor_fixed_inventory. This sheet styles the
+             `<bp-paper-editor>` custom element, which mounts INSIDE the
+             `studio-paper-editor` `.editor-panel` root — so the answer is
+             :under_panel unless you can point at the `document.body.appendChild`
+             that portals it out. If it is :under_panel, it also belongs in the
+             hand-verified three-set above.
+             """
+
+      assert MapSet.difference(known, found) == MapSet.new([]),
+             "inventoried paper-editor selectors no longer declare position: fixed: " <>
+               inspect(MapSet.to_list(MapSet.difference(known, found)))
+    end
+
+    test "the paper-editor census is non-vacuous: a planted selector fails it" do
+      css = File.read!(@paper_editor_css)
+      known = MapSet.new(Map.keys(@paper_editor_fixed_inventory))
+
+      # Guard 1 — a path typo or an emptied sheet must not read as "all clear".
+      # (File.read! already raises on a bad path; this catches a live-but-empty
+      # extraction, which is the failure mode that looks green.)
+      refute MapSet.size(fixed_position_selectors(css)) == 0,
+             "the paper-editor census found zero `position: fixed` selectors in " <>
+               "#{@paper_editor_css} — the census above is vacuous"
+
+      # Guard 2 — the same extractor, on the same source plus one synthetic rule,
+      # must SEE it. This is the assertion the census makes; if it cannot fire
+      # here, it cannot fire on a real new surface either.
+      planted = css <> "\n.bp-planted-census-probe {\n  position: fixed;\n  inset: 0;\n}\n"
+      found = fixed_position_selectors(planted)
+
+      assert MapSet.member?(found, ".bp-planted-census-probe"),
+             "the extractor cannot see a planted `position: fixed` rule in the " <>
+               "paper-editor stylesheet — its census certifies nothing"
+
+      assert MapSet.difference(found, known) == MapSet.new([".bp-planted-census-probe"]),
+             "the planted rule is the ONLY thing the census should flag as new; got: " <>
+               inspect(found |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort())
+    end
+
+    test "the paper-editor stylesheet contributes no unaudited under-panel surface" do
+      under_panel =
+        @paper_editor_fixed_inventory
+        |> Enum.filter(fn {_sel, placement} -> placement == :under_panel end)
+        |> Enum.map(&elem(&1, 0))
+
+      assert under_panel == [],
+             """
+             A paper-editor selector is classified :under_panel: #{inspect(under_panel)}
+
+             That is a real finding, not a test bug — the paper editor mounts
+             inside an `.editor-panel` root, so this surface is now subject to any
+             containing block the panel grows. Add it to the hand-verified
+             under-panel set (the "exactly three" test above) with a rationale,
+             then update this expectation. Do not just delete the classification.
+             """
     end
 
     test "server-rendered inline position:fixed appears only in the inventoried files" do
