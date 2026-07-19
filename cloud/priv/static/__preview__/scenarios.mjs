@@ -950,6 +950,69 @@ const siteStatesDomains = {
   ],
 };
 
+// ── G-04 notifications (the crown) ───────────────────────────────────────────
+// Backend-true settings_view: transport + masked SMTP secrets ("********" when
+// set), the 9 per-event email booleans, the chat half (channels report only
+// {type, enabled, configured} — credentials are NEVER echoed), event_routes, and
+// the server-owned vocabulary (chat_events = 9 + "test", channel_types = the 5
+// ChannelConfig types, chat_default_on = the 4 failure events).
+const NOTIF_EVENT_KEYS = [
+  "provision_succeeded", "provision_failed", "deployment_succeeded", "deployment_failed",
+  "agent_reachable", "agent_unreachable", "subscription_past_due", "member_invited", "token_expiring",
+];
+const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
+const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "agent_unreachable", "subscription_past_due"];
+function notifSettings(over) {
+  const base = {
+    transport: "instance",
+    alerts_enabled: true,
+    smtp_host: null, smtp_username: null, smtp_password: null,
+    smtp_port: null, smtp_encryption: "starttls",
+    api_key: null,
+    from_address: null, from_name: null,
+    last_test_sent_at: null,
+    channels: [],
+    event_routes: {},
+    chat_events: NOTIF_CHAT_EVENTS,
+    channel_types: NOTIF_CHANNEL_TYPES,
+    chat_default_on: NOTIF_DEFAULT_ON,
+  };
+  // Failures default ON, successes OFF (email hygiene, mirrors EmailSettings).
+  for (const k of NOTIF_EVENT_KEYS) base[k] = NOTIF_DEFAULT_ON.indexOf(k) !== -1;
+  return Object.assign(base, over);
+}
+const notifConfigured = notifSettings({
+  transport: "smtp",
+  smtp_host: "********", smtp_username: "********", smtp_password: "********",
+  smtp_port: 587, from_address: "alerts@acme.com", from_name: "Acme Alerts",
+  last_test_sent_at: tMinus(3600),
+  channels: [
+    { type: "discord", enabled: true, configured: true },
+    { type: "slack", enabled: true, configured: true },
+    { type: "telegram", enabled: false, configured: true },
+    { type: "pushover", enabled: false, configured: false },
+    { type: "webhook", enabled: true, configured: true },
+  ],
+  event_routes: {
+    provision_failed: ["discord", "slack"],
+    deployment_failed: ["discord"],
+    deployment_succeeded: ["slack"],
+  },
+  deployment_succeeded: true, // a customized email boolean
+});
+const notifEmpty = notifSettings({});
+// delivery_json rows: recipient/event/channel/kind/status/attempts/last_error/
+// http_status/inserted_at. Chat rows record the channel TYPE as recipient (never
+// a webhook URL); email rows carry the address. status ∈ pending|sent|failed.
+const notifDeliveries = [
+  { id: "del_5", recipient: "alerts@acme.com", event: "provision_failed", channel: "email", kind: "alert", status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null, inserted_at: tMinus(120) },
+  { id: "del_4", recipient: "discord", event: "deployment_failed", channel: "discord", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: 204, inserted_at: tMinus(600) },
+  { id: "del_3", recipient: "alerts@acme.com", event: "deployment_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
+  { id: "del_2", recipient: "slack", event: "provision_failed", channel: "slack", kind: "alert", status: "pending", attempts: 0, last_error: null, http_status: null, inserted_at: tMinus(4200) },
+  { id: "del_1", recipient: "alerts@acme.com", event: "subscription_past_due", channel: "email", kind: "transactional", status: "sent", attempts: 1, last_error: null, http_status: 200, inserted_at: tMinus(90000) },
+];
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2072,6 +2135,63 @@ export const SCENARIOS = {
       capabilities: settingsProviderCapabilities,
     },
   },
+  // ── G-04 notifications: the crown, states-complete ─────────────────────────
+  "notif-configured": {
+    label: "Notifications — SMTP transport, chat channels wired, matrix customized, delivery log populated",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveries: notifDeliveries,
+    },
+  },
+  "notif-empty": {
+    label: "Notifications — first run: platform transport, no channels, empty delivery log",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifEmpty,
+      notifDeliveries: [],
+    },
+  },
+  "notif-member": {
+    label: "Notifications as a plain member — read-only email, no save-rows, no admin sections",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveries: notifDeliveries,
+    },
+  },
+  "notif-deliveries-error": {
+    label: "Notifications — the deliveries route errors: the log degrades honestly",
+    authed: true,
+    deepLink: "#notifications",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      notifSettings: notifConfigured,
+      notifDeliveriesError: true, // GET /v1/notifications/deliveries → 500
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2345,6 +2465,23 @@ export function route(name, method, path) {
   // absent → the benign catch-all below (which archivesModel reads as a transient
   // error, exactly like today), so no non-archives scenario changes.
   if (p === "/v1/archives" && d.archives) return d.archives;
+
+  // G-04 notifications. GET settings is member-readable; the mutations (PUT
+  // settings/channels/events, POST test, GET deliveries) are admin-gated server-
+  // side — the harness echoes the fixture back on a write so a live click
+  // reconciles, and models the deliveries 500 so the log's honest-degrade path is
+  // observable. `notifSettings` absent → the benign empty 200 (older-CP shape).
+  if (p === "/v1/notifications/settings") {
+    if (method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+    return d.notifSettings ? { status: 200, body: { settings: d.notifSettings } } : { status: 200, body: {} };
+  }
+  if (p === "/v1/notifications/channels" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+  if (p === "/v1/notifications/events" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
+  if (p === "/v1/notifications/test" && method === "POST") return { status: 202, body: { ok: true } };
+  if (p === "/v1/notifications/deliveries" && method === "GET") {
+    if (d.notifDeliveriesError) return { status: 500, body: { error: "internal" } };
+    return { status: 200, body: { deliveries: d.notifDeliveries || [] } };
+  }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.
