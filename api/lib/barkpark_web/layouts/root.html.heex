@@ -1145,7 +1145,21 @@
     .bp-update-bar--muted .bp-update-bar-main { min-height: 28px; }
 
     /* ── Pane layout (shared across all Studio panes) ──────────────────── */
-    .pane-layout { display: flex; flex: 1; overflow: hidden; }
+    /* spd-s1 escape valve (charter D15 — content must NEVER become
+       unreachable). The pane row now carries hard floors on BOTH sides of the
+       negotiation: list columns bottom out at their clamp and the content pane
+       at 560px. When the viewport cannot afford the sum (e.g. a drilled
+       document at ~700px: one 44px strip + a 140px list column + the 560px
+       content floor = 744px), the flex row overflows — and with `overflow:
+       hidden` the tail item IS the content pane, so the right edge of the
+       document would be silently CLIPPED with no way to reach it. `overflow-x:
+       auto` turns that failure into a scroll instead of a wall; it is inert
+       whenever nothing overflows (every ≥1024px desktop), so the wide/standard
+       buckets stay byte-identical. Vertical containment is unchanged — panes
+       and the editor body still own their own y-scroll. Rounds 2–3 (spd-s4
+       server strips, spd-s6 phone drill) remove the overflow itself; this line
+       is the guarantee that the interim never hides content. */
+    .pane-layout { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; }
     .pane-column {
       /* spd-s1 priority squeeze (charter D5): list panes YIELD before the
          content pane starves — 260px basis, but under pressure they may
@@ -1528,6 +1542,23 @@
       position: relative; min-width: 560px;
       container-type: inline-size; container-name: content;
     }
+    /* CONTAINMENT CARVE-OUT (spd-s1 review). `container-type: inline-size`
+       computes to `contain: layout style inline-size`, and LAYOUT containment
+       makes the element a containing block for `position: fixed` descendants —
+       they stop resolving against the viewport and start resolving against
+       (and clipping inside) `.editor-panel`'s `overflow: hidden` box. The
+       paper editor's three floating surfaces are safe because they portal to
+       `document.body` (slash-menu.js / format-bubble.js / wikilink-menu.js all
+       `document.body.appendChild`), but the Sheets right-click menu is
+       SERVER-rendered inside this panel with VIEWPORT coordinates
+       (`sheet_grid.ex` cell_menu_style/1 — `position: fixed; left/top` from
+       clientX/clientY, re-clamped against the viewport by the hook). Under
+       containment it would open offset by the panel's origin and be clipped.
+       The sheet surface contains no `.bp-paper-surface`, no `.bp-doc-sidebar`
+       and no ONIX preview, so every @container rule below is inert for it —
+       opting it out costs nothing and removes the only real casualty.
+       Re-visit if Sheets ever grows a container-queried child. */
+    .editor-panel.sheet-editor { container-type: normal; }
     .editor-header { justify-content: space-between; background: var(--bg); }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
     .editor-meta { font-size: 12px; color: var(--fg-dim); margin-bottom: 20px; }
