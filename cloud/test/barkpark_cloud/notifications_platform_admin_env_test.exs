@@ -174,4 +174,31 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
     boot_with_env(user.email)
     assert operator_call(user).status == 200
   end
+
+  # The one link no Elixir test can OBSERVE is also the one that was broken, and
+  # it shipped with nothing watching it. This is the narrowest honest tripwire:
+  # a text assertion that the bare passthrough line is still in the
+  # x-control-plane environment block. It cannot prove compose forwards the
+  # value — but it reds the moment someone reorders or refactors that block and
+  # drops the line, which is exactly how the console went dark the first time.
+  #
+  # Deliberately NOT a general "every runtime.exs env name must be bare-listed"
+  # lint: 22 other names are absent today, and deciding which of those are real
+  # omissions is its own piece of work (filed, not smuggled in here).
+  test "docker-compose.yml still bare-lists PLATFORM_ADMIN_EMAILS for the control plane" do
+    compose = File.read!(Path.join(__DIR__, "../../docker-compose.yml"))
+
+    [_, control_plane_block | _] = String.split(compose, "x-control-plane:", parts: 2)
+    # The anchor block ends where the next top-level key begins.
+    block = control_plane_block |> String.split(~r/\n(?=\S)/, parts: 2) |> hd()
+
+    assert block =~ ~r/^\s*- PLATFORM_ADMIN_EMAILS\s*$/m,
+           """
+           cloud/docker-compose.yml's x-control-plane environment: list must carry a
+           BARE `- PLATFORM_ADMIN_EMAILS` entry. Compose passes nothing it does not
+           bare-list, so without it an operator can set the variable in
+           /opt/barkpark/cloud/.env, see it set on the host, and still get a dark
+           Operator console — the exact false green GR60 exists to prevent.
+           """
+  end
 end
