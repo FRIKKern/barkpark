@@ -1871,6 +1871,135 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # ── blocked-truth guard (charter D56h, herd-s3f) ────────────────────────────
+  #
+  # Reproduced 3/3 live: the instant an ask fires, a trailing assistant
+  # tool_use frame re-derives :working and clobbers :needs_you 1.3–2.7ms later
+  # while the ask stays genuinely pending — blocked was observable for
+  # milliseconds only. The guard lives at the publish_activity seam: an
+  # activity-derived :working never overwrites blocked while any pending ask
+  # remains; resolution (answer / cancel / exit) still unblocks.
+  describe "blocked-truth guard — a pending ask keeps agent_state=blocked (D56h)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid}
+    end
+
+    test "a late assistant tool_use frame never clobbers blocked; resolve → working",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "thinking…"}}
+
+      frame(recorder, ask_frame("bt-1", "Bash"))
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you}}
+      assert agent_state(sid) == "blocked"
+
+      # THE CLOBBER: a trailing/duplicate assistant tool_use frame lands
+      # microseconds after the ask while it is still genuinely pending
+      frame(recorder, tool_frame("mix test"))
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :working}}, 100
+
+      # stream deltas derive :working too — same guard, same suppression
+      frame(recorder, delta_frame())
+      assert agent_state(sid) == "blocked"
+
+      # resolving the ask (Studio + /v1/chat both funnel through
+      # update_approval_status) flips the store, and the NEXT working frame
+      # passes the guard so the live overlay converges too
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-1", "allowed")
+      assert agent_state(sid) == "working"
+
+      frame(recorder, tool_frame("mix test again"))
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+      assert agent_state(sid) == "working"
+    end
+
+    test "a second ask keeps blocked until the LAST resolves",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "thinking…"}}
+
+      frame(recorder, ask_frame("bt-a", "Write"))
+      frame(recorder, ask_frame("bt-b", "AskUserQuestion"))
+      assert agent_state(sid) == "blocked"
+
+      # first resolution: one ask still pending — aligned with
+      # unblock_if_resolved's pending==0 guard, blocked holds
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-a", "allowed")
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, tool_frame("mix deps.get"))
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :working}}, 100
+
+      # the LAST resolution unblocks; the next working frame flows through
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-b", "denied")
+      assert agent_state(sid) == "working"
+
+      frame(recorder, tool_frame("mix test"))
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+      assert agent_state(sid) == "working"
+    end
+
+    test "cancel_pending_approvals unblocks: the next working frame flows",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, ask_frame("bt-c"))
+      assert agent_state(sid) == "blocked"
+
+      # the force-cancel teardown zeroes the pending counter; the guard reads
+      # that store truth and lets the wire's working through again
+      StudioChat.cancel_pending_approvals(sid)
+      frame(recorder, tool_frame("mix test"))
+      assert agent_state(sid) == "working"
+    end
+
+    test "suppression writes NOTHING (flips-only discipline intact)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, ask_frame("bt-d"))
+      %{agent_state: "blocked", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      for _ <- 1..20, do: frame(recorder, delta_frame())
+      frame(recorder, tool_frame("mix a"))
+      frame(recorder, tool_frame("mix b"))
+
+      # an unchanged stamp PROVES zero writes while suppressed (every
+      # set_agent_state write refreshes agent_state_at)
+      %{agent_state: "blocked", agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+    end
+
+    test "codex: a text_delta after :approval_requested keeps blocked until resolve",
+         %{sid: sid, recorder: recorder} do
+      ev = fn kind -> %Event{kind: kind, provider: "codex", session_id: sid} end
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:turn_started)})
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event,
+         %Event{
+           kind: :approval_requested,
+           provider: "codex",
+           session_id: sid,
+           approval_id: "bt-cdx",
+           native: %{"method" => "item/commandExecution/requestApproval", "params" => %{}}
+         }}
+      )
+
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:text_delta)})
+      assert agent_state(sid) == "blocked"
+
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-cdx", "allowed")
+      frame(recorder, {:studio_chat_runtime_event, ev.(:text_delta)})
+      assert agent_state(sid) == "working"
+    end
+  end
+
   describe "autopilot policy (plan-approve auto-switch)" do
     test "the plan-approved fact engages Autopilot: persist + broadcast",
          %{sid: sid, recorder: recorder} do
