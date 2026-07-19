@@ -4332,3 +4332,94 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   line-height: 1.6;
   color: var(--dim);
 }
+
+/* ==================================================== ACCOUNT MODAL + 2FA
+   gr-p5-account-2fa (GR54/GR56/GR57) — the account modal recomposed in place:
+   identity row with password on demand, sessions, two-factor.
+
+   GR57 WIDTH: the design measures ~518px, but `.modal-card { max-width: 420px }`
+   is the SHARED base for 15+ modal bodies (env editor, token creation, provider
+   picker …) and widening it fattens every one. Follow the live :has() precedent
+   the command palette set — a SECOND, scoped rule keyed off a class unique to
+   this body. The base is never touched. */
+.modal-root:has(.am-modal) .modal-card { max-width: 520px; }
+
+/* GR57 LINKS: `.btn-link` colours itself var(--primary), which IS the
+   user-selectable accent (redefined across five identities) — the design's
+   links are a FIXED blue. --info resolves to --cc-blue and is declared ONLY in
+   :root / [data-theme="dark"], with zero [data-bp-theme] overrides, so these
+   stay blue under Ember exactly as drawn. --primary is never repurposed. */
+.am-link { color: var(--info); font-size: var(--text-sm); white-space: nowrap; }
+
+/* Identity row: avatar · name over "email · owner of Team" · password link. */
+.am-identity { display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; }
+.am-face {
+  flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--muted-surface); color: var(--text);
+  font-size: 15px; font-weight: 600;
+}
+.am-who { min-width: 0; flex: 1 1 auto; }
+.am-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.am-line {
+  font-size: 12px; color: var(--muted-text); font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Progressive disclosure — the form ships in the DOM `hidden` so its ids never
+   move; only visibility changes. */
+.am-pw { margin-top: 12px; }
+/* Section header with a right-aligned affordance (revoke-all, the 2FA badge). */
+.am-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.am-head .modal-section { margin-bottom: 8px; }
+
+/* ---- two-factor ---- */
+.a2f-badge { height: 20px; padding: 0 8px; font-size: 11px; }
+.a2f-badge--on { background: var(--success); color: var(--primary-fg); }
+.a2f-badge--off { background: var(--muted-surface); color: var(--muted-text); }
+.a2f-panel { margin-top: 2px; }
+.a2f-off-line, .a2f-on-line { font-size: 13px; color: var(--muted-text); margin: 0 0 10px; }
+.a2f-error { margin-bottom: 10px; }
+.a2f-on-actions { display: flex; gap: 18px; align-items: center; }
+.a2f-off-link { color: var(--danger); }
+
+/* Enroll: QR plate beside the manual-entry column. When the URI overruns the
+   encoder's capacity the QR is absent and the manual column takes the row
+   alone — never a broken or blank QR box. */
+.a2f-enroll { display: flex; gap: 16px; align-items: flex-start; }
+.a2f-enroll--noqr { display: block; }
+.a2f-qr { flex: 0 0 auto; width: 118px; height: 118px; border-radius: 10px; overflow: hidden; }
+/* Literal black/white, not tokens: a scanner needs true contrast, and a themed
+   QR that reads in light mode and fails in dark is a silent lockout. */
+.a2f-qr-svg { display: block; width: 100%; height: 100%; }
+.a2f-manual { flex: 1 1 auto; min-width: 0; }
+.a2f-manual p { font-size: 13px; color: var(--muted-text); margin: 0 0 10px; }
+.a2f-secret {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); margin-bottom: 10px;
+}
+.a2f-secret-value { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; }
+.a2f-confirm-row { display: flex; gap: 10px; align-items: center; }
+.a2f-otp {
+  width: 108px; font-family: var(--mono); letter-spacing: 0.22em; text-align: left;
+}
+
+/* One-shot recovery sheet — 8 chips, 4 across. */
+.a2f-warn { font-size: 13px; color: var(--warn); margin: 0 0 12px; }
+.a2f-codes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.a2f-code {
+  display: block; text-align: center; padding: 8px 4px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  font-family: var(--mono); font-size: 12.5px;
+}
+.a2f-codes-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 14px; }
+.a2f-saved { flex: 0 0 auto; }
+
+/* GR56: `.modal-x` carries data-close, so a pin DEADENS it. An author rule beats
+   the UA sheet regardless of specificity, so `.modal-x { display: grid }` would
+   keep a DEAD × visible — this restores [hidden] for the pinned sheet.
+   The same applies to every [data-close] a BODY renders (the account footer's
+   "Close" is a `.btn`, i.e. `display: inline-flex`): same delegated handler,
+   same pin, same need for [hidden] to actually hide. */
+.modal-x[hidden] { display: none; }
+#modal-body [data-close][hidden] { display: none; }

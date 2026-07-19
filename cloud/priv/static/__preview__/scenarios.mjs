@@ -503,6 +503,22 @@ const liveInstanceAudit = [
   auditEvent({ id: "ev_b1", action: "barkpark.go_live", target_type: "barkpark", target_id: IDS.liveInstance, metadata: { name: "Production" }, inserted_at: tMinus(86400) }),
 ];
 
+// The one-shot recovery sheet: 8 codes, 8-char lowercase base32 — the exact
+// shape accounts/two_factor.ex mints. Shown plaintext ONCE and never re-served.
+const RECOVERY_CODES = [
+  "h4kq2mfp", "x8dw9rgt", "p2ml5qzn", "k9vt3bxs",
+  "w6ny8jhc", "r1gd4tkm", "z7sb6plf", "m3cx1vwq",
+];
+
+// The active-session list the account modal renders (GR54). Two rows so both
+// arms are exercised: the CURRENT device (badged, un-revokable) and a second
+// device that CAN be revoked. Unmodelled before this slice — the modal is
+// click-opened, so no scenario ever reached it.
+const accountSessions = [
+  { id: "sess_current", user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/126.0", ip_address: "84.212.31.7", last_used_at: tMinus(20), current: true },
+  { id: "sess_cli", user_agent: "barkpark-cli/0.9", ip_address: "84.212.31.7", last_used_at: tMinus(2 * 86400), current: false },
+];
+
 // ── me / subscription helpers ────────────────────────────────────────────────
 // onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
 // vocabulary is CLOSED — subscription | instance | published_doc — and the
@@ -2474,6 +2490,56 @@ export const SCENARIOS = {
       operatorDenied: true,
     },
   },
+
+  // ── gr-p5-account-2fa: the account modal (GR54/GR58) ──────────────────────
+  // The modal is opened by a CLICK, so it is unreachable by deepLink — smoke
+  // drives the composition through the real openModal primitive instead (the
+  // browser twin of this seam is mock.js's ?modal=account). Two scenarios
+  // because the 2FA on/off state is read STRAIGHT off /v1/me's
+  // two_factor_enabled: zero extra fetches, and the fixture is the proof.
+  "account-modal": {
+    label: "Account modal — identity, sessions, password on demand, 2FA OFF (the not-enrolled state)",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+    },
+  },
+  "account-modal-2fa-badcode": {
+    label: "Account modal — enrollment rejected: 422 invalid_otp, inline in the #pw-error grammar (never a toast)",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+      twoFactorConfirm: { status: 422, body: { error: "invalid_otp" } },
+    },
+  },
+  "account-modal-2fa-on": {
+    label: "Account modal — 2FA already ON: the on-row, read free from /v1/me's two_factor_enabled",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: (function () {
+        const m = me("Guerrilla");
+        return Object.assign({}, m, { user: Object.assign({}, m.user, { two_factor_enabled: true }) });
+      })(),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2565,6 +2631,35 @@ export function route(name, method, path) {
   }
 
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
+  // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
+  // than 404 so every scenario answers HONESTLY ("No active sessions") instead
+  // of the modal's couldn't-load state.
+  if (p === "/v1/account/sessions" && method === "GET") {
+    return { status: 200, body: { sessions: d.accountSessions || [] } };
+  }
+  // gr-p5-account-2fa: the five password-free two-factor routes. Overridable per
+  // scenario (d.twoFactorConfirm) so the 422 invalid_otp / not_enrolled arms are
+  // reachable without a backend. The secret is a well-known RFC 4648 test vector.
+  if (p === "/v1/account/two-factor/enroll" && method === "POST") {
+    return d.twoFactorEnroll || { status: 200, body: {
+      secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+      otpauth_uri: "otpauth://totp/Barkpark%20Cloud:" +
+        encodeURIComponent((d.me && d.me.user && d.me.user.email) || "you@example.com") +
+        "?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Barkpark%20Cloud",
+    } };
+  }
+  if (p === "/v1/account/two-factor/confirm" && method === "POST") {
+    return d.twoFactorConfirm || { status: 200, body: { recovery_codes: RECOVERY_CODES } };
+  }
+  if (p === "/v1/account/two-factor/recovery-codes" && method === "POST") {
+    return d.twoFactorRegen || { status: 200, body: { recovery_codes: RECOVERY_CODES } };
+  }
+  if (p === "/v1/account/two-factor" && method === "DELETE") return { status: 200, body: { ok: true } };
+  if (p === "/v1/account/two-factor" && method === "GET") {
+    // Modelled for completeness; the SPA never calls it (two_factor_enabled
+    // rides /v1/me, so the on-state costs zero extra fetches).
+    return { status: 200, body: { enabled: !!(d.me && d.me.user && d.me.user.two_factor_enabled) } };
+  }
   // gr-p2 HOME TRIAGE (C-02): the onboarding fold is member-readable on GET
   // (mirrors /v1/me's fold, so the runway self-heals on refetch); the mutating
   // POST (advance/ack/skip/complete) is owner/admin-only server-side — here it

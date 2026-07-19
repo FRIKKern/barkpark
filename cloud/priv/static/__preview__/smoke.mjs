@@ -221,6 +221,75 @@ async function flush() {
 
 // ── EXPECTATIONS: the per-scenario view skeleton (edit HERE when markup moves) ─
 const EXPECTATIONS = {
+  // ── gr-p5-account-2fa (GR54/GR56/GR57): the account modal, recomposed ──────
+  // The modal is CLICK-opened, so no deepLink reaches it. Drive the composition
+  // through the REAL openModal primitive into the REAL #modal-body — the same
+  // hook seam "loggedout-twofactor" uses for the login card — and pin the
+  // rendered anatomy. The browser twin is mock.js's ?modal=account.
+  "account-modal": {
+    what: "the recomposed account modal — identity, sessions, password ON DEMAND, 2FA off-state; every lockout-bearing id intact",
+    check(reg, hooks) {
+      const model = hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal"].data.me);
+      assert.equal(model.twoFactorEnabled, false, "this fixture's /v1/me must say 2FA is off");
+      hooks.openModal(hooks.accountModalHtml(model));
+      const html = reg.get("modal-body").innerHTML || "";
+      // The four bands of the recomposition.
+      assert.ok(html.includes(">Your account<"), "the v4 heading must render");
+      assert.ok(html.includes('class="am-identity"'), "the identity row must render");
+      assert.ok(html.includes("owner of Guerrilla"), "the identity line must name the role and team");
+      assert.ok(html.includes(">Sessions<"), "the sessions header must render");
+      assert.ok(html.includes(">Two-factor authentication<"), "the 2FA header must render");
+      // Password is DISCLOSED, not conditionally rendered: the form and all its
+      // ids ship in the markup `hidden` so submitPasswordChange never unbinds.
+      assert.ok(html.includes('id="am-pw-toggle"'), "the change-password disclosure link must render");
+      assert.ok(/<form id="pw-form"[^>]*hidden/.test(html), "the password form must ship hidden, not absent");
+      for (const id of ["modal-title", "pw-current", "pw-new", "pw-error", "sessions-box",
+        "sessions-revoke-all", "pw-form", "modal-logout"]) {
+        assert.ok(html.includes('id="' + id + '"'), "the modal must keep id=" + JSON.stringify(id));
+      }
+      // The footer is KEPT: both renders crop mid-scroll, so its absence is unproven.
+      assert.ok(html.includes(">Close<") && html.includes(">Log out<"), "the Close / Log out footer must stay");
+      // 2FA off-state, read free from /v1/me — no GET /v1/account/two-factor.
+      assert.ok(html.includes('id="a2f-badge"') && html.includes(">Off<"), "the 2FA badge must read Off");
+      assert.ok(html.includes('id="a2f-start"'), "the off state must offer the setup button");
+      assert.ok(!html.includes('id="a2f-otp"'), "the off state must not draw the enroll form");
+    },
+  },
+  "account-modal-2fa-badcode": {
+    what: "enrollment rejected — 422 invalid_otp renders INLINE in the .form-error grammar, the form survives, and no toast fires",
+    check(reg, hooks) {
+      // The panel renders are pure, so drive the state the 422 arm produces and
+      // pin the honest recovery: the code field stays, carrying the sentence.
+      const copy = hooks.accountTwoFactorErrorCopy(422, { error: "invalid_otp" });
+      assert.ok(copy && copy.includes("didn't match"), "invalid_otp must get its own sentence");
+      const uri = "otpauth://totp/Barkpark%20Cloud:ada@acme.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Barkpark%20Cloud";
+      hooks.openModal(hooks.accountModalHtml(hooks.accountModel({}, SCENARIOS["account-modal-2fa-badcode"].data.me)));
+      const panel = hooks.accountTwoFactorPanelHtml({ phase: "enroll", uri, secret: "JBSWY3DPEHPK3PXP", error: copy });
+      assert.ok(panel.includes('class="form-error a2f-error"'), "the error must ride the inline grammar");
+      assert.ok(panel.includes('id="a2f-otp"'), "the code field must survive a rejection");
+      assert.ok(panel.includes("a2f-qr-svg"), "the QR must still be there to re-scan");
+      assert.ok(!/\brate[ -]?limit|\b429\b|try again in/i.test(panel),
+        "GR52b: this route is genuinely unthrottled — no rate-limit theatre");
+      // The toast stack is untouched: inline errors NEVER dive into a toast.
+      // An untouched #toast-stack never enters the registry at all — either way,
+      // nothing was appended to it.
+      const toasts = reg.get("toast-stack");
+      assert.ok(!toasts || !(toasts.innerHTML || "").length, "a field error must not fire a toast");
+    },
+  },
+  "account-modal-2fa-on": {
+    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches)",
+    check(reg, hooks) {
+      const model = hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal-2fa-on"].data.me);
+      assert.equal(model.twoFactorEnabled, true, "the on-state must come from /v1/me's two_factor_enabled");
+      hooks.openModal(hooks.accountModalHtml(model));
+      const html = reg.get("modal-body").innerHTML || "";
+      assert.ok(html.includes(">On<"), "the badge must read On");
+      assert.ok(html.includes('id="a2f-regen"'), "the on-row must offer regenerate");
+      assert.ok(html.includes('id="a2f-disable"'), "the on-row must offer turn-off");
+      assert.ok(!html.includes('id="a2f-start"'), "an enrolled account is never offered setup again");
+    },
+  },
   loggedout: {
     what: "the sign-in screen (no shell)",
     check(reg) {
