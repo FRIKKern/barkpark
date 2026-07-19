@@ -6249,3 +6249,151 @@ test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the es
   // Without an estimate (the pre-fix state) it was flat 0.
   assert.equal(hooks.stepRingProgress(30000, undefined), 0);
 });
+
+// ── gr-p2 plan & dunning (GR17/GR19/GR20): catalog, dunning, trial, chip ─────
+
+test("PLAN_CATALOG is the one quota-honest source: USD placeholders + real 1/3/10 ceilings", () => {
+  const cat = hooks.planCatalog;
+  assert.equal(cat.length, 3, "exactly the three real plans");
+  const by = {};
+  for (const t of cat) by[t.plan] = t;
+  // The REAL enforced ceilings (server Billing @default_limits) — never unlimited.
+  assert.equal(by.free.instances, 1);
+  assert.equal(by.supporter.instances, 3);
+  assert.equal(by.support_plus.instances, 10);
+  // USD placeholders held until the cloud-console-billing-live-gate human gate.
+  assert.equal(by.free.price, "$0");
+  assert.equal(by.supporter.price, "$69");
+  assert.equal(by.support_plus.price, "$499");
+});
+
+test("planFeatures leads with the real ceiling — the unlimited fiction is gone", () => {
+  const names = { free: "1 managed instance", supporter: "3 managed instances", support_plus: "10 managed instances" };
+  for (const t of hooks.planCatalog) {
+    const feats = hooks.planFeatures(t);
+    assert.equal(feats[0], names[t.plan], t.plan + " must state its real ceiling first");
+    assert.ok(!feats.join("|").includes("Unlimited"), t.plan + " must never claim unlimited");
+  }
+  assert.equal(hooks.planInstanceLimit({ instances: 1 }), "1 managed instance", "singular at 1");
+});
+
+test("planFromSub: a past_due team KEEPS its paid plan (the sidebar-pill fix)", () => {
+  assert.equal(hooks.planFromSub({ status: "past_due", plan: "supporter" }), "supporter");
+  assert.equal(hooks.planFromSub({ status: "active", plan: "supporter" }), "supporter");
+  assert.equal(hooks.planFromSub({ status: "active", plan: "trial" }), "trial");
+  // canceled / absent / plan-less all read free — never a stale paid name.
+  assert.equal(hooks.planFromSub({ status: "canceled", plan: "supporter" }), "free");
+  assert.equal(hooks.planFromSub(null), "free");
+  assert.equal(hooks.planFromSub({ status: "active" }), "free");
+});
+
+test("dunningDates: failed_date is EXACTLY suspend_date minus the 3-day grace", () => {
+  const end = "2026-08-01T12:00:00.000Z";
+  const d = hooks.dunningDates({ current_period_end: end });
+  assert.ok(d, "a dated sub yields both milestones");
+  assert.equal(d.suspendMs, Date.parse(end));
+  assert.equal(d.suspendMs - d.failedMs, 3 * 86400 * 1000, "the −3d offset is the grace window");
+  // No dated milestone → null (the banner drops dates, never invents them).
+  assert.equal(hooks.dunningDates({ current_period_end: null }), null);
+  assert.equal(hooks.dunningDates(null), null);
+});
+
+test("dunningBannerHtml: GR17 strings verbatim, portal CTA, dead promises stay dead", () => {
+  const html = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z" });
+  assert.match(html, /Your card was declined on .+\. Your instances keep running until .+, then they're suspended — not deleted — and come right back the moment payment succeeds\./);
+  assert.ok(html.includes(">Past due<"), "the banner title");
+  assert.ok(html.includes(">Supporter<"), "the plan-name chip");
+  assert.ok(html.includes(">Update payment method<"), "the GR17 CTA verbatim");
+  assert.ok(html.includes('id="dunning-portal"'), "the CTA is the portal wire point");
+  assert.ok(!html.includes("retry twice more"), "the retry-count fiction is gone");
+  assert.ok(!/contact support/i.test(html), "the support-mail denial copy is gone");
+  // Date-less sub still renders the honest sentence, without invented dates.
+  const bare = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: null });
+  assert.ok(bare.includes("suspended — not deleted"), "the promise survives date-less");
+  assert.ok(!bare.includes("declined on"), "no invented failed date");
+});
+
+test("trialCardHtml carries the RATIFIED CTA verbatim and never the teardown-dishonest promise", () => {
+  const html = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 14 });
+  assert.ok(html.includes("Pick a plan below to keep it. No card needed."),
+    "the ratified CTA (task-2ed0ea068f37345d), verbatim");
+  assert.ok(html.includes("14 days left"), "the countdown chip");
+  assert.ok(!html.includes("suspended — not deleted"), "trial expiry is a real teardown");
+  // The final days flip the chip to the low state; singular reads correctly.
+  const low = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 1 });
+  assert.ok(low.includes("trial-chip--low"), "≤3 days lights the low chip");
+  assert.ok(low.includes("1 day left"), "singular day");
+});
+
+test("tierCardHtml: quota line always; portal button for subscribed, checkout otherwise", () => {
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const fresh = hooks.tierCardHtml(supporter, "free", false);
+  assert.ok(fresh.includes("3 managed instances"), "the quota line renders");
+  assert.ok(fresh.includes('data-plan="supporter"'), "unsubscribed → checkout");
+  const paid = hooks.tierCardHtml(supporter, "support_plus", true);
+  assert.ok(paid.includes('data-portal-plan="supporter"'), "subscribed → portal, self-serve");
+  assert.ok(!/contact support/i.test(paid), "no support-mail denial copy");
+  const current = hooks.tierCardHtml(supporter, "supporter", true);
+  assert.ok(current.includes(">Current plan<"), "the current tier is marked");
+});
+
+test("billingChipModel: trial countdown XOR past-due alarm; silent otherwise (GR20)", () => {
+  assert.equal(hooks.billingChipModel(null), null);
+  const trial = hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 5 });
+  assert.equal(trial.kind, "trial");
+  assert.equal(trial.label, "Trial · 5 days left");
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 1 }).label, "Trial · 1 day left");
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "active", trial_days_remaining: 0 }).label, "Trial ended");
+  const due = hooks.billingChipModel({ plan: "supporter", status: "past_due" });
+  assert.equal(due.kind, "past_due");
+  assert.equal(due.label, "Payment failed · fix billing");
+  // XOR: a past_due trial reads past-due (payment beats countdown).
+  assert.equal(hooks.billingChipModel({ plan: "trial", status: "past_due", trial_days_remaining: 5 }).kind, "past_due");
+  // An active paid plan / free team shows NO chip.
+  assert.equal(hooks.billingChipModel({ plan: "supporter", status: "active" }), null);
+  assert.equal(hooks.billingChipModel({ plan: "free", status: "active" }), null);
+});
+
+test("currentPlanCardHtml: dunning banner only when past_due; portal CTA always", () => {
+  const due = hooks.currentPlanCardHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
+  assert.ok(due.includes("dunning-banner"), "past_due carries the banner");
+  assert.ok(due.includes(">Manage billing<"), "the portal CTA renders");
+  const ok = hooks.currentPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z", started_at: "2026-05-01T00:00:00.000Z" });
+  assert.ok(!ok.includes("dunning-banner"), "active carries no banner");
+  assert.ok(ok.includes(">Manage billing<"), "the portal CTA renders for active too");
+  assert.ok(!/contact support/i.test(ok + due), "no support-mail denial copy anywhere");
+});
+
+test("billingPortalFlag matches the gateway's pinned return_url flag exactly", () => {
+  // stripe_gateway.ex default_portal_return_url: "https://barkpark.cloud/?billing=portal"
+  assert.equal(hooks.billingPortalFlag("?billing=portal"), true);
+  assert.equal(hooks.billingPortalFlag("?billing=portal&x=1"), true);
+  assert.equal(hooks.billingPortalFlag("?x=1&billing=portal"), true);
+  assert.equal(hooks.billingPortalFlag("?checkout=success"), false);
+  assert.equal(hooks.billingPortalFlag("?billing=portalx"), false, "no prefix-match false positive");
+  assert.equal(hooks.billingPortalFlag(""), false);
+  assert.equal(hooks.billingPortalFlag(undefined), false);
+});
+
+test("ERRORS gains the two billing truths; friendly() precedence is ERRORS → details → fallback → slug", () => {
+  assert.equal(hooks.friendly({ error: "limit_reached" }, "fallback"), "You're at your plan's instance limit.");
+  assert.equal(hooks.friendly({ error: "billing_not_configured" }), "Billing isn't set up on this deployment yet.");
+  // The GR19 fix: a designed per-call fallback now BEATS the humanized slug…
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }, "Please try again."), "Please try again.");
+  // …while a call WITHOUT a fallback still surfaces the humanized slug.
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
+  // details still outrank the fallback (field-level truth is more specific).
+  assert.equal(hooks.friendly({ error: "x", details: { name: ["is required"] } }, "fb"), "name is required");
+});
+
+test("tierCardHtml: a trial team's Free card never offers a doomed checkout (review fix)", () => {
+  // There is no free checkout — POST /v1/billing/checkout with plan=free 422s
+  // plan_invalid. Only a TRIAL team ever sees Free as non-current, and doing
+  // nothing IS how a trial lands on Free, so the card is honest and inert.
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  const onTrial = hooks.tierCardHtml(free, "trial", false);
+  assert.ok(!onTrial.includes('data-plan="free"'), "no checkout wire on the free card");
+  assert.ok(onTrial.includes("Yours when the trial ends"), "the honest inert label");
+  // A genuinely free team still reads Free as its current plan.
+  assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
+});

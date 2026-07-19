@@ -95,7 +95,17 @@ function makeDom() {
     querySelector: query,
     querySelectorAll() { return []; },
     getElementById: byId,
-    createElement() { return makeEl(""); },
+    // Created (non-registry) elements are throwaway wiring surfaces here. Their
+    // querySelector answers an inert element (never null) so a primitive that
+    // wires its own fresh markup — toast()'s close button is the first smoke-
+    // exercised case (gr-p2 portal-return ack) — stays inert instead of
+    // crashing the boot. Registry (#id) elements keep the null-returning
+    // querySelector above, so existence-driven logic is untouched.
+    createElement() {
+      const el = makeEl("");
+      el.querySelector = () => makeEl("");
+      return el;
+    },
   };
 
   return { registry, document, byId };
@@ -551,6 +561,74 @@ const EXPECTATIONS = {
         assert.ok(!html.includes(needle),
           "#twofa-card must not import theater vocabulary " + JSON.stringify(needle));
       }
+  // ── gr-p2 plan & dunning (C-03/C-04): trial CTA, GR17 dunning, portal return ─
+  "billing-trial": {
+    what: "the trial billing state — countdown chip, the RATIFIED CTA verbatim, quota-honest open plan grid, trial topbar chip",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The ratified CTA (task-2ed0ea068f37345d), VERBATIM — never the
+      // prototype's superseded draft.
+      assert.ok(box.includes("Pick a plan below to keep it. No card needed."),
+        "the ratified trial CTA must render verbatim");
+      assert.ok(box.includes('class="trial-chip"'), "the countdown chip must render");
+      assert.ok(box.includes("14 days left"), "the chip must carry the server's days-remaining");
+      // Trial expiry is a real teardown — the dunning suspend promise must NOT
+      // leak into trial copy.
+      assert.ok(!box.includes("suspended — not deleted"), "trial copy must never borrow the dunning suspend promise");
+      // The plan grid opens right below the CTA ("below" must be true) and is
+      // quota-honest: real ceilings, no unlimited fiction.
+      assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open under the CTA");
+      const grid = reg.get("billing-tiers").innerHTML || "";
+      for (const q of ["1 managed instance", "3 managed instances", "10 managed instances"]) {
+        assert.ok(grid.includes(q), "tier cards must state the real ceiling " + JSON.stringify(q));
+      }
+      assert.ok(!grid.includes("Unlimited managed instances"), "the unlimited fiction must be gone");
+      // GR20: the topbar chip reads trial (XOR — never the past-due skin).
+      const chip = reg.get("billing-chip");
+      assert.equal(chip.textContent, "Trial · 14 days left", "topbar chip must count the trial down");
+      assert.ok(chip.className.includes("billing-chip--trial"), "topbar chip must ride the trial skin");
+      assert.ok(!chip.className.includes("past_due"), "trial XOR past-due — never both");
+      assert.equal(chip.href, "#billing", "the chip must route to #billing");
+    },
+  },
+  "billing-past-due": {
+    what: "past due — the GR17 banner verbatim with data-driven dates, portal CTA, no denial copy, red topbar chip",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // GR17 strings, data-driven: both date slots filled from current_period_end.
+      assert.ok(box.includes("Your card was declined on "), "the banner must open with the failed date");
+      assert.ok(box.includes("Your instances keep running until "), "the banner must carry the suspend date");
+      assert.ok(box.includes("then they're suspended — not deleted — and come right back the moment payment succeeds."),
+        "the suspended-not-deleted sentence must render verbatim");
+      assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
+      assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
+      assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
+      assert.ok(box.includes(">Manage billing<"), "the current-plan card must offer the portal");
+      // The dead promises stay dead.
+      assert.ok(!box.includes("retry twice more"), "the retry-count fiction must be gone");
+      assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
+      // GR20: the topbar chip flips to the past-due alarm (XOR trial).
+      const chip = reg.get("billing-chip");
+      assert.equal(chip.textContent, "Payment failed · fix billing", "topbar chip must alarm on past-due");
+      assert.ok(chip.className.includes("billing-chip--past_due"), "topbar chip must ride the past-due skin");
+      assert.ok(!chip.className.includes("--trial"), "past-due XOR trial — never both");
+      // The sidebar pill keeps the PAID plan (the activePlan past_due fix).
+      assert.equal(reg.get("ws-plan").textContent, "Supporter", "a past_due team keeps its paid plan in the sidebar pill");
+    },
+  },
+  "billing-portal-return": {
+    what: "back from the portal — billing renders the current plan, portal-managed copy, no denial copy",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
+      assert.ok(box.includes(">Manage billing<"), "the portal CTA must render");
+      assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      assert.ok(!/contact support/i.test(box), "the support-mail denial copy must be gone");
+      // A healthy active sub shows NO topbar billing chip (trial XOR past-due only).
+      assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
     },
   },
 };

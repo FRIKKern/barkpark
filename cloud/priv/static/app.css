@@ -3398,3 +3398,82 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .sidebar { flex-basis: auto; width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08); }
   .nav-spacer { display: none; }
 }
+
+/* ---------------------------------------------------------- gr-p2 plan & dunning (C-03/C-04)
+   Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
+   quota line on tier cards, and the GR20 topbar billing chip. Append-only tail;
+   new rules ride the v4 ladder (--cc-*) directly — no new legacy-alias uses. */
+.trial-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: var(--pill);
+  color: var(--cc-blue);
+  background: hsl(var(--info-hsl) / 0.12);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
+  white-space: nowrap;
+}
+.trial-chip--low {
+  color: var(--danger);
+  background: hsl(var(--danger-hsl) / 0.1);
+  border-color: hsl(var(--danger-hsl) / 0.3);
+}
+.trial-cta { font-size: 14px; font-weight: 600; color: var(--cc-fg); margin: 4px 0 10px; }
+
+/* The GR17 banner stacks (chip+title / body / CTA) inside the .notice frame. */
+.dunning-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
+.dunning-banner .btn { margin-left: 0; }
+.dunning-head { display: flex; align-items: center; gap: 10px; }
+.dunning-plan {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--pill);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.25);
+  color: var(--cc-fg2);
+  white-space: nowrap;
+}
+.dunning-title { color: var(--warn-strong); font-weight: 700; }
+.dunning-body { margin: 0; max-width: 62ch; }
+
+/* Quota-honest tier cards: the real ceiling, mono, right above the action. */
+.tier-quota { font-family: var(--mono); font-size: 11px; color: var(--cc-fg3); margin: 0 0 12px; }
+
+/* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
+   the info blue, past-due the danger red. It is a link to #billing. */
+.billing-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--pill);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  text-decoration: none;
+}
+.billing-chip:hover { text-decoration: none; }
+.billing-chip--trial {
+  color: var(--cc-blue);
+  background: hsl(var(--info-hsl) / 0.1);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
+}
+.billing-chip--trial:hover { background: hsl(var(--info-hsl) / 0.16); }
+.billing-chip--past_due {
+  color: var(--cc-red-strong);
+  background: hsl(var(--danger-hsl) / 0.1);
+  border: 1px solid hsl(var(--danger-hsl) / 0.3);
+}
+.billing-chip--past_due:hover { background: hsl(var(--danger-hsl) / 0.16); }
+
+/* The current-plan status pill in its warning state — "Past due" must never
+   ride the green Recommended skin. */
+.plan-rec--due {
+  color: var(--warn-strong);
+  border-color: hsl(var(--warn-hsl) / 0.4);
+  background: hsl(var(--warn-hsl) / 0.1);
+}
