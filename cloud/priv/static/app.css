@@ -258,10 +258,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 :root {
   /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
      (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
-     status roles (the --ok, --warn, --danger, --info families + --warn-strong;
-     never spell them star-slash-star here — "*" + "/" inside this comment
-     TERMINATED it early and the junk swallowed the next declaration, leaving
-     --btn-bg undefined and every .btn-primary transparent), --ring,
+     status roles (--ok / --warn / --danger / --info / --warn-strong families), --ring,
      --accent, and the brand --primary/--primary-fg are now OWNED by the
      GENERATED block above (design/tokens.json → color.cloudChrome + the
      per-identity accent, mapped role-for-role onto the designer ladder). One

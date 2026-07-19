@@ -1,6 +1,15 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"time"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/chat"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -11,16 +20,24 @@ import (
 // It is a built-in (not a manifest verb) because it is a full-screen interactive
 // Bubble Tea program with its own live SSE stream, not the single JSON body the
 // generic command path decodes — the same reason `bp tasks` is a builtin.
+//
+// `bp chat ls` is the one NON-TUI verb (herd charter D55h): it is peeled off
+// BEFORE the stray-args reject and the TTY gate, because listing/watching the
+// herd is exactly what a pipe or a script wants (`bp chat ls -o json | jq`,
+// `bp chat ls --watch` in a monitor pane).
 func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if len(args) > 0 && args[0] == "ls" {
+		return runChatLs(out, g, ctx, args[1:])
+	}
 	if g.help {
 		printChatHelp(out)
 		return exitOK
 	}
-	// The client takes no positionals or flags of its own; reject stray args so a
-	// typo fails loudly instead of being silently ignored.
+	// The client takes no other positionals or flags of its own; reject stray
+	// args so a typo fails loudly instead of being silently ignored.
 	if len(args) > 0 {
 		return usageErrf(out, func() { printChatHelp(out) },
-			"bp chat takes no arguments (got %q)", args[0])
+			"bp chat takes no arguments besides `ls` (got %q)", args[0])
 	}
 
 	// A full-screen alt-screen TUI needs a real terminal. Without one (piped,
@@ -47,28 +64,199 @@ func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 	return exitOK
 }
 
+// runChatLs is `bp chat ls [--watch]` (herd charter D55h): the herd roster
+// without a TTY. One-shot it prints one row per session (state, title, cost,
+// age — `-o json` emits the raw sidebar rows); with --watch it holds the ONE
+// fleet SSE stream and prints one line per STATE FLIP (session id, state,
+// title) until Ctrl-C, which exits 0.
+func runChatLs(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		printChatLsHelp(out)
+		return exitOK
+	}
+	watch := false
+	for _, a := range args {
+		switch a {
+		case "--watch":
+			watch = true
+		default:
+			return usageErrf(out, func() { printChatLsHelp(out) },
+				"unknown chat ls argument %q (bp chat ls takes only --watch)", a)
+		}
+	}
+
+	// The chat routes are data-plane-token scoped (charter D3/D21) — no
+	// workspace/project/dataset plumbing exists on the wire to carry.
+	client := apiclient.New(apiclient.Config{BaseURL: ctx.Server, Token: ctx.Token})
+
+	if watch {
+		return runChatLsWatch(out, ctx, client)
+	}
+
+	sessions, err := client.ListChatSessions(false)
+	if err != nil {
+		out.errf("bp chat ls: %v", err)
+		return exitGeneric
+	}
+	if out.machineOut() {
+		// Round-trip through JSON so -o json / -o yaml both emit the wire shape.
+		raw, err := json.Marshal(sessions)
+		if err != nil {
+			out.errf("bp chat ls: %v", err)
+			return exitGeneric
+		}
+		var generic any
+		_ = json.Unmarshal(raw, &generic)
+		if out.emitStructured(map[string]any{"sessions": generic}) {
+			return exitOK
+		}
+	}
+	if len(sessions) == 0 {
+		out.outf("no chat sessions")
+		return exitOK
+	}
+	now := time.Now()
+	for _, s := range sessions {
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = "untitled session"
+		}
+		state := s.AgentState
+		if state == "" {
+			state = "unknown"
+		}
+		meta := fmt.Sprintf("%d msg", s.MessageCount)
+		if s.TotalCostUSD > 0 {
+			meta += fmt.Sprintf(" · $%.2f", s.TotalCostUSD)
+		}
+		if age := chatLsAge(s.AgentStateAt, s.LastActiveAt, now); age != "" {
+			meta += " · " + age
+		}
+		out.outf("%s  %-8s %-40s %s", s.ID, state, truncateCell(title, 40), meta)
+	}
+	return exitOK
+}
+
+// runChatLsWatch holds the fleet stream synchronously (the runListen
+// precedent): one printed line per state flip, Ctrl-C cancels the context and
+// exits 0. The transport owns reconnect/backoff; only its terminal give-up is
+// an error.
+func runChatLsWatch(out *writer, ctx manifest.Context, client *apiclient.Client) int {
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if out.isTTY {
+		out.errf("watching the herd on %s — Ctrl-C to stop", ctx.Server)
+	}
+	err := client.FleetEvents(sigCtx, "", func(event, data string) error {
+		if line, ok := fleetWatchLine(event, []byte(data)); ok {
+			out.outf("%s", line)
+		}
+		return nil
+	}, func() {
+		if out.isTTY {
+			out.errf("reconnecting to %s …", ctx.Server)
+		}
+	})
+	if err != nil && sigCtx.Err() == nil {
+		out.errf("bp chat ls --watch: %v", err)
+		return exitGeneric
+	}
+	return exitOK
+}
+
+// fleetWatchLine renders one --watch output line from a fleet frame: STATE
+// FLIPS only (session id, state, title when the frame carries one — live
+// flips carry title:null by design). Snapshots, heartbeats, keepalives, and
+// malformed frames print nothing.
+func fleetWatchLine(event string, data []byte) (string, bool) {
+	if event != "state" {
+		return "", false
+	}
+	var f struct {
+		SessionID  string  `json:"session_id"`
+		AgentState string  `json:"agent_state"`
+		Title      *string `json:"title"`
+	}
+	if err := json.Unmarshal(data, &f); err != nil || f.SessionID == "" || f.AgentState == "" {
+		return "", false
+	}
+	line := f.SessionID + "  " + f.AgentState
+	if f.Title != nil {
+		if t := strings.TrimSpace(*f.Title); t != "" {
+			line += "  " + t
+		}
+	}
+	return line, true
+}
+
+// chatLsAge is the roster row's honest relative age: the agent-state flip
+// timestamp when the widened wire carries one, else last_active_at; "" when
+// neither parses (honest blank, never fabricated).
+func chatLsAge(agentStateAt, lastActiveAt string, now time.Time) string {
+	for _, iso := range []string{agentStateAt, lastActiveAt} {
+		if iso == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, iso)
+		if err != nil {
+			continue
+		}
+		d := now.Sub(t)
+		if d < 0 {
+			d = 0
+		}
+		switch {
+		case d < time.Minute:
+			return "just now"
+		case d < time.Hour:
+			return fmt.Sprintf("%dm", int(d.Minutes()))
+		case d < 24*time.Hour:
+			return fmt.Sprintf("%dh", int(d.Hours()))
+		default:
+			return fmt.Sprintf("%dd", int(d.Hours()/24))
+		}
+	}
+	return ""
+}
+
 // printChatHelp prints the short help block for `bp chat`.
 func printChatHelp(out *writer) {
-	out.outf("usage: bp chat")
+	out.outf("usage: bp chat            open the herd (interactive TUI)")
+	out.outf("       bp chat ls [--watch]   list the herd without a TTY")
 	out.outf("")
 	out.outf("Open the native terminal chat client — the second surface of One Chat, Two")
 	out.outf("Surfaces, driving the SAME engine Studio chat drives over the /v1/chat wire.")
-	out.outf("Launch lists your sessions; resume one or start a new conversation.")
+	out.outf("Launch lands on the herd: every session with its agent-state pill")
+	out.outf("(working/blocked/idle/unknown), sorted by attention — blocked first.")
 	out.outf("")
 	out.outf("The transcript renders block-for-block by pdrender (the same engine papers")
 	out.outf("use); replies stream live and settle into rendered blocks at each turn's end.")
 	out.outf("")
 	out.outf("keys:")
-	out.outf("  picker")
+	out.outf("  herd (launch)")
 	out.outf("    ↑ / ↓          move between sessions")
-	out.outf("    enter          open the session (or start a new one on the top row)")
+	out.outf("    enter          attach to the session (or start a new one on the top row)")
 	out.outf("    n              start a new session")
 	out.outf("    r              refresh the list")
 	out.outf("    q, ctrl-c      quit")
 	out.outf("  conversation")
 	out.outf("    type + enter   send a message (mid-turn sends queue for the next turn)")
-	out.outf("    esc            interrupt the running turn (the session stays live)")
+	out.outf("    esc            interrupt the running turn (the session stays live);")
+	out.outf("                   with no turn running, detach back to the herd")
 	out.outf("    ↑ / ↓, wheel   scroll the transcript · End follows the live tail")
-	out.outf("    ctrl-b         back to the sessions list (your draft is saved)")
+	out.outf("    ctrl-b         back to the herd (your draft is saved)")
 	out.outf("    ctrl-c         quit (your draft is saved)")
+}
+
+// printChatLsHelp prints the short help block for `bp chat ls`.
+func printChatLsHelp(out *writer) {
+	out.outf("usage: bp chat ls [--watch]")
+	out.outf("")
+	out.outf("List the chat herd without a TTY: one row per session — id, agent state")
+	out.outf("(working/blocked/idle/unknown), title, messages, cost, and age.")
+	out.outf("`-o json` emits the raw sidebar rows.")
+	out.outf("")
+	out.outf("  --watch    hold the fleet stream and print one line per state flip")
+	out.outf("             (session id, state, title) until Ctrl-C (exits 0)")
 }
