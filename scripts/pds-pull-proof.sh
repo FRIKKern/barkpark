@@ -277,7 +277,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export + import + scrub through one front door" \
     "\`bp dev pull\` exists (pds-w1-pull-cli) and a scratch target is up" \
-    "ABORTS naming pds-w1-pull-cli. Mode is PINNED :merge (PDS-D33). The step probes for the verb at run time, so it goes green by itself the moment that CLI merges."
+    "ABORTS naming pds-w1-pull-cli. Mode is PINNED :merge (PDS-D33). CORRECTED at wave-3 review: that slice ships the pull as the EXISTING pair (\`bp cloud workspace export --profile dev --dataset <ds> --with-blobs\` then \`import --yes --merge --with-blobs\`), not a single \`bp dev pull\` verb — so this step needs pds-w1-crown-proof to wire the pair; it does not self-green on merge."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true" \
     "step 1 imported into a target" \
@@ -542,6 +542,21 @@ step_0c() {
 # STEP 1 — THE PULL
 # ═════════════════════════════════════════════════════════════════════════════
 
+# WHAT pds-w1-pull-cli ACTUALLY SHIPPED (corrected at wave-3 review). This step
+# was authored expecting a single `bp dev pull` verb. That verb does NOT exist:
+# the pull front door landed as the EXISTING pair, extended —
+#
+#   bp cloud workspace export <ws> --profile dev --dataset <ds> \
+#        --file <tar> --with-blobs [--blobs <dir>]
+#   bp cloud workspace import <ws> --file <tar> --yes --merge --with-blobs [--blobs <dir>]
+#
+# (a single-verb wrapper was filed and REFUSED by the dedup wall as a duplicate
+# of that slice — the two composable verbs ARE the front door). So this step does
+# NOT self-green on merge: pds-w1-crown-proof must wire the pair, carrying the tar
+# path and the sidecar dir between the two commands and pointing the second at the
+# scratch target's own base URL + admin token from $BARKPARK_HOME/scratch.env. The
+# `bp dev pull` probe below is kept because it is free and correct IF that verb
+# ever lands (pds-bl / wave 5).
 step_1() {
   head_step 1 "THE PULL — export + import + scrub through one front door (mode PINNED :merge)"
 
@@ -571,7 +586,7 @@ step_1() {
   fi
 
   abort 1 "pds-w1-pull-cli" \
-    "\`bp dev pull\` does not exist in this bp binary. This step probes for the verb at RUN time, so it goes green by itself the moment that slice merges — no edit to this script required. Everything downstream that needs a populated target (2 target half, 5, 6) aborts with it."
+    "\`bp dev pull\` does not exist in this bp binary, and (corrected at wave-3 review) it is NOT what that slice ships: the front door landed as \`bp cloud workspace export --profile dev --dataset <ds> --with-blobs\` + \`bp cloud workspace import --yes --merge --with-blobs\`. This step therefore does NOT self-green on merge — pds-w1-crown-proof wires the pair (see the comment above this function for the exact two command lines). Everything downstream that needs a populated target (2 target half, 5, 6) aborts with it."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
