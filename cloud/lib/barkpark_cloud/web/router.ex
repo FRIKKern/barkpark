@@ -80,6 +80,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
       POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
       POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
@@ -2804,6 +2805,14 @@ defmodule BarkparkCloud.Web.Router do
 
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
     proxy_instance_webhook(conn, :"webhook.replay")
+  end
+
+  # webhook TEST-SEND (GR45 — always spelled "webhook test-send"; the
+  # notifications email test-send is an unrelated surface). One-shot synthetic
+  # event to the customer's endpoint, single attempt: a `:mutate` because the
+  # instance really does make the outbound request and record a delivery row.
+  post "/v1/barkparks/:id/api/webhooks/:webhook_id/test-send" do
+    proxy_instance_webhook(conn, :"webhook.test_send")
   end
 
   # POST /v1/providers → 201 {provider: ...}. Provider-neutral connect:
@@ -8322,15 +8331,21 @@ defmodule BarkparkCloud.Web.Router do
         maybe_audit_instance_mutation(conn, team, bp, entry)
         json(conn, status, %{ok: true, resource: "webhook", data: decode_instance_body(body)})
 
-      # A bare upstream 404 on one of the three C5-added routes (rotate /
-      # deliveries / replay) is AMBIGUOUS from the status alone (C11 / D25 / OC4):
+      # A bare upstream 404 on one of the LATE-ADDED routes (rotate / deliveries
+      # / replay from C5, test-send from GR45) is AMBIGUOUS from the status alone
+      # (C11 / D25 / OC4):
       # the instance may be too OLD to serve the route at all, OR the route exists
       # and the webhook/event was simply DELETED — very likely elsewhere, on a
       # modern autoupdate-by-default fleet. "Update this instance" is an actively
       # WRONG dead-end for the deleted case. `instance_capability_404/2`
       # discriminates on the instance's OWN coded body (see there).
       {:ok, %{status: 404, body: body}}
-      when entry.capability in [:"webhook.rotate", :"webhook.deliveries", :"webhook.replay"] ->
+      when entry.capability in [
+             :"webhook.rotate",
+             :"webhook.deliveries",
+             :"webhook.replay",
+             :"webhook.test_send"
+           ] ->
         instance_capability_404(conn, body)
 
       # Any other non-2xx is relayed with the instance's OWN status so a caller
@@ -8433,6 +8448,11 @@ defmodule BarkparkCloud.Web.Router do
   defp instance_mutation_action(:"webhook.delete"), do: "webhook.deleted"
   defp instance_mutation_action(:"webhook.rotate"), do: "webhook.rotated"
   defp instance_mutation_action(:"webhook.replay"), do: "webhook.replayed"
+  # LOAD-BEARING, not optional: maybe_audit_instance_mutation/4 calls this for
+  # EVERY :mutate-tier catalog entry and there is no catch-all clause, so a
+  # :mutate capability without a clause here raises FunctionClauseError the first
+  # time the route lands a 2xx in production.
+  defp instance_mutation_action(:"webhook.test_send"), do: "webhook.test_sent"
 
   # GET carries no body; a mutation forwards the parsed request body re-encoded
   # as JSON (an absent body is an empty object, harmless for rotate/replay).

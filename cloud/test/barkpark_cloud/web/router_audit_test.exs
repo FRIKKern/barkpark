@@ -212,7 +212,11 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       {other, _other_token} = member_of(team, "admin")
 
       {:ok, _} =
-        Accounts.record_audit(%{team_id: team.id, actor_user_id: owner.id, action: "site.created"})
+        Accounts.record_audit(%{
+          team_id: team.id,
+          actor_user_id: owner.id,
+          action: "site.created"
+        })
 
       {:ok, _} =
         Accounts.record_audit(%{

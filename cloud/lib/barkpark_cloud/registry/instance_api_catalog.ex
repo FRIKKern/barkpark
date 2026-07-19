@@ -22,9 +22,17 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
       webhook.rotate      POST    /v1/webhooks/{dataset}/{id}/rotate                        :mutate
       webhook.deliveries  GET     /v1/webhooks/{dataset}/{id}/deliveries                    :read
       webhook.replay      POST    /v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay  :mutate
+      webhook.test_send   POST    /v1/webhooks/{dataset}/{id}/test-send                     :mutate
 
   `webhook.update` also serves enable/disable — the GUI/CLI PUTs `{active: bool}`
   through the SAME capability rather than a bespoke toggle endpoint.
+
+  `webhook.test_send` is the cloud half of the instance's one-shot synthetic
+  send (`api/`'s `webhook.test-send`, `writes: true`, role admin — hence
+  `:mutate`, not `:read`: it makes the instance emit a real HTTP request to the
+  customer's endpoint and writes a delivery row). The capability ATOM is
+  underscored to match the audit-action grammar the router keys on; only the
+  upstream PATH carries the hyphen the instance API spells.
 
   ## Tiers — and why there is NO :destroy tier here (charter decision D46)
 
@@ -137,6 +145,13 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
       path: "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay",
       tier: :mutate,
       params: ["dataset", "id", "event_id"]
+    },
+    %{
+      capability: :"webhook.test_send",
+      method: :post,
+      path: "/v1/webhooks/{dataset}/{id}/test-send",
+      tier: :mutate,
+      params: ["dataset", "id"]
     }
   ]
 

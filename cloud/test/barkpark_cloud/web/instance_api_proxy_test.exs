@@ -334,6 +334,49 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert event.metadata["event_id"] == "evt_5"
     end
 
+    test "test-send POSTs the test-send sub-path and writes one webhook.test_sent event" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(200, ~s({"delivered":true,"status":204})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send",
+          token: session_token(user)
+        )
+
+      assert conn.status == 200
+      assert [req] = Fake.requests()
+      assert req.method == :post
+      # The capability ATOM is underscored; only the upstream PATH is hyphenated.
+      assert req.url == @instance_url <> "/v1/webhooks/production/wh_9/test-send"
+
+      # The audit clause is load-bearing: maybe_audit_instance_mutation/4 calls
+      # instance_mutation_action/1 unconditionally for every :mutate tier and has
+      # no catch-all, so a missing clause would be a FunctionClauseError right
+      # here rather than a quiet missing row.
+      assert audit_count(team, "webhook.test_sent") == 1
+      [event] = Accounts.list_audit_events(team)
+      assert event.metadata["capability"] == "webhook.test_send"
+      assert event.metadata["webhook_id"] == "wh_9"
+    end
+
+    test "test-send on a too-old instance degrades to capability_unavailable, not a bare 404" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # Phoenix's UNCODED 404 — the shape a box that predates the route returns.
+      program(ok_json(404, ~s({"errors":{"detail":"Not Found"}})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send",
+          token: session_token(user)
+        )
+
+      assert conn.status == 502
+      assert %{"error" => %{"code" => "capability_unavailable"}} = json_body(conn)
+      # A failed capability is not a mutation that happened.
+      assert audit_count(team, "webhook.test_sent") == 0
+    end
+
     test "a rejected mutation (upstream 422) writes NO audit event" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
