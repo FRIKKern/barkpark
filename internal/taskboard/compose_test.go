@@ -709,24 +709,131 @@ func TestWideMouseBoardWheelStepsCursor(t *testing.T) {
 	}
 }
 
-// At depth 0 the right pane is a non-interactive preview — clicks AND wheel
-// no-op honestly (cursor unmoved, stack unchanged, no command).
-func TestWideMouseDepth0PreviewInert(t *testing.T) {
+// At depth 0 the wheel over the right pane scrolls INSIDE the preview — the
+// viewport offset moves (clamped at the top), while the board cursor and the
+// stack stay untouched, so scrolling the info pane never re-selects a row.
+func TestWideMouseDepth0PreviewWheelScrolls(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 16, true // short pane so the preview overflows
+	m.ui.Cursor = visibleRowIndex(m, composeSubjectID)
+	if m.ui.Cursor < 0 {
+		t.Fatal("subject is not a visible board row")
+	}
+	rightX := boardPaneWidth + paneGutter2 + 4
+	m2, cmd := m.handleWideMouse(wideWheel(rightX, 3, false))
+	if cmd != nil {
+		t.Errorf("a preview scroll fired a command: %v", cmd)
+	}
+	if m2.previewScroll != 1 || m2.previewRef != composeSubjectID {
+		t.Fatalf("wheel-down scrolled preview to (%q, %d), want (%q, 1)",
+			m2.previewRef, m2.previewScroll, composeSubjectID)
+	}
+	if m2.ui.Cursor != m.ui.Cursor || len(m2.stack) != 1 {
+		t.Fatalf("preview scroll moved the board: cursor=%d depth=%d", m2.ui.Cursor, len(m2.stack))
+	}
+	// Wheel-up returns to the top and clamps there — never negative.
+	m3, _ := m2.handleWideMouse(wideWheel(rightX, 3, true))
+	m4, _ := m3.handleWideMouse(wideWheel(rightX, 3, true))
+	if m4.previewScroll != 0 {
+		t.Fatalf("wheel-up clamped preview to %d, want 0", m4.previewScroll)
+	}
+	// The painted pane follows the offset: a scrolled preview shows the ↑ marker.
+	frame := ansi.Strip(composeAt(m2, 116, 15))
+	if !strings.Contains(frame, "more above") {
+		t.Errorf("scrolled preview shows no ↑ more-above marker:\n%s", frame)
+	}
+}
+
+// At depth 0 a click on the right preview pane ENTERS the previewed task — the
+// same single-open descent as activating its board row.
+func TestWideMouseDepth0PreviewClickEnters(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 40, true
-	m.ui.Cursor = 1
-	rightX := boardPaneWidth + paneGutter2 + 4 // deep in the right preview pane
-	for _, ev := range []tea.MouseMsg{
-		wideClick(rightX, 3),
-		wideWheel(rightX, 3, false),
-		wideWheel(rightX, 3, true),
-	} {
-		m2, cmd := m.handleWideMouse(ev)
-		if m2.ui.Cursor != 1 || len(m2.stack) != 1 || cmd != nil {
-			t.Fatalf("preview event %v was not inert: cursor=%d depth=%d cmd=%v",
-				ev, m2.ui.Cursor, len(m2.stack), cmd)
+	m.ui.Cursor = visibleRowIndex(m, composeSubjectID)
+	if m.ui.Cursor < 0 {
+		t.Fatal("subject is not a visible board row")
+	}
+	rightX := boardPaneWidth + paneGutter2 + 4
+	m2, cmd := m.handleWideMouse(wideClick(rightX, 3))
+	if cmd != nil {
+		t.Errorf("a preview click fired a command: %v", cmd)
+	}
+	if len(m2.stack) != 2 || m2.topFrame().Kind != FrameTask || m2.topFrame().Ref != composeSubjectID {
+		t.Fatalf("preview click did not enter the previewed task: depth=%d kind=%v ref=%q",
+			len(m2.stack), m2.topFrame().Kind, m2.topFrame().Ref)
+	}
+}
+
+// rightPaneOf extracts the wide right pane's text from a composeAt frame: each
+// row's columns past the board pane + gutter, ansi-stripped and joined — so an
+// assertion on the preview can never be satisfied by the LEFT board pane's own
+// row text.
+func rightPaneOf(frame string) string {
+	var sb strings.Builder
+	for _, ln := range strings.Split(ansi.Strip(frame), "\n") {
+		r := []rune(ln)
+		if len(r) > boardPaneWidth+paneGutter2 {
+			sb.WriteString(string(r[boardPaneWidth+paneGutter2:]))
 		}
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+// Hovering a board row previews THAT task in the wide right pane, exactly as
+// entering it would — and the pane reverts when the hover clears (pointer left
+// the board pane). The cursor is parked on the section HEADER (no preview
+// target of its own), so the hovered task's detail is attributable to the
+// hover alone.
+func TestWideHoverPreviewsHoveredRow(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 0 // the orphan-section header — previews nothing itself
+	_, innerW, _ := m.wideGeom()
+
+	m.ui.HoverTarget = "sse-conn-dot"
+	right := rightPaneOf(composeAt(m, innerW, m.height-1))
+	if !strings.Contains(right, "Honest connection dot states") {
+		t.Fatalf("hover did not preview the hovered task in the right pane:\n%s", right)
+	}
+
+	m.ui.HoverTarget = ""
+	right = rightPaneOf(composeAt(m, innerW, m.height-1))
+	if strings.Contains(right, "Honest connection dot states") {
+		t.Fatalf("clearing the hover did not revert the preview:\n%s", right)
+	}
+	if !strings.Contains(right, "no task selected") {
+		t.Fatalf("header cursor + no hover should preview nothing:\n%s", right)
+	}
+}
+
+// Entering a task from the board while ANOTHER task frame is open REPLACES it
+// (single-open): the stack never accumulates board-entered FrameTasks, and the
+// checked radio marks exactly one row — the deepest open task.
+func TestSingleOpenTaskEntry(t *testing.T) {
+	m := composeFixture()
+	m = m.enterTask("a")
+	m = m.enterTask("b")
+	if len(m.stack) != 2 || m.topFrame().Ref != "b" {
+		t.Fatalf("second entry did not replace the first: depth=%d top=%q", len(m.stack), m.topFrame().Ref)
+	}
+	if refs := openTaskRefs(m.stack); len(refs) != 1 || !refs["b"] {
+		t.Fatalf("openTaskRefs after replace = %v, want exactly {b}", refs)
+	}
+	// A deep trail (task → paper → child task) still checks ONLY the deepest task.
+	(&m).pushFrame(Frame{Kind: FramePaper, Ref: "p", Title: "p"})
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: "c", Title: "c"})
+	if refs := openTaskRefs(m.stack); len(refs) != 1 || !refs["c"] {
+		t.Fatalf("openTaskRefs on a deep trail = %v, want exactly {c}", refs)
+	}
+	// Re-entering a task already on the trail takes the cycle-guard path: pop
+	// back to its existing frame, never a fresh duplicate.
+	m = m.enterTask("b")
+	if len(m.stack) != 2 || m.topFrame().Ref != "b" {
+		t.Fatalf("re-entry did not pop back to the open frame: depth=%d top=%q", len(m.stack), m.topFrame().Ref)
 	}
 }
 
