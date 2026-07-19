@@ -455,12 +455,50 @@ cmd_teardown() {
 
   # Orphan check BEFORE the tree goes away — a postgres still holding this data
   # dir is exactly the leak we are looking for.
+  #
   # FIXED-STRING, not `pgrep -f "postgres.*$home"`: pgrep's pattern is a regex,
   # so a caller-supplied BARKPARK_HOME containing `.`/`+`/`(` would quietly match
   # the wrong set (or nothing) and report a clean teardown over a live orphan.
+  #
+  # TRAP 8 — THE CHECK USED TO MATCH ITSELF. The previous form was
+  #   ps -Ao pid=,command= | grep -F "$home" | grep -F postgres
+  # which scores ANY process whose argv merely NAMES both the scratch root and
+  # the substring "postgres" — including this script's own invocation, the
+  # wrapper that launched it, and Homebrew's postgresql@17 TOOL paths
+  # (…/postgresql@17/bin/pg_ctl -D $home …). Reproduced with Postgres fully down
+  # ("database system is shut down", no postmaster.pid): an identical root FAILED
+  # teardown twice from a command line that named it — "orphan postgres processes
+  # for /private/tmp/pds.v4: 38130", roots left standing, exit 1 — and PASSED from
+  # a wrapper whose argv did not. A teardown that fails because of how it was
+  # typed is worse than no check: it trains the operator to ignore the one assert
+  # that catches a real leak.
+  #
+  # Two independent defences, both required:
+  #   1. PID EXCLUSION — never score this shell ($$), its parent ($PPID), or a
+  #      direct child of this shell (the pipeline members, e.g. the awk whose own
+  #      argv carries $home via -v).
+  #   2. SERVER-BINARY ANCHOR — argv[0]'s BASENAME must be the postgres server
+  #      itself (`postgres`, its argv-rewritten background workers `postgres:`,
+  #      or `postmaster`). pg_ctl/psql/initdb name the data dir but do not HOLD
+  #      it, and they are not what a leak looks like.
+  # $home is passed to awk via -v, never interpolated into the program text, so a
+  # root containing awk-special characters cannot alter the match either.
   local orphans
   # shellcheck disable=SC2009  # deliberate: pgrep -f is a REGEX, see above
-  orphans="$(ps -Ao pid=,command= 2>/dev/null | grep -F -- "$home" | grep -F -- postgres | awk '{print $1}' | tr '\n' ' ' | sed 's/ *$//' || true)"
+  orphans="$(ps -Ao pid=,ppid=,command= 2>/dev/null |
+    awk -v home="$home" -v self="$$" -v parent="$PPID" '
+      {
+        pid = $1; ppid = $2
+        if (pid == self || pid == parent || ppid == self) next
+        cmd = $0
+        sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/, "", cmd)
+        if (index(cmd, home) == 0) next
+        argv0 = cmd
+        sub(/[[:space:]].*$/, "", argv0)
+        n = split(argv0, parts, "/")
+        base = parts[n]
+        if (base == "postgres" || base == "postgres:" || base == "postmaster") print pid
+      }' | tr '\n' ' ' | sed 's/ *$//' || true)"
   if [ -n "$orphans" ]; then
     printf 'pds-scratch: FAIL orphan postgres processes for %s: %s\n' "$home" "$orphans" >&2
     fails=$((fails + 1))
