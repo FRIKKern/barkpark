@@ -8,6 +8,10 @@ defmodule BarkparkCloud.Web.Router do
 
   ## Route table
 
+  Every GET below also answers HEAD with the same status and headers and an
+  empty body — `plug(Plug.Head)` rewrites the method once, before matching, so
+  HEAD earns no rows of its own here (it is not a route, it is a rewrite).
+
       METHOD  PATH                 AUTH      PURPOSE
       GET     /up                  —         control-plane liveness (200 db up | 503 db down)
       GET     /health              —         alias of /up
@@ -265,6 +269,19 @@ defmodule BarkparkCloud.Web.Router do
   # api.barkpark.cloud, and any unknown/lookalike host all pass through untouched.
   # http->https is already Caddy's 308 — not duplicated here.
   plug(:canonicalize_dashboard_host)
+
+  # HEAD is GET-without-a-body, and every uptime checker, link previewer and
+  # `curl -I` in the world speaks it. This router declared only `get`/`post`/…
+  # matches, so HEAD fell through to the catch-all and answered 404 on EVERY
+  # path — including `/` and `/up` — which is a lie about what is there.
+  # `Plug.Head` rewrites the method to GET exactly once, here, so ONE block
+  # gives every current and future GET route its HEAD twin with the same status
+  # and headers; the body is dropped by the adapter (`Bandit.Adapter`'s
+  # `send_resp_body?/1`, and `Plug.Adapters.Test.Conn` in tests), which is the
+  # only layer that can drop it for a `send_file/3` response too. It runs BEFORE
+  # `Plug.Static` so HEAD /favicon.ico and HEAD /app.css are honest as well, and
+  # AFTER the www→apex canonicalization so a HEAD still gets the 308.
+  plug(Plug.Head)
 
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
   # priv/static. This runs BEFORE :match so a real asset short-circuits the

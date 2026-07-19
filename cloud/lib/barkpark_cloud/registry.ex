@@ -2341,6 +2341,20 @@ defmodule BarkparkCloud.Registry do
   blob. Its per-kind shape is validated by the changeset before insert. `opts`
   may carry `:label`.
 
+  A team has AT MOST ONE provider per kind, so this is an UPSERT, not an append
+  (charter GR44): reconnecting `hetzner` ROTATES the credential (and the label)
+  on the existing row instead of stacking a second one behind it. The
+  `unique_index(:providers, [:team_id, :kind])` from
+  `20260719203000_unique_provider_per_team_kind` is the enforcement;
+  `on_conflict` is how this write cooperates with it. Before both, every read
+  papered over the duplicates with newest-wins ordering — correct output over a
+  quietly growing table.
+
+  `returning: true` is load-bearing: on the conflict branch the in-memory
+  changeset carries the NEW credential but the row's ORIGINAL `id` /
+  `inserted_at` are what Postgres kept, so without it callers would hold a
+  half-invented struct.
+
   Returns `{:ok, %Provider{}}` or `{:error, %Ecto.Changeset{}}`.
   """
   @spec connect_provider(Team.t() | binary(), String.t(), binary(), keyword()) ::
@@ -2356,7 +2370,11 @@ defmodule BarkparkCloud.Registry do
       credential: credential,
       encrypted_token: Vault.encrypt(credential)
     })
-    |> Repo.insert()
+    |> Repo.insert(
+      on_conflict: {:replace, [:label, :encrypted_token, :updated_at]},
+      conflict_target: [:team_id, :kind],
+      returning: true
+    )
   end
 
   @doc "List a Team's connected providers, newest first. Scoped — never crosses teams."
