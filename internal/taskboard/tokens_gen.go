@@ -21,10 +21,12 @@ var GenLifecycle = map[string]GenLifecycleToken{
 	"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 	"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 	"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+	"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+	"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 }
 
 // GenLifecycleOrder is the canonical emission order (matches the source).
-var GenLifecycleOrder = []string{"in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"}
+var GenLifecycleOrder = []string{"in_progress", "blocked", "done", "closed", "cancelled", "ready", "open", "considering", "researching"}
 
 // GenBrailleFrames mirrors lifecycle.in_progress.frames (spinner.go).
 var GenBrailleFrames = [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -56,6 +58,8 @@ var genLifecycleThemes = map[string]ThemeLifecycle{
 			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		BrailleStill: "⠿",
@@ -69,6 +73,8 @@ var genLifecycleThemes = map[string]ThemeLifecycle{
 			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		BrailleStill: "⠿",
@@ -82,6 +88,8 @@ var genLifecycleThemes = map[string]ThemeLifecycle{
 			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		BrailleStill: "⠿",
@@ -95,6 +103,8 @@ var genLifecycleThemes = map[string]ThemeLifecycle{
 			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		BrailleStill: "⠿",

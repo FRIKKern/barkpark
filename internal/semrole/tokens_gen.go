@@ -16,13 +16,15 @@ var (
 // Generated lifecycle glyph hues (design/tokens.json lifecycle.*.color).
 // done/closed stay TEAL — deliberately distinct from status.ok green.
 var (
-	GenInProgressHue = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"}
-	GenBlockedHue    = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"}
-	GenDoneHue       = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
-	GenClosedHue     = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
-	GenCancelledHue  = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
-	GenReadyHue      = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"}
-	GenOpenHue       = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"}
+	GenInProgressHue  = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"}
+	GenBlockedHue     = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"}
+	GenDoneHue        = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
+	GenClosedHue      = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
+	GenCancelledHue   = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
+	GenReadyHue       = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"}
+	GenOpenHue        = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"}
+	GenConsideringHue = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
+	GenResearchingHue = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"}
 )
 
 // GenStatusTone maps a semantic role to its adaptive tone.
@@ -42,6 +44,8 @@ var GenLifecycleHue = map[string]lipgloss.AdaptiveColor{
 	"cancelled":   GenCancelledHue,
 	"ready":       GenReadyHue,
 	"open":        GenOpenHue,
+	"considering": GenConsideringHue,
+	"researching": GenResearchingHue,
 }
 
 // GenANSI16 pins each status role to its basic-16 SGR foreground code — the
@@ -85,6 +89,8 @@ var genTones = map[string]ThemeTones{
 			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
 			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
 			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
 			"ok": 32,
@@ -108,6 +114,8 @@ var genTones = map[string]ThemeTones{
 			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
 			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
 			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
 			"ok": 32,
@@ -131,6 +139,8 @@ var genTones = map[string]ThemeTones{
 			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
 			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
 			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
 			"ok": 32,
@@ -154,6 +164,8 @@ var genTones = map[string]ThemeTones{
 			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
 			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
 			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
 			"ok": 32,

@@ -25,6 +25,15 @@ const (
 	lifeDone       = "done"
 	lifeClosed     = "closed"
 	lifeCancelled  = "cancelled"
+	// The pre-open thought states (task-lifecycle-visibility epic): a candidate the
+	// strategizer just named (considering) and one under active investigation
+	// (researching). Neither is claimable — only "open" is (readiness stays derived,
+	// never stored). They sink to childBand's unknown tier (just after open) until a
+	// later slice teaches the bands their pre-open rank; the vocabulary is defined
+	// here now so TestLifecycleConstsMatchGeneratedTokens stays in lockstep with the
+	// generated GenLifecycleOrder.
+	lifeConsidering = "considering"
+	lifeResearching = "researching"
 )
 
 // kindGoal roots an epic. A goal always heads its own section even with no

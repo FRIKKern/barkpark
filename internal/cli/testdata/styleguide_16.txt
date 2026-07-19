@@ -15,6 +15,8 @@ Lifecycle glyphs
   [94m✕[0m  cancelled    -
   [96m○[0m  ready        -
   [94m○[0m  open         -
+  [94m◌[0m  considering  -
+  [95m◎[0m  researching  -
 
 Priority severity
   [91mP0[0m  danger

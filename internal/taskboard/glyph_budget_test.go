@@ -42,6 +42,8 @@ var glyphAllowlist = map[rune]string{
 	'●': "live connection dot / checked radio on an entered (open) task row",
 	'◐': "polling connection dot",
 	'○': "ready/open status glyph",
+	'◌': "considering status glyph (dotted circle — a candidate the strategizer just named; task-lifecycle-visibility epic)",
+	'◎': "researching status glyph (violet bullseye — a candidate under investigation; task-lifecycle-visibility epic)",
 	'✓': "done status glyph / met criterion / momentum done tally",
 	'✕': "cancelled status glyph",
 	'✗': "offline connection dot",

@@ -15,6 +15,8 @@ Lifecycle glyphs
   [38;2;113;113;121m✕[0m  cancelled    -
   [38;2;231;237;242m○[0m  ready        -
   [38;2;95;107;120m○[0m  open         -
+  [38;2;113;113;121m◌[0m  considering  -
+  [38;2;167;139;250m◎[0m  researching  -
 
 Priority severity
   [38;2;239;97;97mP0[0m  danger

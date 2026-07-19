@@ -8,6 +8,8 @@ closed        ✓      v      ok     #0d9488    #2dd4bf
 cancelled     ✕      x      -      #a1a1aa    #71717a
 ready         ○      o      -      #18181b    #e7edf2
 open          ○      .      -      #71717a    #5f6b78
+considering   ◌      ?      -      #a1a1aa    #71717a
+researching   ◎      R      -      #7c3aed    #a78bfa
 
 spinner frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
 reduced-motion still: ⠿
