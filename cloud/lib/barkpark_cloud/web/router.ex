@@ -265,17 +265,32 @@ defmodule BarkparkCloud.Web.Router do
   # falls through to the matchers below. A missing asset (e.g. no favicon.ico)
   # just falls through too. priv/ ships in the OTP release by default, so
   # `from: :barkpark_cloud` resolves the same in dev and prod.
+  # Fonts are content-stable (a self-hosted, subsetted family whose bytes only
+  # change when the FILENAME changes), so they earn a long immutable lifetime —
+  # `immutable` tells the browser never even to revalidate for a year. This
+  # dedicated plug runs FIRST and only claims `/fonts/*`, so a font short-
+  # circuits here with the immutable header before the no-cache plug below can
+  # see it. (Before this split, fonts fell through the general plug and were
+  # served `no-cache` — the code contradicted the promise this comment makes.)
+  plug(Plug.Static,
+    at: "/fonts",
+    from: {:barkpark_cloud, "priv/static/fonts"},
+    headers: %{"cache-control" => "public, max-age=31536000, immutable"},
+    cache_control_for_etags: "public, max-age=31536000, immutable"
+  )
+
   # `no-cache` ≠ "don't cache": it means REVALIDATE every time — the browser
   # keeps the bytes but must ask (If-None-Match), and Plug.Static answers 304
   # off the etag when unchanged. Without this the SPA's unversioned app.js/
   # app.css shipped bare `cache-control: public`, so browsers heuristically
   # served STALE console UI after every deploy (live-caught: a whole deploy-UX
   # wave was invisible to a returning operator until a hard refresh). Fonts are
-  # content-stable; they keep a long immutable lifetime instead.
+  # handled by the dedicated immutable plug above, so they are NOT in this
+  # allowlist.
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html fonts),
+    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html),
     headers: %{"cache-control" => "no-cache"},
     cache_control_for_etags: "no-cache"
   )
@@ -991,7 +1006,15 @@ defmodule BarkparkCloud.Web.Router do
           id: user.id,
           email: user.email,
           confirmed: not is_nil(user.confirmed_at),
-          two_factor_enabled: Accounts.two_factor_enabled?(user)
+          two_factor_enabled: Accounts.two_factor_enabled?(user),
+          # platform-operator: fail-closed boolean derived SOLELY from the
+          # `:platform_admin_emails` config allowlist (resolved to registered
+          # users), NEVER a team role — owner/admin is a different axis (Authz
+          # law: authority reads from the membership row, never anything
+          # global). Unset/empty allowlist ⇒ false, always. Interim principal
+          # per charter GR9 — isu-backlog-operator-principal inherits/reconciles
+          # this boolean once a first-class platform-operator principal lands.
+          platform_operator: user.email in Notifications.platform_admin_emails()
         },
         team: team && %{id: team.id, name: team.name, slug: team.slug},
         # EVERY membership, so the SPA's team switcher can render — a user who

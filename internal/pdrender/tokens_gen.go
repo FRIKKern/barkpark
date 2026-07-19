@@ -18,7 +18,7 @@ var GenToneNeutral = lipgloss.AdaptiveColor{Light: "#374151", Dark: "#9ca3af"}
 
 // Generated chrome + reading-accent tokens (design/tokens.json color.* → hex).
 var (
-	GenPrimary       = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
+	GenPrimary       = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
 	GenPrimaryFg     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
 	GenInk           = lipgloss.AdaptiveColor{Light: "#09090b", Dark: "#f2f2f2"}
 	GenDim           = lipgloss.AdaptiveColor{Light: "#6e6e77", Dark: "#a1a1aa"}
@@ -31,7 +31,7 @@ var (
 // evergreen genPalette entry below and threaded through theme.go's buildTheme
 // (pal.ChromeAccent/ChromeInk/ChromeTextSecondary/ChromeDim, via Resolve).
 var (
-	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
 	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
 	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}
@@ -126,52 +126,68 @@ var genPalette = map[string]Palette{
 		ToneNeutral:         GenToneNeutral,
 	},
 	"charple": {
-		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#6c52ff"},
+		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#7b3a96", Dark: "#c78ae0"},
 		ChromeInk:           lipgloss.AdaptiveColor{Light: "#323138", Dark: "#d7d6dc"},
 		ChromeTextSecondary: lipgloss.AdaptiveColor{Light: "#57565c", Dark: "#a1a0a6"},
 		ChromeDim:           lipgloss.AdaptiveColor{Light: "#a7a6ab", Dark: "#6e6d73"},
-		Rule:                lipgloss.AdaptiveColor{Light: "#dee0e5", Dark: "#131417"},
-		CodeFg:              lipgloss.AdaptiveColor{Light: "#218bc4", Dark: "#52abff"},
+		Rule:                lipgloss.AdaptiveColor{Light: "#e2dfe3", Dark: "#151316"},
+		CodeFg:              lipgloss.AdaptiveColor{Light: "#302ba5", Dark: "#8480ea"},
 		CodeBg:              lipgloss.AdaptiveColor{Light: "#f0eff4", Dark: "#35343b"},
-		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#67696f", Dark: "#9999a2"},
-		ReadingAccent:       lipgloss.AdaptiveColor{Light: "#218bc4", Dark: "#52abff"},
-		ToneInfo:            lipgloss.AdaptiveColor{Light: "#406bcd", Dark: "#76a2ff"},
-		ToneOK:              lipgloss.AdaptiveColor{Light: "#08883e", Dark: "#53be70"},
-		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#db9400"},
-		ToneDanger:          lipgloss.AdaptiveColor{Light: "#c43732", Dark: "#ff7266"},
-		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#67696f", Dark: "#9999a2"},
+		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#6b676d", Dark: "#9d989f"},
+		ReadingAccent:       lipgloss.AdaptiveColor{Light: "#302ba5", Dark: "#8480ea"},
+		ToneInfo:            lipgloss.AdaptiveColor{Light: "#4a6ebd", Dark: "#7ea3ef"},
+		ToneOK:              lipgloss.AdaptiveColor{Light: "#31854a", Dark: "#6fb87f"},
+		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d2983d"},
+		ToneDanger:          lipgloss.AdaptiveColor{Light: "#b74840", Dark: "#ed8176"},
+		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#6b676d", Dark: "#9d989f"},
 	},
 	"ember": {
-		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
+		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#b34e1e", Dark: "#e8875a"},
 		ChromeInk:           lipgloss.AdaptiveColor{Light: "#342c28", Dark: "#dad5d0"},
 		ChromeTextSecondary: lipgloss.AdaptiveColor{Light: "#59534f", Dark: "#a09b97"},
 		ChromeDim:           lipgloss.AdaptiveColor{Light: "#aaa6a4", Dark: "#6a6561"},
-		Rule:                lipgloss.AdaptiveColor{Light: "#e4dedc", Dark: "#161311"},
+		Rule:                lipgloss.AdaptiveColor{Light: "#e4dfdc", Dark: "#161312"},
 		CodeFg:              lipgloss.AdaptiveColor{Light: "#bf321d", Dark: "#f5855c"},
 		CodeBg:              lipgloss.AdaptiveColor{Light: "#f5f3f2", Dark: "#2e2925"},
-		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a09993"},
+		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a19894"},
 		ReadingAccent:       lipgloss.AdaptiveColor{Light: "#bf321d", Dark: "#f5855c"},
-		ToneInfo:            lipgloss.AdaptiveColor{Light: "#486ec0", Dark: "#7ba3f6"},
-		ToneOK:              lipgloss.AdaptiveColor{Light: "#2c8647", Dark: "#68ba7b"},
-		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d6962c"},
-		ToneDanger:          lipgloss.AdaptiveColor{Light: "#ba453d", Dark: "#f27d72"},
-		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a09993"},
+		ToneInfo:            lipgloss.AdaptiveColor{Light: "#4c6fb9", Dark: "#7fa3ee"},
+		ToneOK:              lipgloss.AdaptiveColor{Light: "#36844c", Dark: "#70b880"},
+		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d29840"},
+		ToneDanger:          lipgloss.AdaptiveColor{Light: "#b54b43", Dark: "#eb8277"},
+		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a19894"},
 	},
 	"fjord": {
-		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#68a2e8"},
+		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#0e6e85", Dark: "#6cc4dd"},
 		ChromeInk:           lipgloss.AdaptiveColor{Light: "#262b36", Dark: "#d0d5db"},
 		ChromeTextSecondary: lipgloss.AdaptiveColor{Light: "#4e525b", Dark: "#969aa1"},
 		ChromeDim:           lipgloss.AdaptiveColor{Light: "#a3a6ab", Dark: "#60646b"},
-		Rule:                lipgloss.AdaptiveColor{Light: "#dde0e5", Dark: "#121417"},
+		Rule:                lipgloss.AdaptiveColor{Light: "#dbe1e3", Dark: "#111516"},
 		CodeFg:              lipgloss.AdaptiveColor{Light: "#0f8299", Dark: "#53d6ea"},
 		CodeBg:              lipgloss.AdaptiveColor{Light: "#f2f3f5", Dark: "#24282f"},
-		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#66696f", Dark: "#959ba2"},
+		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#636a6d", Dark: "#929c9f"},
 		ReadingAccent:       lipgloss.AdaptiveColor{Light: "#0f8299", Dark: "#53d6ea"},
-		ToneInfo:            lipgloss.AdaptiveColor{Light: "#4a6ebc", Dark: "#82a4e9"},
-		ToneOK:              lipgloss.AdaptiveColor{Light: "#32854a", Dark: "#74b783"},
-		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#cf9a4a"},
-		ToneDanger:          lipgloss.AdaptiveColor{Light: "#b74941", Dark: "#e7857b"},
-		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#66696f", Dark: "#959ba2"},
+		ToneInfo:            lipgloss.AdaptiveColor{Light: "#5871a5", Dark: "#88a4dd"},
+		ToneOK:              lipgloss.AdaptiveColor{Light: "#4d7f58", Dark: "#7eb489"},
+		ToneWarn:            lipgloss.AdaptiveColor{Light: "#91692d", Dark: "#c89c5e"},
+		ToneDanger:          lipgloss.AdaptiveColor{Light: "#a35a52", Dark: "#dd8c82"},
+		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#636a6d", Dark: "#929c9f"},
+	},
+	"iris": {
+		ChromeAccent:        lipgloss.AdaptiveColor{Light: "#5b46d6", Dark: "#9d8cff"},
+		ChromeInk:           lipgloss.AdaptiveColor{Light: "#1d1d1e", Dark: "#dbdbdb"},
+		ChromeTextSecondary: lipgloss.AdaptiveColor{Light: "#464648", Dark: "#9c9c9d"},
+		ChromeDim:           lipgloss.AdaptiveColor{Light: "#a2a2a2", Dark: "#626263"},
+		Rule:                lipgloss.AdaptiveColor{Light: "#dfdfe5", Dark: "#141417"},
+		CodeFg:              lipgloss.AdaptiveColor{Light: "#3692e6", Dark: "#8cc8ff"},
+		CodeBg:              lipgloss.AdaptiveColor{Light: "#f5f5f5", Dark: "#202022"},
+		ReadingMuted:        lipgloss.AdaptiveColor{Light: "#68686f", Dark: "#9999a1"},
+		ReadingAccent:       lipgloss.AdaptiveColor{Light: "#3692e6", Dark: "#8cc8ff"},
+		ToneInfo:            lipgloss.AdaptiveColor{Light: "#406bce", Dark: "#78a2fa"},
+		ToneOK:              lipgloss.AdaptiveColor{Light: "#05893e", Dark: "#64bb79"},
+		ToneWarn:            lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d9951c"},
+		ToneDanger:          lipgloss.AdaptiveColor{Light: "#c53732", Dark: "#f67a6f"},
+		ToneNeutral:         lipgloss.AdaptiveColor{Light: "#68686f", Dark: "#9999a1"},
 	},
 }
 

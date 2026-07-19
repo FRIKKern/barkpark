@@ -64,8 +64,8 @@ test("evergreen theme palette equals base tokens byte-for-byte (fallback === the
   // themePalette(evergreen) must reproduce the shipped bytes — Part F's guarantee,
   // re-checked at the emit seam so the evergreen block can never silently retint.
   const p = themePalette(evergreen);
-  assert.equal(p.color.primary.light, "163 46% 22%");
-  assert.equal(p.color.primary.dark, "160 42% 62%");
+  assert.equal(p.color.primary.light, "151.96 71.81% 29.22%");
+  assert.equal(p.color.primary.dark, "152.92 60% 52.94%");
   assert.equal(p.color.paper.surface.ink.light, "#15211d");
 });
 

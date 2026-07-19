@@ -167,8 +167,18 @@ func composeAt(m Model, width, height int) string {
 		rightW = minReadingWidth
 	}
 	var rightLines []string
-	if top.Kind == FrameBoard {
-		rightLines = m.previewLines(rightW, inner, now)
+	if t, ok := m.hoverPreviewTask(); ok {
+		// A live board-row hover PREVIEWS that task in the right pane, exactly as
+		// entering it would render it — at any depth. Transient by construction:
+		// the pointer leaving the board pane clears the hover (wideMouseMotion),
+		// and the pane reverts to the frame/cursor content below.
+		rightLines = m.previewLines(t, rightW, inner, now)
+	} else if top.Kind == FrameBoard {
+		if t, ok := m.taskUnderCursor(); ok {
+			rightLines = m.previewLines(t, rightW, inner, now)
+		} else {
+			rightLines = []string{dimStyle.Render(truncate("no task selected", rightW))}
+		}
 	} else {
 		body, stops := m.frameContent(top, rightW, now)
 		rightLines = windowFrame(body, stops, top.Cursor, top.Scroll, inner, rightW)
@@ -189,21 +199,40 @@ func composeAt(m Model, width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
-// previewLines renders the wide depth-0 right pane: the board cursor-target
-// task's detail, from the in-hand DetailIndex — NEVER a fetch, and never a paper
-// (charter D12). cursor -1 means no active stop (this is a preview, not the
-// focused frame); the viewport shows the top of the detail.
-func (m Model) previewLines(width, avail int, now time.Time) []string {
-	t, ok := m.taskUnderCursor()
-	if !ok {
-		return []string{dimStyle.Render(truncate("no task selected", width))}
+// previewLines renders the wide right-pane PREVIEW of one task's detail (the
+// depth-0 cursor target, or a live board-row hover at any depth), from the
+// in-hand DetailIndex — NEVER a fetch, and never a paper (charter D12).
+// cursor -1 means no active stop (this is a preview, not the focused frame).
+// The viewport windows at the wheel-driven previewScroll while the preview
+// still shows previewRef (rightPaneMouse owns the offset); any other target
+// renders from the top.
+func (m Model) previewLines(t Task, width, avail int, now time.Time) []string {
+	scroll := 0
+	if m.previewRef == t.DocID {
+		scroll = m.previewScroll
 	}
-	d, has := m.details[t.DocID]
-	if !has {
-		d = TaskDetail{Task: t} // thin best-effort from the board row
+	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, width, now)
+	return windowFrame(body, nil, -1, scroll, avail, width)
+}
+
+// previewDetail is a task's preview-pane detail: the reading index's entry, or
+// a thin best-effort wrap of the board row when the index has none.
+func (m Model) previewDetail(t Task) TaskDetail {
+	if d, has := m.details[t.DocID]; has {
+		return d
 	}
-	body, _ := RenderTaskDetail(d, ChildrenOf(m.tasks, t.DocID), -1, width, now)
-	return windowFrame(body, nil, -1, 0, avail, width)
+	return TaskDetail{Task: t}
+}
+
+// hoverPreviewTask resolves a live pointer hover on a board spine row to the
+// task the wide right pane should preview — hovering a row shows it exactly as
+// entering it would. A hover target that is not a task (a cluster fold key, a
+// "+N more" line) previews nothing.
+func (m Model) hoverPreviewTask() (Task, bool) {
+	if !m.wide || m.ui.HoverTarget == "" {
+		return Task{}, false
+	}
+	return m.taskByID(m.ui.HoverTarget)
 }
 
 // Breadcrumb renders the navigation trail (charter D11/D18: always shows where
@@ -238,23 +267,19 @@ func Breadcrumb(stack []Frame, width int) string {
 	return dimStyle.Render(truncateMiddle(full, width, tail))
 }
 
-// openTaskRefs collects the doc_ids of every FrameTask on the navigation stack
-// — the tasks the user has ENTERED and not yet escaped out of. The board wears
-// the checked radio on exactly these rows (UIState.OpenTasks). Returns nil when
-// none are open, so the zero state stays byte-identical. Usually one ref; a
-// deeper trail (task → paper → task) checks every task on it, mirroring the
-// breadcrumb.
+// openTaskRefs marks the ONE task the user is currently inside: the DEEPEST
+// FrameTask on the navigation stack. The board wears the checked radio on
+// exactly this row (UIState.OpenTasks) — never more than one at a time, even on
+// a deep trail (task → paper → child task marks only the child; the breadcrumb
+// still shows the full trail). Returns nil when no task is open, so the zero
+// state stays byte-identical.
 func openTaskRefs(stack []Frame) map[string]bool {
-	var refs map[string]bool
-	for _, f := range stack {
-		if f.Kind == FrameTask && f.Ref != "" {
-			if refs == nil {
-				refs = make(map[string]bool, 1)
-			}
-			refs[f.Ref] = true
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i].Kind == FrameTask && stack[i].Ref != "" {
+			return map[string]bool{stack[i].Ref: true}
 		}
 	}
-	return refs
+	return nil
 }
 
 // crumbSeg is a frame's breadcrumb label: its Title, else "tasks" for the board,
@@ -391,10 +416,12 @@ func padTo(s string, n int) string {
 //     (shifted by 48). The board pane's semantics are identical to narrow — a
 //     click SELECTS the row (same effect as arrowing to it), wheel steps the
 //     cursor (#1878: one line, never a recenter jump).
-//   - Depth 0, the right pane is a non-interactive preview (cursor -1, no stops):
-//     clicks AND wheel no-op honestly. Depth>0 it is the stack-top reading frame:
-//     clicks resolve to a rail stop via Stop.Line + the painted window offset
-//     (overflow markers skipped), wheel free-scrolls ±1 exactly like space/u/d.
+//   - Depth 0, the right pane is the cursor task's PREVIEW: wheel scrolls
+//     inside it (scrollPreview, clamped) and a click enters the previewed task
+//     (enterTask — the single-open descent). Depth>0 it is the stack-top
+//     reading frame: clicks resolve to a rail stop via Stop.Line + the painted
+//     window offset (overflow markers skipped), wheel free-scrolls ±1 exactly
+//     like space/u/d.
 //
 // It touches no paint (routing only), degrades honestly (a click on chrome, the
 // gutter, or empty prose is a no-op, never a crash), and leaves the keyboard flow
@@ -604,16 +631,33 @@ func (m Model) wideBoardPaneAvail(inner int, now time.Time) (idTop, avail int) {
 }
 
 // rightPaneMouse routes a click/wheel that landed in the wide right pane. At
-// depth 0 the pane is the inert detail PREVIEW (cursor -1, no stops) — clicks AND
-// wheel no-op honestly. At depth>0 it is the stack-top reading frame: wheel
-// free-scrolls ±1 (reusing freeScroll so mouse == keyboard), a click resolves to
-// the rail stop on the clicked body line (overflow markers skipped) and selects
-// it exactly as g/G/j would (viewport follows); a click on the ALREADY-selected
-// stop descends onto it, exactly like enter — the narrow reading semantics.
+// depth 0 the pane is the detail PREVIEW of the cursor task: wheel scrolls
+// INSIDE the preview (previewScroll, clamped to its body), and a click ENTERS
+// the previewed task — the same single-open descent as activating its board
+// row. At depth>0 it is the stack-top reading frame: wheel free-scrolls ±1
+// (reusing freeScroll so mouse == keyboard), a click resolves to the rail stop
+// on the clicked body line (overflow markers skipped) and selects it exactly
+// as g/G/j would (viewport follows); a click on the ALREADY-selected stop
+// descends onto it, exactly like enter — the narrow reading semantics.
 func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.Time) (Model, tea.Cmd) {
 	top := m.topFrame()
 	if top.Kind == FrameBoard {
-		return m, nil // depth-0 preview: not a frame you drive
+		t, ok := m.taskUnderCursor()
+		if !ok {
+			return m, nil // empty board — nothing previewed, nothing to drive
+		}
+		switch ev.Button {
+		case tea.MouseButtonWheelUp:
+			(&m).scrollPreview(t, -1, innerW, inner, now)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			(&m).scrollPreview(t, 1, innerW, inner, now)
+			return m, nil
+		}
+		if ev.Button == tea.MouseButtonLeft && ev.Action == tea.MouseActionPress {
+			return m.enterTask(t.DocID), nil
+		}
+		return m, nil
 	}
 	switch ev.Button {
 	case tea.MouseButtonWheelUp:
@@ -650,4 +694,33 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 		}
 	}
 	return m, nil // prose / empty line — nothing to select
+}
+
+// scrollPreview moves the wide depth-0 preview viewport one wheel notch,
+// clamped to the previewed task's rendered body at the SAME width/height the
+// paint uses (previewLines) — the offset can never point past the detail. A
+// wheel on a task other than previewRef re-seeds the offset from the top first,
+// so a preview that just moved (cursor step, hover) starts at 0, not at a stale
+// offset from the last task.
+func (m *Model) scrollPreview(t Task, delta, innerW, inner int, now time.Time) {
+	rightW := innerW - boardPaneWidth - paneGutter2
+	if rightW < minReadingWidth {
+		rightW = minReadingWidth
+	}
+	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, rightW, now)
+	maxTop := len(body) - inner
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	if m.previewRef != t.DocID {
+		m.previewRef, m.previewScroll = t.DocID, 0
+	}
+	s := m.previewScroll + delta
+	if s < 0 {
+		s = 0
+	}
+	if s > maxTop {
+		s = maxTop
+	}
+	m.previewScroll = s
 }

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#14181f;}
+a{color:#7fb4ff;}a:hover{color:#a8ccff;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+@keyframes skel{0%,100%{opacity:0.5;}50%{opacity:0.9;}}
+.scheme-dark{--bg:#0b0e13;--card:#10141b;--card2:#161b24;--fg:#e9edf3;--fg2:#c3cad5;--fg3:#8d96a5;--fg4:#626c7c;--fg5:#3a4150;--mint:#3fcf8e;--mint-hover:#45dd99;--on-mint:#07130d;--amber:#e8b45a;--red:#e57f7f;--blue:#7fb4ff;--line-rgb:255,255,255;--mint-rgb:63,207,142;--amber-rgb:232,180,90;--red-rgb:229,106,106;--blue-rgb:127,180,255;--fg3-rgb:141,150,165;}
+.scheme-light{--bg:#f4f5f7;--card:#ffffff;--card2:#eceef2;--fg:#1a2330;--fg2:#3d4859;--fg3:#5f6a7b;--fg4:#76818f;--fg5:#c6ccd6;--mint:#15804e;--mint-hover:#0e6e42;--on-mint:#ffffff;--amber:#96660f;--red:#bb4040;--blue:#2560bd;--line-rgb:20,30,48;--mint-rgb:21,128,78;--amber-rgb:170,120,30;--red-rgb:187,64,64;--blue-rgb:37,96,189;--fg3-rgb:95,106,123;}
+</style>
+</helmet>
+<div style="min-height:100vh;background:#14181f;color:#e9edf3;font-family:'Inter',system-ui,sans-serif;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;padding:56px 40px 96px 40px;">
+<div style="max-width:1160px;margin:0 auto;display:flex;flex-direction:column;gap:48px;">
+
+  <div>
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.14em;color:#626c7c;">BARKPARK CLOUD · LIVING STYLEGUIDE · P1-2</span>
+    <h1 style="margin:10px 0 0 0;font-size:32px;font-weight:700;letter-spacing:-0.02em;">The ratified language</h1>
+    <p style="margin:10px 0 0 0;font-size:15px;color:#8d96a5;max-width:720px;line-height:1.6;">Canonical spec of the remake system. Every component renders dark and light side-by-side from the same markup and the same tokens (design/tokens.json). Contrast pairs below are computed in this file, not asserted. Doctrine anchors: status told once per row · provider colour is identity, never status · one primary action per screen · honest meters · failure beats false green.</p>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">01 · Tokens</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;">
+          <sc-for list="{{ tokenList }}" as="tk" hint-placeholder-count="10">
+          <div style="display:flex;flex-direction:column;gap:5px;width:86px;">
+            <div style="height:44px;border-radius:9px;background:var({{ tk.v }});border:1px solid rgba(var(--line-rgb),0.14);"></div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--fg3);">{{ tk.v }}</span>
+          </div>
+          </sc-for>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);">Accent slot (--mint) restyles per identity: evergreen · iris · ember · fjord · charple — all five carry dark + light ramps.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">02 · Type</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:12px;">
+        <span style="font-size:26px;font-weight:700;letter-spacing:-0.02em;">Good morning, Fjord — 26/700 page title</span>
+        <span style="font-size:15px;font-weight:600;">Card heading — 15/600</span>
+        <span style="font-size:13.5px;color:var(--fg2);">Body and row text — 13.5/400 fg2</span>
+        <span style="font-size:12.5px;color:var(--fg3);">Secondary copy — 12.5 fg3</span>
+        <span style="font-size:12px;color:var(--fg4);">Meta line — 12 fg4 (≥3:1 target, never for essential info)</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg3);">IBM Plex Mono — machine strings ONLY: URLs, shas, IDs, commands, table headers</span>
+        <span style="font-size:12px;color:var(--fg4);">Inter self-hosted per charter (Google host here is mockup-only). Plex Mono adoption = ratify item. Numerals always tabular.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">03 · Contrast — machine-checked</h2>
+    <div style="border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:2.2fr 1fr 1fr 1fr 1fr;padding:11px 18px;border-bottom:1px solid #232a35;background:#181d26;">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;color:#626c7c;">PAIR</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;color:#626c7c;">NEED</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;color:#626c7c;">DARK</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;color:#626c7c;">LIGHT</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.1em;color:#626c7c;">VERDICT</span>
+      </div>
+      <sc-for list="{{ contrastRows }}" as="c" hint-placeholder-count="10">
+      <div style="display:grid;grid-template-columns:2.2fr 1fr 1fr 1fr 1fr;align-items:center;padding:9px 18px;border-bottom:1px solid #1c222c;">
+        <span style="font-size:13px;">{{ c.label }}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8d96a5;">{{ c.need }}:1</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ c.darkColor }};">{{ c.dark }}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ c.lightColor }};">{{ c.light }}</span>
+        <span style="font-size:12px;font-weight:600;color:{{ c.verdictColor }};">{{ c.verdict }}</span>
+      </div>
+      </sc-for>
+      <div style="padding:11px 18px;font-size:12px;color:#626c7c;">Ratios are WCAG relative-luminance, computed at render time from the token hexes. fg4 is capped at meta-text duty (≥3:1) by rule, not by hope. All five accent identities checked in both themes.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">04 · Buttons &amp; states</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <button style="border:none;border-radius:999px;background:var(--mint);color:var(--on-mint);font-family:inherit;font-size:13.5px;font-weight:600;padding:9px 17px;cursor:pointer;">Primary — one per screen</button>
+          <button style="border:1px solid rgba(var(--line-rgb),0.12);border-radius:999px;background:transparent;color:var(--fg2);font-family:inherit;font-size:13.5px;font-weight:500;padding:9px 16px;cursor:pointer;">Ghost</button>
+          <button style="border:1px solid rgba(var(--red-rgb),0.4);border-radius:999px;background:transparent;color:var(--red);font-family:inherit;font-size:13.5px;font-weight:600;padding:9px 16px;cursor:pointer;">Danger…</button>
+          <button style="border:none;border-radius:999px;background:rgba(var(--red-rgb),0.15);color:rgba(var(--red-rgb),0.5);font-family:inherit;font-size:13.5px;font-weight:600;padding:9px 16px;cursor:not-allowed;">Gated (type-to-confirm)</button>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Hover: primary lightens to --mint-hover; ghost/danger brighten border only. Danger always ends in "…" (a confirm follows, never immediate). Destructive confirms are type-the-name; the button stays visibly gated until the name matches.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">05 · Status pills, plan chip, provider marks</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <sc-for list="{{ pillList }}" as="p" hint-placeholder-count="5">
+          <span style="display:flex;align-items:center;gap:7px;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;background:rgba(var({{ p.rgb }}),0.13);color:var({{ p.c }});"><span style="font-size:10px;line-height:1;">{{ p.g }}</span>{{ p.label }}</span>
+          </sc-for>
+          <span style="padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:600;background:rgba(var(--mint-rgb),0.12);color:var(--mint);">Supporter</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg3);"><span style="width:6px;height:6px;border-radius:2px;border:2px solid #e06a55;"></span>Hetzner</span>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Pill grammar: glyph + colour + word — three redundant channels, told ONCE per row. ● live/healthy · ▲ degraded/warning · ◐ in-flight · ■ halted. Provider marks are hollow (identity, never status). The plan chip is the only place plan state appears outside Billing.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">06 · Triage headline &amp; metadata line</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:10px;">
+        <span style="font-size:22px;font-weight:700;letter-spacing:-0.02em;">Good morning, Fjord</span>
+        <span style="font-size:13.5px;color:var(--fg3);">One thing needs a look — everything else is running fine. And Guerrilla is nearing its disk limit.</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg4);padding-top:8px;">fsn1 · cx22 · 5.75.169.183 · v0.2.25 · prod · autoupdate on</span>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Headline grammar: time-of-day greeting + computed triage sentence (0 issues → "All N running fine" · 1 → "One thing needs a look…" · N → count) + appended limit warnings. The metadata line carries the three status axes (health × billing × update) as quiet mono — region · size · IP · version · channel · update policy, in that order, always.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">07 · Coalesced rows — timeline &amp; logs</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border:1px solid rgba(var(--line-rgb),0.08);border-radius:10px;background:var(--card);">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.08em;padding:3px 8px;border-radius:6px;background:rgba(var(--blue-rgb),0.1);color:var(--blue);">EVENT</span>
+          <span style="font-size:13px;font-weight:500;">Health report × 10</span>
+          <span style="font-size:12px;color:var(--fg4);">every ~1m for the last 10m · all reporting health: down</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:12px;color:var(--blue);">Show all 10</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 16px;border:1px solid rgba(var(--line-rgb),0.08);border-radius:10px;background:var(--card);font-family:'IBM Plex Mono',monospace;">
+          <span style="font-size:11px;color:var(--fg4);">09:13:41</span>
+          <span style="font-size:10.5px;color:var(--fg3);">caddy · gyldendal.no</span>
+          <span style="font-size:11px;color:var(--amber);">404</span>
+          <span style="font-size:12px;color:var(--fg2);">GET /old-pricing — 2ms · repeated 14× today</span>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Coalescing grammar: "&lt;thing&gt; × N · cadence · shared verdict" with an expand affordance. Repetition is summarised, never hidden — and the summary must state the worst verdict in the group.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">08 · Stage ladder &amp; domain rungs</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <sc-for list="{{ stageList }}" as="st" hint-placeholder-count="6">
+          <span style="display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:8px;border:1px solid {{ st.border }};font-family:'IBM Plex Mono',monospace;font-size:11px;color:var({{ st.fg }});"><span style="font-size:10px;">{{ st.g }}</span>{{ st.name }}<span style="color:var(--fg4);">{{ st.d }}</span></span>
+          </sc-for>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <sc-for list="{{ rungList }}" as="rg" hint-placeholder-count="4">
+          <span style="display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:rgba(var({{ rg.rgb }}),0.13);color:var({{ rg.c }});"><span style="font-size:9px;">{{ rg.g }}</span>{{ rg.label }}</span>
+          </sc-for>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Ladder: PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE. A failed stage skips the rest visibly ("—") — production untouched is stated in the console, not implied. Rungs: DNS found → Points here → TLS → Serving; pending rungs get a sentence saying what happens by itself ("nothing to do").</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">09 · Banners — lock, unreachable, suspended</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid rgba(var(--amber-rgb),0.3);border-radius:10px;background:rgba(var(--amber-rgb),0.06);">
+          <span style="width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0;"></span>
+          <span style="flex:1;font-size:12.5px;color:var(--fg2);">Production is locked to deploy #42 — both loops hold until you unlock.</span>
+          <span style="font-size:12px;font-weight:600;border:1px solid rgba(var(--line-rgb),0.12);border-radius:999px;padding:5px 12px;">Unlock</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid rgba(var(--red-rgb),0.35);border-radius:10px;background:rgba(var(--red-rgb),0.06);">
+          <span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;"></span>
+          <span style="flex:1;font-size:12.5px;color:var(--fg2);">Suspended since 21 July — stopped, not destroyed; back the moment payment succeeds.</span>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Banner rules: amber = held/degraded (reversible, reversal named in the banner) · red = stopped/destructive · unreachable ≠ refused, and the copy must say which. Every banner names its target state and the exact exit action.</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">10 · Empty states &amp; skeletons</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #232a35;border-radius:14px;overflow:hidden;">
+      <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+      <div class="{{ th }}" style="background:var(--bg);color:var(--fg);padding:26px;display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:26px;border:1px dashed rgba(var(--line-rgb),0.14);border-radius:12px;text-align:center;">
+          <span style="font-size:13.5px;font-weight:600;">No webhooks configured</span>
+          <span style="font-size:12px;color:var(--fg3);">Get notified when deploys, health changes or checks happen.</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="height:13px;width:62%;border-radius:6px;background:rgba(var(--fg3-rgb),0.18);animation:skel 1.4s ease-in-out infinite;"></div>
+          <div style="height:13px;width:84%;border-radius:6px;background:rgba(var(--fg3-rgb),0.18);animation:skel 1.4s ease-in-out infinite;"></div>
+          <div style="height:13px;width:40%;border-radius:6px;background:rgba(var(--fg3-rgb),0.18);animation:skel 1.4s ease-in-out infinite;"></div>
+        </div>
+        <span style="font-size:12px;color:var(--fg4);line-height:1.6;">Empty state = dashed border + what it is + why you'd want one + ONE affordance. Never a bare card. Skeletons: fg3 at 18% alpha, 1.4s ease pulse, shaped like the real rows (no spinner walls); loading text only past 3s ("still asking the box…").</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">11 · Responsive contract (P1-5)</h2>
+    <div style="border:1px solid #232a35;border-radius:14px;padding:26px;display:flex;flex-direction:column;gap:10px;background:#181d26;">
+      <sc-for list="{{ responsiveRows }}" as="r" hint-placeholder-count="6">
+      <div style="display:flex;gap:16px;padding:9px 0;border-bottom:1px solid #1c222c;">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7fb4ff;width:150px;flex-shrink:0;">{{ r.bp }}</span>
+        <span style="font-size:13px;color:#c3cad5;line-height:1.55;">{{ r.rule }}</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    <h2 style="margin:0;font-size:18px;font-weight:700;">12 · Motion contract (P1-6)</h2>
+    <div style="border:1px solid #232a35;border-radius:14px;padding:26px;display:flex;flex-direction:column;gap:10px;background:#181d26;">
+      <sc-for list="{{ motionRows }}" as="r" hint-placeholder-count="7">
+      <div style="display:flex;gap:16px;padding:9px 0;border-bottom:1px solid #1c222c;">
+        <span style="font-size:13px;font-weight:600;width:190px;flex-shrink:0;">{{ r.what }}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7fb4ff;width:190px;flex-shrink:0;">{{ r.spec }}</span>
+        <span style="font-size:13px;color:#8d96a5;line-height:1.55;">{{ r.note }}</span>
+      </div>
+      </sc-for>
+      <span style="font-size:12.5px;color:#626c7c;line-height:1.6;">prefers-reduced-motion: all pulses become static dots at full opacity, theater steps cut (no slide), toasts appear without translate, skeletons hold at 70% — nothing conveys information through motion alone.</span>
+    </div>
+  </div>
+
+  <span style="font-size:12px;color:#626c7c;">Companion artifacts: design/tokens.json (canonical values) · design/renders/ (matrix + screen proofs) · Barkpark Cloud v4.dc.html (interactive prototype, scenario tweaks). CI contract: this file is the spec the drift gate protects; token edits land here and in tokens.json in the same change.</span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1240, &quot;height&quot;: 900}}">
+class Component extends DCLogic {
+  hex = {
+    dark:  { bg:'#0b0e13', card:'#10141b', fg:'#e9edf3', fg2:'#c3cad5', fg3:'#8d96a5', fg4:'#626c7c', amber:'#e8b45a', red:'#e57f7f', blue:'#7fb4ff' },
+    light: { bg:'#f4f5f7', card:'#ffffff', fg:'#1a2330', fg2:'#3d4859', fg3:'#5f6a7b', fg4:'#76818f', amber:'#96660f', red:'#bb4040', blue:'#2560bd' }
+  };
+  accents = {
+    evergreen: { dark:['#3fcf8e','#07130d'], light:['#15804e','#ffffff'] },
+    iris:      { dark:['#9d8cff','#12093a'], light:['#5b46d6','#ffffff'] },
+    ember:     { dark:['#e8875a','#2a0f04'], light:['#b34e1e','#ffffff'] },
+    fjord:     { dark:['#6cc4dd','#04222b'], light:['#0e6e85','#ffffff'] },
+    charple:   { dark:['#c78ae0','#26062e'], light:['#7b3a96','#ffffff'] }
+  };
+  lum(h) {
+    const c = h.replace('#','');
+    const f = (i) => { const v = parseInt(c.substr(i,2),16)/255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); };
+    return 0.2126*f(0) + 0.7152*f(2) + 0.0722*f(4);
+  }
+  ratio(a, b) { const l1 = this.lum(a), l2 = this.lum(b); const hi = Math.max(l1,l2), lo = Math.min(l1,l2); return (hi+0.05)/(lo+0.05); }
+  renderVals() {
+    const d = this.hex.dark, l = this.hex.light;
+    const pairs = [
+      { label: 'fg on bg — primary text', need: 4.5, dark: [d.fg, d.bg], light: [l.fg, l.bg] },
+      { label: 'fg2 on card — row text', need: 4.5, dark: [d.fg2, d.card], light: [l.fg2, l.card] },
+      { label: 'fg3 on bg — secondary copy', need: 4.5, dark: [d.fg3, d.bg], light: [l.fg3, l.bg] },
+      { label: 'fg4 on bg — meta only', need: 3, dark: [d.fg4, d.bg], light: [l.fg4, l.bg] },
+      { label: 'blue on bg — links', need: 4.5, dark: [d.blue, d.bg], light: [l.blue, l.bg] },
+      { label: 'amber on bg — warnings', need: 4.5, dark: [d.amber, d.bg], light: [l.amber, l.bg] },
+      { label: 'red on bg — danger text', need: 4.5, dark: [d.red, d.bg], light: [l.red, l.bg] }
+    ];
+    Object.entries(this.accents).forEach(([name, a]) => {
+      pairs.push({ label: name + ' primary on bg — badge/UI', need: 3, dark: [a.dark[0], d.bg], light: [a.light[0], l.bg] });
+      pairs.push({ label: name + ' button label on primary', need: 4.5, dark: [a.dark[1], a.dark[0]], light: [a.light[1], a.light[0]] });
+    });
+    const contrastRows = pairs.map(p => {
+      const rd = this.ratio(p.dark[0], p.dark[1]), rl = this.ratio(p.light[0], p.light[1]);
+      const pd = rd >= p.need, pl = rl >= p.need, ok = pd && pl;
+      return { label: p.label, need: p.need,
+        dark: rd.toFixed(2), light: rl.toFixed(2),
+        darkColor: pd ? '#3fcf8e' : '#e57f7f', lightColor: pl ? '#3fcf8e' : '#e57f7f',
+        verdict: ok ? 'pass' : (pd ? 'fails light' : pl ? 'fails dark' : 'fails both'),
+        verdictColor: ok ? '#3fcf8e' : '#e57f7f' };
+    });
+    return {
+      themes: ['scheme-dark', 'scheme-light'],
+      tokenList: ['--bg','--card','--card2','--fg','--fg2','--fg3','--fg4','--mint','--amber','--red','--blue'].map(v => ({ v })),
+      contrastRows,
+      pillList: [
+        { label: 'Live', g: '●', c: '--mint', rgb: '--mint-rgb' },
+        { label: 'Degraded', g: '▲', c: '--amber', rgb: '--amber-rgb' },
+        { label: 'Provisioning', g: '◐', c: '--blue', rgb: '--blue-rgb' },
+        { label: 'Suspended', g: '■', c: '--red', rgb: '--red-rgb' },
+        { label: 'skipped · unchanged', g: '—', c: '--fg3', rgb: '--fg3-rgb' }
+      ],
+      stageList: [
+        { name: 'PLAN', g: '●', fg: '--mint', border: 'rgba(var(--mint-rgb),0.3)', d: '2s' },
+        { name: 'BUILD', g: '✕', fg: '--red', border: 'rgba(var(--red-rgb),0.4)', d: '17s' },
+        { name: 'STAGE', g: '—', fg: '--fg4', border: 'rgba(var(--line-rgb),0.08)', d: '' },
+        { name: 'HEALTH', g: '—', fg: '--fg4', border: 'rgba(var(--line-rgb),0.08)', d: '' },
+        { name: 'SWITCH', g: '—', fg: '--fg4', border: 'rgba(var(--line-rgb),0.08)', d: '' },
+        { name: 'RETIRE', g: '—', fg: '--fg4', border: 'rgba(var(--line-rgb),0.08)', d: '' }
+      ],
+      rungList: [
+        { label: 'DNS found', g: '●', c: '--mint', rgb: '--mint-rgb' },
+        { label: 'Points here', g: '●', c: '--mint', rgb: '--mint-rgb' },
+        { label: 'TLS', g: '◐', c: '--fg3', rgb: '--fg3-rgb' },
+        { label: 'Serving', g: '◐', c: '--fg3', rgb: '--fg3-rgb' }
+      ],
+      responsiveRows: [
+        { bp: '≥1280px', rule: 'Reference layout. Content column max 1140px; two-column detail grids; sidebar 220px with labels.' },
+        { bp: '1000–1279px', rule: 'Detail grids collapse to one column (auto-fit already does this); sidebar keeps labels; topbar project selector stays.' },
+        { bp: '760–999px', rule: 'Sidebar collapses to icon rail (compactSidebar behavior): icons + tooltips, section dividers instead of labels; context-morph keeps the ← exit as an icon row. Tables become two-line rows (Fleet already is one).' },
+        { bp: '<760px', rule: 'Sidebar becomes a sheet behind a menu button; ⌘K becomes a search icon opening the palette full-screen (touch: no shortcut hint); action rows wrap — the ONE primary stays visible, ghosts collapse into an overflow "…" menu.' },
+        { bp: 'Theater on phone', rule: 'Step rail stacks above the console; console max-height 40vh; the done-banner buttons go full-width. Never scale text below 13px.' },
+        { bp: 'Global', rule: 'Hit targets ≥44px on touch; meters and pills never truncate their word (drop the sub-label first); mono strings ellipsize middle-out where the tail matters (shas, URLs keep the tail).' }
+      ],
+      motionRows: [
+        { what: 'Theater step advance', spec: '450ms ease-out', note: 'Rail glyph crossfades ○→◐→●; console lines append with 80ms stagger, no scroll jump.' },
+        { what: 'Live pulses', spec: '1.6–2.4s ease-in-out', note: 'Only on genuinely-live dots (Live pill, in-flight, following). Never on static status.' },
+        { what: 'Lock / unlock', spec: '200ms ease', note: 'Banner slides 6px + fades; the Deployments card does NOT move — layout shift budget is 0.' },
+        { what: 'Toast', spec: 'in 180ms / hold 2.8s / out 240ms', note: 'One at a time, replace not stack; translate 8px up on entry.' },
+        { what: 'Ladder stage advance', spec: '250ms ease', note: 'Border + glyph tint transition; failed stages snap (0ms) — failure is never eased in.' },
+        { what: 'Hover states', spec: '150ms', note: 'Border/translate only; translateY caps at 1px on cards.' },
+        { what: 'Modal / palette', spec: 'in 160ms ease-out', note: 'Scale 0.98→1 + fade; backdrop blur constant (no animated blur).' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

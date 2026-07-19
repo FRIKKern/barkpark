@@ -84,6 +84,95 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── gr-w3 v4 shell: context-morph enum + fail-closed operator gate ──────────
+// The sidebar morph is a PURE function of the parsed route (three panes, one
+// visible); the operator entry is gated fail-closed on /v1/me.platform_operator.
+// Both node-pinned here; their DOM appliers are smoke/browser-driven.
+
+test("gr-w3: the v4 shell pure helpers are exported", () => {
+  for (const name of ["shellNavLayer", "operatorVisible", "ctxDotColor",
+    "bpThemeLabel", "bpThemeOptions", "resetTokenFromHash"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("shellNavLayer folds the route to exactly one sidebar layer (root|instance|site)", () => {
+  assert.equal(hooks.shellNavLayer({ view: "overview" }), "root");
+  assert.equal(hooks.shellNavLayer({ view: "fleet" }), "root");
+  assert.equal(hooks.shellNavLayer({ view: "billing" }), "root");   // settings stay on root
+  assert.equal(hooks.shellNavLayer({ view: "activity" }), "root");
+  assert.equal(hooks.shellNavLayer({ view: "instance", id: "x", tab: "overview" }), "instance");
+  assert.equal(hooks.shellNavLayer({ view: "site", id: "y" }), "site");
+  // Total over junk — a bad/absent route degrades to the root layer, never throws.
+  assert.equal(hooks.shellNavLayer({}), "root");
+  assert.equal(hooks.shellNavLayer(null), "root");
+  assert.equal(hooks.shellNavLayer(undefined), "root");
+});
+
+test("operatorVisible is fail-CLOSED — ONLY platform_operator===true shows the entry (GR9)", () => {
+  assert.equal(hooks.operatorVisible({ platform_operator: true }), true);
+  // Everything else is hidden: absent field, falsy, or truthy-but-not-true.
+  assert.equal(hooks.operatorVisible({ platform_operator: false }), false);
+  assert.equal(hooks.operatorVisible({}), false);            // absent → hidden
+  assert.equal(hooks.operatorVisible({ platform_operator: 1 }), false);      // not === true
+  assert.equal(hooks.operatorVisible({ platform_operator: "true" }), false); // not === true
+  assert.equal(hooks.operatorVisible(null), false);
+  assert.equal(hooks.operatorVisible(undefined), false);
+  // NEVER keyed on team role — an owner without the flag stays hidden.
+  assert.equal(hooks.operatorVisible({ role: "owner" }), false);
+});
+
+test("ctxDotColor maps every fleet status kind onto a defined token", () => {
+  assert.equal(hooks.ctxDotColor("ok"), "var(--ok)");
+  assert.equal(hooks.ctxDotColor("behind"), "var(--ok)");
+  for (const bad of ["failed", "removal_failed", "suspended", "degraded"]) {
+    assert.equal(hooks.ctxDotColor(bad), "var(--danger)");
+  }
+  assert.equal(hooks.ctxDotColor("provisioning"), "var(--warn)");
+  assert.equal(hooks.ctxDotColor("removing"), "var(--warn)");
+  assert.equal(hooks.ctxDotColor(""), "var(--muted-text)");        // unknown → muted
+  assert.equal(hooks.ctxDotColor(undefined), "var(--muted-text)");
+});
+
+test("bpThemeOptions is a pure projection of the GENERATED enum (all 5 identities, Title labels)", () => {
+  const opts = hooks.bpThemeOptions();
+  // Spread the vm-realm arrays into test-realm ones so deepEqual compares by value
+  // (cross-realm Array prototypes differ — the [...hooks.bpThemes] house pattern).
+  assert.deepEqual([...opts.map((o) => o.id)], ["evergreen", "charple", "ember", "fjord", "iris"]);
+  assert.deepEqual([...opts.map((o) => o.label)], ["Evergreen", "Charple", "Ember", "Fjord", "Iris"]);
+  // charple + iris — the drift GR12 fixes — are REACHABLE from the picker now.
+  assert.ok(opts.some((o) => o.id === "charple"));
+  assert.ok(opts.some((o) => o.id === "iris"));
+  assert.equal(hooks.bpThemeLabel("evergreen"), "Evergreen");
+  assert.equal(hooks.bpThemeLabel(""), "");
+});
+
+// ── gr-w3 reset-route (GR13): resetTokenFromHash is now exported + pinned ────
+test("resetTokenFromHash extracts the emailed reset token, tolerant of encoding", () => {
+  const orig = sandbox.location.hash;
+  try {
+    sandbox.location.hash = "#/auth/reset?token=abc123";
+    assert.equal(hooks.resetTokenFromHash(), "abc123");
+    // Percent-encoded token round-trips through safeDecode.
+    sandbox.location.hash = "#/auth/reset?token=a%2Bb%3Dc";
+    assert.equal(hooks.resetTokenFromHash(), "a+b=c");
+  } finally {
+    sandbox.location.hash = orig;
+  }
+});
+
+test("resetTokenFromHash returns null for any non-reset hash (never throws)", () => {
+  const orig = sandbox.location.hash;
+  try {
+    for (const h of ["", "#overview", "#instance/9f3c", "#/auth/reset", "#/auth/reset?nope=1", "#/auth/reset?token="]) {
+      sandbox.location.hash = h;
+      assert.equal(hooks.resetTokenFromHash(), null, JSON.stringify(h) + " → null");
+    }
+  } finally {
+    sandbox.location.hash = orig;
+  }
+});
+
 test("the test hook exported the helpers under test", () => {
   assert.equal(typeof hooks.esc, "function");
   assert.equal(typeof hooks.safeDecode, "function");
@@ -593,12 +682,16 @@ test("bp-theme picker helpers are exported", () => {
   assert.ok(Array.isArray(hooks.bpThemes));
 });
 
-test("bpThemes pins the known identity list (matches the index.html <option>s)", () => {
-  assert.deepEqual([...hooks.bpThemes], ["evergreen", "ember", "fjord"]);
+test("bpThemes pins the GENERATED identity list — all 5 skins, in loadThemes order (GR12)", () => {
+  // DELIBERATE update (gr-w3): BP_THEMES is now emitted from design/themes/*.json
+  // (evergreen default first, then dir order), so charple + iris — the ids the old
+  // hardcoded 3-list dropped, leaving charple emitted-but-unreachable — are present.
+  // Regenerate via `node design/emit.mjs --write`; a drift reds design/check.mjs.
+  assert.deepEqual([...hooks.bpThemes], ["evergreen", "charple", "ember", "fjord", "iris"]);
 });
 
 test("normalizeBpTheme passes known ids through and folds anything else to evergreen", () => {
-  for (const id of ["evergreen", "ember", "fjord"]) {
+  for (const id of ["evergreen", "charple", "ember", "fjord", "iris"]) {
     assert.equal(hooks.normalizeBpTheme(id), id);
   }
   // Unknown / hostile / empty inputs all fall back — never an undefined palette.

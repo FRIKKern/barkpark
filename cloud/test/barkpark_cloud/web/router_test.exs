@@ -1005,6 +1005,37 @@ defmodule BarkparkCloud.Web.RouterTest do
       refute String.contains?(conn.resp_body, "gateway_customer_id")
       refute String.contains?(conn.resp_body, "gateway_subscription_id")
     end
+
+    # platform-operator (charter GR9 interim principal). The boolean is derived
+    # SOLELY from the :platform_admin_emails allowlist — fail-closed to false
+    # when the allowlist is unset/empty, never from a team role.
+
+    test "unset allowlist → platform_operator false (fail-closed)" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # No :platform_admin_emails configured (test default) — even an owner is
+      # NOT a platform operator. Distinct random email keeps this immune to any
+      # allowlist a concurrent async test might momentarily set.
+      conn = call(:get, "/v1/me", nil, token)
+
+      assert conn.status == 200
+      assert json_body(conn)["user"]["platform_operator"] == false
+    end
+
+    test "session email in :platform_admin_emails → platform_operator true" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      prev = Application.get_env(:barkpark_cloud, :platform_admin_emails)
+      Application.put_env(:barkpark_cloud, :platform_admin_emails, [user.email])
+      on_exit(fn -> Application.put_env(:barkpark_cloud, :platform_admin_emails, prev) end)
+
+      conn = call(:get, "/v1/me", nil, token)
+
+      assert conn.status == 200
+      assert json_body(conn)["user"]["platform_operator"] == true
+    end
   end
 
   ## GET/POST /v1/onboarding
@@ -1906,6 +1937,31 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert content_type(conn) =~ "text/css"
       # A token from the stylesheet proves the real file was served.
       assert conn.resp_body =~ "--primary"
+    end
+
+    defp cache_control(conn) do
+      case get_resp_header(conn, "cache-control") do
+        [cc | _] -> cc
+        _ -> nil
+      end
+    end
+
+    test "GET /fonts/Inter-var.woff2 → 200 with immutable 1-year cache" do
+      conn = call(:get, "/fonts/Inter-var.woff2")
+
+      assert conn.status == 200
+      # Content-stable self-hosted font: the dedicated plug ahead of the
+      # no-cache SPA plug serves it with a long immutable lifetime.
+      assert cache_control(conn) == "public, max-age=31536000, immutable"
+    end
+
+    test "GET /app.css stays no-cache (SPA files must revalidate every deploy)" do
+      conn = call(:get, "/app.css")
+
+      assert conn.status == 200
+      # The immutable fonts plug must NOT bleed onto the unversioned SPA assets —
+      # they revalidate so a returning operator never sees stale console UI.
+      assert cache_control(conn) == "no-cache"
     end
 
     test "GET /app.js → 200 javascript from priv/static" do

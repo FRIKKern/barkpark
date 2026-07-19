@@ -199,6 +199,32 @@ for (const role of ["hetzner", "azure"]) {
   }
 }
 
+// --- cloudChrome shell vocabulary (color.cloudChrome): identity-INVARIANT ----
+// passthrough (GR2). Most roles are {light,dark} HEX; line-rgb is an "R,G,B"
+// border triplet, backdrop an rgba() scrim, github a var(--…) neutral reference.
+// A new family is otherwise validated by NOTHING, so this gates its shape.
+const cloudChrome = color.cloudChrome || {};
+const CC_HEX_ROLES = [
+  "bg", "bg-side", "card", "card2", "modal", "toast", "toast-fg",
+  "fg", "fg2", "fg3", "fg4", "fg5", "spark-dim",
+  "red", "red-strong", "on-red", "blue", "blue-hover", "amber",
+  "hetzner", "azure", "cloudflare",
+];
+for (const role of CC_HEX_ROLES) {
+  const o = cloudChrome[role];
+  ok(o && typeof o === "object", `color.cloudChrome.${role} is required`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.cloudChrome.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.cloudChrome.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+const RGB_TRIPLET = /^\d{1,3},\d{1,3},\d{1,3}$/;
+for (const theme of ["light", "dark"]) {
+  ok(RGB_TRIPLET.test((cloudChrome["line-rgb"] || {})[theme] || ""), `color.cloudChrome.line-rgb.${theme} must be an "R,G,B" triplet, got ${JSON.stringify((cloudChrome["line-rgb"] || {})[theme])}`);
+  ok(/^rgba?\(/.test((cloudChrome.backdrop || {})[theme] || ""), `color.cloudChrome.backdrop.${theme} must be an rgba() literal, got ${JSON.stringify((cloudChrome.backdrop || {})[theme])}`);
+  ok(/^var\(--/.test((cloudChrome.github || {})[theme] || ""), `color.cloudChrome.github.${theme} must be a var(--…) reference, got ${JSON.stringify((cloudChrome.github || {})[theme])}`);
+}
+
 // --- auth button fills (color.authButton): HSL channels OR var(--role) -------
 const authButton = color.authButton || {};
 for (const role of ["bg", "fg", "bgHover"]) {
@@ -320,5 +346,5 @@ console.log("OK: design/tokens.json is well-formed and complete.");
 console.log("  color roles: 10 base + 4 status (ok/warn/danger/info), light+dark");
 console.log(`  lifecycle states: ${REQUIRED_LIFE.length} reconciled 1:1 with internal/semrole + taskboard`);
 console.log("  fonts: chrome (self-hosted Inter) / mono / reading; type: chrome + reading scales");
-console.log("  paper/email/callout/mailChrome/provider/authButton/statusChrome/statusHealth/errorPage/readerInfo: shape-gated");
+console.log("  paper/email/callout/mailChrome/provider/cloudChrome/authButton/statusChrome/statusHealth/errorPage/readerInfo: shape-gated");
 process.exit(0);

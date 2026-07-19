@@ -55,7 +55,7 @@ defmodule BarkparkWeb.SessionHTML do
          component rules that follow stay hand-authored. */
       /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
       .bp-auth {
-        --primary: hsl(163 46% 22%);
+        --primary: hsl(151.96 71.81% 29.22%);
         --primary-fg: hsl(0 0% 100%);
         --ring: hsl(163 42% 30%);
         --ring-soft: hsl(163 42% 30% / 0.15);
@@ -64,17 +64,17 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-bg-hover: hsl(163 46% 17%);
       }
       html[data-theme="dark"] .bp-auth {
-        --primary: hsl(160 42% 62%);
+        --primary: hsl(152.92 60% 52.94%);
         --primary-fg: hsl(163 45% 8%);
-        --ring: hsl(160 42% 62%);
-        --ring-soft: hsl(160 42% 62% / 0.2);
+        --ring: hsl(152.92 60% 52.94%);
+        --ring-soft: hsl(152.92 60% 52.94% / 0.2);
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
       /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
       html[data-bp-theme="evergreen"] .bp-auth {
-        --primary: hsl(163 46% 22%);
+        --primary: hsl(151.96 71.81% 29.22%);
         --primary-fg: hsl(0 0% 100%);
         --ring: hsl(163 42% 30%);
         --ring-soft: hsl(163 42% 30% / 0.15);
@@ -83,64 +83,82 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-bg-hover: hsl(163 46% 17%);
       }
       html[data-bp-theme="evergreen"][data-theme="dark"] .bp-auth {
-        --primary: hsl(160 42% 62%);
+        --primary: hsl(152.92 60% 52.94%);
         --primary-fg: hsl(163 45% 8%);
-        --ring: hsl(160 42% 62%);
-        --ring-soft: hsl(160 42% 62% / 0.2);
+        --ring: hsl(152.92 60% 52.94%);
+        --ring-soft: hsl(152.92 60% 52.94% / 0.2);
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
       html[data-bp-theme="charple"] .bp-auth {
-        --primary: hsl(241 57% 45%);
+        --primary: hsl(282.39 44.23% 40.78%);
         --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(241 57% 53%);
-        --ring-soft: hsl(241 57% 53% / 0.15);
+        --ring: hsl(282.39 44.23% 48.78%);
+        --ring-soft: hsl(282.39 44.23% 48.78% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
         --btn-bg-hover: hsl(163 46% 17%);
       }
       html[data-bp-theme="charple"][data-theme="dark"] .bp-auth {
-        --primary: hsl(249 100% 66%);
-        --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(249 100% 66%);
-        --ring-soft: hsl(249 100% 66% / 0.2);
+        --primary: hsl(282.56 58.11% 70.98%);
+        --primary-fg: hsl(282.56 45% 8%);
+        --ring: hsl(282.56 58.11% 70.98%);
+        --ring-soft: hsl(282.56 58.11% 70.98% / 0.2);
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
       html[data-bp-theme="ember"] .bp-auth {
-        --primary: hsl(20 82% 42%);
+        --primary: hsl(19.33 71.29% 40.98%);
         --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(20 82% 50%);
-        --ring-soft: hsl(20 82% 50% / 0.15);
+        --ring: hsl(19.33 71.29% 48.98%);
+        --ring-soft: hsl(19.33 71.29% 48.98% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
         --btn-bg-hover: hsl(163 46% 17%);
       }
       html[data-bp-theme="ember"][data-theme="dark"] .bp-auth {
-        --primary: hsl(30 92% 60%);
-        --primary-fg: hsl(30 45% 8%);
-        --ring: hsl(30 92% 60%);
-        --ring-soft: hsl(30 92% 60% / 0.2);
+        --primary: hsl(19.01 75.53% 63.14%);
+        --primary-fg: hsl(19.01 45% 8%);
+        --ring: hsl(19.01 75.53% 63.14%);
+        --ring-soft: hsl(19.01 75.53% 63.14% / 0.2);
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
       html[data-bp-theme="fjord"] .bp-auth {
-        --primary: hsl(222 58% 44%);
+        --primary: hsl(191.6 80.95% 28.82%);
         --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(222 58% 52%);
-        --ring-soft: hsl(222 58% 52% / 0.15);
+        --ring: hsl(191.6 80.95% 36.82%);
+        --ring-soft: hsl(191.6 80.95% 36.82% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
         --btn-bg-hover: hsl(163 46% 17%);
       }
       html[data-bp-theme="fjord"][data-theme="dark"] .bp-auth {
-        --primary: hsl(213 74% 66%);
-        --primary-fg: hsl(213 45% 8%);
-        --ring: hsl(213 74% 66%);
-        --ring-soft: hsl(213 74% 66% / 0.2);
+        --primary: hsl(193.27 62.43% 64.51%);
+        --primary-fg: hsl(193.27 45% 8%);
+        --ring: hsl(193.27 62.43% 64.51%);
+        --ring-soft: hsl(193.27 62.43% 64.51% / 0.2);
+        --btn-bg: hsl(163 45% 30%);
+        --btn-fg: hsl(0 0% 100%);
+        --btn-bg-hover: hsl(163 45% 26%);
+      }
+      html[data-bp-theme="iris"] .bp-auth {
+        --primary: hsl(248.75 63.72% 55.69%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(248.75 63.72% 62%);
+        --ring-soft: hsl(248.75 63.72% 62% / 0.15);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: hsl(163 46% 17%);
+      }
+      html[data-bp-theme="iris"][data-theme="dark"] .bp-auth {
+        --primary: hsl(248.87 100% 77.45%);
+        --primary-fg: hsl(248.87 45% 8%);
+        --ring: hsl(248.87 100% 77.45%);
+        --ring-soft: hsl(248.87 100% 77.45% / 0.2);
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);

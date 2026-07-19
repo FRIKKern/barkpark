@@ -970,7 +970,7 @@ export const PASSTHROUGH_FAMILIES = [
   "presence", "sheetCf", "matchQuality", "pdrenderChart", "pdrenderHeatmap",
   "provider", "statusHealth", "statusChrome",
   "errorPage", "graphCanvas", "readerInfo", "lifecycle", "instanceLifecycle",
-  "authButton",
+  "authButton", "cloudChrome",
 ];
 
 // ── derive(theme) — the characterization compiler ────────────────────────────

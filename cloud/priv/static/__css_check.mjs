@@ -84,6 +84,21 @@ const ALLOW_PREFIXES = [
   "tlv-badge tlv-badge--",      // tlvRowHtml(): + variant (event | verify | verify-fail | audit)
   "vf-chip vf-chip--",          // verifyChipHtml(): + role (pass | fail | unknown)
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
+  // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
+  // rules in app.css today — verified via `.<family>` grep before allowing.
+  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
+  "notice",                     // noticeHtml(): + (tone ? " notice-"+esc(tone) : "") (.notice / .notice-ok|warn|error)
+  "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
+  "dep-current",                // + (rolledBack ? " dep-current--restored" : "") (.dep-current[--restored])
+  "prov-overall",               // + state (.prov-overall rules)
+  "usage-bar usage-bar--",      // + d.bar.tone (.usage-bar-- rules)
+  "fleet-usage-metric-v",       // + (unmetered ? " dim" : "") (.fleet-usage-metric-v / .dim)
+  "fleet-usage-cell",           // + toneCls (.fleet-usage-cell rules)
+  "metric-card metric--",       // + esc(m.role) (.metric-card / .metric-- rules)
+  "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
+  // gr-w3 (v4 shell): the sidebar instance-morph section links (paintInstanceSections)
+  "nav-link nav-sub",           // + (on ? " is-active" : "") (.sidebar .nav-link / .nav-sub / .is-active)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -105,9 +120,31 @@ const ALLOW_HOOK_CLASSES = [
   "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
 ];
 
-// R3 — violations we know about that live in app.js (another slice owns app.js
-// this wave). Keep entries until the owning slice lands the fix.
-const REPORT_ONLY = [];
+// R3 / KNOWN_GAPS — genuine E2/E3 violations that live in app.js and index.html,
+// NOT in this epic's owned files. This checker is CI-wired by gr-w1-styleguide-port
+// (console-harness.yml) and MUST exit 0; app.js/index.html are owned by other
+// slices ("leave, don't touch"), and their real fix — author the CSS or remove the
+// emission — is tracked by task gr-backlog-css-check-missing-classes. Each entry
+// DEMOTES its exact hard-fail to an R3 report line so the gate stays green while
+// the gap stays visible on every run. Keyed by {file, cls} (E2) or {file, head}
+// (E3) — line-INDEPENDENT so app.js churn never re-reds the gate; a genuinely NEW
+// missing class (different name) or dynamic head still hard-fails. An entry that
+// matches nothing prints `stale` (prune it — the owning slice fixed it). NOTHING
+// in styleguide.html or the app.css token blocks may be listed here: this epic
+// owns those, so their drift MUST hard-fail.
+const KNOWN_GAPS = [
+  // E2 — emitted class with no rule in app.css (author real styles or remove).
+  { file: "index.html", cls: "activate-screen", why: "activate view container; no .activate-screen rule (backlog: author or drop)" },
+  { file: "app.js", cls: "fleet-infra", why: "fleet infra column; no .fleet-infra rule (backlog: author or drop)" },
+  { file: "app.js", cls: "fresh-label", why: "freshness label; no .fresh-label rule (backlog: author or drop)" },
+  { file: "app.js", cls: "metrics-body", why: "metrics panel body; no .metrics-body rule (backlog: author or drop)" },
+  { file: "app.js", cls: "activate-rail", why: "activate step rail; no .activate-rail rule (backlog: author or drop)" },
+  { file: "app.js", cls: "bp-lc-hex", why: "lifecycle hex swatch; zero .bp-lc-* rules exist (backlog: author or drop)" },
+  { file: "app.js", cls: "notice-", why: "detector tail-fragment of noticeHtml()'s ' notice-'+tone concat; the real classes are notice/notice-ok|warn|error (backlog: rewrite the concat)" },
+  // E3 — dynamic class heads the static walker cannot classify (var-then-concat).
+  { file: "app.js", head: "", why: "two `var cls = …` then concat sites the static walker can't head-classify (backlog: inline-concat rewrite)" },
+  { file: "app.js", head: "bp-lc-", why: "lifecycle hex row builds `bp-lc-` + kind; zero .bp-lc-* rules exist (backlog: author or drop)" },
+];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line
 // text as it appears in app.css (comments stripped); each entry carries its
@@ -147,7 +184,7 @@ const CONTRAST_PAIRS = [
   { fg: "--primary", bg: "--bg", min: 4.5, why: "links" },
   { fg: "--primary", bg: "--surface", min: 4.5, why: "links on cards" },
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
-  { fg: "--ok", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip" },
+  { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
   { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
   { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
@@ -172,6 +209,23 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--surface", min: 3, why: ".bp-inst--degraded glyph tone" },
   { fg: "--provider-hetzner", bg: "--surface", min: 3, why: "Hetzner identity mark / chip border" },
   { fg: "--provider-azure", bg: "--surface", min: 3, why: "Azure identity mark / chip border" },
+  // ── The living styleguide's cloudChrome text/UI pairs (gr-w1-styleguide-port).
+  // These mirror the agency spec's own 17-row contrast table (section 03), now
+  // machine-computed here instead of at render time. The cloudChrome family is
+  // identity-INVARIANT (GR2), so these resolve identically across all theme
+  // states, but they pin the raw designer hexes the swatch grid renders. fg4 is
+  // the meta-only token duty-capped at 3:1 (GR6: --dim maps to fg3, never fg4 as
+  // text). The accent pairs (--primary) fan per identity — the styleguide's
+  // section 03 spells them out; the base link/label pairs above already gate them.
+  { fg: "--cc-fg", bg: "--cc-bg", min: 4.5, why: "styleguide 03: primary text (fg on bg)" },
+  { fg: "--cc-fg2", bg: "--cc-card", min: 4.5, why: "styleguide 03: row text on cards (fg2 on card)" },
+  { fg: "--cc-fg3", bg: "--cc-bg", min: 4.5, why: "styleguide 03: secondary copy (fg3 on bg)" },
+  { fg: "--cc-fg4", bg: "--cc-bg", min: 3, why: "styleguide 03: meta only — fg4 on bg, duty-capped ≥3:1 (GR6)" },
+  { fg: "--cc-blue", bg: "--cc-bg", min: 4.5, why: "styleguide 03: links (blue on bg)" },
+  { fg: "--cc-amber", bg: "--cc-bg", min: 4.5, why: "styleguide 03: warning text (amber on bg)" },
+  { fg: "--cc-red", bg: "--cc-bg", min: 4.5, why: "styleguide 03: danger text (red on bg)" },
+  { fg: "--primary", bg: "--cc-bg", min: 3, why: "styleguide 03: accent badge/UI (primary on bg) — fans per identity" },
+  { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "styleguide 03: button label on the accent (primary-fg on primary)" },
 ];
 
 // ── Read the tree ────────────────────────────────────────────────────────────
@@ -190,6 +244,10 @@ const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 
 const definedTokens = new Set();
 for (const m of css.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) definedTokens.add(m[1]);
+// @property --x { … } registers a custom property just as a `--x:` declaration
+// does (the animated conic-ring fill --p at app.css:1717). The name is followed
+// by `{`, not `:`, so the declaration scan above misses it — register it here.
+for (const m of css.matchAll(/@property\s+(--[A-Za-z0-9_-]+)/g)) definedTokens.add(m[1]);
 
 /** var(--x) consumption sites across all three files. */
 function consumedTokens(src, file) {
@@ -203,6 +261,27 @@ function consumedTokens(src, file) {
 // (checked below); everything else it consumes must come from app.css.
 const sgLocalTokens = new Set();
 for (const m of styleguideRaw.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) sgLocalTokens.add(m[1]);
+
+// styleguide.html also DEFINES page-local .sg-* chrome classes in its own <style>
+// (layout scaffolding for the spec — the not-yet-shipped grammars like the stage
+// ladder, coalesced rows and domain rungs render on these, not on app.css
+// component classes). Collect them the same way app.css classes are collected so
+// the E2 pass can exempt them while still checking every SHIPPED-component class
+// the styleguide demonstrates (.btn/.status-pill/.notice/.toast/…) against
+// app.css — that is the drift value of folding styleguide.html into E2.
+const sgStyle = (styleguideRaw.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1];
+const sgLocalClasses = new Set();
+{
+  const sgCss = stripCssComments(sgStyle);
+  let buf = "";
+  for (const c of sgCss) {
+    if (c === "{") {
+      for (const m of buf.matchAll(/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/g)) sgLocalClasses.add(m[1]);
+      buf = "";
+    } else if (c === "}" || c === ";") buf = "";
+    else buf += c;
+  }
+}
 
 const consumed = [
   ...consumedTokens(css, "app.css"),
@@ -244,6 +323,17 @@ for (const m of htmlRaw.matchAll(/class="([^"]*)"/g)) {
   const line = lineOf(htmlRaw, m.index);
   for (const t of m[1].split(/\s+/).filter(Boolean)) {
     emitToken(t, "index.html", line);
+  }
+}
+
+/** styleguide.html static class="..." attributes — the living spec renders the
+ *  shipped components, so every class it names must have a rule in app.css (drift
+ *  gate) EXCEPT its own page-local .sg-* chrome (sgLocalClasses, exempted in the
+ *  E2 loop below — the styleguide analog of the --sg-* token carve-out). */
+for (const m of styleguideRaw.matchAll(/class="([^"]*)"/g)) {
+  const line = lineOf(styleguideRaw, m.index);
+  for (const t of m[1].split(/\s+/).filter(Boolean)) {
+    emitToken(t, "styleguide.html", line);
   }
 }
 
@@ -389,6 +479,44 @@ const lightTokens = parseTokenBlocks(/^:root\s*\{([\s\S]*?)\}/gm);
 const darkOverrides = parseTokenBlocks(/^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm);
 const darkTokens = { ...lightTokens, ...darkOverrides };
 
+// Identity ramps (charter GR5): each `html[data-bp-theme="X"] { … }` block is a
+// full accent+surface token set; its `[data-theme="dark"]` sibling is the dark
+// variant. Per CSS specificity `html[data-bp-theme="X"]` (0,1,1) overrides the
+// base dark block (0,1,0), and `html[data-bp-theme="X"][data-theme="dark"]`
+// (0,2,1) overrides everything — so a dark identity state is
+// base-light ∪ base-dark ∪ identity-light ∪ identity-dark, later spread wins.
+// DISCOVERED from the CSS, never hardcoded: a new identity (iris is landing in
+// this same wave) must join the contrast fanout the moment its block exists —
+// a fixed list would silently re-create the checked-subset dishonesty this
+// detector exists to cure.
+const IDENTITY_RAMPS = [
+  ...new Set([...css.matchAll(/^html\[data-bp-theme="([a-z0-9-]+)"\]\s*\{/gm)].map((m) => m[1])),
+];
+const identityTokens = {}; // id -> { light, dark }
+for (const id of IDENTITY_RAMPS) {
+  identityTokens[id] = {
+    light: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+    dark: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\[data-theme="dark"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+  };
+}
+
+// EVERY theme state the SPA actually renders (charter GR5): base light/dark
+// plus each discovered identity's light/dark. Every CONTRAST_PAIRS entry is
+// resolved against all of them — with today's 4 identities the manifest fans
+// from 2 states to 10 (34 pairs → 340 evaluations); a 5th identity fans it
+// further automatically, so a ramp cannot ship an unreadable pairing unseen.
+const THEME_STATES = [
+  ["base-light", lightTokens],
+  ["base-dark", darkTokens],
+];
+for (const id of IDENTITY_RAMPS) {
+  THEME_STATES.push([`${id}-light`, { ...lightTokens, ...identityTokens[id].light }]);
+  THEME_STATES.push([
+    `${id}-dark`,
+    { ...lightTokens, ...darkOverrides, ...identityTokens[id].light, ...identityTokens[id].dark },
+  ]);
+}
+
 /** Substitute var(--x) references until the value is literal. */
 function resolveValue(name, map, seen = new Set()) {
   if (seen.has(name)) throw new Error(`token cycle at ${name}`);
@@ -460,7 +588,7 @@ function resolveColor(token, map, theme, errs) {
 
 const contrastResults = []; // { theme, fg, bg, ratio, min, why }
 function runContrast(errs) {
-  for (const [theme, map] of [["light", lightTokens], ["dark", darkTokens]]) {
+  for (const [theme, map] of THEME_STATES) {
     for (const p of CONTRAST_PAIRS) {
       const fg = resolveColor(p.fg, map, theme, errs);
       let bg = resolveColor(p.bg, map, theme, errs);
@@ -517,11 +645,24 @@ for (const c of consumed) {
 }
 
 const hookHits = [];
+const gapHits = [];             // KNOWN_GAPS-demoted E2/E3 → printed as R3, not fatal
+const matchedGaps = new Set();  // which KNOWN_GAPS entries fired (staleness check)
+const gapKey = (g) => `${g.file}|${"cls" in g ? "E2:" + g.cls : "E3:" + g.head}`;
 const seenMissing = new Set();
 for (const e of emitted) {
   if (cssClasses.has(e.cls)) continue;
+  // page-local .sg-* chrome defined in styleguide.html's own <style> (the
+  // class analog of the --sg-* token carve-out).
+  if (e.file === "styleguide.html" && sgLocalClasses.has(e.cls)) continue;
   if (ALLOW_HOOK_CLASSES.includes(e.cls)) {
     hookHits.push(e);
+    continue;
+  }
+  const gap = KNOWN_GAPS.find((g) => "cls" in g && g.file === e.file && g.cls === e.cls);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${e.cls}@${e.file}`;
+    if (!seenMissing.has(key)) { seenMissing.add(key); gapHits.push({ code: "E2", file: e.file, what: `class "${e.cls}"`, why: gap.why }); }
     continue;
   }
   const key = `${e.cls}@${e.file}:${e.line}`;
@@ -530,9 +671,21 @@ for (const e of emitted) {
   errors.push(`E2 ${e.file}:${e.line}  class "${e.cls}" is emitted but has no rule in app.css`);
 }
 
+const seenGapHeads = new Set();
 for (const d of dynamicSites) {
+  const gap = KNOWN_GAPS.find((g) => "head" in g && g.file === d.file && g.head === d.head);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${d.head}@${d.file}`;
+    if (!seenGapHeads.has(key)) { seenGapHeads.add(key); gapHits.push({ code: "E3", file: d.file, what: `dynamic head "${d.head}"`, why: gap.why }); }
+    continue;
+  }
   errors.push(`E3 ${d.file}:${d.line}  dynamic class composition with head "${d.head}" is not in ALLOW_PREFIXES`);
 }
+
+// KNOWN_GAPS entries that fired nothing this run — the owning slice fixed the gap,
+// so prune the entry (mirrors staleRawAllows). Reported below, never fatal.
+const staleGaps = KNOWN_GAPS.filter((g) => !matchedGaps.has(gapKey(g)));
 
 for (const b of badTokens) {
   errors.push(
@@ -576,8 +729,14 @@ const pxFontSizes = []; // R4
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Anchored: `[data-theme="dark"] .foo {` is a scoped RULE, not a token
-    // block — only the bare block selectors mark token territory.
-    if (depth === 0 && /^\s*(?::root|\[data-theme="dark"\])\s*\{\s*$/.test(line)) inTokenBlock = true;
+    // block — only the bare block selectors mark token territory. The identity
+    // ramps `html[data-bp-theme="X"] {` and `…[data-theme="dark"] {` (charter
+    // GR5) are token blocks too, so their raw ramp values are contract, not E6.
+    if (
+      depth === 0 &&
+      /^\s*(?::root|\[data-theme="dark"\]|html\[data-bp-theme="[a-z0-9-]+"\](?:\[data-theme="dark"\])?)\s*\{\s*$/.test(line)
+    )
+      inTokenBlock = true;
     for (const ch of line) {
       if (ch === "{") depth++;
       else if (ch === "}") {
@@ -641,8 +800,9 @@ for (const s of staleRawAllows) {
   console.log(`stale  ALLOW_RAW_COLORS entry no longer matches any line — prune it: ${s}`);
 }
 
-// E5 summary: worst pair per theme, so drift toward the threshold is visible.
-for (const theme of ["light", "dark"]) {
+// E5 summary: worst pair per theme state, so drift toward the threshold is
+// visible across all ten (base + 4 identities × light/dark).
+for (const [theme] of THEME_STATES) {
   const rows = contrastResults.filter((r) => r.theme === theme);
   if (!rows.length) continue;
   const worst = rows.reduce((a, b) => (a.ratio / a.min < b.ratio / b.min ? a : b));
@@ -663,9 +823,18 @@ if (process.env.CSS_CHECK_VERBOSE) {
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);
 }
-if (REPORT_ONLY.length) {
-  console.log(`\nR3  REPORT-ONLY (fix requires app.js — owned by another slice):`);
-  for (const r of REPORT_ONLY) console.log(`      ${r}`);
+if (gapHits.length) {
+  console.log(
+    `\nR3  ${gapHits.length} known gap(s) in app.js/index.html demoted (owned by ` +
+      `gr-backlog-css-check-missing-classes — author the CSS or remove the emission):`,
+  );
+  for (const g of gapHits) console.log(`      ${g.code} ${g.file}  ${g.what} — ${g.why}`);
+}
+for (const g of staleGaps) {
+  console.log(
+    `stale  KNOWN_GAPS entry no longer matches any emission — prune it (the owning slice fixed it): ` +
+      `${g.file} ${"cls" in g ? `class "${g.cls}"` : `head "${g.head}"`}`,
+  );
 }
 if (pxFontSizes.length) {
   console.log(
@@ -680,7 +849,7 @@ if (pxFontSizes.length) {
 console.log(
   `\n__css_check: ${uniqEmitted.size} classes checked, ${uniqConsumed.size} tokens checked, ` +
     `${contrastResults.length} contrast pairs, ${allowlistedHits.length + hookHits.length + rawAllowed.length} allowlisted, ` +
-    `${errors.length} error(s)`,
+    `${gapHits.length} known gap(s) demoted (R3), ${errors.length} error(s)`,
 );
 
 if (errors.length) {
