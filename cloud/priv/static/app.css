@@ -1834,6 +1834,49 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .set-matrix-legend { font-size: var(--text-xs); margin-top: var(--space-2); }
 .set-matrix-ack { font-size: var(--text-sm); margin-top: var(--space-2); min-height: 1em; }
 
+/* GR33 roster grammar — the settings-list ROW inside a .set-section (G-06
+   Members + the greenfield env-vars page). One idiom for both: an optional
+   leading avatar/glyph, a name + mono meta stack, and a trailing chip/action
+   cluster. Rows are hairline-separated inside their card (never a second card
+   family). Every fg/bg here is an existing CONTRAST_PAIRS pairing (--text /
+   --muted-text / --dim on --surface, --primary-fg on --primary). */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+.set-row:first-child { border-top: 0; padding-top: 0; }
+.set-list { margin-top: var(--space-2); }
+.set-ava {
+  width: 30px; height: 30px;
+  border-radius: var(--pill);
+  background: var(--primary);
+  color: var(--primary-fg);
+  display: grid; place-items: center;
+  font-size: var(--text-sm); font-weight: 600;
+  flex: 0 0 auto;
+}
+.set-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.set-row-key { font-size: var(--text-sm); font-weight: 600; color: var(--text); font-family: var(--mono); overflow-wrap: anywhere; }
+.set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
+.set-row-note { font-size: var(--text-xs); color: var(--dim); margin-top: 2px; }
+.set-row-tags { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: 2px; }
+.set-row-side { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
+/* A bordered metadata chip (scope · secret · write-once). Text-only tint keeps
+   it on the existing --muted-text/--surface pairing — no new contrast pair. */
+.set-chip {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted-text);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  padding: 1px var(--space-2);
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {
   .topbar { padding: 0 14px; gap: 10px; }

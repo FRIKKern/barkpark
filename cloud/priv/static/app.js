@@ -3013,8 +3013,8 @@
   // longer a view at all (A4/D66): it is the launchFlow() component, opened in a
   // modal or rendered as the empty-fleet welcome runway. Its old #launch bookmark
   // remaps to Overview (legacyRoute) and auto-opens the flow (wantsLaunchFlow).
-  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "activity"];
-  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members"];
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "env", "activity"];
+  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members", "env"];
 
   // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
   // #site/<id>), or the invitation-accept landing (#invitations/accept —
@@ -3180,6 +3180,7 @@
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
     if (r.view === "members") loadMembers(); // C10: the team Members settings panel
+    if (r.view === "env") loadEnvVars(); // G-06: the team environment-variables panel
     if (r.view === "activity") loadActivity();
   }
 
@@ -13416,9 +13417,19 @@
       '</p><p><button class="btn btn-primary btn-sm" data-members-retry type="button">Retry</button></p></div>';
   }
 
-  // Pure: one member row. The current user is tagged "(you)" and never carries
-  // manage controls (you can't demote/remove yourself here); non-managers see
-  // no controls at all.
+  // Pure: the two-letter avatar initials for an email (before the @, first char;
+  // falls back to the first character of the whole string). Upper-cased.
+  function memberInitials(email) {
+    var s = String(email || "").trim();
+    var local = s.split("@")[0] || s;
+    return (local.charAt(0) || "?").toUpperCase();
+  }
+
+  // Pure: one member row on the GR33 roster anatomy — avatar, email (+ "(you)"),
+  // a mono joined-at line, a role chip, and (for managers, never on yourself) the
+  // Change-role / Remove actions. THREE roles only (owner/admin/member); the chip
+  // reads straight off ROLE_LABELS, which already matches the server's 3-role
+  // vocabulary — no invented "operator"/"supporter" tiers (GR36/gr-backlog-role-vocabulary).
   function memberRowHtml(m, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
     var isSelf = ctx.userId != null && String(m.user_id) === String(ctx.userId);
@@ -13428,39 +13439,55 @@
         '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
           '" data-email="' + esc(m.email) + '" type="button">Remove</button>'
       : "";
-    return '<div class="fleet-row">' +
-      '<div class="fleet-main"><div class="fleet-name">' + esc(m.email) +
+    return '<div class="set-row">' +
+      '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(m.email)) + "</span>" +
+      '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
-        '<div class="token-meta dim">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
-      '<div class="fleet-badges">' + badge(ROLE_LABELS[m.role] || m.role, "up") + actions + "</div></div>";
+        '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
+      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[m.role] || m.role) + "</span>" +
+        actions + "</div></div>";
   }
 
-  // Pure: one pending-invitation row.
+  // Pure: one pending-invitation row — email, a mono "invited as <role> · expires
+  // <date>" line, a Pending chip, and (for managers) Revoke. The expiry is the
+  // 7-day, single-use truth the invite copy states.
   function invitationRowHtml(inv, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
     var action = canManage
       ? '<button class="btn btn-ghost btn-sm" data-invite-revoke="' + esc(inv.id) +
           '" data-email="' + esc(inv.email) + '" type="button">Revoke</button>'
       : "";
-    return '<div class="fleet-row">' +
-      '<div class="fleet-main"><div class="fleet-name">' + esc(inv.email) + "</div>" +
-        '<div class="token-meta dim">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
+    return '<div class="set-row">' +
+      '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(inv.email)) + "</span>" +
+      '<div class="set-row-main"><div class="set-row-name">' + esc(inv.email) + "</div>" +
+        '<div class="set-row-meta">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
           " &middot; expires " + esc(fmtTokenDate(inv.expires_at)) + "</div></div>" +
-      '<div class="fleet-badges">' + badge("Pending", "warn") + action + "</div></div>";
+      '<div class="set-row-side"><span class="set-chip">Pending</span>' + action + "</div></div>";
   }
 
-  // Pure: the whole panel body — members section + (for managers) a pending-
-  // invitations section. Empty member lists never happen (you're always a
-  // member), but the invitations block collapses to a quiet line when empty.
+  // Pure: the whole panel body — a roster .set-section + (for managers) a pending-
+  // invitations .set-section. Empty member lists never happen (you're always a
+  // member); the invitations block collapses to a quiet empty line. A plain member
+  // sees only the read-only roster — no invitations card, no affordances (GR33
+  // plain-member law).
   function membersPanelHtml(members, invitations, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
-    var out = "";
-    out += members.map(function (m) { return memberRowHtml(m, ctx); }).join("");
+    var out = '<section class="set-section">' +
+      '<h2 class="set-h">Team members</h2>' +
+      '<p class="set-purpose">Everyone with access to this team. A member\'s role decides what they can do.</p>' +
+      '<div class="set-list">' +
+        members.map(function (m) { return memberRowHtml(m, ctx); }).join("") +
+      "</div></section>";
     if (canManage) {
-      out += '<h2 class="fleet-name" style="margin:20px 0 8px">Pending invitations</h2>';
-      out += invitations.length
-        ? invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("")
-        : '<p class="dim">No pending invitations.</p>';
+      out += '<section class="set-section">' +
+        '<h2 class="set-h">Pending invitations</h2>' +
+        '<p class="set-purpose">Invitation links are emailed, work once, and expire after 7 days.</p>' +
+        (invitations.length
+          ? '<div class="set-list">' +
+              invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("") +
+            "</div>"
+          : '<p class="set-empty">No pending invitations.</p>') +
+        "</section>";
     }
     return out;
   }
@@ -13555,6 +13582,15 @@
     $("#invite-email").focus();
   }
 
+  // Pure: honest copy for a failed invite. The server splits the collision into
+  // already_member (they're on the team) vs already_invited (a live invite exists)
+  // — both are surfaced truthfully instead of a generic "try again".
+  function inviteFailureCopy(data) {
+    if (data && data.error === "already_member") return "That person is already on your team.";
+    if (data && data.error === "already_invited") return "There's already a pending invitation for that address — revoke it first to re-send.";
+    return friendly(data, "Check the address and try again.");
+  }
+
   function submitInvite(ctx) {
     var email = ($("#invite-email").value || "").trim();
     var role = $("#invite-role").value;
@@ -13569,7 +13605,7 @@
       } else {
         btn.disabled = false;
         btn.textContent = "Send invitation";
-        toast({ kind: "error", title: "Couldn't send invitation", body: friendly(r.data, "Check the address and try again.") });
+        toast({ kind: "error", title: "Couldn't send invitation", body: inviteFailureCopy(r.data) });
       }
     });
   }
@@ -13579,8 +13615,9 @@
   function revealInvite(url, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Invitation sent</h2>' +
-      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link:</p>" +
+      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
       '<div class="field"><input class="form-input" id="invite-link" type="text" readonly value="' + esc(url || "") + '" /></div>' +
+      '<p class="set-row-note">This is the only time we\'ll show the link here. If the email doesn\'t arrive, share it directly.</p>' +
       '<div class="modal-actions">' +
         '<button class="btn btn-ghost" id="invite-copy" type="button">Copy link</button>' +
         '<button class="btn btn-primary" type="button" data-close>Done</button>' +
@@ -13624,31 +13661,60 @@
       api("PATCH", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId), { role: role }).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Role updated" });
-        else toast({ kind: "error", title: "Couldn't change role", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't change role",
+          body: (r.status === 409 && r.data && r.data.error === "last_owner")
+            ? "You're the last owner — promote another member to owner first."
+            : friendly(r.data) });
         loadMembers();
       });
     });
   }
 
-  // Remove a member: DELETE /v1/teams/:id/members/:user_id.
+  // Pure: honest copy for a failed member removal. The server's 409 last_owner is
+  // surfaced verbatim in meaning ("You are the last owner…") so the operator knows
+  // WHY the destroy was refused, not just that it failed (charter G-06 ruling).
+  function removeMemberFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "last_owner") {
+      return "You're the last owner — promote another member to owner before removing this one.";
+    }
+    if (status === 404) return "That member is no longer on the team.";
+    return friendly(data, "Please try again.");
+  }
+
+  // Remove a member = destroy-tier typed-confirm (DELETE /v1/teams/:id/members/
+  // :user_id). Removal evicts the member's sessions immediately and can't be
+  // undone, so it rides the same proof-of-attention echo as Decommission: the
+  // operator types the member's email to arm the button. A 409 last_owner is an
+  // honest in-modal recovery sentence, never a silent toast (confirmModal fail
+  // contract).
   function confirmRemoveMember(ctx, userId, email) {
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Remove member?</h2>' +
-      '<p class="modal-sub">Removing <b>' + esc(email || "this member") + "</b> ends their access to the team immediately.</p>" +
-      '<div class="modal-actions">' +
-        '<button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" id="member-remove-go" type="button">Remove</button>' +
-      "</div>"
-    );
-    $("#member-remove-go").addEventListener("click", function () {
-      var btn = $("#member-remove-go");
-      btn.disabled = true;
-      btn.textContent = "Removing…";
-      api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId)).then(function (r) {
-        closeModal();
-        if (r.ok) toast({ kind: "success", title: "Member removed" });
-        else toast({ kind: "error", title: "Couldn't remove member", body: friendly(r.data) });
+    var name = String(email || "");
+    openConfirmModal({
+      tier: "destroy",
+      title: "Remove member?",
+      resourceName: name,
+      consequences: [
+        "Ends " + (name || "this member") + "'s access to the team immediately.",
+        "Any active sessions are signed out.",
+        "This can't be undone (you can re-invite them later).",
+      ],
+      confirmLabel: "Remove member",
+      busyLabel: "Removing…",
+      onConfirm: function (ctl) { runRemoveMember(ctx, userId, ctl); },
+    });
+  }
+
+  function runRemoveMember(ctx, userId, ctl) {
+    api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId)).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        toast({ kind: "success", title: "Member removed" });
         loadMembers();
+        return;
+      }
+      ctl.fail(removeMemberFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runRemoveMember(ctx, userId, c);
       });
     });
   }
@@ -13683,6 +13749,225 @@
   function onMembersEvent(v) {
     fleetCache = null;
     if (v === "members") loadMembers();
+  }
+
+  // ── Environment variables panel (Settings view) ─────────────────────────────
+  // The team's env-var ROWS off /v1/env-vars (GR36 / E-03 write-only doctrine
+  // transferred to rows). This is NOT the per-site env blob editor: each var is a
+  // row {key, scope, is_secret, is_shown_once, comment, timestamps} whose VALUE is
+  // sealed forever — no reveal route exists over HTTP, so the UI never renders a
+  // reveal affordance. Access model: member-read / admin-write (list is member-
+  // readable; POST/DELETE are owner/admin-only). A plain member sees the rows
+  // read-only with no add form and no delete controls (GR33 plain-member law).
+
+  // Pure: the human scope label. A barkpark-scoped var carries a barkpark_id and
+  // applies to one instance; otherwise it's team-wide.
+  function envScopeLabel(v) {
+    return (v && (v.scope === "barkpark" || v.barkpark_id)) ? "Instance" : "Team";
+  }
+
+  // Pure: honest copy for a failed env-vars fetch (member-readable, so a 403 here
+  // means teamless/permission drift rather than the normal member case).
+  function envVarsFailureCopy(status) {
+    if (status === 0) return "Network error — is the control plane reachable? Retry in a moment.";
+    if (status === 422) return "Your account isn't part of a team, so there are no environment variables.";
+    if (status === 403) return "You don't have permission to view this team's environment variables.";
+    return "We couldn't load your environment variables. Retry in a moment.";
+  }
+
+  // Pure: honest copy for a failed env-var write. write_once is the per-row truth
+  // (a shown-once key can't be overwritten — delete and recreate); the rest map to
+  // human sentences instead of raw error codes.
+  function envVarWriteFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "write_once") {
+      return "A write-once variable with that key already exists. Delete it first, then create it again.";
+    }
+    if (status === 403) return "Only team owners and admins can change environment variables.";
+    if (status === 422 && data && data.error === "key_required") return "Enter a key.";
+    return friendly(data, "Check the values and try again.");
+  }
+
+  function envVarsErrorHtml(status) {
+    return '<div class="empty-state"><h2>Couldn\'t load environment variables</h2><p>' +
+      esc(envVarsFailureCopy(status)) +
+      '</p><p><button class="btn btn-primary btn-sm" data-env-retry type="button">Retry</button></p></div>';
+  }
+
+  // Pure: one env-var row — the mono key, the scope + secret + write-once chips,
+  // an optional comment, and (for admins) Delete. is_shown_once rows carry an
+  // honest note that they can't be changed in place (a POST would 409); the value
+  // is NEVER shown or revealable. `canWrite` gates the destructive affordance —
+  // a member row renders exactly the same metadata with no Delete button.
+  function envVarRowHtml(v, canWrite) {
+    var chips = '<span class="set-chip">' + esc(envScopeLabel(v)) + "</span>";
+    if (v.is_secret) chips += '<span class="set-chip">Secret</span>';
+    if (v.is_shown_once) chips += '<span class="set-chip">Write-once</span>';
+    var comment = v.comment
+      ? '<div class="set-row-note">' + esc(v.comment) + "</div>"
+      : "";
+    var once = v.is_shown_once
+      ? '<div class="set-row-note">Write-once — its value is sealed. Delete and recreate to change it.</div>'
+      : "";
+    var action = canWrite
+      ? '<button class="btn btn-ghost btn-sm" data-env-delete="' + esc(v.id) +
+          '" data-key="' + esc(v.key) + '" type="button">Delete</button>'
+      : "";
+    return '<div class="set-row">' +
+      '<div class="set-row-main"><div class="set-row-key">' + esc(v.key) + "</div>" +
+        '<div class="set-row-tags">' + chips + "</div>" +
+        comment + once + "</div>" +
+      '<div class="set-row-side">' + action + "</div></div>";
+  }
+
+  // Pure: the add-var form section (admin-only). A single independently-persisted
+  // FORM section, so it owns its own .set-save-row at the card foot (GR33 save
+  // law). Write-only: there is no value read-back anywhere, matching E-03.
+  function envAddFormHtml() {
+    return '<section class="set-section">' +
+      '<h2 class="set-h">Add a variable</h2>' +
+      '<p class="set-purpose">Values are encrypted at rest and never shown again after you save. ' +
+        'Mark a value <b>write-once</b> if it must never be readable or replaceable in place.</p>' +
+      '<div class="field"><label class="label" for="env-key">Key</label>' +
+        '<input class="form-input" id="env-key" type="text" placeholder="DATABASE_URL" autocapitalize="off" autocomplete="off" spellcheck="false" /></div>' +
+      '<div class="field"><label class="label" for="env-value">Value</label>' +
+        '<input class="form-input" id="env-value" type="text" placeholder="Paste the value" autocomplete="off" spellcheck="false" /></div>' +
+      '<div class="field"><label class="label" for="env-scope">Scope</label>' +
+        '<select class="form-input" id="env-scope">' +
+          '<option value="team" selected>Team — every instance</option>' +
+        "</select></div>" +
+      '<label class="set-toggle"><input type="checkbox" id="env-secret" checked /> Secret (mask everywhere it appears)</label>' +
+      '<label class="set-toggle"><input type="checkbox" id="env-once" /> Write-once (can never be read or replaced — only deleted)</label>' +
+      '<div class="field"><label class="label" for="env-comment">Comment (optional)</label>' +
+        '<input class="form-input" id="env-comment" type="text" placeholder="What this is for" autocomplete="off" /></div>' +
+      '<div class="cm-error" id="env-error" role="alert" hidden><p class="cm-error-msg" id="env-error-msg"></p></div>' +
+      '<div class="set-save-row">' +
+        '<button class="btn btn-primary" id="env-save" type="button">Add variable</button>' +
+      "</div></section>";
+  }
+
+  // Pure: the whole panel body — the existing-vars .set-section (member-readable)
+  // plus, for admins only, the add-var FORM section. `ctx.role` decides write
+  // access via assignableRoles (owner/admin → non-empty; member → empty).
+  function envVarsPanelHtml(vars, ctx) {
+    var canWrite = assignableRoles(ctx.role).length > 0;
+    var out = '<section class="set-section">' +
+      '<h2 class="set-h">Variables</h2>' +
+      '<p class="set-purpose">Injected into your instances at boot. Keys are visible; values are sealed once saved.</p>' +
+      (vars.length
+        ? '<div class="set-list">' +
+            vars.map(function (v) { return envVarRowHtml(v, canWrite); }).join("") +
+          "</div>"
+        : '<p class="set-empty">No environment variables yet.' +
+            (canWrite ? " Add one below." : "") + "</p>") +
+      "</section>";
+    if (canWrite) out += envAddFormHtml();
+    return out;
+  }
+
+  // Load the env-vars panel: resolve the team context (reusing membersContext —
+  // both settings pages key off the same /v1/me role), then fetch the rows.
+  function loadEnvVars() {
+    var box = $("#env-body");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading environment variables&hellip;</div>';
+    var ctx = membersContext();
+    if (ctx) { fetchEnvVars(ctx); return; }
+    api("GET", "/v1/me").then(function (r) {
+      if (r.ok && r.data) meCache = r.data;
+      var c = membersContext();
+      if (!c) {
+        box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
+          "<p>Your account isn't part of a team, so there are no environment variables.</p></div>";
+        return;
+      }
+      fetchEnvVars(c);
+    });
+  }
+
+  function fetchEnvVars(ctx) {
+    var box = $("#env-body");
+    if (!box) return;
+    api("GET", "/v1/env-vars").then(function (r) {
+      if (box.isConnected === false) return;
+      if (!r.ok) {
+        box.innerHTML = envVarsErrorHtml(r.status);
+        var rb = box.querySelector("[data-env-retry]");
+        if (rb) rb.addEventListener("click", loadEnvVars);
+        return;
+      }
+      var vars = (r.data && r.data.env_vars) || [];
+      box.innerHTML = envVarsPanelHtml(vars, ctx);
+      wireEnvPanel(box, ctx);
+    });
+  }
+
+  function wireEnvPanel(box, ctx) {
+    var save = box.querySelector("#env-save");
+    if (save) save.addEventListener("click", function () { submitEnvVar(ctx); });
+    box.querySelectorAll("[data-env-delete]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        confirmDeleteEnvVar(ctx, b.getAttribute("data-env-delete"), b.getAttribute("data-key"));
+      });
+    });
+  }
+
+  // Create a var: POST /v1/env-vars. On 201 the row is added (value never echoed);
+  // a 409 write_once / 422 renders inline at the form (the honest per-row truth),
+  // never a bare toast.
+  function submitEnvVar(ctx) {
+    var key = ($("#env-key").value || "").trim();
+    var value = $("#env-value").value || "";
+    var errBox = $("#env-error");
+    var errMsg = $("#env-error-msg");
+    function showErr(msg) { if (errMsg) setText(errMsg, msg); if (errBox) show(errBox); }
+    if (!key) { showErr("Enter a key."); return; }
+    var btn = $("#env-save");
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+    if (errBox) hide(errBox);
+    var body = {
+      key: key,
+      value: value,
+      scope: ($("#env-scope") && $("#env-scope").value) || "team",
+      is_secret: !!($("#env-secret") && $("#env-secret").checked),
+      is_shown_once: !!($("#env-once") && $("#env-once").checked),
+      comment: ($("#env-comment") && $("#env-comment").value.trim()) || null,
+    };
+    api("POST", "/v1/env-vars", body).then(function (r) {
+      if (r.status === 201 && r.data && r.data.env_var) {
+        toast({ kind: "success", title: "Variable added" });
+        loadEnvVars();
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = "Add variable";
+      showErr(envVarWriteFailureCopy(r.status, r.data));
+    });
+  }
+
+  // Delete a var = standard confirm (recoverable by re-adding, but the value is
+  // gone — the confirm copy states that loss). DELETE /v1/env-vars/:id.
+  function confirmDeleteEnvVar(ctx, id, key) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Delete variable?</h2>' +
+      '<p class="modal-sub">Deleting <b>' + esc(key || "this variable") + "</b> removes it from every instance at the next boot. " +
+        "Its value is sealed, so it can't be recovered — you'd re-enter it to add it back.</p>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" id="env-delete-go" type="button">Delete</button>' +
+      "</div>"
+    );
+    $("#env-delete-go").addEventListener("click", function () {
+      var btn = $("#env-delete-go");
+      btn.disabled = true;
+      btn.textContent = "Deleting…";
+      api("DELETE", "/v1/env-vars/" + encodeURIComponent(id)).then(function (r) {
+        closeModal();
+        if (r.ok) toast({ kind: "success", title: "Variable deleted" });
+        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data) });
+        loadEnvVars();
+      });
+    });
   }
 
   // =========================================================== DEVICE LOGIN (/activate)
@@ -14236,6 +14521,7 @@
   var PAL_SETTINGS_LABEL = {
     billing: "Billing", providers: "Providers",
     notifications: "Notifications", tokens: "Tokens", members: "Members",
+    env: "Environment variables",
   };
 
   // Pure: the STATIC nav registry — the frozen IA (D17) plus the three Fleet lenses
@@ -14896,7 +15182,14 @@
       usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
-      membersPanelHtml: membersPanelHtml,
+      membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
+      removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
+      // G-06 env-vars page: the pure row/panel model + honest failure copy. The
+      // value is sealed forever — envVarRowHtml never renders a reveal affordance;
+      // is_shown_once rows carry the write-once note; canWrite gates Delete only.
+      envScopeLabel: envScopeLabel, envVarsFailureCopy: envVarsFailureCopy,
+      envVarWriteFailureCopy: envVarWriteFailureCopy, envVarRowHtml: envVarRowHtml,
+      envVarsPanelHtml: envVarsPanelHtml, envAddFormHtml: envAddFormHtml,
       // Wave 3 (OC16/OC18): the fleet usage strip's pure model + render helpers,
       // still node-pinned. gr-p2 folded the strip's two truths into the v4
       // Overview (team ceiling → header slots meter; per-instance cells → the

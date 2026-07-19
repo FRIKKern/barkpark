@@ -3767,6 +3767,108 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
+// ── G-06 Members restyle + greenfield env-vars page (Settings wave, phase 4) ──
+
+test("G-06: the members + env-vars helpers are exported", () => {
+  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy",
+    "envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
+    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("G-06: memberInitials — first letter of the local part, upper-cased, total", () => {
+  assert.equal(hooks.memberInitials("ada@acme.com"), "A");
+  assert.equal(hooks.memberInitials("Zed"), "Z");
+  assert.equal(hooks.memberInitials(""), "?");
+  assert.equal(hooks.memberInitials(null), "?");
+});
+
+test("G-06: memberRowHtml — GR33 anatomy with the 3 real role chips, no fiction", () => {
+  const owner = { user_id: "u1", email: "ada@acme.com", role: "owner", joined_at: "2026-01-01T00:00:00Z" };
+  const html = hooks.memberRowHtml(owner, { role: "admin", userId: "u2" });
+  assert.match(html, /set-row/);          // rides the roster anatomy
+  assert.match(html, /set-ava/);          // avatar
+  assert.match(html, /set-chip">Owner</);  // the role chip is the real label
+  // The 5-role design fiction must never render as a team role (GR36/GR14).
+  for (const role of ["owner", "admin", "member"]) {
+    const chip = hooks.memberRowHtml({ user_id: "x", email: "x@y.io", role }, { role: "owner", userId: "z" });
+    assert.ok(!/Operator|Supporter/.test(chip), role + " row must not render an invented tier");
+  }
+});
+
+test("G-06: removeMemberFailureCopy — last_owner 409 is surfaced honestly", () => {
+  assert.match(hooks.removeMemberFailureCopy(409, { error: "last_owner" }), /last owner/i);
+  assert.match(hooks.removeMemberFailureCopy(404, {}), /no longer on the team/i);
+  assert.equal(typeof hooks.removeMemberFailureCopy(500, {}), "string");
+});
+
+test("G-06: inviteFailureCopy — already_member vs already_invited each get true copy", () => {
+  assert.match(hooks.inviteFailureCopy({ error: "already_member" }), /already on your team/i);
+  assert.match(hooks.inviteFailureCopy({ error: "already_invited" }), /pending invitation/i);
+  assert.equal(typeof hooks.inviteFailureCopy({ error: "other" }), "string");
+});
+
+test("G-06: envScopeLabel — barkpark scope OR a barkpark_id reads Instance, else Team", () => {
+  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: null }), "Team");
+  assert.equal(hooks.envScopeLabel({ scope: "barkpark", barkpark_id: "bp1" }), "Instance");
+  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: "bp1" }), "Instance"); // id wins
+  assert.equal(hooks.envScopeLabel({}), "Team");
+});
+
+test("G-06: envVarsFailureCopy + envVarWriteFailureCopy — honest per-status copy", () => {
+  assert.match(hooks.envVarsFailureCopy(0), /Network error/i);
+  assert.match(hooks.envVarsFailureCopy(422), /isn't part of a team/i);
+  assert.match(hooks.envVarsFailureCopy(403), /permission/i);
+  // The write-once 409 is the honest per-row truth — delete + recreate.
+  assert.match(hooks.envVarWriteFailureCopy(409, { error: "write_once" }), /write-once.*[Dd]elete/i);
+  assert.match(hooks.envVarWriteFailureCopy(403, {}), /owners and admins/i);
+  assert.match(hooks.envVarWriteFailureCopy(422, { error: "key_required" }), /Enter a key/i);
+});
+
+test("G-06: envVarRowHtml — value sealed forever (no reveal), write-once note, canWrite gates Delete", () => {
+  const secret = { id: "e1", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "pg" };
+  const admin = hooks.envVarRowHtml(secret, true);
+  assert.match(admin, /set-row-key">DATABASE_URL/); // mono key visible
+  assert.match(admin, /set-chip">Secret</);
+  assert.match(admin, /set-chip">Team</);
+  assert.match(admin, /data-env-delete="e1"/);       // admin gets Delete
+  // The value is NEVER rendered or revealable — no reveal/show affordance at all.
+  assert.ok(!/Reveal|Show value|reveal/i.test(admin), "no reveal affordance may exist");
+  // A member gets the SAME metadata, zero Delete.
+  const member = hooks.envVarRowHtml(secret, false);
+  assert.ok(!member.includes("data-env-delete"), "a member row carries no Delete");
+  // A write-once row states it can't be changed in place (a POST would 409).
+  const once = hooks.envVarRowHtml({ id: "e2", key: "STRIPE", scope: "team", is_secret: true, is_shown_once: true }, true);
+  assert.match(once, /set-chip">Write-once</);
+  assert.match(once, /Delete and recreate to change/i);
+});
+
+test("G-06: envVarsPanelHtml — admin gets the add FORM + save-row; a member is read-only", () => {
+  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
+  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
+  assert.match(admin, /Add a variable/);
+  assert.match(admin, /set-save-row/);
+  assert.match(admin, /data-env-delete="e1"/);
+  // Member-read / admin-write: E-03's any-member-write does NOT transfer here.
+  const member = hooks.envVarsPanelHtml(vars, { role: "member" });
+  assert.ok(!member.includes("Add a variable"), "a member sees no add form");
+  assert.ok(!member.includes("set-save-row"), "a member sees no save-row");
+  assert.ok(!member.includes("data-env-delete"), "a member sees no Delete");
+  // The empty-state copy invites an admin, stays quiet for a member.
+  assert.match(hooks.envVarsPanelHtml([], { role: "admin" }), /Add one below/);
+  assert.ok(!hooks.envVarsPanelHtml([], { role: "member" }).includes("Add one below"));
+});
+
+test("G-06: envAddFormHtml — write-only (never a value read-back affordance)", () => {
+  const html = hooks.envAddFormHtml();
+  assert.match(html, /id="env-key"/);
+  assert.match(html, /id="env-value"/);
+  assert.match(html, /id="env-once"/);   // the write-once toggle
+  assert.match(html, /set-save-row/);
+  assert.ok(!/Reveal|Show value/i.test(html), "the add form never offers a value read-back");
+});
+
 // ── Wave 3 (OC16/OC18): Overview fleet usage strip ──────────────────────────
 // Pure model + render helpers only (the DOM mount loadFleetUsageStrip is browser-
 // verified). These pin the four honest states — fresh / stale / no-sample /

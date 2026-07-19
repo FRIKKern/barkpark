@@ -566,6 +566,33 @@ const activeSub = {
   trial_days_remaining: null,
 };
 
+// ── G-06 members + env-vars fixtures ─────────────────────────────────────────
+// Envelope shapes are the real serializers: member_json {user_id, email, role,
+// joined_at}; invitation_json {id, email, role, expires_at, inserted_at};
+// env_var_json {id, key, scope, barkpark_id, is_secret, is_shown_once, comment,
+// inserted_at, updated_at} — the VALUE is never in the payload (sealed at rest).
+// usr_ada is the me() user, so the roster tags it "(you)" and never offers a
+// self-remove. THREE roles only (owner/admin/member).
+const teamMembers = [
+  { user_id: "usr_ada", email: "ada@acme.com", role: "owner", joined_at: tMinus(240 * 86400) },
+  { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: tMinus(120 * 86400) },
+  { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: tMinus(20 * 86400) },
+];
+const teamInvites = [
+  { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
+  { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
+];
+// Both scopes + a secret + a write-once + a comment row, so one shot proves the
+// whole grammar: DATABASE_URL (team secret, commented), STRIPE_SECRET_KEY (team,
+// write-once → sealed-and-unreplaceable note), PUBLIC_SITE_URL (team, non-secret,
+// commented), WORKER_TOKEN (instance-scoped secret).
+const teamEnvVars = [
+  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "Primary Postgres connection string", inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
+  { id: "env_stripe", key: "STRIPE_SECRET_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: true, comment: null, inserted_at: tMinus(60 * 86400), updated_at: tMinus(60 * 86400) },
+  { id: "env_url", key: "PUBLIC_SITE_URL", scope: "team", barkpark_id: null, is_secret: false, is_shown_once: false, comment: "Canonical URL used in outbound emails", inserted_at: tMinus(30 * 86400), updated_at: tMinus(30 * 86400) },
+  { id: "env_worker", key: "WORKER_TOKEN", scope: "barkpark", barkpark_id: IDS.liveInstance, is_secret: true, is_shown_once: false, comment: null, inserted_at: tMinus(5 * 86400), updated_at: tMinus(5 * 86400) },
+];
+
 // ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
 // Each meter is {value|"unmetered", quota, warn_at, source, measured_at}; a
 // numeric quota lights the SPA's OC7 bar (ok/warn/over), a nil quota is honestly
@@ -1252,6 +1279,92 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: activityFeed,
+    },
+  },
+
+  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // The roster on the GR33 .set-* anatomy: mixed roles (owner "(you)" / admin /
+  // member), the admin-only pending-invitations card, per-manageable-row Change
+  // role + Remove (destroy-tier typed-confirm, click-driven).
+  "members-populated": {
+    label: "Members (admin) — roster with mixed roles + pending invitations",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // The plain-member seam (GR33 plain-member law): read-only roster, NO
+  // invitations card, NO Change-role/Remove affordances. me() role "member"
+  // makes assignableRoles([]) → canManage false throughout.
+  "members-member": {
+    label: "Members (member) — read-only roster, no manage affordances",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      // A member never fetches invitations (the client skips the admin-gated
+      // call), so no fixture — the panel renders the roster alone.
+    },
+  },
+  // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
+  // secret, a write-once (sealed, unreplaceable-in-place note), a comment, and
+  // the add-var FORM section with its .set-save-row.
+  "env-populated": {
+    label: "Environment variables (admin) — rows + add form (secret / write-once / scopes)",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
+    },
+  },
+  // The write-once 409: the same populated rows, but the add-form POST is pinned
+  // to the server's 409 write_once (the collision the form surfaces inline). The
+  // per-row sealed note renders regardless; the 409 copy is unit-pinned via
+  // envVarWriteFailureCopy (the submit is click-driven, inert in smoke).
+  "env-write-once-409": {
+    label: "Environment variables — write-once collision (POST → 409 write_once)",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
+      envPost: { status: 409, body: { error: "write_once" } },
+    },
+  },
+  // Env-vars (member): read-only rows, NO add form, NO Delete buttons (access
+  // model member-read/admin-write; E-03's any-member-write does NOT transfer).
+  "env-member": {
+    label: "Environment variables (member) — read-only rows, no add form",
+    authed: true,
+    deepLink: "#settings/env",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      envVars: teamEnvVars,
     },
   },
 
@@ -2562,6 +2675,48 @@ export function route(name, method, path) {
   if (p === "/v1/notifications/deliveries" && method === "GET") {
     if (d.notifDeliveriesError) return { status: 500, body: { error: "internal" } };
     return { status: 200, body: { deliveries: d.notifDeliveries || [] } };
+  }
+  // G-06 MEMBERS: the roster + invitations reads. Team-scoped under /v1/teams/:id.
+  // A scenario carries `members`/`invitations` fixtures; absent → honest empty
+  // lists (the panel never errors on an empty team). Invitations are admin-gated
+  // server-side, but the client already skips the call for a plain member, so a
+  // member scenario simply omits the fixture. POST/DELETE are click-driven (inert
+  // in smoke) — modelled here so a live/browser exercise reconciles.
+  if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
+    return { status: 200, body: { members: d.members || [] } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/members\/[^/]+$/.test(p) && (method === "DELETE" || method === "PATCH")) {
+    return d.memberWrite || { status: 200, body: { ok: true } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/invitations$/.test(p)) {
+    if (method === "POST") {
+      return d.invitePost || {
+        status: 201,
+        body: { invitation: { id: "inv_new", email: "new@acme.com", role: "member", expires_at: tPlus(7 * 86400), inserted_at: T }, accept_url: "http://localhost/#/invitations/accept?token=preview-new" },
+      };
+    }
+    return { status: 200, body: { invitations: d.invitations || [] } };
+  }
+  if (/^\/v1\/teams\/[^/]+\/invitations\/[^/]+$/.test(p) && method === "DELETE") {
+    return { status: 200, body: { ok: true } };
+  }
+
+  // G-06 ENV-VARS: the ROW model (member-read / admin-write). GET is member-
+  // readable → a scenario's `envVars` fixture (absent → honest empty). POST is
+  // admin-only: `envPost` lets the env-write-once-409 scenario pin the write_once
+  // 409 the form surfaces inline; absent → a benign 201 echo. DELETE → 200.
+  if (p === "/v1/env-vars") {
+    if (method === "POST") {
+      return d.envPost || {
+        status: 201,
+        body: { env_var: { id: "env_new", key: "NEW_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: null, inserted_at: T, updated_at: T } },
+      };
+    }
+    if (d.envVarsDenied) return { status: 403, body: { error: "forbidden" } };
+    return { status: 200, body: { env_vars: d.envVars || [] } };
+  }
+  if (/^\/v1\/env-vars\/[^/]+$/.test(p) && method === "DELETE") {
+    return { status: 200, body: { ok: true } };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
