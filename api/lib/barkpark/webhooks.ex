@@ -375,6 +375,30 @@ defmodule Barkpark.Webhooks do
     |> Repo.insert()
   end
 
+  @doc """
+  Insert a durable TEST delivery row (`source_kind: "test"`, GR45) for a one-shot
+  admin PROBE (`POST /v1/webhooks/:dataset/:id/test-send`).
+
+  Mirrors `create_media_delivery/1` deliberately: `endpoint_id` and `event_id`
+  stay NULL, so the row carries only the synthetic body in `payload_snapshot`.
+  A NULL `endpoint_id` is the crux of the safety contract — `mark_delivered/4`
+  and `mark_giveup/5` no-op their streak accounting on a nil endpoint, so a test
+  send (success OR failure) never resets a healthy endpoint's history nor pushes
+  a flaky one toward auto-disable. The probe is single-attempt (see
+  `Dispatcher.deliver_test/3`) and never resumed, so no `endpoint_id` is needed
+  for a retry to re-target.
+  """
+  def create_test_delivery(payload_snapshot) when is_map(payload_snapshot) do
+    %Delivery{}
+    |> Delivery.changeset(%{
+      source_kind: "test",
+      status: "pending",
+      attempts: 0,
+      payload_snapshot: payload_snapshot
+    })
+    |> Repo.insert()
+  end
+
   def mark_delivered(%Delivery{} = d, status_code, attempts, latency_ms \\ nil) do
     result =
       d

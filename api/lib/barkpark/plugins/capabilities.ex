@@ -1436,6 +1436,18 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "webhook.test-send",
+        "webhook",
+        "test-send",
+        "Send a one-shot synthetic test event to this endpoint (single attempt).",
+        "POST",
+        "/v1/webhooks/:dataset/:id/test-send",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "plugin.ls",
         "plugin",
         "ls",

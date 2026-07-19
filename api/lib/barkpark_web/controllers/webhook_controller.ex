@@ -154,6 +154,45 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  @doc """
+  Send a one-shot TEST delivery to THIS webhook (GR45): a synthetic
+  `webhook.test` event, HMAC-signed with the endpoint's current secret,
+  delivered in a SINGLE synchronous attempt (no retry loop). Returns the
+  delivery verdict so the SPA can show an immediate ok/failed result. The test
+  delivery row carries a NULL `endpoint_id`, so a test — success OR failure —
+  never perturbs the endpoint's consecutive-failure auto-disable accounting.
+  404 if the webhook (under this dataset) is unknown.
+  """
+  def test_send(conn, %{"dataset" => dataset, "id" => id}) do
+    case fetch_scoped(conn, dataset, id) do
+      {:ok, wh} ->
+        body = wh |> test_payload() |> Jason.encode!()
+        # `endpoint_id` intentionally omitted (NULL) — the snapshot holds the
+        # target url + probe body; the secret is NOT snapshotted (a test is never
+        # resumed, so there is nothing to re-sign later).
+        {:ok, delivery} = Webhooks.create_test_delivery(%{"url" => wh.url, "body" => body})
+        {:ok, delivery} = Dispatcher.deliver_test(wh, body, delivery)
+        json(conn, %{delivery: render_delivery(delivery)})
+
+      :error ->
+        webhook_not_found(conn)
+    end
+  end
+
+  # Synthetic probe payload: a self-describing `webhook.test` envelope so the
+  # receiver can tell a manual test apart from a real content event.
+  defp test_payload(wh) do
+    %{
+      type: "webhook.test",
+      dataset: wh.dataset,
+      delivery: "test",
+      message:
+        "Test delivery from Barkpark — someone clicked \"Send test\" to verify this endpoint.",
+      webhook: %{id: wh.id, name: wh.name},
+      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+  end
+
   # Mirror of the dispatch-time selection scope (`Webhooks.active_webhooks_for`
   # through `Scope.scope_to_workspace_or_global`): a webhook may REPLAY an event
   # only if auto-dispatch could have SELECTED it for that event. The dataset
