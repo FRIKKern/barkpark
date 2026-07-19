@@ -83,6 +83,12 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
       POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
       POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
+      GET     /v1/operator/fleet   operator  fleet snapshot for the session-gated operator console
+      GET     /v1/operator/autoupdate operator  fleet-autoupdate policy snapshot (console read)
+      POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
+      POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
+      GET     /v1/operator/deliveries operator  notification delivery log (console read)
+      GET     /v1/operator/warm    operator  warm-pool status (console read)
       PATCH   /v1/admin/barkparks/:id/channel admin  set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
