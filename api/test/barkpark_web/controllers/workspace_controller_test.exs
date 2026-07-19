@@ -475,6 +475,60 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert manifest["workspace_slug"] == target.slug
     end
 
+    test "the profile / dataset / source_server query params REACH the engine (they were silently discarded before)",
+         %{conn: conn} do
+      raw_admin = "ws-export-scoped-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Scoped Export WS"}, admin_token(raw_admin))
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export?profile=dev&source_server=https://x.test")
+
+      assert resp.status == 200
+      {manifest, _dumps} = Archive.unpack(resp.resp_body)
+
+      # The whole point: on the pre-slice controller these are absent because the
+      # action matched only workspace_slug and called export/1.
+      assert manifest["profile"] == "dev"
+      assert manifest["source_server"] == "https://x.test"
+      assert manifest["format"] == Archive.format()
+
+      # Content type is set UNCONDITIONALLY — there is no Accept negotiation here.
+      assert Plug.Conn.get_resp_header(resp, "content-type") == ["application/x-tar"]
+
+      assert Plug.Conn.get_resp_header(resp, "content-disposition") ==
+               ["attachment; filename=#{target.slug}-dev.tar"]
+    end
+
+    test "422 with an honest reason when a scope option cannot be resolved — never a 500, never a silently wrong bundle",
+         %{conn: conn} do
+      raw_admin = "ws-export-422-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Refusing Export WS"}, admin_token(raw_admin))
+
+      for {query, reason} <- [
+            {"profile=staging", "invalid_profile"},
+            {"dataset=no-such-dataset", "dataset_not_found"}
+          ] do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> get("/api/workspaces/#{target.slug}/export?#{query}")
+
+        assert resp.status == 422
+        body = Jason.decode!(resp.resp_body)
+        assert body["error"]["code"] == "unprocessable"
+        assert body["error"]["reason"] == reason
+        assert body["error"]["message"] != ""
+      end
+    end
+
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do
       raw_admin = "ws-export-404-#{System.unique_integer([:positive])}"
       {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
