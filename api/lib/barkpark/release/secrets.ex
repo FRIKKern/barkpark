@@ -77,6 +77,10 @@ defmodule Barkpark.Release.Secrets do
 
   Returns `{:ok, path}` on success.
   """
+  # `path` is a trusted release/operator argument, never request input. The API
+  # intentionally supports an explicit path so installers and tests can target
+  # an isolated Barkpark home without mutating the user's real one.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec write_env(Path.t()) :: {:ok, Path.t()}
   def write_env(path \\ default_path()) do
     path = Path.expand(path)
@@ -146,6 +150,7 @@ defmodule Barkpark.Release.Secrets do
   # Parse the existing .env into a set of present keys. Tolerant of blank
   # lines and `#` comments; only the key (left of the first `=`) matters
   # for the idempotency check.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_existing(path) do
     case File.read(path) do
       {:ok, contents} ->
