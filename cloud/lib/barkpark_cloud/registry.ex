@@ -2341,22 +2341,55 @@ defmodule BarkparkCloud.Registry do
   blob. Its per-kind shape is validated by the changeset before insert. `opts`
   may carry `:label`.
 
+  A team has AT MOST ONE provider per kind, so this is an UPSERT, not an append
+  (charter GR44): reconnecting `hetzner` ROTATES the credential (and the label)
+  on the existing row instead of stacking a second one behind it. The
+  `unique_index(:providers, [:team_id, :kind])` from
+  `20260719203000_unique_provider_per_team_kind` is the enforcement;
+  `on_conflict` is how this write cooperates with it. Before both, every read
+  papered over the duplicates with newest-wins ordering — correct output over a
+  quietly growing table.
+
+  `returning: true` is load-bearing: on the conflict branch the in-memory
+  changeset carries the NEW credential but the row's ORIGINAL `id` /
+  `inserted_at` are what Postgres kept, so without it callers would hold a
+  half-invented struct.
+
   Returns `{:ok, %Provider{}}` or `{:error, %Ecto.Changeset{}}`.
   """
   @spec connect_provider(Team.t() | binary(), String.t(), binary(), keyword()) ::
           {:ok, Provider.t()} | {:error, Ecto.Changeset.t()}
   def connect_provider(team, kind, credential, opts \\ []) when is_binary(credential) do
+    label = Keyword.get(opts, :label)
+
+    # A reconnect that NAMES a label renames the row; a reconnect that names
+    # none rotates the credential and LEAVES the existing label alone. The
+    # difference is not academic: `POST /v1/providers` reads `label` straight
+    # off the body and the SPA omits the key entirely when the field is blank
+    # (`providerCredBody`), so an unconditional `:replace` of `:label` would
+    # silently wipe a previously-named credential on every re-submit of a form
+    # whose label box starts empty. Nothing in the product offers "clear the
+    # label", so keeping it is the only reading that matches intent.
+    replace =
+      if is_nil(label),
+        do: [:encrypted_token, :updated_at],
+        else: [:label, :encrypted_token, :updated_at]
+
     %Provider{}
     |> Provider.changeset(%{
       team_id: team_id(team),
       kind: kind,
-      label: Keyword.get(opts, :label),
+      label: label,
       # The virtual :credential drives the per-kind shape gate; :encrypted_token
       # is the single stored home (ciphertext of the same plaintext).
       credential: credential,
       encrypted_token: Vault.encrypt(credential)
     })
-    |> Repo.insert()
+    |> Repo.insert(
+      on_conflict: {:replace, replace},
+      conflict_target: [:team_id, :kind],
+      returning: true
+    )
   end
 
   @doc "List a Team's connected providers, newest first. Scoped — never crosses teams."
