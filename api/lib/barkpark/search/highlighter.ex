@@ -1,5 +1,38 @@
 defmodule Barkpark.Search.Highlighter do
-  @moduledoc false
+  @moduledoc """
+  Search highlighting + snippets, all app-level (in-memory over BEAM-held field
+  text). No `ts_headline` anywhere — that is a MEASURED decision, not an
+  oversight (AXI charter decision 20 / task `axi-b3-ts-headline-snippets`).
+
+  ## Why not `ts_headline` (benchmark NO-GO, guerrilla prod, 2026-07-19)
+
+  Postgres already indexes body text in the search tsvector
+  (`20260614120000_search_vector_include_body.exs`), so `ts_headline` over the
+  stored `content` was the obvious "server-side, ranked, stemming-aware"
+  candidate. Forced-evaluation benchmarks (2705 docs; `count(*)` over an
+  unreferenced `ts_headline` column is PRUNED by the planner and under-reports
+  ~10x, so these are the forced numbers) killed it: ONE 1.3 MB body → a
+  108-char snippet costs **477 ms**; per-field `ts_headline` over the top-200
+  largest docs runs **2.8–3.1 s**; whole-`content` **4.5 s**. `ts_headline` has
+  **no early-exit** — it scans the entire field to emit ~108 chars — and it
+  re-scans, server-side, text the app already holds in memory. The in-memory
+  windower below (first-match, ~#{160}-char window, early-exit on the first
+  matching field) produces the same shape strictly cheaper and with zero extra
+  I/O. Decision: snippets stay app-level; `ts_headline` is REJECTED for this
+  workload. Do not re-litigate without a new benchmark.
+
+  ## Bounding brief highlights (re-inflation guard)
+
+  `highlight_text/2` marks up the ENTIRE field, and `highlight_fields` is
+  schema-configurable (`highlightFields`) — a `content.body` config would echo a
+  1.3 MB marked string per hit into a brief card. `clamp_brief_highlights/1`
+  caps each already-sealed highlight to a window around the first `<mark>` so a
+  brief hit card can never re-inflate to full-field size. It runs AFTER
+  `visible_highlight_fields/3` (⇒ `Envelope.field_readable?/3`) has already
+  produced the sealed highlights map — never against raw content or the search
+  vector — so it cannot reopen the LOW-11 leak class. The FULL view is
+  untouched: it serves the complete markup exactly as before.
+  """
 
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
@@ -256,6 +289,123 @@ defmodule Barkpark.Search.Highlighter do
           end
         end)
     end
+  end
+
+  @doc """
+  Bound an already-sealed per-field highlights map for a brief hit card.
+
+  Takes the `%{field => marked_string}` map the highlight path produced for ONE
+  document (the value of `meta[:highlights][doc_id]`) and clamps each value to a
+  window around its FIRST `<mark>` — at most ~#{@snippet_window} visible
+  characters, with `…` ellipses marking either cut side. The full field can no
+  longer echo into a brief card no matter how large `highlightFields` is
+  configured.
+
+  This is a pure post-filter over strings that ALREADY passed
+  `visible_highlight_fields/3` — an unreadable field never reached this map, so
+  bounding cannot reopen the LOW-11 leak class. `<mark>` tags stay balanced
+  across the cut (a window that opens or closes inside a match is re-balanced),
+  and HTML entities (`&lt;`, `&amp;`, …) are never split. Only used by the brief
+  view; the full view serves the unbounded markup unchanged.
+  """
+  @spec clamp_brief_highlights(%{optional(String.t()) => String.t()}) :: %{
+          optional(String.t()) => String.t()
+        }
+  def clamp_brief_highlights(field_highlights) when is_map(field_highlights) do
+    Map.new(field_highlights, fn {field, marked} -> {field, clamp_marked(marked)} end)
+  end
+
+  # Tokenise the marked, HTML-escaped string into units that are safe to cut
+  # BETWEEN: a `<mark>`/`</mark>` tag (zero visible width, always kept whole and
+  # re-balanced), an HTML entity (one visible char, never split), or a single
+  # visible codepoint. Then keep a window around the first `<mark>`.
+  defp clamp_marked(marked) when is_binary(marked) do
+    tokens =
+      Regex.scan(~r/<mark>|<\/mark>|&amp;|&lt;|&gt;|&quot;|&#39;|./us, marked) |> List.flatten()
+
+    case Enum.find_index(tokens, &(&1 == @mark_open)) do
+      nil ->
+        # No match tag (defensive — highlight_text always emits one). Keep a
+        # leading window so an unexpected full-field string still can't inflate.
+        {kept, right_cut?} = take_visible(tokens, @snippet_window)
+        assemble("", kept, if(right_cut?, do: "…", else: ""))
+
+      idx ->
+        {lead_tokens, rest} = Enum.split(tokens, idx)
+        {lead_kept, lead_visible, lead_cut?} = take_lead(lead_tokens, @snippet_lead)
+        {rest_kept, right_cut?} = take_visible(rest, @snippet_window - lead_visible)
+
+        left = if lead_cut?, do: "…", else: ""
+        right = if right_cut?, do: "…", else: ""
+        assemble(left, balance_marks(lead_kept ++ rest_kept), right)
+    end
+  end
+
+  defp clamp_marked(other), do: other
+
+  # Keep the TRAILING lead tokens up to `budget` visible chars; report whether
+  # earlier lead was dropped and how many visible chars we kept.
+  defp take_lead(lead_tokens, budget) do
+    {kept_rev, visible, cut?} =
+      lead_tokens
+      |> Enum.reverse()
+      |> Enum.reduce({[], 0, false}, fn token, {acc, vis, cut} ->
+        cond do
+          cut -> {acc, vis, true}
+          tag?(token) -> {[token | acc], vis, false}
+          vis < budget -> {[token | acc], vis + 1, false}
+          true -> {acc, vis, true}
+        end
+      end)
+
+    {kept_rev, visible, cut?}
+  end
+
+  # Keep leading tokens up to `budget` visible chars; report whether more remained.
+  defp take_visible(_tokens, budget) when budget <= 0, do: {[], true}
+
+  defp take_visible(tokens, budget) do
+    {kept_rev, _vis, cut?} =
+      Enum.reduce(tokens, {[], 0, false}, fn token, {acc, vis, cut} ->
+        cond do
+          cut -> {acc, vis, true}
+          tag?(token) -> {[token | acc], vis, false}
+          vis < budget -> {[token | acc], vis + 1, false}
+          true -> {acc, vis, true}
+        end
+      end)
+
+    {Enum.reverse(kept_rev), cut?}
+  end
+
+  defp tag?(@mark_open), do: true
+  defp tag?(@mark_close), do: true
+  defp tag?(_), do: false
+
+  # `<mark>` never nests in highlight_text output, so a cut window opens or
+  # closes at most one span: prepend `<mark>` if we start inside a match, append
+  # `</mark>` if we end inside one.
+  defp balance_marks(tokens) do
+    {depth, min_depth} =
+      Enum.reduce(tokens, {0, 0}, fn
+        @mark_open, {d, m} ->
+          {d + 1, m}
+
+        @mark_close, {d, m} ->
+          d2 = d - 1
+          {d2, min(m, d2)}
+
+        _, {d, m} ->
+          {d, m}
+      end)
+
+    prefix = if min_depth < 0, do: @mark_open, else: ""
+    suffix = if depth > 0, do: @mark_close, else: ""
+    [prefix | tokens] ++ [suffix]
+  end
+
+  defp assemble(left, tokens, right) do
+    left <> IO.iodata_to_binary(tokens) <> right
   end
 
   defp document_field_text(doc, "title"), do: doc.title

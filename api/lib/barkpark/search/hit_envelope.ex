@@ -58,18 +58,34 @@ defmodule Barkpark.Search.HitEnvelope do
     fields = Keyword.get(opts, :fields)
     view = Keyword.get(opts, :view)
 
+    # `highlightFields` is schema-configurable, so the top-level `highlights`
+    # map (keyed by doc id) can echo a full `content.body` per hit. In the brief
+    # view every field highlight is windowed (AXI b3) so neither the per-card
+    # highlights NOR this top-level map can re-inflate a brief page. The full
+    # view serves the complete markup unchanged. Bounding runs AFTER the
+    # visibility filter that produced this map — never against raw content.
+    highlights = top_highlights(meta[:highlights] || %{}, view)
+
     %{
-      documents: documents(docs, meta, view, caller_context, schema_resolver, fields),
+      documents: documents(docs, meta, view, caller_context, schema_resolver, fields, highlights),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],
-      highlights: meta[:highlights] || %{},
+      highlights: highlights,
       recovery: meta[:recovery],
       correctedTo: meta[:corrected_to],
       facets: meta[:facets],
       truncation: meta[:truncation]
     }
   end
+
+  defp top_highlights(raw, @brief) do
+    Map.new(raw, fn {id, field_highlights} ->
+      {id, Highlighter.clamp_brief_highlights(field_highlights)}
+    end)
+  end
+
+  defp top_highlights(raw, _full), do: raw
 
   @doc """
   Re-key a built envelope to the federated documents-surface payload shape:
@@ -88,7 +104,7 @@ defmodule Barkpark.Search.HitEnvelope do
     }
   end
 
-  defp documents(docs, meta, @brief, caller_context, schema_resolver, _fields) do
+  defp documents(docs, meta, @brief, caller_context, schema_resolver, _fields, highlights) do
     # Fail closed: a nil caller is the anonymous principal, never a bypass —
     # both the Envelope render and the snippet visibility check see a real
     # (unprivileged) context. Mirrors Highlighter.visible_highlight_fields/3.
@@ -98,7 +114,6 @@ defmodule Barkpark.Search.HitEnvelope do
     # the render pass and the snippet pass.
     resolver = memoised_resolver(docs, schema_resolver)
 
-    highlights = meta[:highlights] || %{}
     snippets = Highlighter.snippet_documents(docs, meta[:parsed] || %{}, %{}, ctx, resolver)
 
     docs
@@ -112,12 +127,14 @@ defmodule Barkpark.Search.HitEnvelope do
         title: rendered["title"],
         slug: card_slug(rendered),
         snippet: Map.get(snippets, id),
+        # `highlights` was already windowed by `top_highlights/2` (AXI b3) — the
+        # per-card map cannot re-inflate to full-field size.
         highlights: Map.get(highlights, id) || %{}
       }
     end)
   end
 
-  defp documents(docs, _meta, _full, caller_context, schema_resolver, fields) do
+  defp documents(docs, _meta, _full, caller_context, schema_resolver, fields, _highlights) do
     docs
     |> Envelope.render_many_by_type(schema_resolver, caller_context)
     |> Envelope.project(fields)

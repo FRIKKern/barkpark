@@ -196,6 +196,76 @@ defmodule BarkparkWeb.Contract.SearchTest do
              "expected ≥20x reduction, got #{ratio}x (full=#{byte_size(full)}B brief=#{byte_size(brief)}B)"
     end
 
+    # AXI b3: highlightFields is schema-configurable, so a heavyweight content
+    # field (content.body / content.description) configured into it would echo
+    # the whole marked field per brief hit. clamp_brief_highlights bounds it.
+    test "a heavyweight highlightFields config can never re-inflate a brief page (b3)",
+         %{conn: conn} do
+      # Highlight a big content field on the documents surface for this scope.
+      Barkpark.Search.SurfaceConfigs.upsert(
+        "documents",
+        "test",
+        %{"highlightFields" => ["title", "content.description"]}
+      )
+
+      # Declare `description` PUBLIC so it is readable — and thus highlightable —
+      # by the anonymous caller (the re-inflation vector being bounded).
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "description", "type" => "string"}
+          ]
+        },
+        "test"
+      )
+
+      ballast = String.duplicate("zephyrbeacon padding words here ", 2000)
+
+      for i <- 1..52 do
+        Content.create_document(
+          "post",
+          %{"doc_id" => "drafts.hb#{i}", "title" => "Heftybeacon #{i}", "description" => ballast},
+          "test"
+        )
+
+        Content.publish_document("hb#{i}", "post", "test")
+      end
+
+      body =
+        get(conn, "/v1/data/search/test", %{"q" => "zephyrbeacon", "view" => "brief"}).resp_body
+
+      cards = Jason.decode!(body)["documents"]
+
+      # Default page is 50 hits.
+      assert length(cards) == 50
+
+      # The whole 50-hit brief page stays small — the unbounded markup would be
+      # multiple megabytes (each description is ~62 KB, highlighted throughout).
+      assert byte_size(body) <= 45_000,
+             "expected 50-hit brief page <= 45 KB, got #{byte_size(body)} B"
+
+      for card <- cards do
+        snippet = card["snippet"] || ""
+
+        assert byte_size(snippet) <= 256,
+               "snippet #{byte_size(snippet)} B exceeds the 256 B budget"
+
+        hl = card["highlights"]["content.description"]
+        assert is_binary(hl), "expected a bounded content.description highlight"
+        assert hl =~ "<mark>"
+
+        assert byte_size(hl) <= 512,
+               "content.description highlight #{byte_size(hl)} B is not bounded"
+      end
+
+      # The full ballast text can never appear whole in a brief card.
+      refute body =~ ballast
+    end
+
     test "an unknown view value falls back to the full shape (tolerant reader)", %{conn: conn} do
       body =
         Jason.decode!(
