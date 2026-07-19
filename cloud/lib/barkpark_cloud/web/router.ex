@@ -83,6 +83,12 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
       POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
       POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
+      GET     /v1/operator/fleet   operator  fleet snapshot for the session-gated operator console
+      GET     /v1/operator/autoupdate operator  fleet-autoupdate policy snapshot (console read)
+      POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
+      POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
+      GET     /v1/operator/deliveries operator  notification delivery log (console read)
+      GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       PATCH   /v1/admin/barkparks/:id/channel admin  set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
@@ -2394,6 +2400,101 @@ defmodule BarkparkCloud.Web.Router do
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
       json(conn, 200, %{halted: false})
+    end
+  end
+
+  # ── Operator console: session-gated /v1/operator/* read seam (GR39) ────────
+  #
+  # The fleet-ops surface above (/v1/admin/* + /v1/internal/*) is `require_worker`
+  # — a faceless off-box secret, 401-DEAD to a browser SESSION bearer. The
+  # Operator console (its sidebar entry gated on /v1/me's `platform_operator`)
+  # reads the fleet through the operator's SESSION, so these thin proxies are the
+  # NET-NEW seam. `Auth.require_platform_operator` fails closed: no session 401,
+  # a non-operator session 403, reading the SAME
+  # `Notifications.platform_admin_emails/0` allowlist as the /v1/me boolean (ONE
+  # definition of operator-ness — isu-backlog-operator-principal inherits both).
+  # Zero new business logic: every handler is a thin read/toggle over an existing
+  # Registry/Notifications function, mirroring the /v1/admin/autoupdate* trio
+  # above. NO digest-send route here (GR40 cut it — gr-backlog-operator-digest-
+  # send is the successor). The require_worker routes stay untouched (GR9/GR39).
+  get "/v1/operator/autoupdate" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+    end
+  end
+
+  post "/v1/operator/autoupdate/halt" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Registry.set_autoupdate_halted(true)
+      json(conn, 200, %{halted: true})
+    end
+  end
+
+  post "/v1/operator/autoupdate/resume" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Registry.set_autoupdate_halted(false)
+      json(conn, 200, %{halted: false})
+    end
+  end
+
+  # GET /v1/operator/fleet → 200 {barkparks: [...], staging_gate_open: bool} —
+  # the cross-team fleet roll-up the console renders. Per-instance projection:
+  # id/name/channel/update_state + the in-flight marker autoupdate_triggered_at
+  # (nil until a self-update is triggered). Top-level staging_gate_open mirrors
+  # the canary gate the kill switch respects (Registry.staging_gate_open?/0).
+  get "/v1/operator/fleet" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{
+        barkparks: Enum.map(Registry.all_barkparks(), &operator_fleet_json/1),
+        staging_gate_open: Registry.staging_gate_open?()
+      })
+    end
+  end
+
+  # GET /v1/operator/deliveries → 200 {deliveries: [<delivery_json>]} — the
+  # FLEET-DIGEST send log (team_id nil, event fleet_digest), newest first. These
+  # rows are structurally invisible to the team-scoped /v1/notifications/
+  # deliveries, so this is their only read surface. `?limit` caps the page via
+  # parse_int, hard-capped at 200 HERE (list_fleet_deliveries rides the context
+  # default; the router owns the clamp — the /v1/notifications/deliveries
+  # precedent).
+  get "/v1/operator/deliveries" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      limit = min(parse_int(conn.query_params["limit"], 50), 200)
+      deliveries = Notifications.list_fleet_deliveries(limit)
+      json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
+    end
+  end
+
+  # GET /v1/operator/warm-pool → 200 {ready: n} — the warm-pool depth
+  # (ready + refreshing, the reconciler's grow/shrink input).
+  get "/v1/operator/warm-pool" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{ready: Registry.count_ready_warm_servers()})
     end
   end
 
@@ -7330,6 +7431,20 @@ defmodule BarkparkCloud.Web.Router do
       last_error: d.last_error,
       http_status: d.http_status,
       inserted_at: d.inserted_at
+    }
+  end
+
+  # One fleet row for GET /v1/operator/fleet — the cross-team operator roll-up.
+  # A thin projection of the Barkpark row: identity + rollout channel + update
+  # state + the in-flight marker (nil until a self-update is triggered). No
+  # secrets — every field is an observable operational label.
+  defp operator_fleet_json(bp) do
+    %{
+      id: bp.id,
+      name: bp.name,
+      channel: bp.channel,
+      update_state: bp.update_state,
+      autoupdate_triggered_at: bp.autoupdate_triggered_at
     }
   end
 

@@ -34,6 +34,7 @@ defmodule BarkparkCloud.Web.Auth do
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.Authz
   alias BarkparkCloud.Accounts.TeamMembership
+  alias BarkparkCloud.Notifications
   alias BarkparkCloud.Registry
 
   @doc """
@@ -185,6 +186,40 @@ defmodule BarkparkCloud.Web.Auth do
       conn
     else
       _ -> unauthorized(conn)
+    end
+  end
+
+  @doc """
+  Require a USER SESSION whose email is on the platform-operator allowlist — the
+  gate for the read-mostly Operator console (`/v1/operator/*`, GR39). Runs
+  `require_user/2` first (idempotent if `current_user` is already assigned), then
+  checks the resolved email against `Notifications.platform_admin_emails/0` — the
+  SAME allowlist that feeds `/v1/me`'s `platform_operator` boolean, so operator-
+  ness has ONE definition and `isu-backlog-operator-principal` inherits both.
+
+  Fails CLOSED:
+
+    * 401 when no/invalid session token (delegated to `require_user/2`).
+    * 403 when authenticated but NOT on the allowlist — and, because the
+      allowlist resolves config emails against REGISTERED users and reads `[]`
+      when unset, an unconfigured platform 403s every user rather than opening
+      the operator surface by omission.
+
+  Distinct from `require_worker/2` (the faceless off-box provisioner secret
+  behind `/v1/internal/*` + `/v1/admin/*`): this gates the human operator's
+  browser SESSION, which is 401-dead against the worker surface. This is the
+  DECLARED interim operator principal per charter GR9/GR39 — never a team role
+  (owner/admin is a different axis: authority reads from the membership row, not
+  a global allowlist — Authz law).
+  """
+  @spec require_platform_operator(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
+  def require_platform_operator(conn, opts) do
+    conn = if conn.assigns[:current_user], do: conn, else: require_user(conn, opts)
+
+    cond do
+      conn.halted -> conn
+      conn.assigns.current_user.email in Notifications.platform_admin_emails() -> conn
+      true -> forbidden(conn)
     end
   end
 
