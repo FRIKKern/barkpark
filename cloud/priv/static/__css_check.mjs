@@ -102,8 +102,6 @@ const ALLOW_PREFIXES = [
   "dep-current",                // + (rolledBack ? " dep-current--restored" : "") (.dep-current[--restored])
   "prov-overall",               // + state (.prov-overall rules)
   "usage-bar usage-bar--",      // + d.bar.tone (.usage-bar-- rules)
-  "fleet-usage-metric-v",       // + (unmetered ? " dim" : "") (.fleet-usage-metric-v / .dim)
-  "fleet-usage-cell",           // + toneCls (.fleet-usage-cell rules)
   "metric-card metric--",       // + esc(m.role) (.metric-card / .metric-- rules)
   "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
   // gr-w3 (v4 shell): the sidebar instance-morph section links (paintInstanceSections)
@@ -167,7 +165,7 @@ const KNOWN_GAPS = [
 // text as it appears in app.css (comments stripped); each entry carries its
 // reason and is printed on every run. Editing the line invalidates the entry.
 const ALLOW_RAW_COLORS = [
-  { line: ".modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design" },
+  { line: ".modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design (GR63: fixed, so it stays over the viewport while a tall modal scrolls)" },
   { line: "color: #fff; font-weight: 700; font-size: 13px;", why: "white initials on the fixed provider brand tiles" },
   // .brand-hetzner + .brand-azure now tint from --provider-* tokens (S7) — no raw literal to allow.
   { line: ".brand-do { background: #0080ff; }", why: "DigitalOcean brand colour" },

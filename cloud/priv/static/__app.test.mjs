@@ -134,15 +134,20 @@ test("gr-p5-account: index.html still binds aria-labelledby=modal-title on the s
 test("gr-p5-account: loadSessions' two css_check-named hooks survive — .session-revoke and .badge-current", () => {
   // These two class names are not decoration: `.session-revoke` is the selector
   // loadSessions delegates its per-row revoke click through, and `.badge-current`
-  // is what marks the row you must NOT revoke. Both are asserted against the
-  // shipped app.js source of loadSessions, which is a DOM mount (no pure hook).
+  // is what marks the row you must NOT revoke. GR63 extracted the row itself into
+  // the pure sessionRowHtml, so the MARKUP arm reads rendered output; only the
+  // delegation (a DOM mount, no pure seam) still reads source.
+  const current = hooks.sessionRowHtml({ id: "a", user_agent: "barkpark-cli/0.9", current: true });
+  const other = hooks.sessionRowHtml({ id: "b", user_agent: "barkpark-cli/0.9", current: false });
+  assert.ok(current.includes("badge-current"), "the current row must be badged .badge-current");
+  assert.ok(!current.includes("session-revoke"), "the current device is never self-revokable");
+  assert.ok(other.includes('class="btn btn-sm session-revoke"'),
+    "every other row offers .session-revoke");
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const fn = src.slice(src.indexOf("function loadSessions("));
   const body = fn.slice(0, fn.indexOf("\n  function ", 10));
   assert.ok(body.includes('querySelectorAll(".session-revoke")'),
     "loadSessions must delegate row revokes through .session-revoke");
-  assert.ok(body.includes("badge-current"),
-    "loadSessions must badge the current row with .badge-current");
 });
 
 test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
@@ -501,6 +506,104 @@ test("gr-p5-2fa: the width override is :has()-SCOPED — the shared 420px modal 
   // And the body carries the hook the rule keys off.
   const html = hooks.accountModalHtml(hooks.accountModel({}, {}));
   assert.ok(html.includes('class="am-modal"'), "the body must carry the :has() hook class");
+});
+
+// ── GR63 · the modal root must be able to SCROLL ───────────────────────────
+// The blocker this slice exists for: on live barkpark.cloud an account with 19
+// sessions rendered a 1655.5px .modal-card inside a 900px viewport, and NOTHING
+// in the modal chain could scroll (.modal-root was `position:fixed; place-items:
+// center` with no overflow-y; .modal-card had no bounded height). 11 of 28
+// controls were permanently unreachable — every Revoke, the footer Close, "Set
+// up two-factor authentication", and Log out, which is the app's ONLY logout
+// affordance. Measured threshold: 287.5px of modal chrome + 72px per session
+// row ⇒ 8 sessions fit, 9 break it. Five waves of green fixtures missed it
+// because every fixture carried two sessions.
+//
+// Two arms, and BOTH are needed: the markup arm proves the tall shape exists
+// and puts the escape hatches BELOW the list (the structural reason they went
+// out of reach), and the stylesheet arm proves the shipped CSS gives that shape
+// a scroll path. The stylesheet arm reads the declaration block of the rule
+// that actually ships — node cannot lay out CSS, and asserting on rendered
+// markup here would prove nothing about geometry.
+
+const declsOf = (css, selector) => {
+  // The FIRST rule whose selector list is exactly `selector` (so a comment or a
+  // `:has()` variant elsewhere in the file can never satisfy this).
+  const re = new RegExp("(^|\\})\\s*" + selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}", "m");
+  const m = css.match(re);
+  assert.ok(m, "app.css must carry a `" + selector + "` rule");
+  return Object.fromEntries(
+    m[2].split(";").map((d) => d.split(":")).filter((p) => p.length >= 2)
+      .map(([k, ...v]) => [k.trim(), v.join(":").trim()]),
+  );
+};
+
+// Nine sessions: one current device + eight revokable ones — one past the
+// measured break point, so this fixture renders the shape that broke.
+const TALL_SESSIONS = Array.from({ length: 9 }, (_, i) => ({
+  id: "sess_" + i,
+  user_agent: i === 0
+    ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/126.0"
+    : "barkpark-cli/0.9",
+  ip_address: "84.212.31." + (7 + i),
+  last_used_at: new Date(Date.now() - (i + 1) * 3600 * 1000).toISOString(),
+  current: i === 0,
+}));
+
+test("GR63: the 9-session account modal is TALL and buries its escape hatches below the list", () => {
+  const rows = TALL_SESSIONS.map((s) => hooks.sessionRowHtml(s)).join("");
+  assert.equal((rows.match(/class="session-row"/g) || []).length, 9,
+    "the fixture must render nine session rows — 8 fit in a 900px viewport, 9 do not");
+  assert.equal((rows.match(/session-revoke/g) || []).length, 8,
+    "the current device is never self-revokable; the other eight are");
+
+  // Splice the rows into the real body exactly where loadSessions puts them.
+  const body = hooks.accountModalHtml(hooks.accountModel({ team_id: "team_abc" }, ACCT_ME));
+  const html = body.replace(/(<div id="sessions-box"[^>]*>)[\s\S]*?(<\/div>)/, "$1" + rows + "$2");
+
+  // The controls that were unreachable on live all sit AFTER the session list —
+  // which is exactly why an unscrollable root strands them.
+  const lastRow = html.lastIndexOf("session-row");
+  for (const id of ["modal-logout", "am-2fa-start"]) {
+    const at = html.indexOf('id="' + id + '"');
+    if (at === -1) continue; // 2FA start only renders in the not-enrolled arm
+    assert.ok(at > lastRow, id + " sits below the session list — it needs a scroll path");
+  }
+  assert.ok(html.includes('id="modal-logout"'), "Log out is the app's only logout affordance");
+});
+
+test("GR63: the SHARED modal root can scroll, and the card still centres when it fits", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const root = declsOf(css, ".modal-root");
+
+  // The scroll path itself. This is the assertion that reds against pre-fix CSS.
+  assert.match(root["overflow-y"] || "", /^(auto|scroll)$/,
+    "the modal root must be able to scroll a card taller than the viewport");
+
+  // …and it must not be vertically centred, which is what pinned the overflow
+  // out of reach in BOTH directions (a centred grid item overflows above the
+  // scroll origin, so even a scrollable root cannot reach its top).
+  assert.equal(root["place-items"], undefined,
+    "`place-items` sets align-items too — set justify-items separately so align stays start");
+  assert.equal(root["align-items"], "start",
+    "a tall card must grow DOWNWARD from the top of the scroll box");
+
+  // Short modals must still read as centred: `margin: auto 0` on the card makes
+  // the free space split evenly whenever there IS free space.
+  const card = declsOf(css, ".modal-card");
+  assert.match(card["margin"] || "", /\bauto\b/,
+    "the card keeps true vertical centring while it fits");
+  assert.equal(card["max-width"], "420px", "the shared base width is untouched");
+
+  // The scrim must not scroll away from under a tall card.
+  assert.equal(declsOf(css, ".modal-backdrop")["position"], "fixed",
+    "the backdrop covers the viewport, not just the first screenful");
+
+  // The fix is on the SHARED primitive, not scoped to the account modal —
+  // every tall modal (launch, env editor, confirm sheets) inherits the bug.
+  const scoped = css.match(/\.modal-root:has\(\.am-modal\)\s*\{([^}]*)\}/);
+  assert.ok(!scoped || !/overflow/.test(scoped[1]),
+    "the overflow fix must not be :has(.am-modal)-scoped");
 });
 
 // ── gr-p5-account-2fa · the identity band degrades honestly ────────────────
@@ -4665,193 +4768,6 @@ test("G-06: envAddFormHtml — write-only (never a value read-back affordance)",
   assert.ok(!/Reveal|Show value/i.test(html), "the add form never offers a value read-back");
 });
 
-// ── Wave 3 (OC16/OC18): Overview fleet usage strip ──────────────────────────
-// Pure model + render helpers only (the DOM mount loadFleetUsageStrip is browser-
-// verified). These pin the four honest states — fresh / stale / no-sample /
-// over-quota — and prove the team bar reuses the C10 renderer + recovery action.
-
-const fleetIso = (secsAgo) => new Date(Date.now() - secsAgo * 1000).toISOString();
-// A summary envelope with all four states: an over-quota team headline, a fresh
-// row, an hours-stale row, and a no-sample row. Mirrors OC16 { team, instances }.
-const fleetSummaryFixture = () => ({
-  team: { instances: { value: 12, quota: 10, warn_at: 8, source: "control-plane.barkparks", measured_at: null } },
-  instances: [
-    {
-      id: "inst-fresh", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
-      measured_at: fleetIso(20),
-      meters: {
-        documents: { value: 412, measured_at: fleetIso(20) },
-        db_size: { value: 1048576, measured_at: fleetIso(20) },
-        disk: { value: 37, measured_at: fleetIso(20) },
-        seats: { value: 4, measured_at: fleetIso(20) },
-        // The armed machine beat — under its physical ceilings (live).
-        cpu: { value: 23, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
-        ram: { value: 58, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
-      },
-    },
-    {
-      id: "inst-stale", name: "Analytics", slug: "analytics", host: "an.barkpark.cloud",
-      measured_at: fleetIso(3 * 3600),
-      meters: {
-        documents: { value: 88, measured_at: fleetIso(3 * 3600) },
-        db_size: { value: "unmetered" },
-        disk: { value: "unmetered" },
-        seats: { value: 2, measured_at: fleetIso(3 * 3600) },
-      },
-    },
-    {
-      id: "inst-nosample", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
-      measured_at: null,
-      meters: { documents: { value: "unmetered" }, db_size: { value: "unmetered" }, disk: { value: "unmetered" }, seats: { value: "unmetered" } },
-    },
-  ],
-});
-
-test("W3/W5 fleet strip: helpers exported + headline subset is DOCS·DB·DISK·SEATS·CPU·RAM", () => {
-  for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
-    assert.equal(typeof hooks[name], "function", name + " must be exported");
-  }
-  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats", "cpu", "ram"]);
-  // No drift: every headline key is a real meter in the shared vocabulary OR one
-  // of the wave-5 machine meters (cpu/ram land in the vocabulary via the
-  // machine-meters slice; the strip references them by their fixed names ahead of
-  // and independent of that spec — so this guard still catches an invented key).
-  const known = new Set(hooks.usageMeters.map((m) => m.key));
-  const machine = new Set(["cpu", "ram"]);
-  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k) || machine.has(k), k + " must be a real usage meter");
-});
-
-test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shared spec", () => {
-  const model = hooks.fleetStripModel(fleetSummaryFixture());
-  const fresh = model.rows.find((r) => r.id === "inst-fresh");
-  assert.equal(fresh.noSample, false);
-  assert.match(fresh.asOf, /just now|s ago|m ago/); // a recent sample reads fresh
-  const byKey = Object.fromEntries(fresh.cells.map((c) => [c.key, c]));
-  assert.equal(byKey.documents.value, "412");   // count
-  assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
-  assert.equal(byKey.disk.value, "37%");        // percent
-  assert.equal(byKey.seats.value, "4");
-  assert.equal(byKey.cpu.value, "23%");     // machine capacity beat, percent fmt
-  assert.equal(byKey.ram.value, "58%");
-  for (const c of fresh.cells) assert.equal(c.unmetered, false);
-});
-
-test("W3 fleet strip: an hours-stale row keeps its OWN older 'as of', never fake-fresh", () => {
-  const model = hooks.fleetStripModel(fleetSummaryFixture());
-  const stale = model.rows.find((r) => r.id === "inst-stale");
-  assert.equal(stale.noSample, false);
-  assert.match(stale.asOf, /h ago/); // hours old — the stamp tells the truth
-  // A meter with no measurement is a compact em-dash, not a fake zero.
-  const byKey = Object.fromEntries(stale.cells.map((c) => [c.key, c]));
-  assert.equal(byKey.db_size.value, "—");
-  assert.equal(byKey.db_size.unmetered, true);
-  assert.equal(byKey.documents.value, "88");
-});
-
-test("W3 fleet strip: a null measured_at is the honest no-sample cell (no stamp, no values)", () => {
-  const model = hooks.fleetStripModel(fleetSummaryFixture());
-  const none = model.rows.find((r) => r.id === "inst-nosample");
-  assert.equal(none.noSample, true);
-  assert.equal(none.asOf, null);
-  assert.equal(none.worstState, null); // no sample → nothing to accent
-  const html = hooks.fleetStripCellHtml(none);
-  assert.match(html, /No sample yet/);
-  assert.ok(!html.includes("as of"), "a no-sample cell must not fake a freshness stamp");
-  assert.ok(!html.includes("fleet-usage-cell-metrics"), "a no-sample cell shows no values");
-  // Still a live drill-down to the instance's own Usage tab.
-  assert.match(html, /href="#instance\/inst-nosample\/usage"/);
-});
-
-test("W3 fleet strip: the team headline over-quota carries the tone + Manage-plan recovery (D25)", () => {
-  const model = hooks.fleetStripModel(fleetSummaryFixture());
-  assert.equal(model.teamState, "over"); // value 12 >= quota 10, inclusive
-  const html = hooks.fleetStripHtml(model);
-  assert.match(html, /usage-bar--over/);
-  // Exactly ONE recovery action, routing to a real Settings billing view.
-  assert.match(html, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
-  assert.equal((html.match(/usage-bar-action/g) || []).length, 1);
-  assert.ok(hooks.settingsViews.includes("billing"), "Manage plan must land on a real view");
-});
-
-test("W3 fleet strip: cells deep-link into the instance Usage tab", () => {
-  const model = hooks.fleetStripModel(fleetSummaryFixture());
-  const html = hooks.fleetStripHtml(model);
-  assert.match(html, /href="#instance\/inst-fresh\/usage"/);
-  assert.match(html, /href="#instance\/inst-stale\/usage"/);
-  assert.match(html, /aria-label="Fleet usage"/);
-});
-
-test("W3 fleet strip: worst-state fold picks the worst headline quota tone, null when none", () => {
-  // No headline meter carries a ceiling → nothing to accent.
-  assert.equal(hooks.fleetStripWorst({ documents: { value: 5 }, seats: { value: 2 } }), null);
-  // A headline meter over its ceiling folds the row to "over".
-  assert.equal(hooks.fleetStripWorst({ documents: { value: 20, quota: 10, warn_at: 8 }, seats: { value: 2 } }), "over");
-  // warn beats ok.
-  assert.equal(hooks.fleetStripWorst({ seats: { value: 8, quota: 10, warn_at: 8 }, documents: { value: 3, quota: 100, warn_at: 90 } }), "warn");
-});
-
-test("W3 fleet strip: an absent / empty summary yields an empty, bar-less model", () => {
-  const empty = hooks.fleetStripModel(undefined);
-  assert.equal(empty.rows.length, 0); // sandbox-prototype array — compare by length
-  assert.equal(empty.teamMeter, null);
-  assert.equal(empty.teamState, null);
-  const noTeam = hooks.fleetStripModel({ instances: [] });
-  assert.equal(hooks.fleetStripHtml(noTeam).includes("usage-bar"), false);
-});
-
-// ── W5 machine meters: CPU/RAM headline cells + hot-box row accent (OC18/OC27/OC22)
-test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights its row accent", () => {
-  const iso = fleetIso(15);
-  const summary = {
-    team: null,
-    instances: [
-      {
-        id: "inst-hot", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
-        measured_at: iso,
-        meters: {
-          documents: { value: 412, measured_at: iso },
-          db_size: { value: 1048576, measured_at: iso },
-          disk: { value: 37, measured_at: iso },
-          seats: { value: 4, measured_at: iso },
-          // RAM pegged at its physical ceiling → over; CPU past its warn line.
-          cpu: { value: 88, quota: 100, warn_at: 70, measured_at: iso },
-          ram: { value: 100, quota: 100, warn_at: 70, measured_at: iso },
-        },
-      },
-      {
-        // An un-armed box: no cpu/ram meter → the honest dimmed cell, no accent.
-        id: "inst-bare", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
-        measured_at: iso,
-        meters: { documents: { value: 5, measured_at: iso }, seats: { value: 1, measured_at: iso } },
-      },
-    ],
-  };
-  const model = hooks.fleetStripModel(summary);
-  const hot = model.rows.find((r) => r.id === "inst-hot");
-  const byKey = Object.fromEntries(hot.cells.map((c) => [c.key, c]));
-  assert.equal(byKey.cpu.value, "88%");        // percent fmt on the headline entry
-  assert.equal(byKey.ram.value, "100%");
-  assert.equal(byKey.cpu.unmetered, false);
-  // The physical ceiling lights the worst-state fold for free (OC22, no reimpl):
-  // RAM at 100 >= its quota → over.
-  assert.equal(hot.worstState, "over");
-
-  // The un-armed box keeps the honest dimmed em-dash capacity cells — never a
-  // fake zero — and no quota tone (nothing to accent).
-  const bare = model.rows.find((r) => r.id === "inst-bare");
-  const bareByKey = Object.fromEntries(bare.cells.map((c) => [c.key, c]));
-  assert.equal(bareByKey.cpu.value, "—");
-  assert.equal(bareByKey.cpu.unmetered, true);
-  assert.equal(bareByKey.ram.unmetered, true);
-  assert.equal(bare.worstState, null);
-
-  // The rendered strip carries the CPU/RAM cell labels and the lit over accent.
-  const html = hooks.fleetStripHtml(model);
-  assert.match(html, />CPU<\/span>/);
-  assert.match(html, />RAM<\/span>/);
-  assert.match(html, /fleet-usage-cell--over/);
-});
-
 // ════════════════════════════════════════════════════════════════════════════
 // S7 — Azure card + verified connect + priced provider-neutral launch catalog
 // (epic azure-hetzner hosting parity). The pure seam; the DOM mount is live.
@@ -5050,48 +4966,65 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
 // S11b — console lifecycle action row (conduit-driven; azure-hetzner hosting)
 // ════════════════════════════════════════════════════════════════════════════
 //
-// The ratified POST-S9 capability-facet payload the /v1/providers/capabilities
-// conduit serves (built in parallel by azh-w3-s11-capability-conduit). Shape:
-//   { default_gap, providers: { <kind>: { tier?, capabilities:{…}, gaps:{…} } } }
-// capabilities keys: core/catalog/labels/pause/archive/resurrect/decommission/
-// adopt/audit. This inline sample mirrors the committed cross-surface fixture at
-// internal/cli/cloud/providers_capabilities.json (S1) evolved to the facet shape;
-// the conduit slice owns cloud/priv/static/__fixtures__/providers_capabilities.json.
-const CAP_PAYLOAD = {
-  // The server emits NO default_gap (gr-p4 removed the dead client fallback): a
-  // false verb shows the SERVER-OWNED per-verb gap when one exists, otherwise no
-  // reason at all — never invented, never a generic filler.
-  providers: {
-    // hetzner: every lifecycle verb is a seam capability EXCEPT pause (no
-    // primitive) — so the wired-later verbs are CLI affordances and pause is a
-    // disabled control carrying Hetzner's own gap reason.
-    hetzner: {
-      capabilities: {
-        core: true, catalog: false, labels: true, pause: false,
-        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
-      },
-      gaps: { pause: "Hetzner has no pause primitive." },
-    },
-    // azure: adopt carries an explicit gap reason; audit is false WITHOUT a
-    // per-verb gap → no reason (there is no default_gap to fall back to).
-    azure: {
-      capabilities: {
-        core: true, catalog: true, labels: true, pause: true,
-        archive: true, resurrect: true, decommission: true, adopt: false, audit: false,
-      },
-      gaps: { adopt: "Adopt needs an existing resource-group import." },
-    },
-    // fake: dev-tier — the console does not operate it (filtered).
-    fake: {
-      tier: "dev",
-      capabilities: {
-        core: true, catalog: true, labels: true, pause: true,
-        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
-      },
-      gaps: {},
-    },
-  },
+// The POST-S9 capability-facet payload the /v1/providers/capabilities conduit
+// serves:  { providers: { <kind>: { tier?, capabilities:{…}, gaps:{…} } } }
+// — note NO default_gap: gr-p4 removed the dead client-side fallback, so a false
+// verb shows the SERVER-OWNED per-verb gap when one exists and NO reason at all
+// otherwise. Never invented, never a generic filler.
+//
+// GR71: this is DERIVED from the committed cross-surface fixture, not
+// hand-copied. That fixture is byte-gated against internal/cli/cloud/
+// providers_capabilities.json (cloud/test/barkpark_cloud/
+// providers_capabilities_contract_test.exs), so it is the one place the truth
+// about which verbs a provider supports lives. The hand-copy it replaces had
+// ALREADY drifted from it in two places (azure catalog and azure audit both
+// claimed the opposite of the shipped fixture) — exactly the class of quiet lie
+// a fixture exists to prevent.
+//
+// The fixture is FLAT (kind → tier? + verb booleans); the conduit serves the
+// FACET shape, so we lift it here. `gaps` is SERVER-authored copy the fixture
+// does not carry, so it stays an explicit, visible overlay.
+const CAP_FIXTURE = JSON.parse(
+  fs.readFileSync(new URL("./__fixtures__/providers_capabilities.json", import.meta.url), "utf8"),
+);
+const CAP_GAPS = {
+  hetzner: { pause: "Hetzner has no pause primitive." },
+  azure: { adopt: "Adopt needs an existing resource-group import." },
 };
+const CAP_PAYLOAD = {
+  providers: Object.fromEntries(
+    Object.entries(CAP_FIXTURE).map(([kind, row]) => {
+      const { tier, ...capabilities } = row;
+      const entry = { capabilities, gaps: CAP_GAPS[kind] || {} };
+      if (tier) entry.tier = tier; // `fake` is dev-tier → the console filters it
+      return [kind, entry];
+    }),
+  ),
+};
+
+test("GR71: the capability payload carries NO default_gap — the console never pads a reason", () => {
+  assert.equal(Object.prototype.hasOwnProperty.call(CAP_PAYLOAD, "default_gap"), false,
+    "the conduit emits no top-level default_gap");
+  assert.ok(!JSON.stringify(CAP_PAYLOAD).includes("default_gap"),
+    "…and none nested inside a provider entry either");
+  assert.ok(!JSON.stringify(CAP_FIXTURE).includes("default_gap"),
+    "the committed cross-surface fixture invents no default either");
+  // So a false verb with no per-verb gap renders an EMPTY reason, not filler.
+  const m = hooks.lifecycleActionsModel(
+    { providers: { hetzner: { capabilities: { pause: false }, gaps: {} } } },
+    { provider: "hetzner", host: "h", name: "web" },
+  );
+  assert.equal(plain(m.actions).find((a) => a.verb === "pause").reason, "");
+});
+
+test("GR71: CAP_PAYLOAD is derived, not copied — every provider row matches the fixture verbatim", () => {
+  for (const [kind, row] of Object.entries(CAP_FIXTURE)) {
+    const { tier, ...caps } = row;
+    assert.deepEqual(plain(CAP_PAYLOAD.providers[kind].capabilities), caps,
+      kind + " capabilities must come straight off the fixture");
+    assert.equal(CAP_PAYLOAD.providers[kind].tier, tier, kind + " tier must come off the fixture");
+  }
+});
 
 test("S11b: every new lifecycle-console pure helper is exported", () => {
   for (const name of ["lifecyclePillState", "lifecyclePill", "fleetInfraLine",
@@ -5193,16 +5126,20 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   assert.equal(byVerb.decommission.resourceName, "web");
 });
 
-test("S11b: azure model — a false verb with no per-verb gap shows NO reason (no default_gap, never invented)", () => {
+test("S11b: azure model — the one false verb is disabled with its SERVER reason, the rest are CLI affordances", () => {
   const bp = { provider: "azure", host: "h", name: "az1" };
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   assert.equal(byVerb.adopt.mode, "disabled");
   assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
-  // audit: capability false, NO per-verb gap, and the server emits no default_gap
-  // → NO reason at all (gr-p4 removed the dead fallback; the cell is never padded).
-  assert.equal(byVerb.audit.mode, "disabled");
-  assert.equal(byVerb.audit.reason, "");
+  // GR71 note: this arm used to also assert azure `audit` was a false verb with
+  // no gap. The committed fixture says azure audit is TRUE — the hand-copied
+  // payload had drifted. Deriving from the fixture corrected it, so the
+  // never-invent-a-reason invariant is proved where it belongs, against a
+  // synthetic payload: see "JS never invents a reason" below and the GR71
+  // default_gap test above. Here the honest truth is a CLI affordance.
+  assert.equal(byVerb.audit.mode, "cli");
+  assert.equal(byVerb.audit.cli, "bp cloud instance audit az1");
   // pause is a capability here → a CLI affordance, not disabled.
   assert.equal(byVerb.pause.mode, "cli");
 });
