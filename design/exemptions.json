@@ -14,8 +14,8 @@
   },
   {
    "path": "cloud/priv/static/app.css",
-   "count": 35,
-   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57→35 by the GUI-remake GR7 alias bridge (wave 2): the hand :root/[data-theme=dark] shell + status + primary + accent literals (~22 hsl) are now OWNED by the generated block (color.cloudChrome + per-identity accent) and consumed via var(), so they no longer hand-stamp. The residue is mask geometry + overlay/shadow tints + the --btn-*/--console-*/--ring-soft/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2–4). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
+   "count": 33,
+   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57→35 by the GUI-remake GR7 alias bridge (wave 2); 35→33 by GR37 (gr-p4-hygiene, phase 4): the dark --btn-bg/--btn-fg hsl literals (hsl(163 45% 30%) / hsl(0 0% 100%)) became identity-aware var(--primary)/var(--primary-fg), tokenizing 2 more hand-stamps. The residue is mask geometry + overlay/shadow tints + the --btn-danger-*/--console-*/--ring-soft/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2–4). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
   },
   {
    "path": "internal/cli/setup/assets/deploy.sh",

@@ -122,7 +122,9 @@ test("gr-p2: TFA_RATE_WAIT_S is DELIBERATELY 60 — the backend window is a fixe
 
 // ── gr-w3 v4 shell: context-morph enum + fail-closed operator gate ──────────
 // The sidebar morph is a PURE function of the parsed route (three panes, one
-// visible); the operator entry is gated fail-closed on /v1/me.platform_operator.
+// visible); the operator entry is gated fail-closed on /v1/me.user.platform_operator
+// (the flag is NESTED under `user` in the envelope — router.ex me/2 ~1005-1018;
+// GR37 fixed a flat read that made the gate a silent prod false-negative).
 // Both node-pinned here; their DOM appliers are smoke/browser-driven.
 
 test("gr-w3: the v4 shell pure helpers are exported", () => {
@@ -145,17 +147,22 @@ test("shellNavLayer folds the route to exactly one sidebar layer (root|instance|
   assert.equal(hooks.shellNavLayer(undefined), "root");
 });
 
-test("operatorVisible is fail-CLOSED — ONLY platform_operator===true shows the entry (GR9)", () => {
-  assert.equal(hooks.operatorVisible({ platform_operator: true }), true);
+test("operatorVisible is fail-CLOSED — ONLY user.platform_operator===true shows the entry (GR9)", () => {
+  // Real /v1/me shape: the flag is NESTED under `user` (router.ex me/2).
+  assert.equal(hooks.operatorVisible({ user: { platform_operator: true } }), true);
   // Everything else is hidden: absent field, falsy, or truthy-but-not-true.
-  assert.equal(hooks.operatorVisible({ platform_operator: false }), false);
-  assert.equal(hooks.operatorVisible({}), false);            // absent → hidden
-  assert.equal(hooks.operatorVisible({ platform_operator: 1 }), false);      // not === true
-  assert.equal(hooks.operatorVisible({ platform_operator: "true" }), false); // not === true
+  assert.equal(hooks.operatorVisible({ user: { platform_operator: false } }), false);
+  assert.equal(hooks.operatorVisible({ user: {} }), false);   // absent → hidden
+  assert.equal(hooks.operatorVisible({}), false);             // no user → hidden
+  assert.equal(hooks.operatorVisible({ user: { platform_operator: 1 } }), false);      // not === true
+  assert.equal(hooks.operatorVisible({ user: { platform_operator: "true" } }), false); // not === true
+  // The OLD flat shape must NOT satisfy the gate — this is the regression the
+  // GR37 fix closes (a top-level flag was the prod false-negative).
+  assert.equal(hooks.operatorVisible({ platform_operator: true }), false);
   assert.equal(hooks.operatorVisible(null), false);
   assert.equal(hooks.operatorVisible(undefined), false);
   // NEVER keyed on team role — an owner without the flag stays hidden.
-  assert.equal(hooks.operatorVisible({ role: "owner" }), false);
+  assert.equal(hooks.operatorVisible({ role: "owner", user: {} }), false);
 });
 
 test("ctxDotColor maps every fleet status kind onto a defined token", () => {

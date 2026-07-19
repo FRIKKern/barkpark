@@ -507,7 +507,18 @@ const liveInstanceAudit = [
 // onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
 // vocabulary is CLOSED — subscription | instance | published_doc — and the
 // envelope always carries completed/completed_at/last_step/all_done/steps.
-function me(teamName, onb) {
+//
+// role (3rd param, default "owner"): the team role the /v1/me envelope carries.
+// Phase-4 Settings page slices (G-01 billing … G-06 members) ship plain-member
+// scenarios by passing "member" — the write affordances gate on owner/admin, so
+// a member scenario proves the read-only / disabled-CTA states. Pairing pattern
+// for the per-endpoint 403 those members hit: model it as a fixture DENIED FLAG
+// on the endpoint, exactly like `auditDenied` (see below, ~line 1997): the flag
+// makes GET /v1/audit answer 403 so the view degrades, never a client role-check.
+// Add e.g. `membersDenied`/`envDenied` fixtures + the matching flag branch in the
+// endpoint switch, then set the flag on the member scenario. Keep the DEFAULT
+// path (owner, no flag) so no existing scenario changes behaviour.
+function me(teamName, onb, role) {
   onb = onb || {};
   const steps = [
     // Every scenario that is logged-in carries a subscription fixture, so the
@@ -519,7 +530,7 @@ function me(teamName, onb) {
   return {
     user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
-    role: "owner",
+    role: role || "owner",
     onboarding: {
       completed: !!onb.completed,
       completed_at: onb.completed ? tMinus(80000) : null,
@@ -1424,11 +1435,13 @@ export const SCENARIOS = {
     },
   },
   "operator-visible": {
-    label: "v4 shell — /v1/me platform_operator:true reveals the sidebar Operator entry (GR9)",
+    label: "v4 shell — /v1/me user.platform_operator:true reveals the sidebar Operator entry (GR9)",
     authed: true,
     deepLink: "#overview",
     data: {
-      me: { ...me("Ops Team", { instance: true }), platform_operator: true },
+      // Real /v1/me shape: platform_operator is NESTED under `user` (router.ex
+      // me/2) — GR37 fixed the flat read; the fixture must mirror the server.
+      me: (() => { const m = me("Ops Team", { instance: true }); return { ...m, user: { ...m.user, platform_operator: true } }; })(),
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
     },
   },
