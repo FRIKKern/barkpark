@@ -30,8 +30,15 @@ package cli
 // the personal-development-server pull:
 //
 //	export --profile full|dev --dataset <slug>   ->  ?profile=&dataset= (scrub AT export)
+//	export --source-server <url>                 ->  ?source_server= (provenance passthrough)
 //	import --merge                               ->  ?mode=merge (fail-closed server-side)
 //	both   --with-blobs [--blobs <dir>]          ->  the media sidecar channel
+//
+// --dataset needs one seam the other flags do not: it collides with the GLOBAL
+// -d/--dataset, which parseGlobals eats wherever it appears, so the grain is
+// resolved by exportDatasetScope from the global capture — but only when the
+// flag was EXPLICITLY typed (g.datasetSet), never from the ambient saved
+// context. See that function for why both halves matter (PDS-D62).
 //
 // The bundle carries NO blob bytes — it is a DB-only tar — so media travels on a
 // second, explicitly-requested channel: export parses the tar's
@@ -125,8 +132,8 @@ func validWorkspaceSlug(slug string) bool {
 // `-` for stdout). Read-only — a --dry-run prints the request it would make and
 // sends nothing.
 func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
-	const usage = "bp cloud workspace export <slug> [--file <out>] [--profile full|dev] [--dataset <slug>] [--with-blobs [--blobs <dir>]]"
-	a, err := parseHzArgs(args, []string{"file", "profile", "dataset", "blobs"}, []string{"with-blobs"}, usage)
+	const usage = "bp cloud workspace export <slug> [--file <out>] [--profile full|dev] [--dataset <slug>] [--source-server <url>] [--with-blobs [--blobs <dir>]]"
+	a, err := parseHzArgs(args, []string{"file", "profile", "dataset", "source-server", "blobs"}, []string{"with-blobs"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -154,7 +161,8 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	}
 
 	base, token := workspaceBundleTarget(g)
-	url := base + "/api/workspaces/" + slug + "/export" + bundleScopeQuery(a.val("profile"), a.val("dataset"))
+	url := base + "/api/workspaces/" + slug + "/export" +
+		bundleScopeQuery(a.val("profile"), exportDatasetScope(g, a), a.val("source-server"))
 
 	if g.dryRun {
 		out.progressf("DRY RUN — would GET %s → %s", url, exportDest(outPath))
@@ -232,17 +240,57 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	return code
 }
 
-// bundleScopeQuery renders the export scope query string from --profile/--dataset.
-// Empty values are OMITTED entirely (not sent as blanks) so the server's own
-// defaults — profile=full, whole-workspace grain — stay the shape an un-flagged
-// export has always had, byte-identical to the shipped B2 request.
-func bundleScopeQuery(profile, dataset string) string {
+// exportDatasetScope resolves the export's dataset grain from argv, and ONLY
+// from argv.
+//
+// `-d/--dataset` is a GLOBAL value flag (globals.go valueFlags): parseGlobals
+// consumes it wherever it appears in the command line, so this verb's own
+// `dataset` flag resolves empty for every spelling a user actually types
+// (`--dataset x`, `--dataset=x`, a leading `-d x`) and the value lands in
+// g.dataset instead. Reading the local flag alone made `--dataset` a SILENT
+// NO-OP: the request went out as `?profile=dev`, the bundle came back
+// workspace-grain wearing a dataset-scoped command line, and on import
+// stamp_provenance keyed the stamp by the bundle's dataset_slugs — never the
+// `production` the imported rows actually carry — leaving the Bootstrap clobber
+// guard inert for every pulled schema (PDS-D62).
+//
+// The fallback is GATED on g.datasetSet rather than on g.dataset being non-empty
+// (the trap in cloud_site_cmd.go:163's version): the resolved context carries an
+// ambient dataset from the saved config / BARKPARK_DATASET, and an unflagged
+// full-workspace pull that silently narrowed itself to the operator's saved
+// dataset would be the same class of silent wrong answer, pointed the other way.
+// No flag typed → no dataset param → the server's whole-workspace default, the
+// shape an unflagged export has always had.
+func exportDatasetScope(g globals, a *hzArgs) string {
+	if local := strings.TrimSpace(a.val("dataset")); local != "" {
+		return local
+	}
+	if g.datasetSet {
+		return strings.TrimSpace(g.dataset)
+	}
+	return ""
+}
+
+// bundleScopeQuery renders the export scope query string from
+// --profile/--dataset/--source-server. Empty values are OMITTED entirely (not
+// sent as blanks) so the server's own defaults — profile=full, whole-workspace
+// grain, no provenance passthrough — stay the shape an un-flagged export has
+// always had, byte-identical to the shipped B2 request.
+//
+// source_server is provenance, not scope: the server stamps it into the bundle
+// manifest verbatim (workspace_controller.export → WorkspaceBundle opts), and
+// without it every CLI-taken bundle recorded `source_server: null` — a pull
+// receipt that could not name where the data came from.
+func bundleScopeQuery(profile, dataset, sourceServer string) string {
 	q := url.Values{}
 	if p := strings.TrimSpace(profile); p != "" {
 		q.Set("profile", p)
 	}
 	if d := strings.TrimSpace(dataset); d != "" {
 		q.Set("dataset", d)
+	}
+	if s := strings.TrimSpace(sourceServer); s != "" {
+		q.Set("source_server", s)
 	}
 	if len(q) == 0 {
 		return ""
@@ -892,7 +940,8 @@ func printCloudWorkspaceHelp(out *writer) {
 
 USAGE
   bp cloud workspace export <slug> [--file <out>] [--profile full|dev]
-                                   [--dataset <slug>] [--with-blobs [--blobs <dir>]]
+                                   [--dataset <slug>] [--source-server <url>]
+                                   [--with-blobs [--blobs <dir>]]
   bp cloud workspace import <slug>  --file <tar> --yes [--merge]
                                    [--with-blobs [--blobs <dir>]]
 
@@ -903,8 +952,16 @@ EXPORT
   twin of the shipped Barkpark.Tenancy.WorkspaceBundle engine.
     --profile dev    scrub secrets AT export (the personal-dev-server profile);
                      ` + "`full`" + ` (the default) stays byte-identical to an unflagged pull
-    --dataset <slug> narrow the bundle to one dataset partition
-  Both map straight to server query params — omitted when not passed, so an
+    --dataset <slug> narrow the bundle to one dataset partition. This is the same
+                     name as the GLOBAL -d/--dataset, which the global parser
+                     claims wherever it appears — so every spelling
+                     (` + "`--dataset x`" + `, ` + "`--dataset=x`" + `, a leading ` + "`-d x`" + `) means the same
+                     thing here. Only a TYPED flag scopes the bundle: a dataset
+                     merely saved in your config never narrows an export.
+    --source-server <url>
+                     provenance passthrough — stamped into the bundle manifest
+                     so the import receipt can name where the data came from
+  All three map straight to server query params — omitted when not passed, so an
   unflagged export sends the exact request it always has.
 
 IMPORT
