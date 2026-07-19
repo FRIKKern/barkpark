@@ -588,7 +588,9 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
             SELECT (entry->>'wave_revision')::uuid AS wave_revision
             FROM jsonb_array_elements(target_row.correction_of->'ancestry') entry
           ), expected AS (
-            SELECT fleet_phase.key AS phase, assignment.value AS fleet_assignment
+            SELECT fleet_phase.key AS phase,
+                   fleet_phase.value->>'effort' AS expected_effort,
+                   assignment.value AS fleet_assignment
             FROM revisions paper
             CROSS JOIN LATERAL jsonb_array_elements(paper.content->'blocks') block
             CROSS JOIN LATERAL jsonb_each(block->'fleet') fleet_phase
@@ -617,8 +619,7 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
             actual.agent_type IS DISTINCT FROM
               (expected.fleet_assignment::jsonb->>'agent_type') OR
             actual.evidence IS DISTINCT FROM (expected.fleet_assignment::jsonb->>'evidence') OR
-            actual.effort IS DISTINCT FROM
-              CASE WHEN expected.phase IN ('build', 'review') THEN 'high' ELSE 'medium' END
+            actual.effort IS DISTINCT FROM expected.expected_effort
         ) OR EXISTS (
           SELECT 1
           FROM revisions paper

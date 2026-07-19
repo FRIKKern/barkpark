@@ -111,6 +111,24 @@ defmodule Barkpark.CycleFleetTest do
       assert legendary_scaled.build.planned == 22
       assert {:error, :proven_batch_capacity} = Profile.plan(:legendary, %{unit_count: 10})
     end
+
+    test "promotion admission reads phase effort from the authoritative Paper" do
+      %{rows: [[definition]]} =
+        Repo.query!(
+          "SELECT pg_get_functiondef('barkpark_validate_cycle_correction()'::regprocedure)"
+        )
+
+      assert definition =~ "fleet_phase.value->>'effort' AS expected_effort"
+
+      assert definition =~
+               ~r/actual\.effort IS DISTINCT FROM\s+expected\.expected_effort/
+
+      refute definition =~
+               ~r/actual\.effort IS DISTINCT FROM\s+CASE WHEN expected\.phase IN \('build', 'review'\)/
+
+      assert definition =~
+               ~r/model_reasoning_effort'\) IS DISTINCT FROM\s+CASE WHEN expected\.phase IN \('build', 'review'\)/
+    end
   end
 
   describe "durable wave contracts" do
