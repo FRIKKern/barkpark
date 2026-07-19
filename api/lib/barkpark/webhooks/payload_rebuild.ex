@@ -61,6 +61,14 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
     end
   end
 
+  # A "test" row (GR45) is a one-shot admin probe: the synchronous single attempt
+  # in `Dispatcher.deliver_test/3` already wrote its verdict. A row stranded
+  # "pending" by a crash mid-probe is never worth resuming (the admin has long
+  # moved on and would just re-click), so it is abandoned. MUST precede the
+  # catch-all: that clause's `Repo.get(MutationEvent, nil)` — `event_id` is NULL
+  # for a test — would crash the sweeper / RetryWorker instead of skipping.
+  def rebuild(%Delivery{source_kind: "test"}), do: :gone
+
   def rebuild(%Delivery{} = delivery) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
          %MutationEvent{} = event <- Repo.get(MutationEvent, delivery.event_id) do

@@ -460,6 +460,25 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
+  Send a one-shot TEST delivery (GR45) against a freshly-inserted
+  `source_kind: "test"` row: ONE synchronous, HMAC-signed attempt, no retry loop
+  — exactly the single-shot shape of `replay_delivery/3`, but the body is the
+  synthetic probe (no `mutation_events` source) and there is no delivery-id
+  header (`event_id` is nil, like a media delivery). `webhook` carries the REAL
+  url/secret so the signature verifies against the endpoint's live secret; the
+  `delivery` row's `endpoint_id` is NULL, so recording the verdict never touches
+  the endpoint's auto-disable streak (a test that fails must not disable a real
+  endpoint). Returns `{:ok, delivery}` with the refreshed row so the caller can
+  report the ok/failed verdict immediately.
+  """
+  def deliver_test(webhook, body, %Barkpark.Webhooks.Delivery{} = delivery) do
+    warn_if_unsigned(webhook)
+    {_timestamp, headers} = build_request(webhook, body, nil)
+    {latency_ms, result} = timed_post(webhook.url, body, headers)
+    record_single_attempt(delivery, result, latency_ms)
+  end
+
+  @doc """
   Replay a single delivery against an existing (or freshly-claimed) delivery
   row: ONE synchronous attempt, no retry loop, `attempts` bumped by one and
   `status`/`last_status_code`/`last_latency_ms`/`last_error_text` overwritten
@@ -485,6 +504,15 @@ defmodule Barkpark.Webhooks.Dispatcher do
     warn_if_unsigned(webhook)
     {_timestamp, headers} = build_request(webhook, body, event_id)
     {latency_ms, result} = timed_post(webhook.url, body, headers)
+    record_single_attempt(delivery, result, latency_ms)
+  end
+
+  # Record the terminal verdict of ONE synchronous attempt onto `delivery`: bump
+  # `attempts` by one and overwrite status/code/latency/error. Shared by the two
+  # single-shot senders (`replay_delivery/3`, `deliver_test/3`) so a 2xx / non-2xx
+  # / SSRF-block / transport verdict can never be classified two different ways.
+  # NOT used by the retrying `deliver/deliver_media` path (that drives `attempt/5`).
+  defp record_single_attempt(delivery, result, latency_ms) do
     n = delivery.attempts + 1
 
     case result do

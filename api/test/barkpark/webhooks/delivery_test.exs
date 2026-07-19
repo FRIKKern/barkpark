@@ -65,4 +65,35 @@ defmodule Barkpark.Webhooks.DeliveryTest do
       end
     end
   end
+
+  describe "changeset/2 — test source kind (GR45)" do
+    test "a test row is valid with only a payload_snapshot (endpoint_id + event_id NULL)" do
+      cs =
+        Delivery.changeset(%Delivery{}, %{
+          source_kind: "test",
+          payload_snapshot: %{"url" => "http://ex.test/hook", "body" => "{}"}
+        })
+
+      assert cs.valid?
+      assert Ecto.Changeset.get_field(cs, :endpoint_id) == nil
+      assert Ecto.Changeset.get_field(cs, :event_id) == nil
+    end
+
+    test "a test row is invalid without a payload_snapshot" do
+      cs = Delivery.changeset(%Delivery{}, %{source_kind: "test"})
+      refute cs.valid?
+      assert Keyword.has_key?(cs.errors, :payload_snapshot)
+    end
+
+    test "a test row does NOT require endpoint_id (never counts toward auto-disable)" do
+      cs =
+        Delivery.changeset(%Delivery{}, %{
+          source_kind: "test",
+          payload_snapshot: %{"body" => "{}"}
+        })
+
+      assert cs.valid?
+      refute Keyword.has_key?(cs.errors, :endpoint_id)
+    end
+  end
 end
