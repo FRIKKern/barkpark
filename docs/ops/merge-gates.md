@@ -72,7 +72,10 @@ The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 `mix compile --warnings-as-errors` + `mix test` against Postgres — is
 **blocking** (no `continue-on-error`). The test-infra remediation was
 completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
-test suite now prevents merge.
+test suite now prevents merge. Its job **id** is `mix-test`; the check that
+shows up on the PR is its display name, `Test (Elixir 1.18.1 / OTP 27.0)`,
+inside the workflow named `elixir`. There is no check called "Elixir Test" —
+that name is folklore, and searching for it finds nothing.
 
 `main` has **no branch protection or rulesets** configured (verified
 2026-06-21, re-checked 2026-07-01, via the GitHub branches/rulesets APIs), so none of these gates
@@ -256,11 +259,76 @@ PRs touching `*.md` **or any source file** (`.ex`, `.exs`, `.go`, `.ts`,
 `.tsx`) also run `.github/workflows/doc-gates.yml` — code changes trigger it
 because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
-two gate scripts themselves and to the workflow file. It runs two scripts:
-`scripts/check-doc-budgets.sh` (byte caps + 7-card cap) and
-`scripts/docs-anchors-check.sh` (routing/INDEX targets, card Code anchors,
-G1 doc-tier headers, canonical-for uniqueness, ARCHIVED banners). Both are
-**blocking**. Reviewer rules on top of the scripts:
+gate scripts themselves and to the workflow file.
+
+### The doc-gates roster (it is not two scripts — it is seventeen)
+
+`doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
+undersells it: it runs **17 steps labelled `(blocking)`** plus 6 `(tripwire)`
+self-tests that prove a scanner still reds on a planted defect. A PR touching
+one `.ex` file runs all of them. In workflow order:
+
+| # | Step | Runs |
+|---|------|------|
+| 1 | Doc byte budgets | `scripts/check-doc-budgets.sh` (byte caps + the 7-card cap) |
+| 2 | Doc anchors + headers | `scripts/docs-anchors-check.sh` (routing/INDEX targets, card Code anchors, G1 doc-tier headers, `canonical-for` uniqueness, `@canonical capability:` slug uniqueness + public-entry-point placement, ARCHIVED banners) |
+| 3 | Connectors DDL drift | `scripts/connectors-ddl-drift-check.sh` (+ `--selftest`) |
+| 4 | Connectors catalog drift | `scripts/connectors-catalog-drift-check.sh` (+ `--selftest`) |
+| 5 | Paper-editor style mirror | `scripts/paper-editor-mirror-check.sh` |
+| 6 | Status manifest drift | `scripts/status-manifest-check.sh` |
+| 7 | Preview parity + no-oEmbed | `scripts/preview-parity-check.sh` |
+| 8 | Design-token drift | `node design/validate.mjs` · `design/check.mjs` · `derive.test.mjs` · `theme-emit.test.mjs` |
+| 9 | Studio literal-color | `scripts/studio-literal-check.sh` |
+| 10 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
+| 11 | Web literal-color | `scripts/web-literal-check.sh` |
+| 12 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
+| 13 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
+| 14 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
+| 15 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
+| 16 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
+| 17 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+
+Run any of them locally with the same command CI uses — they are ordinary
+scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
+on a contended checkout (an older caution to avoid running it locally is
+retired; it was fixed in #4473).
+
+### Touching `api/lib/barkpark_web/layouts/root.html.heex`
+
+The Studio shell is the single most gate-dense file in the repo — **four**
+of the steps above read it, and no card names them all, which is how a
+one-line CSS edit turns into three surprise reds:
+
+- **9 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
+  colour in Studio chrome; `var(--…)` only.
+- **8 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
+  colour literals per file against a frozen baseline in
+  `design/exemptions.json` (`root.html.heex` is entry #1).
+- **5 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
+  mirror. When the surface legitimately changes, re-stamp it with
+  `bash scripts/paper-editor-mirror-check.sh --write` in the same diff.
+- **10 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
+  scope/dataset Studio URL literal; build paths through
+  `StudioLive.Paths`.
+
+**D53 — the inverse blind spot (the expensive one).** Steps 9 and 8 do *not*
+cover the same thing; each is blind exactly where the other bites:
+
+- `rgba(0,0,0,.55)` **passes** the literal gate (it does not scan `rgb()`/
+  `rgba()` function values at all) and **fails** Part E (which counts any
+  `rgb()/rgba()/hsl()` whose first argument is not `var(`).
+- An inline `lit-allow:` comment silences the literal gate and gives Part E
+  **zero** cover — there is no such mechanism in `check.mjs`. This has already
+  shipped a red: #2273 added one print-reset `#fff` under a `lit-allow`
+  without raising the baseline.
+- Part E fails on **shrink** as hard as on growth: tokenizing a literal is
+  good, and the baseline must be lowered *in the same diff*, or a stale-high
+  number leaves slack for a future regression to hide in.
+
+So: any colour change to `root.html.heex` is a two-file diff —
+the shell *and* `design/exemptions.json`.
+
+Reviewer rules on top of the scripts:
 
 a. A new top-level feature requires a routing-table row or a card update in
    the **same PR**.
