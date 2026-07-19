@@ -240,7 +240,7 @@ func TestRunPaperViewUsesPastedURLOriginAndTenantPath(t *testing.T) {
 	if authorization != "" {
 		t.Fatalf("unknown pasted origin received active Authorization header %q", authorization)
 	}
-	if !strings.Contains(stdout.String(), `"custom": "preserved"`) {
+	if !strings.Contains(stdout.String(), `"custom":"preserved"`) {
 		t.Fatalf("raw PaperDoc field lost from json output: %s", stdout.String())
 	}
 }

@@ -53,25 +53,25 @@ func TestServersEmitStructuredByteIdentical(t *testing.T) {
 		{
 			name: "runUse known name",
 			fn:   func(w *writer) int { return runUse(w, []string{"prod"}) },
-			json: "{\n  \"active\": {\n    \"dataset\": \"\",\n    \"kind\": \"cloud\",\n    \"name\": \"prod\",\n    \"project\": \"\",\n    \"server\": \"https://api.example.com\",\n    \"workspace\": \"\"\n  },\n  \"ok\": true\n}\n",
+			json: "{\"active\":{\"dataset\":\"\",\"kind\":\"cloud\",\"name\":\"prod\",\"project\":\"\",\"server\":\"https://api.example.com\",\"workspace\":\"\"},\"ok\":true}\n",
 			yaml: "active:\n  dataset: \"\"\n  kind: cloud\n  name: prod\n  project: \"\"\n  server: \"https://api.example.com\"\n  workspace: \"\"\nok: true\n",
 		},
 		{
 			name: "runUse no arg (status)",
 			fn:   func(w *writer) int { return runUse(w, nil) },
-			json: "{\n  \"active\": {\n    \"dataset\": \"\",\n    \"kind\": \"cloud\",\n    \"name\": \"prod\",\n    \"project\": \"\",\n    \"server\": \"https://api.example.com\",\n    \"workspace\": \"\"\n  },\n  \"known\": [\n    \"prod\",\n    \"localdev\"\n  ],\n  \"ok\": true\n}\n",
+			json: "{\"active\":{\"dataset\":\"\",\"kind\":\"cloud\",\"name\":\"prod\",\"project\":\"\",\"server\":\"https://api.example.com\",\"workspace\":\"\"},\"known\":[\"prod\",\"localdev\"],\"ok\":true}\n",
 			yaml: "active:\n  dataset: \"\"\n  kind: cloud\n  name: prod\n  project: \"\"\n  server: \"https://api.example.com\"\n  workspace: \"\"\nknown:\n  - prod\n  - localdev\nok: true\n",
 		},
 		{
 			name: "runUse unknown name",
 			fn:   func(w *writer) int { return runUse(w, []string{"nope"}) },
-			json: "{\n  \"error\": {\n    \"code\": \"not_found\",\n    \"known\": [\n      \"prod\",\n      \"localdev\"\n    ],\n    \"message\": \"no known server matches nope\"\n  },\n  \"ok\": false\n}\n",
+			json: "{\"error\":{\"code\":\"not_found\",\"known\":[\"prod\",\"localdev\"],\"message\":\"no known server matches nope\"},\"ok\":false}\n",
 			yaml: "error:\n  code: not_found\n  known:\n    - prod\n    - localdev\n  message: no known server matches nope\nok: false\n",
 		},
 		{
 			name: "runServers",
 			fn:   func(w *writer) int { return runServers(w, nil) },
-			json: "{\n  \"active\": \"prod\",\n  \"servers\": [\n    {\n      \"active\": true,\n      \"aliases\": [],\n      \"instance_id\": \"\",\n      \"kind\": \"cloud\",\n      \"last_connected\": \"\",\n      \"name\": \"prod\",\n      \"server\": \"https://api.example.com\",\n      \"tier\": \"starter\"\n    },\n    {\n      \"active\": false,\n      \"aliases\": [],\n      \"instance_id\": \"\",\n      \"kind\": \"local\",\n      \"last_connected\": \"\",\n      \"name\": \"localdev\",\n      \"server\": \"http://localhost:4000\",\n      \"tier\": \"\"\n    }\n  ]\n}\n",
+			json: "{\"active\":\"prod\",\"servers\":[{\"active\":true,\"aliases\":[],\"instance_id\":\"\",\"kind\":\"cloud\",\"last_connected\":\"\",\"name\":\"prod\",\"server\":\"https://api.example.com\",\"tier\":\"starter\"},{\"active\":false,\"aliases\":[],\"instance_id\":\"\",\"kind\":\"local\",\"last_connected\":\"\",\"name\":\"localdev\",\"server\":\"http://localhost:4000\",\"tier\":\"\"}]}\n",
 			yaml: "active: prod\nservers:\n  -\n    active: true\n    aliases: []\n    instance_id: \"\"\n    kind: cloud\n    last_connected: \"\"\n    name: prod\n    server: \"https://api.example.com\"\n    tier: starter\n  -\n    active: false\n    aliases: []\n    instance_id: \"\"\n    kind: local\n    last_connected: \"\"\n    name: localdev\n    server: \"http://localhost:4000\"\n    tier: \"\"\n",
 		},
 	}

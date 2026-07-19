@@ -203,7 +203,7 @@ func TestInstanceAuditExternalAllowlist(t *testing.T) {
 	if !strings.Contains(stdout, "rogue") {
 		t.Errorf("the real orphan was swallowed by the allowlist: %s", stdout)
 	}
-	if !strings.Contains(stdout, `"external_dns": 2`) {
+	if !strings.Contains(stdout, `"external_dns":2`) {
 		t.Errorf("external count missing from the summary: %s", stdout)
 	}
 }

@@ -80,8 +80,8 @@ func TestMigrateErrorJSONEmitsEnvelope(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, exitGeneric)
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "{") || !strings.Contains(got, "\"ok\": false") {
-		t.Errorf("json stdout missing braces / `\"ok\": false`:\n%s", got)
+	if !strings.Contains(got, "{") || !strings.Contains(got, "\"ok\":false") {
+		t.Errorf("json stdout missing braces / `\"ok\":false`:\n%s", got)
 	}
 	if strings.Contains(stderr.String(), "bp:") {
 		t.Errorf("json path leaked the human stderr line:\n%s", stderr.String())
