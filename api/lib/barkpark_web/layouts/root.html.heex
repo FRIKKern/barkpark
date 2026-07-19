@@ -1608,6 +1608,32 @@
       -webkit-appearance: none; appearance: none;
     }
     .pane-column--collapsed:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    /* The RE-OPENED pane's focus ring (spd-b20, charter D79).
+       `spd-w5-strip-aria-focus-return` cured "Enter drops focus to <body>" by
+       rendering `tabindex="-1" phx-mounted={JS.focus()}` on the pane a just-
+       handled `expand-pane` named — but focus landing on an element with no
+       focus indicator is only half a cure: the keyboard user's focus moved
+       somewhere they cannot see. Same ring as the strip they came FROM, so the
+       eye follows one continuous affordance across the expand.
+       Scoped to the tabindex attribute, so only a pane actually marked as a
+       focus target can ever draw it — a pane nobody navigated to has no way
+       to match.
+
+       MEASURED, not assumed (the review probed the live desk at 1280 before
+       shipping this): a PROGRAMMATIC `.focus()` on this pane matches
+       `:focus-visible` and paints `2px solid rgb(44,109,90)` at offset -2px in
+       ALL THREE modalities — after a key press, after a mouse click, and with
+       no prior input at all. So `:focus-visible` here is NOT the
+       keyboard-only filter it is on a tabbed control: Chrome grants it to
+       programmatic focus on a non-input element regardless of how the user got
+       there, and a MOUSE user who clicks the strip will also see the ring
+       until they click away. That is the accepted cost of the fix, recorded
+       rather than discovered later — `:focus` would behave identically here,
+       and the shared spelling keeps this ring textually in step with the
+       strip's. If the mouse-path ring is ever judged too loud, the lever is
+       `.pane-column[tabindex="-1"]:focus-visible:not(:hover)` or dropping the
+       mark on a pointer-initiated expand — NOT switching pseudo-class. */
+    .pane-column[tabindex="-1"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     /* The strip's INNER subtree is replaced synchronously in the click tick —
        by the time the box starts shrinking, the vertical label is already
        mounted, so a bare width transition shows a tiny rotated label adrift in
