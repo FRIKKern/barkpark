@@ -652,6 +652,123 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert md5s.(manifest_before) == md5s.(m3)
     end
 
+    # ── media_files.size under mode: :merge ───────────────────────────────────
+    #
+    # WHY THESE TWO EXIST AT ALL. The md5-parity convergence test above drifts
+    # workspaces / documents / content_edges / authoring_exemptions and never
+    # touches media_files; the only other merge-mode assertion repo-wide
+    # (workspace_bundle_dev_profile_test.exs) checks that `total_rows` is
+    # positive and asserts no column value. PR #4589's two `size` tests both
+    # import with NO `:mode` — i.e. `:clean`, over a purged target — and its
+    # dev-profile one never imports at all. So the ONE path the crown proof
+    # actually walks in step 1 (a dev-profile bundle merged over a populated
+    # target) had no assertion that could convict a `size` regression. These
+    # two do: excluding `size` from merge_upsert's DO UPDATE set reddens them
+    # and nothing else in this file.
+
+    test "merge over a POPULATED target converges media_files.size — the witness step 5 convicts a truncated blob with" do
+      %{ws_a: ws_a, proj_a: proj_a} = seed_two_workspaces!()
+
+      # DISTINCT, NON-DEFAULT sizes. `create_media_file_in!/4` defaults `size`
+      # to 1, so on a table where every row shares one value a merge that
+      # silently dropped `size` from its update set would still "converge".
+      sized =
+        for bytes <- [4_099, 65_538, 1_048_579] do
+          {:ok, mf} =
+            create_media_file_in!(
+              ws_a,
+              proj_a,
+              %{size: bytes, path: "merge-sized/#{unique("m")}-#{bytes}.bin"},
+              "prod-a"
+            )
+
+          mf
+        end
+
+      source = media_path_sizes!(ws_a.id)
+      assert length(source) == 4
+      assert length(Enum.uniq(Enum.map(source, &elem(&1, 1)))) == 4
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      # Drift the target two ways against media_files specifically:
+      #   (1) a SURVIVING row's `size` is mutated — only an ON CONFLICT DO
+      #       UPDATE set that CARRIES `size` restores it (a set built over
+      #       `cols -- order_cols` does; one that skips `size` does not)…
+      [to_drift, to_delete | _] = sized
+
+      Repo.query!("UPDATE media_files SET size = 7 WHERE id = $1::text::uuid", [to_drift.id])
+
+      #   …and (2) a row is DELETED — it comes back as a plain insert (no
+      #       conflict), so a passing (1) and a passing (2) are different
+      #       mechanisms and a single bug cannot fake both.
+      Repo.query!("DELETE FROM media_files WHERE id = $1::text::uuid", [to_delete.id])
+
+      # Sanity: the drift is REAL. Without this a no-op export/import would
+      # satisfy the convergence assertion vacuously.
+      drifted = media_path_sizes!(ws_a.id)
+      refute drifted == source
+      assert length(drifted) == 3
+      assert {to_drift.path, 7} in drifted
+
+      {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+      assert stats.total_rows > 0
+
+      assert media_path_sizes!(ws_a.id) == source,
+             "media_files (path, size) did not converge under mode: :merge — the crown " <>
+               "proof's step-5 content-length comparison would run against a stale or " <>
+               "defaulted size and pass on a truncated blob"
+    end
+
+    test "dev profile + mode: :merge converges media_files.size — step 1 of the crown proof, exactly" do
+      %{ws_a: ws_a, proj_a: proj_a} = seed_two_workspaces!()
+
+      sized =
+        for bytes <- [8_193, 262_147] do
+          {:ok, mf} =
+            create_media_file_in!(
+              ws_a,
+              proj_a,
+              %{size: bytes, path: "merge-dev/#{unique("m")}-#{bytes}.bin"},
+              "prod-a"
+            )
+
+          mf
+        end
+
+      source = media_path_sizes!(ws_a.id)
+      assert length(source) == 3
+
+      # `--profile dev` + `--merge` is the literal pull the crown proof's step 1
+      # runs. The dev partition is a SECOND, orthogonal classification from the
+      # copy/merge strategy, so a green full-profile merge test does not imply
+      # this one.
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id, profile: :dev)
+      {manifest, _dumps} = Archive.unpack(bundle)
+      assert manifest["profile"] == "dev"
+
+      [to_drift, to_delete | _] = sized
+      Repo.query!("UPDATE media_files SET size = 9 WHERE id = $1::text::uuid", [to_drift.id])
+      Repo.query!("DELETE FROM media_files WHERE id = $1::text::uuid", [to_delete.id])
+
+      refute media_path_sizes!(ws_a.id) == source
+
+      {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+      assert stats.total_rows > 0
+
+      # KEEP BOTH THIS AND THE EXPORT-SIDE DEV TEST ABOVE (L558). This probe
+      # alone could pass VACUOUSLY: if a future @dev_scrub / @dev_copy change
+      # dropped the media_files member from the dev bundle entirely, the merge
+      # becomes a no-op — and a no-op over a target this test already drifted
+      # would fail here, but a no-op over an UNDRIFTED target would not. The
+      # export-side test is what pins member PRESENCE and column carriage; this
+      # one pins that the merge WRITE path actually lands the value.
+      assert media_path_sizes!(ws_a.id) == source,
+             "a dev-profile bundle merged over a populated target did not converge " <>
+               "media_files.size — step 1 of the crown proof leaves the target wrong " <>
+               "and step 5 measures against it"
+    end
+
     test "clean re-import over a populated workspace still ABORTS (default mode untouched)" do
       %{ws_a: ws_a} = seed_two_workspaces!()
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
