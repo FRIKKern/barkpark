@@ -686,6 +686,52 @@ const lifecycleCapabilities = {
   default_gap: "Not supported by this provider.",
 };
 
+// ── gr-p4 G-03: settings provider capabilities (GET /v1/providers/capabilities) ─
+// The honest-matrix source in the SERVER facet shape
+// {providers:{kind:{tier,capabilities,gaps}}} — mirrors __app.test.mjs CAP_PAYLOAD
+// MINUS default_gap (the server NEVER emits one). All 9 verbs × 3 providers:
+// hetzner + azure are prod (the two matrix columns), fake is dev-tier (FILTERED
+// out of the matrix). The false cells prove the honesty grammar: some carry the
+// server-owned gap reason (hetzner.pause, azure.adopt), some are a bare dash with
+// NO reason (hetzner.catalog, azure.audit) — the UI pads neither.
+const settingsProviderCapabilities = {
+  providers: {
+    hetzner: {
+      tier: "prod",
+      capabilities: {
+        core: true, catalog: false, labels: true, pause: false,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+    },
+    azure: {
+      tier: "prod",
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: false, audit: false,
+      },
+      gaps: { adopt: "Adopt needs an existing resource-group import." },
+    },
+    fake: {
+      tier: "dev",
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: {},
+    },
+  },
+};
+
+// ── gr-p4 G-02: connected providers (GET /v1/providers) ──────────────────────
+// Rows carry ONLY {id,kind,label,team_id,inserted_at} (router.ex provider row) —
+// there is NO health/verified field, so the roster shows kind + label + when it
+// was connected and never a live-validity badge.
+const connectedProviders = [
+  { id: "prov_h1", kind: "hetzner", label: "main", team_id: IDS.team, inserted_at: tMinus(86400 * 9) },
+  { id: "prov_a1", kind: "azure", label: "prod-sub", team_id: IDS.team, inserted_at: tMinus(3600 * 5) },
+];
+
 // ── domain status (GET /v1/barkparks/:id/domain-status — a DNS-pending host) ──
 // A platform host mid-propagation: DNS hasn't resolved (the failed front rung
 // carries its own evidence + fix), and the three downstream rungs are all
@@ -1905,6 +1951,67 @@ export const SCENARIOS = {
       siteDomainStatus: siteStatesDomains,
     },
   },
+
+  // ── gr-p4 G-02+G-03 provider settings — the honesty flagship (tail-append) ──
+  // Four states on the .set-* anatomy: a populated roster + hybrid connect card
+  // + the honest capability matrix; the empty roster; the connect-card verify-
+  // before-save remediation state; and the plain-member read-only view (roster +
+  // matrix, ZERO write affordances). GET /v1/providers is member-readable, so the
+  // member scenario still paints the roster + matrix — just no connect/disconnect.
+  "providers-connected": {
+    label: "Providers — roster (Hetzner + Azure), the hybrid connect card, and the honest capability matrix",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+      providers: connectedProviders,
+      capabilities: settingsProviderCapabilities,
+    },
+  },
+  "providers-empty": {
+    label: "Providers — nothing connected yet: the empty roster + the connect card armed on the first provider",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [], subscription: activeSub, sites: [], audit: [],
+      providers: [],
+      capabilities: settingsProviderCapabilities,
+    },
+  },
+  "providers-unverified": {
+    label: "Providers — the connect card's verify-before-save remediation (server names the exact console fix)",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [], subscription: activeSub, sites: [], audit: [],
+      providers: [],
+      capabilities: settingsProviderCapabilities,
+      // POST /v1/providers preflight fails → ALL causes collapse to the single
+      // provider_unverified + the server-owned remediation string, rendered
+      // verbatim in-card when the operator clicks Verify & connect.
+      providerConnect: {
+        status: 422,
+        body: {
+          error: "provider_unverified",
+          remediation: "We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, revoke the old token, then generate a fresh Read & Write token for this project.",
+        },
+      },
+    },
+  },
+  "providers-member": {
+    label: "Providers — a plain member: read-only roster + matrix, NO connect card and NO Disconnect (GR33 plain-member law)",
+    authed: true,
+    deepLink: "#settings/providers",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
+      providers: connectedProviders,
+      capabilities: settingsProviderCapabilities,
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2118,6 +2225,23 @@ export function route(name, method, path) {
   // unavailable" (exactly as an older control plane would).
   if (p === "/v1/providers/capabilities") {
     return { status: 200, body: d.capabilities || {} };
+  }
+
+  // gr-p4 G-02: the connected-providers collection. GET is member-readable (the
+  // roster + matrix render for every role); POST (connect) + DELETE /:kind
+  // (disconnect) are admin-only server-side. A scenario carries `providers` (the
+  // roster) and optionally `providerConnect` (a 422 preflight remediation);
+  // absent → an empty roster + a benign 201/200. MUST precede the catch-all AND
+  // the /:kind/catalog GET (those are two-segment; these are exact or one-segment
+  // DELETE, so they never collide with the capabilities/catalog reads above).
+  if (p === "/v1/providers" && method === "GET") {
+    return { status: 200, body: { providers: d.providers || [] } };
+  }
+  if (p === "/v1/providers" && method === "POST") {
+    return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
+  }
+  if (method === "DELETE" && /^\/v1\/providers\/[^/]+$/.test(p)) {
+    return { status: 200, body: { ok: true } };
   }
 
   // S13: the per-host DNS/TLS checklist. A scenario without a `domainStatus`

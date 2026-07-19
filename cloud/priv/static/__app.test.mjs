@@ -4160,7 +4160,9 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
 // internal/cli/cloud/providers_capabilities.json (S1) evolved to the facet shape;
 // the conduit slice owns cloud/priv/static/__fixtures__/providers_capabilities.json.
 const CAP_PAYLOAD = {
-  default_gap: "Not available on this provider yet.",
+  // The server emits NO default_gap (gr-p4 removed the dead client fallback): a
+  // false verb shows the SERVER-OWNED per-verb gap when one exists, otherwise no
+  // reason at all — never invented, never a generic filler.
   providers: {
     // hetzner: every lifecycle verb is a seam capability EXCEPT pause (no
     // primitive) — so the wired-later verbs are CLI affordances and pause is a
@@ -4173,7 +4175,7 @@ const CAP_PAYLOAD = {
       gaps: { pause: "Hetzner has no pause primitive." },
     },
     // azure: adopt carries an explicit gap reason; audit is false WITHOUT a
-    // per-verb gap → the model falls back to the payload's own default_gap.
+    // per-verb gap → no reason (there is no default_gap to fall back to).
     azure: {
       capabilities: {
         core: true, catalog: true, labels: true, pause: true,
@@ -4293,15 +4295,16 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   assert.equal(byVerb.decommission.resourceName, "web");
 });
 
-test("S11b: azure model — a false verb with no per-verb gap falls back to the payload default_gap, never invented", () => {
+test("S11b: azure model — a false verb with no per-verb gap shows NO reason (no default_gap, never invented)", () => {
   const bp = { provider: "azure", host: "h", name: "az1" };
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   assert.equal(byVerb.adopt.mode, "disabled");
   assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
-  // audit: capability false, NO per-verb gap → the payload's own default_gap.
+  // audit: capability false, NO per-verb gap, and the server emits no default_gap
+  // → NO reason at all (gr-p4 removed the dead fallback; the cell is never padded).
   assert.equal(byVerb.audit.mode, "disabled");
-  assert.equal(byVerb.audit.reason, "Not available on this provider yet.");
+  assert.equal(byVerb.audit.reason, "");
   // pause is a capability here → a CLI affordance, not disabled.
   assert.equal(byVerb.pause.mode, "cli");
 });
@@ -4362,6 +4365,118 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
   assert.equal(rolled._rollback, undefined);
   // rollback with nothing remembered is a no-op (total, never throws).
   assert.equal(hooks.lifecycleOptimistic(base, "rollback"), base);
+});
+
+// ── gr-p4 G-02/G-03: the providers page (roster + hybrid connect + honest matrix)
+// The capability facet in SERVER shape (minus default_gap) — mirrors the settings
+// scenario fixture. hetzner/azure are prod (matrix columns); fake is dev-tier.
+const PROV_CAP = {
+  providers: {
+    hetzner: { tier: "prod", gaps: { pause: "Hetzner has no pause primitive." },
+      capabilities: { core: true, catalog: false, labels: true, pause: false, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
+    azure: { tier: "prod", gaps: { adopt: "Adopt needs an existing resource-group import." },
+      capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: false, audit: false } },
+    fake: { tier: "dev", gaps: {},
+      capabilities: { core: true, catalog: true, labels: true, pause: true, archive: true, resurrect: true, decommission: true, adopt: true, audit: true } },
+  },
+};
+
+test("gr-p4: providers-page pure helpers are exported with the 9-verb order", () => {
+  for (const n of ["providerDisplayName", "providerRosterHtml", "providerConnectModel",
+    "providerConnectCardHtml", "capabilityMatrixModel", "capabilityMatrixHtml"]) {
+    assert.equal(typeof hooks[n], "function", n + " must be exported");
+  }
+  assert.deepEqual([...hooks.capabilityVerbs],
+    ["core", "catalog", "archive", "resurrect", "decommission", "adopt", "audit", "pause", "labels"]);
+});
+
+test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; disconnect gates on admin", () => {
+  const list = [{ id: "p1", kind: "hetzner", label: "main", inserted_at: new Date(Date.now() - 9 * 86400000).toISOString() }];
+  const admin = hooks.providerRosterHtml(list, true);
+  assert.match(admin, /Hetzner/);
+  assert.match(admin, /main/);
+  assert.match(admin, /connected /); // a connected-at line
+  assert.ok(admin.indexOf("Connected</span>") === -1); // never an implied live-validity badge
+  assert.match(admin, /data-prov-disconnect/);
+  assert.match(admin, /data-prov-kind="hetzner"/);
+  // a member (canDisconnect false) sees NO disconnect affordance
+  assert.ok(hooks.providerRosterHtml(list, false).indexOf("data-prov-disconnect") === -1);
+  // empty → an honest note, no rows
+  assert.match(hooks.providerRosterHtml([], true), /No providers connected/);
+  assert.ok(hooks.providerRosterHtml([], true).indexOf("prov-row") === -1);
+});
+
+test("gr-p4: connect model refuses a second connect for an already-connected kind (additive-duplicate guard)", () => {
+  const empty = hooks.providerConnectModel([]);
+  assert.equal(empty.allConnected, false);
+  assert.equal(empty.selectable, "hetzner"); // first available kind armed
+  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.ok(empty.options.every((o) => !o.connected));
+  const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
+  assert.equal(partial.selectable, "azure"); // hetzner taken → azure armed
+  assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
+  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
+  assert.equal(full.allConnected, true);
+  assert.equal(full.selectable, null);
+});
+
+test("gr-p4: connect card is the GR33 hybrid — picker + subform + save-row; already-connected is disabled", () => {
+  const card = hooks.providerConnectCardHtml([{ kind: "hetzner" }], null);
+  assert.match(card, /data-connect-kind="hetzner"[^>]*disabled/); // connected → not selectable
+  assert.match(card, /data-connect-kind="azure"/);
+  assert.match(card, /aria-pressed="true"/); // azure armed
+  assert.match(card, /set-save-row/); // verify+save in a save-row
+  assert.match(card, /data-connect-submit/);
+  assert.match(card, /cred-remediation/); // the in-card remediation slot
+  // all connected → the replace note, and NO second connect is offered
+  const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
+  assert.match(replace, /Every supported provider is connected/);
+  assert.ok(replace.indexOf("data-connect-submit") === -1);
+});
+
+test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
+  const m = hooks.capabilityMatrixModel(PROV_CAP);
+  assert.equal(m.ok, true);
+  assert.deepEqual(plain(m.providers.map((p) => p.kind)), ["hetzner", "azure"]); // fake (dev) filtered
+  assert.equal(m.verbs.length, 9);
+  // false WITH a server gap → the reason is the server's own, verbatim
+  assert.equal(m.cells.pause.hetzner.ok, false);
+  assert.equal(m.cells.pause.hetzner.reason, "Hetzner has no pause primitive.");
+  assert.equal(m.cells.adopt.azure.reason, "Adopt needs an existing resource-group import.");
+  // false with NO gap → a bare cell, NO reason (never padded, no default_gap)
+  assert.equal(m.cells.catalog.hetzner.ok, false);
+  assert.equal(m.cells.catalog.hetzner.reason, "");
+  assert.equal(m.cells.audit.azure.reason, "");
+  // a true cell carries no reason
+  assert.equal(m.cells.core.hetzner.ok, true);
+  assert.equal(m.cells.core.hetzner.reason, "");
+});
+
+test("gr-p4: capability matrix render — mark on yes, dash + verbatim reason on no, honest degrade states", () => {
+  const html = hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(PROV_CAP));
+  assert.match(html, /cap-matrix/);
+  assert.match(html, />core</);
+  assert.match(html, />pause</);
+  assert.match(html, />labels</);
+  assert.match(html, /Hetzner/);
+  assert.match(html, /Azure/);
+  assert.ok(html.indexOf(">Fake<") === -1); // dev-tier filtered from the render
+  assert.match(html, /cap-mark/); // a supported mark
+  assert.match(html, /cap-dash/); // an unsupported dash
+  assert.match(html, /Hetzner has no pause primitive\./); // reason verbatim
+  // honest degrade states
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(undefined)), /Checking provider capabilities/);
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel(null)), /unavailable/);
+  assert.match(hooks.capabilityMatrixHtml(hooks.capabilityMatrixModel({})), /unavailable/);
+  // a payload with ONLY a dev-tier provider → unavailable (nothing to operate)
+  assert.equal(hooks.capabilityMatrixModel({ providers: { fake: { tier: "dev", capabilities: {}, gaps: {} } } }).ok, false);
+});
+
+test("gr-p4: providerDisplayName — known brand or honest Title-case fallback, never a fabricated brand", () => {
+  assert.equal(hooks.providerDisplayName("hetzner"), "Hetzner Cloud");
+  assert.equal(hooks.providerDisplayName("azure"), "Microsoft Azure");
+  assert.equal(hooks.providerDisplayName("gcp"), "Gcp"); // unknown prod kind → Title-case, never invented
+  assert.equal(hooks.providerDisplayName(""), "");
 });
 
 // ── S13 domainStages: the per-host DNS/TLS checklist fold ────────────────────

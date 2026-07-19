@@ -1072,6 +1072,86 @@ const EXPECTATIONS = {
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
     },
   },
+
+  // ── gr-p4 G-02+G-03 Providers — the honesty flagship ───────────────────────
+  // roster (kind + label + connected-at, no implied validity) + the hybrid
+  // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
+  // gap reasons, bare dash where the server owns no reason).
+  "providers-connected": {
+    what: "the roster (2 kinds, Disconnect…), the all-connected replace state, and the honest capability matrix render",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
+      assert.ok(roster.includes("prov-roster") && roster.includes("prov-row"), "roster rows render");
+      assert.ok(roster.includes("Hetzner") && roster.includes("Azure"), "both connected kinds render");
+      assert.ok(roster.includes("connected "), "each row shows a connected-at (never a validity badge)");
+      assert.ok(!/\bConnected<\/span>/.test(roster), "the roster never implies live validity");
+      assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
+
+      // Both connectable providers are already connected → the connect card is in
+      // the "disconnect to replace" state: it offers NO second connect (the
+      // additive-duplicate guard, GR36 already-connected ruling).
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("set-section") && connect.includes("Connect a provider"), "the connect card renders");
+      assert.ok(connect.includes("Every supported provider is connected"), "the all-connected replace note renders");
+      assert.ok(!connect.includes("data-connect-submit"), "no second connect is offered for already-connected kinds");
+
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
+      for (const verb of ["core", "catalog", "archive", "resurrect", "decommission", "adopt", "audit", "pause", "labels"]) {
+        assert.ok(matrix.includes(">" + verb + "<"), "the matrix rows verb " + JSON.stringify(verb));
+      }
+      assert.ok(matrix.includes("cap-mark"), "a supported cell shows an affirmative mark");
+      assert.ok(matrix.includes("cap-dash"), "an unsupported cell shows a dash");
+      assert.ok(matrix.includes("Hetzner has no pause primitive"), "a false cell carries the server-owned gap reason verbatim");
+      assert.ok(matrix.includes("Adopt needs an existing resource-group import"), "the azure adopt gap renders verbatim");
+      // dev-tier `fake` is FILTERED — it is never a matrix column.
+      assert.ok(!matrix.includes(">Fake<"), "the dev-tier provider is filtered out of the matrix");
+    },
+  },
+  "providers-empty": {
+    what: "the empty roster + the connect card armed on the first provider; the matrix still renders",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("set-section"), "the empty roster still rides the anatomy");
+      assert.ok(roster.includes("No providers connected yet"), "the honest empty note renders");
+      assert.ok(!roster.includes("prov-row"), "no roster rows when nothing is connected");
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("data-connect-submit"), "the connect card is armed even with an empty roster");
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the matrix renders regardless of connected providers");
+    },
+  },
+  "providers-unverified": {
+    what: "the connect card's remediation slot + the server-owned remediation copy verbatim (node-pinned)",
+    check(reg, hooks) {
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(connect.includes("cred-remediation"), "the connect card carries the remediation slot (filled on submit)");
+      // The remediation is click-driven (submit → 422). Prove the honest path
+      // node-pinned: the scenario's POST returns the single provider_unverified
+      // + a remediation string, and remediationCopy() extracts it verbatim (never
+      // routed through friendly(), which drops .remediation).
+      const res = route("providers-unverified", "POST", "/v1/providers");
+      assert.equal(res.status, 422, "connect preflight fails");
+      assert.equal(res.body.error, "provider_unverified", "all causes collapse to one provider_unverified");
+      const copy = hooks.remediationCopy(res.body);
+      assert.ok(copy && copy.includes("Hetzner Cloud console"), "the server remediation names the exact console fix, verbatim");
+      assert.equal(hooks.friendly(res.body, "fallback").indexOf(copy), -1, "friendly() provably drops the remediation");
+    },
+  },
+  "providers-member": {
+    what: "a plain member sees a read-only roster + matrix with ZERO write affordances",
+    check(reg) {
+      const roster = (reg.get("provider-roster") || {}).innerHTML || "";
+      assert.ok(roster.includes("prov-row"), "the member still sees the roster (GET is member-readable)");
+      assert.ok(!roster.includes("data-prov-disconnect"), "a member roster has NO Disconnect affordance");
+      const connect = (reg.get("provider-connect") || {}).innerHTML || "";
+      assert.ok(!connect.includes("data-connect-submit"), "a member sees NO connect card");
+      assert.ok(!connect.includes("set-section"), "the connect region is empty for a member");
+      const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
+      assert.ok(matrix.includes("cap-matrix"), "the honest matrix still renders read-only for a member");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
