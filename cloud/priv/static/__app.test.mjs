@@ -6709,17 +6709,6 @@ test("gr-p3: the v4 fleet-row + update helpers are exported", () => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// gr-p3 instance workspace (GR24, screens/02) — the v4 header, the bp CLI card,
-// and the composed Overview pass. Tail-append (OC9).
-// ════════════════════════════════════════════════════════════════════════════
-
-test("GR24: the header helpers are exported", () => {
-  for (const name of ["instanceHeaderHtml", "instanceOverviewHtml", "instanceLifecycle"]) {
-    assert.equal(typeof hooks[name], "function", name + " must be exported");
-  }
-});
-
 test("gr-p3: fleetMetaHtml is the backend-true mono line, blank-tolerant", () => {
   assert.equal(hooks.fleetMetaHtml({}), ""); // an empty row renders nothing (no dangling ·)
   const full = hooks.fleetMetaHtml(fleetBp());
@@ -6824,6 +6813,17 @@ test("gr-p3: archivesModel — a GENERIC store outage stays the transient error 
   assert.match(html, /data-archives-retry/);
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// gr-p3 instance workspace (GR24, screens/02) — the v4 header, the bp CLI card,
+// and the composed Overview pass. Tail-append (OC9).
+// ════════════════════════════════════════════════════════════════════════════
+
+test("GR24: the header helpers are exported", () => {
+  for (const name of ["instanceHeaderHtml", "instanceOverviewHtml", "instanceLifecycle"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
 const GR24_LIVE = {
   id: "b-1", name: "Gyldendal", slug: "gyldendal", host: "5.75.169.183",
   url: "https://gyldendal-506f035e.barkpark.cloud",
@@ -6920,4 +6920,221 @@ test("GR24: pre-host the Overview stays quiet — no Sites card, no verify slot,
   assert.doesNotMatch(html, /id="instance-verify"/);
   assert.match(html, /id="instance-sites"/); // the slot itself stays for loadInstanceSites
   assert.match(html, /Provider<\/span><span class="v">—</);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// gr-p3 D-04 — THE event-coalescing grammar (GR26, styleguide §07)
+// coalesceEntries + tlv-coalesce render: consecutive same-key folds, the
+// PARAMETERIZED group key (type vs type+target for I-01), worst-verdict
+// summary, cadence copy, singleton passthrough, Show-all/Collapse markup.
+// (Tail-append per OC9; reuses the C8 EV/AU fixture builders above.)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("D-04: the coalescing pure helpers are exported", () => {
+  for (const name of ["coalesceEntries", "tlvCoalesceKey", "tlvCoalesceKeyByTarget",
+    "tlvVerdictOf", "tlvGroupVerdictText", "tlvGroupCadenceText", "tlvApproxDur",
+    "tlvGroupTitle", "tlvBadgeMod", "tlvGroupBadgeMod", "tlvGroupRowHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+// Ten health beats, one per minute, newest-first — the styleguide §07 burst.
+const BURST = Array.from({ length: 10 }, (_, i) =>
+  EV(30 - i, "health", 600 - i * 60, { health: "down", disk_used_pct: 91 }));
+
+test("D-04: coalesceEntries folds consecutive same-key runs; singletons pass through UNCHANGED", () => {
+  const entries = hooks.mergeTimeline(
+    [...BURST, EV(5, "status", 30, { transition: "offline" }), EV(4, "backup", 20, { status: "ok" })],
+    [],
+  );
+  const items = hooks.coalesceEntries(entries);
+  assert.equal(items.length, 3, "10 beats fold to one group; the two singles stay");
+  assert.equal(items[0].group, true);
+  assert.equal(items[0].count, 10);
+  assert.equal(items[0].type, "health");
+  assert.equal(items[0].at, entries[0].at, "the newest member fronts the group");
+  // Singletons are the SAME objects mergeTimeline made (===, not copies).
+  assert.equal(items[1], entries[10]);
+  assert.equal(items[2], entries[11]);
+  assert.equal(items[1].group, undefined);
+});
+
+test("D-04: a run of two folds; interleaving breaks the run (consecutive-only, never feed-wide)", () => {
+  const entries = hooks.mergeTimeline(
+    [EV(4, "health", 40, { health: "up" }), EV(3, "health", 30, { health: "up" }),
+     EV(2, "backup", 20, { status: "ok" }), EV(1, "health", 10, { health: "up" })],
+    [],
+  );
+  const items = hooks.coalesceEntries(entries);
+  assert.equal(items.length, 3);
+  assert.equal(items[0].count, 2, "the adjacent pair folds");
+  assert.equal(items[1].key, "e:2");
+  assert.equal(items[2].key, "e:1", "the beat behind the backup stays single — no cross-feed fold");
+});
+
+test("D-04: the group key anchors on the OLDEST member — a live prepend grows, never re-keys", () => {
+  const entries = hooks.mergeTimeline(BURST, []);
+  const before = hooks.coalesceEntries(entries)[0];
+  const grown = hooks.mergeTimeline([EV(31, "health", 660, { health: "down" }), ...BURST], []);
+  const after = hooks.coalesceEntries(grown)[0];
+  assert.equal(after.count, 11);
+  assert.equal(after.key, before.key, "an open group must survive the SSE repaint");
+});
+
+test("D-04: PARAMETERIZED key — the default folds audit repeats; tlvCoalesceKeyByTarget keeps unrelated targets apart (I-01)", () => {
+  const audits = [
+    AU("a3", "site.created", 30, { target_type: "site", target_id: "s1" }),
+    AU("a2", "site.created", 20, { target_type: "site", target_id: "s2" }),
+    AU("a1", "site.created", 10, { target_type: "site", target_id: "s1" }),
+  ];
+  const entries = hooks.mergeTimeline([], audits);
+  // Instance default: same action, same actor → one group of 3.
+  const byType = hooks.coalesceEntries(entries, hooks.tlvCoalesceKey);
+  assert.equal(byType.length, 1);
+  assert.equal(byType[0].count, 3);
+  // Team-feed key: target s1/s2/s1 are non-consecutive → nothing folds.
+  const byTarget = hooks.coalesceEntries(entries, hooks.tlvCoalesceKeyByTarget);
+  assert.equal(byTarget.length, 3, "unrelated targets must never fold together");
+  assert.ok(byTarget.every((i) => !i.group));
+  // mergeTimeline carries the target attribution the key needs.
+  assert.equal(entries[0].target, "site:s1");
+});
+
+test("D-04: two actors' identical actions never fold under the default key (attribution law)", () => {
+  const audits = [
+    AU("a2", "token.minted", 20),
+    AU("a1", "token.minted", 10, { actor: { id: "u2", email: "bob@acme.com" } }),
+  ];
+  const items = hooks.coalesceEntries(hooks.mergeTimeline([], audits));
+  assert.equal(items.length, 2, "different actors stay separate rows");
+});
+
+test("D-04: worst-verdict summary — unanimous says 'all …', mixed states the WORST, never averaged", () => {
+  const down = hooks.mergeTimeline(BURST, []);
+  assert.equal(hooks.tlvGroupVerdictText(down), "all reporting health: down");
+  // 8 up beats around 2 down beats — the summary leads with the bad ones.
+  const mixed = hooks.mergeTimeline(
+    Array.from({ length: 10 }, (_, i) =>
+      EV(30 - i, "health", 600 - i * 60, { health: i === 2 || i === 5 ? "down" : "up" })),
+    [],
+  );
+  assert.equal(hooks.tlvGroupVerdictText(mixed), "2 of 10 reporting health: down");
+  // A verify burst with one failure states the failure.
+  const verifies = hooks.mergeTimeline(
+    [EV(3, "verify", 30, { ok: true, probes: [] }), EV(2, "verify", 20, { ok: false, probes: [] }),
+     EV(1, "verify", 10, { ok: true, probes: [] })],
+    [],
+  );
+  assert.equal(hooks.tlvGroupVerdictText(verifies), "1 of 3 failed");
+  // Verdict-less types (tls) omit the segment rather than inventing one.
+  const tls = hooks.mergeTimeline(
+    [EV(2, "tls", 20, { domain: "a" }), EV(1, "tls", 10, { domain: "b" })], []);
+  assert.equal(hooks.tlvGroupVerdictText(tls), "");
+});
+
+test("D-04: cadence copy — 'every ~1m for 9m' from the members' own stamps; same-second bursts stay silent", () => {
+  const entries = hooks.mergeTimeline(BURST, []);
+  assert.equal(hooks.tlvGroupCadenceText(entries), "every ~1m for 9m");
+  const burst = hooks.mergeTimeline(
+    [EV(2, "health", 10, { health: "up" }), EV(1, "health", 10, { health: "up" })], []);
+  assert.equal(hooks.tlvGroupCadenceText(burst), "", "no fabricated rhythm for a same-second burst");
+  // Approx durations are ONE rounded unit.
+  assert.equal(hooks.tlvApproxDur(45 * 1000), "45s");
+  assert.equal(hooks.tlvApproxDur(40 * 60 * 1000), "40m");
+  assert.equal(hooks.tlvApproxDur(90 * 60 * 1000), "2h", "one rounded unit — never '1h 30m' precision");
+  assert.equal(hooks.tlvApproxDur(5 * 3600 * 1000), "5h");
+  assert.equal(hooks.tlvApproxDur(3 * 86400 * 1000), "3d");
+});
+
+test("D-04: tlvGroupRowHtml closed — badge + '× N' + meta + Show all N; NO member rows in the markup", () => {
+  const entries = hooks.mergeTimeline(BURST, []);
+  const group = hooks.coalesceEntries(entries)[0];
+  const html = hooks.tlvGroupRowHtml(group, { open: false });
+  assert.match(html, /tlv-row tlv-coalesce/);
+  assert.match(html, /data-tlv-group="g:event\|health:e:21"/); // oldest member anchors
+  assert.match(html, /tlv-badge tlv-badge--event/);
+  assert.match(html, /Health report <span class="tlv-coalesce-count">&times; 10<\/span>/);
+  assert.match(html, /every ~1m for 9m · all reporting health: down/);
+  assert.match(html, /data-tlv-group-toggle aria-expanded="false">Show all 10</);
+  assert.doesNotMatch(html, /tlv-coalesce-members/, "collapsed groups keep the DOM cheap");
+  assert.doesNotMatch(html, /data-tlv-key=/, "no member rows while collapsed");
+});
+
+test("D-04: tlvGroupRowHtml open — Collapse + all member rows, each keeping its own Details toggle", () => {
+  const entries = hooks.mergeTimeline(BURST, []);
+  const group = hooks.coalesceEntries(entries)[0];
+  const html = hooks.tlvGroupRowHtml(group, { open: true, expandedKeys: ["e:28"] });
+  assert.match(html, /aria-expanded="true">Collapse</);
+  assert.match(html, /tlv-coalesce-members/);
+  assert.equal(html.split('data-tlv-key="').length - 1, 10, "every member renders");
+  // The remembered member detail re-opens; the others stay shut.
+  const row28 = html.split('data-tlv-key="e:28"')[1].split('data-tlv-key="')[0];
+  assert.match(row28, /aria-expanded="true"/);
+});
+
+test("D-04: a verify group with any failure badges verify-fail — the summary badge never lies green", () => {
+  const entries = hooks.mergeTimeline(
+    [EV(3, "verify", 30, { ok: true, probes: [] }), EV(2, "verify", 20, { ok: false, probes: [] }),
+     EV(1, "verify", 10, { ok: true, probes: [] })],
+    [],
+  );
+  const group = hooks.coalesceEntries(entries)[0];
+  assert.equal(hooks.tlvGroupBadgeMod(group), "verify-fail");
+  assert.match(hooks.tlvGroupRowHtml(group, {}), /tlv-badge tlv-badge--verify-fail/);
+  const allPass = hooks.coalesceEntries(hooks.mergeTimeline(
+    [EV(2, "verify", 20, { ok: true, probes: [] }), EV(1, "verify", 10, { ok: true, probes: [] })], []))[0];
+  assert.equal(hooks.tlvGroupBadgeMod(allPass), "verify");
+});
+
+test("D-04: audit group titles keep the actor only while the whole run shares one", () => {
+  const same = hooks.coalesceEntries(hooks.mergeTimeline(
+    [], [AU("a2", "token.minted", 20), AU("a1", "token.minted", 10)]))[0];
+  assert.equal(hooks.tlvGroupTitle(same), "ada@acme.com minted an API token");
+  // A custom key that folds mixed actors drops the attribution, never miscredits.
+  const mixedEntries = hooks.mergeTimeline(
+    [], [AU("a2", "token.minted", 20), AU("a1", "token.minted", 10, { actor: { id: "u2", email: "bob@acme.com" } })]);
+  const mixed = hooks.coalesceEntries(mixedEntries, (e) => e.source + "|" + e.type)[0];
+  assert.equal(hooks.tlvGroupTitle(mixed), "minted an API token");
+});
+
+test("D-04: timelineFeedHtml coalesces the feed and honors openGroups + expandedKeys across repaints", () => {
+  const entries = hooks.mergeTimeline([...BURST, EV(5, "status", 30, { transition: "offline" })], []);
+  const closed = hooks.timelineFeedHtml(entries, {});
+  assert.equal(closed.split("tlv-coalesce\"").length - 1, 1, "ONE summary row for the burst");
+  assert.match(closed, /Show all 10/);
+  assert.match(closed, /Status → offline/, "the singleton still renders enriched");
+  const gkey = closed.match(/data-tlv-group="([^"]+)"/)[1];
+  const open = hooks.timelineFeedHtml(entries, { openGroups: [gkey], expandedKeys: ["e:28"] });
+  assert.match(open, /aria-expanded="true">Collapse</);
+  assert.equal(open.split('data-tlv-key="').length - 1, 11, "10 members + the singleton");
+  // The custom groupKey seam I-01 will use is honored end-to-end.
+  const flat = hooks.timelineFeedHtml(entries, { groupKey: () => null });
+  assert.doesNotMatch(flat, /tlv-coalesce/, "a null key disables folding entirely");
+});
+
+test("D-04: the quiet line and teaching empty state survive the coalescing rewrite", () => {
+  const entries = hooks.mergeTimeline(BURST, []);
+  const html = hooks.timelineFeedHtml(entries, { quietLine: "Audit entries are visible to team admins." });
+  assert.match(html, /tlv-quiet/);
+  assert.match(html, /tlv-coalesce/);
+  assert.match(hooks.timelineFeedHtml([], {}), /Events will appear here as this Barkpark works/);
+});
+
+test("D-04: total over junk — nulls, garbled stamps, junk payloads never throw or NaN", () => {
+  assert.deepEqual([...hooks.coalesceEntries(null)], []);
+  assert.deepEqual([...hooks.coalesceEntries([null, undefined])], []);
+  const junk = hooks.mergeTimeline(
+    [{ id: 2, type: "health", payload: { health: "down" }, inserted_at: "garbage" },
+     { id: 1, type: "health", payload: { health: "down" }, inserted_at: "garbage" }],
+    [],
+  );
+  const items = hooks.coalesceEntries(junk);
+  assert.equal(items[0].count, 2);
+  assert.equal(hooks.tlvGroupCadenceText(items[0].entries), "", "garbled stamps yield no cadence");
+  const html = hooks.tlvGroupRowHtml(items[0], {});
+  assert.doesNotMatch(html, /NaN/);
+  assert.equal(hooks.tlvVerdictOf(null), null);
+  assert.equal(hooks.tlvVerdictOf({ type: "health", payload: {} }), null);
+  assert.equal(hooks.tlvCoalesceKey(null), null);
+  assert.equal(hooks.tlvCoalesceKeyByTarget(null), null);
 });

@@ -829,6 +829,41 @@ const EXPECTATIONS = {
       assert.ok(sites.includes("No sites yet"), "the Sites empty state renders");
     },
   },
+
+  // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ──────────
+  "timeline-coalesced": {
+    what: "the coalescing grammar folds the health burst to ONE worst-verdict row with Show all/Collapse",
+    check(reg, hooks) {
+      // Routing: the deep link lands the Timeline tab exactly like the other
+      // C8 states (the strip is the shim-observable half of the mount).
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes('/timeline" aria-current="page"'), "the Timeline tab must be current");
+      assert.ok(body.includes('id="instance-tabpanel"'), "the tabpanel must render");
+      // The feed itself paints through element-level querySelector (inert in
+      // this shim), so drive the SAME pure pipeline loadTimeline runs —
+      // mergeTimeline → coalesceEntries → timelineFeedHtml — over this
+      // scenario's committed fixture, and pin the §07 grammar end-to-end.
+      const d = SCENARIOS["timeline-coalesced"].data;
+      const events = Object.values(d.instanceEvents)[0];
+      const entries = hooks.mergeTimeline(events, d.audit);
+      const closed = hooks.timelineFeedHtml(entries, {});
+      assert.equal(countMatches(closed, 'class="tlv-row tlv-coalesce"'), 1, "the 10-beat burst folds to ONE row");
+      assert.ok(closed.includes("Health report"), "the group names its kind");
+      assert.ok(closed.includes("&times; 10"), "the × N count renders");
+      assert.ok(closed.includes("all reporting health: down"), "the WORST verdict is stated");
+      assert.ok(/every ~1m for \d+m/.test(closed), "the cadence segment renders from the members' stamps");
+      assert.ok(closed.includes(">Show all 10<"), "the expand affordance renders");
+      assert.ok(!closed.includes("tlv-coalesce-members"), "members stay out of the DOM while collapsed");
+      assert.ok(closed.includes("Status → offline"), "the singleton status row still renders enriched");
+      // Expanded state: Collapse + every member row on the inset rail.
+      const gkey = (closed.match(/data-tlv-group="([^"]+)"/) || [])[1];
+      assert.ok(gkey, "the group carries its stable key");
+      const open = hooks.timelineFeedHtml(entries, { openGroups: [gkey] });
+      assert.ok(open.includes('aria-expanded="true">Collapse<'), "the open group offers Collapse");
+      assert.ok(open.includes("tlv-coalesce-members"), "the member rail renders");
+      assert.equal(countMatches(open, 'data-tlv-key="'), 14, "10 members + status + tls + the 2 audit rows all render");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
