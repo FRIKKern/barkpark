@@ -540,6 +540,15 @@ function me(teamName, onb, role) {
     },
   };
 }
+// GR39: the platform-operator envelope. The flag is NESTED under `user` (the
+// same read operatorVisible/operatorRouteAllowed make) — a flat one is not the
+// contract and must never open the console.
+function operatorMe(teamName) {
+  const m = me(teamName, { instance: true, published_doc: true, completed: true }, "owner");
+  m.user = Object.assign({}, m.user, { platform_operator: true });
+  return m;
+}
+
 // A trial rides plan:"trial" with status:"active" — "trialing" is NOT in the
 // server's status enum (subscription.ex @statuses: active|canceled|past_due),
 // and app.js gates the current-plan panel + launch entitlement on "active".
@@ -2367,6 +2376,104 @@ export const SCENARIOS = {
       notifDeliveriesError: true, // GET /v1/notifications/deliveries → 500
     },
   },
+
+  // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
+  // The fleet-wide, cross-team surface behind the role-gated sidebar entry.
+  // Fixtures are the PROBE-VERIFIED wire shapes, not the design mock:
+  //   /v1/operator/fleet      → {barkparks:[{id,name,update_state,channel,
+  //                              autoupdate_triggered_at}], staging_gate_open}
+  //                              — the gate flag is TOP-LEVEL, never per-row.
+  //   /v1/operator/warm-pool  → {ready:n}, a bare integer under one key.
+  //   /v1/operator/autoupdate → {halted:bool}.
+  //   /v1/operator/deliveries → {deliveries:[delivery_json]}.
+  // Timestamps carry six microsecond digits + a literal Z; a freshly-registered
+  // box has autoupdate_triggered_at: null and update_state "unknown".
+  "operator-console": {
+    label: "Operator console — rolling: a settling canary, the staging gate open, warm pool ready, digest never sent",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      operatorAutoupdate: { halted: false },
+      operatorFleet: {
+        barkparks: [
+          { id: "5b2c1e00-0000-4000-8000-0000000000f1", name: "acme-canary", channel: "staging", update_state: "current", autoupdate_triggered_at: null },
+          { id: "5b2c1e00-0000-4000-8000-0000000000f2", name: "acme-prod", channel: "prod", update_state: "behind", autoupdate_triggered_at: tMinus(9 * 60) },
+          { id: "5b2c1e00-0000-4000-8000-0000000000f3", name: "beta-prod", channel: "prod", update_state: "behind", autoupdate_triggered_at: null },
+          { id: "5b2c1e00-0000-4000-8000-0000000000f4", name: "fresh-box", channel: "prod", update_state: "unknown", autoupdate_triggered_at: null },
+          { id: "5b2c1e00-0000-4000-8000-0000000000f5", name: "optout-prod", channel: "prod", update_state: "disabled", autoupdate_triggered_at: null },
+        ],
+        staging_gate_open: true,
+      },
+      operatorWarmPool: { ready: 2 },
+      // Prod truth today: zero fleet_digest rows have ever been written.
+      operatorDeliveries: [],
+    },
+  },
+  // The braked fleet: halted banner + Resume, the staging gate CLOSED, an empty
+  // warm pool (a designed state, not an error), and a digest log with a failure.
+  "operator-halted": {
+    label: "Operator console — halted brake, staging gate closed, empty warm pool, digest log with a failure",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      operatorAutoupdate: { halted: true, halted_reason: "bad release 0.5.0" },
+      operatorFleet: {
+        barkparks: [
+          { id: "5b2c1e00-0000-4000-8000-0000000000f1", name: "acme-canary", channel: "staging", update_state: "behind", autoupdate_triggered_at: null },
+          { id: "5b2c1e00-0000-4000-8000-0000000000f2", name: "acme-prod", channel: "prod", update_state: "behind", autoupdate_triggered_at: null },
+        ],
+        staging_gate_open: false,
+      },
+      operatorWarmPool: { ready: 0 },
+      operatorDeliveries: [
+        { id: "dl1", status: "sent", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 1, inserted_at: tMinus(3600), last_error: null, http_status: null },
+        { id: "dl2", status: "failed", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 3, inserted_at: tMinus(90000), last_error: "smtp: connection timed out", http_status: null },
+      ],
+    },
+  },
+  // FAIL-CLOSED (GR49): registering "operator" in VIEWS also made init()'s route
+  // validator accept a deep-linked #operator for ANYBODY, so a non-operator who
+  // types the hash must be BOUNCED to Overview — the sidebar gate alone is not
+  // enough. /v1/me answers platform_operator:false here.
+  "operator-denied": {
+    label: "Operator console — a non-operator deep-links #operator and is bounced to Overview",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // Honest degrade: PLATFORM_ADMIN_EMAILS unset (or an allowlist change mid-
+  // session) makes every /v1/operator/* route 403 while /v1/me still says
+  // operator. Each card then reports that IT could not read — never a fake
+  // reading, never a spinner that outlives the request.
+  "operator-unreadable": {
+    label: "Operator console — every operator route 403s; all four cards degrade honestly",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      operatorDenied: true,
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2717,6 +2824,27 @@ export function route(name, method, path) {
   }
   if (/^\/v1\/env-vars\/[^/]+$/.test(p) && method === "DELETE") {
     return { status: 200, body: { ok: true } };
+  }
+
+  // gr-p5 OPERATOR: the session-gated /v1/operator/* seam. `operatorDenied`
+  // models the live control plane with PLATFORM_ADMIN_EMAILS unset — every route
+  // 403s — so the console's honest per-card degrade is observable. A scenario
+  // without an operator fixture gets the same 403 (a non-operator never reads
+  // these), which is exactly what the bounce scenario needs.
+  if (p.indexOf("/v1/operator/") === 0) {
+    const forbidden = { status: 403, body: { error: "forbidden" } };
+    if (d.operatorDenied) return forbidden;
+    if (p === "/v1/operator/autoupdate" && method === "GET") {
+      return d.operatorAutoupdate ? { status: 200, body: d.operatorAutoupdate } : forbidden;
+    }
+    if (p === "/v1/operator/autoupdate/halt" && method === "POST") return { status: 200, body: { halted: true } };
+    if (p === "/v1/operator/autoupdate/resume" && method === "POST") return { status: 200, body: { halted: false } };
+    if (p === "/v1/operator/fleet") return d.operatorFleet ? { status: 200, body: d.operatorFleet } : forbidden;
+    if (p === "/v1/operator/warm-pool") return d.operatorWarmPool ? { status: 200, body: d.operatorWarmPool } : forbidden;
+    if (p === "/v1/operator/deliveries") {
+      return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
+    }
+    return forbidden;
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

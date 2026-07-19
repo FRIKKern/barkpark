@@ -3035,7 +3035,12 @@
   // longer a view at all (A4/D66): it is the launchFlow() component, opened in a
   // modal or rendered as the empty-fleet welcome runway. Its old #launch bookmark
   // remaps to Overview (legacyRoute) and auto-opens the flow (wantsLaunchFlow).
-  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "env", "activity"];
+  // GR39: "operator" is a REGISTERED view (the sidebar entry finally lands on a
+  // real page) but it is NOT a tab anyone may reach — registering it here also
+  // makes init()'s route validator accept a deep-linked #operator for ANYONE, so
+  // loadOperator fail-closed BOUNCES a non-operator to #overview (GR49). It is
+  // deliberately absent from SETTINGS_VIEWS and from the ⌘K palette.
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "env", "activity", "operator"];
   var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members", "env"];
 
   // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
@@ -3204,6 +3209,7 @@
     if (r.view === "members") loadMembers(); // C10: the team Members settings panel
     if (r.view === "env") loadEnvVars(); // G-06: the team environment-variables panel
     if (r.view === "activity") loadActivity();
+    if (r.view === "operator") loadOperator(); // GR39/GR49 — gate lives INSIDE (fail-closed)
   }
 
   // crumbs: array of {label, href?}; the last item is the current page (no link,
@@ -3246,6 +3252,17 @@
   // (owner/admin is a different axis — Authz law). Pure; node-pinned.
   function operatorVisible(me) {
     return !!(me && me.user && me.user.platform_operator === true);
+  }
+
+  // GR49: the ROUTE gate. applyRoute is not hook-exported (and so cannot be
+  // node-pinned), so the decision "may this /v1/me envelope render #operator?"
+  // lives here as its own PURE, pinned predicate — deliberately delegating to
+  // operatorVisible so the sidebar link and the page can never disagree about
+  // who is an operator. Fail-closed on an unloaded me (undefined → false); the
+  // caller (loadOperator) treats "me not loaded yet" as WAIT, not as deny, so a
+  // real operator's deep link is never bounced by a race.
+  function operatorRouteAllowed(me) {
+    return operatorVisible(me);
   }
 
   // The sidebar layer the instance/site morph shows a context NAME for. Kept in a
@@ -5164,10 +5181,20 @@
     });
   }
 
-  // ---- Fleet rollout banner (isu-w5) ----------------------------------------
-  // GET /v1/admin/autoupdate reports the fleet-wide halt state; POST halt/resume
-  // toggles it. halted → a warn banner with Resume; rolling → a quiet line with
-  // Halt. Absent route / non-admin → null → nothing renders (degrade).
+  // ---- Fleet rollout banner (isu-w5 → GR49) ---------------------------------
+  // The fleet-wide autoupdate brake. GR49 ruling: there is exactly ONE
+  // derivation of this state (fleetRolloutBanner, below — byte-unchanged), ONE
+  // action (fleetRolloutAction), ONE route literal (OPERATOR_AUTOUPDATE), and
+  // ONE control — the Operator console. Team-scoped #fleet keeps a READ-ONLY,
+  // halted-only banner that links to #operator (a fleet-WIDE brake sitting on a
+  // team page was a scope mix), so the console is the sole emitter of
+  // data-fleet-au. The old require_worker admin probe this replaced is GONE
+  // (a node guard pins zero occurrences of it): a browser sends only the session
+  // bearer, so that probe 401-died silently for every human since it shipped.
+  var OPERATOR_AUTOUPDATE = "/v1/operator/autoupdate";
+
+  // halted → a warn banner with Resume; rolling → a quiet line with Halt.
+  // Absent route / non-operator → null → nothing renders (degrade).
   function fleetRolloutBanner(state) {
     if (!state || typeof state !== "object") return null;
     if (state.halted) {
@@ -5185,40 +5212,363 @@
     };
   }
 
-  function fleetRolloutBannerHtml(state) {
+  // opts.readonly (GR49) drops the action button and appends the pointer to the
+  // one place the brake IS operated. The button is the DEFAULT (no opts) so the
+  // existing one-argument pins stay green and no caller changes behaviour by
+  // accident; #fleet passes {readonly:true} explicitly.
+  function fleetRolloutBannerHtml(state, opts) {
     var b = fleetRolloutBanner(state);
     if (!b) return "";
+    var readonly = !!(opts && opts.readonly);
     return '<div class="notice' + (b.tone ? " notice-" + esc(b.tone) : "") + '" role="status">' +
       "<b>" + esc(b.title) + "</b> " + esc(b.body) +
-      '<button class="btn btn-sm" type="button" data-fleet-au="' + esc(b.verb) + '">' + esc(b.actionLabel) + "</button>" +
+      (readonly
+        ? ' <a class="notice-link" href="#operator">Operator console</a>'
+        : '<button class="btn btn-sm" type="button" data-fleet-au="' + esc(b.verb) + '">' + esc(b.actionLabel) + "</button>") +
     "</div>";
   }
 
-  // The DOM mount: fetch the fleet halt state and paint the banner slot. Silent
-  // on a non-ok read (older CP 404 / non-operator 401/403) — the slot stays
-  // empty. noBounce is LOAD-BEARING: the route is platform-operator gated, so a
-  // plain session token 401s — without noBounce that probe would clearSession()
-  // and log the user out on every fleet render.
+  // The Fleet mount (GR49 — READ-ONLY, halted-only). #fleet is TEAM-scoped, so
+  // it states the fleet-WIDE fact only when it actually constrains this team's
+  // instances (halted = nothing advances) and sends the operator to #operator to
+  // act. A live rollout renders nothing here: "autoupdate is live" is the normal
+  // case and a permanent banner for it is noise. Silent on a non-ok read (older
+  // CP 404 / non-operator 403) — the slot stays empty. noBounce is LOAD-BEARING:
+  // the route is platform-operator gated, so a non-operator session 403s (and an
+  // expired one 401s) — without noBounce that probe would clearSession() and log
+  // the user out on every fleet render.
   function loadFleetRollout(container) {
     var slot = container.querySelector("#fleet-rollout");
     if (!slot) return;
-    api("GET", "/v1/admin/autoupdate", null, { noBounce: true }).then(function (r) {
-      if (!r.ok || !r.data) return; // older CP / non-operator → hidden
-      slot.innerHTML = fleetRolloutBannerHtml(r.data);
-      var btn = slot.querySelector("[data-fleet-au]");
-      if (btn) btn.addEventListener("click", function () { fleetRolloutAction(btn.getAttribute("data-fleet-au"), container); });
+    api("GET", OPERATOR_AUTOUPDATE, null, { noBounce: true }).then(function (r) {
+      if (!r.ok || !r.data) return;      // older CP / non-operator → hidden
+      if (!r.data.halted) return;        // live rollout → nothing to say here
+      slot.innerHTML = fleetRolloutBannerHtml(r.data, { readonly: true });
     });
   }
 
-  function fleetRolloutAction(verb, container) {
-    var path = "/v1/admin/autoupdate/" + (verb === "halt" ? "halt" : "resume");
+  // ONE action for both presentations. onDone is the caller's own refresh (the
+  // console repaints its brake card); it was hard-wired to loadFleetRollout
+  // before, which is exactly the coupling GR49 removes.
+  function fleetRolloutAction(verb, onDone) {
+    var path = OPERATOR_AUTOUPDATE + (verb === "halt" ? "/halt" : "/resume");
     api("POST", path, {}, { noBounce: true }).then(function (r) {
       if (r.ok) {
         toast({ kind: "success", title: verb === "halt" ? "Rollout halted" : "Rollout resumed" });
-        loadFleetRollout(container);
+        if (typeof onDone === "function") onDone(r.data);
       } else {
         toast({ kind: "error", title: "Couldn't " + verb + " the rollout", body: friendly(r.data, "Please try again.") });
       }
+    });
+  }
+
+  // =========================================================== OPERATOR CONSOLE
+  // GR39/GR40/GR48/GR49/GR50 — the fleet-wide, cross-team surface behind the
+  // role-gated sidebar entry. It reads the session-gated /v1/operator/* seam and
+  // renders FOUR cards, each honest to machinery that actually exists:
+  //
+  //   1. Rollout brake   — GET/POST /v1/operator/autoupdate[/halt|/resume].
+  //      A SECOND presentation of the SHARED fleetRolloutBanner model (GR49):
+  //      the copy strings are never restated here, only consumed.
+  //   2. Canary rollout  — GET /v1/operator/fleet {barkparks[], staging_gate_open}.
+  //      staging_gate_open is TOP-LEVEL (a sibling of barkparks), never per-row.
+  //   3. Warm pool       — GET /v1/operator/warm-pool {ready:n}. ONE number, no
+  //      bar and no percentage: count_ready_warm_servers/0 merges ready+refreshing
+  //      out of four real statuses and the target size lives in the off-box
+  //      provisioner's env, so there IS no denominator to draw (GR50).
+  //   4. Fleet digest    — GET /v1/operator/deliveries. A send LOG only; there is
+  //      NO send-now button because no route calls deliver_fleet_digest (it is
+  //      cron-only, daily 06:00 UTC — GR40; gr-backlog-operator-digest-send is
+  //      the successor if one is ever wanted).
+  //
+  // Every card degrades honestly on its own: a card whose route doesn't answer
+  // says so about ITSELF and never fakes a reading (the G-04 deliveries pattern).
+  // No instance-lifecycle verbs live here (EXIT.md:13). Every derivation below is
+  // PURE and node-pinned; the DOM mounts are browser + smoke verified.
+
+  var OPERATOR_FLEET = "/v1/operator/fleet";
+  var OPERATOR_WARM_POOL = "/v1/operator/warm-pool";
+  var OPERATOR_DELIVERIES = "/v1/operator/deliveries";
+  // @settle_grace_seconds in autoupdate_rollout_worker.ex is 20*60 — TWENTY
+  // minutes. The design mock's "30m" is wrong and must never be rendered (GR40).
+  var OPERATOR_SETTLE_MIN = 20;
+
+  // ---- pure derivations -----------------------------------------------------
+
+  // The state pill for ONE fleet row. In-flight (autoupdate_triggered_at stamped,
+  // and it is NULL for a freshly-registered box — GR48) wins over update_state,
+  // because that is what the worker's SETTLE pass is watching. Otherwise the four
+  // real update_state values map to their honest label; `unknown` is the COMMON
+  // freshly-registered case, not an edge, so it reads calm (neutral), not alarming.
+  function operatorRowState(bp, nowMs) {
+    bp = bp || {};
+    var now = nowMs == null ? Date.now() : nowMs;
+    if (bp.autoupdate_triggered_at) {
+      var started = new Date(bp.autoupdate_triggered_at).getTime();
+      if (!isNaN(started)) {
+        var mins = Math.max(0, Math.floor((now - started) / 60000));
+        return mins >= OPERATOR_SETTLE_MIN
+          ? {
+              role: "warn",
+              label: "SETTLE — overdue past " + OPERATOR_SETTLE_MIN + "m",
+              note: "The next rollout tick pauses this instance instead of retrying it.",
+            }
+          : {
+              role: "info",
+              label: "SETTLE — " + mins + "m of " + OPERATOR_SETTLE_MIN + "m",
+              note: "Update triggered; waiting for the instance to report itself current.",
+            };
+      }
+    }
+    var st = String(bp.update_state || "unknown").toLowerCase();
+    if (st === "current") return { role: "ok", label: "Current", note: "" };
+    if (st === "behind") return { role: "warn", label: "Behind", note: "Eligible for the next advance." };
+    if (st === "disabled") return { role: "neutral", label: "Autoupdate off", note: "This instance opted out; the rollout skips it." };
+    if (st === "unknown") return { role: "neutral", label: "Unknown", note: "No update state reported yet." };
+    return { role: "neutral", label: cap(st), note: "" };
+  }
+
+  // Display order = the order the rollout cares about: whatever is in flight (it
+  // blocks everything), then staging (the canary advances first), then the boxes
+  // that are behind, then the rest — alphabetical inside each group. Pure + total.
+  function operatorFleetSort(rows) {
+    var list = (rows || []).slice();
+    function rank(bp) {
+      if (bp && bp.autoupdate_triggered_at) return 0;
+      if (bp && bp.channel === "staging") return 1;
+      if (bp && bp.update_state === "behind") return 2;
+      return 3;
+    }
+    list.sort(function (a, b) {
+      var d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      // Ordinal compare, deliberately NOT localeCompare (its collation is not
+      // dependable across node/ICU builds — it mis-ordered plain ASCII here).
+      var an = String((a && a.name) || ""), bn = String((b && b.name) || "");
+      return an < bn ? -1 : an > bn ? 1 : 0;
+    });
+    return list;
+  }
+
+  // The staging-gate sentence — THREE states (GR50), because "open" alone is not
+  // a vouch: Registry.staging_gate_open?/0 fails OPEN on an empty staging list,
+  // which is exactly the state prod is in today (zero staging boxes registered).
+  function operatorStagingGateCopy(open, rows) {
+    var hasStaging = (rows || []).some(function (bp) { return bp && bp.channel === "staging"; });
+    if (!open) {
+      return { role: "warn", text: "Staging gate: closed — staging is behind or paused, so no prod instance advances." };
+    }
+    if (!hasStaging) {
+      return { role: "neutral", text: "Staging gate: open — no staging instance is registered, so prod advances with nothing ahead of it." };
+    }
+    return { role: "ok", text: "Staging gate: open — a staging instance is current on the newest release." };
+  }
+
+  // The console's state pill. Reuses the shared .status-pill grammar (the same
+  // dynamic head the fleet pill uses, already allowlisted in __css_check).
+  function operatorPillHtml(role, label) {
+    return '<span class="status-pill status-pill--' + esc(role) + '">' +
+      '<span class="status-pill-dot" aria-hidden="true"></span>' +
+      '<span class="status-pill-label">' + esc(label) + "</span>" +
+    "</span>";
+  }
+
+  // ---- card bodies (pure) ---------------------------------------------------
+
+  // 1. BRAKE. The banner is the SHARED derivation (GR49) — title/body/verb/
+  // actionLabel are consumed, never restated. The console is the ONE place the
+  // action button lives, and it rides the danger-no-echo confirm tier on the way
+  // in (GR41), because halting stops every team's rollout at once.
+  function operatorBrakeCardHtml(state) {
+    var b = fleetRolloutBanner(state);
+    if (!b) {
+      return '<p class="set-empty">Rollout state unavailable — the brake didn\'t answer. ' +
+        "Nothing has changed; this card just couldn't read it.</p>";
+    }
+    return fleetRolloutBannerHtml(state) +
+      '<p class="set-empty">Halting stops the rollout from ADVANCING to any new instance. ' +
+      "Instances already mid-update keep settling, and nothing is rolled back.</p>";
+  }
+
+  // 2. CANARY. data = the /v1/operator/fleet envelope, or null when it didn't answer.
+  function operatorCanaryCardHtml(data, nowMs) {
+    if (!data || !Array.isArray(data.barkparks)) {
+      return '<p class="set-empty">Fleet unavailable — the roll-up didn\'t answer. ' +
+        "That says nothing about the fleet itself; this card just couldn't read it.</p>";
+    }
+    var gate = operatorStagingGateCopy(data.staging_gate_open === true, data.barkparks);
+    // gate.text is STATIC author copy (never server data) — emitted raw so the
+    // ratified sentence renders verbatim, apostrophes and all.
+    var head = '<p class="op-gate">' + operatorPillHtml(gate.role, "Gate") + "<span>" + gate.text + "</span></p>";
+    if (!data.barkparks.length) {
+      return head + '<p class="set-empty">No instances are registered yet, so there is nothing to roll out.</p>' +
+        operatorCanaryFootHtml();
+    }
+    var rows = operatorFleetSort(data.barkparks).map(function (bp) {
+      var st = operatorRowState(bp, nowMs);
+      var idTail = bp.id ? String(bp.id).slice(0, 8) : "—";
+      return '<div class="set-row">' +
+        '<div class="set-row-main">' +
+          '<div class="set-row-name">' + esc(bp.name || "Unnamed instance") + "</div>" +
+          '<div class="set-row-meta">' + esc(bp.channel || "prod") + " &middot; " + esc(idTail) + "</div>" +
+          (st.note ? '<div class="set-row-note">' + esc(st.note) + "</div>" : "") +
+        "</div>" +
+        '<div class="set-row-side">' + operatorPillHtml(st.role, st.label) + "</div>" +
+      "</div>";
+    }).join("");
+    return head + '<div class="set-list">' + rows + "</div>" + operatorCanaryFootHtml();
+  }
+
+  // The rollout's own vocabulary, verbatim from the worker (GR40/GR50): serial
+  // cohort-of-1, a 20-minute settle grace, pause-not-retry on a wave that never
+  // landed. Never "30m" — that number exists only in the design mock.
+  function operatorCanaryFootHtml() {
+    return '<p class="op-foot">Gates: SETTLE ' + OPERATOR_SETTLE_MIN +
+      "m &rarr; health GATE &rarr; ADVANCE. An instance that hasn't reported itself current within " +
+      OPERATOR_SETTLE_MIN + " minutes is paused, not retried. " +
+      "The rollout is serial — one instance at a time, and an unsettled wave blocks the next.</p>";
+  }
+
+  // 3. WARM POOL. ONE number, no bar, no percentage (GR50 — there is no
+  // denominator anywhere in the control plane to draw one against).
+  function operatorWarmPoolCardHtml(state) {
+    if (!state || typeof state.ready !== "number") {
+      return '<p class="set-empty">Warm pool unavailable — the count didn\'t answer. ' +
+        "That says nothing about the pool itself; this card just couldn't read it.</p>";
+    }
+    var caption = state.ready === 0
+      ? "The pool is empty right now. Launches still work — they provision a cold box instead of claiming a warm one."
+      : "Counts boxes that are ready to claim plus boxes mid-refresh — both are pool members. " +
+        "Boxes being claimed or retired are already on their way out and aren't counted. " +
+        "The pool's target size is set on the provisioner, not here, so there's no total to compare against.";
+    return '<div class="op-metric">' +
+        '<span class="op-metric-v">' + esc(String(state.ready)) + "</span>" +
+        '<span class="op-metric-k">' + (state.ready === 1 ? "box ready" : "boxes ready") + "</span>" +
+      "</div>" +
+      '<p class="op-metric-cap">' + caption + "</p>";   // static author copy, not server data
+  }
+
+  // 4. FLEET DIGEST. A send LOG (rows ride the SHARED delivery-row grammar, the
+  // same helper the team-scoped notification log uses). Empty is the TRUE state
+  // in prod today: zero fleet_digest rows have ever been written (GR50).
+  function operatorDigestCardHtml(list) {
+    if (!Array.isArray(list)) {
+      return '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
+        "That says nothing about the digest itself; this card just couldn't read it.</p>";
+    }
+    if (!list.length) {
+      return '<p class="set-empty">No fleet digest has been sent yet. ' +
+        "The digest goes out daily at 06:00 UTC to the platform-operator addresses.</p>";
+    }
+    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+  }
+
+  // The page shell: four cards, each with its own body slot so one silent route
+  // never blanks the others. Painted BEFORE the reads land, so the console has a
+  // shape instantly and every card owns its loading line.
+  function operatorPageHtml() {
+    function card(id, heading, purpose) {
+      return '<section class="set-section">' +
+        '<h3 class="set-h">' + esc(heading) + "</h3>" +
+        '<p class="set-purpose">' + esc(purpose) + "</p>" +
+        '<div id="' + id + '"><div class="loading">Loading&hellip;</div></div>' +
+      "</section>";
+    }
+    return card("op-brake-body", "Rollout brake",
+        "The fleet-wide autoupdate kill switch — it stops every team's rollout at once.") +
+      card("op-canary-body", "Canary rollout",
+        "Every registered instance across every team, in the order the rollout walks them.") +
+      card("op-warm-body", "Warm pool",
+        "Pre-provisioned boxes a launch can claim instead of waiting for a cold provision.") +
+      card("op-digest-body", "Fleet digest",
+        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.");
+  }
+
+  // ---- DOM mounts -----------------------------------------------------------
+
+  // Fail-CLOSED entry point (GR49). Three outcomes:
+  //   • /v1/me hasn't answered yet  → an honest "checking" line; loadMe re-enters
+  //     here the moment it lands, so a real operator's deep link is never bounced
+  //     by a boot race.
+  //   • answered, not an operator   → BOUNCE to #overview. Registering "operator"
+  //     in VIEWS made init()'s validator accept the deep link for anybody, so the
+  //     sidebar gate alone is no longer enough.
+  //   • answered, operator          → paint the shell and read the four routes.
+  function loadOperator() {
+    var body = $("#operator-body");
+    if (!body) return;
+    if (!meCache) {
+      body.innerHTML = '<div class="loading">Checking operator access&hellip;</div>';
+      return;
+    }
+    if (!operatorRouteAllowed(meCache)) {
+      body.innerHTML = "";
+      // Setting the hash re-routes in a browser (hashchange → applyRoute); the
+      // explicit applyRoute() below makes the bounce synchronous and testable,
+      // and is idempotent when the browser's own event follows.
+      if (location.hash !== "#overview") location.hash = "#overview";
+      applyRoute();
+      return;
+    }
+    body.innerHTML = operatorPageHtml();
+    operatorRefresh();
+  }
+
+  // Read all four routes in parallel; each paints its own card. noBounce is
+  // LOAD-BEARING on every one: these are platform-operator gated, so a session
+  // that has lost the allowlist 403s (and an expired one 401s) — without it a
+  // stale probe would clearSession() and log the operator out mid-page.
+  function operatorRefresh() {
+    operatorPaint("#op-brake-body", OPERATOR_AUTOUPDATE, function (data) {
+      return operatorBrakeCardHtml(data);
+    }, function (slot) {
+      var btn = slot.querySelector ? slot.querySelector("[data-fleet-au]") : null;
+      if (btn) btn.addEventListener("click", function () { operatorConfirmBrake(btn.getAttribute("data-fleet-au")); });
+    });
+    operatorPaint("#op-canary-body", OPERATOR_FLEET, function (data) { return operatorCanaryCardHtml(data); });
+    operatorPaint("#op-warm-body", OPERATOR_WARM_POOL, function (data) { return operatorWarmPoolCardHtml(data); });
+    operatorPaint("#op-digest-body", OPERATOR_DELIVERIES, function (data) {
+      return operatorDigestCardHtml(data && data.deliveries);
+    });
+  }
+
+  // One card's read → render → (optional) wire. A non-ok read paints the card's
+  // own honest degrade (render(null)) rather than a spinner that never resolves.
+  function operatorPaint(sel, path, render, wire) {
+    var slot = $(sel);
+    if (!slot) return;
+    api("GET", path, null, { noBounce: true }).then(function (r) {
+      slot.innerHTML = render(r.ok ? r.data : null);
+      if (wire) wire(slot);
+    });
+  }
+
+  // Halting stops EVERY team's rollout, so it rides the danger-no-echo confirm
+  // tier (GR41): grave, but reversible in one click — no typed echo. Resume is
+  // the recovery direction and needs no ceremony.
+  function operatorConfirmBrake(verb) {
+    if (verb !== "halt") { fleetRolloutAction("resume", operatorRefresh); return; }
+    openConfirmModal({
+      tier: "danger",
+      title: "Halt fleet autoupdate?",
+      consequence: "No instance in any team advances to a new release until you resume. " +
+        "Instances already mid-update keep settling, and nothing is rolled back.",
+      confirmLabel: "Halt rollout",
+      busyLabel: "Halting…",
+      onConfirm: function (ctl) {
+        ctl.busy();
+        api("POST", OPERATOR_AUTOUPDATE + "/halt", {}, { noBounce: true }).then(function (r) {
+          if (r.ok) {
+            ctl.succeed();
+            toast({ kind: "success", title: "Rollout halted" });
+            operatorRefresh();
+            return;
+          }
+          ctl.fail(friendly(r.data, "Please try again."), "Try again", function () {
+            operatorConfirmBrake("halt");
+          });
+        });
+      },
     });
   }
 
@@ -10096,6 +10446,11 @@
         // Re-render now that the real role is known so an owner isn't stranded on
         // the member surface (mirrors loadSubscription's re-render seam).
         if (currentView() === "billing") renderBilling();
+        // GR49 twin of the seam above: a deep-linked #operator rendered its
+        // "checking access" state because meCache was still null. Now that the
+        // real answer is in, either the console paints or the non-operator is
+        // bounced — the decision is never made on an unloaded me.
+        if (currentView() === "operator") loadOperator();
       }
     });
   }
@@ -14842,6 +15197,10 @@
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);
     $("#activity-load-more").addEventListener("click", loadMoreActivity);
+    // GR39: the operator console's own refresh. Null-guarded like the optional
+    // affordances below — the header button only exists in the shipped shell.
+    var opRefresh = $("#operator-refresh");
+    if (opRefresh) opRefresh.addEventListener("click", operatorRefresh);
     // I-01: the delegated feed (Details / Show-all) + filter-chip listeners.
     wireActivityFeed();
     var notifTest = $("#notif-test");
@@ -15287,6 +15646,21 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50). operatorRouteAllowed is
+      // the fail-closed ROUTE gate — applyRoute itself is not exported and cannot
+      // be pinned, so the predicate it consults is pinned instead (GR49). The rest
+      // are the four cards' pure derivations; the DOM mounts (loadOperator /
+      // operatorRefresh / operatorPaint / operatorConfirmBrake) are smoke-driven.
+      operatorRouteAllowed: operatorRouteAllowed,
+      operatorRowState: operatorRowState,
+      operatorFleetSort: operatorFleetSort,
+      operatorStagingGateCopy: operatorStagingGateCopy,
+      operatorBrakeCardHtml: operatorBrakeCardHtml,
+      operatorCanaryCardHtml: operatorCanaryCardHtml,
+      operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,
+      operatorDigestCardHtml: operatorDigestCardHtml,
+      operatorPageHtml: operatorPageHtml,
+      OPERATOR_SETTLE_MIN: OPERATOR_SETTLE_MIN,
       // G-05 API tokens (GR34): the .set-check picker gate + the two DOM mounts
       // smoke drives directly (the modal is click-opened, so smoke's inert click()
       // can't reach it — same seam as renderActivateResult). canMintAnyAbility

@@ -1418,6 +1418,92 @@ const EXPECTATIONS = {
       assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
     },
   },
+
+  // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
+  // The crown surface, states-complete: rolling / halted / bounced / unreadable.
+  "operator-console": {
+    what: "Operator console (rolling) — brake live, canary ordered, staging gate open, warm pool ready, digest empty",
+    check(reg) {
+      assert.equal(reg.get("view-operator").hidden, false, "the Operator view must be visible for an operator");
+      const page = reg.get("operator-body").innerHTML || "";
+      for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest"])
+        assert.ok(page.includes(heading), "the page carries the " + heading + " card");
+
+      // 1. BRAKE — the SHARED banner model, with the console's one action control.
+      const brake = reg.get("op-brake-body").innerHTML || "";
+      assert.ok(brake.includes("Fleet autoupdate is live"), "the shared banner copy renders (never restated)");
+      assert.ok(brake.includes('data-fleet-au="halt"'), "the console owns the Halt control");
+      assert.ok(brake.includes("nothing is rolled back"), "the halt consequence is stated honestly");
+
+      // 2. CANARY — every row, the settle countdown, the top-level gate, 20m copy.
+      const canary = reg.get("op-canary-body").innerHTML || "";
+      for (const name of ["acme-canary", "acme-prod", "beta-prod", "fresh-box", "optout-prod"])
+        assert.ok(canary.includes(name), "the roll-up renders " + name);
+      assert.ok(canary.includes("SETTLE — 9m of 20m"), "the in-flight box shows its settle countdown");
+      assert.ok(canary.includes("a staging instance is current on the newest release"), "the TOP-LEVEL gate flag drives the gate line");
+      assert.ok(canary.includes("Unknown") && canary.includes("Autoupdate off") && canary.includes("Behind") && canary.includes("Current"),
+        "all four update_state vocabularies render");
+      assert.ok(canary.includes("SETTLE 20m") && !canary.includes("30m"), "20 minutes, never the mock's 30m");
+      // In-flight leads, then staging, then behind — the rollout's own order.
+      assert.ok(canary.indexOf("acme-prod") < canary.indexOf("acme-canary"), "the in-flight box leads");
+      assert.ok(canary.indexOf("acme-canary") < canary.indexOf("beta-prod"), "the staging canary precedes the prod queue");
+
+      // 3. WARM POOL — ONE number, no bar, no invented denominator.
+      const warm = reg.get("op-warm-body").innerHTML || "";
+      assert.ok(warm.includes(">2<"), "the ready count renders");
+      assert.ok(warm.includes("there's no total to compare against"), "the honest no-denominator caption renders");
+      assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar and no percentage");
+
+      // 4. DIGEST — empty is the true state, and there is NO send-now button.
+      const digest = reg.get("op-digest-body").innerHTML || "";
+      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty state renders");
+      assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
+    },
+  },
+  "operator-halted": {
+    what: "Operator console (halted) — Resume offered, gate closed, empty pool stated calmly, digest failure verbatim",
+    check(reg) {
+      const brake = reg.get("op-brake-body").innerHTML || "";
+      assert.ok(brake.includes("Fleet autoupdate is halted"), "the halted banner renders");
+      assert.ok(brake.includes("bad release 0.5.0"), "the server's halt reason is shown");
+      assert.ok(brake.includes('data-fleet-au="resume"'), "Resume is the offered action");
+      const canary = reg.get("op-canary-body").innerHTML || "";
+      assert.ok(canary.includes("closed — staging is behind or paused"), "the closed gate is stated");
+      const warm = reg.get("op-warm-body").innerHTML || "";
+      assert.ok(warm.includes("The pool is empty right now"), "an empty pool reads as a designed state");
+      assert.ok(!warm.includes("unavailable"), "an empty pool is never reported as an error");
+      const digest = reg.get("op-digest-body").innerHTML || "";
+      assert.ok(digest.includes("smtp: connection timed out"), "the failed send carries its verbatim error");
+      assert.ok(digest.includes("Sent") && digest.includes("Failed"), "both outcomes render");
+    },
+  },
+  "operator-denied": {
+    what: "Operator console — a non-operator deep link is BOUNCED to Overview (fail-closed route gate)",
+    check(reg) {
+      assert.equal(reg.get("view-operator").hidden, true, "the Operator view must NEVER render for a non-operator");
+      assert.equal(reg.get("view-overview").hidden, false, "the bounce lands on Overview");
+      assert.equal(reg.get("operator-body").innerHTML || "", "", "no operator markup is left behind");
+      assert.equal(reg.get("nav-operator").hidden, true, "the sidebar entry stays hidden too");
+    },
+  },
+  "operator-unreadable": {
+    what: "Operator console — every route 403s; each card says IT couldn't read, and none fakes a value",
+    check(reg) {
+      assert.equal(reg.get("view-operator").hidden, false, "an operator still reaches the page");
+      const brake = reg.get("op-brake-body").innerHTML || "";
+      const canary = reg.get("op-canary-body").innerHTML || "";
+      const warm = reg.get("op-warm-body").innerHTML || "";
+      const digest = reg.get("op-digest-body").innerHTML || "";
+      assert.ok(brake.includes("Rollout state unavailable"), "the brake degrades honestly");
+      assert.ok(!brake.includes("data-fleet-au"), "an unreadable brake offers no button");
+      assert.ok(canary.includes("Fleet unavailable"), "the canary degrades honestly");
+      assert.ok(warm.includes("Warm pool unavailable"), "the warm pool degrades honestly");
+      assert.ok(!warm.includes("op-metric-v"), "no fake zero is drawn when the count didn't answer");
+      assert.ok(digest.includes("Digest log unavailable"), "the digest degrades honestly");
+      for (const html of [brake, canary, warm, digest])
+        assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

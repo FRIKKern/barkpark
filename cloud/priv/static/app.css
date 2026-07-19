@@ -4156,6 +4156,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 @media (max-width: 620px) {
   .detail-head--inst { flex-direction: column; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
+}
+
+/* ==========================================================================
    D-04 — Timeline event-coalescing grammar (gr-p3, GR26, styleguide §07).
    "<thing> × N · cadence · shared verdict" with an expand affordance. The
    tlv-coalesce family EXTENDS the tlv-* feed row — new classes, never sg-*
@@ -4274,3 +4277,58 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .site-domains { margin-top: 22px; }
 /* The v4 site-detail headline: domain + honest state chip on one line. */
 .site-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ------------------------------------------------ OPERATOR CONSOLE (gr-p5)
+   GR39/GR50. The four cards ride the shared GR33 .set-* anatomy (.set-section /
+   .set-h / .set-purpose / .set-row* / .set-empty) — these rules add only what
+   that vocabulary has no word for: the read-only warm-pool metric, the staging
+   gate line, and the rollout's footnote. Tokens only; every fg/bg pairing here
+   (--text / --muted-text / --dim on --surface) is an existing CONTRAST_PAIRS
+   entry, so the console needs no new pair (GR33 contrast law). */
+
+/* The read-only link that replaces the brake button on the team-scoped Fleet
+   banner (GR49). Inherits the notice's own --text, so it adds no contrast pair. */
+.notice-link {
+  margin-left: auto;
+  color: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Warm pool: ONE number. No bar and no percentage — there is no denominator
+   anywhere in the control plane to draw one against (GR50). */
+.op-metric { display: flex; align-items: baseline; gap: var(--space-2); }
+.op-metric-v {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.op-metric-k { font-size: var(--text-sm); color: var(--muted-text); }
+.op-metric-cap {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--muted-text);
+}
+
+/* The staging-gate sentence above the canary rows — a pill + the honest state. */
+.op-gate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+/* The rollout's own vocabulary, stated once under the rows. */
+.op-foot {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--dim);
+}
