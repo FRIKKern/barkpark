@@ -126,6 +126,17 @@ shot() {
   # scenarios that carry a deepLink, making every accent-suffixed filename a lie
   # (charter GR58). Do not reorder.
   local url="http://localhost:$PORT/?scen=$scen&theme=$theme$accent_q$deep"
+  # …and this is the tripwire that makes "do not reorder" enforceable. shoot.sh
+  # has no automated coverage at all, which is exactly how the original bug
+  # survived long enough to void every accent proof this epic ever cited. A
+  # re-swap would once again produce plausible-looking PNGs under lying
+  # filenames; this aborts the run instead.
+  if [[ -n "$accent_q" && "${url%%#*}" != *"accent=$accent"* ]]; then
+    echo "!! shoot.sh: ACCENT=$accent landed inside the URL FRAGMENT, not the query." >&2
+    echo "!! mock.js reads location.search and would silently render evergreen." >&2
+    echo "!! url: $url" >&2
+    exit 1
+  fi
   local png="$OUT/${scen}-${theme}-${width}${accent_sfx}.png"
   # Fresh --user-data-dir per shot dodges the shared-profile lock (the local
   # Chrome-drive gotcha) and keeps runs hermetic.
