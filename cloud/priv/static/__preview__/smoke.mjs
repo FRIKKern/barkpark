@@ -754,6 +754,64 @@ const EXPECTATIONS = {
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
     },
   },
+
+  // ── D-06+D-07 Usage + Metrics in v4 (GR27/GR28): the metrics scenario existed
+  // with ZERO smoke EXPECTATIONS (GR30) — these assert all three beat states plus
+  // the dashed request-level stubs, and pin the GR28 warmup fiction OUT of every
+  // state. mountMetricsTab re-acquires its swap box the mountUsageTab way
+  // (`.metrics-body || panel`), so the grid lands in the OBSERVABLE
+  // #instance-tabpanel here. (tail-append, OC9.) ──────────────────────────────
+  metrics: {
+    what: "the Metrics tab routes and fills all 4 live vitals + the dashed not-yet-metered stubs (no warmup fiction)",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      for (const needle of ["inst-tabs", '/metrics" aria-current="page"', 'id="instance-tabpanel"', ">Metrics<"]) {
+        assert.ok(body.includes(needle), "#instance-body missing " + JSON.stringify(needle));
+      }
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.length > 0, "#instance-tabpanel metrics panel rendered empty");
+      // GR27: all four vitals plot as cards (design showed only CPU/RAM).
+      assert.ok(panel.includes('class="metrics-grid"'), "the vitals grid renders");
+      for (const label of [">CPU<", ">Memory<", ">Disk<", ">Load<"]) {
+        assert.ok(panel.includes(label), "the vitals grid renders " + JSON.stringify(label));
+      }
+      assert.ok(panel.includes("<svg"), "a live vital draws its sparkline");
+      // D-07: the dashed request-level stubs, honestly not-yet-metered.
+      assert.ok(panel.includes('class="metrics-stubs"'), "the request-level stubs render beneath the vitals");
+      for (const label of [">Req/s<", ">p95 latency<", ">API requests<"]) {
+        assert.ok(panel.includes(label), "the stub renders " + JSON.stringify(label));
+      }
+      assert.ok(panel.includes("Not yet metered"), "a stub reads Not yet metered, never a fake number");
+      // The live beat banner reads Live (not the stale skin).
+      assert.ok(panel.includes('class="metrics-fresh'), "the live beat renders the fresh banner");
+      // GR28 kill list: the 24h-warmup fiction never crosses into the build.
+      assert.ok(!/warming up|24h|24 h|of 24|unlock|collected/i.test(panel), "no warmup fiction in the live panel");
+    },
+  },
+  "metrics-stale": {
+    what: "the Metrics tab stale beat — last-known vitals flagged Agent offline, stubs still present",
+    check(reg) {
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.includes('class="metrics-stale"'), "the stale banner renders");
+      assert.ok(panel.includes("Agent offline"), "the stale banner reads Agent offline");
+      assert.ok(panel.includes("last seen "), "the stale banner carries the last-seen age");
+      // A stale read STILL shows the last-known series (history, not blank).
+      assert.ok(panel.includes('class="metrics-grid"'), "the last-known vitals still render on a stale beat");
+      assert.ok(panel.includes('class="metrics-stubs"'), "the stubs still render on a stale beat");
+      assert.ok(!/warming up|24h|24 h|of 24|unlock|collected/i.test(panel), "no warmup fiction in the stale panel");
+    },
+  },
+  "metrics-absent": {
+    what: "the Metrics tab absent beat — the honest waiting panel, never a zeroed chart or a fake stub",
+    check(reg) {
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.includes("Waiting for the first beat"), "the absent state shows the honest waiting panel");
+      assert.ok(!panel.includes('class="metrics-grid"'), "no zeroed vitals grid in the absent state");
+      assert.ok(!panel.includes('class="metrics-stubs"'), "no request-level stubs in the absent state");
+      assert.ok(panel.indexOf("<svg") === -1, "no fabricated chart in the absent state");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

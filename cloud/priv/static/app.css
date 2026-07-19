@@ -2421,6 +2421,26 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .metric--info .metric-spark { color: var(--info); }
 .metric--ok .metric-spark { color: var(--ok); }
 .metric--warn .metric-spark { color: var(--warn); }
+/* D-07 (GR27): the request-level signals the agent doesn't report yet — honest
+   DASHED stubs beneath the vitals grid. The dashed border reads "planned, not
+   present" against the solid vitals cards; the value is dimmed "Not yet metered"
+   (never a fabricated number — GR28 killed the 24h-warmup fiction). */
+.metrics-stubs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.metrics-stub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+.metrics-stub-label { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; }
+.metrics-stub-value { font-size: 12px; }
 .metrics-health { margin-top: 12px; }
 
 /* ---------- Webhooks tab ---------- */

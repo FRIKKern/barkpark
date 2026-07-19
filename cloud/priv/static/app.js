@@ -11243,6 +11243,17 @@
     { key: "load", label: "Load", unit: "", role: "info" },
   ];
 
+  // GR27/D-07: the request-level signals the on-box agent does NOT yet report.
+  // Rendered as honest DASHED stubs beneath the live vitals grid — a promise of
+  // WHAT (not WHEN, and never a fabricated number: GR28 killed the "unlocks after
+  // 24h" fiction outright). Each carries the same "Not yet metered" wording the
+  // Usage tab uses for an unmetered meter, so the two tabs read as one honesty.
+  var METRIC_STUBS = [
+    { key: "req_per_s", label: "Req/s" },
+    { key: "p95_ms", label: "p95 latency" },
+    { key: "api_requests", label: "API requests" },
+  ];
+
   // Pure: an honest human age from the beat's age_seconds. Deterministic (no
   // Date.now dependency — the server already computed the age at collection), so
   // the reducer is node-pinnable. A negative/absent/garbage age → "".
@@ -11415,6 +11426,20 @@
       '<div class="fleet-badges">' + line + "</div></div>";
   }
 
+  // Pure: the dashed request-level stubs beneath the vitals grid. Constant (no
+  // model input) — these signals are honestly not-yet-metered, so the row states
+  // WHAT is coming, never a fabricated number or an ETA (GR28). Rendered only
+  // alongside a real read (live/stale); the absent panel owns its own empty state.
+  function metricsStubsHtml() {
+    var cells = METRIC_STUBS.map(function (s) {
+      return '<div class="metrics-stub">' +
+        '<span class="metrics-stub-label">' + esc(s.label) + "</span>" +
+        '<span class="metrics-stub-value dim">Not yet metered</span>' +
+      "</div>";
+    }).join("");
+    return '<div class="metrics-stubs" aria-label="Request-level metrics">' + cells + "</div>";
+  }
+
   // Pure: the freshness / stale banner above the grid.
   function metricsHeadHtml(model) {
     if (model.stale) {
@@ -11436,6 +11461,7 @@
     var grid = model.metrics.map(metricsCardHtml).join("");
     return metricsHeadHtml(model) +
       '<div class="metrics-grid">' + grid + "</div>" +
+      metricsStubsHtml() +
       metricsHealthHtml(model.health);
   }
 
@@ -11469,6 +11495,11 @@
   var metricsSeq = 0;
   var metricsPollTimer = null;
   function mountMetricsTab(panel, bp) {
+    // Defensive re-acquire by id (the mountUsageTab idiom): the caller passes the
+    // freshly-rendered tabpanel, but a lost ref still resolves through
+    // getElementById — so the vitals render (and stay observable to the preview
+    // harness) rather than no-op.
+    if (!panel && typeof document !== "undefined" && document.getElementById) panel = document.getElementById("instance-tabpanel");
     if (!panel) return;
     panel.innerHTML = metricsTabShellHtml();
     var seq = ++metricsSeq;
@@ -11476,7 +11507,10 @@
     function tick() {
       api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/metrics?points=" + METRICS_POINTS).then(function (r) {
         if (seq !== metricsSeq) return; // a newer mount owns the tab
-        var box = panel.querySelector(".metrics-body");
+        // The shell's .metrics-body is the swap target in the live DOM; fall back
+        // to the panel itself if a harness can't resolve the sub-query (the
+        // mountUsageTab `.fleet-body || panel` idiom — same element the grid lands in).
+        var box = panel.querySelector(".metrics-body") || panel;
         if (!box || box.isConnected === false) return; // navigated away mid-flight
         if (!r.ok || !r.data) {
           box.innerHTML = metricsErrorHtml(r.status);
@@ -12959,6 +12993,7 @@
       metricsAgeText: metricsAgeText, metricsValueText: metricsValueText,
       metricsPanelHtml: metricsPanelHtml, metricsCardHtml: metricsCardHtml,
       metricsHealthHtml: metricsHealthHtml, metricsKeys: METRIC_SPECS.map(function (s) { return s.key; }),
+      metricsStubsHtml: metricsStubsHtml, metricsStubKeys: METRIC_STUBS.map(function (s) { return s.key; }),
       // S14 (azure-hetzner hosting): the archives panel. Only the pure projection
       // (archivesModel) + its render helpers are node-pinned; the DOM mount
       // (loadArchives) is browser-verified.

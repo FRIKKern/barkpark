@@ -4637,6 +4637,40 @@ test("S12: metricsHealthHtml — failing checks surface; absent counts hide (nev
   assert.match(bad, /failing: disk, http/);
 });
 
+// D-07 (GR27): the request-level stubs are honest dashed rows — WHAT, never a
+// fabricated number and never the 24h-warmup ETA fiction (GR28).
+test("D-07: metricsStubsHtml renders exactly the three not-yet-metered signals, dimmed, no number", () => {
+  const html = hooks.metricsStubsHtml();
+  assert.deepEqual([...hooks.metricsStubKeys], ["req_per_s", "p95_ms", "api_requests"]);
+  assert.equal((html.match(/class="metrics-stub"/g) || []).length, 3);
+  for (const label of ["Req/s", "p95 latency", "API requests"]) {
+    assert.ok(html.includes(">" + label + "<"), "the " + label + " stub renders");
+  }
+  assert.equal((html.match(/Not yet metered/g) || []).length, 3);
+  // Honest absence: no fabricated digit, no ETA — the GR28 kill list stays dead.
+  assert.ok(!/\d/.test(html.replace(/p95/g, "")), "a stub never shows a number");
+  assert.doesNotMatch(html, /warm|24\s?h|unlock|collected/i);
+});
+
+test("D-07: metricsPanelHtml shows the stubs alongside a live read + carries NONE of the killed warmup copy", () => {
+  const live = hooks.metricsPanelHtml(hooks.metricsSeries(METRICS_LIVE));
+  assert.match(live, /metrics-grid/); // the 4 live vitals
+  assert.match(live, /metrics-stubs/); // the dashed request-level stubs
+  assert.match(live, />Req\/s</);
+  // GR28 kill list: the "metrics are warming up / 24h / N of 24h collected"
+  // fiction must NOT be reachable in the built panel, in any state.
+  for (const html of [live, hooks.metricsPanelHtml(hooks.metricsSeries({ beat: { status: "stale", age_seconds: 200 }, series: METRICS_LIVE.series }))]) {
+    assert.doesNotMatch(html, /warming up|24h|24 h|of 24|unlock|collected/i);
+  }
+});
+
+test("D-07: the absent panel owns its empty state — no vitals grid, no stubs, never a zeroed chart", () => {
+  const absent = hooks.metricsPanelHtml(hooks.metricsSeries({ ok: true, beat: { status: "absent" }, series: {} }));
+  assert.match(absent, /Waiting for the first beat/);
+  assert.ok(absent.indexOf("metrics-grid") === -1, "no vitals grid in the absent state");
+  assert.ok(absent.indexOf("metrics-stubs") === -1, "no request-level stubs in the absent state");
+});
+
 // ── S14 portable archives: the console archives panel (pure projection) ──────
 test("S14: the archives helpers are exported", () => {
   for (const name of ["archivesModel", "archiveRowHtml", "archivesPanelHtml"]) {

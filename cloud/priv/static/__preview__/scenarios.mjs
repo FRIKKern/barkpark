@@ -1462,6 +1462,38 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── D-07 metrics — the stale + absent beats (tail-append, OC9) ─────────────
+  // The live beat is the `metrics` scenario above; these complete the S12
+  // live/stale/absent trichotomy. Stale keeps the last-known series (a stale
+  // read shows history, never blank); absent has no series at all (the honest
+  // waiting panel, never a zeroed chart). Both still carry the dashed
+  // request-level stubs beneath a real read — but the absent panel does not.
+  "metrics-stale": {
+    label: "Metrics tab — a stale beat: last-known vitals flagged 'Agent offline' + the last-seen age",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/metrics",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      metrics: { ...metricsLive, beat: { status: "stale", age_seconds: 480, last_seen_at: tMinus(480) } },
+    },
+  },
+  "metrics-absent": {
+    label: "Metrics tab — no beat ever: the honest waiting panel, never a zeroed chart or a fake stub",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/metrics",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      metrics: { ok: true, beat: { status: "absent" }, series: {} },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
