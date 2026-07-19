@@ -785,6 +785,50 @@ const EXPECTATIONS = {
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
     },
   },
+
+  // ── gr-p3 instance workspace (GR24/GR30): D-02 header + D-03 Overview ──────
+  // The scenario predates this wave with a fixture but ZERO assertions (the
+  // GR30 vacuous-green finding) — these are its first EXPECTATIONS.
+  "panel-overview": {
+    what: "the v4 instance workspace: two-axis header, bp CLI card, composed Overview",
+    check(reg) {
+      const body = reg.get("instance-body").innerHTML || "";
+      // D-02 header: H1 + the two-axis compound pill + mono address + copy.
+      assert.ok(body.includes("detail-head--inst"), "the v4 header renders");
+      assert.ok(body.includes("status-pill-label"), "the compound pill renders its label axis");
+      assert.ok(body.includes('data-copy="production-5b2c1e.barkpark.cloud"'), "the address carries the copy affordance");
+      assert.ok(body.includes('id="inst-open-studio"'), "Open Studio is the primary action");
+      assert.ok(body.includes('id="inst-cli-toggle"'), "the bp CLI disclosure renders");
+      assert.ok(body.includes('aria-controls="inst-lifecycle-actions"'), "the disclosure points at the card slot");
+      // D-03 Overview: one composed pass — updates card, Sites card, card rail.
+      assert.ok(body.includes("update-panel"), "the updates card renders");
+      assert.ok(body.includes("inst-sites-card"), "the Sites card renders");
+      assert.ok(body.includes("detail-rail--cards"), "the rail renders as cards");
+      for (const label of ["Identity", "Runtime", "Platform", "Activity"]) {
+        assert.ok(body.includes('rail-group-label">' + label + "<"), "rail card " + label + " renders");
+      }
+      assert.ok(body.includes('id="instance-domains"'), "the domain-checklist slot renders (component consumed as-is)");
+      assert.ok(body.includes('id="instance-tabpanel"'), "the tab panel pin holds");
+      // The bp CLI card paints into its slot from the capabilities conduit:
+      // 4 copyable commands, the SERVER-OWNED pause sentence, Decommission….
+      const card = reg.get("inst-lifecycle-actions").innerHTML || "";
+      assert.ok(card.includes("Manage this instance via the bp CLI"), "the CLI card head renders");
+      for (const verb of ["archive", "resurrect", "adopt", "audit"]) {
+        assert.ok(card.includes("bp cloud instance " + verb + " Production"), "the " + verb + " command chip renders");
+      }
+      assert.ok(card.includes("a stopped server still bills"), "the foot renders the conduit's own pause sentence");
+      assert.ok(card.includes('data-life-verb="decommission"'), "the typed-confirm Decommission anchors the foot");
+      // The golden-path verify card fills its slot off the events feed
+      // (no verify event in the fixture → the honest never-run invite).
+      const vf = reg.get("instance-verify").innerHTML || "";
+      assert.ok(vf.includes("vf-card"), "the golden-path card renders");
+      assert.ok(vf.includes("Golden path"), "the card heading renders");
+      assert.ok(vf.includes("Run first check"), "the never-run state invites the first check");
+      // Sites slot resolves to the honest empty state (fixture has no sites).
+      const sites = reg.get("instance-sites").innerHTML || "";
+      assert.ok(sites.includes("No sites yet"), "the Sites empty state renders");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

@@ -833,13 +833,14 @@
   function lifecycleActionHtml(a) {
     if (!a) return "";
     if (a.mode === "live") {
+      // The destroy-tier console verb (Decommission) — the trailing ellipsis is
+      // the typed-confirm promise (screens/02): a modal follows, never a direct fire.
       return '<button class="btn btn-danger btn-sm" type="button" data-life-verb="' + esc(a.verb) +
-        '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "</button>";
+        '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "&hellip;</button>";
     }
     if (a.mode === "cli") {
       // Capability true but console-unwired: the verb label + the exact command
-      // chip. The "via the bp CLI" caption is rendered ONCE at the row level
-      // (lifecycleActionRowHtml) instead of repeated per verb — density cut.
+      // chip (screens/02: one boxed row per verb, copy affordance on the chip).
       return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
         cliChipHtml(a.cli) + "</div>";
     }
@@ -850,7 +851,13 @@
       (a.reason ? '<span class="inst-life-reason">' + esc(a.reason) + "</span>" : "") + "</div>";
   }
 
-  // Pure render of the whole action row from its model.
+  // Pure render of the whole "bp CLI" card from its model (GR24, screens/02):
+  // a head (title + lifecycle pill + conduit status), the command grid, then a
+  // foot where the pause verb's SERVER-OWNED gap sentence (on Hetzner: "a
+  // stopped server still bills — archive instead", failure_copy.ex owns the
+  // words) sits beside the destroy-tier Decommission…. A provider whose pause
+  // IS a capability gets pause as a normal command row and no foot sentence —
+  // the copy is always the conduit's, never invented here.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
     // The label sits in its own span so it stays neutral (--text) while the dot
@@ -871,15 +878,31 @@
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
 
-    // One "via the bp CLI" caption for the whole row when any verb is a CLI
-    // affordance — replaces the per-verb repetition (four → one).
-    var hasCli = (model.actions || []).some(function (a) { return a && a.mode === "cli"; });
-    var via = hasCli ? '<div class="inst-life-via">via the bp CLI</div>' : "";
+    var actions = model.actions || [];
+    // The disabled PAUSE verb moves to the foot as the server's own sentence
+    // (screens/02's Hetzner-billing line IS capability_gap_reason("hetzner",
+    // "pause") — rendered verbatim, no client fork of it). Every other verb
+    // stays in the grid; decommission anchors the foot.
+    var pausedGap = null;
+    var live = null;
+    var gridRows = actions.filter(function (a) {
+      if (!a) return false;
+      if (a.mode === "live") { live = a; return false; }
+      if (a.verb === "pause" && a.mode === "disabled") { pausedGap = a; return false; }
+      return true;
+    }).map(lifecycleActionHtml).join("");
 
-    return '<div class="inst-life-head">' + pill +
-      (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
-      '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>" +
-      via;
+    var foot = (pausedGap && pausedGap.reason
+        ? '<span class="inst-life-footnote">' + esc(pausedGap.reason) + "</span>"
+        : '<span class="inst-life-footnote"></span>') +
+      (live ? lifecycleActionHtml(live) : "");
+
+    return '<div class="cli-card">' +
+      '<div class="inst-life-head"><span class="cli-card-title">Manage this instance via the bp CLI</span>' +
+        pill + (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
+      (gridRows ? '<div class="inst-life-actions">' + gridRows + "</div>" : "") +
+      '<div class="cli-card-foot">' + foot + "</div>" +
+    "</div>";
   }
 
   // ---- S14 portable-archives pure helpers (azure-hetzner hosting) ------------
@@ -3500,15 +3523,22 @@
   // Overview panel is the pre-C6 detail body verbatim; the Timeline and Webhooks
   // panels are filled by their mount fns after the shell paints. opts.ready folds
   // the timeline slot into the shared ready panel (A4 — the provision→live moment).
+  // GR24 (screens/02): whether the bp CLI card is disclosed. Module state (not
+  // DOM state) so the operator's open card survives the frequent SSE-driven
+  // full re-renders of this view — the instanceConsoleCollapsed precedent.
+  var instanceCliOpen = false;
+
   function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
-    // S11b: the persistent lifecycle action row sits between the header and the
-    // tabs — a workspace affordance visible on every tab. The slot is filled
-    // async by wireLifecycleActions (the /v1/providers/capabilities conduit); it
-    // renders ONLY where teardown makes sense (showLifecycleRow), so a clean
-    // provisioning box keeps the timeline as its sole surface.
+    // S11b + GR24: the lifecycle surface between the header and the tabs is now
+    // the collapsible "bp CLI" card (screens/02), disclosed by the header's
+    // #inst-cli-toggle. The slot is filled async by wireLifecycleActions (the
+    // /v1/providers/capabilities conduit); it renders ONLY where teardown makes
+    // sense (showLifecycleRow), so a clean provisioning box keeps the timeline
+    // as its sole surface.
     var lifeSlot = showLifecycleRow(bp)
-      ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"></div>'
+      ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"' +
+        (instanceCliOpen ? "" : " hidden") + "></div>"
       : "";
     return instanceHeaderHtml(bp) +
       lifeSlot +
@@ -3560,6 +3590,10 @@
   function instanceHeaderHtml(bp) {
     var lc = instanceLifecycle(bp);
 
+    // The address line (screens/02): mono URL + the shared [data-copy]
+    // affordance for an up box; the in-flight / failed states keep their
+    // honest chips (the SSE fast path in loadInstance patches
+    // .fleet-url.provisioning in place — that class stays load-bearing).
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
@@ -3568,11 +3602,14 @@
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="fleet-url">' + esc(publicUrl(bp)) + "</div>";
+            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
 
-    // The header collapses to ONE pill (charter decision 6). The health / agent
-    // breakdown that USED to be badge-soup now lives only in the Details rail.
-    var badges = statusPill(bp);
+    // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
+    // already carries label + detail ("Degraded · Health down"); its rules are
+    // consumed, never edited here (GR25 quarantine).
+    var pill = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
     var updateBtn = lc.live && bp.update_state === "behind"
@@ -3585,23 +3622,42 @@
       ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
       : "";
 
-    // S11b: the bare Remove button is SUPERSEDED by the lifecycle action row's
-    // typed-confirm Decommission (one teardown affordance, not two). The header
-    // keeps Retry removal (a distinct retry of a FAILED teardown, which the
-    // conduit doesn't cover). Failed provisions get their teardown from the
-    // action row + Retry from the timeline, so the header stays action-free.
+    // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
+    // (#inst-lifecycle-actions, the conduit-driven lifecycle surface). Renders
+    // exactly when the card itself does (showLifecycleRow), so the toggle can
+    // never point at an absent panel; open state persists across SSE repaints
+    // via instanceCliOpen (the instanceConsoleCollapsed precedent).
+    // (Two full static literals, not a composed class head — the __css_check
+    // E3 contract wants every class string statically resolvable.)
+    var cliToggle = !showLifecycleRow(bp)
+      ? ""
+      : instanceCliOpen
+        ? '<button class="btn btn-ghost btn-sm inst-cli-toggle is-open" id="inst-cli-toggle" type="button" aria-expanded="true"' +
+          ' aria-controls="inst-lifecycle-actions">bp CLI <span class="inst-cli-caret" aria-hidden="true">&#9662;</span></button>'
+        : '<button class="btn btn-ghost btn-sm inst-cli-toggle" id="inst-cli-toggle" type="button" aria-expanded="false"' +
+          ' aria-controls="inst-lifecycle-actions">bp CLI <span class="inst-cli-caret" aria-hidden="true">&#9662;</span></button>';
+
+    // S11b: the bare Remove button is SUPERSEDED by the CLI card's typed-confirm
+    // Decommission (one teardown affordance, not two). The header keeps Retry
+    // removal (a distinct retry of a FAILED teardown, which the conduit doesn't
+    // cover). A failed provision keeps the CLI-card toggle (its teardown home);
+    // Retry lives in the timeline (data-tl-retry).
     var actions =
       lc.removing
         ? ""
         : lc.removeFailed
           ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
           : lc.failed
-            ? "" // teardown lives in the lifecycle action row; Retry in the timeline (data-tl-retry)
-            : bp.host
-              ? updateBtn +
-                '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
-                domainBtn
-              : "";
+            ? cliToggle
+            : lc.suspended
+              // A suspended server is STOPPED — an Open Studio button here
+              // would be a dead click. Teardown stays reachable via the card.
+              ? cliToggle
+              : bp.host
+                ? updateBtn +
+                  '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
+                  domainBtn + cliToggle
+                : "";
 
     // The failed case is owned by the timeline now (its fail block shows the
     // verbatim provision_error), so no duplicate "provisioning failed" banner.
@@ -3614,8 +3670,9 @@
             esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
           : "";
 
-    return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
-      '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
+    return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
+      '<div class="detail-title-row"><h1>' + esc(bp.name) + "</h1>" + pill + "</div>" + url + "</div>" +
+      (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div>" +
       failBanner;
   }
 
@@ -3649,33 +3706,39 @@
     // A4/D60: pre-host the timeline is the primary surface — the whole Sites
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
-    // The rail is grouped into labelled sub-sections instead of one flat list, so
-    // it scans as chunks (identity / runtime / platform / activity). railGroup is
-    // a thin local wrapper — same railRow* helpers, same #instance-domains slot.
+    // GR24 (D-03, v4): the rail's labelled sub-sections render as CARDS —
+    // same railRow* helpers, same #instance-domains slot, mono eyebrow labels.
     var railGroup = function (label, rows) {
       return '<div class="rail-group"><div class="rail-group-label">' + esc(label) + "</div>" + rows + "</div>";
     };
-    return timeline + verifySlot +
+    return timeline +
       // detail-grid--instance widens the rail (the domain checklist lives there);
       // the site-deploys grid keeps the bare .detail-grid (byte-identical).
       '<div class="detail-grid detail-grid--instance">' +
         // .inst-overview gives the main column a uniform vertical rhythm so the
-        // update panel + Sites read as evenly-spaced sections, not a flat stack.
+        // golden-path + update + Sites cards read as evenly-spaced sections.
         '<div class="detail-main inst-overview">' +
-          // isu-w5: the operator update panel is the face of the Overview for a
-          // live box — update truth + policy controls sit above Sites.
+          // GR24 (D-03): the golden-path verify card leads the main column
+          // (screens/02 overview), then update truth, then Sites. The verify
+          // slot is filled async by loadInstanceVerify — empty renders nothing.
+          verifySlot +
           (hasHost
             ? updatePanelHtml(bp) +
-              '<section><h2 style="display:flex;align-items:center;justify-content:space-between">Sites ' +
-                '<button class="btn" id="site-new-btn" type="button" style="font-size:.85em">+ New site</button></h2>' +
+              '<section class="card inst-sites-card"><div class="inst-sites-head"><h2>Sites</h2>' +
+                '<button class="btn btn-ghost btn-sm" id="site-new-btn" type="button">+ New site</button></div>' +
                 '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
             : '<div id="instance-sites"></div>') +
         "</div>" +
-        '<aside class="detail-rail">' +
+        // GR24 (D-03): the identity/runtime rail — every value a REAL fleet
+        // field (S6 stamps provider/region/server_type; blank-tolerant "—").
+        '<aside class="detail-rail detail-rail--cards">' +
           railGroup("Identity",
             railRowCopy("ID", bp.id) +
             railRowCopy("Host", bp.host || "—") +
-            railRow("Slug", bp.slug || "—")) +
+            railRow("Slug", bp.slug || "—") +
+            railRow("Provider", bp.provider ? cap(String(bp.provider)) : "—") +
+            railRow("Region", bp.region || "—") +
+            railRow("Size", bp.server_type || "—")) +
           railGroup("Runtime",
             railRow("Mode", bp.mode || "—") +
             railRow("Health", railValue(cap(health), hasHost)) +
@@ -3686,6 +3749,8 @@
           // per-host DNS/TLS checklist. The slot renders the static value first
           // (no layout jump); loadInstanceDomains replaces it with the checklist
           // when the box has attached domains (GET /v1/barkparks/:id/domain-status).
+          // Component consumed AS-IS (gr-p3-site-detail owns its internals); an
+          // instance carries at most 2 domains ever (GR27), so the card never grows.
           '<div class="rail-group"><div class="rail-group-label">Platform</div>' +
             '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div></div>" +
           railGroup("Activity",
@@ -3703,6 +3768,16 @@
     wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
+    // GR24: the "bp CLI ▾" disclosure — show/hide the CLI card and remember the
+    // choice across SSE repaints (module state, see instanceCliOpen).
+    var cliT = $("#inst-cli-toggle");
+    if (cliT) cliT.addEventListener("click", function () {
+      instanceCliOpen = !instanceCliOpen;
+      var card = $("#inst-lifecycle-actions");
+      if (card) card.hidden = !instanceCliOpen;
+      cliT.setAttribute("aria-expanded", instanceCliOpen ? "true" : "false");
+      cliT.classList.toggle("is-open", instanceCliOpen);
+    });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     // The bare Remove button is superseded by the lifecycle action row's typed
@@ -4187,7 +4262,7 @@
     // — data-rollback, never data-au — and the SERVER owns whether a previous slot
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
-    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back</button>';
+    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>';
     var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
 
     return '<div class="card update-panel">' +
@@ -5677,12 +5752,14 @@
     var runBtn = model.ran
       ? '<button class="btn btn-sm" type="button" data-vf-run>Check now</button>'
       : '<button class="btn btn-sm btn-primary" type="button" data-vf-run>Run first check</button>';
+    // GR24 (D-03, v4): the verdict line reads as the card's subtitle under the
+    // heading (screens/02 overview) — same honest verifySummaryText, chips below.
     return '<div class="vf-card">' +
-      '<div class="vf-head"><h2>Golden path</h2>' + runBtn + "</div>" +
+      '<div class="vf-head"><div class="vf-head-main"><h2>Golden path</h2>' +
+        '<p class="vf-meta">' + esc(verifySummaryText(model)) + "</p></div>" + runBtn + "</div>" +
       '<div class="vf-chips" role="list" aria-label="Verification checks">' +
         model.chips.map(verifyChipHtml).join("") +
       "</div>" +
-      '<div class="vf-meta">' + esc(verifySummaryText(model)) + "</div>" +
       (noteHtml || "") +
       "</div>";
   }
@@ -13161,6 +13238,13 @@
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
+      // gr-p3 instance workspace (GR24, screens/02): the v4 header (two-axis
+      // compound pill + address copy + bp CLI disclosure) and the composed
+      // Overview pass — both pure string builders; the toggle wiring
+      // (wireInstanceActions #inst-cli-toggle) is browser+smoke-verified.
+      instanceHeaderHtml: instanceHeaderHtml,
+      instanceOverviewHtml: instanceOverviewHtml,
+      instanceLifecycle: instanceLifecycle,
     });
   }
 })();

@@ -6709,6 +6709,17 @@ test("gr-p3: the v4 fleet-row + update helpers are exported", () => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// gr-p3 instance workspace (GR24, screens/02) — the v4 header, the bp CLI card,
+// and the composed Overview pass. Tail-append (OC9).
+// ════════════════════════════════════════════════════════════════════════════
+
+test("GR24: the header helpers are exported", () => {
+  for (const name of ["instanceHeaderHtml", "instanceOverviewHtml", "instanceLifecycle"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
 test("gr-p3: fleetMetaHtml is the backend-true mono line, blank-tolerant", () => {
   assert.equal(hooks.fleetMetaHtml({}), ""); // an empty row renders nothing (no dangling ·)
   const full = hooks.fleetMetaHtml(fleetBp());
@@ -6811,4 +6822,102 @@ test("gr-p3: archivesModel — a GENERIC store outage stays the transient error 
   assert.equal(html.indexOf("archives-note--unconfigured"), -1);
   assert.equal(html.indexOf("How archives work"), -1); // no docs link on a transient outage
   assert.match(html, /data-archives-retry/);
+});
+
+const GR24_LIVE = {
+  id: "b-1", name: "Gyldendal", slug: "gyldendal", host: "5.75.169.183",
+  url: "https://gyldendal-506f035e.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.2.25",
+  git_commit: "c801681aa00", provider: "hetzner", region: "fsn1", server_type: "cx22",
+  update_state: "current", provision_status: "succeeded",
+};
+
+test("GR24: a live header carries the two-axis pill, the mono address + copy, and the action trio", () => {
+  const html = hooks.instanceHeaderHtml(GR24_LIVE);
+  // two-axis compound pill: statusPill's label + detail axes both render.
+  assert.match(html, /status-pill status-pill--ok/);
+  assert.match(html, /status-pill-label">Healthy</);
+  assert.match(html, /status-pill-detail">v0\.2\.25</);
+  // the address line: mono URL + the shared [data-copy] affordance.
+  assert.match(html, /detail-url-text">https:\/\/gyldendal-506f035e\.barkpark\.cloud</);
+  assert.match(html, /data-copy="https:\/\/gyldendal-506f035e\.barkpark\.cloud"/);
+  // actions: Open Studio primary, Attach domain, the bp CLI disclosure (closed).
+  assert.match(html, /id="inst-open-studio"/);
+  assert.match(html, /id="inst-domain"/);
+  assert.match(html, /id="inst-cli-toggle"[^>]*aria-expanded="false"/);
+  assert.match(html, /aria-controls="inst-lifecycle-actions"/);
+});
+
+test("GR24: a degraded header reads the honest two-axis breakdown off statusPill", () => {
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, health_status: "down" });
+  assert.match(html, /status-pill status-pill--warn/);
+  assert.match(html, /status-pill-label">Degraded</);
+  assert.match(html, /status-pill-detail">Health down</);
+});
+
+test("GR24: suspended keeps the banner + the CLI disclosure (teardown stays reachable)", () => {
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "payment failed" });
+  assert.match(html, /notice notice-error/);
+  assert.match(html, /payment failed/);
+  assert.match(html, /id="inst-cli-toggle"/);
+  assert.doesNotMatch(html, /id="inst-open-studio"/); // no Studio on a stopped box
+});
+
+test("GR24: a provisioning header keeps the live chip and offers no CLI disclosure", () => {
+  const html = hooks.instanceHeaderHtml({ id: "b-2", name: "Analytics", provision_status: "claimed", provision_steps: [] });
+  assert.match(html, /fleet-url provisioning/); // the SSE fast path patches this class in place
+  assert.doesNotMatch(html, /inst-cli-toggle/); // showLifecycleRow is false pre-host
+  assert.doesNotMatch(html, /detail-url-text/);
+});
+
+test("GR24: a failed provision keeps the CLI disclosure — its teardown home", () => {
+  const html = hooks.instanceHeaderHtml({ id: "b-3", name: "Broken", provision_status: "failed" });
+  assert.match(html, /fleet-url failed/);
+  assert.match(html, /id="inst-cli-toggle"/);
+});
+
+test("GR24: the bp CLI card — title, 4 copyable commands, the SERVER pause sentence in the foot, Decommission…", () => {
+  const html = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" }));
+  assert.match(html, /cli-card/);
+  assert.match(html, /Manage this instance via the bp CLI/);
+  for (const verb of ["archive", "resurrect", "adopt", "audit"]) {
+    assert.match(html, new RegExp("bp cloud instance " + verb + " web"));
+  }
+  // the pause verb leaves the grid: its SERVER-OWNED gap reason IS the foot sentence.
+  assert.match(html, /inst-life-footnote">Hetzner has no pause primitive\.</);
+  assert.doesNotMatch(html, /<button[^>]*disabled[^>]*>Pause</); // no dead Pause control in the grid
+  // the destroy-tier verb anchors the foot with the typed-confirm ellipsis.
+  assert.match(html, /cli-card-foot/);
+  assert.match(html, /data-life-verb="decommission"[^>]*>Decommission&hellip;</);
+});
+
+test("GR24: a provider WITH a pause capability gets pause as a command row and no foot sentence", () => {
+  const html = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "azure", host: "h", name: "az1" }));
+  assert.match(html, /bp cloud instance pause az1/); // pause joins the grid
+  assert.match(html, /inst-life-footnote"></); // empty foot spacer, no invented sentence
+});
+
+test("GR24: the composed Overview — verify slot, updates card, Sites card, and the card rail", () => {
+  const html = hooks.instanceOverviewHtml(GR24_LIVE, {});
+  assert.match(html, /id="instance-verify"/);
+  assert.match(html, /update-panel/);
+  assert.match(html, /inst-sites-card/);
+  assert.match(html, /id="site-new-btn"/);
+  assert.match(html, /detail-rail detail-rail--cards/);
+  for (const label of ["Identity", "Runtime", "Platform", "Activity"]) {
+    assert.match(html, new RegExp('rail-group-label">' + label + "<"));
+  }
+  // GR27 identity truth: provider/region/size are the real S6 fields.
+  assert.match(html, /Provider<\/span><span class="v">Hetzner</);
+  assert.match(html, /Region<\/span><span class="v">fsn1</);
+  assert.match(html, /Size<\/span><span class="v">cx22</);
+  assert.match(html, /id="instance-domains"/); // the checklist component's slot, consumed as-is
+});
+
+test("GR24: pre-host the Overview stays quiet — no Sites card, no verify slot, blank-tolerant rail", () => {
+  const html = hooks.instanceOverviewHtml({ id: "b-2", name: "Analytics", provision_status: "claimed", provision_steps: [] }, {});
+  assert.doesNotMatch(html, /inst-sites-card/);
+  assert.doesNotMatch(html, /id="instance-verify"/);
+  assert.match(html, /id="instance-sites"/); // the slot itself stays for loadInstanceSites
+  assert.match(html, /Provider<\/span><span class="v">—</);
 });
