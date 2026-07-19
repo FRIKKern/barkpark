@@ -141,6 +141,33 @@ func TestListChatSessions(t *testing.T) {
 	}
 }
 
+// TestChatSessionSummaryDecodesHerdFields is the D50h decode lock: the herd
+// cold-mount fields (agent_state / agent_state_at / total_cost_usd) decode off
+// the widened sidebar wire, and an older server that omits them is
+// ignore-safe (zero values, no error).
+func TestChatSessionSummaryDecodesHerdFields(t *testing.T) {
+	widened := []byte(`{"id":"a","title":"T","agent_state":"blocked",
+		"agent_state_at":"2026-07-18T11:55:00.123456Z","total_cost_usd":1.25}`)
+	var s ChatSessionSummary
+	if err := json.Unmarshal(widened, &s); err != nil {
+		t.Fatalf("decode widened summary: %v", err)
+	}
+	if s.AgentState != "blocked" || s.AgentStateAt != "2026-07-18T11:55:00.123456Z" {
+		t.Fatalf("herd fields must decode, got %+v", s)
+	}
+	if s.TotalCostUSD != 1.25 {
+		t.Fatalf("total_cost_usd must decode, got %v", s.TotalCostUSD)
+	}
+
+	var old ChatSessionSummary
+	if err := json.Unmarshal([]byte(`{"id":"b","title":"pre-widen"}`), &old); err != nil {
+		t.Fatalf("decode pre-widen summary: %v", err)
+	}
+	if old.AgentState != "" || old.AgentStateAt != "" || old.TotalCostUSD != 0 {
+		t.Fatalf("a pre-widen wire must decode to zero values, got %+v", old)
+	}
+}
+
 func TestListChatSessionsActiveFlag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("archived"); got != "false" {
