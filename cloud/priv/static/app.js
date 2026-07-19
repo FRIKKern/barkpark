@@ -122,8 +122,16 @@
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
     no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
     instance_unreachable: "Couldn't reach the instance — try again in a moment.",
-    network_error: "Network error — is the control plane running?"
+    network_error: "Network error — is the control plane running?",
+    // GR19: the two billing truths the SPA used to garble. limit_reached is the
+    // launch-time quota ceiling (registry.ex); billing_not_configured is the
+    // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
+    limit_reached: "You're at your plan's instance limit.",
+    billing_not_configured: "Billing isn't set up on this deployment yet."
   };
+  // Precedence (GR19 fix): curated ERRORS copy → field-level details → the
+  // caller's DESIGNED fallback → the humanized slug. (Previously any truthy
+  // slug beat the fallback, so a per-call fallback never rendered.)
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
@@ -136,7 +144,7 @@
         return first.replace(/_/g, " ") + " " + msg;
       }
     }
-    return (key ? key.replace(/_/g, " ") : "") || fallback || "Something went wrong.";
+    return fallback || (key ? key.replace(/_/g, " ") : "") || "Something went wrong.";
   }
 
   // =========================================================== TOAST primitive
@@ -7493,11 +7501,11 @@
     });
   }
 
-  // Step 2 (402): the inline plan fold — reuses TIERS + the checkout hand-off.
-  // Stashes the typed name so a success return re-enters the flow prefilled.
+  // Step 2 (402): the inline plan fold — reuses PLAN_CATALOG + the checkout
+  // hand-off. Stashes the typed name so a success return re-enters prefilled.
   function renderLaunchPlan(container, opts, name) {
     try { localStorage.setItem(LAUNCH_RETURN_KEY, name); } catch (x) {}
-    var tiers = TIERS.filter(function (t) { return !t.free; }).map(function (t) {
+    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; }).map(function (t) {
       return '<div class="new-tier">' +
         '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
           '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
@@ -7554,28 +7562,58 @@
   }
 
   // =========================================================== BILLING
-  var TIERS = [
-    { plan: "free", name: "Free", price: "$0", per: "", note: "Get started. No card required.", free: true },
-    { plan: "supporter", name: "Supporter", price: "$69", per: "/mo", note: "Managed hosting for your instance." },
-    { plan: "support_plus", name: "Support++", price: "$499", per: "/mo", note: "Priority support and more capacity." }
+  // GR19: ONE quota-honest plan catalog — names, USD PLACEHOLDER prices, and the
+  // REAL enforced instance ceilings (server Billing @default_limits: Free 1 /
+  // Supporter 3 / Support++ 10). The $ figures stay placeholders until the
+  // cloud-console-billing-live-gate human gate sets live Stripe prices.
+  var PLAN_CATALOG = [
+    { plan: "free", name: "Free", price: "$0", per: "", note: "Get started. No card required.", free: true, instances: 1 },
+    { plan: "supporter", name: "Supporter", price: "$69", per: "/mo", note: "Managed hosting for your instance.", instances: 3 },
+    { plan: "support_plus", name: "Support++", price: "$499", per: "/mo", note: "Priority support and more capacity.", instances: 10 }
   ];
 
   var RECOMMENDED = "supporter";
-  var PLAN_FEATURES = [
-    "Unlimited managed instances",
-    "Automated provisioning & updates",
-    "Daily backups",
-    "Custom domains with automatic TLS",
-    "Standard support"
-  ];
+
+  function catalogPlan(plan) {
+    return PLAN_CATALOG.filter(function (x) { return x.plan === plan; })[0] || null;
+  }
+
+  function planInstanceLimit(t) {
+    return t.instances + " managed instance" + (t.instances === 1 ? "" : "s");
+  }
+
+  // Per-plan feature bullets — the real ceiling leads. (The old shared
+  // unlimited-instances bullet was false: every plan has a ceiling.)
+  function planFeatures(t) {
+    return [
+      planInstanceLimit(t),
+      "Automated provisioning & updates",
+      "Daily backups",
+      "Custom domains with automatic TLS",
+      t.plan === "support_plus" ? "Priority support" : "Standard support"
+    ];
+  }
+
+  function planFeatsHtml(t) {
+    if (!t) return "";
+    return '<ul class="plan-feats">' +
+      planFeatures(t).map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
+      "</ul>";
+  }
 
   function priceFor(plan) {
-    var t = TIERS.filter(function (x) { return x.plan === plan; })[0];
+    var t = catalogPlan(plan);
     return t ? t.price : "—";
   }
 
-  // The active plan, per the server (free counts as "no paid subscription").
-  function activePlan() { return subCache && subCache.status === "active" ? subCache.plan : "free"; }
+  // The team's plan per the server. A past_due team KEEPS its paid plan —
+  // dunning is a payment state, not a downgrade (the sidebar pill must never
+  // read "Free" while Stripe retries a paying customer's card). Pure core,
+  // node-pinned; activePlan() binds it to the session cache.
+  function planFromSub(sub) {
+    return sub && (sub.status === "active" || sub.status === "past_due") && sub.plan ? sub.plan : "free";
+  }
+  function activePlan() { return planFromSub(subCache); }
 
   function renderRecommended() {
     var box = $("#billing-recommended");
@@ -7623,16 +7661,14 @@
     }
 
     // No active paid subscription → the upsell card.
-    var t = TIERS.filter(function (x) { return x.plan === RECOMMENDED; })[0];
+    var t = catalogPlan(RECOMMENDED);
     box.innerHTML =
       '<div class="card plan-card">' +
         '<div class="plan-head"><span class="plan-name">' + esc(t.name) + "</span>" +
           '<span class="plan-rec">Recommended</span></div>' +
         '<p class="plan-tagline">Optimized for shipping to production.</p>' +
         '<div class="plan-price">' + t.price + "<small>" + (t.per || "") + "</small></div>" +
-        '<ul class="plan-feats">' +
-          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
-        "</ul>" +
+        planFeatsHtml(t) +
         '<button class="btn btn-primary btn-block" id="plan-continue">Continue</button>' +
         '<a class="plan-more" id="plan-more">See more plan options</a>' +
       "</div>";
@@ -7683,39 +7719,88 @@
     return "";
   }
 
-  // The active-subscriber state: their real plan, status, start date and the
-  // renewal / dunning / cancel detail the server sends. There's no self-serve
-  // change/cancel yet (no billing portal) — so we say so honestly rather than
-  // render a button that does nothing.
-  function renderCurrentPlan(box) {
-    var sub = subCache;
+  // GR16: the billing portal routes are LIVE (owner-gated), so every billing CTA
+  // opens the Stripe Customer Portal — card update, invoices, plan change and
+  // cancel are self-serve now. The old support-mail denial copy is retired.
+  function openBillingPortal(btn) {
+    var prev = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Opening billing portal…"; }
+    api("POST", "/v1/billing/portal").then(function (r) {
+      if (r.status === 200 && r.data && r.data.portal_url) {
+        window.location = r.data.portal_url;
+      } else {
+        if (btn) { btn.disabled = false; btn.textContent = prev; }
+        toast({ kind: "error", title: "Couldn't open the billing portal", body: friendly(r.data, "Please try again in a moment.") });
+      }
+    });
+  }
+
+  // GR17: the dunning dates, DATA-DRIVEN off the server's current_period_end —
+  // suspend day = the grace end; failed day = suspend minus the 3-day grace
+  // window (billing.ex @grace_days). null when the server sent no dated
+  // milestone (the banner then drops the dates, never invents them).
+  var DUNNING_GRACE_DAYS = 3;
+  function dunningDates(sub) {
+    var end = sub && sub.current_period_end ? Date.parse(sub.current_period_end) : NaN;
+    if (isNaN(end)) return null;
+    return { suspendMs: end, failedMs: end - DUNNING_GRACE_DAYS * 86400 * 1000 };
+  }
+  function fmtDay(ms) {
+    var d = new Date(ms);
+    return isNaN(d.getTime()) ? "—" : d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  }
+
+  // GR17: the past-due banner — plan chip + "Past due", the honest suspended-not-
+  // deleted sentence with real dates, and the portal CTA. The old retry-count
+  // promise is DROPPED (nothing in the codebase retries twice), as is the
+  // support-mail denial copy.
+  function dunningBannerHtml(sub) {
+    var d = dunningDates(sub);
+    var body = d
+      ? "Your card was declined on " + esc(fmtDay(d.failedMs)) + ". Your instances keep running until " +
+        esc(fmtDay(d.suspendMs)) + ", then they're suspended — not deleted — and come right back the moment payment succeeds."
+      : "Your card was declined. Your instances keep running for a short grace period, then they're suspended — not deleted — and come right back the moment payment succeeds.";
+    return '<div class="notice notice-warn dunning-banner" role="alert">' +
+        '<div class="dunning-head"><span class="dunning-plan">' + esc(planName(sub.plan)) + "</span>" +
+          '<b class="dunning-title">Past due</b></div>' +
+        '<p class="dunning-body">' + body + "</p>" +
+        '<button class="btn btn-primary btn-sm" id="dunning-portal" type="button">Update payment method</button>' +
+      "</div>";
+  }
+
+  // The active-subscriber card (pure — node-pinned). Real plan, status, dates,
+  // per-plan quota-honest features, and the self-serve portal CTA.
+  function currentPlanCardHtml(sub) {
     var periodLine = billingPeriodLine(sub);
-    // Past-due gets a prominent dunning notice: their card failed and there's no
-    // self-serve portal, so point them at support before the grace elapses.
-    var dunning = sub.status === "past_due"
-      ? '<div class="notice notice-warn">' +
-          "<b>Your last payment failed.</b> " +
-          "Update your payment method (contact support) to avoid interruption." +
-        "</div>"
-      : "";
-    box.innerHTML =
+    return (sub.status === "past_due" ? dunningBannerHtml(sub) : "") +
       '<div class="card plan-card">' +
         '<div class="plan-head"><span class="plan-name">' + esc(planName(sub.plan)) + "</span>" +
-          '<span class="plan-rec">' + esc(billingStatusBadge(sub)) + "</span></div>" +
+          // The status pill drops its green "Recommended" skin when the status
+          // is a warning — "Past due" must never read like praise.
+          (sub.status === "past_due"
+            ? '<span class="plan-rec plan-rec--due">'
+            : '<span class="plan-rec">') +
+            esc(billingStatusBadge(sub)) + "</span></div>" +
         '<p class="plan-tagline">Your current subscription.</p>' +
         '<div class="plan-price">' + esc(priceFor(sub.plan)) + "<small>/mo</small></div>" +
-        dunning +
-        '<ul class="plan-feats">' +
-          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
-        "</ul>" +
+        planFeatsHtml(catalogPlan(sub.plan)) +
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
-        '<p class="plan-meta dim">To change or cancel your plan, contact support.</p>' +
+        '<button class="btn btn-block" id="plan-portal" type="button">Manage billing</button>' +
+        '<p class="plan-meta dim">Update your card, download invoices, change or cancel your plan — all in the secure Stripe billing portal.</p>' +
         '<a class="plan-more" id="plan-more">See all plans</a>' +
       "</div>";
+  }
+
+  function renderCurrentPlan(box) {
+    box.innerHTML = currentPlanCardHtml(subCache);
     var grid = $("#billing-tiers");
     if (grid) grid.hidden = true;
+    var dp = $("#dunning-portal");
+    if (dp) dp.addEventListener("click", function () { openBillingPortal(dp); });
+    var mp = $("#plan-portal");
+    if (mp) mp.addEventListener("click", function () { openBillingPortal(mp); });
     $("#plan-more").addEventListener("click", function () {
       var nowHidden = !grid.hidden;
       grid.hidden = nowHidden;
@@ -7724,70 +7809,68 @@
     });
   }
 
-  // dwb-13: the free-trial state — a days-remaining badge + a one-click upgrade
-  // CTA. Reuses the checkout flow (subscribe → POST /v1/billing/checkout); the
-  // exact days come from the server (subCache.trial_days_remaining).
-  function renderTrial(box) {
-    var sub = subCache;
+  // C-03: the trial state — countdown chip + the RATIFIED CTA, VERBATIM from the
+  // ratification record (task-2ed0ea068f37345d): "Pick a plan below to keep it.
+  // No card needed." (the v4 prototype carries a superseded draft — never copy
+  // from it). The plan grid opens right below so "below" stays true. Trial
+  // expiry is a REAL teardown (TrialExpiryWorker), so this copy never borrows
+  // the dunning "suspended — not deleted" promise; the 3-day/1-day reminders it
+  // names are the worker's real warn schedule.
+  function trialCardHtml(sub) {
     var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
-    var badge =
-      days === null
-        ? "Free trial"
-        : days <= 0
-        ? "Trial ended"
-        : days + (days === 1 ? " day left" : " days left");
-    var t = TIERS.filter(function (x) { return x.plan === RECOMMENDED; })[0];
-    box.innerHTML =
-      '<div class="card plan-card">' +
+    var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
+    var chipOpen = days !== null && days <= 3
+      ? '<span class="trial-chip trial-chip--low">'
+      : '<span class="trial-chip">';
+    return '<div class="card plan-card">' +
         '<div class="plan-head"><span class="plan-name">Free trial</span>' +
-          '<span class="plan-rec">' + esc(badge) + "</span></div>" +
-        '<p class="plan-tagline">A real dedicated instance, free. Upgrade any time to keep it running — ' +
-          "your trial instance is torn down automatically when the trial ends.</p>" +
-        '<div class="plan-price">' + esc(t.price) + "<small>" + (t.per || "") + "</small></div>" +
-        '<ul class="plan-feats">' +
-          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
-        "</ul>" +
-        '<button class="btn btn-primary btn-block" id="trial-upgrade">Upgrade now</button>' +
-        '<a class="plan-more" id="plan-more">See all plans</a>' +
+          chipOpen + esc(chip) + "</span></div>" +
+        '<p class="plan-tagline">A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.</p>' +
+        '<p class="trial-cta">Pick a plan below to keep it. No card needed.</p>' +
+        "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>" +
       "</div>";
+  }
+
+  function renderTrial(box) {
+    box.innerHTML = trialCardHtml(subCache);
     var grid = $("#billing-tiers");
-    if (grid) grid.hidden = true;
-    $("#trial-upgrade").addEventListener("click", function () { subscribe(RECOMMENDED, $("#trial-upgrade")); });
-    $("#plan-more").addEventListener("click", function () {
-      var nowHidden = !grid.hidden;
-      grid.hidden = nowHidden;
-      setText($("#plan-more"), nowHidden ? "See all plans" : "Hide plans");
-      if (!nowHidden) renderTiers();
-    });
+    if (grid) { grid.hidden = false; renderTiers(); }
+  }
+
+  // One tier card (pure — node-pinned). Quota-honest: every card states its REAL
+  // instance ceiling. A subscribed team changes plans in the portal, self-serve.
+  function tierCardHtml(t, active, subscribed) {
+    var isCurrent = t.plan === active;
+    var btn;
+    if (isCurrent) {
+      btn = '<button class="btn" disabled>Current plan</button>';
+    } else if (subscribed) {
+      btn = '<button class="btn" data-portal-plan="' + esc(t.plan) + '" type="button">Change in billing portal</button>';
+    } else {
+      btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
+    }
+    return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
+      '<div class="tier-name">' + esc(t.name) + "</div>" +
+      '<div class="tier-price">' + t.price + "<small>" + t.per + "</small></div>" +
+      '<p class="tier-note">' + esc(t.note) + "</p>" +
+      '<p class="tier-quota">' + esc(planInstanceLimit(t)) + "</p>" +
+      btn +
+    "</div>";
   }
 
   function renderTiers() {
     var grid = $("#billing-tiers");
     var active = activePlan();
     // A `trial` team has NOT paid — the paid tiers must stay subscribable so it
-    // can upgrade (dwb-13); only a real paid plan disables the others.
+    // can upgrade (dwb-13); only a real paid plan routes changes to the portal.
     var subscribed = active !== "free" && active !== "trial";
-    grid.innerHTML = TIERS.map(function (t) {
-      var isCurrent = t.plan === active;
-      var btn;
-      if (isCurrent) {
-        btn = '<button class="btn" disabled>Current plan</button>';
-      } else if (subscribed) {
-        // Already on a paid plan — switching needs support (no proration/portal).
-        btn = '<button class="btn" disabled title="Contact support to change plans">Unavailable</button>';
-      } else {
-        btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
-      }
-      return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
-        '<div class="tier-name">' + esc(t.name) + "</div>" +
-        '<div class="tier-price">' + t.price + "<small>" + t.per + "</small></div>" +
-        '<p class="tier-note">' + esc(t.note) + "</p>" +
-        btn +
-      "</div>";
-    }).join("");
+    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed); }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
+    });
+    grid.querySelectorAll("[data-portal-plan]").forEach(function (b) {
+      b.addEventListener("click", function () { openBillingPortal(b); });
     });
   }
 
@@ -7910,13 +7993,56 @@
         subError = true;
       }
       paintWorkspacePlan(); // the sidebar plan chip follows the real answer
+      renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
       return subCache;
     });
   }
 
   function planName(plan) {
-    var t = TIERS.filter(function (x) { return x.plan === plan; })[0];
+    var t = catalogPlan(plan);
     return t ? t.name : (plan || "—");
+  }
+
+  // GR20: the ONE topbar billing chip — trial countdown XOR past-due alarm —
+  // the only topbar touch phase 2 allows. Pure model (node-pinned): past-due
+  // outranks the trial countdown; an active paid / free team shows NO chip.
+  function billingChipModel(sub) {
+    if (!sub) return null;
+    if (sub.status === "past_due") return { kind: "past_due", label: "Payment failed · fix billing" };
+    if (sub.plan === "trial") {
+      var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
+      var label = days === null ? "Trial"
+        : days <= 0 ? "Trial ended"
+        : "Trial · " + days + (days === 1 ? " day left" : " days left");
+      return { kind: "trial", label: label };
+    }
+    return null;
+  }
+
+  // Mount + paint the chip from the cached subscription. Injected into
+  // .topbar-right AHEAD of the SSE liveness chip; click routes to #billing.
+  // Repainted on every subscription load (boot, SSE tick, portal re-poll).
+  function renderBillingChip() {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    var model = subLoaded ? billingChipModel(subCache) : null;
+    var chip = document.getElementById("billing-chip");
+    if (!model) { if (chip) chip.hidden = true; return; }
+    if (!chip) {
+      var right = document.querySelector(".topbar .topbar-right");
+      if (!right) return;
+      chip = document.createElement("a");
+      chip.id = "billing-chip";
+      right.insertBefore(chip, document.getElementById("liveness-chip") || right.firstChild);
+    }
+    chip.hidden = false;
+    chip.href = "#billing";
+    chip.className = model.kind === "past_due"
+      ? "billing-chip billing-chip--past_due"
+      : "billing-chip billing-chip--trial";
+    chip.textContent = model.label;
+    chip.setAttribute("title", model.kind === "past_due"
+      ? "Your last payment failed — open Billing to fix it"
+      : "Open Billing to pick a plan and keep your instance");
   }
 
   // =========================================================== ACTIVITY (audit)
@@ -8081,7 +8207,9 @@
       '<span class="live-dot" aria-hidden="true"></span>' +
       '<span class="live-chip-label"></span>' +
       '<span class="live-chip-ago" aria-hidden="true"></span>';
-    right.insertBefore(chip, right.firstChild);
+    // GR20: the billing chip (when it mounted first) stays AHEAD of this one.
+    var bill = document.getElementById("billing-chip");
+    right.insertBefore(chip, bill ? bill.nextSibling : right.firstChild);
     return chip;
   }
 
@@ -8329,6 +8457,39 @@
         setTimeout(function () { pollSubscriptionActive(attempt + 1); }, 1500);
       } else {
         toast({ kind: "info", title: "Finalizing your subscription", body: "This can take a moment — it'll update automatically." });
+      }
+    });
+  }
+
+  // GR16: the Stripe Customer Portal round-trip. The portal's return_url is the
+  // SPA root + "?billing=portal" (stripe_gateway.ex default_portal_return_url —
+  // test-pinned). Scrub the flag, land on #billing, and RE-POLL the
+  // subscription: a portal change (new card, plan switch, cancel) lands via
+  // webhook and races the redirect exactly like checkout. The ack stays
+  // NEUTRAL — a pure card update emits no event, so "card updated" would be a
+  // claim nothing backs.
+  function billingPortalFlag(search) {
+    return /[?&]billing=portal(&|$)/.test(search || "");
+  }
+  function handleBillingPortalReturn() {
+    if (!billingPortalFlag(location.search)) return false;
+    history.replaceState(null, "", "/#billing");
+    toast({ kind: "info", title: "Back from the billing portal",
+      body: "Any billing changes are syncing — this page updates automatically." });
+    pollSubscriptionRefresh(0);
+    return true;
+  }
+
+  // Mirrors pollSubscriptionActive's lag-tolerant shape, with NO success claim:
+  // refetch until the subscription payload changes (or give up quietly — the
+  // SSE "subscription" event still lands late webhooks).
+  function pollSubscriptionRefresh(attempt) {
+    var before = JSON.stringify(subCache);
+    loadSubscription().then(function () {
+      if (JSON.stringify(subCache) !== before) {
+        if (currentView() === "billing") renderRecommended();
+      } else if (attempt < 6) {
+        setTimeout(function () { pollSubscriptionRefresh(attempt + 1); }, 1500);
       }
     });
   }
@@ -9268,7 +9429,7 @@
 
   // ---- Step: pricing (402 — price visible before any charge) ----------------
   function renderNewPricing(tpl) {
-    var tiers = TIERS.filter(function (t) { return !t.free; }).map(function (t) {
+    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; }).map(function (t) {
       return '<div class="new-tier">' +
         '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
           '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
@@ -11530,6 +11691,9 @@
     // tell success from cancel.
     var checkout = checkoutFlag();
     var fromCheckout = handleCheckoutReturn();
+    // GR16: a Stripe billing-portal return (?billing=portal) — scrub the flag,
+    // land on #billing, re-poll the subscription (neutral ack, never a claim).
+    var fromPortal = handleBillingPortalReturn();
 
     // Invitation resume: a parked accept token (a logged-out landing that just
     // came through login / signup / OAuth) outranks whatever hash the
@@ -11559,7 +11723,7 @@
     // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
     // #site/…) — the old guard reset a site deep-link to #fleet on reload.
     var r = parseHash();
-    if (!fromCheckout && VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
+    if (!fromCheckout && !fromPortal && VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
       location.hash = "#overview";
     }
     applyRoute();
@@ -12322,6 +12486,23 @@
       ctxDotColor: ctxDotColor,
       bpThemeLabel: bpThemeLabel,
       bpThemeOptions: bpThemeOptions,
+      // gr-p2 plan & dunning (GR17/GR19/GR20): the ONE plan catalog + the pure
+      // billing builders/models — quota-honest features, data-driven dunning
+      // dates/banner, the ratified trial card, the tier cards, the topbar
+      // billing-chip model, and the portal-return flag. DOM mounts
+      // (renderCurrentPlan/renderTrial/renderBillingChip/openBillingPortal +
+      // handleBillingPortalReturn) are smoke+browser-verified.
+      planCatalog: PLAN_CATALOG.slice(),
+      planInstanceLimit: planInstanceLimit,
+      planFeatures: planFeatures,
+      planFromSub: planFromSub,
+      dunningDates: dunningDates,
+      dunningBannerHtml: dunningBannerHtml,
+      currentPlanCardHtml: currentPlanCardHtml,
+      trialCardHtml: trialCardHtml,
+      tierCardHtml: tierCardHtml,
+      billingChipModel: billingChipModel,
+      billingPortalFlag: billingPortalFlag,
     });
   }
 })();

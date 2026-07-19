@@ -1163,6 +1163,70 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
     },
   },
+
+  // ── gr-p2 plan & dunning (C-03/C-04): trial, past-due dunning, portal return.
+  // The past-due subscription fixture is written FRESH here (tail-append law):
+  // status past_due with current_period_end 3 days out — mid-grace, so the GR17
+  // banner carries both data-driven dates ({failed_date} = −3d ≈ today).
+  "billing-trial": {
+    label: "Billing — free trial with a running fleet: countdown chip + the ratified keep-it CTA + open plan grid",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [liveInstance],
+      subscription: trialSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "billing-past-due": {
+    label: "Billing — past due: GR17 dunning banner with data-driven dates + the portal CTA",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "past_due",
+        past_due: true,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 3 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(60 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+  "billing-portal-return": {
+    label: "Billing — back from the Stripe portal (?billing=portal): URL scrub + re-poll + neutral ack",
+    authed: true,
+    deepLink: "#billing",
+    search: "?billing=portal",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      // A REAL catalog plan (activeSub's legacy "pro" predates the catalog and
+      // would render feature-less) — a healthy Supporter sub, fresh at the tail.
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 20 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(30 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
