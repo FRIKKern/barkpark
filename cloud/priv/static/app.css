@@ -5,14 +5,41 @@
 
 /* Self-hosted Inter (charter decision 27) — the console renders fully offline;
    no fonts.googleapis.com. One variable woff2 carries weights 100–900 (we use
-   400/500/600/700). Italic is browser-synthesised (used only in tiny captions).
-   Font file: fonts/Inter-var.woff2 (Inter, SIL OFL 1.1 — see fonts/OFL.txt). */
+   400/500/600/700), latin-subset. Italic is browser-synthesised (used only in
+   tiny captions). Font file: fonts/Inter-var.woff2 (Inter, SIL OFL 1.1 — see
+   fonts/Inter-OFL.txt). */
 @font-face {
   font-family: "Inter";
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
   src: url("fonts/Inter-var.woff2") format("woff2");
+}
+
+/* Self-hosted IBM Plex Mono (GUI-remake GR8) — the console's monospace face for
+   IDs, refs, versions, token codes. Three static weights, latin-subset to woff2
+   (~13–14KB each). Copyright 2017 IBM Corp., SIL OFL 1.1 — see
+   fonts/IBMPlexMono-OFL.txt. Leads var(--mono) below the GENERATED marker. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Regular-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-Medium-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/IBMPlexMono-SemiBold-latin.woff2") format("woff2");
 }
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
@@ -380,7 +407,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --z-toast: 60;
 
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --mono: "SF Mono", "Fira Code", ui-monospace, Menlo, monospace;
+  --mono: "IBM Plex Mono", "SF Mono", "Fira Code", ui-monospace, Menlo, monospace;
 }
 
 [data-theme="dark"] {
