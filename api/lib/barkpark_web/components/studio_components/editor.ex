@@ -364,7 +364,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     ~H"""
     <%= if @editor_doc do %>
-      <div class="editor-panel">
+      <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
           title={@editor_doc.title || "Untitled"}

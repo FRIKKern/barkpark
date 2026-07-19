@@ -700,17 +700,21 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
         {"standard", 3, true} => [:strip, :strip, :full],
         {"standard", 4, true} => [:strip, :strip, :strip, :full],
         {"standard", 5, true} => [:strip, :strip, :strip, :strip, :full],
-        # narrow — only the last pane stays full, editor or not
+        # narrow, no editor — drill navigation, only the last pane full
         {"narrow", 1, false} => [:full],
         {"narrow", 2, false} => [:strip, :full],
         {"narrow", 3, false} => [:strip, :strip, :full],
         {"narrow", 4, false} => [:strip, :strip, :strip, :full],
         {"narrow", 5, false} => [:strip, :strip, :strip, :strip, :full],
-        {"narrow", 1, true} => [:full],
-        {"narrow", 2, true} => [:strip, :full],
-        {"narrow", 3, true} => [:strip, :strip, :full],
-        {"narrow", 4, true} => [:strip, :strip, :strip, :full],
-        {"narrow", 5, true} => [:strip, :strip, :strip, :strip, :full],
+        # narrow, editor open (spd-s4 / charter D35) — the nav row yields
+        # entirely to the protected content pane; ONE 44px back strip
+        # survives. The old rule here (last pane :full) was bit-identical
+        # to collapse?/3 and closed zero pixels of the 640–1023 overflow.
+        {"narrow", 1, true} => [:strip],
+        {"narrow", 2, true} => [:hidden, :strip],
+        {"narrow", 3, true} => [:hidden, :hidden, :strip],
+        {"narrow", 4, true} => [:hidden, :hidden, :hidden, :strip],
+        {"narrow", 5, true} => [:hidden, :hidden, :hidden, :hidden, :strip],
         # phone, no editor — single-column drill: last pane only
         {"phone", 1, false} => [:full],
         {"phone", 2, false} => [:hidden, :full],
@@ -752,6 +756,51 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
                  "bucket=#{bucket} idx=#{idx} num_panes=#{num_panes} " <>
                    "has_editor=#{has_editor?} diverged from collapse?/3"
         end
+      end
+    end
+
+    test "narrow + editor leaves exactly ONE strip and no full pane (D35)" do
+      for num_panes <- 1..8 do
+        states =
+          for idx <- 0..(num_panes - 1),
+              do: PaneBuilder.display_state(idx, num_panes, true, "narrow")
+
+        assert Enum.count(states, &(&1 == :strip)) == 1,
+               "num_panes=#{num_panes} — want exactly one 44px back strip, got #{inspect(states)}"
+
+        refute Enum.any?(states, &(&1 == :full)),
+               "num_panes=#{num_panes} — no nav pane may hold full width beside the " <>
+                 "protected content pane, got #{inspect(states)}"
+
+        assert List.last(states) == :strip,
+               "num_panes=#{num_panes} — the surviving strip must be the LAST pane " <>
+                 "(it is the back affordance), got #{inspect(states)}"
+      end
+    end
+
+    test "narrow + editor DIVERGES from collapse?/3 — the whole point of D35" do
+      # Before spd-s4 the narrow rule was bit-identical to collapse?/3 whenever
+      # an editor was open, so it removed zero pixels of overflow. This pins
+      # that the divergence is real and cannot silently regress to a no-op.
+      divergences =
+        for num_panes <- 2..8,
+            idx <- 0..(num_panes - 1),
+            collapse_state =
+              if(PaneBuilder.collapse?(idx, num_panes, true), do: :strip, else: :full),
+            PaneBuilder.display_state(idx, num_panes, true, "narrow") != collapse_state,
+            do: {num_panes, idx}
+
+      refute divergences == [],
+             "narrow-with-editor is a no-op again — D35 regressed"
+    end
+
+    test "narrow with NO editor is unchanged from spd-s3" do
+      for num_panes <- 1..8, idx <- 0..(num_panes - 1) do
+        expected = if idx == num_panes - 1, do: :full, else: :strip
+
+        assert PaneBuilder.display_state(idx, num_panes, false, "narrow") == expected,
+               "idx=#{idx} num_panes=#{num_panes} — the editor-closed narrow row has no " <>
+                 "560px floor and must keep its full drill column"
       end
     end
   end
