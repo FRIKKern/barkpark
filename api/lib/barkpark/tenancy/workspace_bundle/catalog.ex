@@ -403,7 +403,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     public surfaces on the target), registered_chat_hosts,
   #     preview_token_jti.
   #   * PII / conversation / audit trails: audit_events, workspace_memberships,
-  #     chat_execution_leases, chat_execution_events.
+  #     chat_execution_leases, chat_execution_events, search_intel_events
+  #     (raw user-typed `query` text + `actor_key`/`session_key` identity —
+  #     per-user behavioral telemetry; the DERIVED aggregates
+  #     search_intel_crystals / search_intel_merge_patterns carry only
+  #     normalized-query counts with no actor identity and stay copy).
   #   * sync family: sync_* (all five), github_sync_conflicts (conflict
   #     payloads snapshot foreign state that cannot converge on a dev target).
   #   * cycle/epic fleet ledgers incl. FK children: cycle_*, epic_*,
@@ -417,7 +421,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @dev_copy ~w(
     authoring_exemptions content_edges datasets media_files paper_events
     plugin_doc_state projects role_permissions roles schema_definitions
-    search_intel_crystals search_intel_events search_intel_merge_patterns
+    search_intel_crystals search_intel_merge_patterns
     search_surface_config search_synonyms task_edges workspaces
   )
 
@@ -433,7 +437,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     data_keys epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events
-    preview_token_jti registered_chat_hosts revisions secrets secrets_audit
+    preview_token_jti registered_chat_hosts revisions search_intel_events
+    secrets secrets_audit
     share_links shares sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
     workspace_memberships

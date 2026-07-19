@@ -61,10 +61,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleCatalogDevTest do
       #   * shares is an access-granting registry — copying it would silently
       #     re-open public surfaces on the dev target;
       #   * github_sync_conflicts is sync-family with content-bearing payloads;
-      #   * chat_runtime_usage_receipts is a cycle-fleet telemetry FK child.
+      #   * chat_runtime_usage_receipts is a cycle-fleet telemetry FK child;
+      #   * search_intel_events carries raw user-typed `query` text plus
+      #     `actor_key`/`session_key` identity — per-user behavioral telemetry
+      #     ("user PII never copied"); the derived crystals/merge_patterns
+      #     aggregates carry no actor identity and stay copy.
       for table <-
             ~w(audit_export_sinks webhook_deliveries shares github_sync_conflicts
-               chat_runtime_usage_receipts) do
+               chat_runtime_usage_receipts search_intel_events) do
         assert Catalog.dev_partition()[table] == :deny,
                "#{table} must be denied fail-closed"
       end
