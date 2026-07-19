@@ -64,18 +64,29 @@ defmodule BarkparkWeb.TasksController do
         |> Keyword.merge(scope_opts(conn))
 
       docs = Tasks.ready(opts)
-      json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
+
+      json(conn, task_list_response(docs, conn, params))
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
     end
   end
 
+  # axi-w2-s2: the shared list envelope — cards in the requested view, plus
+  # the ONE top-level truncation-honesty help[] line whenever a brief card
+  # lost bytes to the …-caps (charter law 2; full view never truncates, never
+  # carries the line).
+  defp task_list_response(docs, conn, params) do
+    %{ok: true, docs: render_task_list(docs, conn, params)}
+    |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
+  end
+
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
-  # caller's requested view. `?view=brief` → the frozen brief cards
+  # caller's requested view. `?view=brief` → the brief v2 cards
   # (child_count via ONE batched grouped query, no content echo, no work
-  # digests); absent/unknown view → the full bd-compatible shape with edge
-  # counts (the server default STAYS full — SDK/Studio/taskboard untouched).
+  # digests, the nine diet cuts); absent/unknown view → the full bd-compatible
+  # shape with edge counts (the server default STAYS full — SDK/Studio/
+  # taskboard untouched).
   defp render_task_list(docs, conn, params) do
     case Params.parse_view(params["view"]) do
       :brief ->
@@ -140,15 +151,19 @@ defmodule BarkparkWeb.TasksController do
       # distinct parent of its in-progress claims (rail_rev per rail, so a burst
       # agent can diff after compaction) + blocked_while_claimed notices for any
       # claim a second actor has since blocked.
-      base = %{
-        ok: true,
-        worker: worker,
-        in_progress: in_progress_cards,
-        ready: ready_cards,
-        recent_events: events,
-        counts: lifecycle_counts,
-        rails: prime_rails(in_progress, conn)
-      }
+      base =
+        %{
+          ok: true,
+          worker: worker,
+          in_progress: in_progress_cards,
+          ready: ready_cards,
+          recent_events: events,
+          counts: lifecycle_counts,
+          rails: prime_rails(in_progress, conn)
+        }
+        # axi-w2-s2: prime inherits the brief truncation-honesty help[] line —
+        # checked over BOTH card slices (charter law 2).
+        |> Params.maybe_put_brief_truncation_help(in_progress ++ ready, view)
 
       json(conn, maybe_put_notices(base, prime_notices(in_progress)))
     else
@@ -244,7 +259,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
-    json(conn, %{ok: true, docs: render_task_list(docs, conn, params)})
+    json(conn, task_list_response(docs, conn, params))
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────

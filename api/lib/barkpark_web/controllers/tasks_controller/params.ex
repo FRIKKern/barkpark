@@ -154,10 +154,10 @@ defmodule BarkparkWeb.TasksController.Params do
   #     top-level; `content.claim` had zero HTTP-envelope readers). DB storage
   #     `content["claim"]` is untouched — it stays the write-path source of
   #     truth; only the response echo is de-duplicated.
-  #   * `:brief` — the frozen AXI brief card (charter decision 3): no content
-  #     echo, no work digests, claim cut to {worker, epoch, now}. `child_count`
-  #     is NOT set here — list callers add it via `render_brief/2` from one
-  #     batched query.
+  #   * `:brief` — the AXI brief card v2 (charter decisions 3 + 15/16): no
+  #     content echo, no work digests, claim cut to {worker, epoch, now}, and
+  #     the nine measured diet cuts below. `child_count` is NOT set here —
+  #     list callers add it via `render_brief/2` from one batched query.
   def render_doc(doc, view \\ :full)
 
   def render_doc(%Document{} = doc, :full) do
@@ -197,39 +197,159 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_criteria_progress(content)
   end
 
+  # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
+  # cuts, ENTIRELY inside the brief path (:full untouched):
+  #
+  #   (a) nil/absent keys are omitted wire-wide (see `prune_nils/1`);
+  #   (b) the internal uuid `id` is dropped — `doc_id` is the only address any
+  #       `bp` verb takes;
+  #   (c) `claim` is emitted only when it carries SIGNAL (worker != nil OR a
+  #       now-line) — no Go consumer reads claim.epoch pre-claim;
+  #   (d) `claim.now.text` capped at #{@brief_now_text_limit} graphemes with a
+  #       bare … marker (grapheme-safe — never splits a cluster);
+  #   (e) `title` capped at #{@brief_title_limit} graphemes, same marker;
+  #   (f) seconds-precision timestamps (`updated_at`, `claim.now.ts`);
+  #   (g) `lifecycle_status` omitted when "open" — NEVER unconditionally:
+  #       queue.ex admits open|blocked and blocked must survive on the card as
+  #       the actionable exception;
+  #   (h) `status` omitted when "published" (the task-contract steady state);
+  #   (i) the criteria_met/criteria_total pair omitted when there are no
+  #       criteria — adopting full view's own put_criteria_progress omission
+  #       law (wire §4: omit the segment, never "0/0").
+  #
+  # Truncation honesty (charter law 2): the bare … is legal because doc_id is
+  # on every card AND list responses append ONE top-level help[] line when any
+  # truncation fired — see `maybe_put_brief_truncation_help/3`.
+  @brief_title_limit 96
+  @brief_now_text_limit 160
+  @brief_truncation_help "truncated fields end with …; full record via bp task get <doc_id>"
+
   def render_doc(%Document{} = doc, :brief) do
     content = doc.content || %{}
-    progress = Criteria.progress(content) || %{met: 0, total: 0}
 
     %{
-      id: doc.id,
       doc_id: doc.doc_id,
-      title: doc.title,
-      status: doc.status,
-      lifecycle_status: Map.get(content, "lifecycle_status"),
+      title: truncate_graphemes(doc.title, @brief_title_limit),
       priority: Map.get(content, "priority"),
       assignee: Map.get(content, "assignee"),
-      claim: brief_claim(Map.get(content, "claim")),
-      criteria_met: progress.met,
-      criteria_total: progress.total,
       parent_id: Map.get(content, "parent_id"),
-      updated_at: doc.updated_at
+      updated_at: brief_timestamp(doc.updated_at)
     }
+    |> put_unless(:status, doc.status, "published")
+    |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
+    |> put_brief_criteria(content)
+    |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
+    |> prune_nils()
   end
 
-  # Brief claim = {worker, epoch, now} only — the identity + fencing + now-line
-  # a board or resuming agent needs. work_digest / work_field_digests /
-  # ts_iso / execution_policy are full-view (and `task get`) detail.
-  defp brief_claim(%{} = claim), do: Map.take(claim, ["worker", "epoch", "now"])
+  # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
+  # now-line a board or resuming agent needs. work_digest / work_field_digests /
+  # ts_iso / execution_policy are full-view (and `task get`) detail. A claim
+  # with NEITHER a worker NOR a now-line carries no signal a list reader acts
+  # on (cut c) → nil, which prune_nils/1 then omits from the card.
+  defp brief_claim(%{} = claim) do
+    worker = Map.get(claim, "worker")
+    now = Map.get(claim, "now")
+
+    if is_nil(worker) and is_nil(now) do
+      nil
+    else
+      %{"worker" => worker, "epoch" => Map.get(claim, "epoch"), "now" => brief_now(now)}
+      |> prune_nils()
+    end
+  end
+
   defp brief_claim(_), do: nil
 
-  # axi-s1: the frozen brief LIST card = brief render_doc + `child_count` from
+  # The now-line rides the card with its text capped (cut d) and its timestamp
+  # trimmed to seconds (cut f); `criterion` (a small int) survives untouched.
+  defp brief_now(%{} = now) do
+    now
+    |> Map.take(["text", "ts", "criterion"])
+    |> Map.update("text", nil, &truncate_graphemes(&1, @brief_now_text_limit))
+    |> Map.update("ts", nil, &brief_timestamp/1)
+    |> prune_nils()
+  end
+
+  defp brief_now(_), do: nil
+
+  # Cut (i): same omission law as full view's put_criteria_progress —
+  # Criteria.progress/1 is nil for absent/empty criteria, so a 0/0 pair never
+  # reaches the wire.
+  defp put_brief_criteria(map, content) do
+    case Criteria.progress(content) do
+      %{met: met, total: total} when total > 0 ->
+        map |> Map.put(:criteria_met, met) |> Map.put(:criteria_total, total)
+
+      _ ->
+        map
+    end
+  end
+
+  # Cut (g)/(h): keep the key only when the value differs from the steady
+  # state the reader already assumes; nil stays nil for prune_nils/1.
+  defp put_unless(map, _key, steady, steady), do: map
+  defp put_unless(map, key, value, _steady), do: Map.put(map, key, value)
+
+  # Cut (a): a nil value IS absence — drop the key instead of shipping
+  # `"assignee":null` fifty times per page.
+  defp prune_nils(map), do: Map.reject(map, fn {_k, v} -> is_nil(v) end)
+
+  # Cut (d)/(e): grapheme-safe cap with a bare … marker. The truncated value
+  # NEVER exceeds `limit` graphemes (limit - 1 content + the marker), and a
+  # multi-byte cluster (emoji, combining accents) is never split.
+  defp truncate_graphemes(s, limit) when is_binary(s) do
+    if String.length(s) > limit do
+      s |> String.graphemes() |> Enum.take(limit - 1) |> Enum.join() |> Kernel.<>("…")
+    else
+      s
+    end
+  end
+
+  defp truncate_graphemes(other, _limit), do: other
+
+  # Cut (f): seconds precision. Structs are truncated (Jason renders them
+  # ISO8601 without the fractional part); the now-line's ts is a stored
+  # ISO8601 STRING, so its fractional seconds are trimmed textually.
+  defp brief_timestamp(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
+  defp brief_timestamp(%NaiveDateTime{} = dt), do: NaiveDateTime.truncate(dt, :second)
+
+  defp brief_timestamp(ts) when is_binary(ts),
+    do: String.replace(ts, ~r/\.\d+(?=Z$|[+-]\d\d:?\d\d$)/, "")
+
+  defp brief_timestamp(other), do: other
+
+  # axi-s1: the brief LIST card = brief render_doc + `child_count` from
   # one batched grouped query (`batch_child_counts/2`) — never per-row.
   def render_brief(%Document{} = doc, child_counts) do
     doc
     |> render_doc(:brief)
     |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
   end
+
+  # ─── Brief truncation honesty (axi-w2-s2, charter law 2) ─────────────────
+  #
+  # When any card on a brief LIST response lost bytes to the … caps above, the
+  # response carries ONE top-level help[] line naming the escape hatch. No
+  # truncation → no line (an always-on banner would train readers to ignore
+  # it). Checked against the RAW docs — the same inputs the render saw — so
+  # the predicate can never drift from what actually got cut. Full view never
+  # truncates, so it never carries the line.
+  def maybe_put_brief_truncation_help(base, _docs, :full), do: base
+
+  def maybe_put_brief_truncation_help(base, docs, :brief) do
+    if Enum.any?(docs, &brief_truncated?/1),
+      do: Map.put(base, :help, [@brief_truncation_help]),
+      else: base
+  end
+
+  defp brief_truncated?(%Document{} = doc) do
+    over_limit?(doc.title, @brief_title_limit) or
+      over_limit?(get_in(doc.content || %{}, ["claim", "now", "text"]), @brief_now_text_limit)
+  end
+
+  defp over_limit?(s, limit) when is_binary(s), do: String.length(s) > limit
+  defp over_limit?(_, _), do: false
 
   defp put_criteria_progress(map, content) do
     case Criteria.progress(content) do

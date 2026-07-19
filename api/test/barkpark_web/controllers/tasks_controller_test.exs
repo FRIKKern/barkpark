@@ -67,6 +67,23 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # axi-w2-s2: a card fixture with a caller-chosen TITLE (mk_task! pins
+  # title = doc_id — too short for the truncation laws and too uniform for
+  # the brief byte tripwires).
+  defp mk_card_task!(doc_id, title, scope, content_extra) do
+    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+
+    {:ok, doc} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => doc_id, "title" => title, "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
@@ -1913,17 +1930,16 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
-  # ─── axi-s1 (R1/R2): ?view=brief cards + full-view claim de-dup ─────────
-  # The brief card is FROZEN (charter decision 3): id/doc_id, title, status,
-  # lifecycle_status, priority, assignee, claim{worker,epoch,now},
-  # criteria_met, criteria_total, child_count, parent_id, updated_at — no
-  # content echo, no work digests. Absent/unknown view = full (server default
+  # ─── axi-w2-s2: ?view=brief v2 cards + full-view claim de-dup ───────────
+  # Brief card v2 (charter decisions 15+16) is a PRESENCE/OMISSION contract,
+  # not an exact key set: populated fields ride; nil/absent keys, the uuid
+  # `id`, steady-state `status:"published"` / `lifecycle_status:"open"`, a
+  # signal-free claim, and a 0/0 criteria pair are all omitted; title and
+  # now.text are grapheme-capped (96/160) with a bare … + ONE top-level
+  # help[] escape-hatch line. Absent/unknown view = full (server default
   # stays full). Full view keeps exactly ONE claim copy — the top-level one.
-  describe "?view=brief (axi-s1 R1/R2)" do
-    @brief_keys ~w(assignee child_count claim criteria_met criteria_total doc_id id
-                   lifecycle_status parent_id priority status title updated_at)
-
-    test "ready?view=brief returns exactly the frozen field set — no content echo, no digests",
+  describe "?view=brief (axi-w2-s2 v2)" do
+    test "populated brief card: fields present, uuid id/content/digests and nil keys absent",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-ready")
 
@@ -1946,23 +1962,179 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["ok"] == true
       assert [card] = payload["docs"]
 
-      assert Enum.sort(Map.keys(card)) == Enum.sort(@brief_keys)
-
+      # doc_id is the ONLY address — the internal uuid id is gone (cut b).
+      assert is_binary(card["doc_id"])
+      refute Map.has_key?(card, "id")
       refute Map.has_key?(card, "content")
       refute Map.has_key?(card, "work_digest")
       refute Map.has_key?(card, "work_field_digests")
       refute Map.has_key?(card, "dependency_count")
 
       assert card["title"] != nil
-      assert card["lifecycle_status"] == "open"
+      # Draft fixture: status differs from the "published" steady state, so it
+      # survives (cut h omits ONLY "published").
+      assert card["status"] == "draft"
+      # Steady-state open lifecycle is omitted (cut g)…
+      refute Map.has_key?(card, "lifecycle_status")
+      # …and an unclaimed task carries NO claim key at all (cuts a+c).
+      refute Map.has_key?(card, "claim")
       assert card["priority"] == 1
       assert card["assignee"] == "someone"
       assert card["parent_id"] == phase
       assert card["criteria_met"] == 1
       assert card["criteria_total"] == 2
       assert card["child_count"] == 0
-      # Unclaimed: the claim key is present and honestly nil.
-      assert Map.fetch!(card, "claim") == nil
+
+      # Cut (a): nothing on the wire is null.
+      refute Enum.any?(card, fn {_k, v} -> is_nil(v) end)
+
+      # Cut (f): seconds-precision timestamp — no fractional part.
+      refute card["updated_at"] =~ ~r/\.\d/
+
+      # Nothing was truncated → no help line (honesty is not a banner).
+      refute Map.has_key?(payload, "help")
+    end
+
+    test "minimal open card is exactly {doc_id, title, status, child_count, updated_at}",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-min")
+      mk_task!(uniq("brief-min"), scope, %{"parent_id" => phase})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      assert [card] = payload["docs"]
+
+      # No priority/assignee/criteria/claim on the doc → none on the wire
+      # (cuts a, c, i); open lifecycle omitted (g); draft status survives (h).
+      assert Enum.sort(Map.keys(card)) ==
+               ~w(child_count doc_id parent_id status title updated_at)
+    end
+
+    test "blocked lifecycle SURVIVES on the brief card — the actionable exception",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-blocked")
+
+      mk_task!(uniq("brief-blocked"), scope, %{
+        "parent_id" => phase,
+        "lifecycle_status" => "blocked"
+      })
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      # queue.ex admits open|blocked — the blocked row is IN the ready page
+      # and its card says so (cut g is conditional, never unconditional).
+      assert [card] = payload["docs"]
+      assert card["lifecycle_status"] == "blocked"
+    end
+
+    test "published steady state: status key omitted from the brief card",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-pub")
+      raw_id = uniq("brief-pub")
+
+      # The publish wall requires a description + weighted REGISTERED tags —
+      # merge the one canonical test-side spelling (Barkpark.LabelFixtures).
+      mk_task!(
+        raw_id,
+        scope,
+        Barkpark.LabelFixtures.with_registered_labels(%{"parent_id" => phase}, @dataset)
+      )
+
+      {:ok, _} = Content.publish_document(raw_id, "task", @dataset, scope)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      assert [card] = payload["docs"]
+      assert card["doc_id"] == raw_id
+      # The task-contract steady state ("tasks MUST be published") is silent
+      # (cut h); everything else about the card is unchanged.
+      refute Map.has_key?(card, "status")
+    end
+
+    test "signal-free claim (no worker, no now) is omitted from the brief card",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-residue")
+
+      mk_task!(uniq("brief-residue"), scope, %{
+        "parent_id" => phase,
+        "claim" => %{"epoch" => 2, "ts_iso" => "2026-07-18T09:00:00Z", "work_digest" => "abcd"}
+      })
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      # A released/expired claim residue carries nothing a list reader acts
+      # on — cut (c) drops the whole key rather than shipping {"epoch":2}.
+      assert [card] = payload["docs"]
+      refute Map.has_key?(card, "claim")
+    end
+
+    test "truncation: title/now.text grapheme-capped with bare … and ONE help line; full view untouched",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-trunc")
+      # 100 graphemes of DECOMPOSED e-acute (two codepoints each -- 200
+      # codepoints, inside the varchar(255) title column) -- a byte/codepoint-
+      # naive cut at 95 would split a cluster; the grapheme cut must not.
+      long_title = String.duplicate("e\u0301", 100)
+      long_now = String.duplicate("now line words ", 20)
+
+      # Worker-less claim residue: a task with a LIVE claim worker is never on
+      # the ready page (QueueGate.executable_query), so the ready-card
+      # truncation case is a lingering now-line, worker long gone.
+      mk_card_task!(uniq("brief-trunc"), long_title, scope, %{
+        "parent_id" => phase,
+        "claim" => %{
+          "epoch" => 3,
+          "now" => %{"text" => long_now, "ts" => "2026-07-19T12:00:00.123456Z"}
+        }
+      })
+
+      resp = conn |> authed() |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+      payload = json_response(resp, 200)
+
+      assert [card] = payload["docs"]
+
+      # Title: capped at 96 graphemes INCLUDING the bare … marker, still
+      # valid UTF-8, no split cluster.
+      assert String.length(card["title"]) == 96
+      assert String.ends_with?(card["title"], "…")
+      assert String.valid?(card["title"])
+
+      # now.text: capped at 160 graphemes, same marker; ts trimmed to seconds.
+      assert String.length(card["claim"]["now"]["text"]) == 160
+      assert String.ends_with?(card["claim"]["now"]["text"], "…")
+      assert card["claim"]["now"]["ts"] == "2026-07-19T12:00:00Z"
+
+      # ONE top-level help line names the escape hatch.
+      assert payload["help"] == [
+               "truncated fields end with …; full record via bp task get <doc_id>"
+             ]
+
+      # Full view never truncates → never carries the line, title intact.
+      full_payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}")
+        |> json_response(200)
+
+      assert [full_doc] = full_payload["docs"]
+      assert full_doc["title"] == long_title
+      refute Map.has_key?(full_payload, "help")
     end
 
     test "absent and unknown view both return the full shape unchanged",
@@ -2009,6 +2181,8 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert claim["now"]["text"] == "halfway through"
       # The claim work digests are full-view detail — never on the brief card.
       assert Enum.sort(Map.keys(claim)) == ["epoch", "now", "worker"]
+      # Cut (f): the now-line timestamp is trimmed to seconds precision.
+      refute claim["now"]["ts"] =~ ~r/\.\d/
     end
 
     test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",
@@ -2105,6 +2279,158 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       assert full_bytes >= 10 * brief_bytes,
              "brief prime not ≥10x smaller: full=#{full_bytes}B brief=#{brief_bytes}B"
+    end
+
+    test "prime inherits the v2 cuts: in_progress now.text capped + top-level help line",
+         %{conn: conn, scope: scope} do
+      task_id = uniq("brief-prime-trunc")
+      mk_task!(task_id, scope)
+      {:ok, claimed} = Tasks.claim_by_id(task_id, "prime-trunc-worker", scope)
+      long_now = String.duplicate("pulse words here ", 20)
+      {:ok, _} = Tasks.pulse_by_id(claimed.id, "prime-trunc-worker", text: long_now)
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/prime?view=brief&worker=prime-trunc-worker")
+        |> json_response(200)
+
+      assert [card] = payload["in_progress"]
+      assert String.length(card["claim"]["now"]["text"]) == 160
+      assert String.ends_with?(card["claim"]["now"]["text"], "…")
+
+      assert payload["help"] == [
+               "truncated fields end with …; full record via bp task get <doc_id>"
+             ]
+
+      # Full prime never truncates → never carries the line.
+      full_payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/prime?worker=prime-trunc-worker")
+        |> json_response(200)
+
+      refute Map.has_key?(full_payload, "help")
+    end
+
+    # ─── Byte tripwires (axi-w2-s2, criterion 0's teeth) ───────────────────
+    # Two synthetic 50-card pages guard the diet from opposite ends: the
+    # realistic mix mirrors the live census presence ratios (the ≤15 KB
+    # typical-page bound the epic promises), the hostile page maxes every
+    # field (the ≤30 KB disclosed re-inflation ceiling, charter decision 16).
+    # Any cut that regresses — a nil key creeping back, a cap widening, a
+    # steady-state omission dropped — shows up here as raw bytes.
+
+    test "realistic-mix tripwire: 50 brief ready cards ≤ 15,360 B",
+         %{conn: conn, scope: scope} do
+      ts = "2026-07-19T12:00:00.123456Z"
+      # Pre-computed ids so every card can carry `distinct_from` (the dedup
+      # gate's own opt-out) — 50 same-shaped fixture cards are exactly what
+      # the duplicate-task wall exists to refuse.
+      ids = for i <- 1..50, do: uniq("mix#{i}")
+
+      for {id, i} <- Enum.with_index(ids, 1) do
+        # 11/50 titles past the 96-grapheme cap; the rest typical length.
+        title =
+          if i <= 11 do
+            "Realistic long slice title number #{i} that spills well past the " <>
+              "ninety-six grapheme cap " <> String.duplicate("padding ", 6)
+          else
+            "Fix the ready queue pager step #{i}"
+          end
+
+        extra = %{"priority" => rem(i, 5), "distinct_from" => ids -- [id]}
+        # ~half carry an assignee, ~half a parent_id (independent halves).
+        extra = if i in 12..36, do: Map.put(extra, "assignee", "builder-#{i}"), else: extra
+
+        extra =
+          if rem(i, 2) == 0,
+            do: Map.put(extra, "parent_id", "phase-mix-#{rem(i, 3)}"),
+            else: extra
+
+        # 7/50 claim residues with a now-line (worker-less — a task with a
+        # LIVE claim worker is never ready); 3 of those now-lines past 160.
+        extra =
+          if i >= 44 do
+            now_text =
+              if i >= 48,
+                do: String.duplicate("now-line words that ramble on ", 10),
+                else: "wiring the serializer, tests next (#{i})"
+
+            Map.put(extra, "claim", %{
+              "epoch" => 3,
+              "ts_iso" => ts,
+              "work_digest" => "abcd1234deadbeef",
+              "now" => %{"text" => now_text, "ts" => ts}
+            })
+          else
+            extra
+          end
+
+        mk_card_task!(id, title, scope, extra)
+      end
+
+      resp = conn |> authed() |> get("/v1/tasks/ready?view=brief&limit=50")
+      payload = json_response(resp, 200)
+      assert length(payload["docs"]) == 50
+
+      bytes = byte_size(resp.resp_body)
+      IO.puts("axi-w2-s2 realistic-mix probe: #{bytes}B for 50 brief ready cards")
+      assert bytes <= 15_360, "realistic 50-card brief page blew the 15,360 B bound: #{bytes}B"
+    end
+
+    test "hostile-ceiling tripwire: 50 maxed brief cards ≤ 30,720 B",
+         %{conn: conn, scope: scope} do
+      ts = "2026-07-19T12:00:00.654321Z"
+      title = String.duplicate("hostile title ", 10)
+      now_text = String.duplicate("now line words ", 20)
+
+      criteria =
+        for j <- 1..5,
+            do: %{"criterion" => "criterion #{j}", "met" => j <= 2, "evidence" => ""}
+
+      # Pre-computed ids for `distinct_from` — the dedup gate's own opt-out
+      # (50 identical hostile cards are the canonical duplicate otherwise).
+      ids = for i <- 1..50, do: uniq("h#{i}")
+
+      for {id, _i} <- Enum.with_index(ids, 1) do
+        mk_card_task!(id, title, scope, %{
+          "lifecycle_status" => "blocked",
+          "priority" => 0,
+          "assignee" => "hostile-builder",
+          "parent_id" => "phase-hostile",
+          "distinct_from" => ids -- [id],
+          "acceptance_criteria" => criteria,
+          # Worker-less claim residue (a live worker would exclude the row
+          # from ready) — now-line + epoch survive as the hostile payload.
+          "claim" => %{
+            "epoch" => 7,
+            "ts_iso" => ts,
+            "work_digest" => "ffffffff",
+            "now" => %{"text" => now_text, "ts" => ts}
+          }
+        })
+      end
+
+      resp = conn |> authed() |> get("/v1/tasks/ready?view=brief&limit=50")
+      payload = json_response(resp, 200)
+      assert length(payload["docs"]) == 50
+
+      # Spot-check the maxed card kept its honest shape under the diet.
+      card = hd(payload["docs"])
+      assert card["lifecycle_status"] == "blocked"
+      assert card["criteria_met"] == 2
+      assert card["criteria_total"] == 5
+      assert String.length(card["title"]) == 96
+      assert String.length(card["claim"]["now"]["text"]) == 160
+
+      assert payload["help"] == [
+               "truncated fields end with …; full record via bp task get <doc_id>"
+             ]
+
+      bytes = byte_size(resp.resp_body)
+      IO.puts("axi-w2-s2 hostile-ceiling probe: #{bytes}B for 50 maxed brief cards")
+      assert bytes <= 30_720, "hostile 50-card brief page blew the 30,720 B ceiling: #{bytes}B"
     end
   end
 
