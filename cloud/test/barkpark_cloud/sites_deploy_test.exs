@@ -696,15 +696,18 @@ defmodule BarkparkCloud.SitesDeployTest do
   # would report a successful rollback for a symlink that had not moved, and the
   # "sub-second rollback" the product promises would be timing the ACCEPT, not the
   # FLIP. These tests drive the actual HTTP impl over the fake transport.
+  #
+  # They call `BoxRelay.HTTP.rollback/2` DIRECTLY — never `BoxRelay.rollback/2`
+  # after swapping `:site_box_relay`. Application env is one GLOBAL shared by the
+  # whole node, so in an `async: true` module that swap points EVERY concurrently
+  # running test at the real HTTP relay for as long as this describe runs: a
+  # `Sites.Deploy.run/1` over in `router_sites_test.exs` then talks to a fake
+  # transport nobody programmed for it and settles `{:ok, :failed}`. That was the
+  # order-dependent red on the required Cloud gate (GR47). The dispatcher is one
+  # `impl().rollback(...)` hop with no logic of its own, so naming the impl
+  # directly tests strictly MORE than the swap did, and isolates by construction.
   # ---------------------------------------------------------------------------
   describe "BoxRelay.HTTP.rollback/2 — answers only once the box has really flipped" do
-    setup do
-      prev = Application.get_env(:barkpark_cloud, :site_box_relay)
-      Application.put_env(:barkpark_cloud, :site_box_relay, BarkparkCloud.Sites.BoxRelay.HTTP)
-      on_exit(fn -> Application.put_env(:barkpark_cloud, :site_box_relay, prev) end)
-      :ok
-    end
-
     test "POLLS past the async 202 and reports the build that is NOW live" do
       bp = team_fixture() |> live_barkpark()
 
@@ -725,7 +728,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       ])
 
       assert {:ok, 200, body} =
-               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
+               BarkparkCloud.Sites.BoxRelay.HTTP.rollback(bp, %{mode: "rollback", slug: "blog"})
 
       assert body["status"] == "rolled_back"
       # THE point: the previous build's id, scraped from the box's own stream. A
@@ -752,7 +755,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       ])
 
       assert {:ok, 422, body} =
-               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
+               BarkparkCloud.Sites.BoxRelay.HTTP.rollback(bp, %{mode: "rollback", slug: "blog"})
 
       assert body["error"] =~ "no previous release"
     end
@@ -765,7 +768,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       ])
 
       assert {:ok, 409, _body} =
-               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
+               BarkparkCloud.Sites.BoxRelay.HTTP.rollback(bp, %{mode: "rollback", slug: "blog"})
     end
   end
 
