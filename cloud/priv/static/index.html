@@ -442,6 +442,23 @@
           <div id="env-body" aria-live="polite"></div>
         </section>
 
+        <!-- ---------- OPERATOR CONSOLE (GR39 — platform operators only) ----------
+             The ONE fleet-wide, cross-team surface. Reachable only through the
+             role-gated sidebar entry; a non-operator who deep-links #operator is
+             BOUNCED to Overview by loadOperator (fail-closed, GR49) — this
+             section never renders for them. Body is painted by app.js. -->
+        <section class="view" id="view-operator" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Operator</h1>
+              <p class="dim">Fleet-wide rollout controls. Everything here spans every team &mdash; there is no team scope on this page.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="operator-refresh" type="button">Refresh</button>
+          </header>
+
+          <div id="operator-body" aria-live="polite"></div>
+        </section>
+
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->
         <section class="view" id="view-instance" hidden>
           <div id="instance-body" aria-live="polite"></div>

@@ -84,6 +84,278 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+test("gr-p5: app.css is BRACE-BALANCED — no rule is silently swallowed by an unclosed block", () => {
+  // A REAL defect this slice hit (present on main since #4271): a comment's
+  // opening `/*` was lost, so `@media (max-width: 620px) {` never closed and
+  // every rule after it — the whole tlv-coalesce + domain-checklist families,
+  // and this wave's .op-* rules — was nested inside that media query and DEAD
+  // above 620px. __css_check has no structural parse (E9 only guards the token
+  // blocks), so nothing else would ever catch it. This is that tripwire.
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  let depth = 0, i = 0, inComment = false, firstNegative = -1;
+  while (i < css.length) {
+    if (inComment) {
+      if (css.startsWith("*/", i)) { inComment = false; i += 2; continue; }
+      i += 1; continue;
+    }
+    if (css.startsWith("/*", i)) { inComment = true; i += 2; continue; }
+    const c = css[i];
+    if (c === "{") depth += 1;
+    else if (c === "}") { depth -= 1; if (depth < 0 && firstNegative < 0) firstNegative = i; }
+    i += 1;
+  }
+  assert.equal(firstNegative, -1, "a stray closing brace ends a block early");
+  assert.equal(depth, 0, "app.css has " + depth + " unclosed block(s) — every rule after it is nested and dead");
+  assert.equal(inComment, false, "an unterminated /* comment eats the rest of the stylesheet");
+});
+
+// ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
+// THE crown surface: the #operator view rendered honest over the real rollout
+// machinery. Pinned here: the fail-closed ROUTE gate (applyRoute is not
+// hook-exported, so the predicate it consults is), the four cards' pure
+// derivations against the PROBE-VERIFIED wire bytes, and the four anti-drift
+// source guards GR49 asks for (one route literal, one action emitter, zero
+// /v1/admin/autoupdate, zero fleetStrip* consumption).
+
+const APP_SRC = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+test("gr-p5: the operator console's pure helpers ride the ONE test hook", () => {
+  for (const name of [
+    "operatorRouteAllowed", "operatorRowState", "operatorFleetSort",
+    "operatorStagingGateCopy", "operatorBrakeCardHtml", "operatorCanaryCardHtml",
+    "operatorWarmPoolCardHtml", "operatorDigestCardHtml", "operatorPageHtml",
+  ]) assert.equal(typeof hooks[name], "function", name + " is exported");
+  assert.equal(hooks.OPERATOR_SETTLE_MIN, 20, "the settle grace is 20 minutes, never 30 (GR40)");
+});
+
+test("gr-p5: operatorRouteAllowed is FAIL-CLOSED — only user.platform_operator === true opens #operator", () => {
+  assert.equal(hooks.operatorRouteAllowed(undefined), false, "me not loaded → closed");
+  assert.equal(hooks.operatorRouteAllowed(null), false);
+  assert.equal(hooks.operatorRouteAllowed({}), false);
+  assert.equal(hooks.operatorRouteAllowed({ user: {} }), false);
+  assert.equal(hooks.operatorRouteAllowed({ user: { platform_operator: false } }), false);
+  assert.equal(hooks.operatorRouteAllowed({ user: { platform_operator: "yes" } }), false, "truthy-but-not-true stays closed");
+  // GR37: the flag is NESTED under `user`; a flat read must never open the gate.
+  assert.equal(hooks.operatorRouteAllowed({ platform_operator: true }), false, "a flat flag is not the contract");
+  assert.equal(hooks.operatorRouteAllowed({ user: { platform_operator: true } }), true);
+  // The route gate and the sidebar gate are ONE truth — never two vocabularies.
+  for (const me of [null, {}, { user: { platform_operator: true } }, { user: { platform_operator: 1 } }]) {
+    assert.equal(hooks.operatorRouteAllowed(me), hooks.operatorVisible(me));
+  }
+});
+
+test("gr-p5: #operator is a registered route (the sidebar link finally lands on a page)", () => {
+  const orig = sandbox.location.hash;
+  try {
+    sandbox.location.hash = "#operator";
+    assert.equal(hooks.parseHash().view, "operator");
+    // It is NOT a settings page and NOT a drill-down — a bare tab route.
+    sandbox.location.hash = "#settings/operator";
+    assert.equal(hooks.parseHash().view, "overview", "there is no settings/operator page");
+  } finally {
+    sandbox.location.hash = orig;
+  }
+});
+
+// ── card 1: the brake (GR49 — one derivation, never restated copy) ───────────
+
+test("gr-p5: operatorBrakeCardHtml is a SECOND presentation of the SHARED banner model", () => {
+  for (const state of [{ halted: false }, { halted: true, halted_reason: "bad release 0.5.0" }]) {
+    const shared = hooks.fleetRolloutBanner(state);
+    const card = hooks.operatorBrakeCardHtml(state);
+    assert.ok(card.includes(shared.title), "the card carries the SHARED title: " + shared.title);
+    assert.ok(card.includes(shared.actionLabel), "the card carries the SHARED action label");
+    assert.ok(card.includes('data-fleet-au="' + shared.verb + '"'), "the console owns the action control");
+  }
+  // Honest degrade: the route didn't answer → say so about THIS card, never fake a state.
+  const dead = hooks.operatorBrakeCardHtml(null);
+  assert.match(dead, /Rollout state unavailable/);
+  assert.doesNotMatch(dead, /data-fleet-au/, "an unreadable brake offers no button");
+  // The halt consequence is stated honestly: advance stops, in-flight keeps settling.
+  assert.match(hooks.operatorBrakeCardHtml({ halted: false }), /nothing is rolled back/);
+});
+
+// ── card 2: the canary (GR48 wire shape + GR50 copy) ─────────────────────────
+
+test("gr-p5: operatorRowState renders ALL FOUR update_state values, unknown reads calm", () => {
+  assert.deepEqual(
+    ["current", "behind", "disabled", "unknown"].map((s) => hooks.operatorRowState({ update_state: s }).label),
+    ["Current", "Behind", "Autoupdate off", "Unknown"],
+  );
+  assert.equal(hooks.operatorRowState({ update_state: "current" }).role, "ok");
+  assert.equal(hooks.operatorRowState({ update_state: "behind" }).role, "warn");
+  // `unknown` is the COMMON freshly-registered case (GR48) — neutral, not alarming.
+  assert.equal(hooks.operatorRowState({ update_state: "unknown" }).role, "neutral");
+  assert.equal(hooks.operatorRowState({ update_state: "disabled" }).role, "neutral");
+  // A missing/absent state is `unknown`, and a hostile one never throws.
+  assert.equal(hooks.operatorRowState({}).label, "Unknown");
+  assert.equal(hooks.operatorRowState(null).label, "Unknown");
+});
+
+test("gr-p5: operatorRowState settle math — null-guarded, 20m grace, overdue is pause-not-retry", () => {
+  const now = Date.parse("2026-07-19T18:00:00.000000Z");
+  // GR48: autoupdate_triggered_at is NULL for a freshly-registered box.
+  assert.equal(hooks.operatorRowState({ update_state: "behind", autoupdate_triggered_at: null }, now).label, "Behind");
+  // Six microsecond digits + literal Z — the real serializer shape.
+  const at12 = "2026-07-19T17:48:00.000000Z";
+  const settling = hooks.operatorRowState({ update_state: "behind", autoupdate_triggered_at: at12 }, now);
+  assert.equal(settling.label, "SETTLE — 12m of 20m");
+  // Elapsed FLOORS (a wait of 11m59s reads 11m — never rounded up into a minute
+  // that hasn't passed), and the six-microsecond serializer shape parses fine.
+  assert.equal(
+    hooks.operatorRowState({ update_state: "behind", autoupdate_triggered_at: "2026-07-19T17:48:00.932308Z" }, now).label,
+    "SETTLE — 11m of 20m",
+  );
+  assert.equal(settling.role, "info");
+  // In-flight WINS over update_state (that is what the worker's settle pass watches).
+  assert.match(hooks.operatorRowState({ update_state: "current", autoupdate_triggered_at: at12 }, now).label, /^SETTLE/);
+  const overdue = hooks.operatorRowState({ update_state: "behind", autoupdate_triggered_at: "2026-07-19T17:30:00.000000Z" }, now);
+  assert.equal(overdue.label, "SETTLE — overdue past 20m");
+  assert.match(overdue.note, /pauses this instance instead of retrying it/,
+    "the overdue note states the worker's real behaviour: pause, not retry");
+  // A garbage timestamp degrades to the update_state, never NaN.
+  assert.equal(hooks.operatorRowState({ update_state: "behind", autoupdate_triggered_at: "nonsense" }, now).label, "Behind");
+});
+
+test("gr-p5: operatorStagingGateCopy renders THREE states — open is not automatically a vouch", () => {
+  const staging = [{ channel: "staging" }, { channel: "prod" }];
+  const prodOnly = [{ channel: "prod" }, { channel: "prod" }];
+  assert.match(hooks.operatorStagingGateCopy(true, staging).text, /open — a staging instance is current on the newest release\./);
+  // The fail-OPEN branch (zero staging boxes) — the state prod is in TODAY.
+  assert.match(hooks.operatorStagingGateCopy(true, prodOnly).text, /open — no staging instance is registered, so prod advances with nothing ahead of it\./);
+  assert.match(hooks.operatorStagingGateCopy(false, staging).text, /closed — staging is behind or paused, so no prod instance advances\./);
+  assert.equal(hooks.operatorStagingGateCopy(true, prodOnly).role, "neutral", "fail-open is not a green vouch");
+  assert.equal(hooks.operatorStagingGateCopy(true, staging).role, "ok");
+  assert.equal(hooks.operatorStagingGateCopy(false, []).role, "warn");
+});
+
+test("gr-p5: operatorFleetSort walks the rollout's own order — in-flight, staging, behind, rest", () => {
+  const rows = [
+    { name: "zeta-prod", channel: "prod", update_state: "current" },
+    { name: "beta-prod", channel: "prod", update_state: "behind" },
+    { name: "canary", channel: "staging", update_state: "current" },
+    { name: "alpha-prod", channel: "prod", update_state: "behind", autoupdate_triggered_at: "2026-07-19T17:50:00.000000Z" },
+    { name: "aaa-prod", channel: "prod", update_state: "current" },
+  ];
+  assert.deepEqual(hooks.operatorFleetSort(rows).map((r) => r.name),
+    ["alpha-prod", "canary", "beta-prod", "aaa-prod", "zeta-prod"]);
+  assert.equal(hooks.operatorFleetSort([]).length, 0);
+  assert.equal(hooks.operatorFleetSort(null).length, 0, "a missing list is empty, never a throw");
+  // Pure: the input array is never mutated.
+  const input = [{ name: "b" }, { name: "a" }];
+  hooks.operatorFleetSort(input);
+  assert.equal(input[0].name, "b");
+});
+
+test("gr-p5: operatorCanaryCardHtml reads the REAL envelope — staging_gate_open is TOP-LEVEL", () => {
+  const now = Date.parse("2026-07-19T18:00:00.000000Z");
+  const data = {
+    barkparks: [
+      { id: "5b2c1e00-0000-4000-8000-0000000000a1", name: "acme-prod", channel: "prod", update_state: "unknown", autoupdate_triggered_at: null },
+      { id: "5b2c1e00-0000-4000-8000-0000000000a2", name: "acme-canary", channel: "staging", update_state: "current", autoupdate_triggered_at: null },
+    ],
+    staging_gate_open: true,
+  };
+  const html = hooks.operatorCanaryCardHtml(data, now);
+  assert.ok(html.includes("acme-prod") && html.includes("acme-canary"), "every instance renders");
+  assert.ok(html.includes("5b2c1e00"), "the row carries the id head an operator can grep on");
+  assert.match(html, /a staging instance is current/, "the TOP-LEVEL gate flag drives the gate line");
+  // A per-row staging_gate_open is NOT the contract and must not be read.
+  const perRow = hooks.operatorCanaryCardHtml({ barkparks: [{ name: "x", channel: "prod", staging_gate_open: true }] });
+  assert.match(perRow, /closed — staging is behind or paused/, "an absent top-level flag reads closed, never per-row");
+  // GR40/GR50 vocabulary: 20 minutes, serial, pause-not-retry — and NEVER 30m.
+  assert.match(html, /Gates: SETTLE 20m &rarr; health GATE &rarr; ADVANCE/);
+  assert.match(html, /hasn't reported itself current within 20 minutes is paused, not retried/);
+  assert.match(html, /serial — one instance at a time/);
+  assert.ok(!html.includes("30m") && !html.includes("30 minutes"), "the design mock's 30m is never rendered");
+  // Empty + unreadable states.
+  assert.match(hooks.operatorCanaryCardHtml({ barkparks: [], staging_gate_open: true }), /No instances are registered yet/);
+  assert.match(hooks.operatorCanaryCardHtml(null), /Fleet unavailable/);
+  // Hostile server strings are escaped, never injected.
+  const evil = hooks.operatorCanaryCardHtml({ barkparks: [{ name: "<img src=x onerror=alert(1)>", channel: "prod" }], staging_gate_open: false });
+  assert.doesNotMatch(evil, /<img src=x/);
+  assert.match(evil, /&lt;img/);
+});
+
+// ── card 3: warm pool (GR50 — one number, no denominator exists) ─────────────
+
+test("gr-p5: operatorWarmPoolCardHtml renders ONE number — no bar, no percentage, no invented total", () => {
+  const two = hooks.operatorWarmPoolCardHtml({ ready: 2 });
+  assert.match(two, /op-metric-v">2</);
+  assert.match(two, /boxes ready/);
+  assert.match(two, /there's no total to compare against/);
+  assert.match(two, /Boxes being claimed or retired are already on their way out/);
+  assert.ok(!two.includes("usage-bar") && !two.includes("%"), "no bar and no percentage — there is no denominator");
+  assert.ok(!/\bof\s+\d/.test(two), "never renders an 'n of m' fiction");
+  assert.match(hooks.operatorWarmPoolCardHtml({ ready: 1 }), /box ready/, "singular reads right");
+  // Zero is a DESIGNED state, not an error.
+  const zero = hooks.operatorWarmPoolCardHtml({ ready: 0 });
+  assert.match(zero, /The pool is empty right now\./);
+  assert.match(zero, /Launches still work — they provision a cold box instead of claiming a warm one\./);
+  assert.doesNotMatch(zero, /unavailable/, "an empty pool is never reported as an error");
+  // Unreadable is about THIS CARD, never about the pool.
+  const dead = hooks.operatorWarmPoolCardHtml(null);
+  assert.match(dead, /Warm pool unavailable — the count didn't answer\./);
+  assert.match(dead, /this card just couldn't read it/);
+  assert.match(hooks.operatorWarmPoolCardHtml({}), /Warm pool unavailable/, "a shapeless answer is unreadable, not zero");
+});
+
+// ── card 4: fleet digest (GR40 — no send-now route, so no send-now button) ───
+
+test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO Send-now button", () => {
+  const empty = hooks.operatorDigestCardHtml([]);
+  assert.match(empty, /No fleet digest has been sent yet\./);
+  assert.match(empty, /daily at 06:00 UTC to the platform-operator addresses/);
+  const rows = hooks.operatorDigestCardHtml([
+    { id: "d1", status: "sent", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 1, inserted_at: "2026-07-19T06:00:01.932308Z", last_error: null, http_status: null },
+    { id: "d2", status: "failed", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 3, inserted_at: "2026-07-18T06:00:02.100000Z", last_error: "smtp timeout", http_status: null },
+  ]);
+  assert.ok(rows.includes("ops@barkpark.cloud"), "the recipient renders");
+  assert.ok(rows.includes("Sent") && rows.includes("Failed"), "both delivery outcomes render");
+  assert.ok(rows.includes("smtp timeout"), "a failure carries its verbatim last_error");
+  for (const html of [empty, rows, hooks.operatorDigestCardHtml(null)]) {
+    assert.ok(!/Send (one )?now/i.test(html), "no send-now button — no route calls deliver_fleet_digest (GR40)");
+  }
+  assert.match(hooks.operatorDigestCardHtml(null), /Digest log unavailable/);
+});
+
+test("gr-p5: operatorPageHtml composes the four cards, each with its own body slot", () => {
+  const html = hooks.operatorPageHtml();
+  for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest"])
+    assert.ok(html.includes(heading), "the page carries the " + heading + " card");
+  for (const id of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body"])
+    assert.ok(html.includes('id="' + id + '"'), "each card owns its body slot: " + id);
+  assert.equal((html.match(/class="set-section"/g) || []).length, 4, "four cards on the shared .set-* anatomy");
+  // No instance-lifecycle verbs live on this page (EXIT.md:13).
+  assert.ok(!/Suspend|Decommission|Archive|Delete instance/i.test(html), "no lifecycle admin verbs");
+});
+
+// ── GR49 anti-drift source guards (the console is the SOLE brake control) ────
+
+test("gr-p5 GR49: ONE route literal, ONE action emitter, ZERO worker-gated probes", () => {
+  assert.equal((APP_SRC.match(/\/v1\/admin\/autoupdate/g) || []).length, 0,
+    "the require_worker route (401-dead to a browser session) is gone from app.js");
+  assert.equal((APP_SRC.match(/"\/v1\/operator\/autoupdate"/g) || []).length, 1,
+    "the operator autoupdate route literal is defined exactly ONCE");
+  assert.equal((APP_SRC.match(/data-fleet-au="/g) || []).length, 1,
+    "exactly one emitter of the brake action attribute");
+  // Fleet is demoted to a READ-ONLY, halted-only banner that points at #operator.
+  const readonly = hooks.fleetRolloutBannerHtml({ halted: true }, { readonly: true });
+  assert.doesNotMatch(readonly, /data-fleet-au/, "the team-scoped Fleet banner carries no fleet-wide button");
+  assert.match(readonly, /href="#operator"/, "it points at the one place the brake is operated");
+  // The DEFAULT (one-arg) call keeps the button, so the existing pins stay green.
+  assert.match(hooks.fleetRolloutBannerHtml({ halted: true }), /data-fleet-au="resume"/);
+});
+
+test("gr-p5 GR42/GR51: the operator console consumes ZERO fleetStrip* helpers", () => {
+  const start = APP_SRC.indexOf("OPERATOR CONSOLE");
+  const end = APP_SRC.indexOf("function railRow(", start);
+  assert.ok(start > 0 && end > start, "the operator console block is locatable");
+  const block = APP_SRC.slice(start, end);
+  assert.equal((block.match(/fleetStrip/g) || []).length, 0, "no fleetStrip* consumption in the operator console");
+  assert.equal((block.match(/FLEET_STRIP/g) || []).length, 0);
+});
+
 // ── gr-p5 GR41: danger-no-echo confirm tier, rich-body slot, toast shape ─────
 // The shared confirm modal's THIRD tier (btn-danger weight WITHOUT the typed
 // echo — for grave-but-reversible actions like rollbacks) plus the trusted
