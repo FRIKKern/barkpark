@@ -235,7 +235,39 @@
     else { shell.removeAttribute("inert"); shell.removeAttribute("aria-hidden"); }
   }
 
+  // ---------------------------------------------------- one-shot modal pin (GR56)
+  // Some modal bodies show something the server will NEVER serve again — the
+  // 2FA recovery sheet is the first. Escape / backdrop / the × must not throw
+  // that away by reflex; only an explicit "I saved them" (or logout, or any
+  // programmatic close) may dismiss it.
+  //
+  // The pin is FAIL-OPEN by construction: openModal clears it on EVERY open, so
+  // a stale pin can never lock the NEXT modal (launch, env editor, confirm)
+  // shut with no explanation. closeModal stays completely UNGATED.
+  var modalPinFlag = false;
+
+  // Pure, total predicate over the four dismissal routes. `explicit` ALWAYS
+  // passes — it is the body's own affordance, not a reflex.
+  function modalDismissAllowed(pinned, via) {
+    if (via === "explicit") return true;
+    return !pinned;
+  }
+
+  // `.modal-x` carries data-close (index.html), so it rides the same delegated
+  // handler as the backdrop and a pin DEADENS it. A visible dead × is strictly
+  // worse than no × — hide it while pinned.
+  function setModalPin(on) {
+    modalPinFlag = !!on;
+    var x = $(".modal-x");
+    if (x) x.hidden = modalPinFlag;
+    return modalPinFlag;
+  }
+  function modalPinState() { return modalPinFlag; }
+
   function openModal(html) {
+    // Fail-open FIRST, before any early return: a modal that never mounted must
+    // still not leave a pin behind for the next one.
+    setModalPin(false);
     var root = $("#modal-root");
     var bodyEl = $("#modal-body");
     if (!root || !bodyEl) return;
@@ -243,8 +275,11 @@
     bodyEl.innerHTML = html;
     show(root);
     setShellInert(true);
-    var focusable = bodyEl.querySelector(FOCUSABLE_SEL);
-    (focusable || $(".modal-x")).focus();
+    // Total: a body with no focusable control AND no × (the pinned recovery
+    // sheet is the first shape that can produce it) must not throw on open —
+    // that would abort the mount and leave a half-shown dialog.
+    var focusable = bodyEl.querySelector(FOCUSABLE_SEL) || $(".modal-x");
+    if (focusable && typeof focusable.focus === "function") focusable.focus();
     return bodyEl;
   }
 
@@ -288,12 +323,21 @@
   function wireModal() {
     var root = $("#modal-root");
     if (!root) return;
+    // GR56: the pin is consulted ONLY here, at the two reflex dismissal routes.
+    // Every other close path — closeModal(), logout, a body's own button —
+    // stays ungated, so a hung request can never imprison the operator.
     root.addEventListener("click", function (e) {
-      if (e.target.hasAttribute && e.target.hasAttribute("data-close")) closeModal();
+      if (!(e.target.hasAttribute && e.target.hasAttribute("data-close"))) return;
+      var isX = e.target.classList && e.target.classList.contains("modal-x");
+      if (!modalDismissAllowed(modalPinState(), isX ? "close-x" : "backdrop")) return;
+      closeModal();
     });
     document.addEventListener("keydown", function (e) {
       if (root.hidden) return;
-      if (e.key === "Escape") { closeModal(); return; }
+      if (e.key === "Escape") {
+        if (modalDismissAllowed(modalPinState(), "escape")) closeModal();
+        return;
+      }
       trapModalTab(e);
     });
   }
@@ -512,6 +556,10 @@
   // in the list, deliberately not a full UA parser (no dependency).
   function deviceLabel(ua) {
     if (!ua) return "Unknown device";
+    // The bp CLI signs in through the device-link flow and holds a session like
+    // any browser. Calling it "Browser" is a lie an operator would act on — it
+    // is exactly the row they scan for when deciding what to revoke.
+    if (/barkpark-cli|bp-cli/i.test(ua)) return "bp CLI";
     var os = /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS"
       : /Android/.test(ua) ? "Android" : /iPhone|iPad|iOS/.test(ua) ? "iOS"
       : /Linux/.test(ua) ? "Linux" : "";
@@ -520,26 +568,111 @@
     return (br + (os ? " · " + os : "")) || "Browser";
   }
 
-  // PURE body of the account modal (GR54's safety net). Extracted verbatim from
-  // openAccountModal so the eight element-id contracts the wiring below depends
-  // on — and that a lockout would ride — are node-pinned BEFORE the markup is
-  // recomposed. `s` is the session object; only `team_id` is read.
-  function accountModalHtml(s) {
-    s = s || {};
-    var team = s.team_id ? String(s.team_id) : "—";
-    return (
-      '<h2 class="modal-title" id="modal-title">Account &amp; sessions</h2>' +
-      '<p class="modal-sub">You are signed in to Barkpark Cloud.</p>' +
-      '<div class="modal-row"><span class="k">Team</span><span class="v">' + esc(team) + "</span></div>" +
+  // ------------------------------------------------- clipboard + file download
+  // Same execCommand-then-Clipboard-API ladder the token reveal already uses
+  // (#token-copy): a hidden textarea keeps it working where the async clipboard
+  // permission is denied. downloadText is a Blob URL — zero dependencies.
+  function copyText(text, title) {
+    var t = String(text == null ? "" : text), ok = false;
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = t;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    if (!ok && navigator.clipboard) {
+      navigator.clipboard.writeText(t).then(function () {}, function () {});
+    }
+    toast({ kind: "success", title: title || "Copied to clipboard" });
+  }
 
-      '<h3 class="modal-section">Active sessions</h3>' +
-      '<div id="sessions-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
-      '<div class="modal-actions inline">' +
-        '<button class="btn btn-sm" type="button" id="sessions-revoke-all">Sign out everywhere else</button>' +
+  function downloadText(filename, text) {
+    try {
+      var blob = new Blob([String(text == null ? "" : text)], { type: "text/plain;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Revoking synchronously can race the download in some browsers.
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    } catch (e) {
+      toast({ kind: "error", title: "Couldn't download the file", body: "Copy the codes instead." });
+    }
+  }
+
+  // ─────────────────────────── the account modal, recomposed (GR54) ──────────
+  // One screen, four bands: identity (with password on demand), sessions,
+  // two-factor, footer. Every band is PURE below; the DOM wiring follows.
+  //
+  // The three operations here can lock a user out of their own console, so the
+  // element-id contracts (#pw-form, #pw-current, #pw-new, #pw-error,
+  // #sessions-box, #sessions-revoke-all, #modal-logout, #modal-title) are
+  // node-pinned and mutation-proved. The password form is DISCLOSED, not
+  // conditionally rendered — it ships in the markup `hidden` and the link
+  // toggles it — so submitPasswordChange's bindings never move.
+
+  // The view-model, folded from the two truths the SPA already holds: the
+  // session (team id) and meCache (/v1/me). NOTHING here costs a fetch —
+  // two_factor_enabled has been in the /v1/me envelope all along.
+  function accountModel(s, me) {
+    s = s || {};
+    me = me || {};
+    var user = me.user || {};
+    var team = me.team || null;
+    var email = user.email ? String(user.email) : "";
+    return {
+      email: email,
+      name: email ? email.split("@")[0] : "Account",
+      teamName: (team && team.name) ? String(team.name) : "",
+      teamId: s.team_id ? String(s.team_id) : (team && team.id ? String(team.id) : ""),
+      role: me.role ? String(me.role) : "",
+      twoFactorEnabled: !!user.two_factor_enabled
+    };
+  }
+
+  // "fjord@jarl.no · owner of Guerrilla". Degrades honestly: no role/team drops
+  // the clause, no email at all falls back to the raw team id rather than
+  // inventing an identity.
+  function accountIdentityLine(model) {
+    model = model || {};
+    var left = model.email || (model.teamId ? "Team " + model.teamId : "");
+    var right = (model.role && model.teamName) ? model.role + " of " + model.teamName
+      : model.teamName ? "member of " + model.teamName : "";
+    if (left && right) return left + " · " + right;
+    return left || right || "Signed in to Barkpark Cloud";
+  }
+
+  function accountModalHtml(model) {
+    model = model || {};
+    var name = model.name || "Account";
+    var initial = (String(name).charAt(0) || "B").toUpperCase();
+    return (
+      // .am-modal is the :has() hook the width override keys off — the shared
+      // .modal-card 420px base is never touched (GR57).
+      '<div class="am-modal">' +
+      '<h2 class="modal-title" id="modal-title">Your account</h2>' +
+
+      '<div class="am-identity">' +
+        '<span class="am-face" aria-hidden="true">' + esc(initial) + "</span>" +
+        '<div class="am-who">' +
+          '<div class="am-name">' + esc(name) + "</div>" +
+          '<div class="am-line">' + esc(accountIdentityLine(model)) + "</div>" +
+        "</div>" +
+        '<button class="btn-link am-link" type="button" id="am-pw-toggle" ' +
+          'aria-expanded="false" aria-controls="pw-form">Change password</button>' +
       "</div>" +
 
-      '<h3 class="modal-section">Change password</h3>' +
-      '<form id="pw-form" class="pw-form">' +
+      // Progressive disclosure, NOT conditional rendering: the form is always in
+      // the DOM so #pw-form / #pw-current / #pw-new / #pw-error keep their
+      // bindings whether or not it is open.
+      '<form id="pw-form" class="pw-form am-pw" hidden>' +
         '<label class="field"><span>Current password</span>' +
           '<input type="password" id="pw-current" autocomplete="current-password" required></label>' +
         '<label class="field"><span>New password (12+ characters)</span>' +
@@ -550,17 +683,307 @@
         "</div>" +
       "</form>" +
 
+      '<div class="am-head">' +
+        '<h3 class="modal-section">Sessions</h3>' +
+        '<button class="btn-link am-link" type="button" id="sessions-revoke-all">Sign out everywhere else</button>' +
+      "</div>" +
+      '<div id="sessions-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
+
+      '<div class="am-head">' +
+        '<h3 class="modal-section">Two-factor authentication</h3>' +
+        accountTwoFactorBadgeHtml(model.twoFactorEnabled) +
+      "</div>" +
+      '<div class="a2f-panel" id="a2f-panel">' +
+        accountTwoFactorPanelHtml({ phase: model.twoFactorEnabled ? "on" : "off" }) +
+      "</div>" +
+
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Close</button>' +
         '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
+      "</div>" +
       "</div>"
     );
   }
 
+  // ======================================================= TWO-FACTOR (GR52/GR55/GR56)
+  // Five password-free routes; the live session IS the gate (that same session
+  // can already DELETE the factor, so a password reconfirm would be theatre).
+  //
+  //   POST   /v1/account/two-factor/enroll          → {otpauth_uri, secret}
+  //   POST   /v1/account/two-factor/confirm {code}  → {recovery_codes:[8]}
+  //                                                 | 422 invalid_otp
+  //                                                 | 422 not_enrolled
+  //   GET    /v1/account/two-factor                 → {enabled}   (unused: free on /v1/me)
+  //   DELETE /v1/account/two-factor                 → {ok:true}
+  //   POST   /v1/account/two-factor/recovery-codes  → {recovery_codes:[8]}
+  //
+  // SEVEN states, and EXACTLY TWO honest server errors. There is NO
+  // rate-limited state: TwoFactorRateLimiter's only call site is the LOGIN
+  // challenge, so this route is genuinely unthrottled and a "try again in Ns"
+  // sentence here would be a lie (GR52b).
+
+  function accountTwoFactorBadgeHtml(enabled) {
+    return enabled
+      ? '<span class="badge a2f-badge a2f-badge--on" id="a2f-badge">On</span>'
+      : '<span class="badge a2f-badge a2f-badge--off" id="a2f-badge">Off</span>';
+  }
+
+  // The secret in 4-char groups — the shape a human retypes without losing
+  // their place, and the fallback that makes the QR non-load-bearing.
+  function secretGroups(secret) {
+    var s = String(secret || "").replace(/\s+/g, "").toUpperCase(), out = [], i;
+    for (i = 0; i < s.length; i += 4) out.push(s.slice(i, i + 4));
+    return out.join(" ");
+  }
+
+  // EXACTLY two named server errors. Everything else returns null and the
+  // caller falls back to friendly() — inventing a third sentence would be
+  // inventing a server behaviour.
+  function accountTwoFactorErrorCopy(status, data) {
+    var code = (data && data.error) ? String(data.error) : "";
+    if (status === 422 && code === "invalid_otp") {
+      return "That code didn't match. Check your authenticator app and enter the six digits it shows right now.";
+    }
+    if (status === 422 && code === "not_enrolled") {
+      return "That setup is no longer pending. Start again to get a fresh secret.";
+    }
+    return null;
+  }
+
+  // The QR, or nothing. qrMatrix THROWS past the version-10 capacity (an RFC-legal
+  // 254-char address reaches it), so the throw is caught HERE and the enroll panel
+  // falls back to manual entry alone — never a broken or blank QR box.
+  function accountTwoFactorQrHtml(uri) {
+    if (!uri) return "";
+    try {
+      return '<div class="a2f-qr">' + qrSvg(qrMatrix(String(uri), { ec: "M" }),
+        "Two-factor setup QR code") + "</div>";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  // The one-shot recovery sheet as a plain-text file body (Download .txt).
+  function recoveryCodesText(codes) {
+    var list = (codes || []).map(function (c) { return String(c); });
+    return "Barkpark Cloud — two-factor recovery codes\n" +
+      "Each code works once. Keep them somewhere only you can reach.\n\n" +
+      list.join("\n") + "\n";
+  }
+
+  // PURE render of the 2FA panel. view:
+  //   { phase: "off" | "enroll" | "codes" | "on", uri, secret, codes, error, busy }
+  // The seven states are: off (not enrolled) · off+error (the not_enrolled
+  // recovery) · enroll · enroll+error (invalid_otp) · codes (one-shot sheet) ·
+  // on · and the disable confirm, which rides the shared danger-no-echo tier.
+  function accountTwoFactorPanelHtml(view) {
+    view = view || {};
+    var phase = view.phase || "off";
+    // Inline errors in the #pw-error grammar (.form-error) — never a toast.
+    var err = view.error
+      ? '<div class="form-error a2f-error" id="a2f-error" role="alert">' + esc(view.error) + "</div>"
+      : "";
+
+    if (phase === "codes") {
+      var codes = (view.codes || []).map(function (c) {
+        return '<code class="a2f-code">' + esc(String(c)) + "</code>";
+      }).join("");
+      return err +
+        '<p class="a2f-warn">Save these recovery codes now — each works once, and this is the ' +
+          "only time they're shown.</p>" +
+        '<div class="a2f-codes" id="a2f-codes">' + codes + "</div>" +
+        '<div class="a2f-codes-actions">' +
+          '<button class="btn-link am-link" type="button" id="a2f-copy">Copy all</button>' +
+          '<button class="btn-link am-link" type="button" id="a2f-download">Download .txt</button>' +
+          '<button class="btn btn-primary btn-sm a2f-saved" type="button" id="a2f-saved">I saved them</button>' +
+        "</div>";
+    }
+
+    if (phase === "enroll") {
+      var qr = accountTwoFactorQrHtml(view.uri);
+      return err +
+        // Static class strings per branch (no dynamic head) so the CSS checker
+        // resolves both — the same discipline providerChipHtml follows.
+        (qr ? '<div class="a2f-enroll">' : '<div class="a2f-enroll a2f-enroll--noqr">') +
+          qr +
+          '<div class="a2f-manual">' +
+            "<p>" + (qr
+              ? "Scan with your authenticator, or enter the secret by hand. Then type the 6-digit code it shows."
+              : "Your address is too long to fit a QR code — enter this secret in your authenticator by hand, then type the 6-digit code it shows.") +
+            "</p>" +
+            '<div class="a2f-secret">' +
+              '<code class="a2f-secret-value" id="a2f-secret">' + esc(secretGroups(view.secret)) + "</code>" +
+              '<button class="btn-link am-link" type="button" id="a2f-copy-secret">Copy</button>' +
+            "</div>" +
+            '<div class="a2f-confirm-row">' +
+              '<input class="form-input a2f-otp" id="a2f-otp" type="text" inputmode="numeric" ' +
+                'autocomplete="one-time-code" maxlength="6" placeholder="000000" ' +
+                'aria-label="6-digit code from your authenticator">' +
+              '<button class="btn btn-primary btn-sm" type="button" id="a2f-confirm"' +
+                (view.busy ? " disabled" : "") + ">" + (view.busy ? "Confirming…" : "Confirm") + "</button>" +
+            "</div>" +
+          "</div>" +
+        "</div>";
+    }
+
+    if (phase === "on") {
+      return err +
+        '<p class="a2f-on-line">Codes from your authenticator app are required when you sign in.</p>' +
+        '<div class="a2f-on-actions">' +
+          '<button class="btn-link am-link" type="button" id="a2f-regen">Regenerate recovery codes</button>' +
+          '<button class="btn-link am-link a2f-off-link" type="button" id="a2f-disable">Turn off</button>' +
+        "</div>";
+    }
+
+    // off / not enrolled
+    return err +
+      '<p class="a2f-off-line">Add a second step at sign-in with an authenticator app.</p>' +
+      '<button class="btn btn-sm" type="button" id="a2f-start"' + (view.busy ? " disabled" : "") + ">" +
+        (view.busy ? "Starting…" : "Set up two-factor authentication") + "</button>";
+  }
+
+  // ---- the 2FA DOM mount. Pure renders above; this is the only stateful part,
+  // and it never leaves the account modal (the disable confirm is the one
+  // deliberate exception — it borrows the shared confirm modal, then comes back).
+  var a2fView = { phase: "off" };
+
+  function a2fPaint(view) {
+    a2fView = view || { phase: "off" };
+    var panel = $("#a2f-panel");
+    if (!panel) return;
+    panel.innerHTML = accountTwoFactorPanelHtml(a2fView);
+    var badge = $("#a2f-badge");
+    // Re-render through the PURE badge helper rather than patching a class head
+    // — one owner for the badge's markup, and no dynamic class composition.
+    if (badge) badge.outerHTML = accountTwoFactorBadgeHtml(
+      a2fView.phase === "on" || a2fView.phase === "codes");
+    // The one-shot sheet is the ONLY pinned state: the server will never serve
+    // these codes again, so a reflex Escape must not throw them away.
+    setModalPin(a2fView.phase === "codes");
+    a2fWire();
+  }
+
+  // Local echo of the /v1/me boolean so a disable/enroll inside this modal
+  // doesn't need a refetch to stay honest on the next open.
+  function a2fSetEnabled(on) {
+    if (meCache && meCache.user) meCache.user.two_factor_enabled = !!on;
+  }
+
+  function a2fWire() {
+    var start = $("#a2f-start");
+    if (start) start.addEventListener("click", function () {
+      a2fPaint({ phase: "off", busy: true });
+      api("POST", "/v1/account/two-factor/enroll", {}, { noBounce: true }).then(function (r) {
+        if (r.ok && r.data && r.data.secret) {
+          a2fPaint({ phase: "enroll", uri: r.data.otpauth_uri, secret: r.data.secret });
+          var f = $("#a2f-otp"); if (f) f.focus();
+        } else {
+          a2fPaint({ phase: "off", error: friendly(r.data, "Couldn't start two-factor setup.") });
+        }
+      });
+    });
+
+    var copySecret = $("#a2f-copy-secret");
+    if (copySecret) copySecret.addEventListener("click", function () {
+      copyText(String(a2fView.secret || ""), "Secret copied");
+    });
+
+    var confirm = $("#a2f-confirm");
+    if (confirm) confirm.addEventListener("click", function () {
+      var input = $("#a2f-otp");
+      var code = (input && input.value ? input.value : "").replace(/\s+/g, "");
+      var pending = { phase: "enroll", uri: a2fView.uri, secret: a2fView.secret };
+      a2fPaint(Object.assign({}, pending, { busy: true }));
+      api("POST", "/v1/account/two-factor/confirm", { code: code }, { noBounce: true })
+        .then(function (r) {
+          if (r.ok && r.data && r.data.recovery_codes) {
+            a2fSetEnabled(true);
+            a2fPaint({ phase: "codes", codes: r.data.recovery_codes });
+            return;
+          }
+          var honest = accountTwoFactorErrorCopy(r.status, r.data);
+          // not_enrolled means there is nothing pending to confirm — the honest
+          // recovery is the off state with a fresh Set up button, not a dead form.
+          if (honest && r.data && r.data.error === "not_enrolled") {
+            a2fSetEnabled(false);
+            a2fPaint({ phase: "off", error: honest });
+            return;
+          }
+          a2fPaint(Object.assign({}, pending, {
+            error: honest || friendly(r.data, "Couldn't confirm that code.")
+          }));
+          var again = $("#a2f-otp"); if (again) { again.value = code; again.focus(); }
+        });
+    });
+
+    var copyAll = $("#a2f-copy");
+    if (copyAll) copyAll.addEventListener("click", function () {
+      copyText((a2fView.codes || []).join("\n"), "Recovery codes copied");
+    });
+
+    var dl = $("#a2f-download");
+    if (dl) dl.addEventListener("click", function () {
+      downloadText("barkpark-recovery-codes.txt", recoveryCodesText(a2fView.codes));
+    });
+
+    var saved = $("#a2f-saved");
+    if (saved) saved.addEventListener("click", function () {
+      // The explicit route: the ONLY way out of the pinned sheet.
+      a2fPaint({ phase: "on" });
+    });
+
+    var regen = $("#a2f-regen");
+    if (regen) regen.addEventListener("click", function () {
+      api("POST", "/v1/account/two-factor/recovery-codes", {}, { noBounce: true })
+        .then(function (r) {
+          if (r.ok && r.data && r.data.recovery_codes) a2fPaint({ phase: "codes", codes: r.data.recovery_codes });
+          else a2fPaint({ phase: "on", error: friendly(r.data, "Couldn't issue new recovery codes.") });
+        });
+    });
+
+    var off = $("#a2f-disable");
+    if (off) off.addEventListener("click", function () {
+      // Grave but reversible → the danger-no-echo tier: btn-danger weight, no
+      // typed echo. The live session is the gate; no password reconfirm.
+      openConfirmModal({
+        tier: "danger",
+        title: "Turn off two-factor authentication?",
+        confirmLabel: "Turn it off",
+        busyLabel: "Turning off…",
+        bodyHtml: "Sign-in drops back to <b>password only</b>, and your unused recovery " +
+          "codes stop working immediately.",
+        onConfirm: function (ctl) {
+          api("DELETE", "/v1/account/two-factor", null, { noBounce: true }).then(function (r) {
+            if (r.ok) {
+              a2fSetEnabled(false);
+              ctl.succeed();
+              openAccountModal(); // straight back to the account screen, now Off
+            } else {
+              ctl.fail(friendly(r.data, "Couldn't turn two-factor off."), "Try again",
+                function (again) { again.busy(); });
+            }
+          });
+        }
+      });
+    });
+  }
+
   function openAccountModal() {
-    openModal(accountModalHtml(session() || {}));
+    openModal(accountModalHtml(accountModel(session(), meCache)));
 
     loadSessions();
+
+    // Password on demand — disclosure only. The form and all four of its ids
+    // are already mounted; this just reveals them.
+    var pwToggle = $("#am-pw-toggle");
+    if (pwToggle) pwToggle.addEventListener("click", function () {
+      var form = $("#pw-form");
+      if (!form) return;
+      var opening = form.hidden;
+      form.hidden = !opening;
+      pwToggle.setAttribute("aria-expanded", opening ? "true" : "false");
+      if (opening) { var c = $("#pw-current"); if (c) c.focus(); }
+    });
 
     var revokeAll = $("#sessions-revoke-all");
     if (revokeAll) revokeAll.addEventListener("click", function () {
@@ -576,6 +999,11 @@
 
     var pwForm = $("#pw-form");
     if (pwForm) pwForm.addEventListener("submit", submitPasswordChange);
+
+    // The on-state costs ZERO extra fetches: /v1/me has carried
+    // two_factor_enabled all along and nothing read it until now.
+    a2fView = { phase: (meCache && meCache.user && meCache.user.two_factor_enabled) ? "on" : "off" };
+    a2fWire();
 
     var out = $("#modal-logout");
     if (out) out.addEventListener("click", function () {
@@ -15352,6 +15780,352 @@
   // helpers node-pinned, DOM mounts browser-verified. Sweeps: move this
   // comment only whole, on its own lines. MARK:zone-console-helpers
 
+  // ======================================================== QR (gr-p5, GR55)
+  // Dependency-free byte-mode QR encoder, versions 1-10, EC L/M/Q/H — enough
+  // for the ~100-byte otpauth:// URI the 2FA enrollment renders. Ported to the
+  // house ES5 dialect from the phase-5 spike, which was proved byte-identical
+  // to an out-of-repo reference encoder on 276/276 randomized otpauth URIs
+  // across versions 5-10 and all four EC levels (zero structural mismatches).
+  //
+  // THE GATE IS A BYTE-MATCH against the committed __qr_fixture.json, NEVER a
+  // self-written decoder: a decoder verifying its own encoder is circular, and
+  // that circle already green-lit a matrix with a TRANSPOSED format block AND a
+  // REVERSED generator polynomial. cloud/priv/static has no package.json and
+  // none may be added, so the fixture IS the independent oracle.
+  //
+  // qrMatrix THROWS above the version-10 capacity (a 214-byte URI; fixed
+  // overhead is 96, so a 113+ char local part throws). Every call site MUST
+  // wrap it and fall back to manual secret entry — never a broken QR box.
+
+  // ECC block table per version, per level: [ecPerBlock, g1Blocks, g1Data, g2Blocks, g2Data]
+  var QR_ECB = {
+    L: [null,[7,1,19,0,0],[10,1,34,0,0],[15,1,55,0,0],[20,1,80,0,0],[26,1,108,0,0],[18,2,68,0,0],[20,2,78,0,0],[24,2,97,0,0],[30,2,116,0,0],[18,2,68,2,69]],
+    M: [null,[10,1,16,0,0],[16,1,28,0,0],[26,1,44,0,0],[18,2,32,0,0],[24,2,43,0,0],[16,4,27,0,0],[18,4,31,0,0],[22,2,38,2,39],[22,3,36,2,37],[26,4,43,1,44]],
+    Q: [null,[13,1,13,0,0],[22,1,22,0,0],[18,2,17,0,0],[26,2,24,0,0],[18,2,15,2,16],[24,4,19,0,0],[18,2,14,4,15],[22,4,18,2,19],[20,4,16,4,17],[24,6,19,2,20]],
+    H: [null,[17,1,9,0,0],[28,1,16,0,0],[22,2,13,0,0],[16,4,9,0,0],[22,2,11,2,12],[28,4,15,0,0],[26,4,13,1,14],[26,4,14,2,15],[24,4,12,4,13],[28,6,15,2,16]]
+  };
+  var QR_ALIGN = [null,[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];
+  var QR_ECL_BITS = { L: 1, M: 0, Q: 3, H: 2 };
+
+  // GF(256), primitive polynomial 0x11d.
+  var QR_EXP = new Uint8Array(512), QR_LOG = new Uint8Array(256);
+  (function qrInitGF() {
+    var x = 1, i;
+    for (i = 0; i < 255; i++) { QR_EXP[i] = x; QR_LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+    for (i = 255; i < 512; i++) QR_EXP[i] = QR_EXP[i - 255];
+  })();
+  function qrMul(a, b) { return (a === 0 || b === 0) ? 0 : QR_EXP[QR_LOG[a] + QR_LOG[b]]; }
+
+  function qrZeros(n) { var a = [], i; for (i = 0; i < n; i++) a.push(0); return a; }
+
+  function qrGenPoly(n) {
+    var p = [1], i, j;
+    for (i = 0; i < n; i++) {
+      var np = qrZeros(p.length + 1);
+      for (j = 0; j < p.length; j++) {
+        np[j] ^= p[j];                          // p[j] * x
+        np[j + 1] ^= qrMul(p[j], QR_EXP[i]);    // p[j] * alpha^i
+      }
+      p = np;
+    }
+    return p;
+  }
+
+  function qrRsEncode(data, ecLen) {
+    var g = qrGenPoly(ecLen), res = qrZeros(ecLen), i, k;
+    for (k = 0; k < data.length; k++) {
+      var factor = data[k] ^ res[0];
+      res.shift(); res.push(0);
+      if (factor !== 0) for (i = 0; i < ecLen; i++) res[i] ^= qrMul(g[i + 1], factor);
+    }
+    return res;
+  }
+
+  // BCH(15,5) format info and BCH(18,6) version info.
+  function qrBchFormat(fmt5) {
+    var d = fmt5 << 10, i;
+    for (i = 4; i >= 0; i--) if (d & (1 << (i + 10))) d ^= 0x537 << i;
+    return ((fmt5 << 10) | d) ^ 0x5412;
+  }
+  function qrBchVersion(v) {
+    var d = v << 12, i;
+    for (i = 5; i >= 0; i--) if (d & (1 << (i + 12))) d ^= 0x1f25 << i;
+    return (v << 12) | d;
+  }
+
+  // UTF-8 bytes, surrogate pairs folded to a single code point.
+  function qrUtf8Bytes(s) {
+    var out = [], i = 0;
+    while (i < s.length) {
+      var cp = s.charCodeAt(i);
+      if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < s.length) {
+        var lo = s.charCodeAt(i + 1);
+        if (lo >= 0xdc00 && lo <= 0xdfff) { cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00); i++; }
+      }
+      i++;
+      if (cp < 0x80) out.push(cp);
+      else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 63));
+      else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+      else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+    }
+    return out;
+  }
+
+  function qrCapacityBytes(version, ec) {
+    var t = QR_ECB[ec][version];
+    var total = t[1] * t[2] + t[3] * t[4];
+    var countBits = version <= 9 ? 8 : 16;
+    return total - Math.ceil((4 + countBits) / 8);
+  }
+
+  function qrPickVersion(len, ec) {
+    for (var v = 1; v <= 10; v++) if (qrCapacityBytes(v, ec) >= len) return v;
+    throw new Error("qr: data too long for versions 1-10");
+  }
+
+  function qrBuildCodewords(bytes, version, ec) {
+    var t = QR_ECB[ec][version];
+    var ecLen = t[0], b1 = t[1], d1 = t[2], b2 = t[3], d2 = t[4];
+    var totalData = b1 * d1 + b2 * d2;
+    var countBits = version <= 9 ? 8 : 16;
+    var bits = [], i, j;
+    function push(val, n) { for (var k = n - 1; k >= 0; k--) bits.push((val >> k) & 1); }
+    push(4, 4);                    // byte mode
+    push(bytes.length, countBits);
+    for (i = 0; i < bytes.length; i++) push(bytes[i], 8);
+    var cap = totalData * 8;
+    for (i = 0; i < 4 && bits.length < cap; i++) bits.push(0);   // terminator
+    while (bits.length % 8 !== 0) bits.push(0);
+    var dataCw = [];
+    for (i = 0; i < bits.length; i += 8) {
+      var v = 0;
+      for (j = 0; j < 8; j++) v = (v << 1) | bits[i + j];
+      dataCw.push(v);
+    }
+    var pad = [0xec, 0x11], pi = 0;
+    while (dataCw.length < totalData) dataCw.push(pad[pi++ % 2]);
+
+    var blocks = [], ecBlocks = [], off = 0, blk;
+    for (i = 0; i < b1; i++) { blk = dataCw.slice(off, off + d1); off += d1; blocks.push(blk); ecBlocks.push(qrRsEncode(blk, ecLen)); }
+    for (i = 0; i < b2; i++) { blk = dataCw.slice(off, off + d2); off += d2; blocks.push(blk); ecBlocks.push(qrRsEncode(blk, ecLen)); }
+
+    var out = [], maxData = Math.max(d1, d2);
+    for (i = 0; i < maxData; i++) for (j = 0; j < blocks.length; j++) if (i < blocks[j].length) out.push(blocks[j][i]);
+    for (i = 0; i < ecLen; i++) for (j = 0; j < ecBlocks.length; j++) out.push(ecBlocks[j][i]);
+    return out;
+  }
+
+  // Function patterns: finders, timing, alignment, format reserves, dark module,
+  // version info. `fn` marks every module the data placer must skip.
+  function qrMakeMatrix(version) {
+    var size = version * 4 + 17, m = [], fn = [], i, j;
+    for (i = 0; i < size; i++) { m.push(new Uint8Array(size)); fn.push(new Uint8Array(size)); }
+    function setFn(r, c, v) { m[r][c] = v; fn[r][c] = 1; }
+
+    function finder(r0, c0) {
+      var dr, dc;
+      for (dr = -1; dr <= 7; dr++) for (dc = -1; dc <= 7; dc++) {
+        var r = r0 + dr, c = c0 + dc;
+        if (r < 0 || c < 0 || r >= size || c >= size) continue;
+        var inRing = (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6), v = 0;
+        if (inRing) {
+          var d = Math.max(Math.abs(dr - 3), Math.abs(dc - 3));
+          v = (d !== 2) ? 1 : 0;
+        }
+        setFn(r, c, v);
+      }
+    }
+    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+
+    for (i = 0; i < size; i++) {
+      if (!fn[6][i]) setFn(6, i, i % 2 === 0 ? 1 : 0);
+      if (!fn[i][6]) setFn(i, 6, i % 2 === 0 ? 1 : 0);
+    }
+
+    var centers = QR_ALIGN[version];
+    function inFinder(r, c) {
+      return (r < 8 && c < 8) || (r < 8 && c >= size - 8) || (r >= size - 8 && c < 8);
+    }
+    for (i = 0; i < centers.length; i++) for (j = 0; j < centers.length; j++) {
+      var r0 = centers[i], c0 = centers[j];
+      if (inFinder(r0, c0)) continue;
+      var dr2, dc2;
+      for (dr2 = -2; dr2 <= 2; dr2++) for (dc2 = -2; dc2 <= 2; dc2++) {
+        var dd = Math.max(Math.abs(dr2), Math.abs(dc2));
+        setFn(r0 + dr2, c0 + dc2, dd !== 1 ? 1 : 0);
+      }
+    }
+
+    for (i = 0; i < 9; i++) { if (!fn[8][i]) setFn(8, i, 0); if (!fn[i][8]) setFn(i, 8, 0); }
+    for (i = 0; i < 8; i++) { setFn(8, size - 1 - i, 0); setFn(size - 1 - i, 8, 0); }
+    setFn(size - 8, 8, 1); // dark module
+
+    if (version >= 7) {
+      var vi = qrBchVersion(version);
+      for (i = 0; i < 18; i++) {
+        var bit = (vi >> i) & 1, a = Math.floor(i / 3), b = i % 3;
+        setFn(size - 11 + b, a, bit);
+        setFn(a, size - 11 + b, bit);
+      }
+    }
+    return { m: m, fn: fn, size: size };
+  }
+
+  function qrPlaceData(m, fn, size, codewords) {
+    var bitIdx = 0, totalBits = codewords.length * 8;
+    function getBit() {
+      if (bitIdx >= totalBits) return 0;
+      var b = (codewords[bitIdx >> 3] >> (7 - (bitIdx & 7))) & 1;
+      bitIdx++; return b;
+    }
+    var up = true, col, i, k;
+    for (col = size - 1; col > 0; col -= 2) {
+      if (col === 6) col--;
+      for (i = 0; i < size; i++) {
+        var row = up ? size - 1 - i : i;
+        for (k = 0; k < 2; k++) {
+          var c = col - k;
+          if (fn[row][c]) continue;
+          m[row][c] = getBit();
+        }
+      }
+      up = !up;
+    }
+    return bitIdx;
+  }
+
+  var QR_MASKS = [
+    function (r, c) { return (r + c) % 2 === 0; },
+    function (r, c) { return r % 2 === 0; },
+    function (r, c) { return c % 3 === 0; },
+    function (r, c) { return (r + c) % 3 === 0; },
+    function (r, c) { return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0; },
+    function (r, c) { return ((r * c) % 2) + ((r * c) % 3) === 0; },
+    function (r, c) { return (((r * c) % 2) + ((r * c) % 3)) % 2 === 0; },
+    function (r, c) { return (((r + c) % 2) + ((r * c) % 3)) % 2 === 0; }
+  ];
+
+  function qrApplyFormat(m, size, ec, mask) {
+    var bits = qrBchFormat((QR_ECL_BITS[ec] << 3) | mask), i;
+    function bit(k) { return (bits >> k) & 1; }
+    // vertical strip: column 8 top (bits 0-7) then bottom (bits 8-14)
+    for (i = 0; i < 15; i++) {
+      if (i < 6) m[i][8] = bit(i);
+      else if (i < 8) m[i + 1][8] = bit(i);
+      else m[size - 15 + i][8] = bit(i);
+    }
+    // horizontal strip: row 8 right side (bits 0-7) then left side (bits 8-14)
+    for (i = 0; i < 15; i++) {
+      if (i < 8) m[8][size - 1 - i] = bit(i);
+      else if (i < 9) m[8][7] = bit(i);
+      else m[8][14 - i] = bit(i);
+    }
+    m[size - 8][8] = 1; // dark module
+  }
+
+  function qrPenalty(m, size) {
+    var p = 0, i, j, r, c;
+    // rule 1 — runs of 5+, both axes
+    for (i = 0; i < size; i++) {
+      for (var axis = 0; axis < 2; axis++) {
+        var rowwise = axis === 0;
+        var run = 1, prev = rowwise ? m[i][0] : m[0][i];
+        for (j = 1; j < size; j++) {
+          var v = rowwise ? m[i][j] : m[j][i];
+          if (v === prev) { run++; }
+          else { if (run >= 5) p += 3 + (run - 5); run = 1; prev = v; }
+        }
+        if (run >= 5) p += 3 + (run - 5);
+      }
+    }
+    // rule 2 — 2x2 same-colour blocks
+    for (r = 0; r < size - 1; r++) for (c = 0; c < size - 1; c++) {
+      var v2 = m[r][c];
+      if (v2 === m[r][c + 1] && v2 === m[r + 1][c] && v2 === m[r + 1][c + 1]) p += 3;
+    }
+    // rule 3 — 1:1:3:1:1 finder-like run with 4 light modules on either side.
+    // Out-of-symbol space counts as light (spec), so each line is padded with 4.
+    var pat = [1, 0, 1, 1, 1, 0, 1];
+    function allLight(a) {
+      if (a.length !== 4) return false;
+      for (var k = 0; k < 4; k++) if (a[k] !== 0) return false;
+      return true;
+    }
+    function check(arr0) {
+      var arr = [0, 0, 0, 0].concat(arr0, [0, 0, 0, 0]), cnt = 0, k, q;
+      for (k = 4; k + 7 <= arr.length - 4; k++) {
+        var ok = true;
+        for (q = 0; q < 7; q++) if (arr[k + q] !== pat[q]) { ok = false; break; }
+        if (!ok) continue;
+        if (allLight(arr.slice(k - 4, k)) || allLight(arr.slice(k + 7, k + 11))) cnt++;
+      }
+      return cnt;
+    }
+    for (i = 0; i < size; i++) {
+      var row = [], col = [];
+      for (j = 0; j < size; j++) { row.push(m[i][j]); col.push(m[j][i]); }
+      p += 40 * (check(row) + check(col));
+    }
+    // rule 4 — dark-module proportion
+    var dark = 0;
+    for (r = 0; r < size; r++) for (c = 0; c < size; c++) dark += m[r][c];
+    var pct = (dark * 100) / (size * size);
+    p += 10 * Math.floor(Math.abs(pct - 50) / 5);
+    return p;
+  }
+
+  // qrMatrix(text, {ec}) -> {version, size, mask, penalty, modules}.
+  // THROWS when `text` exceeds the version-10 capacity — callers MUST catch.
+  function qrMatrix(text, opts) {
+    opts = opts || {};
+    var ec = opts.ec || "M";
+    var bytes = qrUtf8Bytes(String(text));
+    var version = opts.version || qrPickVersion(bytes.length, ec);
+    var codewords = qrBuildCodewords(bytes, version, ec);
+    var built = qrMakeMatrix(version);
+    var base = built.m, fn = built.fn, size = built.size;
+    qrPlaceData(base, fn, size, codewords);
+
+    var best = null, bestScore = Infinity, bestMask = -1, mask, r, c;
+    for (mask = 0; mask < 8; mask++) {
+      var m = [];
+      for (r = 0; r < size; r++) m.push(Uint8Array.from(base[r]));
+      for (r = 0; r < size; r++) for (c = 0; c < size; c++) if (!fn[r][c] && QR_MASKS[mask](r, c)) m[r][c] ^= 1;
+      qrApplyFormat(m, size, ec, mask);
+      var s = qrPenalty(m, size);
+      if (s < bestScore) { bestScore = s; best = m; bestMask = mask; }
+    }
+    return { version: version, size: size, mask: bestMask, penalty: bestScore, modules: best };
+  }
+
+  // Canonical text form — the shape the committed fixture stores, and the ONLY
+  // sanctioned equality oracle for the encoder.
+  function qrText(res) {
+    var out = [], r, c;
+    for (r = 0; r < res.size; r++) {
+      var line = "";
+      for (c = 0; c < res.size; c++) line += res.modules[r][c] ? "#" : ".";
+      out.push(line);
+    }
+    return out.join("\n");
+  }
+
+  // Inline SVG for a matrix: one <path> of module rects on a light plate, with
+  // the spec's 4-module quiet zone. Colours are LITERAL black/white, never
+  // theme tokens — a scanner needs true contrast, and a themed QR that reads in
+  // light mode and fails in dark is a silent lockout. Pure: no DOM, no fetch.
+  function qrSvg(res, label) {
+    var quiet = 4, dim = res.size + quiet * 2, d = "", r, c;
+    for (r = 0; r < res.size; r++) for (c = 0; c < res.size; c++) {
+      if (res.modules[r][c]) d += "M" + (c + quiet) + " " + (r + quiet) + "h1v1h-1z";
+    }
+    return '<svg class="a2f-qr-svg" viewBox="0 0 ' + dim + " " + dim + '" ' +
+      'role="img" aria-label="' + esc(label || "Two-factor setup QR code") + '" ' +
+      'shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect width="' + dim + '" height="' + dim + '" fill="#ffffff"/>' +
+      '<path d="' + d + '" fill="#000000"/></svg>';
+  }
+
   // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
@@ -15657,6 +16431,29 @@
       // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
+      accountModel: accountModel, accountIdentityLine: accountIdentityLine,
+      // GR55: the QR encoder + its canonical text form. qrText IS the byte-match
+      // oracle against __qr_fixture.json — never a self-written decoder.
+      qrMatrix: qrMatrix, qrText: qrText, qrSvg: qrSvg,
+      // GR52/GR55: the 2FA surface's pure renders + its EXACTLY-two error map.
+      accountTwoFactorBadgeHtml: accountTwoFactorBadgeHtml,
+      accountTwoFactorPanelHtml: accountTwoFactorPanelHtml,
+      accountTwoFactorQrHtml: accountTwoFactorQrHtml,
+      accountTwoFactorErrorCopy: accountTwoFactorErrorCopy,
+      secretGroups: secretGroups, recoveryCodesText: recoveryCodesText,
+      // GR56: the pin predicate + the two DOM primitives it guards. openModal /
+      // closeModal are IMPURE and exported here by explicit charter permission —
+      // proving the pin FAIL-OPENS behaviourally is the only honest gate, and a
+      // source-regex guard is banned (one already passed on a commented-out line).
+      modalDismissAllowed: modalDismissAllowed,
+      setModalPin: setModalPin, modalPinState: modalPinState,
+      openModal: openModal, closeModal: closeModal,
+      // GR58: the account modal is CLICK-opened, so the preview harness (which
+      // reaches screens by deepLink) could never see it — it was structurally
+      // invisible to the accent x theme matrix. Exported as a DOM mount, exactly
+      // like openTokenModal, so mock.js's ?modal=account shoots the REAL screen
+      // with its real wiring rather than a re-composed lookalike.
+      openAccountModal: openAccountModal,
       // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50). operatorRouteAllowed is
       // the fail-closed ROUTE gate — applyRoute itself is not exported and cannot
       // be pinned, so the predicate it consults is pinned instead (GR49). The rest

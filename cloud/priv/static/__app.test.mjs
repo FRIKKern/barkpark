@@ -92,8 +92,17 @@ vm.runInContext(
 // nothing else. Source-regex guards are BANNED (a probe's first attempt passed
 // while the guarded line sat commented out) — these read the rendered markup.
 
+// The model the recomposed body renders — folded from the session + /v1/me by
+// accountModel, exactly as openAccountModal does. NOTHING here costs a fetch.
+const ACCT_ME = {
+  user: { email: "fjord@jarl.no", two_factor_enabled: false },
+  team: { id: "team_abc", name: "Guerrilla" },
+  role: "owner",
+};
+const acctModel = (me = ACCT_ME) => hooks.accountModel({ team_id: "team_abc" }, me);
+
 test("gr-p5-account: accountModalHtml carries all eight element ids the wiring binds to", () => {
-  const html = hooks.accountModalHtml({ team_id: "team_abc" });
+  const html = hooks.accountModalHtml(acctModel());
   // Each id is bound by openAccountModal / submitPasswordChange / loadSessions.
   // Losing one silently deadens a control that can strand a signed-in user.
   for (const id of ["modal-title", "pw-current", "pw-new", "pw-error",
@@ -104,7 +113,7 @@ test("gr-p5-account: accountModalHtml carries all eight element ids the wiring b
 });
 
 test("gr-p5-account: the <h2> ITSELF carries id=modal-title (index.html binds it statically)", () => {
-  const html = hooks.accountModalHtml({ team_id: "team_abc" });
+  const html = hooks.accountModalHtml(acctModel());
   // index.html sets aria-labelledby="modal-title" on the SHARED .modal-card, so
   // the id must live on this body's heading — not on some other node, and never
   // absent: dropping it strips the accessible name from EVERY modal in the app.
@@ -152,10 +161,332 @@ test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct
     "the command palette must keep the act-account action id");
 });
 
-test("gr-p5-account: a hostile team name is ESCAPED, never injected", () => {
-  const html = hooks.accountModalHtml({ team_id: '<img src=x onerror="alert(1)">' });
-  assert.ok(!html.includes("<img src=x"), "raw hostile markup must never reach the body");
-  assert.ok(html.includes("&lt;img src=x"), "the hostile name must render escaped");
+test("gr-p5-account: hostile identity values are ESCAPED, never injected", () => {
+  // Every string in the identity band is server-supplied. Drive the real fold,
+  // not a hand-built model, so an unescaped NEW field would be caught too.
+  const html = hooks.accountModalHtml(hooks.accountModel(
+    { team_id: '<img src=x onerror="alert(1)">' },
+    { user: { email: '<svg onload="alert(2)">@x.no' }, team: { name: '"><script>alert(3)</script>' }, role: "owner" },
+  ));
+  for (const raw of ["<img src=x", "<svg onload", "<script>alert(3)"]) {
+    assert.ok(!html.includes(raw), "raw hostile markup must never reach the body: " + raw);
+  }
+  assert.ok(html.includes("&lt;svg onload"), "the hostile email must render escaped");
+  assert.ok(html.includes("&lt;script&gt;alert(3)"), "the hostile team name must render escaped");
+});
+
+// ── gr-p5-account-2fa · GR55 THE QR SHIPS, GATED BY A BYTE-MATCH ────────────
+// The encoder is verified against the COMMITTED fixture, never against a
+// self-written decoder. That circle already green-lit a matrix with a
+// TRANSPOSED format block AND a REVERSED generator polynomial — a decoder that
+// shares its author's misconception agrees with it perfectly.
+
+const QR_FIXTURE = JSON.parse(
+  fs.readFileSync(new URL("./__qr_fixture.json", import.meta.url), "utf8"),
+);
+
+test("gr-p5-2fa: every fixture entry round-trips BYTE-IDENTICAL through the shipped encoder", () => {
+  assert.equal(QR_FIXTURE.length, 3, "the fixture must keep all three entries");
+  for (const entry of QR_FIXTURE) {
+    const res = hooks.qrMatrix(entry.uri, { ec: entry.ec });
+    assert.equal(res.version, entry.version, "version drift on " + entry.uri);
+    assert.equal(res.mask, entry.mask, "mask drift on " + entry.uri);
+    // THE gate: the full module matrix, module for module.
+    assert.equal(hooks.qrText(res), entry.rows.join("\n"),
+      "matrix bytes drifted on " + entry.uri);
+  }
+});
+
+test("gr-p5-2fa: the fixture actually covers the three shapes it claims (v7/m4, v6/m4, v2/m6)", () => {
+  // A fixture that silently lost an entry would make the byte-match above
+  // vacuous. Pin the coverage itself.
+  const shapes = QR_FIXTURE.map((e) => e.version + "/" + e.mask);
+  assert.deepEqual(shapes, ["7/4", "6/4", "2/6"]);
+});
+
+test("gr-p5-2fa: qrMatrix THROWS past capacity, and the enroll panel falls back to manual entry ALONE", () => {
+  // Fixed otpauth overhead is 96 bytes, so a 113+ char local part overruns
+  // version 10 — and RFC-legal addresses reach 254.
+  const long = "otpauth://totp/Barkpark%20Cloud:" + "a".repeat(120) +
+    "@jarl.no?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Barkpark%20Cloud";
+  assert.ok(long.length > 214, "the probe URI must actually overrun the encoder");
+  assert.throws(() => hooks.qrMatrix(long, { ec: "M" }), /too long/);
+
+  // The throw is CAUGHT at the render seam — no broken box, no blank plate.
+  assert.equal(hooks.accountTwoFactorQrHtml(long), "", "an over-long URI must render NO qr node");
+  const panel = hooks.accountTwoFactorPanelHtml({ phase: "enroll", uri: long, secret: "JBSWY3DPEHPK3PXP" });
+  assert.ok(!panel.includes("a2f-qr-svg"), "no QR may be drawn when the encoder threw");
+  assert.ok(panel.includes("a2f-enroll--noqr"), "the panel must take the no-QR layout");
+  assert.ok(panel.includes("too long to fit a QR code"),
+    "the panel must SAY why the QR is missing, not silently drop it");
+  // Manual entry is still complete and first-class — the fallback that makes
+  // the residual scanner risk non-fatal.
+  assert.ok(panel.includes("JBSW Y3DP EHPK 3PXP"), "the secret must still be offered in 4-char groups");
+  assert.ok(panel.includes('id="a2f-otp"'), "the code field must still be reachable");
+});
+
+test("gr-p5-2fa: a normal enrollment DOES draw the QR, and it carries a real module path", () => {
+  const uri = QR_FIXTURE[0].uri;
+  const html = hooks.accountTwoFactorQrHtml(uri);
+  assert.ok(html.includes("a2f-qr-svg"), "the QR must render for a normal address");
+  const path = html.match(/<path d="([^"]*)"/);
+  assert.ok(path && path[1].length > 500, "the QR path must carry real modules, not an empty d=");
+  // Literal black/white, never theme tokens: a themed QR that reads in light
+  // mode and fails in dark is a silent lockout.
+  assert.ok(html.includes('fill="#000000"') && html.includes('fill="#ffffff"'),
+    "the QR must use literal contrast, never var(--…)");
+  assert.ok(!html.includes("var(--"), "no theme token may reach the QR");
+});
+
+// ── gr-p5-account-2fa · GR52b THE SEVEN STATES, TWO HONEST ERRORS ───────────
+
+test("gr-p5-2fa: all seven states render, each distinguishable from the others", () => {
+  const off = hooks.accountTwoFactorPanelHtml({ phase: "off" });
+  const notEnrolled = hooks.accountTwoFactorPanelHtml({ phase: "off", error: "That setup is no longer pending. Start again to get a fresh secret." });
+  const enroll = hooks.accountTwoFactorPanelHtml({ phase: "enroll", uri: QR_FIXTURE[0].uri, secret: "JBSWY3DPEHPK3PXP" });
+  const enrollErr = hooks.accountTwoFactorPanelHtml({ phase: "enroll", uri: QR_FIXTURE[0].uri, secret: "JBSWY3DPEHPK3PXP", error: "That code didn't match." });
+  const codes = hooks.accountTwoFactorPanelHtml({ phase: "codes", codes: ["h4kq2mfp", "x8dw9rgt", "p2ml5qzn", "k9vt3bxs", "w6ny8jhc", "r1gd4tkm", "z7sb6plf", "m3cx1vwq"] });
+  const on = hooks.accountTwoFactorPanelHtml({ phase: "on" });
+
+  // 1 not-enrolled
+  assert.ok(off.includes('id="a2f-start"') && !off.includes("form-error"), "1: the off state offers setup, clean");
+  // 2 not-enrolled carrying the recovered 422 not_enrolled
+  assert.ok(notEnrolled.includes('id="a2f-start"') && notEnrolled.includes("no longer pending"),
+    "2: not_enrolled recovers to the off state WITH the sentence, never a dead form");
+  // 3 enroll
+  assert.ok(enroll.includes('id="a2f-otp"') && enroll.includes('id="a2f-confirm"') && !enroll.includes("form-error"),
+    "3: enroll offers the QR + secret + code field");
+  // 4 enroll + invalid_otp
+  assert.ok(enrollErr.includes('id="a2f-otp"') && enrollErr.includes("form-error"),
+    "4: a bad code keeps the form AND shows the inline sentence");
+  // 5 one-shot recovery sheet
+  assert.ok(codes.includes('id="a2f-codes"') && codes.includes('id="a2f-saved"'), "5: the recovery sheet");
+  // 6 on-row
+  assert.ok(on.includes('id="a2f-regen"') && on.includes('id="a2f-disable"'), "6: the on-row");
+  // 7 the disable confirm rides the SHARED danger-no-echo tier (landed #4390):
+  // btn-danger weight, NO typed echo, and a bodyHtml slot for the warning.
+  const confirm = hooks.confirmModalHtml(hooks.confirmModalInit({
+    tier: "danger", title: "Turn off two-factor authentication?",
+    bodyHtml: "Sign-in drops back to <b>password only</b>.", confirmLabel: "Turn it off",
+  }));
+  assert.ok(confirm.includes("btn-danger"), "7: disable must carry danger weight");
+  assert.ok(!confirm.includes("cm-typed"), "7: the danger tier must NOT demand a typed echo");
+  assert.ok(confirm.includes("<b>password only</b>"), "7: the warning rides the bodyHtml slot");
+
+  // The five undrawn states all speak the EXISTING inline-error grammar
+  // (.form-error, the #pw-error pattern) — never a toast.
+  for (const html of [notEnrolled, enrollErr]) {
+    assert.ok(html.includes('class="form-error a2f-error"'), "errors must ride the .form-error grammar");
+    assert.ok(html.includes('role="alert"'), "an inline error must announce itself");
+  }
+});
+
+test("gr-p5-2fa: EXACTLY two honest server errors — 422 invalid_otp and 422 not_enrolled", () => {
+  assert.ok(/didn't match/.test(hooks.accountTwoFactorErrorCopy(422, { error: "invalid_otp" })),
+    "422 invalid_otp must get its own sentence");
+  assert.ok(/no longer pending/.test(hooks.accountTwoFactorErrorCopy(422, { error: "not_enrolled" })),
+    "422 not_enrolled must get its own sentence");
+  // Everything else returns null so the caller falls back to friendly(). A third
+  // named sentence would be inventing a server behaviour.
+  for (const [status, data] of [
+    [422, { error: "not_enabled" }], [422, { error: "whatever" }], [422, {}],
+    [429, { error: "invalid_otp" }], [401, { error: "invalid_otp" }],
+    [500, null], [200, { error: "invalid_otp" }],
+  ]) {
+    assert.equal(hooks.accountTwoFactorErrorCopy(status, data), null,
+      "only the two documented 422s may be named: " + status + " " + JSON.stringify(data));
+  }
+});
+
+test("gr-p5-2fa: GR52b — the account 2FA surface has NO rate-limited state anywhere", () => {
+  // TwoFactorRateLimiter's ONLY call site is the LOGIN challenge (router.ex),
+  // so the account confirm route is genuinely unthrottled. A "try again in Ns"
+  // sentence here would be a lie. Scoped to the ACCOUNT surface: the login
+  // challenge legitimately has a 429 branch and must not be caught by this.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const start = src.indexOf("function accountTwoFactorBadgeHtml(");
+  const end = src.indexOf("function openAccountModal(");
+  assert.ok(start > 0 && end > start, "the account 2FA region must be locatable");
+  const region = src.slice(start, end);
+  for (const banned of ["429", "rate_limited", "rateLimited", "Too many", "try again in"]) {
+    assert.ok(!region.includes(banned),
+      "the account 2FA surface must never speak " + JSON.stringify(banned));
+  }
+  // And the states themselves carry no such copy.
+  for (const phase of ["off", "enroll", "codes", "on"]) {
+    const html = hooks.accountTwoFactorPanelHtml({ phase, uri: QR_FIXTURE[0].uri, secret: "JBSWY3DPEHPK3PXP", codes: ["a", "b"] });
+    // Word-bounded: "Regenerate recovery codes" legitimately contains "rate".
+    assert.ok(!/\brate[ -]?limit|\b429\b|too many|try again in|\d+\s*seconds?/i.test(html),
+      "no throttling copy in the " + phase + " state");
+  }
+});
+
+test("gr-p5-2fa: the on-state is read FREE from /v1/me — no GET /v1/account/two-factor call site", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(!/api\(\s*"GET"\s*,\s*"\/v1\/account\/two-factor"/.test(src),
+    "the status route must stay unused — two_factor_enabled is already on /v1/me");
+  // And the model actually reads it.
+  assert.equal(hooks.accountModel({}, { user: { two_factor_enabled: true } }).twoFactorEnabled, true);
+  assert.equal(hooks.accountModel({}, { user: { two_factor_enabled: false } }).twoFactorEnabled, false);
+  assert.equal(hooks.accountModel({}, {}).twoFactorEnabled, false, "an unloaded /v1/me must fail to OFF");
+});
+
+// ── gr-p5-account-2fa · GR56 THE ONE-SHOT SHEET, AND THE × TRAP ─────────────
+
+test("gr-p5-2fa: the recovery sheet is 8 chips in a 4x2 grid with Copy all + Download .txt", () => {
+  const codes = ["h4kq2mfp", "x8dw9rgt", "p2ml5qzn", "k9vt3bxs", "w6ny8jhc", "r1gd4tkm", "z7sb6plf", "m3cx1vwq"];
+  const html = hooks.accountTwoFactorPanelHtml({ phase: "codes", codes });
+  assert.equal(html.split('class="a2f-code"').length - 1, 8, "all eight codes must render as chips");
+  for (const c of codes) assert.ok(html.includes(c), "code " + c + " must render");
+  assert.ok(html.includes('id="a2f-copy"') && html.includes("Copy all"), "Copy all must be offered");
+  assert.ok(html.includes('id="a2f-download"') && html.includes("Download .txt"), "Download .txt must be offered");
+  assert.ok(html.includes('id="a2f-saved"') && html.includes("I saved them"), "the explicit exit must be offered");
+  // The sentence that makes the stakes plain — losing the sheet is unrecoverable.
+  assert.ok(html.includes("only time they're shown"), "the one-shot warning must be stated");
+  // The .txt body carries every code.
+  const txt = hooks.recoveryCodesText(codes);
+  for (const c of codes) assert.ok(txt.includes(c), ".txt body must carry " + c);
+  assert.ok(txt.includes("works once"), ".txt must restate the one-shot rule out of context");
+});
+
+test("gr-p5-2fa: the 4x2 grid is a real CSS grid of four columns, not a wrapped guess", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  assert.ok(/\.a2f-codes\s*\{[^}]*grid-template-columns:\s*repeat\(4,/.test(css),
+    "the sheet must lay 8 chips out as 4 across (→ 4x2)");
+});
+
+test("gr-p5-2fa: modalDismissAllowed refuses the three REFLEX routes while pinned, and always allows explicit", () => {
+  for (const via of ["escape", "backdrop", "close-x"]) {
+    assert.equal(hooks.modalDismissAllowed(true, via), false, via + " must be refused while pinned");
+    assert.equal(hooks.modalDismissAllowed(false, via), true, via + " must pass when unpinned");
+  }
+  // The body's own affordance is never a reflex — it ALWAYS passes.
+  assert.equal(hooks.modalDismissAllowed(true, "explicit"), true);
+  assert.equal(hooks.modalDismissAllowed(false, "explicit"), true);
+  // Total over junk: an unknown route is treated as a reflex (fail-safe).
+  assert.equal(hooks.modalDismissAllowed(true, "who-knows"), false);
+  assert.equal(hooks.modalDismissAllowed(false, undefined), true);
+});
+
+test("gr-p5-2fa: openModal CLEARS the pin — a stale pin can never strand the NEXT modal", () => {
+  // BEHAVIOURAL, not a source-regex: a probe's regex guard once passed while the
+  // guarded line sat commented out. This drives the real openModal.
+  hooks.setModalPin(true);
+  assert.equal(hooks.modalPinState(), true, "the pin must actually set");
+  hooks.openModal("<p>the next modal</p>");
+  assert.equal(hooks.modalPinState(), false,
+    "openModal must fail OPEN — otherwise launch / env-editor / confirm lock shut with no explanation");
+  // And it clears even when the mount aborts (no #modal-root in this sandbox),
+  // which is exactly the path that would otherwise strand the flag.
+  hooks.setModalPin(true);
+  hooks.openModal("");
+  assert.equal(hooks.modalPinState(), false, "an aborted mount must still clear the pin");
+});
+
+test("gr-p5-2fa: closeModal stays UNGATED — a pin never imprisons the operator", () => {
+  // Behavioural: mount a minimal real DOM into the sandbox, pin it, and prove
+  // closeModal still tears the dialog down. (The pin is consulted ONLY in
+  // wireModal's two reflex handlers.)
+  const el = (id) => ({
+    id, innerHTML: "", hidden: false, textContent: "",
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => id === "modal-x" },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = { "#modal-root": el("modal-root"), "#modal-body": el("modal-body"), ".modal-x": el("modal-x") };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  try {
+    hooks.openModal("<p>recovery codes</p>");
+    assert.equal(nodes["#modal-root"].hidden, false, "the dialog must be showing");
+    assert.equal(nodes["#modal-body"].innerHTML, "<p>recovery codes</p>", "the body must have mounted");
+    hooks.setModalPin(true);
+    // GR56: `.modal-x` carries data-close, so a pin DEADENS it — a visible dead
+    // × is strictly worse than no ×.
+    assert.equal(nodes[".modal-x"].hidden, true, "the × must HIDE while pinned, never sit there dead");
+    hooks.closeModal();
+    assert.equal(nodes["#modal-root"].hidden, true, "closeModal must work THROUGH the pin");
+    assert.equal(nodes["#modal-body"].innerHTML, "", "the body must be cleared");
+    // Un-pinning restores the ×.
+    hooks.setModalPin(false);
+    assert.equal(nodes[".modal-x"].hidden, false, "the × must come back when unpinned");
+  } finally {
+    sandbox.document.querySelector = prevQS;
+    sandbox.document.getElementById = prevGE;
+    hooks.setModalPin(false);
+  }
+});
+
+test("gr-p5-2fa: a hidden .modal-x is actually invisible — [hidden] must beat the display rule", () => {
+  // `.modal-x { display: grid }` is an AUTHOR rule, and author rules beat the
+  // UA sheet's [hidden]{display:none} regardless of specificity. Without an
+  // explicit override the "hidden" × would stay on screen, dead.
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  assert.ok(/\.modal-x\[hidden\]\s*\{[^}]*display:\s*none/.test(css),
+    "app.css must restore [hidden] for .modal-x");
+});
+
+// ── gr-p5-account-2fa · GR57 TOKENS ────────────────────────────────────────
+
+test("gr-p5-2fa: fixed-blue links ride --info/--cc-blue — never --primary, which IS the user's accent", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = css.match(/\.am-link\s*\{([^}]*)\}/);
+  assert.ok(rule, "the account modal's link variant must exist");
+  assert.ok(/color:\s*var\(--info\)/.test(rule[1]),
+    "the link colour must be the fixed blue: " + rule[1]);
+  assert.ok(!/var\(--primary\)/.test(rule[1]),
+    "--primary is the user-selectable accent — links would go orange under Ember");
+  // --info is declared ONLY in :root / [data-theme="dark"] and has zero
+  // [data-bp-theme] overrides. If that ever changes, this red is the warning.
+  const themeBlocks = css.match(/\[data-bp-theme="[^"]+"\][^{]*\{[^}]*\}/g) || [];
+  for (const b of themeBlocks) {
+    assert.ok(!/--info\s*:/.test(b) && !/--cc-blue\s*:/.test(b),
+      "an accent identity must never redefine the fixed blue: " + b.slice(0, 60));
+  }
+  // And the recomposed body reaches for the variant, not bare .btn-link.
+  const html = hooks.accountModalHtml(hooks.accountModel({}, { user: { email: "a@b.no" } }));
+  assert.ok(html.includes('class="btn-link am-link"'), "the body's links must carry the fixed-blue variant");
+});
+
+test("gr-p5-2fa: the width override is :has()-SCOPED — the shared 420px modal base is untouched", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  // The shared base, still 420px for the other 15+ modal bodies (env editor,
+  // token creation, provider picker …).
+  const base = css.match(/\.modal-card\s*\{([^}]*)\}/);
+  assert.ok(base && /max-width:\s*420px/.test(base[1]),
+    "the shared .modal-card base must stay 420px: " + (base && base[1]));
+  // The widening rule follows the live cmdk :has() precedent.
+  assert.ok(/\.modal-root:has\(\.am-modal\)\s*\.modal-card\s*\{[^}]*max-width:\s*5\d\dpx/.test(css),
+    "the account modal must widen through a :has()-scoped rule");
+  // And the body carries the hook the rule keys off.
+  const html = hooks.accountModalHtml(hooks.accountModel({}, {}));
+  assert.ok(html.includes('class="am-modal"'), "the body must carry the :has() hook class");
+});
+
+// ── gr-p5-account-2fa · the identity band degrades honestly ────────────────
+
+test("gr-p5-2fa: the identity line never invents an identity it wasn't given", () => {
+  const line = hooks.accountIdentityLine;
+  assert.equal(line({ email: "fjord@jarl.no", role: "owner", teamName: "Guerrilla" }),
+    "fjord@jarl.no · owner of Guerrilla");
+  // No role → no fabricated one.
+  assert.equal(line({ email: "fjord@jarl.no", teamName: "Guerrilla" }), "fjord@jarl.no · member of Guerrilla");
+  assert.equal(line({ email: "fjord@jarl.no" }), "fjord@jarl.no");
+  // No email at all (e.g. /v1/me hasn't landed) → the raw team id, the same
+  // honesty the pre-recomposition body showed, never a made-up name.
+  assert.equal(line({ teamId: "team_abc" }), "Team team_abc");
+  assert.equal(line({}), "Signed in to Barkpark Cloud");
+  assert.equal(line(), "Signed in to Barkpark Cloud");
+});
+
+test("gr-p5-2fa: secretGroups makes the manual fallback retypeable", () => {
+  assert.equal(hooks.secretGroups("JBSWY3DPEHPK3PXP"), "JBSW Y3DP EHPK 3PXP");
+  assert.equal(hooks.secretGroups("jbswy3dp"), "JBSW Y3DP");
+  assert.equal(hooks.secretGroups(""), "");
+  assert.equal(hooks.secretGroups(null), "");
+  assert.equal(hooks.secretGroups("ABC"), "ABC", "a short tail must not be padded or dropped");
 });
 
 test("gr-p5: app.css is BRACE-BALANCED — no rule is silently swallowed by an unclosed block", () => {

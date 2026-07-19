@@ -120,6 +120,34 @@
     });
   };
 
+  // 4b) gr-p5-account-2fa (GR58) — the ?modal=account seam.
+  //     The account modal is opened by a CLICK, and scenarios reach screens by
+  //     deepLink only, so the modal was structurally INVISIBLE to the accent x
+  //     theme shot matrix. mock.js loads immediately BEFORE app.js (serve.mjs
+  //     injects it), so it can install the hook capture first and then drive the
+  //     REAL openAccountModal once /v1/me has painted the account chip. This is
+  //     the browser twin of the seam smoke.mjs uses for the same modal.
+  var appHooks = null;
+  globalThis.__bpTestHook = function (h) { appHooks = h; };
+
+  if (params.get("modal") === "account") {
+    window.addEventListener("load", function () {
+      var tries = 0;
+      (function waitForMe() {
+        // Wait for the account chip to carry the real email — that is the
+        // observable proof /v1/me resolved, so the identity row and the 2FA
+        // on-state render from real data instead of the placeholder.
+        var chip = document.getElementById("acct-email");
+        var ready = chip && chip.textContent;
+        if ((ready || tries > 40) && appHooks && appHooks.openAccountModal) {
+          appHooks.openAccountModal();
+          return;
+        }
+        if (tries++ < 40) window.setTimeout(waitForMe, 50);
+      })();
+    });
+  }
+
   // 5) Inert EventSource — the SPA opens one live stream at boot. It never fires
   //    on its own (a screenshot must be deterministic), but exposes a manual
   //    push hook for demos: `__preview.push("fleet")` drives handleLiveEvent.
