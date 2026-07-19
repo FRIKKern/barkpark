@@ -84,6 +84,42 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── gr-p2-front-door: the v4 front door (B-01..B-03) ────────────────────────
+// The sign-in card's initial-tab classifier, the 2FA card's AUTH-scoped
+// vocabulary (GR21: theater's .new-title/.new-desc never render on an auth
+// surface), and the DELIBERATE 60s rate-limit countdown pin.
+
+test("authModeFromHash: #signup / #/auth/signup land the Create-account tab; all else login", () => {
+  assert.equal(typeof hooks.authModeFromHash, "function", "authModeFromHash must be exported");
+  assert.equal(hooks.authModeFromHash("#signup"), "signup");
+  assert.equal(hooks.authModeFromHash("#/auth/signup"), "signup");
+  for (const h of ["", "#", "#overview", "#login", "#signup2", "#/auth/signup?x=1",
+    "#/auth/reset?token=x", null, undefined]) {
+    assert.equal(hooks.authModeFromHash(h), "login", JSON.stringify(h) + " → login");
+  }
+});
+
+test("gr-p2: every 2FA card state composes in the AUTH vocabulary — zero theater classes", () => {
+  for (const opts of [{ mode: "otp" }, { mode: "recovery" },
+    { mode: "otp", rateLimited: true }, { mode: "otp", error: "invalid_code" }]) {
+    const html = hooks.twoFactorCardHtml(opts);
+    assert.match(html, /class="auth-title"/, JSON.stringify(opts) + " must carry .auth-title");
+    assert.match(html, /class="auth-desc"/, JSON.stringify(opts) + " must carry .auth-desc");
+    assert.doesNotMatch(html, /new-title|new-desc/,
+      JSON.stringify(opts) + " must not import theater vocabulary");
+  }
+});
+
+test("gr-p2: TFA_RATE_WAIT_S is DELIBERATELY 60 — the backend window is a fixed 60s", () => {
+  // two_factor_rate_limiter.ex: @limit 5, @window_ms 60_000. The old 30s
+  // countdown re-enabled the button INSIDE the same window and re-fired
+  // straight into the same 429. A server retry_after seam is backlog
+  // (gr-backlog-tfa-retry-after) — until then the constant mirrors the window.
+  assert.equal(hooks.twoFactorRateWaitS, 60);
+  const html = hooks.twoFactorCardHtml({ mode: "otp", rateLimited: true });
+  assert.match(html, /Try again in 60s/); // the countdown copy matches the pin
+});
+
 // ── gr-w3 v4 shell: context-morph enum + fail-closed operator gate ──────────
 // The sidebar morph is a PURE function of the parsed route (three panes, one
 // visible); the operator entry is gated fail-closed on /v1/me.platform_operator.

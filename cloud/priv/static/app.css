@@ -497,7 +497,10 @@ a:hover { text-decoration: underline; }
 .btn-ghost:hover { background: var(--muted-surface); color: var(--text); }
 
 .btn-sm { height: 28px; padding: 0 10px; font-size: var(--text-xs); }
-.btn-block { width: 100%; }
+/* Full-width CTA (auth submit, launch, ready-fold, Vercel handoff): every
+   .btn-block in the product is a screen's ONE primary-weight action, so it
+   carries the taller 40px front-door hit target (v4, gr-p2-front-door). */
+.btn-block { width: 100%; height: 40px; font-size: var(--text-base); }
 
 /* ---------------------------------------------------------- inputs */
 .label { display: block; font-size: var(--text-sm); font-weight: 500; margin-bottom: 6px; color: var(--text); }
@@ -506,13 +509,13 @@ a:hover { text-decoration: underline; }
 
 .form-input {
   width: 100%;
-  height: 36px;
+  height: 38px;
   padding: 0 var(--space-3);
   font-family: inherit;
   font-size: var(--text-base);
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.14);
   border-radius: var(--radius-sm);
   transition: border-color var(--t), box-shadow var(--t);
   appearance: none;
@@ -524,10 +527,12 @@ select.form-input {
   padding-right: 32px;
 }
 .form-input::placeholder { color: var(--dim); }
+/* Focus rides the IDENTITY accent (not the evergreen-frozen --ring-soft): the
+   ring recolours across all 5 skins × both modes for free (gr-p2-front-door). */
 .form-input:focus {
   outline: none;
   border-color: var(--ring);
-  box-shadow: 0 0 0 2px var(--ring-soft);
+  box-shadow: 0 0 0 3px hsl(var(--primary-hsl) / 0.15);
 }
 
 /* ---------------------------------------------------------- card */
@@ -646,24 +651,63 @@ select.form-input {
   border-radius: var(--radius-sm);
 }
 
-/* ============================================================ AUTH */
+/* ============================================================ AUTH
+   The front door (B-01..B-03: login/signup, reset request+form, 2FA challenge),
+   composed fresh from the styleguide vocabulary on the v4 ladder (GR21 — no
+   agency mock exists for auth; the component spec is styleguide.html). Chrome
+   rides the identity-invariant cloudChrome family; ONLY the accent
+   (--primary…) varies per skin, so the welcome glow, active tab, focus rings
+   and links restyle across all 5 identities × light/dark for free. The shared
+   form primitives (.field/.label/.form-input/.btn-block/.input-affix/
+   .check-row/.oauth-*, in their sections above) stay UNSCOPED on purpose:
+   /new's auth step and /activate inherit them by class identity — never scope
+   them under .auth-card, never import Launch Theater's .new-* here. */
 .auth-screen {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(60% 60% at 50% 0%, var(--muted-surface) 0%, transparent 70%),
+    radial-gradient(90% 55% at 50% -5%, hsl(var(--primary-hsl) / 0.08) 0%, transparent 70%),
     var(--bg);
 }
 .auth-center { flex: 1; display: grid; place-items: center; padding: 24px; }
-.auth-card { width: 100%; max-width: 380px; padding: 32px; box-shadow: var(--shadow); }
-.auth-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; }
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 36px 32px 32px;
+  background: var(--cc-card);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.1);
+  box-shadow: var(--elev-2);
+}
+.auth-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 26px; }
+.auth-brand .wordmark-text { font-size: 16px; }
+
+/* Card heading + supporting copy — AUTH-scoped by name, shared by the reset
+   card and the 2FA challenge card at ALL THREE of its mount sites (#twofa-card,
+   /new's #new-twofa, the /activate park→resume). GR21: theater's
+   .new-title/.new-desc never render on an auth surface. */
+.auth-title {
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.auth-desc {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--dim);
+  margin: 0 0 20px;
+}
+
+/* Segmented Log in / Sign up switch — card2 track, card-raised active thumb. */
 .auth-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   padding: 4px;
-  background: var(--muted-surface);
+  background: var(--cc-card2);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.06);
   border-radius: var(--radius);
   margin-bottom: 24px;
 }
@@ -673,29 +717,39 @@ select.form-input {
   background: transparent;
   border-radius: var(--radius-sm);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--muted-text);
+  color: var(--dim);
   cursor: pointer;
   transition: background var(--t), color var(--t), box-shadow var(--t);
 }
-.auth-tab.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
-.auth-foot { font-size: 13px; text-align: center; margin: 20px 0 0; }
+.auth-tab:hover { color: var(--text); }
+.auth-tab.is-active {
+  background: var(--cc-card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--elev-1);
+}
+.auth-foot { font-size: var(--text-sm); text-align: center; margin: 20px 0 0; }
 
 /* ---------------------------------------------- OAuth / SSO (oauth-sso) */
-/* "or" divider between password auth and the provider buttons. */
+/* "or" divider between password auth and the provider buttons — the mono
+   eyebrow voice (machine string, meta duty: --cc-fg4 is capped ≥3:1). */
 .oauth-divider {
   display: flex; align-items: center; gap: 12px;
-  margin: 20px 0; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 20px 0; color: var(--cc-fg4);
+  font-family: var(--mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.14em;
 }
 .oauth-divider::before, .oauth-divider::after {
-  content: ""; flex: 1; height: 1px; background: var(--border);
+  content: ""; flex: 1; height: 1px; background: rgba(var(--cc-line-rgb), 0.1);
 }
 .oauth-buttons { display: flex; flex-direction: column; gap: 10px; }
 .btn-oauth {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  background: var(--cc-card); color: var(--text);
+  border: 1px solid rgba(var(--cc-line-rgb), 0.14);
 }
-.btn-oauth:hover { background: var(--bg); border-color: var(--primary); }
+.btn-oauth:hover { background: var(--cc-card); border-color: rgba(var(--cc-line-rgb), 0.3); }
 
 /* ========================================================== SHELL */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
@@ -1178,7 +1232,7 @@ select.form-input {
 .input-affix .form-input { padding-right: 40px; }
 .affix-btn {
   position: absolute; top: 0; right: 0;
-  height: 36px; width: 36px;
+  height: 38px; width: 38px; /* mirrors .form-input's 38px control height */
   display: grid; place-items: center;
   background: none; border: none; cursor: pointer; color: var(--dim);
 }
@@ -2454,13 +2508,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .invite-skip:hover { color: var(--text); }
 
 /* The sign-in card's invitation banner (logged-out landing). :empty hides the
-   slot while the preview fetch is in flight, so no husk flashes. */
+   slot while the preview fetch is in flight, so no husk flashes. Info-tinted
+   on the ladder (styleguide banner grammar: tint + border say "info"; copy
+   stays readable --muted-text, never colour-on-colour). */
 .auth-invite {
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--muted-text);
   background: var(--info-soft);
-  border: 1px solid hsl(var(--info-hsl) / 0.25);
+  border: 1px solid hsl(var(--info-hsl) / 0.3);
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 18px;
