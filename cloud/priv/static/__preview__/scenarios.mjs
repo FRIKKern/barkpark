@@ -1548,6 +1548,68 @@ export const SCENARIOS = {
     },
   },
 
+  // ── G-05 API tokens (GR34). The list renders real pat_json fields only
+  // (id/name/abilities/last_used_at/expires_at/revoked_at/inserted_at) — there is
+  // no prefix/preview field, so the row never fakes one. `tokens-member` carries
+  // role:"member" so the picker proves the plain-member read-only truth up-front
+  // (smoke drives openTokenModal directly — the modal is click-opened).
+  "tokens-populated": {
+    label: "API tokens — a populated list: mixed abilities (deploy/read/root/write) incl. a revoked row, per-row Revoke",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_ci", name: "CI deploy key", abilities: ["deploy"], last_used_at: tMinus(3 * 3600), expires_at: tPlus(60 * 86400), revoked_at: null, inserted_at: tMinus(40 * 86400) },
+        { id: "tok_read", name: "Read-only dashboard", abilities: ["read"], last_used_at: null, expires_at: null, revoked_at: null, inserted_at: tMinus(10 * 86400) },
+        { id: "tok_root", name: "Break-glass root", abilities: ["root"], last_used_at: tMinus(2 * 86400), expires_at: tPlus(365 * 86400), revoked_at: null, inserted_at: tMinus(90 * 86400) },
+        { id: "tok_old", name: "Legacy writer", abilities: ["read", "write"], last_used_at: tMinus(50 * 86400), expires_at: tPlus(20 * 86400), revoked_at: tMinus(6 * 86400), inserted_at: tMinus(120 * 86400) },
+      ],
+    },
+  },
+  "tokens-empty": {
+    label: "API tokens — the empty state: no tokens minted yet, Create-token CTA",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [],
+    },
+  },
+  "tokens-member": {
+    label: "API tokens — plain member: the picker offers read-only scope up-front (no write/deploy/root pickers)",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_m_read", name: "My read token", abilities: ["read"], last_used_at: tMinus(6 * 3600), expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: tMinus(4 * 86400) },
+      ],
+    },
+  },
+  "tokens-reveal": {
+    label: "API tokens — the plaintext-once reveal: amber only-time banner + mono input-affix + copy",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [],
+      // The mint POST answers the plaintext ONCE + pat_json (no plaintext/hash on
+      // the row); smoke drives revealToken() directly with this shape.
+      tokenMint: {
+        status: 201,
+        body: {
+          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEF",
+          pat: { id: "tok_new", name: "CI deploy key", abilities: ["deploy"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
+        },
+      },
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): the /new journey + the provisioning theater.
   // pathname "/new" unlocks isNewFlow(); ?template selects the starter and &bp=
   // resumes straight into the theater (the refresh-durable URL the flow writes).
@@ -2007,6 +2069,25 @@ export function route(name, method, path) {
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
+
+  // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
+  // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
+  // d.tokenMint); DELETE /v1/tokens/:id → revoke (200 {ok}). A member never mints
+  // beyond read (the UI offers only read-scope), so no 403 branch is reachable here.
+  if (p === "/v1/tokens") {
+    if (method === "GET") return { status: 200, body: { tokens: d.tokens || [] } };
+    if (method === "POST") {
+      return d.tokenMint || {
+        status: 201,
+        body: {
+          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEF",
+          pat: { id: "tok_new", name: "New token", abilities: ["read"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
+        },
+      };
+    }
+  }
+  if (/^\/v1\/tokens\/[^/]+$/.test(p) && method === "DELETE") return { status: 200, body: { ok: true } };
+
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).
   if (p === "/v1/audit") {
