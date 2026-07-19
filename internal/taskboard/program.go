@@ -138,6 +138,14 @@ type Model struct {
 	cacheDir string
 	cacheKey string
 
+	// Wide depth-0 preview scroll (the right info pane): previewScroll is the
+	// wheel-driven line offset previewLines windows at, valid only while the
+	// preview still shows previewRef — a preview that moves to another task
+	// (cursor step, hover) renders from the top again, and the stale offset is
+	// re-seeded on the next wheel. Never persisted; zero on every launch.
+	previewRef    string
+	previewScroll int
+
 	// live-loop state
 	dirty         bool
 	debounceGen   int
@@ -1060,12 +1068,34 @@ func (m Model) activateBoard() Model {
 		m.ui.CollapsedEpics[r.docID] = m.sectionExpandedByKey(r.docID)
 		m.clampCursor()
 	case rowChild, rowClusterMember, rowOrphan:
-		title := r.docID
-		if t, found := m.taskByID(r.docID); found && t.Title != "" {
-			title = t.Title
-		}
-		(&m).pushFrame(Frame{Kind: FrameTask, Ref: r.docID, Title: title})
+		m = m.enterTask(r.docID)
 	}
+	return m
+}
+
+// enterTask is the SINGLE-OPEN task entry (board activate, preview click): at
+// most one task is entered at a time, so entering a task from the board REPLACES
+// any task frame already open instead of stacking a second one (the stack
+// resets to the root board first, then pushes). A task that is ALREADY on the
+// stack takes the D11 cycle-guard path instead — pushFrame pops back to the
+// existing frame with its saved Cursor/Scroll intact, so re-entering the open
+// task never loses your place. Trails grown INSIDE a frame (task → paper →
+// child task via descend) are untouched — this governs entry from the board.
+func (m Model) enterTask(docID string) Model {
+	for _, ex := range m.stack {
+		if ex.Kind == FrameTask && ex.Ref == docID {
+			(&m).pushFrame(Frame{Kind: FrameTask, Ref: docID})
+			return m
+		}
+	}
+	title := docID
+	if t, found := m.taskByID(docID); found && t.Title != "" {
+		title = t.Title
+	}
+	if len(m.stack) > 1 {
+		m.stack = m.stack[:1]
+	}
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: docID, Title: title})
 	return m
 }
 

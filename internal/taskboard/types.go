@@ -326,14 +326,15 @@ type UIState struct {
 	// a background tint (the terminal's hover vocabulary); at rest (0) the footer
 	// is one dim span, byte-identical to the pre-mouse footer, so goldens stay calm.
 	HoverFooterVerb rune
-	// OpenTasks is the set of task doc_ids currently OPEN as FrameTask frames on
-	// the navigation stack — the breadcrumb trail as a lookup. The board renders
-	// those rows' status glyph as the checked radio ● (ASCII '*'): enter checks
-	// the row, esc unchecks it — the picker vocabulary, visible in the wide
-	// two-pane where the board stays pinned beside the reading frame. It is
-	// DERIVED from Model.stack at compose time (openTaskRefs, compose.go), never
-	// stored shell state, so it cannot desync from the breadcrumb; nil while
-	// nothing is open, so an at-rest render is byte-identical.
+	// OpenTasks marks the ONE task currently entered — the deepest FrameTask on
+	// the navigation stack (single-open: at most one entry, never a pile of
+	// checks). The board renders that row's status glyph as the checked radio ●
+	// (ASCII '*'): enter checks the row, esc unchecks it — the picker
+	// vocabulary, visible in the wide two-pane where the board stays pinned
+	// beside the reading frame. It is DERIVED from Model.stack at compose time
+	// (openTaskRefs, compose.go), never stored shell state, so it cannot desync
+	// from the breadcrumb; nil while nothing is open, so an at-rest render is
+	// byte-identical.
 	OpenTasks map[string]bool
 }
 
