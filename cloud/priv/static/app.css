@@ -49,26 +49,15 @@
   --cc-card: #ffffff;
   --cc-card2: #eceef2;
   --cc-modal: #ffffff;
-  --cc-toast: #212936;
-  --cc-toast-fg: #f4f5f7;
   --cc-fg: #1a2330;
   --cc-fg2: #3d4859;
   --cc-fg3: #5f6a7b;
   --cc-fg4: #76818f;
-  --cc-fg5: #c6ccd6;
-  --cc-spark-dim: #a8b0bd;
   --cc-line-rgb: 20,30,48;
-  --cc-backdrop: rgba(18,26,40,0.4);
   --cc-red: #bb4040;
   --cc-red-strong: #b23636;
-  --cc-on-red: #ffffff;
   --cc-blue: #2560bd;
-  --cc-blue-hover: #1c4c99;
   --cc-amber: #96660f;
-  --cc-hetzner: #e06a55;
-  --cc-azure: #2f7fce;
-  --cc-cloudflare: #e8a34e;
-  --cc-github: var(--cc-fg3);
   --bg: var(--cc-bg);
   --surface: var(--cc-card);
   --muted-surface: var(--cc-card2);
@@ -98,26 +87,15 @@
   --cc-card: #10141b;
   --cc-card2: #161b24;
   --cc-modal: #12161d;
-  --cc-toast: #1a2029;
-  --cc-toast-fg: #e9edf3;
   --cc-fg: #e9edf3;
   --cc-fg2: #c3cad5;
   --cc-fg3: #8d96a5;
   --cc-fg4: #626c7c;
-  --cc-fg5: #3a4150;
-  --cc-spark-dim: #5a6372;
   --cc-line-rgb: 255,255,255;
-  --cc-backdrop: rgba(4,6,10,0.7);
   --cc-red: #e57f7f;
   --cc-red-strong: #e56a6a;
-  --cc-on-red: #1a0808;
   --cc-blue: #7fb4ff;
-  --cc-blue-hover: #a8ccff;
   --cc-amber: #e8b45a;
-  --cc-hetzner: #e06a55;
-  --cc-azure: #62aaf4;
-  --cc-cloudflare: #e8a34e;
-  --cc-github: var(--cc-fg3);
   --bg: var(--cc-bg);
   --surface: var(--cc-card);
   --muted-surface: var(--cc-card2);
@@ -302,15 +280,13 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --text-2xl: 26px;  --leading-2xl: 1.2;
 
   /* Space scale — the 4px grid (decision 29). --step stays as a legacy alias
-     (= --space-2) until the decision-24 sweep retires it. */
-  --space-1: 4px;
+     (= --space-2) until the decision-24 sweep retires it. --space-1/7/8 retired
+     GR29 (gr-p3-hygiene-guard) — zero consumers; the used steps are 2–6. */
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
-  --space-7: 28px;
-  --space-8: 32px;
   --step: 8px;
 
   /* Motion (decision 29) — durations + easing; the reduced-motion media block

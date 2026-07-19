@@ -8,6 +8,10 @@
 // The scenario is chosen by the URL:  ?scen=<name>  (default: empty)
 // The theme is pre-seeded by:          ?theme=dark|light  (writes localStorage
 //   before app.js's initTheme reads it — mirrors index.html's pre-paint key).
+// The accent identity is pre-seeded by: ?accent=evergreen|ember|fjord|charple|iris
+//   (writes localStorage `bp_theme` + sets data-bp-theme before first paint —
+//   mirrors index.html's identity pre-paint; theme MODE and accent IDENTITY are
+//   two orthogonal switches). Unlocks non-evergreen headless accent shots (GR30).
 //
 // Everything below runs SYNCHRONOUSLY except the fetch router, which lazily
 // dynamic-import()s scenarios.mjs (the single source of truth, shared with
@@ -19,11 +23,16 @@
   var SESSION_KEY = "bpcloud.session";
   var THEME_KEY = "bpcloud.theme";
   var INVITE_KEY = "bpcloud.invite";
+  // Accent IDENTITY key — mirrors app.js's `var BP_THEME = "bp_theme"` and
+  // index.html's identity pre-paint. Orthogonal to THEME_KEY (light/dark mode).
+  var BP_THEME_KEY = "bp_theme";
+  var BP_THEMES = ["evergreen", "ember", "fjord", "charple", "iris"];
   var SCENARIOS_URL = "/__preview__/scenarios.mjs";
 
   var params = new URLSearchParams(window.location.search || "");
   var scen = params.get("scen") || "empty";
   var theme = params.get("theme");
+  var accent = params.get("accent");
 
   // 1) Seed / clear the session synchronously so app.js's first render() lands on
   //    the right screen (logged-out scenario → the sign-in card).
@@ -51,6 +60,16 @@
     if (theme === "dark" || theme === "light") {
       window.localStorage.setItem(THEME_KEY, theme);
       document.documentElement.setAttribute("data-theme", theme);
+    }
+  } catch (e) {}
+
+  // 2b) Pre-seed the accent IDENTITY so [data-bp-theme] reflects ?accent= before
+  //     first paint (app.js's initBpTheme reads bp_theme; the picker mirrors it).
+  //     A bad id is ignored — evergreen is the bare-declaration fallback in CSS.
+  try {
+    if (accent && BP_THEMES.indexOf(accent) !== -1) {
+      window.localStorage.setItem(BP_THEME_KEY, accent);
+      document.documentElement.setAttribute("data-bp-theme", accent);
     }
   } catch (e) {}
 
@@ -133,6 +152,7 @@
   // handleLiveEvent invalidation exactly as a real SSE tick would).
   window.__preview = {
     scenario: scen,
+    accent: accent || "evergreen",
     push: function (type) {
       var payload = JSON.stringify({ type: type });
       streams.forEach(function (s) {

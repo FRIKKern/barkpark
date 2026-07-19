@@ -284,11 +284,14 @@ function providerVars(theme, indent) {
 // bare :root / [data-theme=dark] ONLY (identity-INVARIANT passthrough — the v4
 // applyTheme() only ever moves the 5 accent vars). check.mjs Part G D25 bans
 // --cc-* from every [data-bp-theme] identity block, so this NEVER runs there.
+// GR29 dead-var retirement (gr-p3-hygiene-guard): 11 zero-consumer roles removed
+// at the SOURCE — azure, backdrop, blue-hover, cloudflare, fg5, github, hetzner,
+// on-red, spark-dim, toast, toast-fg (all R2-dead, 0 var() consumers). Regenerate
+// the app.css block with `node design/emit.mjs --write` — never hand-edit it.
 export const CC_ROLES = [
-  "bg", "bg-side", "card", "card2", "modal", "toast", "toast-fg",
-  "fg", "fg2", "fg3", "fg4", "fg5", "spark-dim", "line-rgb", "backdrop",
-  "red", "red-strong", "on-red", "blue", "blue-hover", "amber",
-  "hetzner", "azure", "cloudflare", "github",
+  "bg", "bg-side", "card", "card2", "modal",
+  "fg", "fg2", "fg3", "fg4", "line-rgb",
+  "red", "red-strong", "blue", "amber",
 ];
 function cloudChromeVars(theme, indent) {
   const cc = tokens.color.cloudChrome;
