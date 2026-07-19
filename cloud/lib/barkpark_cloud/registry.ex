@@ -2360,18 +2360,33 @@ defmodule BarkparkCloud.Registry do
   @spec connect_provider(Team.t() | binary(), String.t(), binary(), keyword()) ::
           {:ok, Provider.t()} | {:error, Ecto.Changeset.t()}
   def connect_provider(team, kind, credential, opts \\ []) when is_binary(credential) do
+    label = Keyword.get(opts, :label)
+
+    # A reconnect that NAMES a label renames the row; a reconnect that names
+    # none rotates the credential and LEAVES the existing label alone. The
+    # difference is not academic: `POST /v1/providers` reads `label` straight
+    # off the body and the SPA omits the key entirely when the field is blank
+    # (`providerCredBody`), so an unconditional `:replace` of `:label` would
+    # silently wipe a previously-named credential on every re-submit of a form
+    # whose label box starts empty. Nothing in the product offers "clear the
+    # label", so keeping it is the only reading that matches intent.
+    replace =
+      if is_nil(label),
+        do: [:encrypted_token, :updated_at],
+        else: [:label, :encrypted_token, :updated_at]
+
     %Provider{}
     |> Provider.changeset(%{
       team_id: team_id(team),
       kind: kind,
-      label: Keyword.get(opts, :label),
+      label: label,
       # The virtual :credential drives the per-kind shape gate; :encrypted_token
       # is the single stored home (ciphertext of the same plaintext).
       credential: credential,
       encrypted_token: Vault.encrypt(credential)
     })
     |> Repo.insert(
-      on_conflict: {:replace, [:label, :encrypted_token, :updated_at]},
+      on_conflict: {:replace, replace},
       conflict_target: [:team_id, :kind],
       returning: true
     )

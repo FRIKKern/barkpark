@@ -89,6 +89,25 @@ defmodule BarkparkCloud.RegistryProviderUpsertTest do
       assert DateTime.compare(second.updated_at, first.updated_at) in [:gt, :eq]
     end
 
+    test "a reconnect with NO label keeps the one already there (review fix)" do
+      team = team_fixture()
+
+      {:ok, first} = Registry.connect_provider(team, "hetzner", "hz-a", label: "prod key")
+      # `POST /v1/providers` reads `label` straight off the body and the SPA
+      # omits the key when the field is blank — so this is the shape a real
+      # re-submit takes, and an unconditional {:replace, [:label, …]} would
+      # silently blank a credential the operator had named.
+      {:ok, second} = Registry.connect_provider(team, "hetzner", "hz-b")
+
+      assert second.id == first.id
+      assert second.label == "prod key", "a nameless reconnect must not wipe the label"
+      assert token_of(second) == "hz-b", "…while still rotating the credential"
+
+      # And naming one still renames it.
+      {:ok, third} = Registry.connect_provider(team, "hetzner", "hz-c", label: "rotated key")
+      assert third.label == "rotated key"
+    end
+
     test "the migration really left a UNIQUE index behind (not a plain one)" do
       # Proven by reading the schema rather than by provoking a violation: a
       # constraint error would abort the surrounding sandbox transaction, and a
