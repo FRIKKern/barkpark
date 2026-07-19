@@ -159,6 +159,11 @@ defmodule BarkparkWeb.CycleFleetController do
     end)
   end
 
+  # @sobelow_skip — XSS.SendResp is a false-positive at this deliberate HTML
+  # response boundary. PortableDoc.Render escapes persisted text and attributes;
+  # cycle_release_gate_hostile_test.exs locks that contract with executable-tag
+  # and event-handler payloads before this authenticated candidate reader emits it.
+  # sobelow_skip ["XSS.SendResp"]
   def release_paper_render(conn, params) do
     with_scope(conn, params, :read, fn scope ->
       case CycleFleet.release_paper_candidate(

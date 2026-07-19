@@ -201,6 +201,24 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     :ok
   end
 
+  test "release candidate HTML escapes executable markup before the controller emits it" do
+    html =
+      Barkpark.PortableDoc.Render.render_blocks(
+        [
+          %{
+            "type" => "paragraph",
+            "text" => "<script>alert('release')</script><img src=x onerror=alert(1)>"
+          }
+        ],
+        %{}
+      )
+
+    assert html =~ "&lt;script&gt;alert"
+    assert html =~ "&lt;img src=x onerror=alert(1)&gt;"
+    refute html =~ "<script>"
+    refute html =~ "<img src=x"
+  end
+
   test "open and activate are exact replays and ten captures bind both immutable candidates" do
     fixture = release_fixture!()
 

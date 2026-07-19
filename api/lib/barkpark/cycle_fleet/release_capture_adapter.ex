@@ -27,6 +27,7 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
 
     @http_surfaces ~w(source_json public_html)
     @headless_surfaces ~w(cli task_board tui)
+    @max_command_output_bytes 2_000_000
 
     @impl true
     def capture(request) do
@@ -286,15 +287,56 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
     defp content_type("public_html"), do: "text/html"
 
     defp bounded_cmd(command, args, timeout, opts) do
-      task =
-        Task.async(fn ->
-          System.cmd(command, args, Keyword.merge([stderr_to_stdout: true], opts))
-        end)
+      port =
+        Port.open(
+          {:spawn_executable, String.to_charlist(command)},
+          [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            args: Enum.map(args, &String.to_charlist/1),
+            env: encode_command_env(Keyword.fetch!(opts, :env))
+          ]
+        )
 
-      case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-        {:ok, result} -> result
-        nil -> {"", 124}
+      collect_command(port, System.monotonic_time(:millisecond) + timeout, [], 0)
+    rescue
+      _ -> {"", 126}
+    end
+
+    defp collect_command(port, deadline, chunks, size) do
+      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+      receive do
+        {^port, {:data, data}} when size + byte_size(data) <= @max_command_output_bytes ->
+          collect_command(port, deadline, [data | chunks], size + byte_size(data))
+
+        {^port, {:data, _data}} ->
+          close_command_port(port)
+          {"", 125}
+
+        {^port, {:exit_status, status}} ->
+          {chunks |> Enum.reverse() |> IO.iodata_to_binary(), status}
+      after
+        remaining ->
+          close_command_port(port)
+          {"", 124}
       end
+    end
+
+    defp encode_command_env(env) do
+      Enum.map(env, fn {key, value} ->
+        {String.to_charlist(key), String.to_charlist(value)}
+      end)
+    end
+
+    defp close_command_port(port) do
+      Port.close(port)
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
     end
 
     defp normalize_headers(headers) do
