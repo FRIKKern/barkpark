@@ -15,7 +15,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
         new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
 
         {:noreply,
-         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         socket
+         |> assign(focus_pane_idx: nil)
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       _ ->
         {:noreply, socket}
@@ -158,13 +160,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
   def create_project(_params, socket), do: {:noreply, socket}
 
+  # Activating the collapsed strip DESTROYS it (the <button> is replaced by the
+  # expanded <div>), so the browser drops focus to <body> — measured live on the
+  # authenticated desk, charter D79. `:focus_pane_idx` marks the pane this
+  # navigation just re-opened; the shell renders `phx-mounted={JS.focus()}` on
+  # that pane alone, so focus lands where the strip said it would. Drilling
+  # (`select/2`) and a width-bucket flip both clear it, so the mark is spent on
+  # the navigation that set it and never re-fires on an unrelated re-render.
   def expand_pane(%{"idx" => idx_str}, socket) do
     case Integer.parse(idx_str) do
       {idx, ""} when idx >= 0 ->
         new_path = Enum.take(socket.assigns.nav_path, idx)
 
         {:noreply,
-         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         socket
+         |> assign(focus_pane_idx: idx)
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       _ ->
         {:noreply, socket}

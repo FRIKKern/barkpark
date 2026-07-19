@@ -651,6 +651,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
+      <%!-- spd-w5/D79: the pane index a just-handled `expand-pane` named, set
+            by Handlers.Scope. Only THAT pane gets `phx-mounted={JS.focus()}`,
+            so activating the collapsed strip returns focus to the pane it
+            named instead of dropping it on <body>, while an initial page load
+            (where every pane mounts) never steals focus. Map.get, not @, so a
+            socket that never navigated renders exactly as before. --%>
+      <% focus_pane_idx = Map.get(assigns, :focus_pane_idx) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <% display = PaneBuilder.display_state(idx, num_panes, has_editor, @width_bucket) %>
         <% collapsed = display == :strip %>
@@ -667,6 +674,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           marker_class={if pane[:type_name], do: "bp-doc-list", else: nil}
           phx_click={if collapsed, do: "expand-pane", else: nil}
           phx_value_idx={if collapsed, do: "#{idx}", else: nil}
+          controls={if collapsed, do: "studio-panes", else: nil}
+          focus_on_mount={not collapsed and focus_pane_idx == idx}
         >
           <:header_actions>
             <%= if pane[:type_name] do %>
