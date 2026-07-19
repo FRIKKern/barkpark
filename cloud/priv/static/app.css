@@ -983,7 +983,12 @@ select.form-input {
    every card that still FITS. Shared primitive on purpose — every tall modal
    (launch, env editor, confirm sheets) inherits the same bug, so a
    `:has(.am-modal)`-scoped patch would only move it. */
-.modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; justify-items: center; align-items: start; overflow-y: auto; padding: var(--space-6); }
+   REVIEW ADDENDUM: making the root a scroll container also opens a scroll-CHAIN
+   into the shell behind it — the shell is `inert` (pointer/keyboard) but inert
+   does not stop a wheel, so reaching the bottom of a tall modal would start
+   scrolling the page underneath. `overscroll-behavior: contain` closes that;
+   it is inert on every modal that fits. */
+.modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; justify-items: center; align-items: start; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-6); }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .modal-card {
   position: relative;
@@ -1330,8 +1335,9 @@ select.form-input {
 /* The instance workspace rail hosts the per-host domain checklist (#instance-
    domains), which needs room for a rung's label + evidence code on one line — so
    its rail is wider than the shared 260px. SCOPED to the instance workspace: the
-   site-deploys grid (bare .detail-grid) is byte-identical. The ≤900px collapse
-   below still wins (it's later in source), so this only widens the desktop rail. */
+   site-deploys grid (bare .detail-grid) is byte-identical. The single-column
+   collapse below (GR65: ≤768px, moved up from 720) still wins — same specificity,
+   later in source — so this only widens the desktop rail. */
 .detail-grid--instance { grid-template-columns: 1fr 340px; }
 .detail-main h2 { margin-bottom: 12px; }
 .detail-rail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
@@ -2715,7 +2721,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .instances-grid { grid-template-columns: 1fr; }
   .overview-head { flex-direction: column; }
   .overview-head-right { justify-content: flex-start; }
-  /* .attention-row wraps from 768px up — see the GR65 tablet block. */
+  /* .attention-row already STACKS from 768px down — see the GR65 tablet block
+     above; the old flex-wrap here would only re-collapse the name column. */
 }
 
 /* ============================================================ C6 INSTANCE TABS
