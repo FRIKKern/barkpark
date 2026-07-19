@@ -3434,15 +3434,18 @@ defmodule BarkparkCloud.Web.Router do
   # exposure of the durable notification_deliveries table — the delivery-log surface
   # the Settings wave renders. ADMIN-gated (require_team_admin halts 401 with no
   # session / 403 for a plain member) for parity with the other notifications admin
-  # routes. `?limit` caps the page via parse_int; there is no `?before` — the log is
-  # a bounded backlog, not a keyset-paged trail like /v1/audit.
+  # routes. `?limit` caps the page via parse_int, hard-capped at 200 HERE (the
+  # /v1/audit precedent — list_audit_events caps in the context, but
+  # list_deliveries rides UNCHANGED per the wave brief, so the router owns the
+  # clamp); there is no `?before` — the log is a bounded backlog, not a
+  # keyset-paged trail like /v1/audit.
   get "/v1/notifications/deliveries" do
     conn = Auth.require_team_admin(conn, [])
 
     if conn.halted do
       conn
     else
-      limit = parse_int(conn.query_params["limit"], 50)
+      limit = min(parse_int(conn.query_params["limit"], 50), 200)
       deliveries = Notifications.list_deliveries(conn.assigns.current_team, limit)
       json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
     end

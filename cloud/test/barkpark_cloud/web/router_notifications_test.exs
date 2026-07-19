@@ -255,6 +255,33 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       assert length(body(conn)["deliveries"]) == 2
     end
 
+    test "?limit is hard-capped at 200 — an absurd limit cannot pull the whole table" do
+      {_user, team, token} = user_with_team()
+      t0 = DateTime.utc_now()
+
+      rows =
+        for i <- 1..205 do
+          %{
+            id: Ecto.UUID.generate(),
+            team_id: team.id,
+            recipient: "r#{i}@example.com",
+            event: "provision_failed",
+            channel: "email",
+            kind: "alert",
+            status: "sent",
+            attempts: 1,
+            inserted_at: DateTime.add(t0, -i, :second),
+            updated_at: t0
+          }
+        end
+
+      Repo.insert_all(Delivery, rows)
+
+      conn = call(:get, "/v1/notifications/deliveries?limit=100000", nil, token)
+      assert conn.status == 200
+      assert length(body(conn)["deliveries"]) == 200
+    end
+
     test "an admin only ever sees their OWN team's deliveries (no cross-team leak)" do
       {_user, _team, token} = user_with_team()
       {_other_user, other_team, _other_token} = user_with_team()
