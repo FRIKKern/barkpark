@@ -554,6 +554,45 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
              "media_files (path, size) drifted across the round-trip — a truncated-blob " <>
                "proof built on the imported size would silently pass"
     end
+
+    test "media_files.size rides the DEV profile too — the profile the crown proof actually pulls with" do
+      %{ws_a: ws_a, proj_a: proj_a} = seed_two_workspaces!()
+
+      for bytes <- [4_097, 1_048_577] do
+        {:ok, _} =
+          create_media_file_in!(
+            ws_a,
+            proj_a,
+            %{size: bytes, path: "sized-dev/#{unique("m")}-#{bytes}.bin"},
+            "prod-a"
+          )
+      end
+
+      source = media_path_sizes!(ws_a.id)
+
+      # The test above pins the FULL profile. Step 5 of the crown proof runs off
+      # a `--profile dev` pull, and the dev partition is a SECOND, orthogonal
+      # classification: media_files is `:copy` with an empty scrub set today, so
+      # `size` travels — but nothing pinned that, and a future entry in
+      # @dev_scrub nulling it would break step 5's baseline with every other
+      # gate green. This is the assertion that convicts that change.
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id, profile: :dev)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      assert manifest["profile"] == "dev"
+
+      entry = table_index(manifest)["media_files"]
+
+      assert entry,
+             "a dev-profile bundle carried NO media_files member — the crown proof's " <>
+               "served-asset step has nothing to compare a content-length against"
+
+      assert "size" in entry["columns"],
+             "the dev profile dropped or scrubbed media_files.size — step 5 would then " <>
+               "compare a served content-length against a default and pass on a truncated blob"
+
+      assert media_pairs_from_copy(dumps["media_files"], entry["columns"]) == source
+    end
   end
 
   # ── merge import mode (PDS-D8/D9) ─────────────────────────────────────────────
