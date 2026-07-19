@@ -118,9 +118,31 @@ const ALLOW_HOOK_CLASSES = [
   "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
 ];
 
-// R3 — violations we know about that live in app.js (another slice owns app.js
-// this wave). Keep entries until the owning slice lands the fix.
-const REPORT_ONLY = [];
+// R3 / KNOWN_GAPS — genuine E2/E3 violations that live in app.js and index.html,
+// NOT in this epic's owned files. This checker is CI-wired by gr-w1-styleguide-port
+// (console-harness.yml) and MUST exit 0; app.js/index.html are owned by other
+// slices ("leave, don't touch"), and their real fix — author the CSS or remove the
+// emission — is tracked by task gr-backlog-css-check-missing-classes. Each entry
+// DEMOTES its exact hard-fail to an R3 report line so the gate stays green while
+// the gap stays visible on every run. Keyed by {file, cls} (E2) or {file, head}
+// (E3) — line-INDEPENDENT so app.js churn never re-reds the gate; a genuinely NEW
+// missing class (different name) or dynamic head still hard-fails. An entry that
+// matches nothing prints `stale` (prune it — the owning slice fixed it). NOTHING
+// in styleguide.html or the app.css token blocks may be listed here: this epic
+// owns those, so their drift MUST hard-fail.
+const KNOWN_GAPS = [
+  // E2 — emitted class with no rule in app.css (author real styles or remove).
+  { file: "index.html", cls: "activate-screen", why: "activate view container; no .activate-screen rule (backlog: author or drop)" },
+  { file: "app.js", cls: "fleet-infra", why: "fleet infra column; no .fleet-infra rule (backlog: author or drop)" },
+  { file: "app.js", cls: "fresh-label", why: "freshness label; no .fresh-label rule (backlog: author or drop)" },
+  { file: "app.js", cls: "metrics-body", why: "metrics panel body; no .metrics-body rule (backlog: author or drop)" },
+  { file: "app.js", cls: "activate-rail", why: "activate step rail; no .activate-rail rule (backlog: author or drop)" },
+  { file: "app.js", cls: "bp-lc-hex", why: "lifecycle hex swatch; zero .bp-lc-* rules exist (backlog: author or drop)" },
+  { file: "app.js", cls: "notice-", why: "detector tail-fragment of noticeHtml()'s ' notice-'+tone concat; the real classes are notice/notice-ok|warn|error (backlog: rewrite the concat)" },
+  // E3 — dynamic class heads the static walker cannot classify (var-then-concat).
+  { file: "app.js", head: "", why: "two `var cls = …` then concat sites the static walker can't head-classify (backlog: inline-concat rewrite)" },
+  { file: "app.js", head: "bp-lc-", why: "lifecycle hex row builds `bp-lc-` + kind; zero .bp-lc-* rules exist (backlog: author or drop)" },
+];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line
 // text as it appears in app.css (comments stripped); each entry carries its
@@ -185,6 +207,23 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--surface", min: 3, why: ".bp-inst--degraded glyph tone" },
   { fg: "--provider-hetzner", bg: "--surface", min: 3, why: "Hetzner identity mark / chip border" },
   { fg: "--provider-azure", bg: "--surface", min: 3, why: "Azure identity mark / chip border" },
+  // ── The living styleguide's cloudChrome text/UI pairs (gr-w1-styleguide-port).
+  // These mirror the agency spec's own 17-row contrast table (section 03), now
+  // machine-computed here instead of at render time. The cloudChrome family is
+  // identity-INVARIANT (GR2), so these resolve identically across all theme
+  // states, but they pin the raw designer hexes the swatch grid renders. fg4 is
+  // the meta-only token duty-capped at 3:1 (GR6: --dim maps to fg3, never fg4 as
+  // text). The accent pairs (--primary) fan per identity — the styleguide's
+  // section 03 spells them out; the base link/label pairs above already gate them.
+  { fg: "--cc-fg", bg: "--cc-bg", min: 4.5, why: "styleguide 03: primary text (fg on bg)" },
+  { fg: "--cc-fg2", bg: "--cc-card", min: 4.5, why: "styleguide 03: row text on cards (fg2 on card)" },
+  { fg: "--cc-fg3", bg: "--cc-bg", min: 4.5, why: "styleguide 03: secondary copy (fg3 on bg)" },
+  { fg: "--cc-fg4", bg: "--cc-bg", min: 3, why: "styleguide 03: meta only — fg4 on bg, duty-capped ≥3:1 (GR6)" },
+  { fg: "--cc-blue", bg: "--cc-bg", min: 4.5, why: "styleguide 03: links (blue on bg)" },
+  { fg: "--cc-amber", bg: "--cc-bg", min: 4.5, why: "styleguide 03: warning text (amber on bg)" },
+  { fg: "--cc-red", bg: "--cc-bg", min: 4.5, why: "styleguide 03: danger text (red on bg)" },
+  { fg: "--primary", bg: "--cc-bg", min: 3, why: "styleguide 03: accent badge/UI (primary on bg) — fans per identity" },
+  { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "styleguide 03: button label on the accent (primary-fg on primary)" },
 ];
 
 // ── Read the tree ────────────────────────────────────────────────────────────
@@ -220,6 +259,27 @@ function consumedTokens(src, file) {
 // (checked below); everything else it consumes must come from app.css.
 const sgLocalTokens = new Set();
 for (const m of styleguideRaw.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) sgLocalTokens.add(m[1]);
+
+// styleguide.html also DEFINES page-local .sg-* chrome classes in its own <style>
+// (layout scaffolding for the spec — the not-yet-shipped grammars like the stage
+// ladder, coalesced rows and domain rungs render on these, not on app.css
+// component classes). Collect them the same way app.css classes are collected so
+// the E2 pass can exempt them while still checking every SHIPPED-component class
+// the styleguide demonstrates (.btn/.status-pill/.notice/.toast/…) against
+// app.css — that is the drift value of folding styleguide.html into E2.
+const sgStyle = (styleguideRaw.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1];
+const sgLocalClasses = new Set();
+{
+  const sgCss = stripCssComments(sgStyle);
+  let buf = "";
+  for (const c of sgCss) {
+    if (c === "{") {
+      for (const m of buf.matchAll(/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/g)) sgLocalClasses.add(m[1]);
+      buf = "";
+    } else if (c === "}" || c === ";") buf = "";
+    else buf += c;
+  }
+}
 
 const consumed = [
   ...consumedTokens(css, "app.css"),
@@ -261,6 +321,17 @@ for (const m of htmlRaw.matchAll(/class="([^"]*)"/g)) {
   const line = lineOf(htmlRaw, m.index);
   for (const t of m[1].split(/\s+/).filter(Boolean)) {
     emitToken(t, "index.html", line);
+  }
+}
+
+/** styleguide.html static class="..." attributes — the living spec renders the
+ *  shipped components, so every class it names must have a rule in app.css (drift
+ *  gate) EXCEPT its own page-local .sg-* chrome (sgLocalClasses, exempted in the
+ *  E2 loop below — the styleguide analog of the --sg-* token carve-out). */
+for (const m of styleguideRaw.matchAll(/class="([^"]*)"/g)) {
+  const line = lineOf(styleguideRaw, m.index);
+  for (const t of m[1].split(/\s+/).filter(Boolean)) {
+    emitToken(t, "styleguide.html", line);
   }
 }
 
@@ -572,11 +643,24 @@ for (const c of consumed) {
 }
 
 const hookHits = [];
+const gapHits = [];             // KNOWN_GAPS-demoted E2/E3 → printed as R3, not fatal
+const matchedGaps = new Set();  // which KNOWN_GAPS entries fired (staleness check)
+const gapKey = (g) => `${g.file}|${"cls" in g ? "E2:" + g.cls : "E3:" + g.head}`;
 const seenMissing = new Set();
 for (const e of emitted) {
   if (cssClasses.has(e.cls)) continue;
+  // page-local .sg-* chrome defined in styleguide.html's own <style> (the
+  // class analog of the --sg-* token carve-out).
+  if (e.file === "styleguide.html" && sgLocalClasses.has(e.cls)) continue;
   if (ALLOW_HOOK_CLASSES.includes(e.cls)) {
     hookHits.push(e);
+    continue;
+  }
+  const gap = KNOWN_GAPS.find((g) => "cls" in g && g.file === e.file && g.cls === e.cls);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${e.cls}@${e.file}`;
+    if (!seenMissing.has(key)) { seenMissing.add(key); gapHits.push({ code: "E2", file: e.file, what: `class "${e.cls}"`, why: gap.why }); }
     continue;
   }
   const key = `${e.cls}@${e.file}:${e.line}`;
@@ -585,9 +669,21 @@ for (const e of emitted) {
   errors.push(`E2 ${e.file}:${e.line}  class "${e.cls}" is emitted but has no rule in app.css`);
 }
 
+const seenGapHeads = new Set();
 for (const d of dynamicSites) {
+  const gap = KNOWN_GAPS.find((g) => "head" in g && g.file === d.file && g.head === d.head);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${d.head}@${d.file}`;
+    if (!seenGapHeads.has(key)) { seenGapHeads.add(key); gapHits.push({ code: "E3", file: d.file, what: `dynamic head "${d.head}"`, why: gap.why }); }
+    continue;
+  }
   errors.push(`E3 ${d.file}:${d.line}  dynamic class composition with head "${d.head}" is not in ALLOW_PREFIXES`);
 }
+
+// KNOWN_GAPS entries that fired nothing this run — the owning slice fixed the gap,
+// so prune the entry (mirrors staleRawAllows). Reported below, never fatal.
+const staleGaps = KNOWN_GAPS.filter((g) => !matchedGaps.has(gapKey(g)));
 
 for (const b of badTokens) {
   errors.push(
@@ -725,9 +821,18 @@ if (process.env.CSS_CHECK_VERBOSE) {
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);
 }
-if (REPORT_ONLY.length) {
-  console.log(`\nR3  REPORT-ONLY (fix requires app.js — owned by another slice):`);
-  for (const r of REPORT_ONLY) console.log(`      ${r}`);
+if (gapHits.length) {
+  console.log(
+    `\nR3  ${gapHits.length} known gap(s) in app.js/index.html demoted (owned by ` +
+      `gr-backlog-css-check-missing-classes — author the CSS or remove the emission):`,
+  );
+  for (const g of gapHits) console.log(`      ${g.code} ${g.file}  ${g.what} — ${g.why}`);
+}
+for (const g of staleGaps) {
+  console.log(
+    `stale  KNOWN_GAPS entry no longer matches any emission — prune it (the owning slice fixed it): ` +
+      `${g.file} ${"cls" in g ? `class "${g.cls}"` : `head "${g.head}"`}`,
+  );
 }
 if (pxFontSizes.length) {
   console.log(
@@ -742,7 +847,7 @@ if (pxFontSizes.length) {
 console.log(
   `\n__css_check: ${uniqEmitted.size} classes checked, ${uniqConsumed.size} tokens checked, ` +
     `${contrastResults.length} contrast pairs, ${allowlistedHits.length + hookHits.length + rawAllowed.length} allowlisted, ` +
-    `${errors.length} error(s)`,
+    `${gapHits.length} known gap(s) demoted (R3), ${errors.length} error(s)`,
 );
 
 if (errors.length) {

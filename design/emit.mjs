@@ -410,6 +410,51 @@ function cloudBlock(themes = loadThemes()) {
   return lines.join("\n");
 }
 
+// ── surface: living styleguide swatch grid (cloud/priv/static/styleguide.html) ─
+// The agency spec's "01 · Tokens" swatch table, byte-spliced into styleguide.html
+// so a chip label can never drift from design/tokens.json. Each cell renders its
+// CSS var LIVE (background: var(--cc-*)/var(--primary)) — the styleguide clones
+// each pane into a light and a dark scope, so the chip resolves per theme — while
+// the value line is the CANONICAL tokens.json truth (light · dark). The 11 slots
+// mirror the agency's own list: the cloudChrome passthrough family (identity-
+// invariant, so one light+dark pair each — GR2) plus the accent slot --primary
+// (per-identity; the evergreen value is shown, labelled). An HTML-comment marker
+// (kind "html") is the splice target, mirroring the CSS surfaces' BEGIN/END block.
+const SWATCH_TOKENS = [
+  { css: "--cc-bg", cc: "bg" },
+  { css: "--cc-card", cc: "card" },
+  { css: "--cc-card2", cc: "card2" },
+  { css: "--cc-fg", cc: "fg" },
+  { css: "--cc-fg2", cc: "fg2" },
+  { css: "--cc-fg3", cc: "fg3" },
+  { css: "--cc-fg4", cc: "fg4" },
+  { css: "--primary", accent: true }, // the mint/evergreen accent (restyles per identity)
+  { css: "--cc-amber", cc: "amber" },
+  { css: "--cc-red", cc: "red" },
+  { css: "--cc-blue", cc: "blue" },
+];
+
+function styleguideSwatches() {
+  const cc = tokens.color.cloudChrome;
+  const cell = (css, light, dark) =>
+    [
+      `              <div class="sg-swatch">`,
+      `                <div class="sg-swatch-chip" style="background: var(${css});"></div>`,
+      `                <div class="sg-swatch-meta">`,
+      `                  <div class="sg-swatch-name">${css}</div>`,
+      `                  <div class="sg-swatch-val">${light} · ${dark}</div>`,
+      `                </div>`,
+      `              </div>`,
+    ].join("\n");
+  return SWATCH_TOKENS.map((s) => {
+    if (s.accent) {
+      const p = tokens.color.primary;
+      return cell(s.css, hslToHex(p.light), hslToHex(p.dark));
+    }
+    return cell(s.css, cc[s.cc].light, cc[s.cc].dark);
+  }).join("\n");
+}
+
 // ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
 // Reading font + reading type scale + status tones, plus the lifecycle
 // glyph-tone classes (.bp-lg--<state>) that give the CSS/GUI half of the §6
@@ -1860,6 +1905,7 @@ export const ARTIFACTS = [
   { name: "error page (error_html)", path: "api/lib/barkpark_web/controllers/error_html.ex", kind: "css", build: errorPageBlock },
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
+  { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit
@@ -1868,6 +1914,16 @@ const markerRe = new RegExp(
   `([ \\t]*${escapeRe(MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(MARKER_END)})`
 );
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+// The kind "html" splice target: an HTML-comment marker (the swatch grid lives
+// inside styleguide.html's [data-sg-swatches] host, not a <style> block, so a CSS
+// comment can't mark it). Same tolerant leading-indent capture as markerRe.
+const HTML_MARKER_BEGIN =
+  "<!-- BEGIN GENERATED: swatches (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) -->";
+const HTML_MARKER_END = "<!-- END GENERATED: swatches -->";
+const htmlMarkerRe = new RegExp(
+  `([ \\t]*${escapeRe(HTML_MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(HTML_MARKER_END)})`
+);
 
 // Compute {expected, current, path, kind, name} for one artifact. `expected` is
 // the desired full file text; `current` is what's on disk. A missing marker for a
@@ -1879,6 +1935,17 @@ export function evaluate(a) {
   catch { current = null; }
   const content = a.build();
 
+  if (a.kind === "html") {
+    // html: splice into the HTML-comment marker of the CURRENT file (same
+    // mechanism as css, different marker). A missing marker is a hard error.
+    const base = current == null ? "" : current;
+    const m = base.match(htmlMarkerRe);
+    if (!m) {
+      return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: swatches marker in ${a.path}` };
+    }
+    const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
+    return { ...a, abs, current, expected };
+  }
   if (a.kind !== "css") {
     // whole-file artifacts (Go, TS): the build() output IS the entire file.
     return { ...a, abs, current, expected: content };
