@@ -219,7 +219,7 @@ func TestRunCloudOpenJSON(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	for _, want := range []string{`"ok": true`, `"target": "sites"`, `"url": "https://dash.test/#sites"`, `"opened": false`} {
+	for _, want := range []string{`"ok":true`, `"target":"sites"`, `"url":"https://dash.test/#sites"`, `"opened":false`} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("json missing %q:\n%s", want, stdout)
 		}

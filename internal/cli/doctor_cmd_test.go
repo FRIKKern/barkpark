@@ -189,7 +189,7 @@ func TestDoctorAllGreenJSONExitZero(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0 on all-green\n%s", code, stdout)
 	}
-	if !bytes.Contains([]byte(stdout), []byte(`"ok": true`)) {
+	if !bytes.Contains([]byte(stdout), []byte(`"ok":true`)) {
 		t.Fatalf("green JSON should carry ok:true:\n%s", stdout)
 	}
 }

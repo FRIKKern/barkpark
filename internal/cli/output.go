@@ -253,11 +253,13 @@ func (w *writer) info(format string, a ...any) {
 	}
 }
 
-// renderJSON pretty-prints v as stable JSON to stdout.
+// renderJSON emits v as compact single-line JSON to stdout. Machine output
+// carries no indentation — a 23-25% pure-whitespace tax every scripted consumer
+// paid for nothing (AXI wave 2, charter decision 14). json.Encoder.Encode still
+// appends a trailing newline, so the stream stays line-delimited.
 func (w *writer) renderJSON(v any) {
 	enc := json.NewEncoder(w.stdout)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
 }
 
@@ -291,8 +293,8 @@ func (w *writer) emitStructured(payload map[string]any) bool {
 	return false
 }
 
-// renderRaw prints already-serialized JSON bytes, re-indented for stability. If
-// the bytes are not valid JSON it prints them verbatim.
+// renderRaw prints already-serialized JSON bytes, re-serialized compact for
+// stability. If the bytes are not valid JSON it prints them verbatim.
 func (w *writer) renderRaw(b []byte) {
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
