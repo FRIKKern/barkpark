@@ -28,6 +28,20 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       assert result == %{"kind" => "PdHeading", "level" => 1, "children" => ["Title"]}
     end
 
+    test "heading renders a persisted PortableDoc inline content array" do
+      b = %{
+        "type" => "heading",
+        "level" => 1,
+        "content" => [%{"type" => "text", "value" => "Portable title"}]
+      }
+
+      assert Compose.compose_block(b, :article) == %{
+               "kind" => "PdHeading",
+               "level" => 1,
+               "children" => ["Portable title"]
+             }
+    end
+
     test "divider emits PdHr in email mode" do
       assert Compose.compose_block(%{"type" => "divider"}) == %{"kind" => "PdHr"}
     end

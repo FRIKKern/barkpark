@@ -174,7 +174,10 @@ defmodule BarkparkWeb.CycleFleetController do
              params["candidate_id"]
            ) do
         {:ok, gate, candidate} ->
-          html = Barkpark.PortableDoc.Render.render_blocks(candidate.content["blocks"], %{})
+          html =
+            candidate.content["blocks"]
+            |> Barkpark.PortableDoc.Render.render_blocks(%{})
+            |> ensure_release_paper_title(candidate.title)
 
           conn
           |> put_release_candidate_headers(gate, candidate)
@@ -200,6 +203,17 @@ defmodule BarkparkWeb.CycleFleetController do
     |> put_resp_header("x-barkpark-wave-revision", gate.reserved_target_revision)
     |> put_resp_header("x-barkpark-paper-candidate", candidate.id)
     |> put_resp_header("x-barkpark-paper-role", candidate.role)
+  end
+
+  defp ensure_release_paper_title(html, title) do
+    title = String.trim(title || "")
+
+    if title == "" or String.contains?(String.downcase(html), String.downcase(title)) do
+      html
+    else
+      escaped = title |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+      "<h1 data-release-paper-title>#{escaped}</h1>" <> html
+    end
   end
 
   def seal(conn, params) do
