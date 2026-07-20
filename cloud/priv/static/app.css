@@ -4157,7 +4157,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      one that must absorb the squeeze in the 721-782 band. Clipping here (with
      min-width:0 from `.topbar-right > *`) is what turns a page-level
      horizontal scrollbar into a truncated chip; the 768-block cosmetic trio
-     then buys the full label back at tablet widths. */
+     then buys the full label back at tablet widths.
+     HONEST NAMING (review): `text-overflow: ellipsis` is INERT on this element
+     — it is a flex container, and Chrome does not ellipsize a flex container's
+     anonymous items. In the 769-782 band the chip CLIPS; it does not paint a
+     literal "…". `overflow: hidden` is the declaration doing the work (it also
+     zeroes the chip's automatic minimum size, which is why the guard's GR108
+     mutation only flips when the WHOLE pair is reverted — each half alone
+     measures clean at today's label widths, verified both directions at
+     review). The ellipsis is kept as charter-authored intent and as correct
+     behaviour the day the chip stops being a flex container; it is documented
+     here rather than described as polish it does not deliver. */
   overflow: hidden;
   text-overflow: ellipsis;
 }
