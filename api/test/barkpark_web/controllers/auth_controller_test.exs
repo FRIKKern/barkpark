@@ -2,6 +2,10 @@ defmodule BarkparkWeb.AuthControllerTest do
   @moduledoc "Phase 1 — the /v1/auth HTTP surface (register, login, MFA, sessions)."
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   import Ecto.Query, only: [from: 2]
   alias Barkpark.{Accounts, Audit, Repo}
   alias Barkpark.Audit.Event
@@ -28,7 +32,11 @@ defmodule BarkparkWeb.AuthControllerTest do
       authed(token)
       |> post(
         "/v1/auth/mfa/verify",
-        Jason.encode!(%{secret: enroll["secret"], code: NimbleTOTP.verification_code(secret), password: @password})
+        Jason.encode!(%{
+          secret: enroll["secret"],
+          code: totp_code_stable!(secret),
+          password: @password
+        })
       )
       |> json_response(200)
 
@@ -188,7 +196,7 @@ defmodule BarkparkWeb.AuthControllerTest do
           "/v1/auth/mfa/verify",
           Jason.encode!(%{
             secret: enroll["secret"],
-            code: NimbleTOTP.verification_code(secret),
+            code: totp_code_stable!(secret),
             password: @password
           })
         )
@@ -224,7 +232,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       # … and succeeds with a live TOTP code.
       assert login_token(build_conn(), "mfa@example.com", %{
-               totp_code: NimbleTOTP.verification_code(secret)
+               totp_code: totp_code_stable!(secret)
              })
     end
 
@@ -257,7 +265,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       # Correct password AND a live TOTP → login succeeds.
       assert login_token(build_conn(), "mfa@example.com", %{
-               totp_code: NimbleTOTP.verification_code(secret)
+               totp_code: totp_code_stable!(secret)
              })
 
       # A clean login must not fabricate a failure event — an ALLOW-only test is
@@ -310,7 +318,7 @@ defmodule BarkparkWeb.AuthControllerTest do
         "/v1/auth/mfa/verify",
         Jason.encode!(%{
           secret: enroll["secret"],
-          code: NimbleTOTP.verification_code(secret),
+          code: totp_code_stable!(secret),
           password: @password
         })
       )
@@ -359,7 +367,9 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "revoking ANOTHER session kills it, keeps mine, and audits", %{token_a: a, token_b: b} do
-      sessions = authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+      sessions =
+        authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+
       other = Enum.find(sessions, &(not &1["current"]))
 
       resp = authed(a) |> delete("/v1/auth/sessions/#{other["id"]}") |> json_response(200)
@@ -373,7 +383,9 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "revoking the CURRENT session behaves as logout", %{token_a: a} do
-      sessions = authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+      sessions =
+        authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+
       current = Enum.find(sessions, & &1["current"])
 
       resp = authed(a) |> delete("/v1/auth/sessions/#{current["id"]}") |> json_response(200)
@@ -424,18 +436,25 @@ defmodule BarkparkWeb.AuthControllerTest do
              |> json_response(200)
     end
 
-    test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{token: token} do
+    test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{
+      token: token
+    } do
       {secret, _codes} = enroll_totp!(token)
 
       # Enrolment stamped the session fresh — simulate the window lapsing.
       backdate_step_up!(token)
 
       # The guarded action now demands a fresh factor (before the password is even checked).
-      challenge = authed(token) |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+      challenge =
+        authed(token) |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+
       assert json_response(challenge, 401)["error"]["code"] == "mfa_required"
 
       # Step up with a live TOTP → session fresh again.
-      step = authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: NimbleTOTP.verification_code(secret)}))
+      step =
+        authed(token)
+        |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: totp_code_stable!(secret)}))
+
       assert json_response(step, 200)["factor"] == "totp"
 
       # The guarded action now succeeds.
@@ -471,7 +490,9 @@ defmodule BarkparkWeb.AuthControllerTest do
       authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: "000000"}))
       assert Repo.one(from e in Event, where: e.action == "mfa_failed")
 
-      authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: NimbleTOTP.verification_code(secret)}))
+      authed(token)
+      |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: totp_code_stable!(secret)}))
+
       assert Repo.one(from e in Event, where: e.action == "mfa_passed")
 
       # The global (no-workspace) chain stays intact through all these emits.

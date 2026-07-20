@@ -2,6 +2,10 @@ defmodule BarkparkWeb.SamlControllerTest do
   @moduledoc "SAML SP HTTP surface — start redirect + ACS session mint + JIT."
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   alias Barkpark.{Accounts, Repo, Sso.Saml, Tenancy}
   alias Barkpark.Tenancy.Membership
   import Ecto.Query
@@ -21,8 +25,11 @@ defmodule BarkparkWeb.SamlControllerTest do
 
     authn =
       case Keyword.get(opts, :session_index) do
-        nil -> ""
-        idx -> ~s(<saml:AuthnStatement AuthnInstant="#{DateTime.to_iso8601(now)}" SessionIndex="#{idx}"/>)
+        nil ->
+          ""
+
+        idx ->
+          ~s(<saml:AuthnStatement AuthnInstant="#{DateTime.to_iso8601(now)}" SessionIndex="#{idx}"/>)
       end
 
     xml = """
@@ -186,7 +193,7 @@ defmodule BarkparkWeb.SamlControllerTest do
       secret = NimbleTOTP.secret()
 
       {:ok, _user, _codes} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       body =
         conn
@@ -256,7 +263,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("slo@samlctrl.com", i.key, i.cert_der, session_index: "idx-1")
+          "SAMLResponse" =>
+            signed_response("slo@samlctrl.com", i.key, i.cert_der, session_index: "idx-1")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -309,7 +317,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("victim@samlctrl.com", i.key, i.cert_der, session_index: "idx-2")
+          "SAMLResponse" =>
+            signed_response("victim@samlctrl.com", i.key, i.cert_der, session_index: "idx-2")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -336,7 +345,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("bye@samlctrl.com", i.key, i.cert_der, session_index: "idx-3")
+          "SAMLResponse" =>
+            signed_response("bye@samlctrl.com", i.key, i.cert_der, session_index: "idx-3")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -353,7 +363,9 @@ defmodule BarkparkWeb.SamlControllerTest do
       refute Accounts.verify_user_session_token(token)
     end
 
-    test "logout of a SAML session on an SLO-less connection stays local (no slo_url)", %{conn: conn} do
+    test "logout of a SAML session on an SLO-less connection stays local (no slo_url)", %{
+      conn: conn
+    } do
       i = idp()
       setup_conn(i.cert_pem)
 
