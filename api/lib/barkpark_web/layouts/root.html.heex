@@ -1461,10 +1461,26 @@
 
     /* Breadcrumb drill strip — spd-s6 PRE-PROVISION (D13/D16: this file is
        single-owner per round, so the phone drill's full CSS contract ships
-       NOW and spd-s6 touches only .ex/test files). Hidden in every bucket
-       except phone. Crumbs are @panes titles; clicks reuse the existing
-       "expand-pane" nav_path truncation — zero new server events. */
+       NOW and spd-s6 touches only .ex/test files). Crumbs are @panes titles;
+       clicks reuse the existing "expand-pane" nav_path truncation — zero new
+       server events.
+
+       SHOWN AT `narrow` AS WELL AS `phone` (charter D168). This rule used to
+       read "hidden in every bucket except phone", and it was correct while the
+       trail was a phone-drill affordance. Wave 11 made it load-bearing at
+       `narrow` too: `desk_crumbs/1` now EMITS the nav at both buckets, because
+       `narrow` is one of the two widths where the summoned inspector covers the
+       whole content pane, and the document crumb is the trail's way back out of
+       it. Leaving this rule phone-only would have shipped the markup half of
+       D168 into a `display: none` — the server emitting an escape route that no
+       reader can see, which is worse than not emitting it, since the DOM would
+       assert an affordance the desk does not offer.
+
+       Enumeration, not negation, for the same reason as the Tier-3 exit below:
+       `:not(wide)` would also catch `standard`, whose inspector docks beside a
+       document that never leaves the screen and therefore needs no trail. */
     .bp-desk-crumbs { display: none; }
+    html[data-width-bucket="narrow"] .bp-desk-crumbs,
     html[data-width-bucket="phone"] .bp-desk-crumbs {
       display: flex; align-items: center; gap: 4px;
       min-height: 36px; padding: 0 12px;
@@ -2013,6 +2029,44 @@
       .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
       content: none;
     }
+    /* …AND THE WIDE SCRIM IS ABOLISHED TOO (charter D170). The guard above
+       carves `wide` out because a wide pane squeezed under 860px was assumed to
+       overlay a document that stays visible beside it — the one state where
+       dimming reads as an honest signal. Wave-11 measured that assumption and
+       it does not hold: the state is REACHABLE BY ARITHMETIC AND UNREACHABLE IN
+       FACT.
+
+       THE PAPER-ROUTING INVARIANT IS WHAT CARRIES IT. A document that has an
+       inspector at all is a paper, and papers route to a fixed two-pane shell —
+       a 44px yielded rail plus a 260px list column — so `.editor-panel` is
+       `vw - 304` at every wide viewport. The narrowest wide viewport is 1280,
+       giving panel = 976; the `@container panel (max-width: 860px)` generator
+       needs 860. Measured on the deployed sheet: 976 at 1280 and 1136 at 1440,
+       both clear of the threshold by more than 100px. The two shapes that could
+       breach 860 do not apply — deeper drills carry no inspector at all, and
+       the 360px `.bp-secondary-pane` that would eat the difference is
+       unreachable from the paper editor. So the wide scrim never painted for a
+       real desk; keeping the carve-out only preserved a rule nobody could
+       reach, over a document nobody could see dimmed.
+
+       WHAT THIS COSTS D153. The `wide` row used to be this sheet's POSITIVE
+       CONTROL — the proof that the scrim generator is live code rather than a
+       rule the suppressions had quietly killed everywhere. It cannot be that
+       any more, and the honest replacement is NOT this rule but the
+       FORCED-CONTAINER CONTROL: force `.editor-panel` to 861px and the computed
+       `::after` content is `none`, force it to 860px and it is `""`, verified at
+       both 1280 and 1440. That control exercises the generator's own threshold
+       instead of asserting a bucket keeps a scrim it never rendered — and it
+       still fails loudly if the generator is ever deleted.
+
+       Unconditional at `wide`, deliberately: `[data-user-opened]` is not
+       qualified here because the arithmetic above is indifferent to it. Both a
+       server-defaulted and a user-summoned inspector sit in the same [44,260]
+       shell, so neither can bring the pane under 860. */
+    html[data-width-bucket="wide"]
+      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
+      content: none;
+    }
 
     /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
        At `narrow` and `phone` the user-opened inspector stops being a panel
@@ -2097,6 +2151,44 @@
       color: var(--fg-dim); display: inline-flex; align-items: center;
     }
     .bp-doc-sidebar__collapse:hover { color: var(--fg-muted); }
+    /* TIER-3 CHROME EARNS A 44px EXIT (charter D167). The rule above gives the
+       control no padding and no minimum, so its rendered box is exactly the
+       icon: 16x16, live-measured at 1280, 1440, 800 and phone alike. At the
+       docked tiers that is defensible — the inspector sits BESIDE the document,
+       so the button is one affordance among many and the document is never
+       hostage to hitting it. At Tier 3 it is not: the summoned destination
+       covers 100% of the content pane, so this 16px box is the ONLY exit from a
+       surface that has replaced the reader's document. 16px is under every
+       touch-target floor there is, and the cost of missing it is being stuck.
+
+       SCOPED BY ENUMERATION, NOT BY NEGATION. `narrow` and `phone` are spelled
+       out rather than written `html:not([data-width-bucket="wide"])` because
+       negation would also catch `standard`, whose inspector still docks and
+       whose answer is a different slice's to give. This mirrors the compound
+       selector two rule-blocks above, deliberately: the summoned destination
+       and its exit are one shape and must share one scope, or a later edit
+       moves one without the other.
+
+       `[data-user-opened]` IS LOAD-BEARING, not decoration. The painted-closed
+       strip is `.is-open:not([data-user-opened])` (D91/b29), so this selector is
+       disjoint from it BY CONSTRUCTION — the strip's own 16px button is
+       structurally unreachable from here, and so is every docked tier. That is
+       what lets a 44px minimum ship without a single docked pixel moving:
+       measured, head 36.195px -> 61px and the collapse box 16px -> 44px at
+       narrow and phone, while the head/collapse rects at 1280 and 1440 stay
+       byte-identical.
+
+       `justify-content: center` because the 16px glyph would otherwise sit at
+       the flex-start edge of its new 44px box, putting the visual mark 14px
+       from where the finger is aimed. No padding is added: the head's own
+       `8px 12px` plus a 44px child is what produces the 61px head, and that
+       height is the room the back-arrow and document title need. */
+    html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse,
+    html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+    }
     /* The only affordance that closes the inspector once it overlays the
        document — it must be able to receive focus visibly. */
     .bp-doc-sidebar__collapse:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
