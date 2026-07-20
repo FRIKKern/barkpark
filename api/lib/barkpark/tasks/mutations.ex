@@ -63,6 +63,7 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
+
                 ev =
                   insert_mutation_event!(
                     updated,
@@ -135,6 +136,7 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
+
                 ev =
                   insert_mutation_event!(
                     updated,

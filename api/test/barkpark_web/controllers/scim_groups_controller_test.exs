@@ -198,7 +198,10 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
     test "PATCH /scim/v2/Groups/:id with a non-UUID id → 404 (never a 500)" do
       %{token: token} = org_with_ws("grp-cast-patch")
-      assert scim(token) |> patch("/scim/v2/Groups/%2Fnope", member_op("add", "x")) |> json_response(404)
+
+      assert scim(token)
+             |> patch("/scim/v2/Groups/%2Fnope", member_op("add", "x"))
+             |> json_response(404)
     end
 
     test "positive control: a valid-shape but unknown UUID → 404 (not 500)" do

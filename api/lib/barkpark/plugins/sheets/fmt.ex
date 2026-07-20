@@ -182,7 +182,11 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
     neg? = scaled < 0
     scaled = abs(scaled)
     int_part = div(scaled, scale)
-    int_str = if group?, do: group_thousands(Integer.to_string(int_part)), else: Integer.to_string(int_part)
+
+    int_str =
+      if group?,
+        do: group_thousands(Integer.to_string(int_part)),
+        else: Integer.to_string(int_part)
 
     body =
       if decimals > 0 do
@@ -212,21 +216,27 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   # NaiveDateTime then Date; an unparseable string returns verbatim.
   defp date_part(v) do
     case NaiveDateTime.from_iso8601(v) do
-      {:ok, ndt} -> ndt |> NaiveDateTime.to_date() |> Date.to_iso8601()
-      _ -> case Date.from_iso8601(v) do
-             {:ok, d} -> Date.to_iso8601(d)
-             _ -> v
-           end
+      {:ok, ndt} ->
+        ndt |> NaiveDateTime.to_date() |> Date.to_iso8601()
+
+      _ ->
+        case Date.from_iso8601(v) do
+          {:ok, d} -> Date.to_iso8601(d)
+          _ -> v
+        end
     end
   end
 
   defp datetime_part(v) do
     case NaiveDateTime.from_iso8601(v) do
-      {:ok, ndt} -> ndt |> NaiveDateTime.truncate(:second) |> NaiveDateTime.to_string()
-      _ -> case Date.from_iso8601(v) do
-             {:ok, d} -> Date.to_iso8601(d)
-             _ -> v
-           end
+      {:ok, ndt} ->
+        ndt |> NaiveDateTime.truncate(:second) |> NaiveDateTime.to_string()
+
+      _ ->
+        case Date.from_iso8601(v) do
+          {:ok, d} -> Date.to_iso8601(d)
+          _ -> v
+        end
     end
   end
 

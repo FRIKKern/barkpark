@@ -519,7 +519,11 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert entry["agent_state"] == "working"
 
       assert {:ok, at, 0} = DateTime.from_iso8601(entry["agent_state_at"])
-      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [:eq, :gt]
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
     end
 
     # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────

@@ -294,7 +294,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # loss-free. An already-sorted range (identity permutation) is a true no-op
   # — no rev bump, no undo entry, no broadcast (the move_tab from==to
   # precedent).
-  def apply_one(%{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys} = op, state) do
+  def apply_one(
+        %{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys} = op,
+        state
+      ) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, rect} <- validate_sort_range(range),
          old_tab = Sheets.get_tab(state.content, tab_idx),
@@ -400,7 +403,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         # rename captures a lossless multi-tab inverse), and the delete_tab
         # structure delta already drives a client refetch.
         state =
-          commit_cross_tab_content(state, state.content, delete_cross_tab_refs(state.content, deleted_name))
+          commit_cross_tab_content(
+            state,
+            state.content,
+            delete_cross_tab_refs(state.content, deleted_name)
+          )
 
         # Every stack index AFTER the deleted slot slides down by one —
         # the mirror of duplicate_tab's insert shift. Entries pinned to the

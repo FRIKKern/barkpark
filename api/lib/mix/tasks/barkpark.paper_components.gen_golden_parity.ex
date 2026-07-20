@@ -275,7 +275,13 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   @roadmap_input %{
     "type" => "roadmap",
     "snapshot" => [
-      %{"title" => "Foundation", "status" => "done", "phase_row" => true, "left" => 0, "width" => 40},
+      %{
+        "title" => "Foundation",
+        "status" => "done",
+        "phase_row" => true,
+        "left" => 0,
+        "width" => 40
+      },
       %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35}
     ],
     "scale" => ["Q1", "Q2", "Q3"]
@@ -287,9 +293,17 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   @columns_input %{
     "type" => "columns",
     "columns" => [
-      [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Left column body."}]}],
       [
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Right column body."}]}
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Left column body."}]
+        }
+      ],
+      [
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Right column body."}]
+        }
       ]
     ]
   }
@@ -320,7 +334,10 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     "type" => "section",
     "layout" => %{"mode" => "grid", "tracks" => 2, "gap" => "md"},
     "blocks" => [
-      %{"type" => "card", "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}},
+      %{
+        "type" => "card",
+        "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}
+      },
       %{
         "type" => "card",
         "span" => 2,
@@ -535,7 +552,13 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
 
   defp note_projection(item) do
     row = note_row(item)
-    %{"container_role" => "note", "label" => row["label"], "lead" => row["lead"], "text" => row["text"]}
+
+    %{
+      "container_role" => "note",
+      "label" => row["label"],
+      "lead" => row["lead"],
+      "text" => row["text"]
+    }
   end
 
   # cards: title · text · tone, tone normalized against the SHARED card allowlist
@@ -669,7 +692,7 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
         {"meta", true},
         {"timeline", timeline != []},
         {"criteria", crit != []},
-        {"labels", (t |> Map.get("labels") |> as_list()) != []}
+        {"labels", t |> Map.get("labels") |> as_list() != []}
       ]
       |> Enum.filter(fn {_role, present?} -> present? end)
       |> Enum.map(fn {role, _} -> role end)

@@ -48,7 +48,8 @@ defmodule BarkparkWeb.WebauthnController do
     with {:ok, bytes} <- verify_token(@reg_salt, token),
          {:ok, att} <- decode64(att_b64),
          {:ok, cdj} <- decode64(cdj_b64),
-         {:ok, cred} <- Webauthn.verify_registration(user, att, cdj, bytes, nickname: conn.params["nickname"]) do
+         {:ok, cred} <-
+           Webauthn.verify_registration(user, att, cdj, bytes, nickname: conn.params["nickname"]) do
       Audit.emit(%{
         category: "auth",
         action: "passkey_registered",
@@ -67,7 +68,13 @@ defmodule BarkparkWeb.WebauthnController do
   end
 
   def register(conn, _),
-    do: error(conn, 422, "bad_request", "attestation_object, client_data_json and challenge_token are required")
+    do:
+      error(
+        conn,
+        422,
+        "bad_request",
+        "attestation_object, client_data_json and challenge_token are required"
+      )
 
   # ── Login (public: usernameless passkey sign-in → a fresh session) ───────────
 
@@ -109,13 +116,24 @@ defmodule BarkparkWeb.WebauthnController do
       SessionIssuer.issue(conn, user, mfa_verified: true)
     else
       _ ->
-        error(conn, 401, "invalid_passkey", "the passkey could not be verified",
-          "retry the passkey prompt; if it keeps failing, sign in another way")
+        error(
+          conn,
+          401,
+          "invalid_passkey",
+          "the passkey could not be verified",
+          "retry the passkey prompt; if it keeps failing, sign in another way"
+        )
     end
   end
 
   def login(conn, _),
-    do: error(conn, 422, "bad_request", "credential_id, authenticator_data, signature, client_data_json and challenge_token are required")
+    do:
+      error(
+        conn,
+        422,
+        "bad_request",
+        "credential_id, authenticator_data, signature, client_data_json and challenge_token are required"
+      )
 
   # ── Step-up (session-gated: a passkey clears a mfa_required challenge) ────────
 
@@ -152,7 +170,11 @@ defmodule BarkparkWeb.WebauthnController do
         ok: true,
         factor: "passkey",
         fresh_until:
-          DateTime.add(session.mfa_verified_at, Accounts.UserSession.default_step_up_window(), :second)
+          DateTime.add(
+            session.mfa_verified_at,
+            Accounts.UserSession.default_step_up_window(),
+            :second
+          )
       })
     else
       _ ->

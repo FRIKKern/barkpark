@@ -74,6 +74,7 @@ defmodule Barkpark.RateLimiterTest do
     for i <- 1..10_001 do
       :ets.insert(:barkpark_rate_limiter, {{:token, "stale-#{i}"}, 5.0, stale})
     end
+
     :ets.insert(:barkpark_rate_limiter, {{:token, "keep-me"}, 5.0, fresh})
     assert :ets.info(:barkpark_rate_limiter, :size) > 10_000
 

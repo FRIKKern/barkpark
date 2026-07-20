@@ -274,7 +274,10 @@ defmodule Barkpark.SelfUpdate.Runner do
   # nil `state.port`, so it falls through to the catch-all below.
   def handle_info({:run_deadline, port}, %{port: port, run: :running} = state) do
     _ = close_port(port)
-    state = push_log(state, "[runner] run exceeded #{run_deadline_ms()}ms deadline — force-closed")
+
+    state =
+      push_log(state, "[runner] run exceeded #{run_deadline_ms()}ms deadline — force-closed")
+
     {:noreply, %{state | run: {:done, -2}, port: nil, finished_at: DateTime.utc_now()}}
   end
 

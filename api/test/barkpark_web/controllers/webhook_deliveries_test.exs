@@ -26,7 +26,8 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   end
 
   setup do
-    {:ok, token} = Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    {:ok, token} =
+      Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
 
     prev_adapter = Application.get_env(:barkpark, :webhook_http_adapter)
     Application.put_env(:barkpark, :webhook_http_adapter, RecordingHTTP)
@@ -59,7 +60,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
     dataset = Map.get(attrs, "dataset", "test")
 
     body =
-      %{"name" => "Hook", "url" => "http://example.test/hook", "events" => ["patch"], "secret" => "s0"}
+      %{
+        "name" => "Hook",
+        "url" => "http://example.test/hook",
+        "events" => ["patch"],
+        "secret" => "s0"
+      }
       |> Map.merge(Map.delete(attrs, "dataset"))
 
     resp = conn |> authed() |> post("/v1/webhooks/#{dataset}", Jason.encode!(body))
@@ -195,11 +201,17 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
 
       # Re-signed with the CURRENT secret (verify_signature over the combined header).
       ts = String.to_integer(hmap["x-barkpark-timestamp"])
-      assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["current-secret"])
+
+      assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], [
+               "current-secret"
+             ])
+
       refute Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["s0"])
     end
 
-    test "replaying against an existing delivery row bumps attempts on the SAME row", %{conn: conn} do
+    test "replaying against an existing delivery row bumps attempts on the SAME row", %{
+      conn: conn
+    } do
       wh = make_webhook(conn)
       ev = make_event()
       {:ok, d} = Webhooks.claim_delivery(wh.id, ev.id)
@@ -345,8 +357,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       # A flat-route (unscoped/Default) webhook id is invisible under this
       # workspace's scoped routes.
       flat_wh = make_webhook(conn)
-      assert conn |> authed() |> get("#{base}/test/#{flat_wh.id}/deliveries") |> Map.get(:status) == 404
-      assert conn |> authed() |> post("#{base}/test/#{flat_wh.id}/rotate") |> Map.get(:status) == 404
+
+      assert conn |> authed() |> get("#{base}/test/#{flat_wh.id}/deliveries") |> Map.get(:status) ==
+               404
+
+      assert conn |> authed() |> post("#{base}/test/#{flat_wh.id}/rotate") |> Map.get(:status) ==
+               404
     end
   end
 

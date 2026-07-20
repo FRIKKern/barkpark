@@ -49,9 +49,21 @@ defmodule Barkpark.SheetsM0ProofTest do
   # unique max, rationales ≥20 chars.
   @wall_tag_names ~w(m0-proof-sheet m0-proof-embed m0-proof-budget)
   @wall_tags [
-    %{"tag" => "m0-proof-sheet", "strength" => 90, "rationale" => "Primary label: the live-sheet-embedding proof paper."},
-    %{"tag" => "m0-proof-embed", "strength" => 55, "rationale" => "Secondary label: embed hydration coverage for the wall."},
-    %{"tag" => "m0-proof-budget", "strength" => 20, "rationale" => "Tertiary label: budget write-through ingest fixture."}
+    %{
+      "tag" => "m0-proof-sheet",
+      "strength" => 90,
+      "rationale" => "Primary label: the live-sheet-embedding proof paper."
+    },
+    %{
+      "tag" => "m0-proof-embed",
+      "strength" => 55,
+      "rationale" => "Secondary label: embed hydration coverage for the wall."
+    },
+    %{
+      "tag" => "m0-proof-budget",
+      "strength" => 20,
+      "rationale" => "Tertiary label: budget write-through ingest fixture."
+    }
   ]
   @wall_description "M0 proof fixture paper embedding a live sheet across the publish-wall gate."
 

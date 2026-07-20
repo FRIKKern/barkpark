@@ -54,9 +54,21 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   # POST must carry registered weighted tags + a description.
   @wall_tag_names ~w(m3m5-proof-sales m3m5-proof-import m3m5-proof-roundtrip)
   @wall_tags [
-    %{"tag" => "m3m5-proof-sales", "strength" => 93, "rationale" => "Primary label: the sales-report import proof paper."},
-    %{"tag" => "m3m5-proof-import", "strength" => 58, "rationale" => "Secondary label: import-recompute embed coverage."},
-    %{"tag" => "m3m5-proof-roundtrip", "strength" => 21, "rationale" => "Tertiary label: export round-trip ingest fixture."}
+    %{
+      "tag" => "m3m5-proof-sales",
+      "strength" => 93,
+      "rationale" => "Primary label: the sales-report import proof paper."
+    },
+    %{
+      "tag" => "m3m5-proof-import",
+      "strength" => 58,
+      "rationale" => "Secondary label: import-recompute embed coverage."
+    },
+    %{
+      "tag" => "m3m5-proof-roundtrip",
+      "strength" => 21,
+      "rationale" => "Tertiary label: export round-trip ingest fixture."
+    }
   ]
   @wall_description "M3+M5 proof fixture paper embedding an imported live sales sheet."
 

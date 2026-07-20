@@ -91,7 +91,10 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
       log =
         capture_log(fn ->
           assert {:ok, doc} =
-                   create_task("qg-zero-1", %{"title" => "A real task", "content" => base_content()})
+                   create_task("qg-zero-1", %{
+                     "title" => "A real task",
+                     "content" => base_content()
+                   })
 
           assert doc.title == "A real task"
         end)

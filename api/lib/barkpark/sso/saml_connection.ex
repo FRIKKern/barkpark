@@ -27,7 +27,14 @@ defmodule Barkpark.Sso.SamlConnection do
 
   def changeset(c, attrs) do
     c
-    |> cast(attrs, [:organization_id, :idp_entity_id, :idp_sso_url, :idp_slo_url, :idp_cert_pem, :active])
+    |> cast(attrs, [
+      :organization_id,
+      :idp_entity_id,
+      :idp_sso_url,
+      :idp_slo_url,
+      :idp_cert_pem,
+      :active
+    ])
     |> validate_required([:organization_id, :idp_entity_id, :idp_sso_url, :idp_cert_pem])
     |> assoc_constraint(:organization)
     |> unique_constraint(:organization_id)

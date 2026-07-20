@@ -3,13 +3,17 @@ name: elixir
 # Phase 2 / WI4 — Elixir CI gate.
 #
 # Jobs:
-#   1. format           — `mix format --check-formatted`. ADVISORY (see the
-#                         continue-on-error note on the job). Runs first so
-#                         drift is visible in <60s without spinning up
-#                         Postgres or compiling. (Task #29 — see PR #58/#59
-#                         mix-format hotfixes.)
-#   2. mix-test         — dev-mode compile + test suite. Blocking gate.
-#   3. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
+#   1. format           — `mix format --check-formatted`. A DRIFT SIGNAL, not
+#                         a gate (see the continue-on-error note on the job).
+#                         Runs first so drift is visible in <60s without
+#                         spinning up Postgres or compiling. (Task #29 — see
+#                         PR #58/#59 mix-format hotfixes.)
+#   2. format-ceiling   — BLOCKING. The signal above cannot fail, so it does
+#                         not hold a line; this job does. It forbids the
+#                         drifted-file population from GROWING beyond the
+#                         committed roster in `.format-drift-ceiling`.
+#   3. mix-test         — dev-mode compile + test suite. Blocking gate.
+#   4. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
 #                         _build/prod, --warnings-as-errors enforced.
 #
 # Why a dedicated `format` job? The format check used to live inside
@@ -41,15 +45,26 @@ concurrency:
 
 jobs:
   format:
-    # ADVISORY format signal — NOT a merge gate. The project pins formatting
-    # to the PROD Elixir version (server runs 1.18.x; local dev runs 1.19.x,
-    # whose formatter produces different output). Running `mix format` on a
-    # local toolchain is forbidden (see CLAUDE.md), so this check is
-    # structurally red whenever code was last formatted under a different
-    # Elixir than CI's 1.18.1. Formatting passes must only ever happen in a
-    # deliberate session pinned to the prod Elixir version; until then this
-    # job stays visible as a drift signal, not a blocker.
-    name: Format (mix format --check-formatted, advisory)
+    # A DRIFT SIGNAL, not a merge gate — and `continue-on-error` below is
+    # DELIBERATE, not neglect. 2026-07-20: the conflict-free population (50
+    # files) was migrated, taking this job's drift set from 92 to 42. The
+    # remaining 42 are held by live work and cannot be formatted without
+    # colliding with it: 24 production-truth files under content/ and
+    # portable_doc/, 15 under the Studio bucket that open PRs #5016/#5015/#5014
+    # are editing right now, and 3 owned by a sibling wave-1 slice. Dropping
+    # continue-on-error today would red every merge repo-wide, including the
+    # cycles doing the remaining work.
+    #
+    # What stops the declaw from being permanent furniture is the
+    # `format-ceiling` job below, which IS blocking: this job may stay red,
+    # but the red can only ever get SMALLER. Wave-2 item 5 formats the
+    # remainder and retires the continue-on-error entirely.
+    #
+    # Toolchain note: formatting is pinned to CI's Elixir 1.18.1 (local dev
+    # runs 1.19.x). cloud.yml runs the identical command BLOCKING and green on
+    # this same pin — the live proof that version skew is not the whole cause
+    # and that blocking is affordable once the population is clean.
+    name: Format (mix format --check-formatted, drift signal)
     continue-on-error: true
     runs-on: ubuntu-latest
     strategy:
@@ -82,6 +97,51 @@ jobs:
 
       - name: mix format --check-formatted
         run: mix format --check-formatted
+
+  format-ceiling:
+    # BLOCKING — deliberately a SEPARATE job from `format` above.
+    #
+    # `continue-on-error` is a JOB-level setting: it neutralises every step in
+    # the job it is declared on. Putting this ratchet inside the `format` job
+    # would have made it unable to fail — the exact disease it exists to stop.
+    # It therefore lives in its own job with no continue-on-error.
+    #
+    # It does NOT re-litigate the 42 known-drifted files; it forbids the set
+    # from growing. A file that drifts and is not on the committed roster reds
+    # this check BY NAME, with the `mix format` command to fix it.
+    name: Format drift ceiling (shrink-only)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps (formatter only needs deps for import_deps)
+        uses: actions/cache@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      # The ceiling script hard-errors on `Unknown dependency` rather than
+      # reporting a count of zero, so a failed fetch here surfaces as a dep
+      # error and never as a false "clean tree".
+      - name: Fetch deps (required by .formatter.exs import_deps)
+        working-directory: api
+        run: mix deps.get
+
+      - name: Enforce the drift ceiling
+        run: bash scripts/format-drift-ceiling.sh
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})

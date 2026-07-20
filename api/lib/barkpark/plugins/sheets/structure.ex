@@ -1557,16 +1557,24 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp rebase_col_word(word, dc) do
     case parse_col_word(word) do
-      {:ok, _col, true} -> word
-      {:ok, col, false} -> if col + dc in 1..@grid_max_col, do: col_letters(col + dc), else: "#REF!"
-      :error -> word
+      {:ok, _col, true} ->
+        word
+
+      {:ok, col, false} ->
+        if (col + dc) in 1..@grid_max_col, do: col_letters(col + dc), else: "#REF!"
+
+      :error ->
+        word
     end
   end
 
   defp rebase_row_word(word, dr) do
     case parse_row_word(word) do
-      {:ok, row} -> if row + dr in 1..@grid_max_row, do: Integer.to_string(row + dr), else: "#REF!"
-      :error -> word
+      {:ok, row} ->
+        if (row + dr) in 1..@grid_max_row, do: Integer.to_string(row + dr), else: "#REF!"
+
+      :error ->
+        word
     end
   end
 

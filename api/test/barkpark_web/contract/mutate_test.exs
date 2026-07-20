@@ -460,8 +460,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
             "_id" => id,
             "_type" => "paper",
             "title" => "Hollow-gate paper",
-            "content" =>
-              Barkpark.LabelFixtures.with_labels(%{"blocks" => blocks})
+            "content" => Barkpark.LabelFixtures.with_labels(%{"blocks" => blocks})
           }
         }
       ]
@@ -647,8 +646,22 @@ defmodule BarkparkWeb.Contract.MutateTest do
 
     fresh = %{
       "mutations" => [
-        %{"patch" => %{"id" => a.doc_id, "type" => "post", "ifRevisionID" => a.rev, "set" => %{"title" => "a2"}}},
-        %{"patch" => %{"id" => b.doc_id, "type" => "post", "ifRevisionID" => b.rev, "set" => %{"title" => "b2"}}}
+        %{
+          "patch" => %{
+            "id" => a.doc_id,
+            "type" => "post",
+            "ifRevisionID" => a.rev,
+            "set" => %{"title" => "a2"}
+          }
+        },
+        %{
+          "patch" => %{
+            "id" => b.doc_id,
+            "type" => "post",
+            "ifRevisionID" => b.rev,
+            "set" => %{"title" => "b2"}
+          }
+        }
       ]
     }
 
@@ -656,7 +669,14 @@ defmodule BarkparkWeb.Contract.MutateTest do
 
     stale = %{
       "mutations" => [
-        %{"patch" => %{"id" => a.doc_id, "type" => "post", "ifRevisionID" => "not-the-rev", "set" => %{"title" => "a3"}}}
+        %{
+          "patch" => %{
+            "id" => a.doc_id,
+            "type" => "post",
+            "ifRevisionID" => "not-the-rev",
+            "set" => %{"title" => "a3"}
+          }
+        }
       ]
     }
 

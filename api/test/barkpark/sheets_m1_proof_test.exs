@@ -49,9 +49,21 @@ defmodule Barkpark.SheetsM1ProofTest do
   # dashboard-paper POST must carry registered weighted tags + a description.
   @wall_tag_names ~w(m1-proof-budget m1-proof-live m1-proof-dashboard)
   @wall_tags [
-    %{"tag" => "m1-proof-budget", "strength" => 88, "rationale" => "Primary label: the live budget dashboard proof paper."},
-    %{"tag" => "m1-proof-live", "strength" => 52, "rationale" => "Secondary label: two-colleague live-edit coverage."},
-    %{"tag" => "m1-proof-dashboard", "strength" => 19, "rationale" => "Tertiary label: sheet-embed dashboard fixture."}
+    %{
+      "tag" => "m1-proof-budget",
+      "strength" => 88,
+      "rationale" => "Primary label: the live budget dashboard proof paper."
+    },
+    %{
+      "tag" => "m1-proof-live",
+      "strength" => 52,
+      "rationale" => "Secondary label: two-colleague live-edit coverage."
+    },
+    %{
+      "tag" => "m1-proof-dashboard",
+      "strength" => 19,
+      "rationale" => "Tertiary label: sheet-embed dashboard fixture."
+    }
   ]
   @wall_description "M1 proof fixture dashboard paper embedding a live budget sheet for the wall."
 

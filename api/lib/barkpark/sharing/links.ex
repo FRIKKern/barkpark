@@ -39,7 +39,9 @@ defmodule Barkpark.Sharing.Links do
     expires_at =
       case attrs[:ttl] || attrs["ttl"] do
         ttl when is_integer(ttl) and ttl > 0 ->
-          DateTime.utc_now() |> DateTime.add(min(ttl, @max_ttl), :second) |> DateTime.truncate(:second)
+          DateTime.utc_now()
+          |> DateTime.add(min(ttl, @max_ttl), :second)
+          |> DateTime.truncate(:second)
 
         _ ->
           nil

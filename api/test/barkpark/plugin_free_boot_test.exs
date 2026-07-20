@@ -107,7 +107,8 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_webhook_controller.ex"},
     {"Barkpark.Plugins.Github", "lib/barkpark_web/plugs/github_webhook_signature.ex"},
     {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/ticket_keys_controller.ex"},
-    {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/tickets_attachments_controller.ex"},
+    {"Barkpark.Plugins.Tickets",
+     "lib/barkpark_web/controllers/tickets_attachments_controller.ex"},
     {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/tickets_controller.ex"},
     {"Barkpark.Plugins.Tickets", "lib/barkpark_web/plugs/require_ticket_key.ex"}
   ]

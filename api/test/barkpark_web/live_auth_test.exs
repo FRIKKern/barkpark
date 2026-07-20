@@ -116,7 +116,8 @@ defmodule BarkparkWeb.LiveAuthTest do
     test "signing in with the return_to lands back on the exact session", %{conn: conn} do
       sid = Ecto.UUID.generate()
 
-      conn = post(conn, "/login", %{"token" => @admin_token, "return_to" => "/studio/chat/#{sid}"})
+      conn =
+        post(conn, "/login", %{"token" => @admin_token, "return_to" => "/studio/chat/#{sid}"})
 
       assert redirected_to(conn) == "/studio/chat/#{sid}"
     end

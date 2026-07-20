@@ -63,7 +63,12 @@ defmodule Barkpark.Webhooks.AuditWebhooksTest do
     end
 
     test "audit_actions narrows within the category", %{org: org} do
-      only_login = sub(%{"audit_categories" => ["auth"], "audit_actions" => ["sso_login"], "organization_id" => org.id})
+      only_login =
+        sub(%{
+          "audit_categories" => ["auth"],
+          "audit_actions" => ["sso_login"],
+          "organization_id" => org.id
+        })
 
       assert [%{id: id}] = Webhooks.audit_webhooks_for("auth", "sso_login", org.id)
       assert id == only_login.id
@@ -94,7 +99,8 @@ defmodule Barkpark.Webhooks.AuditWebhooksTest do
   end
 
   describe "Audit.emit → webhook bridge" do
-    test "emit selects the matching subscription + builds the audit payload (via audit_targets)", %{org: org} do
+    test "emit selects the matching subscription + builds the audit payload (via audit_targets)",
+         %{org: org} do
       auth_sub = sub(%{"audit_categories" => ["auth"], "organization_id" => org.id})
       _token_sub = sub(%{"audit_categories" => ["token"], "organization_id" => org.id})
 
@@ -118,11 +124,18 @@ defmodule Barkpark.Webhooks.AuditWebhooksTest do
       assert payload["organization_id"] == org.id
     end
 
-    test "the emit bridge delivers a matching audit event through a durable audit row", %{org: org} do
+    test "the emit bridge delivers a matching audit event through a durable audit row", %{
+      org: org
+    } do
       wh = sub(%{"audit_categories" => ["auth"], "organization_id" => org.id})
 
       {:ok, _event} =
-        Audit.emit(%{category: "auth", action: "sso_login", subject: "u3", metadata: %{"organization_id" => org.id}})
+        Audit.emit(%{
+          category: "auth",
+          action: "sso_login",
+          subject: "u3",
+          metadata: %{"organization_id" => org.id}
+        })
 
       # The post-commit bridge fires the signed delivery through the same durable
       # state machine content webhooks use (source_kind "audit").
@@ -139,7 +152,12 @@ defmodule Barkpark.Webhooks.AuditWebhooksTest do
       _other_sub = sub(%{"audit_categories" => ["auth"], "organization_id" => other.id})
 
       {:ok, event} =
-        Audit.emit(%{category: "auth", action: "sso_login", subject: "u2", metadata: %{"organization_id" => org.id}})
+        Audit.emit(%{
+          category: "auth",
+          action: "sso_login",
+          subject: "u2",
+          metadata: %{"organization_id" => org.id}
+        })
 
       assert {[], _body} = Dispatcher.audit_targets(event)
     end

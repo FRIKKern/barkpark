@@ -154,9 +154,7 @@ defmodule Barkpark.AuthSessionTokenTest do
                )
 
       assert {:error, :forbidden} =
-               Auth.create_claude_session_token(nil, Ecto.UUID.generate(),
-                 workspace_id: ws.id
-               )
+               Auth.create_claude_session_token(nil, Ecto.UUID.generate(), workspace_id: ws.id)
     end
   end
 
@@ -263,9 +261,7 @@ defmodule Barkpark.AuthSessionTokenTest do
       {:ok, session} =
         ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: sid}})
 
-      refute Repo.exists?(
-               from(t in ApiToken, where: t.label == ^"claude-session #{sid}")
-             )
+      refute Repo.exists?(from(t in ApiToken, where: t.label == ^"claude-session #{sid}"))
 
       refute File.exists?(config_path(sid))
       ClaudeChat.close(session)

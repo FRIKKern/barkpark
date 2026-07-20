@@ -35,11 +35,13 @@ defmodule Barkpark.Sharing.LinksTest do
     # (at more digits) hang DateTime.add. Clamped, it is small-int math.
     ceiling = DateTime.add(DateTime.utc_now(), 366 * 24 * 3600, :second)
 
-    {:ok, {_raw, link}} = Links.create(Map.put(base, :ttl, 1_000_000_000_000_000_000_000_000_000_000))
+    {:ok, {_raw, link}} =
+      Links.create(Map.put(base, :ttl, 1_000_000_000_000_000_000_000_000_000_000))
 
     assert DateTime.compare(link.expires_at, ceiling) in [:lt, :eq]
     # Clamp lands it right at ~now + 1y, not decades out.
-    assert DateTime.compare(link.expires_at, DateTime.add(DateTime.utc_now(), @one_year - 60)) == :gt
+    assert DateTime.compare(link.expires_at, DateTime.add(DateTime.utc_now(), @one_year - 60)) ==
+             :gt
   end
 
   test "honors a normal ttl un-clamped", %{base: base} do

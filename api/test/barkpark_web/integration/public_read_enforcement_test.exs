@@ -68,9 +68,13 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
 
       # A PUBLISHED post and a DRAFT-ONLY post: `drafts.d1` exists but the
       # published `d1` does not, so a drafts leak is observable.
-      {:ok, _} = Content.create_document("post", %{"_id" => "p1", "title" => "Live"}, @dataset, scope)
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "p1", "title" => "Live"}, @dataset, scope)
+
       {:ok, _} = Content.publish_document("p1", "post", @dataset, scope)
-      {:ok, _} = Content.create_document("post", %{"_id" => "d1", "title" => "Draft"}, @dataset, scope)
+
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "d1", "title" => "Draft"}, @dataset, scope)
 
       raw = "site-build-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(raw, "site-spawner build", @dataset, ["public-read"], ws.id)
@@ -101,7 +105,12 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       refute "d1" in ids
     end
 
-    test "reads a published doc by id (200)", %{conn: conn, ws: ws, project: project, token: token} do
+    test "reads a published doc by id (200)", %{
+      conn: conn,
+      ws: ws,
+      project: project,
+      token: token
+    } do
       body =
         conn
         |> authed(token)
@@ -196,7 +205,9 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
           scope
         )
 
-      {:ok, _} = Content.create_document("fpost", %{"_id" => "fp1", "title" => "Live"}, @dataset, scope)
+      {:ok, _} =
+        Content.create_document("fpost", %{"_id" => "fp1", "title" => "Live"}, @dataset, scope)
+
       {:ok, _} = Content.publish_document("fp1", "fpost", @dataset, scope)
 
       raw = "flat-build-#{System.unique_integer([:positive])}"
