@@ -281,6 +281,68 @@ test("rerun.mjs does not import level.mjs", async () => {
     "the executor must stay independent of the authority-level grammar");
 });
 
+// ── 7b. the probe's authority is NOT the literal command's authority ─────────
+//
+// REGRESSION. The HTTP branch ruled on the reachability probe alone and threw
+// the literal command's exit away, so `curl <live 200 host> | grep -c NEEDLE`
+// came back verdict=OK with admits.pass=true even when the needle was ABSENT —
+// the probe's authority laundered onto the command's result, inside the module
+// built to make laundering impossible. Hermetic: the "live host" is a loopback
+// server this test starts, so nothing here depends on the world being up.
+
+// The server MUST live in a child process: runRerun uses spawnSync, which
+// blocks this thread, so an in-process http server would never accept the
+// connection and every probe would read HOST-UNREACHABLE — a fake red that
+// looks exactly like the real one.
+async function withLocalServer(body, fn) {
+  const { spawn } = await import("node:child_process");
+  const src = `const http=require("http");const s=http.createServer((q,r)=>{r.writeHead(200,{"content-type":"text/plain"});r.end(${JSON.stringify(body)})});s.listen(0,"127.0.0.1",()=>console.log(s.address().port));`;
+  const child = spawn(process.execPath, ["-e", src], { stdio: ["ignore", "pipe", "ignore"] });
+  try {
+    const port = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("local server did not report a port in 5s")), 5000);
+      child.stdout.once("data", (d) => { clearTimeout(timer); resolve(Number(String(d).trim())); });
+      child.once("error", reject);
+    });
+    return await fn(port);
+  } finally {
+    child.kill("SIGKILL");
+  }
+}
+
+test("a piped curl whose filter finds NOTHING is not laundered into a pass", async () => {
+  await withLocalServer("hello grip\n", (port) => {
+    const r = runRerun(`curl -s http://127.0.0.1:${port}/ | grep -c NEEDLE_THAT_IS_ABSENT`, { timeoutMs: 5000 });
+    // The host DID answer — reachability is real and must be reported as such.
+    assert.equal(r.code, 200);
+    assert.equal(r.reachable, true);
+    // …but the command said no, so the verdict follows the command, not the probe.
+    assert.equal(r.verdict, VERDICT.FAILED);
+    assert.equal(r.literalExit, 1);
+    assert.equal(admitsPassClaim(r), false, "a filter that matched nothing may never support a pass claim");
+    // A live host answering + a real read that found nothing IS a valid absence.
+    assert.equal(admitsAbsenceClaim(r), true);
+  });
+});
+
+test("a piped curl whose filter DOES match still reads OK — the fix is not blanket strictness", async () => {
+  await withLocalServer("hello grip\n", (port) => {
+    const r = runRerun(`curl -s http://127.0.0.1:${port}/ | grep -c hello`, { timeoutMs: 5000 });
+    assert.equal(r.verdict, VERDICT.OK);
+    assert.equal(r.literalExit, 0);
+    assert.equal(admitsPassClaim(r), true);
+  });
+});
+
+test("an UNPIPED curl that discards stdout is not falsely NULL-READ", async () => {
+  await withLocalServer("hello grip\n", (port) => {
+    const r = runRerun(`curl -s -o /dev/null http://127.0.0.1:${port}/`, { timeoutMs: 5000 });
+    assert.notEqual(r.verdict, VERDICT.NULL_READ,
+      "the response IS the read; the probe measured it, so emptiness of stdout proves nothing");
+    assert.equal(r.verdict, VERDICT.OK);
+  });
+});
+
 // ── 8. opt-in live probes against prod (GRIP_LIVE=1) ─────────────────────────
 // Skipped by default so the gate never depends on the world being up.
 

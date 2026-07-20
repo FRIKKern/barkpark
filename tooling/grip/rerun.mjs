@@ -294,12 +294,13 @@ export function runRerun(command, opts = {}) {
   //    the adjudicator deserves the real reason. The probe carries its own
   //    --max-time, so it always answers.
   const url = HTTP_URL.exec(cmd);
-  if (/\bcurl\b/.test(cmd) && url) {
+  if (/\b(curl|wget)\b/.test(cmd) && url) {
     const probe = probeHttp(url[0], timeoutMs);
     const { verdict, reachable } = classifyHttp(probe.code, probe.exit);
     const httpOut = {
       ...base, scope: SCOPE.SYNC, ran: true, code: probe.code, exit: probe.exit,
       reachable, ms: probe.ms, verdict,
+      literalExit: null,
       reason: `code=${probe.code} exit=${probe.exit} — ${verdict}`,
     };
     // Only bother running the literal command when the host actually answered.
@@ -309,6 +310,36 @@ export function runRerun(command, opts = {}) {
       httpOut.stderr = lit.stderr;
       httpOut.stdoutBytes = Buffer.byteLength(lit.stdout ?? "", "utf8");
       httpOut.ms += lit.ms;
+      httpOut.literalExit = lit.exit;
+
+      // THE PROBE'S AUTHORITY IS NOT THE LITERAL COMMAND'S AUTHORITY.
+      // The probe answers ONE question — did the host respond, and on which
+      // route. It says nothing about whether the literal command SUCCEEDED. A
+      // pipeline like `curl … | grep -q NEEDLE` reaches a live 200 host and
+      // still exits nonzero when the needle is absent; ruling on the probe
+      // alone reported OK and admits.pass=true for a read that found nothing —
+      // the reachability probe's authority laundered onto the command's result,
+      // this module's own failure mode. The literal exit therefore governs the
+      // verdict whenever the host answered; the probe governs only reachability.
+      if (lit.timedOut) {
+        httpOut.verdict = VERDICT.ASYNC_DEFERRED;
+        httpOut.scope = SCOPE.ASYNC;
+        httpOut.ran = false;
+        httpOut.reason = `host answered code=${probe.code}, but the literal command exceeded the ${timeoutMs}ms sync ceiling — deferred, not failed`;
+      } else {
+        // NULL-READ applies only to a PIPED command. An unpiped curl's read is
+        // the HTTP response itself, which the probe already measured — and
+        // `curl -o /dev/null` deliberately discards stdout, so testing it for
+        // emptiness would reject an honest probe (D3: never punish honest work).
+        const nullWhy = cmd.includes("|") ? readIsNull(cmd, { exit: lit.exit, stdout: lit.stdout }) : null;
+        if (nullWhy) {
+          httpOut.verdict = VERDICT.NULL_READ;
+          httpOut.reason = `host answered code=${probe.code}, but the read was null: ${nullWhy}`;
+        } else if (lit.exit !== 0) {
+          httpOut.verdict = VERDICT.FAILED;
+          httpOut.reason = `host answered code=${probe.code} (reachable) but the literal command exited ${lit.exit}: ${firstLine(lit.stderr) || "(no stderr)"}`;
+        }
+      }
     } else {
       httpOut.stdoutBytes = 0;
     }
