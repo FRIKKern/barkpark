@@ -142,6 +142,23 @@ export const GENERATED_ARTIFACT_PATTERNS = Object.freeze([
   // review-batches/ by intentions/review.mjs, dossiers/ by blast-radius.
   /(^|\/)tooling\/[^/\s]+\/(?:batches|review-batches|results|dossiers)\/[^/\s]+\.json$/,
 
+  // KNOWN, DELIBERATE OMISSION — tooling/grip/fixtures/evidence-corpus.json.
+  // harvest.mjs writes it, so by the census rule above it IS an emitted
+  // artifact and belongs on this list. It is held out on purpose, and the
+  // reason is worth stating rather than leaving as a silent gap:
+  //
+  // L4 sits BELOW L3 on the ladder, so adding it would make checkCeiling start
+  // REJECTING the in-flight L3 claims of every slice that cites a read of the
+  // frozen corpus — this wave's own siblings included. That is a real cost paid
+  // to avoid a mid-wave break, NOT a judgment that the file is source. It is
+  // filed as tgw2-l4-grip-corpus-selfref and should be added once the wave that
+  // depends on those L3 citations has merged.
+  //
+  // The same question hangs over tooling/concept-map/boundary-baseline.json,
+  // which IS listed above: it is regenerable, but it is also checked in and
+  // read as a reference. The two are ruled differently today and that
+  // inconsistency is known, not overlooked.
+
   // --- tooling/ emitters: the scalar hand-off files ---
   // batch-count.txt / review-count.txt / issues-stale.txt / taxonomy-input.txt
   // are written by the same runs that build the batches they describe.

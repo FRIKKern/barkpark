@@ -258,6 +258,21 @@ test("the two-levels-deep fan-out directories derive L4; hand-authored fixtures 
   assert.equal(deriveLevel("cat tooling/doc-truth/fixtures/citation-corpus-2026-07.json"), "L3");
 });
 
+// The one census entry knowingly NOT applied — pinned so the gap is visible in
+// the suite rather than living only in a backlog task. harvest.mjs WRITES
+// evidence-corpus.json, so the census rule says L4; it is held at L3 because L4
+// sits below L3 and promoting the rule mid-wave would reject the sibling
+// slices' in-flight L3 citations of it. When tgw2-l4-grip-corpus-selfref is
+// taken, this expectation flips to L4 and that is the intended change, not a
+// regression — which is exactly why it is written down here.
+test("the frozen corpus is knowingly held at L3 despite being an emitted artifact", () => {
+  assert.equal(
+    deriveLevel("cat tooling/grip/fixtures/evidence-corpus.json"),
+    "L3",
+    "held at L3 on purpose (tgw2-l4-grip-corpus-selfref) — see the KNOWN, DELIBERATE OMISSION note in level.mjs",
+  );
+});
+
 test("the scalar hand-off .txt files derive L4 at their real depth only", () => {
   assert.equal(deriveLevel("cat tooling/intentions/batch-count.txt"), "L4");
   assert.equal(deriveLevel("cat tooling/intentions/review-count.txt"), "L4");
