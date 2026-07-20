@@ -15,6 +15,10 @@ defmodule BarkparkWeb.SessionPagesTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   alias Barkpark.Accounts
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
@@ -48,7 +52,7 @@ defmodule BarkparkWeb.SessionPagesTest do
     secret = NimbleTOTP.secret()
 
     {:ok, user, _codes} =
-      Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
     {user, secret}
   end

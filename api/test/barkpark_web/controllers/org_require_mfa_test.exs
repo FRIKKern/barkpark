@@ -8,6 +8,10 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   alias Barkpark.Accounts
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -57,7 +61,7 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
         "/v1/auth/mfa/verify",
         Jason.encode!(%{
           secret: enroll["secret"],
-          code: NimbleTOTP.verification_code(secret),
+          code: totp_code_stable!(secret),
           password: @password
         })
       )
