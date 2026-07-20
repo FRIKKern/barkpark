@@ -884,3 +884,96 @@ merge; it is the escapability debt this wave took on deliberately. Then, after a
 deployed render, with D150's per-face prediction registered BEFORE the run so it can fail, and D153's
 positive control MANDATORY because a successful fix makes the non-vacuity guard vacuous and a drifted
 selector produces the identical zero. Paper: `spd-inspector-successor-wave-2026-07-20`.
+
+### Wave 2026-07-20 — Wave 11 (THE DESTINATION IS A NAVIGATION), Review. Grade A−.
+
+**Wave 10's tier-2 ladder is merged and live — verified, and the wish's premise was understated.** All
+FOUR of wave 10's round-1 slices are on `origin/main` (#4922 the ladder, #4923 the summoned destination,
+#4924 the instrument's third state, #4925 the rule-deletion diff), not one. Wave 11 then finished the
+shape it left open: the destination shipped its geometry without its door.
+
+**What landed, all three round-1 slices green on their own gates and green together.**
+`tier3-header-chrome-and-wide-scrim-abolished` — the Tier-3 exit earns a 44px touch target scoped by
+ENUMERATION (`narrow`/`phone` + `[data-user-opened]`, never `:not(wide)`, because standard docks), with
+`justify-content: center` load-bearing so the 16px glyph does not sit 14px from where the finger aims;
+and the wide scrim is ABOLISHED (D170) on the paper-routing invariant — papers land on a fixed [44,260]
+shell so `.editor-panel` is `vw − 304`, giving 976 at 1280 and 1136 at 1440, both clear of the 860px
+generator. The slice did two things beyond its brief and both were necessary: the cascade test asserted
+the OPPOSITE of D170 and would have red-mained the merge, and the 44px rule had no tripwire at all.
+`tier3-return-grammar-markup` — arrow-left, the document's real title, the enumeration gate, crumbs at
+narrow, a server-rendered `inert` (never JS-set: morphdom strips a JS-set inert on the very diff the
+toggle produces), `data-inspector-destination` and `data-test-id="sidebar-dismiss"`. Two brief premises
+were FALSE and both were fixed: `arrow-left` was not in the icon map and `icon/1` answers an unknown
+name with the "file" glyph rather than raising, so `layouts/studio.html.heex` and `chat_live.ex` have
+BOTH been painting a document icon on a back control for months — independently confirmed at Review;
+and `width_bucket` never reached `studio_paper_view/1` from its only call site, so the component fell to
+`"wide"` on every viewport and the spd-b29f aria-expanded fix has been pinned to the wide branch since
+it shipped. `wide-geometry-lock-sees-the-inspector` — `pane_family?/1` was blind to `.bp-doc-sidebar`,
+proven by MUTATION rather than argument: `flex: 0 0 300px` → `0 0 200px` passed 16/16 on the pre-wave
+lock while moving 44px of wide reading column; the new lock reds by name.
+
+**Review's two fixes, both found by integrating before merging rather than after.**
+(1) **The narrow crumb trail was half-shipped.** The markup slice widened `desk_crumbs/1` to
+`["narrow","phone"]`, but `root.html.heex` still read `.bp-desk-crumbs { display: none }` with a single
+`phone` override — written when the trail was a phone-drill affordance. The narrow markup landed inside
+a `display: none`, so the desk emitted an escape route out of the Tier-3 destination that no reader
+could see and AT announced a way out of a trap that did not exist. That is worse than not emitting it.
+Fixed on the CSS slice (which owns the file), tripwired, and the tripwire is mutation-proven — reverting
+to phone-only reds it by name. **Neither builder could have caught this alone: it lives exactly in the
+seam between two file-disjoint slices, which is the cost the file-truth dispatch law (D160) pays for its
+parallelism, and the reason Review integrates.**
+(2) **The census collision the geometry-lock builder predicted, arriving exactly as predicted.** That
+slice taught `pane_family?/1` to see `.bp-doc-sidebar` in the same wave the CSS slice added a
+`min-width` to `.bp-doc-sidebar__collapse` — `min-width` is a geometry property, so the first thing the
+new eye saw was the new rule. Integrated, the census red 1/17 with "New in the stylesheet (found, not
+declared here)". That is the tripwire working, not failing; Review declared the entry and kept the count
+comment truthful (15 → 26, delta ELEVEN, not 25/TEN). **This creates a real merge-order dependency** —
+the census is exact in both directions, so the geometry-lock branch is RED standalone until the CSS rule
+exists. Review stacked it on the CSS slice's branch so both PRs are green; see the handoff below.
+
+**Full integration: 1769 tests, 0 failures**, plus `design/check.mjs` PASS (18 surfaces, Part H 270
+contrast checks), `studio-literal-check` PASS (367 files, no colour literal), `studio-link-lint` PASS.
+
+**THE WAVE'S DEFINING DEFECT IS D135 AGAIN — THE FIFTH RECORDED TIME, AND A NEW MECHANISM.** Wave 10's
+log closed by writing the lesson down: "Decide writes decisions" is not satisfied by Decide writing them
+into a Paper. Wave 11's Decide DID write D161–D171 to the charter, in a real commit (`6c65b6209`) — and
+committed it to **LOCAL main**, unpushed, with no PR and no remote branch, alongside an unrelated PDS
+epic's charter commit. `origin/main`'s charter contained ZERO mentions of D161 or D171, while all three
+built slices shipped code comments citing D164, D165, D167, D168, D169 and D170 into a tree where they
+resolved to nothing. The previous four occurrences were confident-empty greps; this one is a correct
+write to the wrong ref, which is harder to see and produces the identical cold-agent experience. Review
+cherry-picked `6c65b6209` onto the CSS slice's branch so the decisions merge WITH the code that cites
+them (D68). **The lesson extends: a charter commit that is not on a branch headed for `origin/main` has
+not been written. Decide must verify the ref, not the commit.**
+
+**Ledger audited HONEST — no lies to fix.** All three built tasks left `lifecycle: in_progress`, parent
+`spd-b39`, `wave_paper` linked, every non-merge criterion stamped with substantial evidence as they
+worked (278–1069 bytes each), and the merge-gated criterion correctly `met: false` with empty evidence
+for the lead. Recorded SHAs resolve. Two discovered-but-not-taken items were filed and published mid-run
+(`spd-standard-bucket-scrim-unruled`, `icons-unknown-name-tripwire`); Review filed a third,
+`spd-instrument-open-leg-stale-locator`. The two deferred slices sit `open` and unclaimed exactly as the
+sequenced-rounds law requires.
+
+**What the lead must know before merging.** (1) **MERGE ORDER IS NOT FREE THIS WAVE.** Merge
+`…tier-3-chrome-earns-a-44px-exit-and-the--0-r` FIRST — it carries the charter (D161–D171) and the CSS
+rule the census declares. The geometry-lock branch is stacked on it and must merge SECOND; merging it
+first reds main. The markup branch is independent. (2) The lead closes the merge-gated criterion on all
+three tasks (index 7 / 10 / 6 respectively). (3) **Escapability is still an honest, bounded debt**: there
+is no Escape key and no focus management at Tier 3 — `inspector-dismissal-and-return-grammar` owns that
+and is round 2. What wave 11 added is that the exit is now findable (44px, arrow-left, named) and
+plural (the back control AND the document crumb), which was not true before. (4) `standard` is now the
+ONLY bucket in the sheet where a scrim can still render, and nobody has ruled on whether it should;
+`spd-standard-bucket-scrim-unruled` holds that question, and the geometry lock's new positive control
+SITS on standard, so a ruling that suppresses it must move the control or the file goes quietly vacuous.
+(5) Nothing in this wave ran in a browser against the deployed build — the CSS slice's measurement is a
+reconstructed shell using the real deployed stylesheet bytes, which is honest and is not the desk.
+
+**Next wave: merge round 1 in the order above, then dispatch by dependency.**
+`inspector-dismissal-and-return-grammar` the moment the CSS and markup slices merge — it wires Escape to
+the tier predicate and destination marker they create, and D164/D166 already refuse the sibling-scrim /
+`aria-modal` / bare `phx-window-keydown` shape its original criteria described. Then, after all five
+merge AND the box deploys, `inspector-shape-bracketed-deployed-run` — the only artefact permitted to
+speak about the deployed render, with D150's per-face prediction registered BEFORE the run, D171's
+bucket precondition on every reading, and D153's positive control MANDATORY. Fold
+`spd-instrument-open-leg-stale-locator` into that slice: it owns the instrument file.
+Paper: `spd-inspector-shape-wave-11-2026-07-20`.
