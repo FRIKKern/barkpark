@@ -152,8 +152,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
     test "the spill dir is configurable and is not a bare tmp dir by default" do
       refute Janitor.spill_dir() == System.tmp_dir!()
 
-      Application.put_env(:barkpark, :workspace_bundle_spill_dir, "/var/lib/barkpark/spill")
-      on_exit(fn -> Application.delete_env(:barkpark, :workspace_bundle_spill_dir) end)
+      # The SAME key the engine's Archive.spill_dir/0 reads — sweep where it
+      # writes. (Set here explicitly rather than relying on config.exs, whose
+      # default lands on the engine branch, not this one.)
+      Application.put_env(:barkpark, :bundle_spill_dir, "/var/lib/barkpark/spill")
+      on_exit(fn -> Application.delete_env(:barkpark, :bundle_spill_dir) end)
 
       assert Janitor.spill_dir() == "/var/lib/barkpark/spill"
     end

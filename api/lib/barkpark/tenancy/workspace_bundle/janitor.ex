@@ -34,8 +34,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
 
     * the **filename prefixes** `bp-ws-bundle-` (the tar, already produced by
       `WorkspaceBundle.Archive`) and `bp-ws-spill-` (the per-table spill files);
-    * the **config key** `:workspace_bundle_spill_dir`, the directory both
-      sides agree the files live in.
+    * the **config key** `:bundle_spill_dir`, the directory both sides agree
+      the files live in — the SAME key `WorkspaceBundle.Archive.spill_dir/0`
+      reads (set in `config/config.exs`, overridable by
+      `BARKPARK_BUNDLE_SPILL_DIR`). The janitor must sweep exactly where the
+      engine writes, or it greens forever over an empty directory while spills
+      pile up out of its sight — the silent-wrong-answer this epic keeps killing.
 
   ## The staleness threshold is DERIVED
 
@@ -114,15 +118,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   @doc """
   The directory both the engine and this janitor agree the temp files live in.
 
-  Configured via `:workspace_bundle_spill_dir`. The default is anchored under
-  the release data directory (the parent of `:media_upload_dir`, which is the
-  shipped data anchor) rather than a bare `System.tmp_dir!/0`, because on a
-  release host a bare tmp dir may be a tmpfs — i.e. RAM — which would defeat
-  the entire point of spilling to disk.
+  Configured via `:bundle_spill_dir` — the SAME key the engine's
+  `WorkspaceBundle.Archive.spill_dir/0` reads, set in `config/config.exs` and
+  overridable at runtime by `BARKPARK_BUNDLE_SPILL_DIR`. Reading the identical
+  key is the whole handshake: the janitor sweeps precisely where the engine
+  writes. The fallback below is defensive only — the key is always set in
+  `config.exs`, and if it somehow were not, the engine's `fetch_env!` would
+  raise before any spill is ever written, so there is nothing for the janitor
+  to miss.
   """
   @spec spill_dir() :: String.t()
   def spill_dir do
-    case Application.get_env(:barkpark, :workspace_bundle_spill_dir) do
+    case Application.get_env(:barkpark, :bundle_spill_dir) do
       dir when is_binary(dir) and dir != "" ->
         dir
 
