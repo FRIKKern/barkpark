@@ -6,7 +6,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
   file is gone". Every assertion below therefore names BOTH sides: what must
   disappear AND what must survive the same call.
   """
-  use ExUnit.Case, async: true
+  # async: false — one case sets the node-global `:bundle_spill_dir` env to
+  # prove `Janitor.spill_dir/0` reads exactly the engine's config key. That
+  # value is read from Application env for the WHOLE node, so serialization is
+  # the only thing that stops a concurrent async test from observing the swap
+  # (the async-env-seam ratchet enforces exactly this). The janitor's public
+  # API has no per-process override for that key, so `async: false` is the
+  # honest, minimal isolation — not a widened guard, not an allowlist.
+  use ExUnit.Case, async: false
 
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
@@ -178,21 +185,37 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
     end
   end
 
-  # An OS pid that is reliably gone: spawn a real process, capture its pid,
-  # then wait for the OS to reap it. Picking an arbitrary high number would
-  # make this test's meaning depend on the host's pid allocation.
+  # An OS pid that is reliably gone: spawn a real process, capture its pid
+  # WHILE IT IS STILL ALIVE, then kill it and wait for the OS to reap it.
+  # Picking an arbitrary high number would make this test's meaning depend on
+  # the host's pid allocation.
+  #
+  # Spawning `true`/`echo` and reading `Port.info(port, :os_pid)` afterwards
+  # races the exit: on a fast box the child is already gone and the port
+  # closed, so `Port.info/2` returns nil and the read blows up with a
+  # MatchError. A long-lived `sleep` keeps the port open so the pid read is
+  # deterministic; we then SIGKILL it ourselves and confirm it is reaped, so
+  # the returned pid is dead by construction rather than by timing.
   defp dead_os_pid do
-    exe = System.find_executable("true") || System.find_executable("echo")
-    port = Port.open({:spawn_executable, exe}, [:binary, :exit_status, args: []])
-    {:os_pid, pid} = Port.info(port, :os_pid)
+    exe =
+      System.find_executable("sleep") || flunk("no `sleep` executable to build a dead pid from")
 
-    receive do
-      {^port, {:exit_status, _}} -> :ok
-    after
-      5_000 -> flunk("helper process never exited")
-    end
+    port = Port.open({:spawn_executable, exe}, [:binary, args: ["60"]])
+
+    pid =
+      case Port.info(port, :os_pid) do
+        {:os_pid, os_pid} when is_integer(os_pid) and os_pid > 0 -> os_pid
+        other -> flunk("could not read a live os pid for the helper process: #{inspect(other)}")
+      end
+
+    {_, 0} = System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    # The BEAM waitpid()s the child on SIGCHLD, so the zombie is reaped without
+    # our help; closing the port just releases the port resource. It may have
+    # auto-closed already the instant the child died, so this is best-effort.
+    if Port.info(port), do: Port.close(port)
 
     wait_until_reaped(pid, 100)
+    assert is_integer(pid) and pid > 0
     pid
   end
 
