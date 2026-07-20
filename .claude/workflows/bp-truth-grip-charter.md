@@ -323,3 +323,88 @@ real next capability (`tgw-bl-r2-dependency-enrichment-substrate`).
 
 D10 still holds: nothing is stored durably, and `tooling/research-coverage`
 stays blocked until its ledger is reproducible.
+
+### Wave 2026-07-20 (2) — round 1, verify-writes-back. Grade A−.
+
+Paper: `source-of-truth-grip-wave-2-2026-07-20`. Six round-1 slices built and
+reviewed; the two round-2 slices deferred by design (sequenced-rounds law), not
+stalled. Every slice ran `builder_model: opus` — the wave's hard model
+constraint, verified on all six task documents.
+
+**Landed** (final branches carry a reviewer `-r` commit):
+
+| Slice | Branch | What |
+|---|---|---|
+| `tgw2-adjudicator` | `…ship-the-verdict-engine-by-composing-adm-0-r` | `adjudicate.mjs` + `cli.mjs`: the verdict engine as a COMPOSITION of `admitFact`, ten frozen names, CONFLICT unit-tested and stated NOT live. 32 tests. |
+| `tgw2-inloop-gate` | `…run-a-grammar-free-demotion-gate-over-ev-1-r` | `gateFactProvenance` in `bp-epic-cycle.workflow.js` — one grammar-free interception per resolve, DEMOTE-never-drop. 17 tests under a host-shaped vm. |
+| `tgw2-recipe-ledger` | `…store-re-derivation-recipes-never-values-2-r` | `ledger.mjs`: rows with NO value field, `wx` content-addressed immutable writes, conflict observed at fold time. 37 tests, 7 selftest controls. |
+| `tgw2-grip-quote-safety` | `…make-classifysafety-quote-aware-so-hones-3-r` | Quote-aware `classifySafety` + interpreter carve-out; suite made invocation-agnostic; vacuous test 21 tightened. 38 tests. |
+| `tgw2-l4-artifact-census` | `…derive-generated-artifact-patterns-by-ru-4-r` | `GENERATED_ARTIFACT_PATTERNS` derived from an actual emitter census; marker-splice boundary ruled in a comment. 45 tests. |
+| `tgw2-wild-bulk-fanout-floor` | `…give-wild-bulk-cycle-the-same-never-fewe-5-r` | Four named fan-out floors + two survival guards in `wild-bulk-cycle`; minItems settled by reading the host. 10 tests (added in review). |
+
+**The wave's thesis, delivered.** Wave 1 shipped a substrate nothing called.
+Wave 2 makes the loop USE it: facts returned by the survey and verify fleets now
+pass a demotion gate in-loop, and the durable store exists with a schema that
+cannot hold an answer. All six branches merge clean with every gate green.
+
+**Defects the review found and fixed** — the pattern from wave 1 held: the
+epic's own failure modes kept appearing inside the tooling built to prevent them.
+
+1. **The ten-name vocabulary leaked through Object.prototype.** `EXECUTION_MAP`
+   is an object literal, so a bare index resolved inherited keys — an executor
+   returning `toString` / `constructor` / `__proto__` produced a ruling whose
+   verdict was a function or `{}`. The guard written to keep the vocabulary
+   closed was the one place it failed open. Own-property lookup + non-string
+   guard; mutation-proven.
+2. **The demotion never reached Decide.** The gate annotated the resolved survey
+   objects and Digest saw it, but the Decide projection was
+   `{key, findings, relevant_files}` — no `facts[]` at all, and
+   `relevant_files` is not even a SURVEY_SCHEMA property. So the phase that
+   FILES THE NEXT WAVE'S SLICES was blind to which facts cannot be re-derived.
+   The wiring read as done while half-connected.
+3. **One rotten row took down the whole ledger fold.** `admitRecipe` gates the
+   WRITE path; nothing re-admits the READ path. A non-string subject threw out
+   of `recipeKey` and cost every well-formed row in every other file, while null
+   rows and subject-less rows silently merged into one bogus empty-key entry.
+   Reported at row grain now — never skipped, never fatal.
+4. **The quote-safety fix opened four live bypasses.** `su -c`, `watch`,
+   `elixir -e` and `iex -e` each rated `rm -rf /tmp/y` SAFE once quoted — all
+   commands the executor would then have run. Closed on SHAPE, not a longer name
+   denylist: an unknown head handed a quoted argument through
+   `-c`/`-e`/`--eval`/`--command`/`--exec` is assumed to execute it, with a
+   small allowlist of data-flag heads. That inverts the error direction for the
+   unbounded set, which is the point — a wrong allowlist entry costs a false
+   refusal, a wrong denylist costs a false permission.
+5. **The fan-out floors had no test at all.** The slice's gate was `node
+   --check` — a syntax check that cannot tell a floor of 3 from a floor of 0.
+   That is the slice's own thesis failing one level up: the anti-goal was prose,
+   prose does not run, so it became a throw, and the throw was checked by
+   something that does not run it either. Harness committed
+   (`tooling/grip/test/fanout-floors.test.mjs`), mutation-proven three ways.
+   Also hardened: `"abc".length` is 3 and satisfied `DOMAIN_FLOOR`.
+
+**The number wave 2 was missing, now measured.** The quote-safety builder said
+the never-cry-wolf rate was unknown. Over the 651 distinct frozen-corpus
+commands, refusal went **84 → 79: five false refusals recovered, zero newly
+refused.** Strictly better, no new cry-wolf. The L4 census was likewise
+re-verified independently: the corpus re-derives an identical L1 33 / L2 31 /
+L3 336 / L6 252, so no historical command was silently re-levelled.
+
+**Honest gaps carried forward, not papered over.** L4 is still 0 across the
+frozen corpus — the corpus predates the emitters appearing in rerun commands, so
+only `level.test.mjs` can regression-test L4 today. CONFLICT remains unwired and
+unproven in the field in both the adjudicator and the ledger. The ledger is
+empty: nothing writes a row from a real verify phase yet, which is exactly what
+`tgw2-verify-writes-back` is for. And D28 still holds — no fan-out floor in
+either workflow has ever fired in a real run; all of it is harness evidence.
+
+**What the next wave inherits.** Merge round 1 (six branches, all green), then
+dispatch by dependency: `tgw2-acceptance-suite` once `tgw2-adjudicator` is in,
+and `tgw2-verify-writes-back` once BOTH `tgw2-recipe-ledger` and
+`tgw2-inloop-gate` are in. `tgw2-verify-writes-back` is the one that makes the
+wave title fully honest — until a verifier actually writes a row, the store is a
+schema with no contents. Backlog worth taking after that:
+`tgw2-fold-reread-derived-level` (the fold trusts a stored derivation, which is
+a stored value by another name), `tgw2-l4-grip-corpus-selfref` (safe to apply
+once this wave's L3 citations have merged), and `tgw-bl-wild-bulk-roster-floor`
+(a fifth, still-unguarded fan-out).
