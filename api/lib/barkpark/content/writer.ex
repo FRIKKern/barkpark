@@ -531,7 +531,12 @@ defmodule Barkpark.Content.Writer do
         Map.put(attrs, "content", content)
 
       nil ->
-        attrs
+        # No blocks to render from, so nothing on this write was server-rendered
+        # and any "body_html_sv" in the payload is caller-controlled. Under a
+        # stamp-vs-digest reader rule that is a classification switch a client
+        # can flip (sv == digest pins a paper at 422; sv != digest forces the
+        # overwrite branch). Provenance is server-derived only — strip it.
+        Map.put(attrs, "content", Map.delete(content, "body_html_sv"))
     end
   end
 
