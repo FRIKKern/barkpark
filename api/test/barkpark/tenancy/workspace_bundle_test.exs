@@ -856,57 +856,158 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   describe "export COPY timeout (PDS-D42)" do
     # A happy-path export does NOT pay for this: it is just as green with no
     # `:timeout` at all — that is exactly how the 15s default hid until a live
-    # export died at 27.0s. So look at what actually reaches the driver: trace
-    # every `Repo.query!/3` call the export makes and read the options off the
-    # COPY calls themselves. Delete `timeout: copy_out_timeout()` from
-    # run_copy_out/1 and this test fails on the very next run.
+    # export died at 27.0s. So look at what actually reaches the driver.
+    #
+    # RE-SITED onto `Repo.transaction/2` (PDS-D206). The producer is now
+    # `Ecto.Adapters.SQL.stream` rather than `Repo.query!`, and the budget it
+    # actually runs under is the TRANSACTION's: a 4-cell probe matrix proved
+    # the stream-level `:timeout` is INERT (txn `:infinity` + stream 300 ms
+    # survived 3002 ms) and that a stream cannot widen its transaction's budget
+    # (txn 300 ms + stream `:infinity` died at 310 ms). So a build that moved
+    # `:infinity` onto the `SQL.stream` call would be GREEN on a `query!`-shaped
+    # assertion while silently running on Ecto's 15,000 ms default in prod —
+    # precisely the live failure PDS-D42 exists to close. Delete
+    # `timeout: copy_out_timeout()` from run_copy_out/2 and this fails on the
+    # very next run.
     #
     # (Driving a real 0 ms budget is NOT usable here: under
     # `Ecto.Adapters.SQL.Sandbox` a pool timeout arrives as an ownership-
     # shutdown EXIT, not a rescuable raise, and it kills the test connection.)
-    test "every COPY reaches Repo.query! with timeout: :infinity — never Ecto's 15_000 ms default" do
+    test "every COPY streams inside a Repo.transaction carrying timeout: :infinity — never Ecto's 15_000 ms default" do
       %{ws_a: ws_a} = seed_two_workspaces!()
 
-      calls = trace_repo_query_bang(fn -> assert {:ok, _} = WorkspaceBundle.export(ws_a.id) end)
+      calls =
+        trace_repo_transaction(fn -> assert {:ok, _} = WorkspaceBundle.export(ws_a.id) end)
 
-      copy_calls = Enum.filter(calls, fn {sql, _opts} -> String.starts_with?(sql, "COPY ") end)
-      assert length(copy_calls) > 10, "expected the COPY loop to run; saw #{length(copy_calls)}"
+      # One transaction per table in the COPY loop — the same population the
+      # old `COPY `-prefixed query! filter counted.
+      assert length(calls) > 10,
+             "expected the COPY loop to open one transaction per table; saw #{length(calls)}"
 
-      for {sql, opts} <- copy_calls do
+      for opts <- calls do
         assert Keyword.get(opts, :timeout) == :infinity,
-               "a COPY reached Repo with #{inspect(Keyword.get(opts, :timeout, :NO_TIMEOUT))}: " <>
-                 String.slice(sql, 0, 80)
+               "a COPY transaction opened with " <>
+                 "#{inspect(Keyword.get(opts, :timeout, :NO_TIMEOUT))} — the stream would then " <>
+                 "inherit that budget, not :infinity"
       end
     end
   end
 
-  # Call-trace `Barkpark.Repo.query!/3` for the duration of `fun`, returning
-  # `[{sql, opts}]` in call order. `:erlang.trace/3` is the only seam that
-  # observes the OPTIONS argument — Ecto's query telemetry metadata carries
+  # ── transport: file-to-file packing (PDS-D204/D207) ──────────────────────────
+
+  describe "transport parity (PDS-D204/D207)" do
+    test "export_to_file/2 produces the same bundle export/2 does and leaves NO spill behind" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      dir = Archive.spill_dir()
+      before = spill_files(dir)
+
+      {:ok, path} = WorkspaceBundle.export_to_file(ws_a.id)
+
+      try do
+        assert String.starts_with?(Path.basename(path), "bp-ws-bundle-"),
+               "the janitor sweeps by prefix; got #{Path.basename(path)}"
+
+        # Every per-table spill was deleted the MOMENT it was added to the tar.
+        assert spill_files(dir) -- before == [],
+               "streamed spills survived the export: #{inspect(spill_files(dir) -- before)}"
+
+        {manifest, dumps} = Archive.unpack(File.read!(path))
+        assert manifest["format"] == "bp-export-v1"
+
+        # THE CHARLIST TRIPWIRE (PDS-D207d). The manifest md5 is folded
+        # incrementally over the bytes the producer STREAMED; this compares it
+        # against the bytes the tar actually CARRIES. `:erl_tar.add/4` treats a
+        # binary as content and a charlist as a filename, so a string path would
+        # silently archive the path TEXT as the member body — with no error, and
+        # every one of these md5s would diverge.
+        for %{"name" => table, "md5" => md5} <- manifest["tables"] do
+          assert :crypto.hash(:md5, dumps[table]) |> Base.encode16(case: :lower) == md5,
+                 "member #{table}: the archived body is not the bytes the producer hashed"
+        end
+      after
+        File.rm(path)
+      end
+    end
+
+    # The engine itself stamps the REAL export time, so it is deliberately NOT
+    # self-reproducible: two identical-input exports a second apart differ in
+    # their tar headers. An unpinned two-export `cmp` would therefore red
+    # against the CURRENT engine and be misread as a regression. Pin the mtime
+    # and the packing becomes deterministic — and the third pack proves this
+    # assertion can still FAIL, i.e. that it is genuinely reading header bytes.
+    test "the same members packed twice with the SAME pinned mtime are byte-identical" do
+      dir = Archive.spill_dir()
+      manifest = %{"format" => "bp-export-v1", "grain" => "workspace", "tables" => []}
+      body = String.duplicate("42\tsome-copy-row-value\n", 500)
+
+      pack_at = fn mtime ->
+        # A fresh spill each time: pack/3 CONSUMES what it adds.
+        spill = Archive.spill_path(dir, "documents")
+        File.write!(spill, body)
+        Archive.pack(manifest, %{"documents" => spill}, dir: dir, mtime: mtime)
+      end
+
+      a = pack_at.(1_700_000_000)
+      b = pack_at.(1_700_000_000)
+      c = pack_at.(1_700_000_001)
+
+      try do
+        assert File.read!(a) == File.read!(b)
+        refute File.read!(a) == File.read!(c)
+      after
+        Enum.each([a, b, c], &File.rm/1)
+      end
+    end
+
+    test "the spill dir assertion REFUSES a memory-backed filesystem" do
+      mounts = [{"/", "ext4"}, {"/dev/shm", "tmpfs"}]
+
+      assert :ok = Archive.assert_not_tmpfs!("/var/lib/barkpark/spill", mounts)
+
+      # Longest matching mount point wins, so /dev/shm beats / …
+      assert_raise ArgumentError, ~r/tmpfs/, fn ->
+        Archive.assert_not_tmpfs!("/dev/shm/bp-spill", mounts)
+      end
+
+      # …and the boundary is a path SEGMENT: /dev/shmx is not under /dev/shm.
+      assert :ok = Archive.assert_not_tmpfs!("/dev/shmx/bp-spill", mounts)
+
+      # A host with no /proc/mounts (macOS) abstains rather than guessing.
+      assert :ok = Archive.assert_not_tmpfs!("/anywhere", [])
+    end
+  end
+
+  defp spill_files(dir) do
+    dir |> File.ls!() |> Enum.filter(&String.starts_with?(&1, "bp-ws-spill-")) |> Enum.sort()
+  end
+
+  # Call-trace `Barkpark.Repo.transaction/2` for the duration of `fun`,
+  # returning each call's OPTS in call order. `:erlang.trace/3` is the only
+  # seam that observes the options argument — Ecto's telemetry metadata carries
   # `:telemetry_options`, not the caller's `:timeout`. The tracer MUST be a
   # separate process: with the traced process as its own tracer, OTP accepts
   # the call and silently delivers nothing (measured).
-  defp trace_repo_query_bang(fun) do
+  defp trace_repo_transaction(fun) do
     me = self()
     tracer = spawn_link(fn -> trace_collector([], me) end)
 
-    :erlang.trace_pattern({Repo, :query!, 3}, true, [:local])
+    :erlang.trace_pattern({Repo, :transaction, 2}, true, [:local])
     :erlang.trace(self(), true, [:call, {:tracer, tracer}])
 
     try do
       fun.()
     after
       :erlang.trace(self(), false, [:call])
-      :erlang.trace_pattern({Repo, :query!, 3}, false, [:local])
+      :erlang.trace_pattern({Repo, :transaction, 2}, false, [:local])
     end
 
     send(tracer, {:dump, me})
 
     receive do
       {:traced, msgs} ->
-        for {:trace, _pid, :call, {_m, :query!, [sql, _params, opts]}} <- msgs,
-            is_binary(sql),
-            do: {sql, opts}
+        for {:trace, _pid, :call, {_m, :transaction, [fun_or_multi, opts]}} <- msgs,
+            is_function(fun_or_multi),
+            do: opts
     after
       5_000 -> flunk("the trace collector never answered")
     end

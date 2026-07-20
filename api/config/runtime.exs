@@ -416,6 +416,20 @@ case System.get_env("BARKPARK_MEDIA_DIR") do
     :ok
 end
 
+# Workspace-bundle export SPILL root (pds W11). The streamed export writes one
+# per-table spill file plus the assembled tar here; peak transient disk is
+# `tar-so-far + the largest single table`. Relocate it when the default lives
+# on a small or memory-backed volume — `Archive.spill_dir/0` REFUSES to run on
+# tmpfs/ramfs rather than silently paying the RSS peak the spill removes.
+# Unset ⇒ the compiled default (api/tmp/bundle-spill). Applies in ALL envs.
+case System.get_env("BARKPARK_BUNDLE_SPILL_DIR") do
+  dir when is_binary(dir) and dir != "" ->
+    config :barkpark, :bundle_spill_dir, Path.expand(dir)
+
+  _ ->
+    :ok
+end
+
 # Workspace-bundle IMPORT switch (pds W1, G3). Fail-closed: OFF unless
 # BARKPARK_ALLOW_BUNDLE_IMPORT is truthy. `bin/barkpark up` writes =1 into the
 # personal-local .env (the free local twin is the intended pull TARGET); a prod

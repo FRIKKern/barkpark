@@ -58,7 +58,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
       {_bundle, queries} =
         capture_queries(fn -> WorkspaceBundle.export(f.ws.id, profile: :dev) end)
 
-      copies = Enum.filter(queries, &String.starts_with?(&1, "COPY ("))
+      # `Enum.uniq` because `capture_queries` is TELEMETRY-based and the
+      # streamed producer emits one query event PER FETCH — a fat table issues
+      # the SAME `COPY (…)` string once per chunk. Uniquing collapses those
+      # back to one event per TABLE, which is the quantity this proof is about.
+      #
+      # This stays a strict `==`, never a `>=`: the whole content of the
+      # PDS-D31 skip-not-post-filter proof is that a denied table is never
+      # queried AT ALL, and `>=` would pass for an export that copied every
+      # table and filtered afterwards — exactly the build this test exists to
+      # catch.
+      copies = queries |> Enum.filter(&String.starts_with?(&1, "COPY (")) |> Enum.uniq()
       assert length(copies) == length(Catalog.dev_copy_tables())
 
       # Sampled across all three deny classes: secret store, size class, PII.
@@ -262,6 +272,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
       assert dumps["documents"] =~ f.post_marker
       refute dumps["documents"] =~ f.beta_marker
       refute dumps["documents"] =~ f.ticket_marker
+
+      # PDS-D215: this file's moduledoc promises every deny assertion is paired
+      # with a `:full`-profile positive control, and this was the one raw
+      # `refute` on a bundle value without one — a green here would have been
+      # indistinguishable from a fixture that never seeded the secret at all.
+      {:ok, full} = WorkspaceBundle.export(f.ws.id)
+
+      assert full =~ f.webhook_secret,
+             "positive control failed: the webhook secret is not in the FULL bundle either"
+
       refute bundle =~ f.webhook_secret
     end
   end
