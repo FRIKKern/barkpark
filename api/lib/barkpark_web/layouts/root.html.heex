@@ -1872,6 +1872,79 @@
     html[data-theme="dark"] .bp-doc-sidebar { --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-info: #60a5fa; }
     .bp-doc-sidebar.is-open { flex: 0 0 300px; min-width: 0; }
     .bp-doc-sidebar.is-collapsed { flex: 0 0 auto; }
+
+    /* ── The bucket-aware inspector default (charter D91) ──────────────────
+       The server opens the inspector unconditionally (`sidebar_open: true` in
+       `Shared.Paper.sidebar_assigns/1`), and below the `wide` bucket that
+       costs the reader the document: the panel either docks 300px off the
+       column or, once the content pane drops under 860px, overlays it
+       outright. Measured visible reading width at viewport 1024 was 380px
+       against 720px with the inspector out of the way.
+
+       Why the fix lives in the CASCADE and not in the mount. Two other shapes
+       were built and driven in a real browser, and D91 refutes both.
+       SERVER-SEEDING cannot be early enough: the static render's root is a
+       bare <html lang="en">, `mount.ex` seeds width_bucket "wide", and the
+       true bucket arrives only in a post-connect handle_event — cold-load
+       marks at viewport 1024 are firstAnimationFrame t=20.1ms, phx-connected
+       t=419.5ms, so a server-seeded close is ~400ms of panel-on-text on every
+       document open. That is the flash D12 refused, now with a number.
+       CSS-ONLY DEFAULT-CLOSED does not flash but makes the inspector
+       permanently unreachable below `wide`: CSS is stateless, so a rule that
+       suppresses `.is-open` suppresses the server's default and the user's
+       explicit open alike, and the control just toggles between "collapsed"
+       and "open but still off-canvas" forever.
+
+       So: the cascade owns FIRST PAINT (the bucket is already stamped on
+       <html> by the pre-paint head script, D2, so this selector is true at
+       first paint with no round-trip), and it YIELDS to `[data-user-opened]`
+       — a marker the server stamps when the user explicitly asks, which it
+       can answer without ever knowing the viewport. Three states, not two:
+       `.is-collapsed` (body absent from the DOM), open-and-asked-for (docks
+       or overlays as before), and this one.
+
+       The declarations deliberately reproduce `.is-collapsed`'s GEOMETRY
+       rather than inventing a hidden state — the strip and its control stay
+       on screen and clickable, which is the whole difference from the refuted
+       CSS-only shape. `position`/`width`/`box-shadow` are reset because the
+       `@container content (max-width: 860px)` block above promotes the open
+       panel to an absolute overlay; without the reset it would still float
+       over the document, merely emptied.
+
+       SCOPE IS LOAD-BEARING (D92): `html:not([data-width-bucket="wide"])`.
+       At viewport 1280 and 1440 the inspector docks and costs nothing, epic
+       criterion 2 is measured there, and the round-2 floor slice takes its
+       676px input from those rows. This rule may not move one pixel there. */
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) {
+      position: static;
+      flex: 0 0 auto;
+      width: auto;
+      transform: none;
+      box-shadow: none;
+      /* The overlay block also raises `z-index: 5`, and z-index applies to
+         flex items whatever their `position` — so without this the strip
+         would keep an overlay-tier stacking context it no longer earns.
+         Inert today (a 41px in-flow strip overlaps nothing), reset anyway:
+         the contract of this rule is `.is-collapsed`'s geometry exactly, and
+         a leftover from the state being overridden is how that contract
+         quietly stops being true. */
+      z-index: auto;
+    }
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
+      display: none;
+    }
+    /* The scrim guard. The overlay scrim keys on `:has(.bp-doc-sidebar.is-open)`
+       and is otherwise correct — but `.is-open` is now true for a panel that
+       paints as a strip, so without this the desk would dim the document under
+       an inspector nobody can see. Suppressed, not rewritten: the scrim must
+       still render for a wide-bucket pane narrow enough to overlay, and for
+       any panel the user actually opened, so the condition being subtracted is
+       exactly "below wide AND never asked for". */
+    html:not([data-width-bucket="wide"])
+      .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
+      content: none;
+    }
     .bp-doc-sidebar__head {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border-bottom: 1px solid var(--border-muted);

@@ -663,11 +663,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   # Default t6 sidebar assigns when a paper opens: panel + every section open,
   # slug draft seeded from the paper's own id with its live format verdict.
+  #
+  # `sidebar_user_opened` is the server half of the bucket-aware inspector
+  # default (charter D91). It answers ONE question the server can answer without
+  # ever knowing the viewport: "has the user, on THIS paper, explicitly asked
+  # for the inspector?" It seeds false on every paper open, and
+  # `Handlers.Paper.sidebar_toggle_panel/1` is the only thing that raises it.
+  # Components renders it as `data-user-opened` on the <aside>, and the
+  # first-paint rule in root.html.heex paints the inspector closed below the
+  # `wide` bucket exactly while that marker is absent. `sidebar_open` stays
+  # unconditionally true and is NOT bucket-seeded on purpose: the true bucket
+  # only reaches the server ~400ms after first paint, so a server-seeded close
+  # would BE the flash D12 refused (measured: first paint t=20.1ms,
+  # phx-connected t=419.5ms). The cascade closes it at first paint instead.
   defp sidebar_assigns(paper) do
     slug = (paper && Map.get(paper, :doc_id)) || ""
 
     [
       sidebar_open: true,
+      sidebar_user_opened: false,
       sidebar_collapsed: MapSet.new(),
       sidebar_slug_draft: slug,
       sidebar_slug_feedback: PaperCanvas.slug_feedback(slug)
