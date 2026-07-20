@@ -1,0 +1,836 @@
+══════════════════════════════════════════════════════════════════════════════
+PDS CROWN RE-CLIMB — the corrected rung, fired once, on a memory-starved box
+run pdsw9-reclimb-20260720 · 0 attempts spent · APPEND-ONLY
+══════════════════════════════════════════════════════════════════════════════
+
+This is the SECOND run record for the PDS crown, and it exists because the
+first one's rung 6 was corrected. It does not replace
+scripts/pds-pull-proof.crown-transcript.txt — that file is the wave-7 climb and
+its rung-6 FAIL stays exactly where it is.
+
+  bp task    pds-w8-crown-reclimb          (epic task-2ac1f95237c4a8e5)
+  crown      pds-w1-crown-proof            — READ, never written by this run
+  runbook    scripts/pds-crown-runbook.md
+  harness    scripts/pds-pull-proof.sh, FROZEN at blob
+             e219e97ccf7f33797c86a2b84d998d599b6bda31
+
+  RESULT     9 PASS · 2 ABORT (named, severable, environmental) · 0 FAIL
+             Rung 6 — the one the whole wave was about — PASSED WITH ITS
+             CONTROL FIRING IN BOTH DIRECTIONS.
+
+──────────────────────────────────────────────────────────────────────────────
+1. WHAT THIS RUN PAYS, AND WHAT IT DOES NOT
+──────────────────────────────────────────────────────────────────────────────
+
+Per PDS-D171 this run does not stamp, close or amend `pds-w1-crown-proof`. The
+climber must not pay the criteria it is judged by. What follows is a statement
+of fact for the LEAD to stamp against, nothing more.
+
+The crown reads 9 of 11 met before this run. The two open rows are criterion 6
+(step-6 convergence) and criterion 10 (PR merged). Everything else — 0-5, 7-9 —
+was already paid by the wave-7 climb.
+
+  THIS RUN PAYS CROWN CRITERION 6, and it is the only one it needs to.
+  Rung 6 PASSED with deliberate drift written into all eight guarded columns
+  before the first reboot, 34 of 34 sentinels intact across a stamped boot, and
+  ALL EIGHT columns reverted on the guard-off boot. §3 is the evidence.
+
+  THIS RUN DOES NOT REGRESS CROWN CRITERIA 3 AND 4. Rungs 3 and 4 ABORTED on
+  cond_b (§2). Those two rungs back crown criteria 3 and 4, which the wave-7
+  climb already paid off its own full-fidelity bundle. An abort here withholds a
+  fresh re-proof; it does not unpay a criterion. The transcript says this
+  plainly rather than letting a reader infer a regression from two ABORT lines.
+
+  THIS RUN RE-ESTABLISHES 0a/0b/0c/1/2/5/7/8 ON A NEWER SHA — guerrilla now
+  serves 65541e2d4 (#4772's merge commit) rather than wave 7's 15e057f83. That
+  is a bonus, not a requirement.
+
+──────────────────────────────────────────────────────────────────────────────
+2. cond_b — HANDLED BY SCHEDULING ALONE, AND THE SCHEDULING FAILED
+──────────────────────────────────────────────────────────────────────────────
+
+PDS_FULL_EXPORT_MIN_MEM_MB WAS NEVER EXPORTED AND NEVER LOWERED. The floor
+printed by the run is 2200, the default, verifiable in the five-condition block
+below. The only lever this operator touched was WHEN to fire.
+
+That ban is arithmetic, not sentiment: the wave-7 bundle's own meta gives
+2483304 − 194228 kB = 2235 MB of incremental demand, so the 2200 floor already
+sits ~35 MB BELOW what it gates. Lowering it would widen a gate that is already
+too narrow to protect the LIVE content API.
+
+THE SAMPLE SERIES — every 60 s for the full 90-minute bound, all 90 recorded:
+
+    n                90 samples, 2026-07-20T10:08:04Z → 2026-07-20T11:38:36Z
+    min                981.62 MB
+    median            1524.71 MB
+    max               1733.53 MB
+    floor             2200 MB
+    samples clearing     0 of 90
+    best sample was    466 MB short
+
+    SwapFree over the same window: 1294 MB → 750 MB, monotonically draining.
+    Memory pressure on that box ROSE across the wait; it did not ease.
+
+The full series is not summarised away — it is reproduced in §6.
+
+This matches, and slightly worsens, the 8-sample survey the brief carried
+(min 1345 / median 1788 / max 2018, 0 of 8). Two independent series, 98 samples,
+zero clearances. The window the wave-7 transcript recorded at 03:25Z (2765 MB)
+is real but was not reachable in this 90-minute slot.
+
+WHAT WAS DONE ABOUT IT: the run was fired anyway, which is one of the two
+outcomes the task pre-declared as legitimate. Firing costs NOTHING when cond_b
+fails — the harness writes the attempt counter only AFTER all five conditions
+pass (pds-pull-proof.sh: the `spent_now` increment sits below the `ok -ne 1`
+early return). The attempts file read 1 before the run and reads 1 after it.
+Rungs 3 and 4 aborted; the other nine climbed. That severability is by design
+and the harness says so in its own ABORT text.
+
+──────────────────────────────────────────────────────────────────────────────
+3. RUNG 6 — THE CORRECTED RUNG, AND ITS CONTROL FIRING IN BOTH DIRECTIONS
+──────────────────────────────────────────────────────────────────────────────
+
+Wave 8's finding was that rung 6 measured NOTHING in either direction. At sha
+parity Bootstrap's clobber is a write of the same declaration into rows that
+already match it, so leg A's "the eight columns did not change" would have held
+with the guard DELETED from the codebase. #4771 fixed that by writing a sentinel
+into the eight guarded columns BEFORE the first reboot. This run is the first
+time the corrected rung has been fired against a real booted target.
+
+  LEG A — the drifted rows SURVIVE a stamped reboot:
+      RETURNING       34 rows sentinelled
+      before reboot   digest 0ea8e23e6e234a2e81e13dc2d4ee9e5a rows=36
+      boot log        34 Bootstrap SKIP (guard fired) · 0 REGISTER
+      after reboot    digest 0ea8e23e6e234a2e81e13dc2d4ee9e5a rows=36  (UNCHANGED)
+      sentinel intact 34 of 34 rows still carry the drift
+
+  THE ROSTER TRIPWIRE AGREED. The sentinel wrote 34 rows from this script's
+  hand-maintained exclusion list ('tag','metric'); the boot logged 34 Bootstrap
+  guard SKIPs from Bootstrap's own Registry.all() walk. Those two numbers are
+  derived independently and they matched. The TagRegistry skip of the core `tag`
+  row counted 1, outside the sentinel scope, exactly as #4770 intended — the
+  scoped grep that keeps that 1 from reading as 35-against-34 is load-bearing
+  and it held.
+
+  LEG B — the same rows REVERT once the stamp is gone:
+      RETURNING       {"production": {}}     (the clear TOOK — asserted, not assumed)
+      after guard-off c3b6f2d3950a9a9ec8f5f13e9c4243a7 rows=36  (MOVED)
+      sentinel wiped  0 of 34 rows still carry ANY trace of the drift
+      per-column      ALL EIGHT reverted: title icon visibility owner_scoped
+                      fields cors_origins desk_groups list_preview
+
+  The pre-named dormant mode `pds-bl-legb-visibility-false-red` did NOT fire.
+  Leg B reverted all eight columns including `visibility`; there is no partial
+  reversion to report.
+
+The harness's own closing sentence is the one worth keeping:
+
+    At sha parity a sentinel-free version of this rung would pass with the
+    guard deleted from the codebase; this one cannot.
+
+That is the difference between wave 7's rung 6 and this one, stated by the
+instrument rather than by the operator.
+
+──────────────────────────────────────────────────────────────────────────────
+4. ENV HYGIENE — ASSERTED FROM THE RUN'S OWN OUTPUT, NOT FROM DISCIPLINE
+──────────────────────────────────────────────────────────────────────────────
+
+The exact pins, exported (not assigned) in the shell that ran both the target
+boot and the climb:
+
+    PDS_RUN_ID=pdsw9-reclimb-20260720
+    BARKPARK_HOME=/private/tmp/pds-w9c
+    PDS_SCRATCH_POINTER=/private/tmp/pds-w9c.last
+    PDS_PROOF_ARTIFACTS=/private/tmp/pds-w9c-art
+    PDS_CONTROL_PG=postgres
+    PDS_FULL_EXPORT_BUDGET=2
+    PDS_AMMO_FILE       <UNSET>
+    PDS_SOURCE_DATASET  <UNSET>
+    FAILDEMO/GUARD_DEMO <UNSET → both default to 1>
+    PDS_FULL_EXPORT_MIN_MEM_MB   NEVER SET. grep -c over the invocation: 0.
+
+BARKPARK_HOME, PDS_SCRATCH_POINTER and PDS_PROOF_ARTIFACTS were all pinned
+EXPLICITLY to distinct fresh values. A fresh RUN_ID alone would not have forced
+a fresh target: pds-pull-proof.sh:113-115 defaults those three only when UNSET,
+so an ambient value from a neighbouring cycle would have silently survived.
+
+Three of those pins are proven by the run's own bytes rather than by assertion:
+
+  · `instrument control: PASSED` appears verbatim — so PDS_CONTROL_PG reached
+    the harness. Its absence would have left rung 4 at a terminal PASS with a
+    scanner never shown able to fire.
+  · `8 webhook secret(s) pulled read-only from the source DB this run` appears
+    verbatim — so the ammo came from the live source, not from an ambient
+    PDS_AMMO_FILE. The wording `N value(s) from PDS_AMMO_FILE` appears nowhere.
+  · Rungs 5 and 6 carry no disabled-demo wording in their PASS lines, so both
+    mutations ran at their defaults.
+
+The invocation was ONE serial `--all`. It was never split. Step 6 stayed
+terminal among target-reading rungs, which is the only safe order (PDS-D101).
+
+──────────────────────────────────────────────────────────────────────────────
+5. THE THINGS THIS TRANSCRIPT REFUSES TO SAY
+──────────────────────────────────────────────────────────────────────────────
+
+NO RSS FIGURE. This run measured no memory peak, because no full export ran.
+The honesty banner therefore quotes NO peak — not this run's, not wave 7's, not
+a survey's, and above all not one extrapolated from the cheap leg. PDS-D103
+measured that extrapolation undershooting by 4.2x; "unmeasurable" beats a
+confident wrong number. A reader grepping this file for a megabyte peak finds
+nothing, and that absence is the correct reading.
+
+What WAS taken, because it costs nothing and bounds a future run, is the
+sampler-aim bracket that PDS-D113 exists for:
+
+    BEFORE the run  11:40:02Z   head-1: 923511   pgrep-o: 923511   EQUAL
+    AFTER  the run  11:45:02Z   head-1: 923511   pgrep-o: 923511   EQUAL
+
+The frozen sampler selects with a selector that is correct only on a swept box.
+The box was swept, both times. Had an export run, its figure would have been
+aimed at the real BEAM. It did not run, so this is a bound on a measurement
+that was never taken, and it is recorded as such.
+
+NO DEPLOY LANDED UNDER THIS RUN — and the near-miss is declared rather than
+omitted. Two deploy.yml runs completed at 11:00:48Z and 11:02:43Z, inside the
+90-minute wait and 38 minutes before the climb fired. Guerrilla's served sha
+did not move: 37 independent SSH reads across the wait all returned
+65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f, the harness pinned that same sha at
+rung 0a, and rung 8 re-read it unchanged with uptime monotonic 19399s → 19492s.
+Those deploy runs did not target this box. Wave 7's re-fetch / frozen-script-
+diff-empty / teardown-and-reboot recipe was therefore NOT needed and NOT
+invoked, and no assertion was loosened. Had the sha moved, the recipe — not a
+softened assertion — was the plan.
+
+RUNG 0b PASSED ON ITS ANCESTRY BRANCH, NOT ON EQUALITY. The deployed sha is an
+ancestor of the climb worktree, 1 commit behind, 0 code and 1 docs-only. Box
+BEHIND worktree passes; box AHEAD would have failed. The tree was clean at fire
+time (0 dirty files) — which matters because 0b never checks for one.
+
+──────────────────────────────────────────────────────────────────────────────
+6. THE cond_b SAMPLE SERIES — all 90, verbatim
+──────────────────────────────────────────────────────────────────────────────
+
+    01 2026-07-20T10:08:04Z MemAvailable=1593.33 MB SwapFree=1294 MB cond_b=fail
+    02 2026-07-20T10:09:05Z MemAvailable=1335.67 MB SwapFree=1294 MB cond_b=fail
+    03 2026-07-20T10:10:05Z MemAvailable=1563.29 MB SwapFree=1245 MB cond_b=fail
+    04 2026-07-20T10:11:05Z MemAvailable=1058.64 MB SwapFree=1248 MB cond_b=fail
+    05 2026-07-20T10:12:06Z MemAvailable=1682.19 MB SwapFree=1241 MB cond_b=fail
+    06 2026-07-20T10:13:06Z MemAvailable=981.62 MB SwapFree=1241 MB cond_b=fail
+    07 2026-07-20T10:14:07Z MemAvailable=1635.69 MB SwapFree=1227 MB cond_b=fail
+    08 2026-07-20T10:15:07Z MemAvailable=1116.31 MB SwapFree=1227 MB cond_b=fail
+    09 2026-07-20T10:16:07Z MemAvailable=1634.66 MB SwapFree=1223 MB cond_b=fail
+    10 2026-07-20T10:17:08Z MemAvailable=1000.84 MB SwapFree=1222 MB cond_b=fail
+    11 2026-07-20T10:18:08Z MemAvailable=1570.64 MB SwapFree=1181 MB cond_b=fail
+    12 2026-07-20T10:19:09Z MemAvailable=1073.36 MB SwapFree=1181 MB cond_b=fail
+    13 2026-07-20T10:20:09Z MemAvailable=1590.25 MB SwapFree=1136 MB cond_b=fail
+    14 2026-07-20T10:21:09Z MemAvailable=1073.42 MB SwapFree=1136 MB cond_b=fail
+    15 2026-07-20T10:22:10Z MemAvailable=1071.28 MB SwapFree=1136 MB cond_b=fail
+    16 2026-07-20T10:23:11Z MemAvailable=1611.53 MB SwapFree=1121 MB cond_b=fail
+    17 2026-07-20T10:24:11Z MemAvailable=1471.63 MB SwapFree=1115 MB cond_b=fail
+    18 2026-07-20T10:25:12Z MemAvailable=1570.81 MB SwapFree=1115 MB cond_b=fail
+    19 2026-07-20T10:26:13Z MemAvailable=1094.58 MB SwapFree=1112 MB cond_b=fail
+    20 2026-07-20T10:27:14Z MemAvailable=1563.38 MB SwapFree=1081 MB cond_b=fail
+    21 2026-07-20T10:28:15Z MemAvailable=1562.36 MB SwapFree=1081 MB cond_b=fail
+    22 2026-07-20T10:29:15Z MemAvailable=1547.80 MB SwapFree=1081 MB cond_b=fail
+    23 2026-07-20T10:30:16Z MemAvailable=1556.86 MB SwapFree=1082 MB cond_b=fail
+    24 2026-07-20T10:31:17Z MemAvailable=1556.83 MB SwapFree=1082 MB cond_b=fail
+    25 2026-07-20T10:32:17Z MemAvailable=1509.92 MB SwapFree=1086 MB cond_b=fail
+    26 2026-07-20T10:33:18Z MemAvailable=1499.63 MB SwapFree=1086 MB cond_b=fail
+    27 2026-07-20T10:34:19Z MemAvailable=1398.51 MB SwapFree=1087 MB cond_b=fail
+    28 2026-07-20T10:35:19Z MemAvailable=1491.82 MB SwapFree=1088 MB cond_b=fail
+    29 2026-07-20T10:36:20Z MemAvailable=1401.95 MB SwapFree=1088 MB cond_b=fail
+    30 2026-07-20T10:37:21Z MemAvailable=1085.82 MB SwapFree=1021 MB cond_b=fail
+    31 2026-07-20T10:38:21Z MemAvailable=1555.11 MB SwapFree=1021 MB cond_b=fail
+    32 2026-07-20T10:39:22Z MemAvailable=1457.84 MB SwapFree=1021 MB cond_b=fail
+    33 2026-07-20T10:40:23Z MemAvailable=1429.69 MB SwapFree=1022 MB cond_b=fail
+    34 2026-07-20T10:41:24Z MemAvailable=1022.41 MB SwapFree=1023 MB cond_b=fail
+    35 2026-07-20T10:42:24Z MemAvailable=1491.80 MB SwapFree=1000 MB cond_b=fail
+    36 2026-07-20T10:43:25Z MemAvailable=1518.76 MB SwapFree=1000 MB cond_b=fail
+    37 2026-07-20T10:44:26Z MemAvailable=1523.30 MB SwapFree=1000 MB cond_b=fail
+    38 2026-07-20T10:45:26Z MemAvailable=1512.50 MB SwapFree=1000 MB cond_b=fail
+    39 2026-07-20T10:46:27Z MemAvailable=1506.36 MB SwapFree=1000 MB cond_b=fail
+    40 2026-07-20T10:47:28Z MemAvailable=1540.79 MB SwapFree=1000 MB cond_b=fail
+    41 2026-07-20T10:48:28Z MemAvailable=1524.59 MB SwapFree=1000 MB cond_b=fail
+    42 2026-07-20T10:49:29Z MemAvailable=1520.71 MB SwapFree=1001 MB cond_b=fail
+    43 2026-07-20T10:50:30Z MemAvailable=1527.07 MB SwapFree=997 MB cond_b=fail
+    44 2026-07-20T10:51:30Z MemAvailable=1546.37 MB SwapFree=997 MB cond_b=fail
+    45 2026-07-20T10:52:31Z MemAvailable=1506.70 MB SwapFree=1003 MB cond_b=fail
+    46 2026-07-20T10:53:32Z MemAvailable=1023.29 MB SwapFree=1001 MB cond_b=fail
+    47 2026-07-20T10:54:33Z MemAvailable=1438.34 MB SwapFree=1002 MB cond_b=fail
+    48 2026-07-20T10:55:33Z MemAvailable=1480.04 MB SwapFree=1003 MB cond_b=fail
+    49 2026-07-20T10:56:34Z MemAvailable=1051.04 MB SwapFree=1003 MB cond_b=fail
+    50 2026-07-20T10:57:35Z MemAvailable=1498.50 MB SwapFree=990 MB cond_b=fail
+    51 2026-07-20T10:58:36Z MemAvailable=1377.58 MB SwapFree=992 MB cond_b=fail
+    52 2026-07-20T10:59:37Z MemAvailable=1421.21 MB SwapFree=991 MB cond_b=fail
+    53 2026-07-20T11:00:37Z MemAvailable=1041.52 MB SwapFree=992 MB cond_b=fail
+    54 2026-07-20T11:01:37Z MemAvailable=1106.62 MB SwapFree=946 MB cond_b=fail
+    55 2026-07-20T11:02:38Z MemAvailable=1556.36 MB SwapFree=940 MB cond_b=fail
+    56 2026-07-20T11:03:39Z MemAvailable=1560.45 MB SwapFree=940 MB cond_b=fail
+    57 2026-07-20T11:04:40Z MemAvailable=1560.81 MB SwapFree=940 MB cond_b=fail
+    58 2026-07-20T11:05:41Z MemAvailable=1546.32 MB SwapFree=944 MB cond_b=fail
+    59 2026-07-20T11:06:41Z MemAvailable=1159.85 MB SwapFree=944 MB cond_b=fail
+    60 2026-07-20T11:07:42Z MemAvailable=1462.16 MB SwapFree=938 MB cond_b=fail
+    61 2026-07-20T11:08:43Z MemAvailable=1547.02 MB SwapFree=938 MB cond_b=fail
+    62 2026-07-20T11:09:44Z MemAvailable=1509.74 MB SwapFree=940 MB cond_b=fail
+    63 2026-07-20T11:10:44Z MemAvailable=1033.54 MB SwapFree=937 MB cond_b=fail
+    64 2026-07-20T11:11:45Z MemAvailable=1164.59 MB SwapFree=923 MB cond_b=fail
+    65 2026-07-20T11:12:46Z MemAvailable=1524.84 MB SwapFree=892 MB cond_b=fail
+    66 2026-07-20T11:13:47Z MemAvailable=1160.69 MB SwapFree=877 MB cond_b=fail
+    67 2026-07-20T11:14:47Z MemAvailable=1635.56 MB SwapFree=787 MB cond_b=fail
+    68 2026-07-20T11:15:49Z MemAvailable=1652.99 MB SwapFree=762 MB cond_b=fail
+    69 2026-07-20T11:16:51Z MemAvailable=1681.98 MB SwapFree=764 MB cond_b=fail
+    70 2026-07-20T11:17:53Z MemAvailable=1634.18 MB SwapFree=765 MB cond_b=fail
+    71 2026-07-20T11:18:55Z MemAvailable=1169.98 MB SwapFree=757 MB cond_b=fail
+    72 2026-07-20T11:19:57Z MemAvailable=1647.93 MB SwapFree=757 MB cond_b=fail
+    73 2026-07-20T11:20:59Z MemAvailable=1670.90 MB SwapFree=759 MB cond_b=fail
+    74 2026-07-20T11:22:00Z MemAvailable=1698.95 MB SwapFree=760 MB cond_b=fail
+    75 2026-07-20T11:23:03Z MemAvailable=1707.79 MB SwapFree=760 MB cond_b=fail
+    76 2026-07-20T11:24:05Z MemAvailable=1706.63 MB SwapFree=760 MB cond_b=fail
+    77 2026-07-20T11:25:08Z MemAvailable=1733.53 MB SwapFree=760 MB cond_b=fail
+    78 2026-07-20T11:26:12Z MemAvailable=1689.11 MB SwapFree=760 MB cond_b=fail
+    79 2026-07-20T11:27:16Z MemAvailable=1698.12 MB SwapFree=761 MB cond_b=fail
+    80 2026-07-20T11:28:18Z MemAvailable=1716.79 MB SwapFree=761 MB cond_b=fail
+    81 2026-07-20T11:29:20Z MemAvailable=1209.98 MB SwapFree=761 MB cond_b=fail
+    82 2026-07-20T11:30:23Z MemAvailable=1613.86 MB SwapFree=754 MB cond_b=fail
+    83 2026-07-20T11:31:26Z MemAvailable=1665.03 MB SwapFree=754 MB cond_b=fail
+    84 2026-07-20T11:32:29Z MemAvailable=1673.51 MB SwapFree=754 MB cond_b=fail
+    85 2026-07-20T11:33:31Z MemAvailable=1696.90 MB SwapFree=755 MB cond_b=fail
+    86 2026-07-20T11:34:32Z MemAvailable=1203.45 MB SwapFree=755 MB cond_b=fail
+    87 2026-07-20T11:35:33Z MemAvailable=1689.01 MB SwapFree=749 MB cond_b=fail
+    88 2026-07-20T11:36:34Z MemAvailable=1654.59 MB SwapFree=749 MB cond_b=fail
+    89 2026-07-20T11:37:35Z MemAvailable=1718.31 MB SwapFree=750 MB cond_b=fail
+    90 2026-07-20T11:38:36Z MemAvailable=1674.07 MB SwapFree=750 MB cond_b=fail
+    SAMPLING_COMPLETE 90 samples, no window reached 2200 MB
+
+──────────────────────────────────────────────────────────────────────────────
+7. PER-RUNG VERDICT TABLE
+──────────────────────────────────────────────────────────────────────────────
+
+  RUNG  VERDICT  WHAT IT ESTABLISHED
+  ────  ───────  ────────────────────────────────────────────────────────────
+  0a    PASS     source pinned: version=0.2.25.1372, sha 65541e2d4; dev dialect
+                 LIVE (200, 60,340,224 B, 8 s, 18 members, profile=dev)
+  0b    PASS     deploy provenance: deployed sha IS AN ANCESTOR of the worktree
+                 the target migrated from (c30d4a2d2), 1 behind — 0 code
+  0c    PASS     both sentinels :ok against the SCRATCH Repo, proven
+                 barkpark:49631 from INSIDE the BEAM
+  1     PASS     the pull as the front-door PAIR, grain ASSERTED
+                 dataset=production profile=dev, 34 blobs, import exit 0 in 8 s
+  2     PASS     raw-perspective census both ends: source raw 3084 / published
+                 2867 over 36 declared types; every bundle type present on
+                 target at >= its own row count
+  3     ABORT    env:full-export-unavailable — cond_b FAILED (1249 MB vs floor
+                 2200). SEVERABLE. Crown criterion 3 stays paid by wave 7.
+  4     ABORT    env:full-export-unavailable — cond_b FAILED (1224 MB vs floor
+                 2200). The dev bundle and target DB both scanned CLEAN and the
+                 instrument control PASSED, but the positive control off the
+                 full bundle could not be taken, so the rung is honestly ABORT
+                 rather than a clean-without-a-firing-control PASS.
+  5     PASS     34 imported assets, every one 200 with content-length == the
+                 size in the target's own DB; comparator SHOWN able to fail
+  6     PASS     THE CORRECTED RUNG. 34 rows deliberately drifted in all eight
+                 guarded columns; stamped reboot preserved 34/34; guard-off
+                 reboot reverted ALL EIGHT and wiped 0/34. See §3.
+  7     PASS     source refuses a MERGE import: 403 bundle_import_disabled,
+                 re-derived this run
+  8     PASS     source did not move under the run: same sha, uptime 19399 →
+                 19492 monotonic
+
+  TOTAL: 9 PASS · 2 ABORT · 0 FAIL        attempt budget: 0 of 2 spent this run
+                                          (store still reads 1, unchanged)
+
+──────────────────────────────────────────────────────────────────────────────
+8. NOTHING WAS FILED AS A BUG, AND WHY THAT IS NOT A DODGE
+──────────────────────────────────────────────────────────────────────────────
+
+PDS-D100 requires every failing rung to be NAMED and sorted HARNESS BUG vs
+ENGINE FAIL. This run produced ZERO failing rungs. The two ABORTs are neither
+bucket: they are the harness correctly refusing to spend a 2.2 GB export on a
+box with 1.2 GB free, which is the instrument working, not failing. Sorting an
+environmental refusal into a defect bucket would be the dishonest move.
+
+What IS filed is the blocker itself — `pds-bl-cond-b-window-unreachable` — so
+that the next wave inherits a measured 98-sample record rather than re-deriving
+it. No harness edit was made. The freeze held: the blob is
+e219e97ccf7f33797c86a2b84d998d599b6bda31 before the run and after it.
+
+──────────────────────────────────────────────────────────────────────────────
+9. RAW RUN OUTPUT — the harness's own bytes, unedited, from here down
+──────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────
+PDS CROWN PROOF — run pdsw9-reclimb-20260720
+──────────────────────────────────────────────────────────────────────────────
+HONESTY BANNER — what this transcript does and does not claim.
+
+  SOURCE          https://guerrilla.barkpark.cloud (workspace=default dataset=production)
+  SERVED          resolved live in step 0a and printed there — version AND
+                  git sha. Auto-deploy has been observed NOT firing, so the
+                  box may be running older code than main; if it is, the
+                  transcript says so in step 0a/0b rather than blaming a slice.
+  PLANE           the proof runs on THIS host against a disposable
+                  personal-local target (/private/tmp/pds-w9c), booted by
+                  scripts/pds-scratch-target.sh. Nothing is written to the
+                  source: every source call here is a GET, a read-only psql,
+                  or the import POST of step 7 whose whole point is being REFUSED.
+  WORKTREE        c30d4a2d249ab0015c4002e6eeff373550c28c04 (loop-epic/the-crown-gets-paid-or-gets-named-one-se-0)
+
+  SCOPE OF EVERY CLAIM BELOW:
+   · Profile scope — the pull and its scans are the DEV profile. A clean dev
+     scan proves the carrying TABLES ARE ABSENT (:deny), never that a field
+     was scrubbed: @dev_scrub is genuinely empty (PDS-D25).
+   · Convergence scope — content-and-presence convergence of the imported
+     rows, not byte-identity of two independently produced tar files.
+   · Census scope — raw-perspective row counts per type. Bare-slug E3 tables
+     are EXCLUDED and the shortfall is pre-declared in step 2 (PDS-D45).
+   · Deploy scope — step 0b asserts DEPLOY PROVENANCE, not migration parity.
+     No schema_migrations HTTP surface exists; a stale build prints the same
+     /status.json green (PDS-D47). Step 8 re-pins the same sha at the CLOSE:
+     everything between them is dated by ONE build or the run says so.
+   · Refusal scope — step 7 proves the source refuses a MERGE import. The
+     clean/restore mode is NOT gated by that flag, so 'guerrilla cannot be
+     written' is a claim this transcript does not make (PDS-D73).
+   · Asset scope — step 5 asserts served bytes against the size the TARGET's
+     own database stores. It does not compare bytes against the SOURCE.
+   · Full-export scope — exactly ONE full-fidelity export is taken per store,
+     and only as the FIRING control for steps 3 and 4. Its memory figure is
+     measured by a 1 Hz ps sampler over SSH during that export; no cgroup
+     number and no survey number is reprinted as this run's.
+
+  THE SCAN'S OWN LIMITS, VERBATIM (they bound every 'clean' below):
+   1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given. It
+      does NOT detect derived material — base64/hex re-encodings, prefix
+      slices, HMACs, hashes, or values inside compressed members.
+   2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+      of the values you ENUMERATED — never that it is free of secrets nobody
+      enumerated.
+──────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0a — SOURCE FRESHNESS — pin the source before believing any differential
+──────────────────────────────────────────────────────────────────────────────
+      status.json     status=operational version=0.2.25.1372 uptime_seconds=19399
+      step-8 baseline uptime_seconds=19399 — re-read at close; backwards means the box redeployed mid-run
+      deployed sha    65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f  (source of truth: the box's own git HEAD over SSH)
+      last deploy run 24fae1b9f success 2026-07-20T10:58:59Z
+      dev export      HTTP 200 · 60340224 bytes · 8s · filename=default-production-dev.tar
+      manifest        format=bp-export-v1 members=18
+                      profile=dev dataset=production source_workspace=default source_dataset=production source_server_key=True
+  PASS   0a   source pinned: version=0.2.25.1372 sha=65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f; dev dialect LIVE (HTTP 200, 60340224 bytes, 8s, 18 members, profile=dev dataset=production, source_* present)
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0b — DEPLOY-PROVENANCE — the assertion schema_migrations parity cannot make
+──────────────────────────────────────────────────────────────────────────────
+  WHY NOT MIGRATION PARITY: there is NO schema_migrations HTTP surface
+  anywhere in this API, and the source's Postgres is not reachable
+  externally. /status.json's migrations component is a boolean computed by
+  the RUNNING BINARY over its OWN migration files, so a stale build prints
+  an identical green. That is a green a broken build could also produce, and
+  PDS-D20 forbids it. The assertion made here instead is DEPLOY PROVENANCE:
+  the deployed sha EQUALS OR IS AN ANCESTOR OF the worktree the target
+  migrated from.
+
+      deployed  65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f (version 0.2.25.1372)
+      worktree  c30d4a2d249ab0015c4002e6eeff373550c28c04
+      worktree is 1 commit(s) ahead: 0 touching code (api/internal/cloud/js/web), 1 docs-only
+      · c30d4a2d2 fix(studio): the instrument stops failing silently and writes its artifact (spd-w8) (#4787)
+  PASS   0b   deploy provenance holds: the deployed sha 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f IS AN ANCESTOR OF the worktree the target migrated from (c30d4a2d249ab0015c4002e6eeff373550c28c04), 1 commit(s) behind — 0 code, 1 docs-only
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 0c — SENTINELS — Catalog.assert_partition!/1 and assert_dev_partition!/1
+──────────────────────────────────────────────────────────────────────────────
+  A NEW tenant table RAISES these sentinels by design. If that happens the
+  transcript reports it as a FAIL with the raise message intact — it is
+  never bypassed, never downgraded, and never 'handled' by narrowing the
+  assertion. An unclassified table is an unproven export.
+
+  AND THE REPO MUST BE THE SCRATCH REPO (PDS-D64). `MIX_ENV=dev mix run`
+  resolves [hostname: localhost, username: postgres, database: barkpark_dev]
+  — the DEVELOPER'S OWN database — even with BARKPARK_HOME, BARKPARK_PG_PORT,
+  PDS_SCRATCH_DB and DATABASE_URL all pointed at the scratch box, because
+  dev.exs hardcodes host/port/user and DATABASE_URL is read on the prod
+  branch only. So the Repo is started HERE with the scratch conninfo and its
+  identity is asserted from inside the BEAM before either sentinel runs. A
+  'SENTINELS OK' measured against the wrong database is worse than an ABORT.
+
+      scratch Repo    host=127.0.0.1 port=49631 dbname=barkpark user=barkpark (from scratch.env, not from dev.exs)
+      REPO IS barkpark:49631 (asserted from inside the BEAM, not from the env it was handed)
+  PASS   0c   both sentinels returned :ok against the SCRATCH Repo (proven barkpark:49631 from inside the BEAM) — the live tenant-table membership matches the reviewed E1/E2/E3 partition AND every bundle-reachable table has a dev-partition classification
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 1 — THE PULL — export --profile dev + import --yes --merge (both --with-blobs)
+──────────────────────────────────────────────────────────────────────────────
+  ENV DIALECT (PDS-D63): BARKPARK_TOKEN is read NOWHERE by this CLI. Both
+  calls below carry an explicit -s <base> --token <tok>, and the two are
+  never the same pair — the source token is a PRODUCTION admin token and a
+  mirrored typo would aim it at production.
+
+      bp binary       /private/tmp/pds-w9c-art/bp (built from /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_611a5c05-871-29 this run; its own `cloud workspace --help` advertises --profile, --dataset, --merge and --with-blobs)
+      target          http://localhost:46905  (media dir /private/tmp/pds-w9c/media)
+      Blobs: 34 fetched, 0 failed → /private/tmp/pds-w9c-art/pull-default-production.tar.blobs
+      {"blobs":{"bytes":7987874,"dir":"/private/tmp/pds-w9c-art/pull-default-production.tar.blobs","failed":0,"failures":null,"fetched":34},"bytes":60340224,"file":"/private/tmp/pds-w9c-art/pull-default-production.tar","workspace":"default"}
+      export          exit 0 · 60340224 bytes · 9s · 34 blob(s) in /private/tmp/pds-w9c-art/pull-default-production.tar.blobs
+      manifest        profile='dev' dataset='production' (asked for profile=dev dataset=production)
+      {"mode":"merge","provenance":{"datasets":["production"],"stamp":{"exported_at":"2026-07-20T11:40:43.847239Z","profile":"dev","pulled_at":"2026-07-20T11:40:59.559682Z","source_dataset":"production","source_server":null,"source_workspace":"default"},"stamped":true,"workspace":"default"},"tables":{"authoring_exemptions":1148,"content_edges":4281,"datasets":1,"documents":3085,"media_files":34,"paper_events":0,"plugin_doc_state":0,"projects":1,"role_permissions":0,"roles":0,"schema_definitions":36,"search_intel_crystals":1968,"search_intel_merge_patterns":2386,"search_surface_config":0,"search_synonyms":0,"task_edges":61,"workspaces":1},"total_rows":13002}
+      Blobs: 34 uploaded, 0 failed → /private/tmp/pds-w9c-art/pull-default-production.tar.blobs
+      PDS-D9 ADOPTION FIRED — the target's workspaces row changed across the import
+        before: a033a667-d231-4e3e-b588-f330befc6df1 default;
+        after:  03e3d6d9-d123-4557-9c06-ae4382a20626 default;
+        Nothing in the CLI output, the HTTP receipt or the provenance block says
+        so; it is only visible by diffing the row, which is why it is diffed.
+  PASS   1    the pull ran through the front-door PAIR: export --profile dev --dataset production --with-blobs (60340224 bytes, 34 blobs) then import --yes --merge --with-blobs into http://localhost:46905, exit 0 in 8s. Manifest grain ASSERTED dataset=production profile=dev. Receipt: {"mode":"merge","provenance":{"datasets":["production"],"stamp":{"exported_at":"2026-07-20T11:40:43.847239Z","profile":"dev","pulled_at":"2026-07-20T11:40:59.559682Z","source_dataset":"production","source_server":null,"s
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 2 — RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true
+──────────────────────────────────────────────────────────────────────────────
+  CARRIER CHOICE: /v1/data/counts/:dataset is NOT used. It hard-codes
+  perspective:"published" and ignores ?perspective (raw and default return
+  byte-identical bodies), so every draft row is invisible to it. The per-type
+  query route genuinely honours the parameter, and the raw-vs-published
+  spread printed below is the proof that it does.
+
+      TYPE                                RAW  PUBLISHED DRAFT-ONLY
+      book                                  1          0          1
+      bossType                              1          0          1
+      command                              22         22          0
+      mediaAsset                           34          0         34
+      metric                                6          6          0
+      paper                               423        416          7
+      sheet                                 1          0          1
+      tag                                 127        123          4
+      task                               2468       2300        168
+      ticket                                1          0          1
+      TOTAL                              3084       2867        217
+      authedness      SOURCE census is AUTHED — the authed raw census (2468) is WIDER than the same call with no Authorization header (2300) — only a real token widens it
+      schemas=36 (GET /v1/schemas/production)  media=34 (GET /v1/media/production)  types with rows: counted above out of 36 declared
+
+  *** PRE-DECLARED SHORTFALL — bare-slug E3, EXPECTED, NOT corruption ***
+  :full is NOT lossless. The dataset slug 'production' is owned by MORE THAN
+  ONE workspace, so dataset_slugs_for/1 drops it under the D21 exclusivity
+  rule and bare-slug E3 tables are exported with dataset = ANY('{}') — i.e.
+  nothing. tables/shares.copy is 0 BYTES in the full bundle for exactly this
+  reason. Discovering it mid-run looks like data loss; it is a known,
+  bounded ownership artifact.
+      derived live: shares rows at dataset='production' = 1 · workspaces owning the slug 'production' = 2 (>1 is what triggers the exclusivity drop)
+      EXCLUDED from every parity assertion in this step: preview_token_jti shares
+
+  ── TARGET HALF ──────────────────────────────────────────────────────
+  The assertion that means something is BUNDLE -> TARGET: every document
+  row the bundle CARRIED must be present at the raw perspective on the
+  target. SOURCE -> BUNDLE is the dev scrub's scope; it is printed as a
+  delta and never asserted as loss (a dev bundle is SUPPOSED to be smaller).
+
+      authedness      TARGET census is AUTHED — the authed raw census (2468) is WIDER than the same call with no Authorization header (2300) — only a real token widens it
+
+      TYPE                             BUNDLE TARGET raw SOURCE raw
+      book                                  1          1          1
+      bossType                              1          1          1
+      command                              22         22         22
+      document                              2          2          2
+      mediaAsset                           34         34         34
+      metric                                6          6          6
+      paper                               423        423        424
+      sheet                                 1          1          1
+      tag                                 127        127        127
+      task                               2468       2468       2468
+      EXCLUDED from every parity assertion (PDS-D45, bare-slug E3): preview_token_jti shares
+  PASS   2    raw-perspective census, BOTH ends, authedness proven on each: source raw 3084 / published 2867 across 36 declared types; every type the dev bundle carried is present on the target at >= the bundle's own row count (bundle types: 10). The source->bundle delta above is the DEV SCRUB's scope, not loss.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 3 — TICKET-DENY BYTE-SCAN — bytes at ROW grain, never a count diff
+──────────────────────────────────────────────────────────────────────────────
+  WHAT A RAW BYTE SCAN CANNOT DO ALONE, learned by running it. The ticket's
+  doc_id and row uuid are DISCUSSED IN PROSE inside other documents (this
+  wave's own papers and tasks quote them). A naive 'these bytes appear
+  nowhere' assertion therefore FIRES on a bundle where the deny held
+  perfectly — a false alarm that reads exactly like a leak. So the assertion
+  is made at ROW grain: no ticket-carrying table member, and zero ROWS in
+  documents.copy whose own doc_id/type/id fields identify the ticket. The
+  byte hits are still printed — and each one is CLASSIFIED by the document
+  that contains it, so a prose reference is never silently equated with the row.
+
+      ticket doc_id   drafts.ticket-34751d4f62f4a8f0 (published id: ticket-34751d4f62f4a8f0) — RE-DERIVED this run
+      ticket row uuid 6b892995-de73-43c1-908d-65862c531f14 — RE-DERIVED this run (the surveys disagree on it; the run is the arbiter)
+      members         no ticket-carrying table member in 18 members
+      columns         documents: id=$1 doc_id=$2 type=$3 of 16 (from the manifest, this run)
+      grammar         COPY TEXT confirmed: 3085 row(s), first row = 16 fields = the manifest's 16 columns
+      ticket ROWS in tables/documents.copy: 0 (asserted 0)
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:11Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /private/tmp/pds-w9c-art/dev-default-production.tar
+        HIT  member=tables/documents.copy  ammo=value#1  value=draf…(30 bytes, sha256:7cfe8dd5)  lines=3  first_line=21
+        HIT  member=tables/documents.copy  ammo=value#2  value=tick…(23 bytes, sha256:a0aa60a2)  lines=3  first_line=21
+        HIT  member=tables/documents.copy  ammo=value#3  value=6b89…(36 bytes, sha256:80109e35)  lines=2  first_line=2033
+        members scanned: 18   ammo values: 3
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: 3 HIT(S) — enumerated secret values are present in the target.
+      dev profile: 3 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+
+      CLASSIFYING every byte hit — which document CONTAINS it:
+        containing row: doc_id=pds-w1-crown-proof type=task  (a PROSE reference in this row's own content, not the ticket row)
+        containing row: doc_id=pds-wave-2-2026-07-19 type=paper  (a PROSE reference in this row's own content, not the ticket row)
+        containing row: doc_id=pds-wave-4-2026-07-19 type=paper  (a PROSE reference in this row's own content, not the ticket row)
+      None of the above IS the ticket row — the row-grain count is 0. This is the
+      false-alarm shape a naive byte scan produces for an identifier that other
+      documents talk about, and it is reported rather than suppressed.
+
+      POSITIVE CONTROL — the same row-grain assertion against the ONE full bundle:
+      full bundle     STALE — parked at sha 15e057f83ba0c59a809364202e5eed91e1650fad, this run pinned 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f. Not reused.
+
+      FULL-EXPORT PRECONDITIONS (all five printed BEFORE any byte moves):
+        (a) served sha re-pinned == step 0a's ....... OK (65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f, re-pinned this instant)
+        (b) MemAvailable >= 2200 MB ................. FAILED (1249 MB available, floor 2200 MB) — taking it now risks OOMing the LIVE content API
+        (c) attempts < budget ...................... OK (1 of 2 attempt(s) spent)
+        (d) no deploy.yml run in progress .......... OK (no deploy.yml run in progress)
+        (e) lock acquired .......................... not attempted (an earlier condition already failed)
+
+  ABORT  3    waits on env:full-export-unavailable
+         the ROW-GRAIN zero above is real — and it is HALF a proof without a control that fires. The one full-fidelity bundle could not be acquired: the parked bundle was taken off sha 15e057f83ba0c59a809364202e5eed91e1650fad but step 0a pinned 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f — it is NOT reusable for a differential dated by this run's pin. a full-export precondition did not hold — (a) OK (65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f, re-pinned this instant) · (b) FAILED (1249 MB available, floor 2200 MB) — taking it now risks OOMing the LIVE content API · (c) OK (1 of 2 attempt(s) spent) · (d) OK (no deploy.yml run in progress) · (e) not attempted (an earlier condition already failed). This ABORT is SEVERABLE: it costs steps 3 and 4 only; every other rung ran.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 4 — VALUE-BASED SECRET SCAN — consuming scripts/pds-secret-scan.sh
+──────────────────────────────────────────────────────────────────────────────
+      ammo            8 webhook secret(s) pulled read-only from the source DB this run; lengths 43 bytes. Values are never printed.
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:16Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /private/tmp/pds-w9c-art/dev-default-production.tar
+        members scanned: 18   ammo values: 8
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: CLEAN — 0 hits for 8 enumerated value(s).
+      dev profile: 0 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      UNSCANNED notices in the output above: 0 (never silenced — an unscannable table is not a clean table)
+      dev bundle: CLEAN
+      ────────────────────────────────────────────────────────────────────────
+      PDS secret-scan POSITIVE CONTROL — locally seeded, no live export spent
+        throwaway database: pds_secret_scan_ctl_80667 (created and dropped by this run)
+      ────────────────────────────────────────────────────────────────────────
+      
+      STEP 1/3 — FULL-fidelity bundle must FIRE (webhooks.secret + grantee_email present)
+      ────────────────────────────────────────────────────────────────────────
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:21Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /var/folders/hb/18wmml0n5495w28s_1z_8flh0000gn/T//pds-control.vHhIeF/full.tar
+        HIT  member=tables/access_grants.copy  ammo=ammo#2  value=pds-…(34 bytes, sha256:4c54768e)  lines=1  first_line=1
+        HIT  member=tables/webhooks.copy  ammo=ammo#1  value=DVY3…(41 bytes, sha256:931f0751)  lines=1  first_line=1
+        members scanned: 5   ammo values: 2
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: 2 HIT(S) — enumerated secret values are present in the target.
+      full profile: 2 hits — full fidelity carries every E1 table verbatim,
+        including webhooks.secret. Hits are EXPECTED here; zero hits means the
+        ammo was wrong, not that the bundle is clean.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      
+      STEP 2/3 — target DB must FIRE (per-table t::text ~ alternation)
+      ────────────────────────────────────────────────────────────────────────
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:21Z
+      ────────────────────────────────────────────────────────────────────────
+      target DB: pds_secret_scan_ctl_80667
+        HIT  table=access_grants  rows_matching_ammo=1
+        HIT  table=webhooks  rows_matching_ammo=1
+        tables scanned: 4   ammo values: 2
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: 2 HIT(S) — enumerated secret values are present in the target.
+      full profile: 2 hits — full fidelity carries every E1 table verbatim,
+        including webhooks.secret. Hits are EXPECTED here; zero hits means the
+        ammo was wrong, not that the bundle is clean.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      
+      STEP 3/3 — DENY-shaped bundle (webhooks + access_grants members absent) must be CLEAN
+      ────────────────────────────────────────────────────────────────────────
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:22Z
+      ────────────────────────────────────────────────────────────────────────
+      bundle: /var/folders/hb/18wmml0n5495w28s_1z_8flh0000gn/T//pds-control.vHhIeF/dev.tar
+        members scanned: 3   ammo values: 2
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: CLEAN — 0 hits for 2 enumerated value(s).
+      dev profile: 0 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      ────────────────────────────────────────────────────────────────────────
+      control fires on the bundle: exit 1 with the hit named in tables/webhooks.copy
+      control fires on the target DB: exit 1 with the hit named per table
+      deny-shaped bundle is CLEAN: exit 0 against the same ammo
+      ────────────────────────────────────────────────────────────────────────
+      CONTROL PASSED — the instrument fires on real secret bytes and comes back
+      clean when the denied members are absent. Both bundles were built from real
+      COPY (SELECT …) TO STDOUT bytes over local database pds_secret_scan_ctl_80667; NO live guerrilla
+      export was spent (PDS-D31).
+      instrument control: PASSED — the scan FIRES on a full-shaped fixture and comes back clean on a deny-shaped one
+      ────────────────────────────────────────────────────────────────────────
+      PDS value-based secret scan — 2026-07-20T11:41:22Z
+      ────────────────────────────────────────────────────────────────────────
+      target DB: host=127.0.0.1 port=49631 dbname=barkpark user=barkpark
+        tables scanned: 94   ammo values: 8
+      ────────────────────────────────────────────────────────────────────────
+      RESULT: CLEAN — 0 hits for 8 enumerated value(s).
+      dev profile: 0 hits — mechanism = table DENY (webhooks and access_grants
+        are :deny in the dev partition, so the members are ABSENT). No field-level
+        scrub is configured — @dev_scrub is empty — so nothing here was scrubbed.
+      
+      LIMITS — these bound the claim this scan can support:
+        1. VERBATIM-VALUE-BASED ONLY. It matches the exact bytes it was given.
+           It does NOT detect derived material — base64/hex re-encodings, prefix
+           slices, HMACs, hashes, or values inside compressed members.
+        2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free
+           of the values you ENUMERATED — never that it is free of secrets nobody
+           enumerated.
+      target DB       exit=0 · tables scanned=94 · UNSCANNED=0
+      target DB: CLEAN over 94 table(s), 0 UNSCANNED
+
+      POSITIVE CONTROL — the SAME ammo against the ONE full-fidelity bundle:
+      full bundle     STALE — parked at sha 15e057f83ba0c59a809364202e5eed91e1650fad, this run pinned 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f. Not reused.
+
+      FULL-EXPORT PRECONDITIONS (all five printed BEFORE any byte moves):
+        (a) served sha re-pinned == step 0a's ....... OK (65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f, re-pinned this instant)
+        (b) MemAvailable >= 2200 MB ................. FAILED (1224 MB available, floor 2200 MB) — taking it now risks OOMing the LIVE content API
+        (c) attempts < budget ...................... OK (1 of 2 attempt(s) spent)
+        (d) no deploy.yml run in progress .......... OK (no deploy.yml run in progress)
+        (e) lock acquired .......................... not attempted (an earlier condition already failed)
+
+  ABORT  4    waits on env:full-export-unavailable
+         the dev bundle and the target database are both CLEAN over 8 enumerated value(s) — and a scan that has never fired is not an instrument. The full-fidelity bundle that makes those cleans interpretable could not be acquired: the parked bundle was taken off sha 15e057f83ba0c59a809364202e5eed91e1650fad but step 0a pinned 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f — it is NOT reusable for a differential dated by this run's pin. a full-export precondition did not hold — (a) OK (65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f, re-pinned this instant) · (b) FAILED (1224 MB available, floor 2200 MB) — taking it now risks OOMing the LIVE content API · (c) OK (1 of 2 attempt(s) spent) · (d) OK (no deploy.yml run in progress) · (e) not attempted (an earlier condition already failed). SEVERABLE: this costs steps 3 and 4 only.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 5 — SERVED ASSET — EVERY imported asset serves 200 with a matching content-length
+──────────────────────────────────────────────────────────────────────────────
+  RESOLVED FROM THE TARGET'S OWN INDEX, never from a path guessed off the
+  source: GET /v1/media/:dataset (the v1 route — the flat /media index emits
+  no originalUrl at all and ignores ?limit). originalUrl and size are taken
+  VERBATIM per asset; originalUrl may be signed.
+
+      assets          34/34 served 200 with content-length == the stored size
+      FAILURE DEMO 1  2026/07/livedata-e4b48dd4.png truncated to 100 bytes on disk -> HTTP 200, content-length 100, stored size 617470
+      FAILURE DEMO 2  2026/07/livedata-e4b48dd4.png removed from disk -> HTTP 404 (the typed 'media blob missing' 404, never a 500)
+      RESTORED        2026/07/livedata-e4b48dd4.png -> content-length 617470 (stored size 617470)
+  PASS   5    34 imported asset(s) resolved from the TARGET's own /v1/media/production and every one served HTTP 200 with content-length == the size stored in the target's database. Control: the size comparator FIRED on a truncated blob that still served HTTP 200, and a missing blob answered the typed 404 rather than a 500.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 6 — CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)
+──────────────────────────────────────────────────────────────────────────────
+  The Bootstrap clobber fires only on BOOT. A convergence proof that does not
+  restart the target measures nothing: it re-reads rows from a process that
+  never had the chance to overwrite them. Reboot here is `bin/barkpark stop`
+  then `up` in the SAME BARKPARK_HOME — there is NO restart verb, and
+  `teardown` would stop Postgres and take the data with it.
+
+  SCOPE: this is CONTENT-AND-PRESENCE convergence of the imported rows — not
+  byte-identity of two independently produced tar files. On a WORKSPACE-grain
+  pull it would additionally be measuring identical plugin declarations rather
+  than a guard; step 1 asserts the grain so that ambiguity cannot arise here.
+
+      stamped slot    workspace 03e3d6d9-d123-4557-9c06-ae4382a20626
+                      pull_provenance[production] = {"profile": "dev", "pulled_at": "2026-07-20T11:40:59.559682Z", "exported_at": "2026-07-20T11:40:43.847239Z", "source_server": null, "source_dataset": "production", "source_workspace": "default"}
+
+      SENTINEL        writing deliberate drift into all eight guarded columns
+                      scope: workspace 03e3d6d9-d123-4557-9c06-ae4382a20626 · dataset production · name NOT IN ('tag','metric')
+      RETURNING       34 rows sentinelled
+      before reboot   guarded-column digest 0ea8e23e6e234a2e81e13dc2d4ee9e5a rows=36
+      boot log        34 Bootstrap SKIP (guard fired) · 0 REGISTER, this boot only
+                      1 TagRegistry SKIP (the core `tag` row, outside the sentinel scope)
+                      REGISTER is informational: it is Logger.info and can be filtered out by log level, so only the Bootstrap SKIP count is asserted.
+                      The TagRegistry count is reported, NOT asserted: `SchemaBootstrap.init/1` hardcodes dataset "production", so it is legitimately 1 when SOURCE_DS is production and 0 otherwise.
+      after reboot    guarded-column digest 0ea8e23e6e234a2e81e13dc2d4ee9e5a rows=36
+      sentinel intact 34 of 34 rows still carry the drift
+
+      GUARD-OFF CONTROL — clearing the stamp by SQL, then booting again:
+      RETURNING       {"production": {}}
+      after guard-off c3b6f2d3950a9a9ec8f5f13e9c4243a7 rows=36
+      sentinel wiped  0 of 34 rows still carry ANY trace of the drift
+      NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are
+                      sequenced BEFORE this control for exactly that reason; a
+                      re-pull is required before any further assertion about it.
+  PASS   6    content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: 34 rows (workspace 03e3d6d9-d123-4557-9c06-ae4382a20626 · dataset production · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly 34 Bootstrap guard SKIPs to match (plus 1 TagRegistry skip of the core `tag` row, which the scope excludes), and the stamped reboot preserved every column and all 34 sentinels (0ea8e23e6e234a2e81e13dc2d4ee9e5a rows=36, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of title icon visibility owner_scoped fields cors_origins desk_groups list_preview and wiped every trace of the drift (c3b6f2d3950a9a9ec8f5f13e9c4243a7 rows=36). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 7 — THE NEGATIVE GUARD — a MERGE import against the SOURCE must be REFUSED
+──────────────────────────────────────────────────────────────────────────────
+  SCOPE, exactly (PDS-D73): the :allow_bundle_import gate wraps ONLY the merge
+  branch of the import controller. `clean` is the DEFAULT mode and is NOT
+  gated by that flag. So what is proven below is that the source refuses a
+  MERGE import — never the broader claim that guerrilla cannot be written.
+
+  Re-derived at RUN time on purpose. This is a blue/green box: a deploy could
+  land between any survey and this run, and the single point of failure is
+  anyone appending BARKPARK_ALLOW_BUNDLE_IMPORT=1 to an env source. A refusal
+  proven yesterday is not a refusal proven now.
+
+      POST /api/workspaces/default/import?mode=merge -> HTTP 403  code=bundle_import_disabled
+      body: {"error":{"code":"bundle_import_disabled","message":"mode=merge requires the server to opt in via the :allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"}}
+  PASS   7    the source refuses a MERGE import: POST …/import?mode=merge -> HTTP 403 bundle_import_disabled, re-derived this run against https://guerrilla.barkpark.cloud (deployed sha 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f). SCOPED CLAIM: the clean/restore mode is ungated by this flag and is NOT covered by this line.
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 8 — CLOSING RE-PIN — did the source redeploy under this run?
+──────────────────────────────────────────────────────────────────────────────
+      sha at 0a       65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f
+      sha now         65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f
+      uptime at 0a    19399s
+      uptime now      19492s
+  PASS   8    the source did not move under this run: sha re-read over SSH is unchanged (65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f); uptime_seconds 19399 -> 19492 (monotonic). Every source-derived number above is dated by the SAME build.
+
+──────────────────────────────────────────────────────────────────────────────
+SUMMARY — run pdsw9-reclimb-20260720
+──────────────────────────────────────────────────────────────────────────────
+  PASS   0a  
+  PASS   0b  
+  PASS   0c  
+  PASS   1   
+  PASS   2   
+  ABORT  3    waits on env:full-export-unavailable
+  ABORT  4    waits on env:full-export-unavailable
+  PASS   5   
+  PASS   6   
+  PASS   7   
+  PASS   8   
+──────────────────────────────────────────────────────────────────────────────
+  9 PASS · 2 ABORT (blocked, named) · 0 FAIL
+──────────────────────────────────────────────────────────────────────────────
+RESULT: BLOCKED — every step above either passed with run-time numbers or
+named the merge it waits on. This is the honest partial artifact the wave
+is supposed to carry; it is NOT a green.
