@@ -697,6 +697,180 @@ prose that preceded it.
   `pds-bl-charter-slot-durability` warns a blanket reset destroys five epics' charters at once,
   including the TLV charter that exists nowhere but local main.
 
+- **PDS-D91 — The export route is `/api/workspaces/:slug/export`, NOT `/v1/workspaces/...`.** Three
+  runs of the `/v1` path returned `HTTP=404 BYTES=206 {"code":"not_found"}`; `router.ex:2443` scopes
+  it under `/api` and the harness itself calls `/api/...` at `:580` and `:1365`. With `/api` it
+  returns 200 / 54,812,160 bytes / 18 members. Why: a "VERIFIED FACTS, do not re-derive" line was
+  wrong, and a worker who trusted it would have measured nothing and blamed the engine.
+
+- **PDS-D92 — The headroom gate is CHECK-AND-GO on a ~10-minute retry cadence.** MemAvailable was
+  above the 2200 MB floor in 97/97 five-second samples across 486 s, and in 51.7% (worst day) to
+  73.4% of every 10-minute `sar` sample over four days, with a 130-minute continuous open window on
+  the worst day. A failed gate (b) `return 1`s at `:1330` BEFORE `spent_now=$((spent + 1))` at
+  `:1334`. Why: a closed window costs ZERO attempts, so polling is free and the window is the box's
+  majority state — not a knife-edge to be timed.
+
+- **PDS-D93 — The deploy pounce is REFUTED and FORBIDDEN.** Across all 30 slot restarts on one day a
+  deploy is worth mean +174 MB / median +146 MB with 9 of 30 NEGATIVE, and the three large rises all
+  began from depressed baselines (regression to the mean, not headroom manufacture). guerrilla is
+  blue/green, so a deploy is a memory TROUGH first — three coexisting BEAMs plus a live
+  `deps/req` compile bottomed at 2248 MB. Worse, pouncing breaks gate (a) (`DEPLOYED_SHA` is pinned
+  once at `:562`) AND step 0b (`:661` hard-fails when the served sha is not an ancestor of the
+  worktree). Why: it trades a gate the box passes most of the time for two gates it is guaranteed to
+  fail. The dominant driver of MemAvailable here is aggregate quiet, not BEAM freshness.
+
+- **PDS-D94 — Step 0c FAILED its first-ever live execution: `mix run --no-start` starts no dep apps.**
+  Measured inside the BEAM: `db_connection started? nil · postgrex started? nil · Watcher alive? nil`,
+  so `Barkpark.Repo.start_link()` dies on `GenServer.call(DBConnection.Watcher, …)`. Starting only
+  `:postgrex` is insufficient — `Ecto.Repo.Registry` is next. The fix is
+  `Application.ensure_all_started(:ecto_sql)` + `(:postgrex)` immediately before the `put_env` block,
+  which flips `--only 0c` from `HARNESS_EXIT=1 / FAIL` to `HARNESS_EXIT=0 / PASS` printing
+  `REPO IS barkpark:43195`. Why: HARNESS BUG, PREFLIGHT-fixable, and the rung is otherwise sound —
+  with the apps started both sentinels return `SENTINELS OK` against the scratch target.
+
+- **PDS-D95 — PDS-D64's guard is an INSTRUMENT, not a decoration — proven by mutation.** With the
+  apps started but the `put_env` removed, the Repo landed on `REPO IS barkpark_dev:5432` and the
+  self-check fired `REPO MISMATCH — wanted barkpark:43195`. The developer's own `barkpark_dev` is
+  live on this host at localhost:5432, so D64's hazard is reachable, not theoretical.
+
+- **PDS-D96 — Step 0c's catch-all `else` at `:788` reports ANY non-zero exit as "a sentinel RAISED".**
+  A Repo boot crash in which no sentinel executed was reported verbatim as
+  `FAIL 0c a sentinel RAISED (exit 1) — … A new/unclassified tenant table must be classified`. Why:
+  under the bucket rule that line becomes a FILED engine defect that does not exist, and a false
+  ENGINE FAIL is the most expensive sentence the append-only transcript can carry.
+
+- **PDS-D97 — Step 4 has NO cross-invocation guard, and its PASS line overclaims a leg that did not
+  run.** `awk '/^step_4\(\)/,/^step_5\(\)/' | grep -c PULL_BUNDLE` returns 0, while steps 2/5/6 each
+  abort `step:1` at `:1135` / `:1769` / `:1940`; step 4's target leg gates only on
+  `if load_target && [ -n "$TARGET_DB" ]` (`:1680`). Live `--only 4` against a stale target printed
+  `no dev bundle from step 0a — the bundle half of this step did not run` and would still terminate
+  in `pass 4 "… all three legs this run: the DEV bundle is CLEAN …"`. Why: rung 4 is one of the two
+  control-bearing rungs D84 names, so a partial-invocation pass is exactly the confident-wrong
+  artifact this wave exists to prevent.
+
+- **PDS-D98 — Gate (d) fails OPEN on a GitHub API error.** 5 of 8 back-to-back
+  `gh run list --workflow deploy.yml --branch main --status in_progress` calls returned
+  `HTTP 503: No server is currently available`; `2>/dev/null … || true` (`:1298-1307`) makes an
+  errored call indistinguishable from "no deploy running" and reports
+  `cond_d="OK (no deploy.yml run in progress)"`. Why: gh-MISSING fails closed (`ok=0`) but
+  gh-ERRORING fails open — the inverse hazard, on the gate that protects the one attempt.
+
+- **PDS-D99 — `grep -c … || echo 0` at `:1687` yields the two-line string `0\n0`, silently skipping
+  the PDS-D68 UNSCANNED gate.** `grep -c` prints `0` AND exits 1 on no-match, so both branches emit;
+  `[ "0\n0" -gt 0 ]` then errors to stderr and evaluates FALSE. Reproduced live:
+  `line 1701: [: 0\nERR: integer expression expected`. Benign TODAY only because
+  `pds-secret-scan.sh:278` emits the NOTE the `sed` at `:1686` catches whenever the true count is >0.
+  Why: a raw bash error inside an append-only evidence artifact, plus a dead tripwire that is the
+  sole detector if that NOTE's wording ever changes.
+
+- **PDS-D100 — THE HARNESS FREEZE.** Every harness change lands in PREFLIGHT, before attempt 1. From
+  attempt 1 onward the harness is FROZEN and each red sorts into exactly one bucket BEFORE anything
+  is touched: HARNESS BUG (filed; the corrected assertion must be SHOWN still failing on the pre-fix
+  condition) or ENGINE FAIL (filed, NOT fixed). Why: the freeze is what makes the transcript
+  trustworthy — it removes the climber's ability to edit a red away exactly when doing so is most
+  tempting.
+
+- **PDS-D101 — Anything touching rungs 2–6 runs as a full `--all`; `--only 3,4` is FORBIDDEN.**
+  `canonical_order` (`:2177-2191`) enforces ladder order only WITHIN one process; DEV_BUNDLE and
+  PULL_BUNDLE are bash globals that do not survive a process boundary; step 6's guard-off control
+  clears the stamp and reboots with no restore; and step 4 has no guard (D97). So a deferred 3/4
+  re-run must be `--all`, which necessarily re-imports the clobber, re-pins the sha, re-brackets
+  step 8, and re-runs 6 AFTER 4 — and reuses a parked bundle for 0 attempts when the sha held
+  (`:1249-1261`). THE DEFERRAL RULE: any deferral of 3/4 also defers 6, enforced by making `--all`
+  the only deferral mechanism.
+
+- **PDS-D102 — Env hygiene is MECHANISM, not discipline: the run greps its own transcript.** D79
+  fires (an unexported `PDS_CONTROL_PG` prints `instrument control: NOT RUN` and still reaches a
+  terminal `PASS 4` — the else-branch at `:1668-1670` is `info`-level with no `return`) and D80's
+  substitution fires (`ammo 1 value(s) from PDS_AMMO_FILE` replacing
+  `8 webhook secret(s) pulled read-only from the source DB this run`). But D80's stated OUTCOME is
+  REFUTED: the literal `bp-export-v1` reddens the DEV leg at exit 1 (D82 was right, D80's
+  "three greens" was wrong). The true vacuous window is a full-bundle-ONLY literal — the shape of a
+  STALE or PARTIAL real ammo file. Why: the absurd poison fails loudly and the plausible one passes
+  silently, so the climb must `export PDS_CONTROL_PG`, `unset PDS_AMMO_FILE`, and ASSERT the two
+  strings `instrument control: PASSED` and the 8-secret provenance line in its own output.
+  NOTE: the mandated D79 repro `PDS_CONTROL_PG=… sh -c '…'` is an EXPORT prefix and tests the wrong
+  condition; the real shape is `sh -c 'PDS_CONTROL_PG=…; script'`.
+
+- **PDS-D103 — RSS must NOT be extrapolated from the cheap leg; criterion 9 is
+  UNMEASURABLE-BY-DESIGN on a headroom abort.** A paired n=8 interleaved design gives a mean diff of
+  +31.7 MiB, 95% bootstrap CI [−21.5, +92.1] (spanning zero), sign test 4/8 — multiplier 0.60x, CI
+  [−0.41x, 1.76x] — against PDS-D44's full-leg 2.53x delta: a 4.2x undershoot (543 MiB predicted vs
+  2270 MiB measured). Mechanism: at 52 MiB the transient binary is absorbed by allocator slack (idle
+  RSS alone swings 378 MiB over 135 s with zero requests) and at 897 MiB it is paid. The attempt
+  counter and RSS sampler both sit AFTER gate (b), so a headroom abort leaves NOTHING to report.
+  Why: "unmeasurable" is a stronger and more honest closing line than a confident wrong number, and
+  the unaffordability finding stands on the code read plus D44 without it.
+
+- **PDS-D104 — PDS-D70's 1 Hz sampler is under-specified; any RSS claim needs a paired idle control
+  and a stated sampling rate.** Sampling at 8.4–8.7 Hz still could not resolve the dev export
+  against a background moving 335.7 MiB per 10 s. Why: an uncontrolled RSS number on this box is
+  noise, which is exactly the vacuous green the core rule forbids.
+
+- **PDS-D105 — The ~941 MB single-binary export is the wave's HEADLINE ENGINE FAIL: FILED, not
+  fixed.** `workspace_bundle.ex:259-276` accumulates every table's COPY bytes into one live `dumps`
+  map; `archive.ex:56-57` writes a temp tar and `File.read!`s it back into a second full-size binary
+  while the first is still an argument (`:27` admits ":erl_tar has no in-memory create");
+  `workspace_controller.ex:157` then `send_resp(200, bundle)` once, with no lock or semaphore
+  anywhere near the route (`:126` documents this in-code). ~2x-the-tar floor, ~1.9–2.2 GB for ONE
+  request on a 3.9 GB box — architecturally unaffordable here, permanently. A working chunked pattern
+  already exists in the same tree (`export_controller.ex:9-28`, `send_chunked` + per-line `chunk`).
+  Why: the epic needs the VERDICT before it needs the fix, and landing a fidelity change underneath a
+  running proof invalidates its census (the ruling D74 already makes about `shares`).
+
+- **PDS-D106 — Single ownership is enforced at `/tmp`, not per-`BARKPARK_HOME`.**
+  `FULL_ATTEMPTS_FILE=/tmp/pds-full-export/attempts` and `FULL_LOCK=/tmp/pds-full-export/lock`
+  (`:125-129`) are machine-global and independent of `BARKPARK_HOME`, so a second agent with a
+  different home shares the budget, the lock and the parked bundle. Concurrent wave-6 activity was
+  observed live: three unowned memory-watch loggers running on guerrilla and fresh `/tmp/pds-*`
+  artifacts from another session. Why: the wish's single-owner rule is load-bearing at the machine
+  level, and the climber must claim its bp task before touching the store.
+
+- **PDS-D107 — The scratch pointer dangles on macOS because the write path realpaths and the read
+  path does not.** `new_scratch_home` canonicalises with `cd -P` (`scratch-target.sh:131`) before
+  writing the pointer (`:268`), while `resolve_home` returns `BARKPARK_HOME` verbatim (`:139-147`),
+  so the string compare at `:533` can never match under `/tmp` → `/private/tmp`. Reproduced in one
+  second with a hand-made home, no boot needed. teardown still reports PASS, still releases both
+  ports and still removes the root — the failure is loud-never-dangerous, and a later unguarded call
+  dies with `scratch root … does not exist (already torn down?)`. Why: post-climb cleanup is the
+  bite window, and the wave's "pin both vars explicitly" rule is necessary but does not fix it.
+
+- **PDS-D108 — The deliverable's publication path is PROVEN, end to end, with residue removed.** A
+  live create+publish+delete probe cleared the label spine, the tag registry and the dedup wall on
+  the first try; `bp doc create <type> --file -` DOES honour stdin (a bare pipe without `--file -` is
+  REFUSED with `piped stdin is unused; pass --file -`, exit 2, never silently ignored); and a `patch`
+  mutation missing `type` returns 400 `malformed` (`mutations.ex:266` pattern-matches `id`+`type`,
+  `:325` is the catch-all). Why: the deliverable dies at the last step otherwise, and three prior
+  dedup rejections are on record for this epic's papers — choose a title that diverges from the six
+  existing PDS paper titles.
+
+- **PDS-D109 — Step 3's full-bundle control-leg grammar asymmetry is REAL but NOT exploitable; the
+  harness freezes as it stands.** The dev leg's three-part guard (`:1491`, `:1495`, `:1496-1499`)
+  has no equivalent on the full-bundle control leg (`:1560-1587`) — but the control's assertion
+  polarity is `> 0`, and every garbage grammar collapses NF to 1 so `$idc`/`$it` evaluate empty and
+  the count comes out 0, taking the `fail 3 "THE CONTROL DID NOT FIRE"` branch. Measured: CSV = 0,
+  JSON-lines carrying a literal `ticket` = 0, zero-byte = 0, +1-column drift = 0, honest COPY TEXT
+  = 1. The one spurious-non-zero path (EMPTY ammo against an NF<idc member) is unreachable because
+  `doc_id` is hard-guarded non-empty at `:1431-1434`. Why: no PREFLIGHT fix is justified — but the
+  transcript must state that the control is guarded by POLARITY, not by a grammar assertion, and
+  that its failure message would misdiagnose a grammar change as an ammo problem.
+
+- **PDS-D110 — Step 5's PASS line does not self-declare a disabled FAILDEMO; this is WAIVED, not
+  fixed.** `${demo:+…}` at `:1887` contributes nothing when `PDS_STEP5_FAILDEMO=0` because `demo`
+  is never assigned, whereas step 6's disabled note is a hardcoded literal inside its own `pass`
+  call (`:1976-1982`). The default is `1`, the disabled state IS visible in the immediately
+  preceding `info` line (undeletable under D87), and acceptance criterion index 5 already
+  disqualifies the close outright for any transcript carrying
+  `failure demo DISABLED (PDS_STEP5_FAILDEMO=0)`. Why: wave 5 surveyed this exact asymmetry (D76)
+  and chose criterion-hardening over a harness patch — a stronger and more general mechanism than
+  the wish's literal "in its own PASS line" phrasing.
+
+- **PDS-D111 — Wave 6 is THREE preflight slices then ONE serial climb.** Round 1 = charter
+  amendment + harness fixes + pointer fix, three disjoint files, dispatched in parallel. Round 2 =
+  `pds-w1-crown-proof` alone, single-owner, strictly serial, after all three MERGE. Why: every
+  harness edit must be on origin/main BEFORE the freeze (D100), and the climb is one job by
+  construction — the sequenced-rounds law forbids dispatching it beside its unmerged dependencies.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -842,6 +1016,25 @@ server's table MAP as an int · neither blob sidecar leg verifies transferred by
 export/teardown lockstep is prose-only and asserted by no test (D74) · the scratch pointer is one
 global path and other sessions were observed using it concurrently (D54).
 
+
+Wave 6 — THE CLIMB (IN FLIGHT; 4 slices; ROUNDS ARE LAW; paper `pds-wave-6-2026-07-20`):
+
+- R1 `pds-w6-charter-amendment` (opus, S): land D91–D111 on origin/main so every builder and every
+  future wave reads the same memory. `.claude/workflows/bp-pds-charter.md` only.
+- R1 `pds-w6-preflight-harness-fixes` (opus, M): the LAST legal harness edit before the freeze —
+  0c's `ensure_all_started` (D94), 0c's misattributing `else` (D96), step 4's cross-invocation
+  guard + honest PASS line (D97), gate (d)'s fail-open (D98), the `0\n0` UNSCANNED parse (D99).
+  Each fix carries a mutation proof: the corrected assertion still FAILS on the pre-fix condition.
+  `scripts/pds-pull-proof.sh` only.
+- R1 `pds-w6-scratch-pointer-canonicalize` (opus, S): teardown clears the pointer it wrote (D107).
+  `scripts/pds-scratch-target.sh` only.
+- R2 `pds-w1-crown-proof` (opus, L; AFTER all three R1 slices MERGE): the climb itself, under the
+  freeze — check-and-go on headroom (D92), never a pounce (D93), `--all` only (D101), env asserted
+  from the transcript (D102), RSS never extrapolated (D103). Deliverable:
+  `scripts/pds-pull-proof.crown-transcript.txt` (append-only, D87) + a published Barkpark paper +
+  every FAIL filed as a task rather than fixed away (D100).
+
+HELD BEHIND THE TRANSCRIPT: `pds-w3-shares-fidelity` — it moves the census baseline (D45/D74).
 
 ## Wave log
 
