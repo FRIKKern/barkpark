@@ -744,6 +744,13 @@ step_0c() {
       want_db   = System.get_env("PDS_PG_DB")
       want_port = String.to_integer(System.get_env("PDS_PG_PORT"))
 
+      # --no-start starts NO applications, so DBConnection.Watcher and
+      # Ecto.Repo.Registry do not exist and Repo.start_link/0 dies with
+      # "no process ... possibly because its application is not started".
+      # :postgrex ALONE is insufficient — the Ecto registry is next (PDS-D94).
+      {:ok, _} = Application.ensure_all_started(:ecto_sql)
+      {:ok, _} = Application.ensure_all_started(:postgrex)
+
       Application.put_env(:barkpark, Barkpark.Repo,
         hostname: System.get_env("PDS_PG_HOST"),
         port: want_port,
@@ -783,9 +790,16 @@ step_0c() {
 
   if [ "$rc" -eq 0 ] && grep -q 'SENTINELS OK' "$out"; then
     pass 0c "both sentinels returned :ok against the SCRATCH Repo (proven $pg_db:$pg_port from inside the BEAM) — the live tenant-table membership matches the reviewed E1/E2/E3 partition AND every bundle-reachable table has a dev-partition classification"
+  elif [ -z "$repo_line" ]; then
+    # The run never printed 'REPO IS ', so the Repo never connected and NEITHER
+    # sentinel ever executed. Reporting that as "a sentinel RAISED" invents an
+    # ENGINE finding out of an environment failure — the most expensive line an
+    # append-only transcript can carry (PDS-D96).
+    info "$(tail -20 "$out" | sed 's/^/  /')"
+    fail 0c "the scratch Repo never connected (exit $rc) — no 'REPO IS' line was printed, so NEITHER sentinel ran. This is a BOOT failure against $pg_db:$pg_port, NOT a partition finding: the sentinels are UNMEASURED, neither passed nor failed. See the tail above."
   else
     info "$(tail -20 "$out" | sed 's/^/  /')"
-    fail 0c "a sentinel RAISED (exit $rc) — see the message above. A new/unclassified tenant table must be classified, not bypassed."
+    fail 0c "a sentinel RAISED (exit $rc) after the Repo reached $pg_db:$pg_port — see the message above. A new/unclassified tenant table must be classified, not bypassed."
   fi
 }
 
@@ -1262,7 +1276,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   # ── the five conditions, printed with measured values, before any byte moves
-  local spent mem_kb mem_mb sha_now deploy_running cond_a cond_b cond_c cond_d cond_e ok=1
+  local spent mem_kb mem_mb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e ok=1
   spent="$(full_attempts)"
 
   sha_now=""
@@ -1296,9 +1310,19 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
 
   deploy_running=""
   if command -v gh >/dev/null 2>&1; then
-    deploy_running="$(gh run list --workflow deploy.yml --branch main --status in_progress --limit 5 \
-                        --json databaseId -q '.[].databaseId' 2>/dev/null | tr '\n' ' ' || true)"
-    if [ -z "$deploy_running" ]; then
+    # gh's EXIT STATUS is captured apart from its stdout. Piping it straight into
+    # `tr … || true` made an API error and a genuinely empty result identical —
+    # both read "no deploy.yml run in progress" — and the GitHub API answers 503
+    # often enough to matter (5 of 8 back-to-back calls, measured). A gate that
+    # cannot see is UNKNOWN, never OK: this must fail CLOSED exactly as the
+    # gh-missing branch below already does (PDS-D98).
+    gh_rc=0
+    gh_out="$(gh run list --workflow deploy.yml --branch main --status in_progress --limit 5 \
+                --json databaseId -q '.[].databaseId' 2>/dev/null)" || gh_rc=$?
+    deploy_running="$(printf '%s' "$gh_out" | tr '\n' ' ')"
+    if [ "$gh_rc" -ne 0 ]; then
+      cond_d="UNKNOWN (gh exited $gh_rc — the GitHub API did not answer, so an in-flight deploy cannot be ruled out)"; ok=0
+    elif [ -z "$gh_out" ]; then
       cond_d="OK (no deploy.yml run in progress)"
     else
       cond_d="FAILED — deploy.yml run(s) in progress: $deploy_running. A deploy mid-export swaps the slot under the request"; ok=0
@@ -1626,15 +1650,28 @@ step_4() {
     return 0
   fi
 
+  # Steps 2/5/6 each refuse to measure a target this run did not populate; step 4
+  # did not, so --only 4 would scan a target left behind — or step-6-clobbered —
+  # by a DIFFERENT process and report it as a leg of a PASS (PDS-D97). Checked
+  # BEFORE resolve_ammo: this costs nothing, while ammo resolution may reach for
+  # the source DB over SSH to answer a question this run cannot use.
+  if [ -z "${PULL_BUNDLE:-}" ]; then
+    abort 4 "step:1" \
+      "no bundle was imported this run, so the TARGET-DB leg below has nothing it can honestly attribute to this transcript. Re-run with step 1 selected (--only 1,4); a target populated by an earlier run is not evidence for this one."
+    return 0
+  fi
+
   if ! resolve_ammo; then
     abort 4 "env:no-ammo" \
       "no run-time ammo. The one real discriminator is webhooks.secret, which the HTTP API deliberately never re-exposes after creation, so ammo comes from the source DB (SSH, read-only) or from PDS_AMMO_FILE. A scan with no ammo is not a scan — it is refused rather than reported clean."
     return 0
   fi
 
-  local rc out unscanned
+  local rc out unscanned dev_leg
   out="$(mktmp)"
   rc=0
+  # Which legs actually ran is reported by the PASS line, never assumed by it.
+  dev_leg=0
   if [ -n "$DEV_BUNDLE" ]; then
     "$SCAN_SCRIPT" scan --bundle "$DEV_BUNDLE" --ammo-file "$AMMO_FILE" --profile dev >"$out" 2>&1 || rc=$?
     sed 's/^/      /' "$out"
@@ -1647,6 +1684,7 @@ step_4() {
       fail 4 "the scan could not run against the dev bundle (exit $rc)"
       return 0
     fi
+    dev_leg=1
     info "dev bundle: CLEAN"
   else
     info "no dev bundle from step 0a — the bundle half of this step did not run"
@@ -1684,7 +1722,16 @@ step_4() {
     "$SCAN_SCRIPT" scan --db "$TARGET_DB" --ammo-file "$AMMO_FILE" --profile dev >"$dout" 2>&1 || drc=$?
     sed 's/^/      /' "$dout"
     unscanned_n="$(sed -n 's/^NOTE: \([0-9][0-9]*\) table(s) were UNSCANNED.*/\1/p' "$dout" | tail -1)"
-    [ -n "$unscanned_n" ] || unscanned_n="$(grep -c 'counted as UNSCANNED' "$dout" 2>/dev/null || echo 0)"
+    if [ -z "$unscanned_n" ]; then
+      # grep -c PRINTS "0" *and* EXITS 1 on no-match, so `|| echo 0` fired BOTH
+      # sides and yielded the two-line string "0\n0". The -gt test below then
+      # errored to stderr ("integer expression expected") and evaluated FALSE —
+      # silently skipping the PDS-D68 gate, and dropping a raw bash error into an
+      # append-only evidence artifact. This fallback yields ONE integer (PDS-D99).
+      unscanned_n="$(grep -c 'counted as UNSCANNED' "$dout" 2>/dev/null || true)"
+      unscanned_n="${unscanned_n%%[!0-9]*}"
+      [ -n "$unscanned_n" ] || unscanned_n=0
+    fi
     tables_n="$(sed -n 's/.*tables scanned: \([0-9][0-9]*\).*/\1/p' "$dout" | tail -1)"
     info "target DB       exit=$drc · tables scanned=${tables_n:-?} · UNSCANNED=${unscanned_n:-0}"
     if [ "$drc" -eq 1 ]; then
@@ -1727,7 +1774,16 @@ step_4() {
     return 0
   fi
 
-  pass 4 "value-based scan, all three legs this run: the DEV bundle is CLEAN, the TARGET DATABASE is CLEAN over $tables_n table(s) with 0 UNSCANNED (gated here, not by the scan's own exit code), and the SAME ammo FIRES on the one full-fidelity bundle taken from the same source — the instrument is shown able to see before its silence is believed."
+  # The PASS names the legs that ACTUALLY ran. Claiming a DEV-bundle leg in the
+  # same breath as "no dev bundle from step 0a" printed twenty lines earlier is
+  # the kind of overclaim rung 4 exists to catch (PDS-D97).
+  local legs_ran
+  if [ "$dev_leg" -eq 1 ]; then
+    legs_ran="all three legs this run: the DEV bundle is CLEAN, the TARGET DATABASE"
+  else
+    legs_ran="two of three legs this run (NO dev bundle was available from step 0a, so that leg did NOT run and nothing here speaks to it): the TARGET DATABASE"
+  fi
+  pass 4 "value-based scan, $legs_ran is CLEAN over $tables_n table(s) with 0 UNSCANNED (gated here, not by the scan's own exit code), and the SAME ammo FIRES on the one full-fidelity bundle taken from the same source — the instrument is shown able to see before its silence is believed."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
