@@ -108,29 +108,86 @@
 // ASCENDING sweep stamps viewport 640 as `phone`, 1024 as `narrow` and 1280 as
 // `standard` — three of these nine widths, and at `phone` the pane columns are
 // `display: none` and every floor is neutralised, i.e. a completely different
-// layout. The cold-load state additionally re-navigates per row, which makes
-// each of its rows independent of the one before it regardless.
+// layout. Both inspector states sweep descending, and NEITHER reloads mid-sweep:
+// the `user-opened` marker is a server assign that a reload would reset, so a
+// fresh-nav-per-row shortcut is a DIFFERENT protocol, not an upgrade (D110).
 //
-// ── TWO ENTRY STATES, kept because the question is real even though the
-//    answer turned out to be "they agree" ──────────────────────────────────────
-// A user can reach a document two ways — by clicking down the desk, or by
-// opening its URL cold (a deep link, a reload, a restored tab) — and nobody in
-// five waves had checked whether those produce the same layout. This harness's
-// OWN first run said they did not: at viewport 900px it read the drilled state
-// as panes [44] / panel 856 / content 640 = 64.00ch and the cold-load state as
-// panes [44, 260] / panel 596 / content 516 = 51.60ch, which would have been a
-// live, unreported 124px defect and a seventh overturn.
+// ── Three more, learned when the epic nearly sealed on the wrong table ───────
 //
-// It was the INSTRUMENT'S bug, not the desk's. The cold-load rows were being
-// measured before the LiveView socket connected and pushed the width bucket, so
-// they captured the pre-connect server render — a transient that resolves in
-// well under a second. With `waitForDeskSettled()` in place the two states are
-// byte-identical at all nine widths (see the matrix). The near-miss is exactly
-// why the settle-wait exists and why every row records `settle`.
+//  10. THE SECOND AXIS IS THE INSPECTOR'S STATE, NOT THE NAVIGATION PATH
+//      (D110). This harness used to sweep `entry_state ∈ {drilled, cold-load}`
+//      — how the user ARRIVED. That axis was measured twice, at nine widths and
+//      three faces, and agreed in 54 of 54 cells across both runs: 27 rows per
+//      run re-proving that arrival does not matter, and ZERO rows on the axis
+//      that moves the answer by 219px. Meanwhile a grep of this file for any
+//      click on the inspector toggle returned nothing — the "two states" were
+//      never open vs closed. So: `inspector_state ∈ {default, user-opened}`.
+//      `default` is as served. `user-opened` is after a REAL click on
+//      `[data-test-id="sidebar-toggle-panel"]` through the live LiveView
+//      socket, because the marker the CSS yields to (`data-user-opened`) is
+//      SERVER-stamped from the `sidebar_user_opened` assign — a JS-set
+//      attribute would prove only that the stylesheet works, which was never
+//      in doubt. A click that does not take is an INSTRUMENT failure and the
+//      run dies; it is never recorded as a desk fact.
 //
-// Both states are still measured and still printed. The disagreement is gone
-// today; it is one server-render change away from coming back, and a harness
-// that stopped looking would not notice.
+//      Two clicks are needed at the top of the sweep and that is not a hack.
+//      `sidebar_toggle_panel/1` resolves a click against `width_bucket`: at
+//      `wide` (>=1280) the panel is genuinely open, so one click CLOSES it and
+//      a second re-opens it — and the re-open is the one that sets
+//      `sidebar_user_opened: true`. Below `wide` the panel is painted closed
+//      while the assign still says open, and the handler's `painted_closed?`
+//      branch makes a single click mean OPEN. The sweep must start at 1440
+//      (descending, D80), so it pays the two-click price once and then holds
+//      the marker for every row after it — no reload, because a reload builds
+//      a new socket and `sidebar_user_opened` seeds back to false.
+//
+//  11. OCCLUSION IS ATTRIBUTED BY DIFF, NEVER BY A HAND-MAINTAINED LIST
+//      (D112). The old test was one line — `iCs.position === 'absolute' ||
+//      'fixed'` — with exactly ONE element in its universe. It was honest the
+//      day it was written and structurally unable to stay honest: any overlay
+//      nobody had thought of yet was invisible to it. It is replaced by a
+//      hit-test, and its number is still printed as
+//      `legacy_inspector_subtraction_px` so no history is erased.
+//
+//      THE TRAP, proven live before this was written:
+//      `document.elementsFromPoint` structurally skips `pointer-events: none`
+//      AND never returns a pseudo-element. The scrim is BOTH
+//      (`.editor-with-preview:has(.bp-doc-sidebar.is-open)::after`,
+//      `pointer-events: none` deliberately — a click-catching scrim would
+//      swallow edits). So with the scrim painted over them, the leftmost
+//      samples return the IDENTICAL topmost element they return when no scrim
+//      exists at all. Every row is therefore sampled TWICE: once naturally,
+//      once with `pointer-events: auto` forced on the scrim via an INJECTED
+//      STYLESHEET (a pseudo has no inline style — a real deviation from this
+//      file's two existing inline-style mutate-measure-restore uses), and the
+//      scrim's footprint is the DIFF between the two.
+//
+//      Geometric occlusion is an ANCESTRY test, not a name match: at each
+//      sample point, is the topmost element the surface or a descendant of it?
+//      Anything else is covering the reader, whatever it is called — a modal
+//      backdrop, a sticky bar, an overlay nobody has written yet. That is what
+//      this design buys, and it is why matching against a known list is
+//      refused: `main.bp-paper-surface` is already topmost at one sampled point
+//      with no scrim at all, so a list would have to encode exceptions to its
+//      own exceptions.
+//
+//      A NON-VACUITY GUARD IS MANDATORY (D31/D39). An injected rule whose
+//      selector drifts out of sync with root.html.heex is a SILENT no-op, and a
+//      vacuous pass here would falsify the seal itself. So: in any row where
+//      the scrim actually renders, the forced sample MUST differ from the
+//      natural one, and a row where it does not kills the run naming the
+//      selector.
+//
+//  12. THE SCRIM DIMS, IT DOES NOT HIDE (D111). When it renders it covers the
+//      ENTIRE content box at 55% black. Folding that into `visible_content_px`
+//      makes the visible measure 0px at every sub-wide user-opened width, so no
+//      seal is ever possible there and the metric can no longer rank an
+//      improvement against a regression. Folding it into nothing is the epic's
+//      own chronic disease in a new costume. So `visible_content_px` answers
+//      one question only — CAN THE READER SEE THE GLYPH AT ALL — and the scrim
+//      is reported beside it as `dimmed_content_px` + `scrim_alpha`, named in
+//      every row it renders and never summed into the headline. Silence about
+//      it is what is forbidden; neither arithmetic alone is.
 //
 // ── Settling ────────────────────────────────────────────────────────────────
 // The width bucket is stamped into `html[data-width-bucket]` pre-paint by an
@@ -281,12 +338,22 @@ function readProvenance() {
 }
 
 /**
- * The bracket (D97). A sweep takes ~10 minutes; the deployment underneath it is
- * not frozen for our convenience. Returns a list of human-readable differences
+ * The bracket (D97). A full authenticated sweep has been observed at 29.8s,
+ * 30.9s, 32.8s and 59.7s — call it ~30-60s, and budget ~2min for the worst
+ * case, because a slot rotation landing mid-sweep roughly doubles the run
+ * (the 59.7s observation IS that case: `barkpark-slot@green` entered inside
+ * the window). Whatever the duration, the deployment underneath it is not
+ * frozen for our convenience. Returns a list of human-readable differences
  * between the pre-run and post-run reads — EMPTY means every row in between was
  * served by the same code from the same process.
  *
- * Exported so this can be exercised directly, without a 10-minute authenticated
+ * (The "~10 minutes" this comment used to claim was never measured and was off
+ * by ~20x — D115. It is a live false-blocker in both directions: a builder who
+ * believes it aborts a healthy 90s run as 9x over budget, or waits ten minutes
+ * before suspecting a genuine hang. Replaced with the observed range AND its
+ * worst case rather than one over-confident number swapped for another.)
+ *
+ * Exported so this can be exercised directly, without a full authenticated
  * run, which is the only way to know the check is not vacuous.
  */
 export function compareProvenance(pre, post) {
@@ -348,7 +415,12 @@ async function mintTicket({ base, token }) {
 // returns one fully self-describing record. Nothing here infers a box from
 // another box.
 
-const PAGE_MEASURE = /* js */ `
+// EXPORTED so its syntax can be checked without an authenticated run. This is
+// a template STRING, so `node --check` on this file says nothing about it — a
+// typo in here used to be discoverable only after ssh, a minted ticket, a login
+// and a drill, i.e. at the most expensive possible moment. `new Function(...)`
+// over this export parses it in milliseconds and costs nothing.
+export const PAGE_MEASURE = /* js */ `
 async (faceOverride) => {
   const px = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
   const round = (n, d = 3) => (n === null ? null : Math.round(n * 10 ** d) / 10 ** d);
@@ -486,37 +558,55 @@ async (faceOverride) => {
   const crumbs = document.querySelectorAll('.bp-desk-crumb').length;
   const crumbsVisible = crumbsHost ? getComputedStyle(crumbsHost).display !== 'none' : false;
 
-  // ── the inspector, in its DEFAULT state (server-default open — D57). The
-  //    LAYOUT measure and the VISIBLE measure are reported side by side: a
-  //    matrix that reports only the layout box reads as spin.
+  // ── the inspector. Its geometry is still REPORTED in full, and the old
+  //    subtraction it used to drive is still computed and printed as
+  //    \`legacy_inspector_subtraction_px\` — but it no longer AUTHORS
+  //    visible_content_px. That is now a hit-test (D112). Nothing here is
+  //    erased; the two numbers sit side by side so the delta is readable.
   //
-  //    THE DOCKED CASE IS NOT A MISSING SUBTRACTION — DO NOT "FIX" IT. When the
-  //    inspector is IN FLOW (computed position static/relative, i.e. docked) it
-  //    is a sibling column that already took its width out of the panel before
-  //    the surface was laid out. The surface's own content box is therefore
-  //    ALREADY the width the reader sees, and visible == content is the correct
-  //    answer, not an oversight. Subtracting the docked inspector's overlap here
-  //    would double-count it and under-report the visible measure at exactly the
-  //    two widths (1280, 1440) where this epic's verdict is MEET. We subtract
-  //    ONLY when the inspector is out of flow (absolute/fixed), where it covers
-  //    the column the surface was already sized for.
+  //    THE DOCKED CASE IS NOT A MISSING SUBTRACTION. When the inspector is IN
+  //    FLOW (computed position static/relative) it is a sibling column that
+  //    already took its width out of the panel before the surface was laid out,
+  //    so the surface's own content box is ALREADY the width the reader sees
+  //    and subtracting again would double-count. On the DEPLOYED build this is
+  //    the case at EVERY sub-wide width in the default state, not — as this
+  //    comment claimed until D115 — "at exactly the two widths (1280, 1440)":
+  //    spd-b29 turned the sub-wide overlay into a 41px in-flow strip, so
+  //    \`width_px\` reads 300 at 1440/1280 and 41 at 1024 and below. The hit-test
+  //    gets this right without being told, which is the point of it.
   const sidebar = document.querySelector('.bp-doc-sidebar');
   const sRect = surface.getBoundingClientRect();
+  const padT = px(sCs.paddingTop), padB = px(sCs.paddingBottom);
+  const borT = px(sCs.borderTopWidth), borB = px(sCs.borderBottomWidth);
   const contentLeft = sRect.left + borL + padL;
   const contentRight = sRect.right - borR - padR;
+  const contentTop = sRect.top + borT + padT;
+  const contentBottom = sRect.bottom - borB - padB;
+
   let inspector = { present: false };
-  let visibleContentPx = contentPx;
+  let legacySubtractionPx = null;
   if (sidebar) {
     const iCs = getComputedStyle(sidebar);
     const iR = sidebar.getBoundingClientRect();
     const overlapSurface = Math.max(0, Math.min(sRect.right, iR.right) - Math.max(sRect.left, iR.left));
     const overlapContent = Math.max(0, Math.min(contentRight, iR.right) - Math.max(contentLeft, iR.left));
     const overlays = iCs.position === 'absolute' || iCs.position === 'fixed';
-    if (overlays) visibleContentPx = contentPx - overlapContent;
+    legacySubtractionPx = overlays ? contentPx - overlapContent : contentPx;
     inspector = {
       present: true,
-      is_open: sidebar.classList.contains('is-open'),
-      default_state_note: 'server-default OPEN — this is the state a user lands in, not one this harness opened',
+      is_open_class: sidebar.classList.contains('is-open'),
+      user_opened_marker: sidebar.hasAttribute('data-user-opened'),
+      // D115: this used to read "server-default OPEN — this is the state a user
+      // lands in". That is now FALSE below \`wide\`. The server assign
+      // \`sidebar_open\` is still true, but spd-b29's
+      // \`html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])\`
+      // rule paints that same open panel as a 41px in-flow strip with its title
+      // and body \`display: none\`. So \`.is-open\` is a class, not a state, and
+      // the state a user lands in is READ HERE rather than asserted in prose.
+      default_state_note:
+        'is_open_class is the CLASS, not the painted state: below the wide bucket spd-b29 paints ' +
+        'an .is-open panel WITHOUT [data-user-opened] as a 41px in-flow strip (title/body display:none). ' +
+        'inspector_state on this row says which state was actually measured.',
       position: iCs.position,
       display: iCs.display,
       width_px: round(iR.width),
@@ -527,21 +617,285 @@ async (faceOverride) => {
     };
   }
 
-  // ── the scrim is an ::after pseudo-element on .editor-with-preview.
+  // ── the scrim is an ::after PSEUDO-ELEMENT on .editor-with-preview, and that
+  //    is the whole difficulty: elementsFromPoint never returns a pseudo, and
+  //    this one is also pointer-events:none, so it is doubly invisible to a
+  //    hit-test until we force it. See the occlusion block below.
   const withPreview = document.querySelector('.editor-with-preview');
   let scrim = { host_present: !!withPreview, renders: false };
+  const scrimCsBefore = withPreview ? getComputedStyle(withPreview, '::after') : null;
+  const alphaOf = (bg) => {
+    const m = String(bg).match(/rgba?\\(([^)]+)\\)/);
+    if (!m) return null;
+    const parts = m[1].split(/[,/]/).map((s) => parseFloat(s.trim()));
+    return parts.length >= 4 && Number.isFinite(parts[3]) ? parts[3] : 1;
+  };
   if (withPreview) {
-    const aCs = getComputedStyle(withPreview, '::after');
     scrim = {
       host_present: true,
-      renders: aCs.content !== 'none' && aCs.content !== 'normal',
-      content: aCs.content,
-      position: aCs.position,
-      background: aCs.backgroundColor,
-      pointer_events: aCs.pointerEvents,
-      z_index: aCs.zIndex,
+      renders: scrimCsBefore.content !== 'none' && scrimCsBefore.content !== 'normal',
+      content: scrimCsBefore.content,
+      position: scrimCsBefore.position,
+      background: scrimCsBefore.backgroundColor,
+      scrim_alpha: alphaOf(scrimCsBefore.backgroundColor),
+      pointer_events: scrimCsBefore.pointerEvents,
+      z_index: scrimCsBefore.zIndex,
     };
   }
+
+  // ══ OCCLUSION BY DIFF (D112) ═══════════════════════════════════════════════
+  //
+  // visible_content_px answers exactly one question — CAN THE READER SEE THE
+  // GLYPH AT ALL — and it answers it by hit-testing the content box rather than
+  // by consulting a hand-maintained list of things that might be on top. The
+  // list had exactly one entry and could not stay honest.
+  //
+  // The classification at each sampled point is an ANCESTRY test, never a name
+  // match: if the topmost element is the surface or a descendant of it, the
+  // reader sees the surface there. Anything else is covering it, whatever it is
+  // called. (A name match would be actively wrong here: main.bp-paper-surface is
+  // itself topmost at some sampled points, so a list would need exceptions to
+  // its own exceptions.)
+  //
+  // Three outcomes, not two. A point outside the viewport cannot be hit-tested
+  // at all — elementsFromPoint returns [] — and calling that "occluded" would
+  // silently merge D113's horizontal-overflow failure into this one. It is
+  // counted and reported separately as content_offscreen_px.
+  const SCAN_COLUMNS = 48;
+  const BISECT_TOL_PX = 0.5;
+  const VIS = 0, OCC = 1, OFF = 2;
+
+  const describe = (t) => {
+    if (!t) return '(nothing — outside the viewport)';
+    return t.tagName.toLowerCase() +
+      (t.id ? '#' + t.id : '') +
+      (t.className && typeof t.className === 'string'
+        ? '.' + t.className.trim().split(/\\s+/).slice(0, 3).join('.') : '');
+  };
+  const describeAt = (x, y) => {
+    if (x < 0 || y < 0 || x > window.innerWidth - 1 || y > window.innerHeight - 1) return '(offscreen)';
+    const stack = document.elementsFromPoint(x, y);
+    const top = stack[0] || null;
+    return describe(top) +
+      (top && (top === surface || surface.contains(top)) ? ' [surface or descendant]' : ' [OCCLUDER]');
+  };
+
+  const classifyAt = (x, y) => {
+    if (x < 0 || y < 0 || x > window.innerWidth - 1 || y > window.innerHeight - 1) return OFF;
+    const top = document.elementsFromPoint(x, y)[0] || null;
+    if (!top) return OFF;
+    return (top === surface || surface.contains(top)) ? VIS : OCC;
+  };
+
+  // Sub-pixel edges by bisection between adjacent disagreeing samples. The scan
+  // step bounds what can be DETECTED (a feature narrower than one step can be
+  // stepped over); the bisection bounds the PRECISION of every edge it finds.
+  // Both are reported, because a px figure whose resolution is unstated is a
+  // figure nobody can check.
+  const scanLineAt = (y) => {
+    const L = contentLeft, R = contentRight;
+    if (!(R > L)) return null;
+    const xs = [];
+    for (let i = 0; i < SCAN_COLUMNS; i++) xs.push(L + ((i + 0.5) * (R - L)) / SCAN_COLUMNS);
+    const cls = xs.map((x) => classifyAt(x, y));
+    const bounds = [L];
+    const labels = [];
+    const edges = [];
+    for (let i = 1; i < SCAN_COLUMNS; i++) {
+      if (cls[i] === cls[i - 1]) continue;
+      let lo = xs[i - 1], hi = xs[i];
+      const loCls = cls[i - 1];
+      while (hi - lo > BISECT_TOL_PX) {
+        const mid = (lo + hi) / 2;
+        if (classifyAt(mid, y) === loCls) lo = mid; else hi = mid;
+      }
+      const at = (lo + hi) / 2;
+      // NAME THE ELEMENT ON EACH SIDE OF THE EDGE. The sampled-column occluder
+      // list is 13px-grained and cannot identify a 1px-wide sliver; the first
+      // live run found the hit-test edge sitting ~1.04px LEFT of the
+      // inspector's own getBoundingClientRect().left and had no way to say
+      // what was in the gap. An unexplained systematic offset in the headline
+      // metric is exactly the kind of thing this epic has been burned by.
+      edges.push({
+        at_px: round(at), from: loCls, to: cls[i],
+        left_of_edge: describeAt(lo, y),
+        right_of_edge: describeAt(hi, y),
+      });
+      bounds.push(at);
+      labels.push(loCls);
+    }
+    labels.push(cls[SCAN_COLUMNS - 1]);
+    bounds.push(R);
+    const acc = [0, 0, 0];
+    for (let k = 0; k < labels.length; k++) acc[labels[k]] += bounds[k + 1] - bounds[k];
+    return {
+      y: round(y, 1),
+      visible_px: round(acc[VIS]),
+      occluded_px: round(acc[OCC]),
+      offscreen_px: round(acc[OFF]),
+      // What was ON TOP where the reader was covered — DISCOVERED, not matched.
+      // This is diagnostic only: nothing above branches on it.
+      occluders: [...new Set(xs.filter((x, i) => cls[i] === OCC)
+        .map((x) => describe(document.elementsFromPoint(x, y)[0])))],
+      edges,
+    };
+  };
+
+  // ── WHERE TO PUT THE SCANLINES. This is the part that is easy to get wrong
+  //    and was, on the first live run: clamping a scanline to the viewport edge
+  //    put it on div.studio-footer, which reported 0px visible and — under a
+  //    MIN headline — zeroed a row whose other two scanlines both read the
+  //    correct 640px. A footer is HORIZONTAL chrome below the text. It does not
+  //    narrow the reading COLUMN, which is the only thing this metric measures.
+  //
+  //    So: the band is the intersection of the content box with the viewport
+  //    (never the viewport edge itself), and the lines sit at 10/30/50/70/90%
+  //    INSIDE it. Five, not three, so the headline can be a MEDIAN — robust to
+  //    two outlying lines, while a genuine full-height overlay (the case this
+  //    epic is about) moves all five together and is not smoothed away at all.
+  const bandTop = Math.max(contentTop, 0);
+  const bandBottom = Math.min(contentBottom, window.innerHeight - 1);
+  const bandHeight = bandBottom - bandTop;
+  const SCANLINE_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
+  const scanYs = bandHeight > 2
+    ? [...new Set(SCANLINE_FRACTIONS.map((f) => round(bandTop + f * bandHeight, 1)))]
+    : [];
+
+  const naturalLines = scanYs.map(scanLineAt).filter(Boolean);
+
+  // ── the forced sample. A pseudo-element has NO inline style, so the two
+  //    mutate-measure-restore sites above (which set element.style) cannot
+  //    reach it. An injected stylesheet can. This is a real deviation from this
+  //    file's established pattern and is deliberate.
+  //
+  //    THE SELECTOR IS A LIABILITY AND IS TREATED AS ONE. It is copied from
+  //    root.html.heex, and if that file's scrim selector moves, this rule
+  //    silently matches nothing and every dimming figure quietly becomes zero —
+  //    a vacuous pass, which for THIS metric would falsify the seal itself
+  //    (D31/D39). The non-vacuity guard below is what makes the drift loud.
+  //    THE LIMIT OF THIS, STATED PLAINLY: the forced sample forces exactly ONE
+  //    known pointer-events:none occluder — the scrim. An ELEMENT occluder that
+  //    is also pointer-events:none, and that nobody has written yet, would be
+  //    invisible to BOTH samples and would silently not be subtracted. The
+  //    ancestry test catches every normal overlay automatically; it does not
+  //    catch an invisible-to-hit-testing one. Forcing pointer-events globally
+  //    was considered and rejected: it would make every decorative
+  //    pointer-events:none element (icons, gradients, rules) read as an
+  //    occluder and the metric would collapse to noise. This is a real
+  //    remaining hole and is named here rather than left for a verifier to find.
+  const SCRIM_SELECTOR = '.editor-with-preview:has(.bp-doc-sidebar.is-open)::after';
+
+  // Snapshot BEFORE injecting, as STRINGS. getComputedStyle returns a LIVE
+  // object: holding one and reading it after the restore would compare the page
+  // to itself and pass no matter what happened. That is the exact shape of
+  // vacuous check this slice exists to abolish, so it is spelled out here.
+  const DUMP_PROPS = ['content', 'position', 'inset', 'top', 'right', 'bottom', 'left',
+                      'width', 'height', 'z-index', 'background-color', 'pointer-events'];
+  const dump = (el, pseudo) => {
+    if (!el) return null;
+    const cs = getComputedStyle(el, pseudo || null);
+    return DUMP_PROPS.map((p) => p + ':' + cs.getPropertyValue(p)).join(';');
+  };
+  const hostBeforeDump = dump(withPreview, null);
+  const pseudoBeforeDump = dump(withPreview, '::after');
+
+  const styleEl = document.createElement('style');
+  styleEl.setAttribute('data-desk-measure', 'scrim-hit-test');
+  styleEl.textContent = SCRIM_SELECTOR + ' { pointer-events: auto !important; }';
+  document.head.appendChild(styleEl);
+
+  const forcedPointerEvents = withPreview
+    ? getComputedStyle(withPreview, '::after').pointerEvents : null;
+  const forcedLines = scanYs.map(scanLineAt).filter(Boolean);
+
+  styleEl.remove();
+
+  // ── RESTORE IS ASSERTED, NOT ASSUMED. Byte-identical or the row is poison.
+  const restoreCheck = {
+    injected_rule: SCRIM_SELECTOR + ' { pointer-events: auto !important; }',
+    sheet_removed: !document.querySelector('style[data-desk-measure]'),
+    host_before: hostBeforeDump,
+    host_after: dump(withPreview, null),
+    pseudo_before: pseudoBeforeDump,
+    pseudo_after: dump(withPreview, '::after'),
+    pointer_events_natural: scrim.pointer_events ?? null,
+    pointer_events_forced: forcedPointerEvents,
+  };
+  restoreCheck.host_identical = restoreCheck.host_before === restoreCheck.host_after;
+  restoreCheck.pseudo_identical = restoreCheck.pseudo_before === restoreCheck.pseudo_after;
+  restoreCheck.byte_identical =
+    restoreCheck.sheet_removed && restoreCheck.host_identical && restoreCheck.pseudo_identical;
+
+  // ── the numbers. visible = GEOMETRIC occlusion only (the natural sample).
+  //    The worst scanline is the headline, because the reader reads every line
+  //    and the narrowest one is what they actually get; all three are reported
+  //    so a partial-height occluder is visible as a disagreement rather than
+  //    averaged into invisibility.
+  const median = (xs) => {
+    const a = [...xs].sort((p, q) => p - q);
+    return a.length ? a[Math.floor(a.length / 2)] : null;
+  };
+  const natVisible = naturalLines.map((l) => l.visible_px);
+  const visibleContentPx = natVisible.length ? median(natVisible) : contentPx;
+  const offscreenPx = naturalLines.length ? Math.max(...naturalLines.map((l) => l.offscreen_px)) : 0;
+  // The spread is REPORTED, never smoothed. Five agreeing lines and five wildly
+  // disagreeing ones must not print the same way: a disagreement means some
+  // occluder covers part of the column's height, which is a real finding about
+  // the desk and is exactly what a lone median would hide.
+  const scanlineSpread = {
+    min_px: natVisible.length ? Math.min(...natVisible) : null,
+    max_px: natVisible.length ? Math.max(...natVisible) : null,
+    disagreement_px: natVisible.length ? round(Math.max(...natVisible) - Math.min(...natVisible)) : null,
+    all_px: natVisible,
+    note:
+      'headline is the MEDIAN of the scanlines. A full-height overlay — the case this epic exists ' +
+      'for — moves every line together, so median == min == max and nothing is smoothed. A nonzero ' +
+      'disagreement_px means something covers only PART of the column height (the first live run ' +
+      'found div.studio-footer this way) and the per-line figures below say where.',
+  };
+
+  // ── the scrim's footprint IS THE DIFF, and only the diff. Not a name match,
+  //    not the host's rect, not an assumption that inset:0 means "everything":
+  //    the extra ground the forced sample loses is exactly the ground the scrim
+  //    was covering invisibly.
+  const dimmedByLine = naturalLines.map((nat, i) => {
+    const f = forcedLines[i];
+    if (!f) return null;
+    return round(Math.max(0, f.occluded_px - nat.occluded_px));
+  }).filter((v) => v !== null);
+  const dimmedContentPx = dimmedByLine.length ? Math.max(...dimmedByLine) : 0;
+
+  // ── THE NON-VACUITY GUARD (D31/D39). If the scrim renders, forcing its
+  //    pointer-events MUST change the hit-test. If it does not, the injected
+  //    selector has drifted out of sync with root.html.heex and every dimming
+  //    figure in this run is a silent zero. That is not a number to publish
+  //    with a caveat — it is a broken instrument, and the run must die.
+  const scrimRenders = !!scrim.renders;
+  const forcedDiffers = naturalLines.some((nat, i) =>
+    forcedLines[i] && forcedLines[i].occluded_px > nat.occluded_px + BISECT_TOL_PX);
+  const nonVacuity = {
+    scrim_renders: scrimRenders,
+    forced_sample_differs: forcedDiffers,
+    scanlines_taken: naturalLines.length,
+    // The guard only has an opinion where there IS a scrim to detect AND at
+    // least one scanline was actually taken. Where the scrim does not render,
+    // "no difference" is the CORRECT answer and proves nothing either way —
+    // which is stated rather than dressed up as a pass. And where no scanline
+    // could be placed (the content box and the viewport barely intersect) there
+    // is no sample to differ, so firing the fatal guard there would kill a run
+    // over a geometry problem while claiming a selector problem.
+    guard_applies: scrimRenders && naturalLines.length > 0,
+    guard_passed: (scrimRenders && naturalLines.length > 0) ? forcedDiffers : null,
+    natural_occluded_px_by_line: naturalLines.map((l) => l.occluded_px),
+    forced_occluded_px_by_line: forcedLines.map((l) => l.occluded_px),
+    method:
+      'the scrim renders on this row, so forcing pointer-events:auto on ' + SCRIM_SELECTOR +
+      ' must make the hit-test lose ground it did not lose naturally. If it does not, the ' +
+      'injected selector no longer matches root.html.heex and every dimming figure is a silent zero.',
+  };
+
+  scrim.covers_content_fully = scrimRenders && naturalLines.length > 0 &&
+    forcedLines.every((l) => l && l.visible_px <= BISECT_TOL_PX);
 
   const pR = panel.getBoundingClientRect();
 
@@ -601,7 +955,54 @@ async (faceOverride) => {
     surface_max_width_px: maxWidthPx,
     content_px: round(contentPx),
     visible_content_px: round(visibleContentPx),
-    measure_note: 'content_px is the LAYOUT measure; visible_content_px subtracts the inspector overlap where the inspector is out of flow (D57). Where the inspector is DOCKED (in flow) visible == content by design: layout already shrank the surface, so subtracting again would double-count.',
+    content_offscreen_px: round(offscreenPx),
+    dimmed_content_px: round(dimmedContentPx),
+    scrim_alpha: scrim.scrim_alpha ?? null,
+    legacy_inspector_subtraction_px: legacySubtractionPx === null ? null : round(legacySubtractionPx),
+    // The two methods side by side, with their disagreement stated as a number.
+    // They are NOT expected to agree to the pixel — the legacy figure is pure
+    // rectangle arithmetic on the inspector's own box, while the hit-test asks
+    // what is actually on top and therefore also sees anything the arithmetic
+    // never knew about. A delta is a FINDING, not noise to be smoothed.
+    visible_vs_legacy_delta_px: legacySubtractionPx === null
+      ? null : round(visibleContentPx - legacySubtractionPx),
+    occlusion: {
+      method:
+        'hit-test by DIFF (D112). At each sampled point the topmost element is classified by ANCESTRY ' +
+        '(is it .bp-paper-surface or a descendant?) — never matched against a list of known occluders. ' +
+        'Each scanline is sampled at ' + SCAN_COLUMNS + ' columns across the content box and every ' +
+        'class boundary is then bisected to +/-' + BISECT_TOL_PX + 'px.',
+      resolution_note:
+        'DETECTION is bounded by the scan step (content_px/' + SCAN_COLUMNS + ' px — an occluder ' +
+        'narrower than one step can be stepped over entirely); PRECISION of every edge found is ' +
+        'bounded by the bisection tolerance, +/-' + BISECT_TOL_PX + 'px. Both bound every px figure here.',
+      scan_columns: SCAN_COLUMNS,
+      bisect_tolerance_px: BISECT_TOL_PX,
+      scan_step_px: round((contentRight - contentLeft) / SCAN_COLUMNS),
+      scanlines_natural: naturalLines,
+      scanlines_forced: forcedLines,
+      scanline_placement:
+        'five lines at 10/30/50/70/90% of the INTERSECTION of the content box with the viewport — ' +
+        'never at the viewport edge, which on the first live run put a line on div.studio-footer and ' +
+        'reported 0px visible for a row whose other lines both read the correct 640px',
+      scanline_spread: scanlineSpread,
+      headline_rule:
+        'visible_content_px is the MEDIAN visible_px across the scanlines. Median, not min: horizontal ' +
+        'chrome at the top or bottom of the column (a footer, a toast) does not narrow the reading ' +
+        'COLUMN, and under a min rule one such line silently zeroes the row. Median, not mean: a real ' +
+        'full-height overlay moves every line together and must not be diluted. scanline_spread carries ' +
+        'the min, the max and the disagreement so nothing is hidden by the choice.',
+      non_vacuity: nonVacuity,
+      restore: restoreCheck,
+    },
+    measure_note:
+      'content_px is the LAYOUT measure. visible_content_px is GEOMETRIC occlusion only, derived by ' +
+      'hit-test diff (D112) — can the reader see the glyph at all. dimmed_content_px + scrim_alpha are ' +
+      'reported SEPARATELY and are NEVER folded into visible_content_px (D111): the scrim dims, it does ' +
+      'not hide, and counting it as occlusion would make visible 0px at every sub-wide user-opened width, ' +
+      'so no seal could ever be taken there and the metric could no longer rank an improvement. ' +
+      'legacy_inspector_subtraction_px is what the OLD one-entry-list subtraction would have said, kept ' +
+      'beside the new number so the delta is readable and no history is erased.',
     criterion_ch: CRITERION_CH,
     content_ch: round(contentCh, 2),
     content_meets_55ch: contentCh === null ? null : contentCh >= CRITERION_CH,
@@ -733,8 +1134,8 @@ async function tryOpenRow(page, row, { timeoutMs = 20_000 } = {}) {
 }
 
 /** Drill by CLICKING, exactly as a user does: root desk -> Papers -> document.
- *  Returns the document path the drill landed on, so the cold-load state
- *  measures the very same document.
+ *  Returns the document path the drill landed on, so both inspector states
+ *  measure the very same document.
  *
  *  DETERMINISM (D97). The Papers list is ordered newest-first and concurrent
  *  epic waves publish into it continuously, so "the first row" is a moving
@@ -817,6 +1218,196 @@ async function drillToDocument(page, base, target) {
     skipped.map((s) => `      skipped ${s}`).join('\n'));
 }
 
+// ── the user-opened state, reached the way a user reaches it ─────────────────
+
+/**
+ * Click `[data-test-id="sidebar-toggle-panel"]` for real, through the live
+ * LiveView socket, until the SERVER stamps `data-user-opened` on the aside.
+ *
+ * WHY IT CAN TAKE TWO CLICKS, and why that is the handler being right rather
+ * than this being a hack. `Handlers.Paper.sidebar_toggle_panel/1` resolves a
+ * click against the `width_bucket` assign:
+ *
+ *   - at `wide` (>=1280) the panel is genuinely open, so the first click means
+ *     CLOSE (`sidebar_open: false, sidebar_user_opened: false`) and the second
+ *     means OPEN — and it is the second that stamps the marker;
+ *   - below `wide` the panel is PAINTED closed while `sidebar_open` is still
+ *     true, and the handler's `painted_closed?` branch makes one click mean
+ *     OPEN, so the marker lands immediately.
+ *
+ * The sweep starts at 1440 (descending, D80), so it pays the two-click price
+ * once. Rather than hardcode "two clicks at wide" — which would rot the moment
+ * the handler changed — we click until the marker appears, with a hard cap, and
+ * REPORT how many it took. A cap-exhausting failure is an INSTRUMENT failure
+ * (D97): it says the harness never reached the state it names, and nothing
+ * whatsoever about the desk's layout.
+ */
+async function openInspectorByRealClick(page, { maxClicks = 3 } = {}) {
+  const toggle = page.locator('[data-test-id="sidebar-toggle-panel"]').first();
+  if (await toggle.count() === 0) {
+    die(`INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
+        `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
+        `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
+        `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
+  }
+
+  const observe = () => page.evaluate(() => {
+    const sb = document.querySelector('.bp-doc-sidebar');
+    if (!sb) return null;
+    const cs = getComputedStyle(sb);
+    const r = sb.getBoundingClientRect();
+    return {
+      user_opened: sb.hasAttribute('data-user-opened'),
+      is_open_class: sb.classList.contains('is-open'),
+      position: cs.position,
+      transform: cs.transform,
+      left_px: Math.round(r.left * 100) / 100,
+      width_px: Math.round(r.width * 100) / 100,
+      z_index: cs.zIndex,
+      bucket: document.documentElement.getAttribute('data-width-bucket'),
+    };
+  });
+
+  const before = await observe();
+  const clicks = [];
+  for (let i = 1; i <= maxClicks; i++) {
+    await toggle.click({ timeout: 10_000 });
+    // The marker comes back over the socket, not from the click — wait for the
+    // round trip rather than for a fixed delay.
+    await page.waitForTimeout(150);
+    await waitForDeskSettled(page);
+    const after = await observe();
+    clicks.push({ click: i, after });
+    if (after?.user_opened) {
+      return {
+        reached: true,
+        clicks_needed: i,
+        method: 'real click on [data-test-id="sidebar-toggle-panel"] through the live LiveView socket — ' +
+                'NOT a JS-set attribute. data-user-opened is server-stamped from the sidebar_user_opened ' +
+                'assign, so a simulated attribute would prove only that the CSS works (D110).',
+        before,
+        after,
+        click_log: clicks,
+        note: i > 1
+          ? `${i} clicks: at the wide bucket the panel is genuinely open, so the first click CLOSED it ` +
+            `and the next re-opened it as an explicit user request — which is the one that stamps the marker.`
+          : 'one click: below the wide bucket the panel is painted closed, so a click means OPEN.',
+      };
+    }
+  }
+  die(`INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
+      `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
+      `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
+      `recorded as one (D97).\n\n  What it saw after each click:\n` +
+      clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+}
+
+// ── spd-b29's two deferred criteria ──────────────────────────────────────────
+
+/**
+ * c2 (NO FLASH) and c3 (REACHABLE), both at viewport 1024, both single
+ * observations spd-b29's builder explicitly deferred past merge. Diagnostic
+ * output only — this function has no more gate authority than the rest of the
+ * instrument (D81).
+ *
+ * c2 is the one that needs care. D12's refuted shape was a SERVER-seeded close
+ * that painted the panel open for ~400ms before collapsing it, so "does it
+ * flash" cannot be answered by looking at the settled DOM — by then any flash
+ * is over. The sampler is installed at `document_start`, before the document
+ * exists, and records the sidebar's painted geometry on EVERY animation frame
+ * from first paint onward. A flash would appear as early frames at overlay
+ * width followed by a transition to the strip.
+ */
+async function runB29Probes(page, base, docPath) {
+  const PROBE_WIDTH = 1024;
+  const SAMPLE_MS = 2500;
+
+  await page.addInitScript(({ sampleMs }) => {
+    window.__b29 = { frames: [], t0: performance.now(), sample_ms: sampleMs };
+    const tick = () => {
+      const sb = document.querySelector('.bp-doc-sidebar');
+      const el = document.documentElement;
+      if (sb) {
+        const cs = getComputedStyle(sb);
+        const r = sb.getBoundingClientRect();
+        window.__b29.frames.push({
+          t_ms: Math.round(performance.now() - window.__b29.t0),
+          position: cs.position,
+          width_px: Math.round(r.width * 100) / 100,
+          left_px: Math.round(r.left * 100) / 100,
+          display: cs.display,
+          user_opened: sb.hasAttribute('data-user-opened'),
+          is_open_class: sb.classList.contains('is-open'),
+          bucket: el.getAttribute('data-width-bucket'),
+        });
+      }
+      if (performance.now() - window.__b29.t0 < sampleMs) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, { sampleMs: SAMPLE_MS });
+
+  await page.setViewportSize({ width: PROBE_WIDTH, height: 900 });
+  await page.goto(base + docPath, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
+  await waitForDeskSettled(page);
+  await page.waitForTimeout(SAMPLE_MS + 250);
+
+  const frames = await page.evaluate(() => (window.__b29?.frames ?? []));
+
+  // A "visible" frame is one where the panel is painted at overlay scale rather
+  // than as the 41px strip. The threshold is stated, not hidden: the strip
+  // measures ~41px and the overlay 300px, so 100px separates them with room to
+  // spare either side.
+  const OVERLAY_WIDTH_THRESHOLD_PX = 100;
+  const sig = (f) => `${f.position}|${f.width_px}|${f.display}|${f.user_opened}`;
+  let transitions = 0;
+  for (let i = 1; i < frames.length; i++) if (sig(frames[i]) !== sig(frames[i - 1])) transitions++;
+  const visibleFrames = frames.filter((f) => f.width_px >= OVERLAY_WIDTH_THRESHOLD_PX);
+
+  const c2 = {
+    criterion: 'spd-b29 c2 — NO FLASH: the inspector must never paint as an overlay before collapsing',
+    viewport_px: PROBE_WIDTH,
+    sampler: 'installed at document_start via addInitScript, sampling requestAnimationFrame from first paint',
+    sample_window_ms: SAMPLE_MS,
+    frames_captured: frames.length,
+    first_frame: frames[0] ?? null,
+    last_frame: frames[frames.length - 1] ?? null,
+    overlay_width_threshold_px: OVERLAY_WIDTH_THRESHOLD_PX,
+    overlay_frames: visibleFrames.length,
+    overlay_frame_times_ms: visibleFrames.map((f) => f.t_ms),
+    transitions,
+    distinct_states: [...new Set(frames.map(sig))],
+    flash_observed: visibleFrames.length > 0,
+    note:
+      'D12 measured the refuted server-seeded shape at ~400ms of panel-on-text on every document open. ' +
+      'A flash would show as early frames at >=' + OVERLAY_WIDTH_THRESHOLD_PX + 'px followed by a ' +
+      'transition down to the ~41px strip. overlay_frames counts them.',
+  };
+
+  // c3 — REACHABLE. The same real click the user-opened axis performs, taken
+  // here at 1024 where the reachability question actually lives, with the
+  // resulting geometry recorded.
+  const beforeClick = await page.evaluate(() => {
+    const sb = document.querySelector('.bp-doc-sidebar');
+    const cs = getComputedStyle(sb);
+    const r = sb.getBoundingClientRect();
+    return { position: cs.position, transform: cs.transform,
+             left_px: Math.round(r.left * 100) / 100, width_px: Math.round(r.width * 100) / 100 };
+  });
+  const opened = await openInspectorByRealClick(page);
+  const c3 = {
+    criterion: 'spd-b29 c3 — REACHABLE: the inspector must still be reachable at every width, proven by a real click',
+    viewport_px: PROBE_WIDTH,
+    before_click: beforeClick,
+    after_click: opened.after,
+    clicks_needed: opened.clicks_needed,
+    control: '[data-test-id="sidebar-toggle-panel"]',
+    method: opened.method,
+  };
+
+  return { c2, c3, probe_note: 'diagnostic only — no gate authority (D81)' };
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -848,16 +1439,28 @@ async function main() {
     sweep_note:
       'Descending (D80). The width-bucket dead-band is widen-only and re-anchors to the bucket ' +
       'currently held, so an ASCENDING sweep stamps viewport 640 as `phone`, 1024 as `narrow` ' +
-      'and 1280 as `standard` — three of these nine widths. The cold-load state additionally ' +
-      're-navigates per row; the drilled state cannot reload without destroying the state it names.',
-    entry_states_note:
-      'Two entry states, because a user can reach a document two ways and nobody had checked ' +
-      'whether they agree. `drilled` = clicked root desk -> Papers -> document (the state ' +
-      'D49/D74 measured). `cold-load` = the same document URL opened fresh, as a deep link, a ' +
-      'reload or a restored tab does. They agree at all nine widths on this run. This harness\'s ' +
-      'own first run said they differed by 124px at viewport 900px — that was the instrument ' +
-      'measuring before the LiveView socket pushed the width bucket, not a defect in the desk, ' +
-      'and it is why every row now carries `settle`.',
+      'and 1280 as `standard` — three of these nine widths. BOTH inspector states sweep descending ' +
+      'and neither reloads mid-sweep: `user-opened` is a server assign that a reload resets, so a ' +
+      'fresh-nav-per-row shortcut is a DIFFERENT protocol, not an upgrade. The one navigation between ' +
+      'the states re-enters at 1440 from the raw band, which descending and reload agree on.',
+    inspector_states_note:
+      'The second axis is `inspector_state` (D110). `default` = the desk as served. `user-opened` = ' +
+      'after a REAL click on [data-test-id="sidebar-toggle-panel"] through the live LiveView socket — ' +
+      'not a JS-set attribute, because `data-user-opened` is stamped by the SERVER from the ' +
+      '`sidebar_user_opened` assign and a simulated attribute would prove only that the CSS works. ' +
+      'It REPLACED `entry_state` ∈ {drilled, cold-load}, which was measured twice at nine widths and ' +
+      'three faces and agreed in 54 of 54 cells both times: 27 rows per run spent re-proving that how ' +
+      'the reader arrived does not matter, and zero rows on the axis that moves the answer by 219px. ' +
+      'Neither state reloads mid-sweep — the marker is a server assign a reload would reset.',
+    occlusion_note:
+      'visible_content_px is GEOMETRIC occlusion, derived by HIT-TEST DIFF (D112): the topmost element ' +
+      'at each sampled point is classified by ANCESTRY (surface or descendant?), never matched against ' +
+      'a list of known occluders — the old list had exactly one entry and could not stay honest. The ' +
+      'scrim is pointer-events:none AND a pseudo-element, so elementsFromPoint is doubly blind to it; ' +
+      'every row is therefore sampled twice, once naturally and once with pointer-events forced via an ' +
+      'INJECTED STYLESHEET, and the scrim\'s footprint is the DIFF. It is reported as dimmed_content_px ' +
+      '+ scrim_alpha and NEVER folded into visible_content_px (D111) — the scrim dims, it does not hide. ' +
+      'legacy_inspector_subtraction_px preserves what the old subtraction would have said.',
     faces_note:
       'Each face is ACTUALLY forced via --paper-font-serif on .bp-paper-surface and the WHOLE ' +
       'box re-measured under it. No ch figure anywhere divides one face box by another face ' +
@@ -889,8 +1492,8 @@ async function main() {
     }
     run.landed_authenticated_url = page.url();
 
-    // ── the drilled state, reached the way a user reaches it. This also tells
-    //    us WHICH document to cold-load, so both states measure the same one.
+    // ── drill in, the way a user reaches a document. This also fixes WHICH
+    //    document both inspector states measure.
     await page.setViewportSize({ width: WIDTHS[0], height: 900 });
     const drill = await drillToDocument(page, srv.base, docTarget);
     const docPath = drill.path;
@@ -951,12 +1554,73 @@ async function main() {
             `${rec.font.requested_primary}, resolved ${rec.font.resolved_family} — ` +
             `this row's ch is NOT the named face.`);
         }
+
+        // ── THE NON-VACUITY GUARD IS FATAL (D31/D39/D112). Where the scrim
+        //    renders, forcing its pointer-events MUST move the hit-test. If it
+        //    does not, the injected selector no longer matches root.html.heex,
+        //    every dimming figure in this run is a silent zero, and a vacuous
+        //    pass on THIS metric would falsify the seal itself. There is no
+        //    caveat that makes that publishable.
+        const nv = rec.occlusion?.non_vacuity;
+        if (nv?.guard_applies && !nv.forced_sample_differs) {
+          die(`NON-VACUITY GUARD FAILED at viewport ${width}px, state "${state}", face ${face.id}. ` +
+              `The scrim RENDERS here (content ${rec.scrim.content}, background ${rec.scrim.background}) ` +
+              `but forcing pointer-events:auto on it changed the hit-test by nothing: natural occluded ` +
+              `${JSON.stringify(nv.natural_occluded_px_by_line)}px vs forced ` +
+              `${JSON.stringify(nv.forced_occluded_px_by_line)}px.\n\n` +
+              `  The injected rule is:\n    ${rec.occlusion.restore.injected_rule}\n\n` +
+              `  Almost certainly its selector has drifted out of sync with root.html.heex's scrim rule. ` +
+              `A drifted selector is a SILENT no-op — every dimmed_content_px in this run would read 0 ` +
+              `and look like good news. Re-sync the selector; do not publish this matrix.`);
+        }
+
+        // ── RESTORE MUST BE BYTE-IDENTICAL. This harness mutates a live page it
+        //    then keeps measuring; a mutation it failed to undo is a state THIS
+        //    HARNESS INVENTED, silently inherited by every row after it.
+        const rst = rec.occlusion?.restore;
+        if (rst && !rst.byte_identical) {
+          die(`RESTORE FAILED at viewport ${width}px, state "${state}", face ${face.id} — the page was ` +
+              `not returned to the state it was found in, so every row after this one would measure a ` +
+              `page this harness invented.\n` +
+              `  injected sheet removed: ${rst.sheet_removed}\n` +
+              `  host identical:         ${rst.host_identical}\n` +
+              `    before: ${rst.host_before}\n    after:  ${rst.host_after}\n` +
+              `  pseudo identical:       ${rst.pseudo_identical}\n` +
+              `    before: ${rst.pseudo_before}\n    after:  ${rst.pseudo_after}`);
+        }
+
+        // ── the user-opened state's own assertion. The marker being present is
+        //    already fatal upstream (that is "did the click take"). THIS is the
+        //    desk observation D108 turned on: below `wide`, an explicitly-opened
+        //    inspector leaves flow and overlays the reading column. If that ever
+        //    stops being true it is a DESK CHANGE — plausibly the successor
+        //    slice's fix landing — so it is reported loudly rather than made
+        //    fatal, which would leave the harness unable to measure a fixed desk.
+        let overlayAsserted = null;
+        if (state === 'user-opened' && rec.inspector.present) {
+          const subWide = rec.width_bucket_stamped !== 'wide';
+          overlayAsserted = rec.inspector.position === 'absolute';
+          if (subWide && !overlayAsserted) {
+            run.warnings.push(
+              `viewport ${width}px / user-opened / face "${face.id}": bucket ` +
+              `"${rec.width_bucket_stamped}" is sub-wide and [data-user-opened] IS present, but the ` +
+              `inspector reports position "${rec.inspector.position}", not "absolute". D108 measured ` +
+              `absolute here. Either the desk changed (a successor fix landing — check before reading ` +
+              `these rows as the old defect) or the marker is not doing what it did.`);
+          }
+        }
+
         run.rows.push({
           // Per-row wall clock (D97). Without it a bracket mismatch tells you
           // THAT the deployment moved but not WHICH rows straddle it.
           measured_at: new Date().toISOString(),
           viewport_px: width,
-          entry_state: state,
+          // D110: this axis used to be `entry_state` ∈ {drilled, cold-load} —
+          // how the reader ARRIVED — which agreed in 54 of 54 cells across two
+          // runs. It is now the inspector's state, which moves the answer by
+          // 219px on the single interaction this epic is about.
+          inspector_state: state,
+          user_opened_overlay_asserted: overlayAsserted,
           face: face.id,
           face_forced_to: face.override,
           face_note: face.note,
@@ -974,23 +1638,51 @@ async function main() {
       });
     };
 
-    // State A — DRILLED. Descending, and deliberately NO reload: a reload is
-    // exactly what turns this state into the other one.
+    // ── STATE A — DEFAULT. As served. Descending (D80), no reload, no clicks.
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      await sweepRow(width, 'drilled');
+      await sweepRow(width, 'default');
     }
 
-    // State B — COLD-LOAD. Descending, with a fresh navigation per row.
+    // ── STATE B — USER-OPENED. The state the epic was filed about: a reader who
+    //    opens the panel to check metadata. Reached by a REAL click through the
+    //    live socket, because `data-user-opened` is stamped by the SERVER from
+    //    the `sidebar_user_opened` assign — setting the attribute from JS would
+    //    prove the stylesheet works and nothing else (D110).
+    //
+    //    Re-navigate first: the sweep must restart at 1440 and widening from 500
+    //    would drag the bucket dead-band's anchor up with it (D80). A fresh load
+    //    re-stamps the bucket from the raw band, which is the state descending
+    //    and reload both agree on.
+    await page.setViewportSize({ width: WIDTHS[0], height: 900 });
+    await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
+    if (/\/login(\b|\/|$)/.test(new URL(page.url()).pathname)) {
+      die(`the document URL redirected to ${page.url()} — session lost between the two states`);
+    }
+    await waitForDeskSettled(page);
+    run.user_opened_proof = await openInspectorByRealClick(page);
+
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
-      if (/\/login(\b|\/|$)/.test(new URL(page.url()).pathname)) {
-        die(`the document URL redirected to ${page.url()} at viewport ${width}px — session lost mid-sweep`);
+      // The marker is a server assign and survives a viewport change — but if it
+      // ever stops surviving one, every row after that point would silently be a
+      // DEFAULT-state row wearing a user-opened label. Re-asserted per row.
+      const stillOpen = await page.evaluate(() =>
+        !!document.querySelector('.bp-doc-sidebar[data-user-opened]'));
+      if (!stillOpen) {
+        die(`INSTRUMENT FAILURE — the [data-user-opened] marker vanished at viewport ${width}px, ` +
+            `between rows of the user-opened sweep. Every row after this would be a DEFAULT-state ` +
+            `measurement labelled "user-opened", which is the exact class of mislabelling this ` +
+            `axis was added to prevent. This says nothing about the desk's layout.`);
       }
-      await sweepRow(width, 'cold-load');
+      await sweepRow(width, 'user-opened');
     }
+
+    // ── spd-b29's two deferred criteria. This is the only authenticated
+    //    Chromium in the wave, and both are single observations its builder
+    //    could not take before merge. Diagnostic output, no gate authority.
+    run.b29_probes = await runB29Probes(page, srv.base, docPath);
   } finally {
     await browser.close();
   }
@@ -998,7 +1690,7 @@ async function main() {
   // ── CLOSE THE BRACKET (D97). The sweep is over; re-read the two facts every
   //    row was stamped with. If either moved, every row's provenance is a claim
   //    the run cannot support, so the run FAILS rather than publishing a matrix
-  //    whose stamps are fiction. A ~10 minute run is cheap enough to discard.
+  //    whose stamps are fiction. A ~30-60s run is cheap enough to discard.
   const provenancePost = readProvenance();
   const mismatches = compareProvenance(provenance, provenancePost);
   run.provenance_post = provenancePost;
@@ -1021,7 +1713,7 @@ async function main() {
 
   // The contract is "it prints a matrix". The JSON matrix IS the deliverable;
   // the human table is a convenience rendered from it. A formatting bug in the
-  // table (one null where a number was expected, at the very end of a ~10min
+  // table (one null where a number was expected, at the very end of an
   // authenticated run) must never destroy the data the run was for — so the
   // table is best-effort and says so on stderr if it fails.
   if (!JSON_ONLY) {
@@ -1060,7 +1752,12 @@ function printTable(run) {
   L(`  drill target  ${run.doc_target.mode === 'any' ? 'first row that opens (--doc=any)' : run.doc_target.slug} ` +
     `(from the ${run.doc_target.source})` +
     (run.drill ? `; opened on attempt ${run.drill.attempts} of ${run.drill.rows_in_list} rows` : ''));
-  L(`  sweep         ${run.sweep_direction} (D80); cold-load re-navigates per row, drilled must not`);
+  L(`  sweep         ${run.sweep_direction} (D80); neither state reloads mid-sweep`);
+  if (run.user_opened_proof) {
+    L(`  user-opened   reached by ${run.user_opened_proof.clicks_needed} real click(s) on ` +
+      `[data-test-id="sidebar-toggle-panel"] via the live socket (D110) — ` +
+      `position ${run.user_opened_proof.after.position}, width ${run.user_opened_proof.after.width_px}px`);
+  }
   L(`  platform      ${run.platform} — scrollbar ${run.rows[0]?.scrollbar_width_px ?? '?'}px (macOS overlay; D83)`);
   L('');
 
@@ -1068,7 +1765,7 @@ function printTable(run) {
     ['viewport', 9], ['face', 15], ['bucket', 9], ['panes', 16], ['panel', 7],
     ['gutter', 7], ['content', 8], ['px/ch', 8], ['ch', 7], ['floor?', 7],
     ['xscroll', 8], ['strip', 6], ['crumb', 6], ['insp', 6], ['lay?', 6],
-    ['visible', 8], ['vis-ch', 8], ['vis?', 5],
+    ['visible', 8], ['vis-ch', 8], ['vis?', 5], ['dimmed', 8], ['legacy', 8],
   ];
   const pad = (v, w) => String(v).padEnd(w);
   // The row's OWN in-page figures. Never recomputed here from another row's
@@ -1076,13 +1773,13 @@ function printTable(run) {
   const chOf = (r) => (r.content_ch ?? null);
   const RULE = '  ' + '-'.repeat(150);
 
-  for (const state of ['drilled', 'cold-load']) {
-    const rows = run.rows.filter((r) => r.entry_state === state);
+  for (const state of ['default', 'user-opened']) {
+    const rows = run.rows.filter((r) => r.inspector_state === state);
     if (!rows.length) continue;
-    L(`  ENTRY STATE: ${state.toUpperCase()}   ` +
-      (state === 'drilled'
-        ? '(clicked: root desk -> Papers -> document — the state D49/D74 measured)'
-        : '(the same document URL opened fresh, as any deep link or reload does)'));
+    L(`  INSPECTOR STATE: ${state.toUpperCase()}   ` +
+      (state === 'default'
+        ? '(as served — below `wide` spd-b29 paints the open panel as a 41px in-flow strip)'
+        : '(after a REAL click on the inspector toggle through the live socket — the state D108 measured)'));
     L('  ' + cols.map(([h, w]) => pad(h, w)).join(''));
     L(RULE);
     let lastVp = null;
@@ -1109,6 +1806,8 @@ function printTable(run) {
         pad(r.visible_content_px, 8),
         pad(r.visible_ch === null ? '?' : r.visible_ch.toFixed(2), 8),
         pad(r.visible_meets_55ch ? 'MEET' : 'FAIL', 5),
+        pad(r.scrim?.renders ? `${r.dimmed_content_px}@${r.scrim_alpha}` : '-', 8),
+        pad(r.legacy_inspector_subtraction_px ?? '-', 8),
       ].join(''));
     }
     L('');
@@ -1120,7 +1819,16 @@ function printTable(run) {
   L('  floor?  = min-inline-size forced to 0 and re-measured; a width change IS the bind (not arithmetic).');
   L('  xscroll = .editor-body.bp-paper-body scrollWidth > clientWidth (D39\'s real scroller).');
   L('  insp    = inspector DOCKed (in flow, steals width) vs OVLays (out of flow, covers the column).');
-  L('  visible = content_px minus the inspector overlap where it overlays — the measure a reader SEES (D57).');
+  L('  visible = GEOMETRIC occlusion by HIT-TEST DIFF (D112): at each sampled point, is the topmost');
+  L('            element .bp-paper-surface or a descendant? Ancestry, never a list of known occluders.');
+  L('            The narrowest scanline is the headline — the reader reads every line.');
+  L('  dimmed  = the scrim\'s footprint as `px@alpha`, found by DIFF (natural sample vs one with');
+  L('            pointer-events forced on the scrim via an injected sheet — it is pointer-events:none');
+  L('            AND a pseudo, so elementsFromPoint is doubly blind to it). NEVER folded into visible:');
+  L('            the scrim DIMS, it does not hide (D111). Folding it in would read 0px visible at every');
+  L('            sub-wide user-opened width, so no seal could be taken and no improvement could rank.');
+  L('  legacy  = what the OLD one-entry-list subtraction would have said. Kept beside the new number');
+  L('            so the delta is readable and no history is erased.');
   L('  panes   = VISIBLE .pane-column widths. strip/crumb are VISIBLE counts, not DOM counts.');
   L('  *       = the desk never settled at this width; treat the row as a moving target.');
   L('  lay?    = the LAYOUT verdict: content_px / this row\'s own px/ch, against >=55ch.');
@@ -1135,8 +1843,8 @@ function printTable(run) {
 
   // The visible census — the number this wave's seal ruling turns on, stated as
   // a count rather than left for a reader to tally out of 54 rows.
-  for (const state of ['drilled', 'cold-load']) {
-    const rows = run.rows.filter((r) => r.entry_state === state);
+  for (const state of ['default', 'user-opened']) {
+    const rows = run.rows.filter((r) => r.inspector_state === state);
     if (!rows.length) continue;
     const meet = rows.filter((r) => r.visible_meets_55ch);
     const lay = rows.filter((r) => r.content_meets_55ch).length;
@@ -1160,8 +1868,8 @@ function printTable(run) {
   // The epic's own criterion, answered with a number, honestly either way.
   L('  THE EPIC\'S HEADLINE CRITERION — >=55ch of CONTENT at viewport 900px:');
   L('');
-  for (const state of ['drilled', 'cold-load']) {
-    for (const r of run.rows.filter((x) => x.viewport_px === 900 && x.entry_state === state)) {
+  for (const state of ['default', 'user-opened']) {
+    for (const r of run.rows.filter((x) => x.viewport_px === 900 && x.inspector_state === state)) {
       const ch = chOf(r), vch = r.visible_ch;
       L(`    ${pad(state, 11)} ${pad(r.face, 16)} content ${String(r.content_px).padEnd(7)}px = ` +
         `${ch.toFixed(2).padStart(6)}ch  ${r.content_meets_55ch ? 'MEETS' : 'FAILS'}   ` +
@@ -1185,13 +1893,71 @@ function printTable(run) {
     L('    by the surface\'s own max-width, not by min-inline-size.');
   } else {
     for (const r of bound) {
-      L(`    viewport ${r.viewport_px}px / ${r.entry_state} / ${r.face}: ` +
+      L(`    viewport ${r.viewport_px}px / ${r.inspector_state} / ${r.face}: ` +
         `floor ${r.floor.min_inline_size_px}px pushed the surface ` +
         `${r.floor.width_without_floor_px} -> ${r.floor.width_with_floor_px}px` +
         (r.overflow.horizontal_scroll
           ? `, and .editor-body.bp-paper-body then overflowed by ${r.overflow.overflow_px}px`
           : ', with no horizontal overflow'));
     }
+  }
+  L('');
+
+  // ── THE INSTRUMENT'S CHECKS ON ITSELF. A metric that cannot show its own
+  //    guard firing is a metric nobody can audit — and for THIS metric a
+  //    vacuous pass would falsify the seal, so the census is printed whether it
+  //    is interesting or not (D31/D39/D112).
+  const scrimRows = run.rows.filter((r) => r.scrim?.renders);
+  const guarded = run.rows.filter((r) => r.occlusion?.non_vacuity?.guard_applies);
+  const guardPassed = guarded.filter((r) => r.occlusion.non_vacuity.forced_sample_differs);
+  const restored = run.rows.filter((r) => r.occlusion?.restore?.byte_identical);
+  L('  OCCLUSION INSTRUMENT — SELF-CHECKS:');
+  L(`    scan resolution      ${run.rows[0]?.occlusion?.scan_columns ?? '?'} columns per scanline ` +
+    `(~${run.rows[0]?.occlusion?.scan_step_px ?? '?'}px step), edges bisected to ` +
+    `+/-${run.rows[0]?.occlusion?.bisect_tolerance_px ?? '?'}px. The step bounds DETECTION, the ` +
+    `tolerance bounds PRECISION.`);
+  L(`    scrim renders in     ${scrimRows.length} of ${run.rows.length} rows` +
+    (scrimRows.length ? ` (${[...new Set(scrimRows.map((r) => r.inspector_state))].join(', ')})` : ''));
+  L(`    NON-VACUITY GUARD    applies in ${guarded.length} rows, PASSED in ${guardPassed.length}` +
+    (guarded.length === 0
+      ? ' — no scrim rendered anywhere in this run, so the guard had nothing to prove. That is NOT'
+      : ' — the forced sample genuinely differed from the natural one.'));
+  if (guarded.length === 0) {
+    L('                         a pass: it means this run never exercised the injected selector, so a');
+    L('                         drift in it would NOT have been caught here. Read dimmed_content_px in');
+    L('                         this run as unproven rather than as zero.');
+  }
+  L(`    RESTORE byte-ident.  ${restored.length} of ${run.rows.length} rows ` +
+    `(injected sheet removed, host and ::after computed styles identical before/after)`);
+
+  // ── HIT-TEST vs THE OLD ARITHMETIC, stated as a number. A divergence here is
+  //    a finding and is printed whether or not anyone wants it to be.
+  const deltas = run.rows.filter((r) => typeof r.visible_vs_legacy_delta_px === 'number');
+  const diverged = deltas.filter((r) => Math.abs(r.visible_vs_legacy_delta_px) > 0.5);
+  L(`    hit-test vs legacy   ${deltas.length - diverged.length} of ${deltas.length} rows agree within ` +
+    `the +/-0.5px bisection tolerance; ${diverged.length} diverge beyond it.`);
+  if (diverged.length) {
+    const byWidth = new Map();
+    for (const r of diverged) {
+      const k = `${r.viewport_px}px ${r.inspector_state}`;
+      if (!byWidth.has(k)) byWidth.set(k, r.visible_vs_legacy_delta_px);
+    }
+    for (const [k, d] of byWidth) {
+      L(`      ${k.padEnd(24)} hit-test reads ${d > 0 ? '+' : ''}${d}px vs the rectangle arithmetic`);
+    }
+    L('      A NEGATIVE delta means the hit-test found MORE occlusion than the inspector\'s own box');
+    L('      accounts for — i.e. something else is also on top there. Read the `edges` field on the');
+    L('      scanlines: it names the element on each side of every boundary it bisected.');
+  }
+  if (run.b29_probes) {
+    const { c2, c3 } = run.b29_probes;
+    L(`    spd-b29 c2 NO FLASH  ${c2.frames_captured} rAF frames from document_start at ` +
+      `${c2.viewport_px}px: ${c2.overlay_frames} frame(s) >= ${c2.overlay_width_threshold_px}px, ` +
+      `${c2.transitions} transition(s) — flash ${c2.flash_observed ? 'OBSERVED' : 'NOT observed'}`);
+    L(`    spd-b29 c3 REACHABLE at ${c3.viewport_px}px, ${c3.clicks_needed} real click(s): ` +
+      `${c3.before_click.width_px}px -> ${c3.after_click.width_px}px, ` +
+      `position ${c3.after_click.position}, left ${c3.after_click.left_px}px, ` +
+      `transform ${c3.after_click.transform}`);
   }
   L('');
 
@@ -1206,8 +1972,9 @@ function printTable(run) {
 
 // Run only when INVOKED, so `compareProvenance` can be imported and exercised
 // directly. A bracket check that has never been seen to fire is a check nobody
-// can trust, and a ~10-minute authenticated run is far too expensive to be the
-// only way to see it fire.
+// can trust, and a full authenticated run (~30-60s observed, ~2min worst case,
+// and it needs deployed guerrilla plus an admin token) is far too heavy to be
+// the only way to see it fire.
 const INVOKED_DIRECTLY = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (INVOKED_DIRECTLY) {
