@@ -342,12 +342,12 @@ OPTIONS
 
 ENVIRONMENT
   BP_DESK_DOC         Env form of --doc.
-  BP_DESK_DESTINATION_CONTROL
-                      Selector for the control that summons the \`destination\`
-                      state, for driving a build where it exists before this
-                      file learns its name. Without it (and without any of the
-                      built-in candidates on the page) the destination state
-                      SKIPS with a named reason — it is never faked.
+                      (BP_DESK_DESTINATION_CONTROL is GONE. It pointed at a
+                      control that summons the Tier-3 destination; no such
+                      control has ever existed, because the destination is
+                      ENTAILED by the server predicate rather than summoned.
+                      Rows now carry a derived \`is_destination\`, read from the
+                      server's own [data-inspector-destination] marker.)
 
 NOTES
   A full authenticated sweep takes ~30-60s observed (D115) — NOT the ~10 minutes
@@ -395,11 +395,73 @@ const FACES = [
  *  have one, and "the thing that is absent" must have a name to be absent. */
 const READING_COLUMN_SELECTOR = '.bp-paper-surface';
 
-/** The `wide` bucket's lower bound. The summoned destination is a sub-wide
- *  shape by construction — at `wide` the inspector docks and nothing is
- *  summoned — so this is also the width above which the destination state does
- *  not apply. Read from the same number the desk's own bucket logic uses. */
-const WIDE_BUCKET_MIN_PX = 1280;
+// ── failure ──────────────────────────────────────────────────────────────────
+//
+// Declared HERE, above the band table, and not in a later section: the band
+// helpers `die()` on an unknown band name and are called at module init
+// (WIDE_BUCKET_MIN_PX below), so a `const die` further down would put the
+// instrument's own failure primitive in its temporal dead zone at exactly the
+// moment it is needed. A `ReferenceError: Cannot access 'die'` instead of a
+// named MeasureError is the same class of defect this wave is closing.
+
+class MeasureError extends Error {}
+const die = (msg) => { throw new MeasureError(msg); };
+
+/**
+ * THE WIDTH BANDS, as ONE table — mirroring the pre-paint stamp in
+ * `root.html.heex` verbatim (`EDGES = [640, 1024, 1280]`,
+ * `NAMES = ["phone","narrow","standard","wide"]`).
+ *
+ * WHY A TABLE AND NOT TWO CONSTANTS (this wave's third defect). The destination
+ * predicate used to be `(width) => width < WIDE_BUCKET_MIN_PX` with
+ * WIDE_BUCKET_MIN_PX = 1280 — which admits SEVEN of these nine widths, INCLUDING
+ * 1024. But 1024 stamps `standard`, and the server predicate is an ENUMERATION,
+ * `bucket in ["narrow","phone"]`, which REFUSES standard (components.ex:111-113
+ * — and refuses it deliberately: the wave-10 ladder made standard + user-opened
+ * a real DOCKED state, so `!= "wide"` is forbidden there). Every 1024 row the old
+ * predicate admitted was therefore a PRE-LOADED FALSE FAILURE: a row labelled
+ * "destination" that the deployed build would never put in that state.
+ *
+ * The fix is not a second hardcoded edge — a fresh `1024` literal is a new thing
+ * that can rot independently of the stamp it is supposed to agree with. Both the
+ * bucket name and every threshold below are DERIVED from this one table, so a
+ * band edge can only move in one place.
+ */
+const WIDTH_BANDS = [
+  { name: 'phone',    min_px: 0 },
+  { name: 'narrow',   min_px: 640 },
+  { name: 'standard', min_px: 1024 },
+  { name: 'wide',     min_px: 1280 },
+];
+
+/** The lower edge of a named band, by NAME — so no caller ever spells an edge. */
+function bandMinPx(name) {
+  const band = WIDTH_BANDS.find((b) => b.name === name);
+  if (!band) die(`unknown width band "${name}" — not in WIDTH_BANDS`);
+  return band.min_px;
+}
+
+/** Which band a raw width falls in (the RAW band, i.e. `bucket(w)` with no held
+ *  bucket — the widen dead-band is a resize-hysteresis concern and this sweep
+ *  re-navigates before each state, which re-stamps from the raw band). */
+function bandNameFor(width) {
+  let name = WIDTH_BANDS[0].name;
+  for (const b of WIDTH_BANDS) if (width >= b.min_px) name = b.name;
+  return name;
+}
+
+/** The `wide` bucket's lower bound — DERIVED, never spelled. */
+const WIDE_BUCKET_MIN_PX = bandMinPx('wide');
+
+/**
+ * THE DESTINATION PREDICATE, mirroring components.ex:111-113 exactly:
+ * `bucket in ["narrow","phone"] and sidebar_user_opened`. Expressed against the
+ * band NAMES rather than a width literal, for the same reason the server
+ * enumerates rather than negates — `standard` is a docked state, not a
+ * destination, and a `< wide` threshold silently swallows that distinction.
+ */
+const DESTINATION_BUCKETS = ['narrow', 'phone'];
+const isDestinationBand = (width) => DESTINATION_BUCKETS.includes(bandNameFor(width));
 
 /**
  * THE STATE TABLE — the second axis, as data rather than as three hardcoded
@@ -446,31 +508,87 @@ const STATES = [
     legend: '(after a REAL click on the inspector toggle through the live socket — the state D108 measured)',
     note: 'after a REAL click on [data-test-id="sidebar-toggle-panel"] through the live LiveView ' +
           'socket. `data-user-opened` is SERVER-stamped, so a JS-set attribute would prove only ' +
-          'that the CSS works (D110).',
-  },
-  {
-    // ── THE THIRD STATE. Tier-3's summoned destination: the reader leaves the
-    //    reading column for a place that is ABOUT the document rather than the
-    //    document. It legitimately has no `.bp-paper-surface` on screen, which
-    //    is why `has_reading_column` had to become a per-state fact before this
-    //    state could exist at all.
-    //
-    //    Nothing that reaches it is deployed yet — the entry control ships in
-    //    `inspector-dismissal-and-return-grammar`. So this state SKIPS with a
-    //    named reason rather than failing, and the skip is recorded in the run
-    //    plan where a reader can see it, not swallowed.
-    id: 'destination',
-    has_reading_column: false,
-    // NOTHING is required. That is the whole point: asserting the reading
-    // column here would abort the sweep over a state that correctly has none.
-    required_selectors: [],
-    applies_at: (width) => width < WIDE_BUCKET_MIN_PX,
-    legend: '(the summoned destination — no reading column on screen BY DESIGN; ch is NULL, never 0)',
-    note: 'sub-wide only: at `wide` the inspector docks and nothing is summoned. Its ch figures are ' +
-          'NULL and its verdicts render "?", because asserting FAIL where no reading column exists ' +
-          'is what D127 Part 2 forbids.',
+          'that the CSS works (D110). At `narrow`/`phone` this state IS the Tier-3 destination — ' +
+          'see DESTINATION, RETIRED AS A STATE below; such rows carry is_destination:true.',
   },
 ];
+
+// ── THE THIRD STATE, RETIRED (this wave, charter D177) ───────────────────────
+//
+// There used to be a `destination` entry here: a summoned Tier-3 state, reached
+// by clicking a purpose-built entry control, sweeping its own widths and
+// contributing its own rows. It is GONE, and its absence is the correction.
+//
+// WHAT WAS WRONG. Its entry controls — `[data-test-id="inspector-destination-open"]`
+// and `[data-test-id="sidebar-destination"]` — exist NOWHERE on origin/main, and
+// they never will, because THE DESTINATION IS NOT SUMMONED BY A CONTROL AT ALL.
+// It is ENTAILED by a server predicate: `paper_doc != nil and bucket in
+// ["narrow","phone"] and sidebar_user_opened` (components.ex:111-113). Every one
+// of those conjuncts is already true of rows this instrument ALREADY takes — the
+// `user-opened` sweep at narrow and phone widths IS the destination, measured,
+// with provenance, today. The "third state" was therefore a DUPLICATE of the
+// second reachable only through an env override, and the instrument was skipping
+// it by name and calling that honest reporting.
+//
+// WHAT REPLACES IT. Nothing is summoned and no state is added. Each row is
+// stamped with a DERIVED `is_destination`, read from the SERVER-stamped
+// `[data-inspector-destination]` marker that #5014 really does ship
+// (components.ex:399) — the same D110 discipline `data-user-opened` is held to,
+// because a marker the client could have written proves only that the
+// stylesheet works. `isDestinationBand()` gives the band-derived EXPECTATION,
+// and the two are cross-checked per row: a disagreement is a warning naming
+// both, never a silent preference for one.
+//
+// Row count therefore returns to 54 (2 states x 9 widths x 3 faces), with 18 of
+// them — user-opened at the six sub-1024 widths, x 3 faces — carrying
+// is_destination:true.
+//
+// WHAT SURVIVES THE RETIREMENT, because it was never about the summoned state.
+// `has_reading_column` stays a PER-STATE fact and `required_selectors` stays
+// per-state: a flat module-level assertion is what let one column-less state
+// abort the whole matrix, and that seam is load-bearing regardless of which
+// states exist today. And D127 Part 2's rule — that a reading column covered BY
+// DESIGN reports NULL, never FALSE — moves onto the destination ROWS, where it
+// is now enforced by `suppressVerdictForDestination()` below.
+
+/** The SERVER-stamped marker that proves a row really is in the destination.
+ *  Same discipline as `data-user-opened` (D110). */
+const DESTINATION_MARKER = '[data-inspector-destination]';
+
+/**
+ * D127 PART 2, ENFORCED ON THE ROW. In the destination the inspector covers the
+ * viewport (`inset: 0`, opaque) — so the reading column, if the DOM still
+ * carries one, is occluded BY DESIGN. `visible_content_px` then measures 0 and
+ * `visible_meets_55ch` computes FALSE.
+ *
+ * A FALSE THERE IS AN INSTRUMENT DEFECT, NOT A DESK FACT. It reports "the reader
+ * cannot get 55ch" about a state whose entire purpose is that the reader is
+ * deliberately looking at something else — and it is a verdict a seal would turn
+ * on. This is the exact trap the retired state's `has_reading_column:false` was
+ * invented to prevent, so its protection has to survive the state's retirement.
+ * The rule: a column covered by design reports NULL. NEVER FALSE, and never 0's
+ * verdict laundered as a pass.
+ *
+ * The MEASUREMENT is left intact — `visible_content_px` and the scrim figures
+ * are real observations and are still worth reading. Only the VERDICT is
+ * withdrawn, and the row says in words that it was withdrawn and why, so a
+ * NULL here can never be confused with a measurement that failed to happen.
+ */
+function suppressVerdictForDestination(rec) {
+  if (rec.visible_meets_55ch === null || rec.visible_meets_55ch === undefined) return rec;
+  return {
+    ...rec,
+    visible_meets_55ch: null,
+    visible_verdict_withdrawn: rec.visible_meets_55ch,
+    visible_verdict_withdrawn_reason:
+      'IS_DESTINATION. The Tier-3 destination covers the viewport with an opaque inspector by ' +
+      'design, so the reading column is occluded on purpose and "does the visible column reach ' +
+      '55ch" is not a question this state answers. The raw verdict this run computed is preserved ' +
+      'in visible_verdict_withdrawn; the reported verdict is NULL, never FALSE (D127 part 2). A ' +
+      'FALSE here would be an instrument defect — it would let a state that is working exactly as ' +
+      'designed read as a reading-measure regression, and the seal turns on this column.',
+  };
+}
 
 const STATE_IDS = STATES.map((s) => s.id);
 const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
@@ -502,17 +620,40 @@ function rowCountNote(stateIds = STATE_IDS) {
          `count always describes the run that actually happened (D121's doctrine, without its number).`;
 }
 
+/** How many rows this run expects to carry `is_destination:true`, DERIVED the
+ *  same way the flag itself is: the server predicate needs `sidebar_user_opened`
+ *  AND a narrow/phone bucket, so it is the user-opened state at exactly the
+ *  widths whose raw band is in DESTINATION_BUCKETS, times the faces. Stated so a
+ *  run that stamps a different number is arithmetic to check, not a vibe. */
+export function expectedDestinationRowCount(stateIds = STATE_IDS) {
+  if (!stateIds.includes('user-opened')) return 0;
+  return WIDTHS.filter(isDestinationBand).length * FACES.length;
+}
+
+function destinationNote() {
+  const at = WIDTHS.filter(isDestinationBand);
+  const not = WIDTHS.filter((w) => !isDestinationBand(w));
+  return `is_destination is DERIVED, not summoned (charter D177). It is stamped from the ` +
+         `SERVER-rendered ${DESTINATION_MARKER} marker (components.ex:399) and cross-checked ` +
+         `against the band predicate, which mirrors components.ex:111-113 — ` +
+         `bucket in [${DESTINATION_BUCKETS.join(', ')}] AND user_opened. Expected true at ` +
+         `${at.join(', ')}px (${at.length} widths x ${FACES.length} faces = ` +
+         `${expectedDestinationRowCount()} rows) and false at ${not.join(', ')}px. ` +
+         `NOTE 1024: it stamps "standard", and the server predicate ENUMERATES the covered ` +
+         `buckets rather than negating "wide" precisely so standard + user-opened stays the ` +
+         `DOCKED state the wave-10 ladder built. The retired threshold (width < ` +
+         `${WIDE_BUCKET_MIN_PX}) admitted 1024 and pre-loaded three false-failure rows; every ` +
+         `edge here is now derived from WIDTH_BANDS, the same table the pre-paint stamp uses. ` +
+         `Destination rows report visible_meets_55ch as NULL, never FALSE — see ` +
+         `suppressVerdictForDestination().`;
+}
+
 const SSH = ['-i', path.join(os.homedir(), '.ssh/barkpark_indx'), '-o', 'ConnectTimeout=15',
              '-o', 'StrictHostKeyChecking=accept-new', 'root@157.180.90.121'];
 
-// ── failure ──────────────────────────────────────────────────────────────────
-
-class MeasureError extends Error {}
-const die = (msg) => { throw new MeasureError(msg); };
-
 // ── playwright ───────────────────────────────────────────────────────────────
 
-function resolvePlaywright() {
+export function resolvePlaywright() {
   const tried = [];
   const candidates = [];
 
@@ -1663,16 +1804,61 @@ async function drillToDocument(page, base, target) {
 // fact. A missing toggle at one width must cost the round trip, never the
 // matrix. This makes the open leg symmetric with `dismissInspectorByRealClick`,
 // which already returned a named skip rather than throwing.
-async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
+//
+// ── AND THE FLAG WAS NOT ENOUGH (this wave, charter D178) ────────────────────
+//
+// The `fatal` seam above only governs the CONTROLLED exhaustion path inside
+// `unreachable()`. It does nothing whatsoever about an exception thrown out of
+// `.click()` by Playwright's own auto-wait — and this function used to guarantee
+// one. It resolved ONE locator, `[data-test-id="sidebar-toggle-panel"]`, BEFORE
+// its retry loop and never re-checked presence, while #5014 renames that same
+// physical button to `sidebar-dismiss` the moment the destination predicate goes
+// true (components.ex:425). The second iteration then clicked a locator matching
+// nothing and sat in auto-wait until it timed out. Driven against a forcing
+// fixture in a real chromium:
+//
+//     THREW after 11093ms / constructor = TimeoutError / instanceof MeasureError = false
+//
+// A RAW Playwright timeout, not this function's own named skip. And it threw
+// IDENTICALLY at 11072ms with `fatal:false` — the exact mode `runRoundTrip`
+// passes so that an unreachable toggle costs one pass instead of the matrix.
+// `main()` has a `finally` but NO `catch`, and `writeRunArtifact` runs after that
+// block exits normally, so the throw propagated to the top-level handler and
+// NOTHING reached `--out`: D138's zero-byte run, back through a different door
+// than the one wave 10 closed.
+//
+// WHY THE DISMISS LEG NEVER HAD THIS BUG, stated precisely because the imprecise
+// version misleads: NOT because Playwright Locators are lazy (they are, whether
+// or not the variable is reused — laziness is why the stale locator times out
+// instead of throwing immediately). It is because `DISMISS_CONTROLS` is a
+// PRIORITY LIST carrying BOTH spellings, resolved through `firstPresent()`. The
+// open leg now has the same shape, and re-resolves INSIDE the loop: a rename
+// between iterations is FOLLOWED (it is the same button, and the sweep would
+// otherwise fail on a control that is plainly on screen), and a control that has
+// vanished entirely routes through `unreachable()` — where `fatal` finally means
+// what it says. Verified against the same fixture:
+//
+//     THREW after 1090ms / constructor = MeasureError / instanceof MeasureError = true
+export const OPEN_CONTROLS = [
+  { selector: '[data-test-id="sidebar-toggle-panel"]', grammar: 'the inspector toggle — the canonical open affordance' },
+  { selector: '[data-test-id="sidebar-dismiss"]',      grammar: 'the SAME button under its Tier-3 destination spelling (#5014, components.ex:425)' },
+];
+
+// EXPORTED for the same reason `compareProvenance` is (see its note): a forcing
+// repro must drive this leg directly against a fixture that renames the control
+// between clicks, because a full authenticated sweep is far too heavy to be the
+// only way to see the D178 fix hold. `scripts/measurements/open-leg-repro.mjs`.
+export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
   const unreachable = (reason) => {
     if (fatal) die(reason);
     return { reached: false, skip_reason: reason };
   };
 
-  const toggle = page.locator('[data-test-id="sidebar-toggle-panel"]').first();
-  if (await toggle.count() === 0) {
+  const spellings = OPEN_CONTROLS.map((c) => c.selector).join(' or ');
+  const control = await firstPresent(page, OPEN_CONTROLS);
+  if (!control) {
     return unreachable(
-      `INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
+      `INSTRUMENT FAILURE — no ${spellings} control on the page, so the ` +
       `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
       `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
       `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
@@ -1697,21 +1883,42 @@ async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = 
 
   const before = await observe();
   const clicks = [];
+  const spellingsUsed = [];
   for (let i = 1; i <= maxClicks; i++) {
-    await toggle.click({ timeout: 10_000 });
+    // RE-RESOLVE EVERY ITERATION (D178). `firstPresent()` is a non-blocking
+    // `.count()` probe across BOTH spellings — it never auto-waits, so a control
+    // that is gone is answered in milliseconds instead of after a 10s timeout
+    // that this function cannot convert into its own named failure.
+    const now = i === 1 ? control : await firstPresent(page, OPEN_CONTROLS);
+    if (!now) {
+      return unreachable(
+        `INSTRUMENT FAILURE — ${spellingsUsed[spellingsUsed.length - 1]} stopped matching after ` +
+        `${i - 1} click(s), and neither ${spellings} is on the page any more, so there is no ` +
+        `control left to click. The harness never reached the user-opened state, so it has NO ` +
+        `user-opened measurement to report (D97). This is an INSTRUMENT fact and says nothing ` +
+        `about the desk's layout.\n\n  What it saw after each click:\n` +
+        clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+    }
+    spellingsUsed.push(now.selector);
+    await page.locator(now.selector).first().click({ timeout: 10_000 });
     // The marker comes back over the socket, not from the click — wait for the
     // round trip rather than for a fixed delay.
     await page.waitForTimeout(150);
     await waitForDeskSettled(page);
     const after = await observe();
-    clicks.push({ click: i, after });
+    clicks.push({ click: i, control: now.selector, after });
     if (after?.user_opened) {
       return {
         reached: true,
         clicks_needed: i,
-        method: 'real click on [data-test-id="sidebar-toggle-panel"] through the live LiveView socket — ' +
+        control: now.selector,
+        grammar: now.grammar,
+        controls_clicked: spellingsUsed,
+        method: `real click on ${now.selector} through the live LiveView socket — ` +
                 'NOT a JS-set attribute. data-user-opened is server-stamped from the sidebar_user_opened ' +
-                'assign, so a simulated attribute would prove only that the CSS works (D110).',
+                'assign, so a simulated attribute would prove only that the CSS works (D110). The ' +
+                'control is re-resolved across both deployed spellings before EVERY click (D178), so ' +
+                'the Tier-3 rename cannot leave this leg holding a locator that matches nothing.',
         before,
         after,
         click_log: clicks,
@@ -1723,11 +1930,11 @@ async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = 
     }
   }
   return unreachable(
-    `INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
-    `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
-    `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
+    `INSTRUMENT FAILURE — ${maxClicks} real clicks on ${[...new Set(spellingsUsed)].join(' then ')} ` +
+    `never produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened ` +
+    `state, so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
     `recorded as one (D97).\n\n  What it saw after each click:\n` +
-    clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+    clicks.map((c) => `      click ${c.click} (${c.control}): ${JSON.stringify(c.after)}`).join('\n'));
 }
 
 // ── dismissal, the destination, and the round trip ───────────────────────────
@@ -1751,20 +1958,13 @@ const DISMISS_CONTROLS = [
   { selector: '[data-test-id="sidebar-toggle-panel"]', grammar: 'toggle re-click — the only dismissal deployed today' },
 ];
 
-/** Candidates that would SUMMON the third state. None is deployed; the env
- *  override exists so the round-2 build can drive this file without editing it. */
-const DESTINATION_CONTROLS = [
-  ...(process.env.BP_DESK_DESTINATION_CONTROL
-    ? [{ selector: process.env.BP_DESK_DESTINATION_CONTROL, grammar: 'BP_DESK_DESTINATION_CONTROL env override' }]
-    : []),
-  { selector: '[data-test-id="inspector-destination-open"]', grammar: 'purpose-built destination entry' },
-  { selector: '[data-test-id="sidebar-destination"]',        grammar: 'destination entry on the sidebar' },
-];
-
-/** The marker that proves the destination was actually ENTERED. Same discipline
- *  as `data-user-opened` (D110): it must be SERVER-stamped, because a
- *  JS-set attribute would prove only that the stylesheet works. */
-const DESTINATION_MARKER = '[data-inspector-destination]';
+// DESTINATION_CONTROLS used to sit here — two selectors that summoned the third
+// state, neither of which has ever existed on origin/main, plus a
+// BP_DESK_DESTINATION_CONTROL env override to drive a build where they did.
+// RETIRED with the state itself (D177): the destination is entailed by a server
+// predicate, not summoned by a control, so there was nothing for a control list
+// to point at. DESTINATION_MARKER survives, up beside the STATES table, because
+// stamping a DERIVED flag from the server's own marker is what replaced it.
 
 async function firstPresent(page, candidates) {
   for (const c of candidates) {
@@ -1834,47 +2034,40 @@ async function dismissInspectorByRealClick(page, { maxClicks = 3 } = {}) {
 }
 
 /**
- * Enter the third state. Skips — by name, into the run plan — when nothing that
- * reaches it is deployed, which is the state of the world today.
+ * OBSERVE whether the desk is CURRENTLY in the Tier-3 destination — the
+ * replacement for `enterDestinationState()`, which clicked a control that has
+ * never existed (D177).
+ *
+ * Nothing here interacts. The destination is not somewhere the instrument goes;
+ * it is a property of the state the instrument is already in, entailed by the
+ * server predicate. So this READS the SERVER-stamped marker and returns it
+ * beside the band-derived expectation, WITHOUT reconciling them: the marker is
+ * what the row is stamped from (D110 — a client could never have written it),
+ * and a disagreement with the predicate is a finding to raise, not a conflict to
+ * quietly resolve in favour of either side.
+ *
+ * BOTH CONJUNCTS, OR NEITHER PREDICTS. The server predicate is `bucket in
+ * ["narrow","phone"] AND sidebar_user_opened` — TWO conditions. The band half
+ * alone would predict a destination for a DEFAULT-state row at narrow/phone,
+ * where the panel was never opened and the server correctly stamps no marker, so
+ * every such row would raise a spurious disagreement. `user_opened` is therefore
+ * read from the live DOM too (`data-user-opened`, itself server-stamped), and the
+ * prediction is the conjunction — mirroring the server exactly.
  */
-async function enterDestinationState(page) {
-  const control = await firstPresent(page, DESTINATION_CONTROLS);
-  if (!control) {
-    return {
-      entered: false,
-      skip_reason:
-        'NO DESTINATION ENTRY CONTROL DEPLOYED. None of ' +
-        DESTINATION_CONTROLS.map((c) => c.selector).join(', ') + ' is on the page. The summoned ' +
-        'destination ships in inspector-dismissal-and-return-grammar; until then this state is ' +
-        'SKIPPED BY NAME and contributes zero rows, and expected_row_count is computed WITHOUT it ' +
-        'so a short run is never mistaken for a complete one. Set BP_DESK_DESTINATION_CONTROL to ' +
-        'drive a build where the control exists under a name this file has not learned yet.',
-      controls_tried: DESTINATION_CONTROLS.map((c) => c.selector),
-    };
-  }
-
-  await page.locator(control.selector).first().click({ timeout: 10_000 });
-  await page.waitForTimeout(150);
-  await waitForDeskSettled(page);
-  const marked = await page.evaluate((sel) => !!document.querySelector(sel), DESTINATION_MARKER);
-  if (!marked) {
-    return {
-      entered: false,
-      control: control.selector,
-      skip_reason:
-        `clicked ${control.selector} but no ${DESTINATION_MARKER} appeared. The marker must be ` +
-        `SERVER-stamped for the same reason data-user-opened is (D110) — a JS-set attribute would ` +
-        `prove only that the stylesheet works. Refusing to label rows "destination" when the ` +
-        `harness cannot show it reached that state.`,
-    };
-  }
+async function observeDestination(page, width) {
+  const { marker_present, user_opened } = await page.evaluate((sel) => ({
+    marker_present: !!document.querySelector(sel),
+    user_opened: !!document.querySelector('.bp-doc-sidebar[data-user-opened]'),
+  }), DESTINATION_MARKER);
+  const band_predicts = isDestinationBand(width) && user_opened;
   return {
-    entered: true,
-    control: control.selector,
-    grammar: control.grammar,
+    is_destination: marker_present,
     marker: DESTINATION_MARKER,
-    method: 'real click through the live LiveView socket, confirmed by the SERVER-stamped ' +
-            DESTINATION_MARKER + ' marker (D110).',
+    marker_present,
+    user_opened,
+    band_predicts,
+    band_name: bandNameFor(width),
+    agrees: marker_present === band_predicts,
   };
 }
 
@@ -2238,9 +2431,11 @@ async function main() {
     inspector_states_note:
       'The second axis is `inspector_state` (D110), and it is now a TABLE (`state_plan`) rather than ' +
       'a pair of string literals: each state declares its own required selectors, whether it has a ' +
-      'reading column at all, and the widths it applies at. `destination` is the third — the summoned ' +
-      'Tier-3 place, which legitimately has NO reading column and whose ch figures are therefore NULL ' +
-      'and whose verdicts render "?" (never 0, never FAIL). `default` = the desk as served. `user-opened` = ' +
+      'reading column at all, and the widths it applies at. There are TWO of them, not three: the ' +
+      'summoned `destination` state is RETIRED (D177) because the Tier-3 destination is ENTAILED by ' +
+      'the server predicate rather than summoned, so user-opened rows at narrow/phone ALREADY ARE it ' +
+      'and carry a derived `is_destination` with their visible verdict withdrawn to NULL — see ' +
+      'destination_derivation. `default` = the desk as served. `user-opened` = ' +
       'after a REAL click on [data-test-id="sidebar-toggle-panel"] through the live LiveView socket — ' +
       'not a JS-set attribute, because `data-user-opened` is stamped by the SERVER from the ' +
       '`sidebar_user_opened` assign and a simulated attribute would prove only that the CSS works. ' +
@@ -2349,10 +2544,33 @@ async function main() {
       const settle = await waitForDeskSettled(page);
       await page.evaluate(() => document.fonts.ready);
 
+      // DERIVED, NOT SUMMONED (D177). Read once per (width x state) block, from
+      // the SERVER's own marker, and cross-checked against the band predicate.
+      // A disagreement is WARNED about by name rather than resolved silently:
+      // the marker wins the stamp (it is the deployed truth), and the fact that
+      // this instrument's model of the predicate disagreed with the server is
+      // itself the finding — it means one of the two has drifted.
+      const dest = await observeDestination(page, width);
+      if (!dest.agrees) {
+        run.warnings.push(
+          `DESTINATION PREDICATE DISAGREEMENT at viewport ${width}px (band "${dest.band_name}"), ` +
+          `state "${stateId}": the server ${dest.marker_present ? 'DID' : 'did NOT'} stamp ` +
+          `${DESTINATION_MARKER}, but this instrument's band predicate — bucket in ` +
+          `[${DESTINATION_BUCKETS.join(', ')}] AND user_opened, mirroring components.ex:111-113 — ` +
+          `says it ${dest.band_predicts ? 'SHOULD' : 'should NOT'} have. Rows are stamped from the ` +
+          `MARKER (D110), so the matrix is still honest; but either the deployed predicate moved or ` +
+          `WIDTH_BANDS has drifted from the pre-paint stamp, and one of them needs re-reading.`);
+      }
+
       for (const face of FACES) {
-        const rec = state.has_reading_column
+        const measured = state.has_reading_column
           ? await measureFace(face)
           : await page.evaluate((src) => eval(`(${src})`)(), PAGE_MEASURE_CHROME);
+        // D127 PART 2, on the ROW rather than on a retired state: in the
+        // destination the column is covered BY DESIGN, so its visible verdict is
+        // WITHDRAWN to NULL. A FALSE there is an instrument defect — see
+        // suppressVerdictForDestination().
+        const rec = dest.is_destination ? suppressVerdictForDestination(measured) : measured;
         if (rec.fatal) {
           die(`a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
               `face ${face.id}: ${JSON.stringify(rec.counts)}`);
@@ -2365,6 +2583,8 @@ async function main() {
             measured_at: new Date().toISOString(),
             viewport_px: width,
             inspector_state: stateId,
+            is_destination: dest.is_destination,
+            destination_evidence: dest,
             user_opened_overlay_asserted: null,
             face: face.id,
             face_forced_to: face.override,
@@ -2476,6 +2696,13 @@ async function main() {
           // runs. It is now the inspector's state, which moves the answer by
           // 219px on the single interaction this epic is about.
           inspector_state: stateId,
+          // DERIVED from the SERVER's [data-inspector-destination] marker, not
+          // from a state this instrument summoned (D177). The Tier-3
+          // destination is entailed by the predicate — user-opened at
+          // narrow/phone IS it — so it is a PROPERTY of a row, not a row of
+          // its own.
+          is_destination: dest.is_destination,
+          destination_evidence: dest,
           user_opened_overlay_asserted: overlayAsserted,
           face: face.id,
           face_forced_to: face.override,
@@ -2538,42 +2765,34 @@ async function main() {
     }
     run.states_measured.push('user-opened');
 
-    // ── STATE C — DESTINATION. The Tier-3 summoned destination: a place ABOUT
-    //    the document rather than the document, with NO reading column on
-    //    screen by design. Nothing that reaches it is deployed yet, so this
-    //    normally skips BY NAME — and the skip is recorded in the run plan and
-    //    subtracted from expected_row_count, so a short run can never be read
-    //    as a complete one.
+    // ── THERE IS NO STATE C, and its absence is the correction (D177).
+    //    A third pass used to live here: re-navigate, click a purpose-built
+    //    entry control, sweep the sub-wide widths as a `destination` state. It
+    //    is gone, along with the state and the controls it clicked, because
+    //    NONE OF THOSE CONTROLS HAS EVER EXISTED ON origin/main — the Tier-3
+    //    destination is entailed by the server predicate (`bucket in
+    //    ["narrow","phone"] and sidebar_user_opened`, components.ex:111-113),
+    //    not summoned. The user-opened sweep that just ran at 900 through 500
+    //    IS the destination, and every one of those rows is stamped
+    //    is_destination:true from the server's own [data-inspector-destination]
+    //    marker, with its visible verdict withdrawn to NULL rather than FALSE.
     //
-    //    Re-navigate first, for the same reason state B does: the sweep must
-    //    re-enter at the widest width from the raw band (D80).
-    await page.setViewportSize({ width: WIDTHS[0], height: 900 });
-    await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
-    await waitForDeskSettled(page);
-    const destination = await enterDestinationState(page);
-    run.destination_entry = destination;
-    if (destination.entered) {
-      run.states_measured.push('destination');
-      for (const width of WIDTHS.filter((w) => stateById('destination').applies_at(w))) {
-        await page.setViewportSize({ width, height: 900 });
-        const stillThere = await page.evaluate(
-          (sel) => !!document.querySelector(sel), DESTINATION_MARKER);
-        if (!stillThere) {
-          // Loud, but NOT fatal: every row collected so far is good, and killing
-          // the run here would discard the entire matrix over one state's
-          // marker — the all-or-nothing abort this wave exists to end.
-          run.warnings.push(
-            `the ${DESTINATION_MARKER} marker vanished at viewport ${width}px, so the destination ` +
-            `sweep STOPPED there rather than labelling default-state rows "destination". Rows ` +
-            `already collected are unaffected; expected_row_count will not match and says so.`);
-          break;
-        }
-        await sweepRow(width, 'destination');
-      }
-    } else {
-      run.states_skipped.push({ state: 'destination', reason: destination.skip_reason });
-    }
+    //    So this pass was never measuring a state the second pass missed. It
+    //    was a duplicate that could only be reached through an env override,
+    //    and its permanent skip-by-name read as diligence.
+    //
+    //    THE ARITHMETIC MOVES WITH IT. Two states x 9 widths x 3 faces = 54
+    //    rows again, of which the six sub-1024 widths x 3 faces = 18 carry
+    //    is_destination. Both numbers are DERIVED (expectedRowCount,
+    //    expectedDestinationRowCount) and both are asserted below, so a run
+    //    that stamps a different count is caught as arithmetic.
+    run.destination_derivation = {
+      summoned_state_retired: true,
+      marker: DESTINATION_MARKER,
+      buckets: DESTINATION_BUCKETS,
+      expected_destination_rows: expectedDestinationRowCount(run.states_measured),
+      note: destinationNote(),
+    };
 
     // ── THE ROUND TRIP. default -> open -> dismiss on the SAME page instance.
     //    Fresh navigation first so the first baseline is a genuine as-served
@@ -2713,6 +2932,20 @@ function writeRunArtifact(run, outPath) {
     expected_row_count_if_no_state_skipped: expectedRowCount(),
     row_count_matches_expected: run.rows.length === expectedRowCount(run.states_measured),
     row_count_note: rowCountNote(run.states_measured),
+    // THE DESTINATION IS ARITHMETIC NOW, not a state that either ran or skipped
+    // (D177). Stating the expectation beside the observation is the whole point:
+    // a run whose marker-derived count differs from the band-derived one is
+    // caught as a number, and `destination_verdicts_withdrawn_all_null` is the
+    // D127-part-2 tripwire — a single FALSE surviving in a destination row is an
+    // INSTRUMENT defect, so it is asserted rather than assumed.
+    destination_row_count: run.rows.filter((r) => r.is_destination).length,
+    expected_destination_row_count: expectedDestinationRowCount(run.states_measured),
+    destination_row_count_matches_expected:
+      run.rows.filter((r) => r.is_destination).length ===
+      expectedDestinationRowCount(run.states_measured),
+    destination_verdicts_withdrawn_all_null:
+      run.rows.filter((r) => r.is_destination).every((r) => r.visible_meets_55ch !== false),
+    destination_note: destinationNote(),
     states_measured: run.states_measured,
     states_skipped: run.states_skipped,
     states_in_rows: [...new Set(run.rows.map((r) => r.inspector_state))],
@@ -3022,10 +3255,13 @@ export function printTable(run) {
   L('            comment on the docked case in PAGE_MEASURE — this is not a missing subtraction).');
   L('  Both ch figures divide THIS row\'s box by THIS row\'s probe span under THIS row\'s forced');
   L('  face. No figure anywhere divides one face\'s box by another face\'s advance (D83/D86).');
-  L('  ?       = NOT MEASURED, never zero and never FAIL. A state may declare it has NO reading');
-  L('            column (the summoned destination does); its ch figures are NULL and its verdicts');
-  L('            render ?. A 0 there would read as catastrophic occlusion and a FAIL would assert a');
-  L('            failure against an element that is not on screen — D127 Part 2 forbids both.');
+  L('  ?       = NOT MEASURED or NOT ASKED, never zero and never FAIL. Two ways to get one: a state');
+  L('            may declare it has NO reading column, and a row may be in the Tier-3 DESTINATION');
+  L('            (is_destination, derived from the server\'s [data-inspector-destination] marker),');
+  L('            where an opaque inspector covers the column BY DESIGN so its vis? verdict is');
+  L('            WITHDRAWN to ? rather than reported FALSE. A 0 there would read as catastrophic');
+  L('            occlusion and a FAIL would assert a reading failure against a state working exactly');
+  L('            as designed — D127 Part 2 forbids both, and the seal turns on this column.');
   L('  face~    = the face was forced for matrix symmetry only; with no reading column there is no');
   L('            advance to measure, so the three face rows of such a state are identical by design.');
   L('  insp n/c = the inspector is present but there is no reading column for it to dock beside or');
