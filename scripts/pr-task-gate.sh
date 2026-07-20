@@ -89,31 +89,44 @@ esac
 # Parse the flattened doc. doc.get wraps the document under `.result`; a
 # published task carries lifecycle_status and claim at the top level. A 2xx with
 # no result (defensive — Sanity-style null-doc) is still a definitive "missing".
-# Fields are emitted as whitespace-separated tokens with "." as the absent
-# sentinel. `claimed` distinguishes "claim object exists" from "claim is null",
-# so a done task that was never worked reads differently from one closed
-# through the engine.
-read -r found lifecycle worker closed_by claimed < <(python3 - "$tmp" <<'PY'
+# Fields are emitted TAB-separated with "." as the absent sentinel, and read
+# with IFS=$'\t' — a worker or closed_by string containing a space would
+# otherwise shift every later field one position and the gate would silently
+# read the wrong value out of a well-formed ledger response. Every field carries
+# a sentinel, so no field is ever empty and the positional read is total.
+# `claimed` distinguishes "claim object exists" from "claim is null", so a done
+# task that was never worked reads differently from one closed through the
+# engine. Any literal tab inside a value is squashed to a space by the emitter
+# below, so the separator can never be forged from the data side.
+IFS=$'\t' read -r found lifecycle worker closed_by claimed < <(python3 - "$tmp" <<'PY'
 import json, sys
+
+
+def emit(*fields):
+    # Tabs and newlines are stripped from values so a ledger string can never
+    # forge a field separator or a second record.
+    print("\t".join(str(f).replace("\t", " ").replace("\n", " ") for f in fields))
+
+
 try:
     with open(sys.argv[1]) as f:
         d = json.load(f)
 except Exception:
-    print("error . . . no")
+    emit("error", ".", ".", ".", "no")
     sys.exit(0)
 doc = d.get("result")
 if isinstance(doc, list):
     doc = doc[0] if doc else None
 if not isinstance(doc, dict) or not doc.get("_id"):
-    print("missing . . . no")
+    emit("missing", ".", ".", ".", "no")
     sys.exit(0)
 raw = doc.get("claim")
 claim = raw if isinstance(raw, dict) else {}
-print("found",
-      doc.get("lifecycle_status") or ".",
-      claim.get("worker") or ".",
-      claim.get("closed_by") or ".",
-      "yes" if claim else "no")
+emit("found",
+     doc.get("lifecycle_status") or ".",
+     claim.get("worker") or ".",
+     claim.get("closed_by") or ".",
+     "yes" if claim else "no")
 PY
 )
 

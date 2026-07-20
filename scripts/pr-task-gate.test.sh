@@ -49,6 +49,14 @@ doc canctask cancelled fable-tob
 # while its claim still only carries a worker. Only the first is task-backed.
 doc doneclosed "done" fable-tob fable-tob
 doc donebare   "done" -
+# Worker/closed_by strings containing a SPACE. The ledger accepts them (nothing
+# constrains the field to a slug), and a whitespace-split positional read of the
+# parser's output shifts every later field one position — the gate would then
+# report `closed_by` as the worker's second word and compare EXPECTED_WORKER
+# against garbage, all while returning a confident verdict. These fixtures pin
+# the tab-separated read; they go red the moment it reverts to plain `read -r`.
+doc spacey      in_progress "fable tob"
+doc spaceclosed "done"      "fable tob" "lead truthgrip"
 # 404 fixture: an id with no file → http.server returns 404 for /task/ghost
 # (missing.json below is a malformed-JSON body served with 200 to test parsing)
 printf 'not json{' > "$fixtures/v1/data/doc/production/task/garbled"
@@ -100,6 +108,11 @@ check "done+closed_by passes"       0 'TASK_ID=doneclosed'
 check "done with no claim fails"    1 'TASK_ID=donebare'
 check "done+closed_by right worker" 0 'TASK_ID=doneclosed EXPECTED_WORKER=fable-tob'
 check "done+closed_by wrong worker" 1 'TASK_ID=doneclosed EXPECTED_WORKER=nobody'
+check "spaced worker passes"        0 'TASK_ID=spacey'
+check "spaced worker matches"       0 'TASK_ID=spacey EXPECTED_WORKER="fable tob"'
+check "spaced worker rejects prefix" 1 'TASK_ID=spacey EXPECTED_WORKER=fable'
+check "spaced closed_by passes"     0 'TASK_ID=spaceclosed'
+check "spaced closed_by matches"    0 'TASK_ID=spaceclosed EXPECTED_WORKER="lead truthgrip"'
 
 echo "---"
 echo "passed: $pass  failed: $fail"
