@@ -473,3 +473,213 @@ Next wave dispatch order (sequenced-rounds law): (1) merge round 1 — `gr-p5-op
 **GR80 re-proven a fifth time.** `gr-p4-hygiene` cites `--btn-bg`/`--btn-fg` at "`:root` light 251-252"; those lines today hold `font-family`/`font-size`, while the real definitions sit at 285-286 (dark pair at 372-373). A line-number-anchored audit would have manufactured a false failure **on a claim that is true**. Every check here anchors on selectors and identifiers.
 
 **Honest residue, stated numerically and not glossed: 21 of 56 done children remain sealed on evidence nobody read** — all in S5, the strongest-attribution stratum. Coverage 62.5%; observed material-failure rate on the audited 35 is 0/35 and the weakest cohort was 7/7 clean, which is the basis for calling the residue low-risk — but it is 21 children read by nobody, and the seal rests on that being visible rather than absent. Forwarding address: **`gr-p5r7-doneset-residue-21`** (published, open, under the epic). Zero mid-wave reopens, zero wave expansion.
+
+---
+
+## Wave 2026-07-20 (seal r4) — round 8: the seal predicate, frozen and inverted-then-repaired
+
+Paper: `cloud-gui-remake-wave-2026-07-20-seal-r4`. Epic task `task-47bc4168392dec17`.
+Charter path correction, binding on every downstream phase: this epic's law is **THIS file**
+(`bp-cloud-gui-remake-charter.md`). `.claude/workflows/bp-cloud-epic-charter.md` is the ROTATING
+epic-cycle slot and currently holds the **Studio Space-Priority Desk** epic — writing this epic's
+rulings there would corrupt a live foreign charter. The lead brief named the rotating slot and the
+epic id `cloud-gui-remake-epic` (which does not resolve); both were followed to the evidence instead.
+
+- **GR115 — the second dead rule is real, is the same class as GR109, and is FOLDED, not forwarded.**
+  `app.css:2409` (`max-height:40vh`) and `:2413` (`font-size:13px`) name both console families in one
+  declaration list, inside the 720px block. `.new-console-*`'s base sits at `:2387` — BEFORE the block,
+  so it applies. `.bp-console-*`'s bases sit at `:2494`/`:2518` — AFTER, at identical (0,0,1,0)
+  specificity, so both declarations are discarded. **The control is decisive: one declaration, both
+  families, opposite computed outcomes, varying only source position** — 320px/13px vs 260px/12px,
+  measured in a real browser at 700x800, mutation-flipped and restored. Severity splits and the filed
+  task was wrong in BOTH directions: the `max-height` half is *conditional* (harmful only below ~650px
+  viewport height, and only at >=14 console lines — the normal production state, since narration is
+  server-capped at 300 lines), while the `font-size` half is *unconditional* and falsifies the authored
+  comment at `:2404-2406` — "no theater text falls below 13px" — on every screen <=720px. A written
+  legibility contract that is false is not cosmetic. Same file, same region, same fix shape as GR109, so
+  a separate slice would collide on the cascade: it is folded into `gr-p5r7-tablet-overflow`.
+
+- **GR116 — GR108's charter-recorded ROOT CAUSE IS WRONG, and the fix it implies fails.**
+  GR108 (line 144) says the 768px block "never tightens `.topbar`" and calls it "one-line-fixable".
+  Measured: **`.topbar`'s right edge is 753 — inside the client area. It does not overflow.** Its
+  *children* escape to 775-780 because they are flex items at the default `min-width:auto`, floored at
+  min-content: content needs ~416px, only 373.92px is available. The charter's implied fix was built
+  and swept — **candidate B (raise the 720 `.topbar` padding/gap to 768) still overflows 14 of 16
+  checks**; tighten+fold still fails 5/16. Worse, **the broken band reaches ~782, ABOVE the breakpoint**
+  (769px still measures 775.22/776.92), so *no* `max-width:768px` rule can close it, and the band's
+  upper edge moves with chip text and locale. The fix that works is breakpoint-free and two
+  declarations — `.topbar-right > * { min-width: 0 }` plus ellipsizing `.billing-chip` — measured
+  **0 of 44 overflowing** across 721/750/768/769/775/780/785/800/900/1024/1440 x 2 themes x 2 scenarios.
+  Its one cost is that the past-due billing chip ellipsizes in the 721-782 band; three cosmetic
+  declarations in the existing 768 block buy the full 169.78px back. **The two halves ship together**:
+  the unconditional pair is correctness, the in-block trio prevents trading a scrollbar for a truncated
+  money message. `!important` remains forbidden (GR110); `.set-matrix` stays untouched.
+
+- **GR117 — GR109 is HALF dead, not dead, and the distinction changes the fix.**
+  `flex-direction: column` **survives** (no later rule contests it) — the row does stack. Only
+  `align-items` is killed, so the row stacks and stays *centred* (`actsLeft=441.28`). The symptom is
+  centring, never failure-to-stack. Specificity repair `.attention-card .attention-row { align-items:
+  flex-start }` at (0,0,2,0) snaps acts to 275, matching GR65's intent, with no `!important`. It carries
+  one coupling worth naming: it assumes `.attention-row` is always inside `.attention-card`, verified on
+  `overview-past-due` only — if any surface renders the row outside that card the repair silently does
+  nothing there, which is the very dead-code class it fixes. A reorder-based fix avoids the coupling; the
+  builder picks, and proves whichever it picks by measurement.
+
+- **GR118 — THE FROZEN PREDICATE WAS EXACTLY INVERTED ON ITS OWN CROWN DEFECT. This is the round's
+  most important finding.** The draft asserted GR108 as "does a `.topbar` rule exist inside the 768
+  block" — the charter's *theory of the cause* rather than the *symptom*. Dry-run at Decide, both
+  directions, before freezing: against the **correct** fix (0/44 overflow) it printed **DEFECT**; against
+  the **broken** fix (14/16 still overflowing) it printed **CLEAN**. Its GR109 assertion likewise reported
+  DEFECT against the recommended specificity repair, because a correct fix legitimately leaves the later
+  base rule reading `align-items:center`. The sharpest attack on this wave's direction — *"you will have
+  automated a false green, and it will look more authoritative than the prose it replaced"* — was not
+  hypothetical. It was already latent in the instrument built to prevent it, and only mutation-testing the
+  predicate against a real candidate fix exposed it. **Ruling: a source regex tests a story about the
+  pixels; only a browser tests the pixels.** Clause (b) now shells out to a committed browser guard and
+  asserts only that it exists, runs, and exits 0. **A missing guard is NO SEAL, never a pass** — unmeasured
+  is not cleared. This is the epic's signature sin (a gate that cannot parse the artifact it certifies)
+  caught one step before it was committed as law.
+
+- **GR119 — the predicate is FROZEN AND COMMITTED at Decide**, at
+  `cloud/priv/static/__preview__/seal-predicate.mjs`, before any builder flew. Mutation-proven in five
+  directions from green, each a real exit code, restoring green after: orphan a child -> `UNNAMED
+  RESIDUE: 1`, exit 1; un-land a defect commit -> `not an ancestor of origin/main`, exit 1; vanish a
+  hardcoded human gate -> exit 1; guard runs and FAILS -> exit 1; guard ABSENT -> exit 1. Live run today
+  is **NO SEAL, exit 1** — 69 unnamed rows, 3 unlanded defects — which is the correct and honest answer at
+  this instant and proves the predicate falsifiable by construction. Three draft defects were fixed
+  before freezing: the roster is read at run time (it drifted 132->133 *during* this wave), the scope
+  sentence counts gates from `PERMANENT_HUMAN_GATES` rather than roster membership (the draft printed
+  "1 permanent human gates" — undercounting by excluding the very billing gate whose invisibility is the
+  point, and ungrammatically), and the sweep envelope is stated numerically.
+
+- **GR120 — GR112 does NOT conflict with a binary exit code, and needs no new ruling.** The apparent
+  nine-laws contradiction resolves mechanically rather than by fiat: GR112's `SEAL DEGRADED` branch fires
+  only at ">=3 material failures, OR any 1 in S3", and this charter at line 458 already records
+  **`Verdict: SEAL CLEAN. Material failures 0. S3 genuine-bypass cohort 0 of 7.`** The branch condition
+  evaluated to 0 and returned the clean branch, so the degraded path never activates. Decide does not
+  choose which law supersedes; it observes that GR112's own threshold already answered. Round-4's
+  two-clause form (line 374) — "zero UNNAMED residue and zero known user-facing defect" — is the seal's
+  substantive law; GR112 is the separate evidence-integrity gate it already froze; GR61 and the round-2/3
+  single-clause forms are SUPERSEDED as earlier, narrower articulations of the same intent.
+
+- **GR121 — there are THREE permanent human gates and one is INVISIBLE to every roster query.**
+  `cloud-console-billing-live-gate`'s parent is `cloud-console-goal`, NOT this epic — proven both
+  directions in one breath: the epic-scoped query returns 133 ids with `billing gate in roster: False`,
+  while `filter[_id]` resolves it `open`. No `filter[parent_id]` query rooted here can ever reach it, so
+  it is carried by **hardcoded doc_id**, and inheritance is not a forwarding address. The bucket also
+  **tripwires on disappearance**: a gate that silently vanishes is a gate that stopped being disclosed,
+  and that is NO SEAL rather than a clean sheet. `gr-ops-platform-admin-emails` and
+  `gr-backlog-qr-live-scan-proof` join it. **The crown is DARK**: `PLATFORM_ADMIN_EMAILS` is unset on
+  prod, so the operator console — this epic's headline feature — shipped fully built and unreachable.
+  **"Seal" here means CODE seal. It has never meant "this feature is live for any human," and the
+  predicate's green says so in its own words.**
+
+- **GR122 — E10 does NOT subsume the brace tripwire; the two are near-DISJOINT, and deleting the
+  tripwire would open a coverage gap at the round meant to close gaps.** Proven by mutation, both
+  directions: a bare unclosed `{` and a bare stray `}` (no comment involved) both leave `__css_check.mjs`
+  at **exit 0, "0 error(s)"** while `__app.test.mjs`'s brace-depth walk goes RED; an orphan `*/` inverts
+  it — E10 reds correctly at `app.css:4519` while the brace walk stays green. E10 (`orphanCommentErrors`,
+  `__css_check.mjs:356-405`) is a comment-nesting state machine that **never inspects a brace character**;
+  its function body contains zero references to `{` or `}`. It covers 1 of the 3 classes
+  `gr-backlog-css-brace-detector` names, and no fixture proving it reds on the other two exists anywhere
+  (`__css_check.fixture.css` is E9-only). GR75 itself only ever scoped E10 to comment terminators — the
+  task's acceptance criteria overreached what the charter chartered. **The interim tripwire at
+  `__app.test.mjs:633-656` STAYS.** The task is re-scoped, not closed.
+
+- **GR123 — the residue-21 tripwire DID NOT FIRE; NAME-AND-FORWARD holds.** Four of the 21 were
+  spot-checked against `origin/main` on their exact user-visible claim, anchored on function names not
+  line numbers (GR80), and **4/4 passed**: `webhookBannerHtml` contains no `consecutive_failures` token;
+  `readOnlyPlanCardHtml` emits zero `<button>` elements and `renderBillingManage(false)` short-circuits to
+  the honest copy; `operatorVisible` is `!!(me && me.user && me.user.platform_operator === true)` —
+  fail-closed by construction; `Auth.require_platform_operator/2` is a literal 401-then-403 shape. The
+  derivation independently reproduced GR111's S1=10/S5=33 split exactly. Observed rate stays **0 material
+  failures across 39 checks**. The audit does not become seal-blocking. Criteria 2-3 forward to the
+  successor. **The 21, enumerated BY NAME — because "the 33-member S5 minus these 12" is a subtraction a
+  cold reader cannot act on, and that is precisely what "zero UNNAMED residue" forbids:**
+  `gr-backlog-email-fleet-mapping`, `gr-backlog-role-vocabulary`, `gr-backlog-shoot-matrix-budget`,
+  `gr-backlog-wave-exhaust`, `gr-p2-home-triage`, `gr-p2-launch-theater`, `gr-p3-hygiene-guard`,
+  `gr-p3-timeline-grammar`, `gr-p3-webhooks`, `gr-p4-billing`, `gr-p4-members-env`,
+  `gr-p5-honesty-batch-1`, `gr-p5-operator-routes`, `gr-w1-charter-archive-pr`,
+  `gr-w1-cloudchrome-bridge`, `gr-w1-css-check-detector`, `gr-w1-operator-me-flag`, `gr-w1-shell`,
+  `gr-w1-styleguide-port`, `gr-w1-token-ramps`, `task-7836903b7ea83111`. One wrinkle stated rather than
+  smoothed: `gr-backlog-email-fleet-mapping` is structurally S5 (all criteria met, clean CAS) yet the
+  audit's criterion-6 evidence mentions handling it — a bonus look outside its declared bookkeeping, not a
+  stratification error.
+
+- **GR124 — cssom-parity's non-wiring is an EXISTING ruling, not a new gap; do not re-litigate it.**
+  It is GREEN on the tip (1200/1200 rules, 1169/1169 selectors, **MISSES 0**, run twice) and referenced by
+  zero workflow or Makefile — but GR93(b) already ruled it "ships UNWIRED on purpose… wiring is the
+  successor's first task… it never gates the seal." That stands. Wiring cost is captured for the successor
+  so it need not be re-derived: **no new CI trigger is needed** (`cloud/priv/static/app.css` is already a
+  doc-gates trigger path), ~15-30s added runtime, and one unverified assumption — that hosted runners ship
+  an ambient Chrome, where `js-tests.yml` instead installs a pinned chromium. **It is also structurally
+  blind to the GR109/GR115 class**: it collects `selectorText` and asks whether a selector REACHED the
+  CSSOM. A cascade-dead rule is present in the CSSOM — it just loses. It was GREEN with GR115 live.
+  `__app.test.mjs` contains **zero** `getComputedStyle` calls and cannot assert a computed value either.
+  So the dead-rule class had NO guard coverage from any instrument in this epic; the overflow guard closes
+  that, which is why it is a measurement and not a regex.
+
+- **GR125 — evidence hygiene proven live this round, carried as law.** (a) **Port squatting is a false
+  green**: a preview server from a *foreign worktree* served `187302 B` — the primary checkout's
+  `origin/main` bytes — while the probe's own tree held `189086 B`, making a patched run print output
+  byte-identical to baseline. With 20 live worktrees on this checkout, any `serve.mjs`-based gate needs a
+  served-bytes-vs-disk-bytes assertion; it was mutation-proven (squat the port -> `!! STALE SERVER on
+  :4199`). (b) **Chrome memory-caches `app.css` across same-URL navigations** — without
+  `Network.setCacheDisabled` a mutation phase measures the ORIGINAL stylesheet. (c) `.new-console-body`
+  and `.bp-console-body` are **byte-identical declaration blocks**, so a plain string `.replace()` patches
+  the wrong twin and reports a false "did not flip" — mutations must be selector-anchored inside braces.
+  (d) **`design/emit.mjs --write` silently overwrites everything between `BEGIN/END GENERATED: tokens`
+  (`app.css:45-232`) with no diff and no log line, and `design/check.mjs` prints PASS and exits 0 over the
+  deletion** — re-proven this round by injecting a sentinel inside the marker, running `--write`, and
+  watching check.mjs go green on the loss. This already ate 33 hand-written `.bp-lc-*` lines in
+  `1d928b3bf`. `__css_check.mjs`'s E2 catches it only if the lost class is referenced by live markup, so an
+  orphaned selector's deletion is invisible to BOTH gates. **Fence: author every rule strictly below line
+  232, and never run `emit.mjs --write` in a slice that changes no token.**
+
+- **GR126 — the ledger is LIVE and MUTATED under a reader mid-seal.** A `tmp-reparent-probe` row was
+  present in one enumeration and gone from three samples minutes later; a concurrent session was
+  rehearsing the re-parent. Roster drifted 132->133 during this wave (`gr-p5r8-bpconsole-dead-rule`, filed
+  11:42:35). **A seal verdict is valid only at an instant.** The predicate must be run LAST, by the same
+  agent that files the successor, in one atomic pass, with its roster count and ISO timestamp recorded
+  verbatim — which is also why residue-21's enumeration is FOLDED into the successor slice rather than
+  dispatched beside it: two builders writing the ledger concurrently can green a predicate over a
+  half-moved roster.
+
+- **GR127 — #4834 is BYTE-EMPTY and the tip's cloud gates never ran on the tip.** `git diff --stat
+  24fae1b9f 8fbef852c` is empty: only 4 of round 7's 5 PRs carry unique diffs. `gh run list` shows
+  `8fbef852c` ran **only** `elixir`; `console-harness`, `cloud` and `Deploy` last succeeded on `24fae1b9f`.
+  This is benign *because* the diff is empty — but **nobody may call it a tip green without that diff in
+  hand**. All four harness gates were re-run directly at the tip and are genuinely green: `node --check`
+  clean, `__app.test.mjs` **640/640**, `__css_check.mjs` 0 errors (1 demoted R3 gap), `smoke.mjs` all 86
+  scenarios. `smoke.mjs` is confirmed unwired from CI, same posture as cssom-parity.
+
+- **GR128 — the reshoot budget, measured rather than asserted.** 32 shots across two runs from a clean
+  `git archive origin/main` export under real load (avg 16-41): **0 wedges, 0 watchdog firings, 32/32
+  distinct hashes**, median 5.0s/shot (worst 6.0) — ~30-40% slower than GR67's 3.0-4.0s clean room. The
+  real slice is 80 PNGs (4 scenarios x 5 accents x 2 themes x 2 widths), extrapolating to ~7min.
+  **Budget 10 minutes; ABANDON at 20 minutes wall-clock with no climbing file count.** The reap watchdog
+  (`shoot.sh:340-367`) caps any single wedged shot at 15s poll + 10s `REAP_BUDGET` = 25s, so even 8 wedges
+  add only ~3.5min. **The brief's "25% transient-failure rate in an 8-shot spot check" could not be traced
+  to any source** — the only documented figure is GR114's 1-of-4-*runs*, pre-dating the watchdog; a
+  separate observation of 2 wedges in 8 shots today is the likely origin. It is carried as an unverified
+  number, not as measured fact. GR114 still binds: "my run was clean is not evidence the risk is closed."
+
+- **GR129 — the #4833 mock fix is REAL, proven by independent hash rather than by commit message.**
+  `account-modal-dark-1440-iris` and `account-modal-2fa-badcode-dark-1440-iris` now hash `1cf3548c…` and
+  `f7898562…` — distinct from each other and both distinct from the pre-fix shared
+  `b3962224…`, with file sizes 309195 vs 337845. The reshoot rests on a sound primitive.
+
+**The round-8 wave (3 build slices, 2 rounds).**
+Round 1, file-disjoint, dispatching now: **`gr-p5r7-tablet-overflow`** (fable) owns `app.css`,
+`__app.test.mjs` and the new `overflow-guard.mjs` — fixes GR116 at its cause, revives GR117, folds GR115,
+and commits the browser guard clause (b) delegates to; **`gr-p5r7-reshoot-verify`** (opus) writes no
+source and is explicitly NON-BLOCKING with ABANDON pre-authorized — it may not delay the seal in either
+direction. Round 2, after tablet-overflow MERGES: **`gr-p5r5-successor-seal`** (fable) files the successor,
+re-parents survivors, moves the billing gate by hardcoded name, labels all three human gates, enumerates
+the 21, closes `gr-p5r7-doneset-residue-21`, and runs the frozen predicate LAST as one atomic act.
+
+**The seal is the predicate's exit code, and NO SEAL is a fully acceptable, pre-committed outcome.**
+Five rounds died of a prose verdict whose bar moved with the reader. This one cannot: the bar was written
+to disk and mutation-proven before a builder flew, and the first thing that proof did was catch the
+predicate blessing a broken fix. If it exits non-zero, the successor is the honest handoff and the epic
+says so on the ledger.
