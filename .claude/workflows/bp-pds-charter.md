@@ -570,6 +570,133 @@ prose that preceded it.
   loss or opens the leak, and landing a fidelity change underneath a running proof invalidates its
   census.
 
+- **PDS-D75 — Criterion 7 of `pds-w1-crown-proof` is REWRITTEN, not word-patched.** The criterion
+  said "the scratch target is REBOOTED between the two pulls and the second pull converges
+  byte-identically." The shipped step 6 (`scripts/pds-pull-proof.sh:1910-2006`) runs ONE pull —
+  it ABORTs naming step 1 if `PULL_BUNDLE` is empty — then a real reboot (`bin/barkpark stop`
+  then `up` in the same `BARKPARK_HOME`; there is no restart verb), an md5 digest over the EIGHT
+  guarded columns (`title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups,
+  list_preview`) `string_agg`'d `ORDER BY (dataset, name)` — that pair, not `name` alone, being the
+  table's unique index — and then a SEPARATE guard-off control. Why: swapping the single word
+  "byte-identically" (already forbidden by D30) would leave the criterion describing a two-pull
+  test nobody runs, so the climber either fails a healthy rung or overclaims a green one.
+
+- **PDS-D76 — Criterion 6 grows the rung's real strength: EVERY asset, the typed 404, and a
+  fail-demo that must have fired.** The criterion asked for "an imported asset path" (singular)
+  while step 5 asserts every asset resolved from the TARGET's own `/v1/media/:dataset` and
+  additionally asserts a typed 404 on a missing blob. Why: a criterion strictly weaker than its
+  rung is satisfied by one asset, and `PDS_STEP5_FAILDEMO=0` still emits `PASS 5` with only an
+  informational "the pass below is weaker for it" note (`:1874`).
+
+- **PDS-D77 — Criterion 10 grows CLOSING teeth; an opening banner alone never satisfies it.**
+  Step 8 (`:2056-2109`) can `fail 8 "THE SOURCE REDEPLOYED UNDER THIS RUN"` or ABORT with no
+  re-pin signal, and NO acceptance criterion covered it. Criterion 10 now requires the banner to
+  open AND step 8 to have run with its verdict printed; a step-8 ABORT is reported as an UNDATED
+  transcript and does not satisfy the criterion. Why: the wish demands the closing re-pin, and a
+  criterion satisfied before the run's most dangerous window has no teeth where they are needed.
+
+- **PDS-D78 — THE DEPLOY EPOCH: a differential is valid only inside one epoch, and a red 0b from
+  a box-ahead is an epoch event, never an assertion to loosen.** Deploy fires 58×/24h with a
+  ~28.5-minute median and no quiet-window mechanism exists anywhere. Rung 0b asserts
+  `merge-base --is-ancestor DEPLOYED_SHA worktree_sha` — TOLERANT of the worktree being ahead,
+  FAILING two ways when the BOX is ahead (`cat-file -e` misses the object, `:645-647`; or
+  is-ancestor is false, `:655-657`). The transcript prints the epoch boundary; a differential
+  straddling two binaries is reported UNDATED rather than as a result; a red 0b means re-fetch,
+  rebase the climb worktree, restart the run and SAY SO. Why: at preflight the box sat one commit
+  behind main with a loaded deploy pending, so this red is the wave's single highest-probability
+  event and it looks exactly like an assertion worth relaxing.
+
+- **PDS-D79 — `PDS_CONTROL_PG` must be exported into the HARNESS's own environment or rung 4
+  cannot close.** Step 4 gates its control call on `[ -n "${PDS_CONTROL_PG:-}" ]` (`:1648`) and
+  does NOT fall back to the bare `postgres` conninfo that `pds-secret-scan.sh control` defaults to
+  standalone; the else-branch prints `instrument control: NOT RUN` and the step still passes. The
+  control itself is proven end to end: `CONTROL EXIT=0`, FIRE (2 hits, full bundle) / FIRE (2 hits,
+  target DB) / CLEAN (0 hits, deny-shaped dev bundle), throwaway DB dropped. Why: one forgotten
+  env var silently costs the closing rule its rung-4 leg while printing green.
+
+- **PDS-D80 — `PDS_AMMO_FILE` REPLACES the real ammo and is never set in the climb's own
+  environment.** `resolve_ammo()` short-circuits on it with an early return before `ssh_available`
+  (`:1591-1594`). A leaked value makes all three of step 4's legs — dev-clean, target-DB-clean and
+  the full-bundle FIRE — measure the literal string, so a poisoned run prints three greens while
+  proving nothing about `webhooks.secret`. Mutations run as their own throwaway `--only`
+  invocations with the variable unset for the climb. Why: this is the wave's most dangerous
+  vacuous-green, and it is one exported variable away at all times.
+
+- **PDS-D81 — Safeguards fall into THREE unequal classes and the transcript records demo status
+  per rung.** DEMONSTRATED BY DEFAULT: steps 5 and 6 (`PDS_STEP5_FAILDEMO`, `PDS_STEP6_GUARD_DEMO`,
+  both default 1). DEMONSTRATED BUT SEVERABLE: steps 3 and 4's positive controls, whose proof
+  capability is itself conditional on the one full export. UNDEMONSTRATED PASSIVE: everything else,
+  including step 2's ERR row and step 3's COPY-TEXT grammar check. Why: the wave's own commitment
+  ("every first-pass rung owes a mutation") was only two-fifths satisfied, and treating all named
+  safeguards as equivalent hides which greens were ever shown able to go red.
+
+- **PDS-D82 — The two first-pass mutations are PROVEN, BOUNDED and SCOPED.** Step-4 ammo poison:
+  `bp-export-v1` (12 bytes, clear of `MIN_AMMO_LEN=8`) is present in every real bundle because
+  `Archive.pack/2` calls `:erl_tar.create(path, members, [])` with an EMPTY option list — nothing is
+  compressed — and the scanner greps EXTRACTED members; it reddens step 4's PRIMARY dev-clean
+  assertion at exit 1 and returns before the export-costing control, spending zero budget. Step-1
+  cheap-fail: a nonexistent slug exits 4 (`exitNotFound`) in ~0.09 s with NO output file created.
+  SCOPE: the poison proves the extraction+grep plumbing and the HIT→FAIL conversion, NOT the dev
+  partition's table DENY; the cheap-fail is non-discriminating (a bogus token returns the identical
+  `not_found` envelope and identical exit 4) and it kills steps 2/5/6, so it runs alone.
+
+- **PDS-D83 — THE BUCKET RULE: every red rung is sorted BEFORE anything is touched.** HARNESS BUG →
+  fix the instrument, and show the corrected assertion still fails on the pre-fix condition. ENGINE
+  FAIL → report it, file it, do NOT fix it this wave. Why: editing the harness until the red goes
+  away converts an engine FAIL into a vacuous green at exactly the moment it is most tempting.
+
+- **PDS-D84 — THE CLOSING RULE, pre-declared before the climber meets it.** `pds-w1-crown-proof`
+  closes ONLY if rungs 3 and 4 pass WITH their controls FIRING off the one full bundle AND rungs
+  1/2/5/6 pass against a real booted target. A severable headroom ABORT of 3/4 is an honest
+  designed outcome and does NOT close the task. Why: the wish's own "zero ABORTs → close" invites
+  closing on a run whose full export was legitimately refused, and 3/4 are the exact leg the
+  zero-secrets headline stands on.
+
+- **PDS-D85 — `merge_upsert` DOES carry `media_files.size`; the live-bug premise is REFUTED and the
+  residue is a COVERAGE gap.** `media_files` is `@pinned_e1` → `import_strategy(_) → "copy"` →
+  `merge_upsert`, whose `DO UPDATE SET` is built generically over `cols -- order_cols`, so `size`
+  is updated with no special-casing; it also rides `@dev_copy` with an empty scrub set. Two probes
+  converge, including step 1's exact dev+merge path. The mutation proof: excluding `size` from that
+  update set reddens ONLY the new probe — 25 tests, 1 failure — because the md5-parity merge test
+  drifts workspaces/documents/content_edges/authoring_exemptions and never touches `media_files`,
+  and the only other merge-mode test asserts `total_rows > 0`. Why: pin the property, do not "fix"
+  an engine that is healthy.
+
+- **PDS-D86 — `ensure_bp()`'s freshness gate checks three of the four flags its own prose claims.**
+  The case-statements at `:358-362` assert `--profile full|dev`, `--merge`, `--with-blobs`; there is
+  no `--dataset` branch, while `:331` and `:839` both claim the check covers it. Latent, not
+  live-broken — the harness always builds fresh from the worktree and ABORTs rather than falling
+  back to PATH. Why: the wave's headline defect class (D61's silent `--dataset` drop) is the exact
+  regression this gate would be blind to.
+
+- **PDS-D87 — The transcript is a DURABLE, CITED receipt and the stale one is RETIRED in the same
+  PR.** `scripts/pds-pull-proof.first-run.txt` is the pre-#4586 run (3 PASS · 7 ABORT · 0 FAIL, sha
+  `ec70fdc3d`, no step 8, ABORT stubs for 1/2/5/6) and is cited by NO doc, card, paper or charter
+  line across all 627 tracked `.md` files. The crown transcript lands as
+  `scripts/pds-pull-proof.crown-transcript.txt`, append-only (attempt 1's reds are never deleted),
+  the orphan is deleted in the same PR, and both the charter and an evidence paper cite the new
+  path. Why: two receipts in one directory means the stale one gets read as the crown proof.
+
+- **PDS-D88 — `bp search` EXISTS as `barkpark search query`.** Six surveyors reported it missing and
+  fell back to grep; two later probes ran it successfully (1287 hits). Every "no prior art"
+  conclusion this epic recorded on the strength of its absence is re-openable. Why: a false
+  negative on the prior-art tool silently weakens every novelty claim built on top of it.
+
+- **PDS-D89 — `--only X --plan` RUNS LIVE.** The arg parser is a `case` on `$1` only (`:2209`) with
+  no shift loop, so trailing flags are silently ignored and a preflight operator reaching for the
+  safety flag in the wrong position takes a real export. Why: the dry-run flag is only safe first,
+  and that is a property to fix in the instrument rather than to remember.
+
+- **PDS-D90 — Charter continuity: the amendment LANDS #4494 REBASED, never re-authored, and
+  `reset --hard origin/main` on the primary checkout stays forbidden.** #4494 is a strict superset
+  of local main's stranded `90b13ad83` (diffing entry headings yields only `>` lines), is contiguous
+  D1–D74 with no gaps, and rebases conflict-free (merge-base `b7d6ce8ee`, origin never touched the
+  file since). Local main is DIVERGENT — 58 behind, 9 ahead — so a push is impossible and a blind
+  rebase-and-push would REVERT four charter files origin advanced, one of which
+  (`bp-task-design-language-spec.md`, −65 lines) no local commit even touches. Why: the already-filed
+  `pds-bl-charter-slot-durability` warns a blanket reset destroys five epics' charters at once,
+  including the TLV charter that exists nowhere but local main.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -641,7 +768,8 @@ per D56):
   close D45 — bare-slug E3 rows under a cross-tenant-shared slug are silently dropped from a
   "byte-identical" backup.
 
-Wave 4 — THE CROWN PROOF PAID (THIS WAVE; 6 slices; every builder `opus` per D38/D56; the ladder
+Wave 4 — THE CROWN PROOF PAID (ROUND 1 COMPLETE — #4586-#4589 all merged 2026-07-19T22:24Z and
+all four merge commits are ancestors of origin/main; 6 slices; every builder `opus` per D38/D56; the ladder
 is FINISHED before it is CLIMBED — merging the wave-3 PRs greened zero blocked rungs):
 
 - R1 `pds-w4-pull-dataset-flag` (opus, M): fix the silently-dropped `--dataset` on
@@ -667,13 +795,32 @@ is FINISHED before it is CLIMBED — merging the wave-3 PRs greened zero blocked
   disagreeing.
 
 
-Wave 5 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
+Wave 5 — CLIMB THE LADDER (DECIDED 2026-07-20; 6 slices; every builder `opus` per PDS-D38/D56):
+
+- R1 `pds-w5-criteria-reconcile` (opus, S): rewrite criteria 6, 7 and 10 of `pds-w1-crown-proof`
+  in the ledger per D75/D76/D77 — the climber must not author the criteria it will be judged by.
+- R1 `pds-w5-harness-hygiene` (opus, M): close `ensure_bp`'s missing `--dataset` branch (D86),
+  make `--plan` win in any argument position (D89), and tag the three uncited rulings the code
+  already implements — `(PDS-D67)` on step 5, `(PDS-D70)` on the RSS sampler, `(PDS-D71)` on the
+  severability abort.
+- R1 `pds-w5-merge-mode-size-pins` (opus, M): land the two mutation-proven pins for
+  `media_files.size` under `mode: :merge`, including step 1's exact dev+merge path (D85).
+- R1 `pds-w5-ledger-merge-stamps` (opus, S): stamp the `PR merged to main` criterion on the 14
+  done PDS tasks whose merge commits are confirmed ancestors of origin/main — `pds-w4-harness-rungs`
+  is deliberately EXCLUDED (4/14; its other nine criteria belong to the climb).
+- R2 `pds-w1-crown-proof` (opus, L; after the two R1 harness/ledger slices): THE CLIMB. One owner,
+  one `BARKPARK_HOME`, one `PDS_SCRATCH_POINTER`, one ATTEMPT-counted full export. Transcript +
+  evidence paper; the orphan `first-run.txt` retired in the same PR (D87).
+- R3 `pds-w3-shares-fidelity` (opus, M; after the crown proof captures the census baseline):
+  close D45 per-table (D74) and split `delete_e3_dataset_keyed`.
+
+Wave 6 — lifecycle honest: `bp dev reset` over the Tenancy cascade; snapshot/restore round-trip
 byte-identical; delete-reconciliation refresh; streamed bundle channel (task 24913529, unblocked
 once wave 2 merges — PDS-D37).
-Wave 6 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
-Wave 7 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
-Wave 8 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
-guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W4/W5.
+Wave 7 — `bp dev` namespace + repo profiles (`bp dev up|pull|reset|promote`), single-verb pull.
+Wave 8 — $29 dev tier via the existing billing gateway (Stripe wiring = human gate).
+Wave 9 — agent-fleet sandbox proof: one destructive fleet wave against a PDS, zero writes to
+guerrilla. G8 twin sync (secondary-unique identity reconciliation) rides behind W6/W7.
 
 Backlog (filed as published child tasks of the epic): flat-verb `-w` honesty · streamed bundle
 channel + import-body streaming · delete-reconciliation refresh · G8 secondary-unique identity
@@ -754,3 +901,93 @@ invisible even to the disclosure (D68).
 Slices: `pds-w4-pull-dataset-flag` · `pds-w4-harness-rungs` · `pds-w4-guard-test-eight` ·
 `pds-w4-media-size-roundtrip` (R1) → `pds-w1-crown-proof` → `pds-w3-shares-fidelity` (R2).
 Paper: `pds-wave-4-2026-07-19`.
+
+### Wave 5 2026-07-20 — "Climb the Ladder" — DECIDED, 4 R1 slices building
+
+The wave opened believing its first job was to merge four PRs. Digest killed that: #4586-#4589
+merged at 22:24Z and every merge commit is an ancestor of origin/main. `scripts/pds-pull-proof.sh`
+— 2244 lines, 11 rungs plus `--plan` — is LIVE ON MAIN with ZERO hardcoded ABORTs.
+
+A PREFLIGHT then bet nothing and learned everything: a live `--only 0a,0b,7,8` returned
+**4 PASS · 0 ABORT · 0 FAIL**, pinning `version=0.2.25.1330 sha=0b4c677fd`, a 200/53,932,544-byte
+dev export carrying `profile=dev dataset=production`, a live 403 `bundle_import_disabled`, and a
+step-8 re-pin on the SAME sha with monotonic uptime. The one full-export ATTEMPT is genuinely
+unspent (`spent so far=0 · on-disk bundle=absent`), the host holds no scratch pointer, and the
+control fires end to end (`CONTROL EXIT=0`, FIRE/FIRE/CLEAN, throwaway DB dropped).
+
+The climb is dispatchable — and four rulings had to be made before it could be climbed honestly.
+Criterion 7 described a two-pull byte-identity test the shipped step 6 does not run (D75), so it is
+rewritten rather than word-patched; criteria 6 and 10 grew the teeth their rungs already have
+(D76/D77). The 0b deploy race is pre-ruled an EPOCH event, never an assertion to loosen (D78) —
+at preflight the box sat one commit behind main with a loaded deploy pending. And two silent
+vacuous-greens are now law: `PDS_CONTROL_PG` unset costs rung 4 its control while printing green
+(D79), and a leaked `PDS_AMMO_FILE` makes all three of step 4's legs measure the literal string
+`bp-export-v1` (D80).
+
+Verification also refuted the wave's own most alarming premise. `merge_upsert` DOES carry
+`media_files.size` — but nothing on main convicts a regression: excluding `size` from the
+`DO UPDATE` set reddens exactly ONE test out of 25, and that one is new (D85). Healthy engine,
+real coverage hole. Two smaller instrument holes are filed, not fixed mid-climb:
+`ensure_bp` never checks `--dataset` while claiming it does (D86), and `--only X --plan` runs LIVE
+(D89).
+
+Slices: `pds-w5-criteria-reconcile` · `pds-w5-harness-hygiene` · `pds-w5-merge-mode-size-pins` ·
+`pds-w5-ledger-merge-stamps` (R1) → `pds-w1-crown-proof` (R2, THE CLIMB, single owner) →
+`pds-w3-shares-fidelity` (R3). Paper: `pds-wave-5-2026-07-20`.
+
+Backlog seeded this wave: whole-process RSS is quoted without an ambient-load caveat · the harness
+asserts no `lifecycle_status` CHECK/migration precondition (0 grep hits) and step 0b's sha proxy is
+skippable on `--only` re-runs · each step 0a leaks ~51 MB into an uncleaned artifacts dir · the TLV
+charter exists only on local main, in no PR, while its work PRs merged · a CI deploy run reported
+SUCCESS for `7f8a0dd7f` while the box stayed at `0b4c677fd`.
+
+### Wave 5 2026-07-20 — R1 built + reviewed, grade A− (paper `pds-wave-5-2026-07-20`)
+
+Round 1 shipped FIVE slices, not the four Decide listed: `pds-w5-charter-amendment` was dispatched
+alongside the roster above. All five gates re-run green on the reviewer's final state.
+
+- `pds-w5-criteria-reconcile` → `loop-epic/the-crown-proof-is-judged-by-the-test-th-0` (no fixes).
+  Crown-proof criteria 6/7/10 rewritten to the harness that actually shipped, BEFORE the climber
+  dispatches, so the climber does not author its own rubric. Criterion 7 no longer demands a
+  two-pull byte-identity test step 6 never performs (PDS-D30 rules byte-identity impossible);
+  it now names the eight guarded columns, the `(dataset, name)` key and `PDS_STEP6_GUARD_DEMO=1`.
+  Ledger-only — the branch carries an `--allow-empty` commit whose message IS the artifact.
+- `pds-w5-harness-hygiene` → `loop-epic/the-proof-harness-stops-overclaiming-its-1-r`
+  (review fix 987a22df1). `ensure_bp` now asserts the fourth flag its own prose claimed (`--dataset`,
+  the D61 class); `--plan` wins in any argv position so `--only 0a --plan` no longer takes a real
+  ~51 MB live export while printing "dry run"; three implemented-but-uncited rulings tagged.
+  REVIEW FIX: a partial `--only` run closed with "RESULT: PASS — the whole ladder ran and held"
+  after four of eleven rungs — the harness's own loudest overclaim, and the exact line a reader
+  lifts into a transcript as the crown proof. It now reads `PASS (PARTIAL) … NOT the crown proof`.
+- `pds-w5-merge-mode-size-pins` → `loop-epic/media-files-size-under-mode-merge-gets-t-2` (no fixes).
+  Two tests pin `media_files.size` under `mode: :merge` — step 1's exact path. Mutation re-proven
+  INDEPENDENTLY at review: excluding `size` from `merge_upsert`'s DO UPDATE set reddens exactly
+  these two and nothing else (26 tests, 2 failures), while the sibling dev-profile file stays
+  15/15 GREEN under the same broken engine. The coverage hole was real, not a story.
+- `pds-w5-ledger-merge-stamps` → `loop-epic/fourteen-done-pds-tasks-stop-under-repor-3` (no fixes).
+  Fourteen done PDS tasks now carry the sha proving their merge criterion, each re-verified three
+  ways (ancestry, `gh pr view` mergeCommit compared programmatically, the PR body's own `Task:`
+  line). `pds-w4-harness-rungs` deliberately EXCLUDED and left at 4/14 — nine of its criteria are
+  "AUTHORED AND GATED, NOT RUN" and belong to the live climb. Ledger-only, already live.
+- `pds-w5-charter-amendment` → `loop-epic/the-epic-s-memory-stops-being-three-diff-4-r`.
+  Charter is contiguous D1–D90 at 942 lines; all 22 harness-cited D-numbers resolve (slash-expanded).
+
+STALE-MERGE MYSTERY, CLOSED. The builder found #4494 merged carrying only D39–D74 and flagged as
+its main blind spot that it could not tell a one-off from a systemic rebase-then-merge race —
+asking the lead to audit other PRs. Resolved at review: `356aa57d5` was AUTHORED at 23:13:26Z,
+twenty seconds AFTER the PR merged at 23:13:06Z, and GitHub's record shows headRefOid never left
+`21c144f2f`. Nothing stale was merged; two concurrent agents raced, one merging while the other
+was still writing onto the branch. NOT systemic — no PR audit is warranted, and the re-land onto a
+fresh branch is the correct remedy.
+
+WHAT DID NOT HAPPEN: the wish's headline job, `pds-w1-crown-proof`, did NOT run this wave. It is
+round 2 by the sequenced-rounds law — it depends on `pds-w5-criteria-reconcile` (which rewrites
+three of the criteria it is judged by) and `pds-w5-harness-hygiene` (which closes two holes in the
+instrument it runs). Round 1 was entirely enablers. The epic's headline claim remains UNPAID and
+the ladder still has never been run end to end; `pds-w1-crown-proof` stays `open` at 0/11.
+
+NEXT WAVE: merge round 1 (the charter branch FIRST or with the hygiene branch — the hygiene harness
+cites D86/D89, which exist only in the amended charter). Then dispatch `pds-w1-crown-proof` as a
+single owner, strictly serial, one `BARKPARK_HOME` / one `PDS_SCRATCH_POINTER` / one ATTEMPT-counted
+export. Only after its transcript lands does `pds-w3-shares-fidelity` go, because it moves the
+census baseline (PDS-D45 — the manifest's `dataset_slugs` came back `[]`, re-confirmed live).
