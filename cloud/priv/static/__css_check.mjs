@@ -49,6 +49,18 @@
 //       `--btn-bg: var(--primary);`). The flat scan still "saw" `--btn-bg:`, so
 //       the contract missed it. Fixture: __css_check.fixture.css; targeted run:
 //       `node __css_check.mjs --swallow-check __css_check.fixture.css` (exit 1).
+//   E10 orphan comment terminator (regression #4592/GR74): a `*/` reached while
+//       NOT inside a comment. Its cause is always the same — a `/*` was lost, so
+//       every line above the orphan is parsed as raw CSS, and CSS error recovery
+//       discards tokens until the next `{…}` block, silently SWALLOWING the next
+//       whole rule. Live case: app.css's GR63 modal comment lost the `/*` on its
+//       REVIEW ADDENDUM paragraph, so `.modal-root { position: fixed; … }` never
+//       reached the CSSOM and every modal in the console rendered in document
+//       flow under a fixed backdrop. E9 could not see it (E9 is scoped to `--x:`
+//       inside the three token blocks) and the app.test.mjs source-text
+//       assertions could not either (they regex app.css as TEXT). The mirror
+//       case — EOF reached while still inside a comment — is the same defect
+//       from the other end and is reported too.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -308,6 +320,75 @@ export function swallowedTokenErrors(cssRawText) {
         );
       }
     }
+  }
+  return errs;
+}
+
+// ── E10: orphan comment terminator (rule-swallow guard, regression #4592) ────
+// E9 answers "did a mis-closed comment eat a custom property inside a token
+// block?". E10 answers the strictly larger question the browser actually asks
+// first: "is this file's comment nesting even coherent?". A `*/` met outside a
+// comment proves a `/*` went missing above it; the browser then parsed that
+// prose as CSS and, per error recovery, threw tokens away until the next `{…}`
+// — i.e. it ATE the following rule whole. That is invisible to every
+// source-text check, because the bytes are all still there.
+//
+// Deliberately NOT a "does this prelude look like a selector?" heuristic: that
+// was prototyped and measured 15 false positives on a clean app.css (descendant
+// selectors ending in ` a`, keyframe `50%` stops). Comment-state is exact.
+//
+// The walk is a single state machine over {code, comment, string} because that
+// is what a CSS tokenizer is: quotes are inert inside a comment (`browser's`
+// must not open a string) and comment markers are inert inside a string
+// (`content: "*/"` is text, not a terminator). A newline ends an unterminated
+// string, matching the tokenizer's bad-string recovery.
+export function orphanCommentErrors(cssRawText, file = "app.css") {
+  const errs = [];
+  let line = 1;
+  let commentStart = 0; // line the open `/*` sits on, 0 when not in a comment
+  let quote = ""; // "" outside a string, else the opening quote character
+  for (let i = 0; i < cssRawText.length; i++) {
+    const c = cssRawText[i];
+    if (c === "\n") {
+      line++;
+      quote = ""; // CSS: a newline terminates a bad string
+      continue;
+    }
+    if (quote) {
+      // An escaped char is consumed whole. CSS permits a backslash-escaped
+      // NEWLINE as a string continuation, so count it or every line number
+      // below such a string drifts.
+      if (c === "\\") {
+        if (cssRawText[i + 1] === "\n") line++;
+        i++;
+      } else if (c === quote) quote = "";
+      continue;
+    }
+    if (commentStart) {
+      if (c === "*" && cssRawText[i + 1] === "/") {
+        commentStart = 0;
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "/" && cssRawText[i + 1] === "*") {
+      commentStart = line;
+      i++;
+    } else if (c === "*" && cssRawText[i + 1] === "/") {
+      errs.push(
+        `E10 ${file}:${line}  orphan '*/' outside any comment — the matching '/*' is ` +
+          `missing, so every line above this was parsed as raw CSS and error recovery ` +
+          `discarded tokens up to the next '{…}', swallowing the rule that follows (#4592)`,
+      );
+      i++;
+    }
+  }
+  if (commentStart) {
+    errs.push(
+      `E10 ${file}:${commentStart}  comment opened here is never closed — EOF reached ` +
+        `inside it, so every rule below this line is invisible to the browser`,
+    );
   }
   return errs;
 }
@@ -785,6 +866,10 @@ runContrast(errors);
 
 // E9 — parse-completeness: declarations a comment mis-close swallowed (#4251).
 for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
+
+// E10 — comment nesting coherence: an orphan `*/` swallows the next whole rule
+// (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
+for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
 
 // E8 — scoped-theme alias integrity. var() inside a custom property substitutes
 // where the property is DECLARED, so a :root-only alias whose value references
