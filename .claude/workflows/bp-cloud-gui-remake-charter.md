@@ -936,3 +936,238 @@ a same-parent no-op is **not free** (it still emits a `task.reparented` event an
 blind catch-up pass costs real budget), and a **bare `?parent_id=` query is silently ignored**, returning an
 unfiltered page of up to 100 rows — a false confirmation, not an error. Bracket-encoded `filter[parent_id]`
 always.
+
+## Wave 2026-07-20 — phase-5 seal round 10: THE DISPOSITION CENSUS
+
+*(Belongs after round 10's Decide section. Authored by `gr-p5r10-census`. This section is DISCLOSURE, not a
+bar — the seal predicate reads exactly three fields per row (`_id`, `lifecycle_status`, `parent_id`, GR131)
+and cannot read prose. It cannot pass on this census and it cannot fail on it.)*
+
+**Why this section exists.** GR132 proved `forwarded` is dead code in live mode: a task has ONE `parent_id`, so
+a re-parented row leaves `children` entirely and the `forwarded` branch can only fire under `--ledger` fixtures.
+After a PERFECT triage the SEAL banner still reads `… 0 forwarded by name to cloud-console-hardening-epic`.
+The banner is structurally incapable of saying what this epic did with its survivors. **This census is that
+disclosure**, and it is the only artifact in which every live row is disposed BY NAME.
+
+**Roster, re-derived at authoring time** (GR126 — a verdict is valid only at an instant), via
+`GET /v1/data/query/production/task?filter[parent_id]=task-47bc4168392dec17&limit=500`:
+
+> **140 children — `{done: 80, open: 60}`.** 60 live = **34 band-named** + **2 self-orphans** + **24 previously
+> unnamed**, all 26 of the latter disposed below for the first time.
+
+**GR149 trap (i), restated because it produces a FALSE CONFIRMATION rather than an error.** `GET /v1/tasks`
+**silently ignores** `filter[parent_id]` in BOTH encodings and returns an unfiltered page spanning eleven
+parents. A roster read that "looks about right" from that route is not a roster. Read the census roster only
+via `/v1/data/query/production/task` with the bracket-encoded filter, or via `bp task get <parent>`'s `.children`.
+
+**Citation discipline (GR130).** Every SHA below is a **merge** SHA on the linear squash chain, confirmed with
+`git merge-base --is-ancestor <sha> origin/main` → **exit 0**: `3f16c9f43` ✔, `24fae1b9f` ✔, `0261ace15` ✔,
+`7a5aff656` ✔. No branch SHA appears as evidence anywhere in this census.
+
+### Closed by name
+
+- **`gr-backlog-bp-search-verb-discoverability`** — **CLOSED** on merge SHA **`3f16c9f43`** (#4725;
+  `internal/cli/cli.go:540-576`). `bp search` now answers the shapes five surveyors proved read as an absent
+  command. **Honest caveat, recorded rather than smoothed:** its criterion 3 asks for a doctrine sentence that
+  lives OUTSIDE this repository, so the criterion is satisfied **in substance, not in letter**. Its PDS twin
+  `pds-bl-bp-search-verb-missing` is cross-linked here as **REFUTED by this landing** — that row belongs to the
+  PDS epic and is **never touched from this one** (GR148).
+- **`gr-p5r7-badcode-shot-nondeterministic`** *(already `done`; its line is carried anyway because its own
+  close is under-cited)* — landed as merge SHA **`24fae1b9f`**. Its close text cites only a PR number, which is
+  precisely the citation form GR130 outlaws. A **citation-form defect, disclosed here and never reopened**
+  (GR147): the work is real, the receipt was written in the wrong currency.
+
+### Forwarded by name — Band 1, security-shaped, with a gradient
+
+- **`gr-bl-peer-ip-container`** — Band 1, **live and real**: the Caddy hop arrives from the bridge gateway
+  (172.18.0.1), so `trust_forwarded_ip` trusts loopback only and silently no-ops — session IPs are uniformly
+  blind and the device-auth `start:<ip>` bucket collapses to ONE global bucket.
+- **`gr-blk-sse-token-in-query`** — Band 1, **live and real**: the full-privilege session bearer authenticates
+  `GET /v1/events` via a URL query param (`router.ex:9707`), landing in access logs, proxy logs and history.
+- **`gr-blk-oauth-head-mint`** — Band 1, **real but narrower than written**: the state nonce is consumed
+  atomically, so this is a first-use RACE against `Plug.Head` from unfurlers and prefetchers, not a replay.
+- **`gr-backlog-tfa-confirm-throttle`** — Band 1, **ruled clean, kept for disclosure**: strictly weaker than
+  what the session already holds. Do not let a future reader count it as an open security gap.
+- **`gr-backlog-console-redaction-allowlist`** — Band 1, **prospective and out of boundary**: today's allowlist
+  covers every live secret; the gap is a future env var, in Go, outside `cloud/`.
+
+### Forwarded by name — Band 2, not Cloud GUI at all, in transit
+
+Band 2 exists because the predicate reads ONE forwarding address, not because these belong to a console epic.
+Three ownerless classes were already named. **This census names a FOURTH.**
+
+- **`gr-blk-studio-presence-perf-flake`** — **NOT the successor.** Forwarded to **Felix pristine
+  `task-96a908af98698118`**, which is its real home: a second wall-clock-fragile perf test in the Studio/Sheets
+  family. It is the only Band 2 row with a true owner.
+- **`gr-blk-worktree-registry-bloat`** — Band 2, ownerless class *repo-git hygiene*: 1028 registered worktrees.
+- **`gr-backlog-stale-w2-branch`** — Band 2, same ownerless class *repo-git hygiene*: delete the superseded
+  `loop-epic/gr-w2-cloudchrome-bridge` branch and the stale phase-1 worktrees, after a full unmerged-diff check.
+- **`gr-blk-primary-checkout-reconcile`** — Band 2, ownerless class *repo-git hygiene*: ahead 8 / behind 48
+  with 1095 lines of foreign uncommitted work. **Its own body names AXI, PDS, TLV and SPD as the true owners of
+  its unpushed commits — that breakdown must survive the re-parent.**
+- **`gr-blk-vercel-checks-ungoverned`** — Band 2, ownerless class *CI / merge-gate governance*: Vercel checks
+  fail on every PR repo-wide and are governed by no document.
+- **`task-04054d483ae95bd1`** — Band 2, ownerless class *Cloud test-infrastructure*: 7 remaining `async: true`
+  Cloud test modules that swap node-global Application env.
+- **`gr-blk-ledger-close-bypass-audit`** — Band 2, **a NAMED FOURTH ownerless class: `bp task-system /
+  platform`**. Elixir in `api/lib/barkpark/tasks/` and `api/lib/barkpark/content/mutations.ex` — outside
+  `cloud/` entirely, and a member of none of Band 2's three existing classes. **This is the highest-severity
+  row in Band 2 and it must not read as hygiene.** A live probe proved `/v1/data/mutate` accepts
+  `lifecycle_status:"done"` with **no claim, no epoch, no worker and no `if_rev`** — that is the **only
+  reachable KNOWN mechanism** by which a task can be closed outside the CAS path. It is stated as *known*, never
+  as *observed*: the audit that ran found **zero** fabrication, and the honest number was 7, not 13. The finding
+  is that the door is open, not that anyone walked through it.
+- **`gr-p5r9-seal-finishers-crit7-unstampable`** — Band 2, same fourth class `bp task-system / platform`: the
+  server refuses stamps on `done` tasks, so `gr-p5r6-seal-finishers` criterion 7 reads unmet on a row whose
+  work is factually complete (#4832 merged as `7a5aff656`). A ledger-mechanics defect, not a console defect.
+  *(Also a self-orphan — see below.)*
+
+### Forwarded by name — Band 3, harness hardening
+
+- **`gr-blk-cssom-parity-ci-wiring`** — Band 3, and the successor's **named first task**: the parity gate exists
+  and is not wired into CI.
+- **`gr-blk-cssom-parity-harden`** — Band 3: promote COUNT SKEW to fatal and widen past `app.css`.
+- **`gr-backlog-cssom-parity-count-skew`** — Band 3: decide whether count skew is fatal and correct the
+  duplicate-selector census.
+- **`gr-blk-serve-stale-guard`** — Band 3: `serve.mjs`'s port-collision hole lets a foreign worktree's server
+  silently serve the wrong bytes — the exact failure class the anti-squat assertion exists to prevent.
+- **`gr-blk-emit-marker-fence`** — Band 3: `design/emit.mjs --write` deletes hand-written CSS while
+  `design/check.mjs` exits 0. A live instance of *verify state, not exit codes*.
+- **`gr-blk-shootsh-scen-guard`** — Band 3: `shoot.sh` must fail loudly on an unknown SCEN and count the whole
+  output, not its own run.
+- **`gr-blk-shootsh-guard-regression`** — Band 3: `shoot.sh`'s four new guards have no automated coverage.
+- **`gr-backlog-css-brace-detector`** — Band 3, **RE-SCOPED, NOT CLOSED**: E10 does not subsume the brace
+  tripwire, and the interim tripwire at `__app.test.mjs:633-656` must not be deleted.
+- **`gr-blk-oracle-modal-callsite-coverage`** — Band 3: the CSSOM oracle certifies ONE consumer of `openModal`;
+  the shared primitive has 15+ other call sites and #4592 killed it for all of them at once.
+- **`gr-blk-revoke-harness-gap`** — Band 3: `scenarios.mjs` has no handler for either revoke route, so the mock
+  **fakes success** — "0 session(s) revoked" instead of an honest failure. A harness that lies is worse than
+  a harness that is absent.
+- **`gr-backlog-scenario-drive-field`** — Band 3: two name-prefix conventions now drive the account-modal shots;
+  promote them to a real `scenarios.mjs` field so the contract stops living in a header comment.
+- **`gr-backlog-coherence-fixture-durable`** — Band 3: `coherence.html` EMBEDS a byte-copy of the TUI goldens,
+  so any foreign cycle that legitimately regenerates a golden reds this epic's harness. Make it READ them.
+- **`gr-backlog-orphan-reap-signature`** — Band 3: a reap matching on process name alone killed a sibling
+  worktree's live `serve.mjs`. Match on PPID and elapsed time. Filed from a disclosed incident.
+- **`gr-backlog-compose-env-passthrough-audit`** — Band 3: `gr-p5r3-ops-passthrough` fixed ONE variable and
+  added a tripwire for that ONE variable; **22 `runtime.exs` env names remain absent** from
+  `x-control-plane`. The instrument landed narrower than the failure class it was built for.
+- **`gr-blk-cp-deploy-rollback-stale-env`** — Band 3: the automated deploy path is verified safe, but
+  `cp-deploy.sh`'s **documented `docker start` rollback recipe** serves stale env from the dormant slot. The
+  defect is in the instrument's documentation, which is where a rollback is read from under pressure.
+
+### Forwarded by name — Band 4, backend wire-ups whose SPA or test leg did not land
+
+- **`gr-backlog-tfa-retry-after`** — Band 4: the 2FA 429 needs `retry_after` so the client can render honest
+  wait math.
+- **`gr-backlog-audit-filter-params`** — Band 4: `GET /v1/audit` needs server-side actor and verb-class filters.
+- **`gr-backlog-webhook-testsend-http-test`** — Band 4: the test-send route is live with ZERO controller-level
+  coverage.
+- **`gr-backlog-provider-reconnect`** — Band 4: reconnect-replace semantics need a unique `(team_id, kind)`
+  index and an upsert.
+- **`gr-backlog-head-requests`** — Band 4: the cloud router answers HEAD with 404 on every path.
+- **`gr-bl-cli-test-send`** — Band 4: `bp cloud webhook test-send` is the CLI verb the SPA's Send-test button
+  has no chip for.
+- **`gr-bl-delivery-keyset-tiebreak`** — Band 4: delivery-log and activity cursors page on `inserted_at` alone
+  while the server orders on a compound key.
+- **`gr-backlog-e02-deploy-actor`** — Band 4: the audit log already captures the human
+  (`site.deploy_requested`, `router.ex ~5062`); either land the join for a backend-true "requested by
+  \<email\>" or **ratify trigger-only permanently**. A decision, not a defect.
+- **`gr-backlog-operator-digest-send`** — Band 4: GR40 cut the Send-one-now button because NO route calls
+  `Notifications.deliver_fleet_digest` (cron-only). The button returns when `POST /v1/operator/digest/send`
+  exists behind `require_platform_operator` — GR28 forbids the reverse order.
+- **`gr-bl-actor-chip-cache-stale`** — Band 4: `ensureActivityActors()` sets its tried-flag BEFORE the read, so
+  a failed members read is never retried and a team switch never refreshes the actor axis.
+- **`gr-p5-session-provenance`** — Band 4: `GET /v1/account/sessions` has no origin column, so the design's
+  "approved 2d ago via device link" has no backing field. Needs a server-side `origin` column first.
+- **`gr-blk-console-refetch-storm`** — Band 4, as **OVER-consumption of the server↔SPA seam, explicitly NOT
+  Band 5.** It is the **only row in this entire roster carrying a live production measurement**: on
+  authenticated `barkpark.cloud`, five endpoints (`/v1/barkparks`, `/v1/audit?limit=5`, `/v1/usage/summary`,
+  `/v1/subscription`, `/v1/onboarding`) were each requested **EIGHT times in one page load — 40 requests where
+  5 would do**, in seven evenly-spaced repeats consistent with one full reload per SSE event. **Zero 4xx, zero
+  5xx, zero console errors** — so nothing surfaces it, no gate reds on it, and it scales with SSE chatter.
+- **`gr-p5r4-spa-b`** — Band 4, and it is forwarded as **A WAVE SLICE, NOT A DEFECT.** Read plainly, its title
+  overstates the residue: **five of its six workstreams are ALREADY forwarded as their own rows and MUST NOT be
+  counted twice** — `gr-backlog-tfa-retry-after`, `gr-backlog-audit-filter-params`,
+  `gr-backlog-webhook-testsend-http-test` and `gr-bl-delivery-keyset-tiebreak` in Band 4, plus
+  `gr-backlog-css-check-missing-classes` and `gr-backlog-setmatrix-scroll-affordance` in Band 5. It stays open
+  for **ONE payload carried by no other row: section (E)** — a `scenarios.mjs` fixture reproducing the operator
+  console's **real production state**, `staging_gate_open: true` with **ZERO `channel:"staging"` rows**. That is
+  the crown's most likely live render state and it is **unmeasured**. Section (E) is named here explicitly
+  because if the row is ever read as "the five already-forwarded things", (E) is silently lost.
+
+### Forwarded by name — Band 5, QA, matrix and UI residue
+
+- **`gr-backlog-tablet-width-audit`** — Band 5: console-wide 768px audit; other components may share the
+  unguarded-breakpoint pattern.
+- **`gr-backlog-accent-matrix-rereview`** — Band 5: actually review the full accent matrix rather than assert it.
+- **`gr-blk-accent-scenario-sweep`** — Band 5: 74 scenarios never measured under the four non-default accents.
+- **`gr-p5r7-ring-soft-accent-invariant`** — Band 5: `--ring-soft` is declared twice and is green-hued and
+  accent-invariant across all five identities. Found by opening shots, not by reading code.
+- **`gr-blk-ok-danger-hue-separation`** — Band 5: `--ok-hsl` tracks `--primary-hsl` per identity while
+  `--danger-hsl` is pinned at hue 0, so semantic separation drifts per accent.
+- **`gr-backlog-setmatrix-scroll-affordance`** — Band 5: the notifications matrix scrolls without announcing it;
+  the last channel column is invisible. *(Also a spa-b workstream — counted here, once.)*
+- **`gr-backlog-css-check-missing-classes`** — Band 5: 6 class families emitted with no CSS rule, plus 2
+  unclassifiable var-then-concat sites. *(Also a spa-b workstream — counted here, once.)*
+- **`gr-backlog-tall-modal-scenario`** — Band 5: the 9-session account modal — **the exact shape that broke
+  prod** — is still invisible to the screenshot harness.
+- **`gr-blk-smoke-click-inert`** — Band 5: the smoke shim is click-inert, so every wire in the console is proven
+  statically and never actually clicked.
+- **`gr-blk-a2fwire-coverage`** — Band 5: `a2fWire()`'s click → api → repaint chain has zero unit coverage;
+  `grep -c a2fWire __app.test.mjs` returns 0.
+- **`gr-blk-hashchange-listener-wiring-proof`** — Band 5: `hashChangeEffects` is pinned as a pure function, but
+  nothing pins that the LISTENER consults it, or that `closeModal()` runs BEFORE `applyRoute`. Proven at the
+  decision, never at the wiring.
+- **`gr-backlog-reset-route-smoke`** — Band 5: the password-reset route renders correctly under a vm probe and
+  has ZERO DOM-level smoke signal.
+- **`gr-backlog-operator-palette-entry`** — Band 5: `paletteNavItems()` is a static argument-free registry, so
+  Cmd+K structurally cannot role-gate an Operator entry.
+- **`gr-backlog-d24-statusmeta-sweep`** — Band 5: parent decision 24's `statusMeta` grammar never landed —
+  git-proven, no commit ever touched `statusMeta` — and `.dep-pill` / `.status-pill` remain two rule families.
+- **`gr-blk-sdk-tui-role-labels`** — Band 5, with an honest boundary note: the row lives in `js/` and the Go TUI,
+  **outside `cloud/`**, but the rule it may violate is the console's own role vocabulary
+  (`owner`/`admin`/`member` user-facing, `platform_operator` internal and never a role). It is banded here
+  rather than opening a fifth ownerless Band 2 class for a single row; the successor may re-route it.
+
+### Forwarded by name — Band 6, permanent human gates (in-roster)
+
+- **`gr-ops-platform-admin-emails`** — Band 6, human gate: `PLATFORM_ADMIN_EMAILS` is unset on the live control
+  plane. **THE CROWN IS DARK** — the operator console ships and cannot be seen in production until a human sets
+  the env and recreates. Disclosed by name every time; its disappearance is itself the tripwire.
+- **`gr-backlog-qr-live-scan-proof`** — Band 6, human gate: a human must scan a real 2FA QR with real phone
+  authenticator apps. Byte-identity is not a phone.
+
+**`cloud-console-billing-live-gate` is deliberately absent from this census.** It is parented at
+`cloud-console-goal` by design (GR138), is therefore **not among the 60**, and bucket (c) resolves it by
+hardcoded id independent of parent. Naming it as a move would be false, and a same-parent no-op still burns a
+write slot.
+
+### The self-orphans
+
+Two live rows are parts of the seal machinery itself, parented under the epic they were built to end. They
+cannot be forwarded as residue without misdescribing them.
+
+- **`gr-p5r5-successor-seal`** — the **terminal act**, not a survivor. It verifies (never re-files) the
+  chartered successor, re-parents the survivors named above, and runs the predicate LAST, once, atomically,
+  from the repo root, with `--successor cloud-console-hardening-epic`. It is disposed by **running**, and its
+  own row closes on the verdict it produces — whichever way that verdict goes.
+- **`gr-p5r9-seal-finishers-crit7-unstampable`** — a self-orphan **and** a Band 2 row; forwarded to the fourth
+  ownerless class `bp task-system / platform`, as recorded above. It is listed twice here on purpose: it is
+  one row, and both facts about it are true.
+
+*(The two other self-orphans of the round-9 pass, `gr-p5r8-register-defect-commits` and
+`gr-p5r9-disposition-pass`, are `done` and are outside the live 60.)*
+
+### What this census asserts, and what it does not
+
+It asserts that at authoring time **every one of the 60 live rows under `task-47bc4168392dec17` is disposed by
+name**, and that **ZERO rows sit in an unnamed remainder**. It does **not** assert that the predicate agrees —
+the predicate cannot read this section (GR131), and it is not a bar (GR146). It does not widen `KNOWN_DEFECTS`,
+the clauses or the thresholds. Every finding surfaced while writing it was **named and forwarded, never built**
+— **no seventh instrument** was created to accommodate any row above.
+
+**The census is the contract on the successor's intake.** `cloud-console-hardening-epic`'s charter is amended
+in the same breath to say what follows from that: **its band lists are CLOSED.** A row that arrives in the
+successor without a line in this census **arrived by accident** — re-triage it, do not absorb it. That sentence
+is the only thing standing between a triage and a bulk sweep, because the predicate cannot tell them apart.
