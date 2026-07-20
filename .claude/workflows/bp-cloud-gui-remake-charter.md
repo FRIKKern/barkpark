@@ -1171,3 +1171,163 @@ the clauses or the thresholds. Every finding surfaced while writing it was **nam
 in the same breath to say what follows from that: **its band lists are CLOSED.** A row that arrives in the
 successor without a line in this census **arrived by accident** — re-triage it, do not absorb it. That sentence
 is the only thing standing between a triage and a bulk sweep, because the predicate cannot tell them apart.
+### Wave 2026-07-20 (round 10) — the census is the deliverable, the exit code is the signature — DECIDE
+
+Wave Paper `cloud-gui-remake-wave-2026-07-20-seal-r10`. Laws GR142–GR152. **This round plans no new
+measurement.** Round 9's three-slice plan is executed exactly as chartered; the wave's entire surplus goes into
+ONE artifact the predicate provably cannot produce — a complete disposition census in which every live row is
+named. **Round 9's wave partly flew, and three of Decide's own premises were wrong.** They are corrected below.
+
+**GR142 — CLAUSE (b) IS FLAKY, AND GR141'S CONCLUSION IS REFUTED.** GR141 measured `overflow-guard.mjs`
+standalone, found it healthy, and generalised to the predicate's spawn pattern: *"the browser half of clause (b)
+is not the blocker … clause (a) becomes the sole remaining blocker."* **The generalisation does not hold.**
+Two independent verifiers induced the post-round-1 world and ran it four times each: one saw
+`✗ GR108-tablet-topbar-overflow / guard exited 1`, the other `✗ GR115-bpconsole-dead-rule / guard exited 1` —
+**two failures in eight runs, on different defects, from a guard that passes all three standalone and under a
+replica of the predicate's exact `spawnSync` sequence.** The indicated mechanism is fixed-port contention:
+the guard binds `4199` (overflow-guard.mjs:84) with an 8 s server-wait cap and the predicate spawns it three
+times back-to-back (seal-predicate.mjs:175) on a loaded multi-agent host. **The terminal run therefore carries
+a material chance of signing a false substantive failure**, and the banner cannot tell you: the predicate
+captures the guard's stderr and reads only `r.status`, so a mechanical squatter and a real measured defect
+print byte-identical lines with zero stderr.
+
+**GR143 — THE MITIGATION AND THE ONE PRE-AUTHORISED REPAIR.** Measured this round: `OVERFLOW_GUARD_PORT` **is**
+honoured (`OVERFLOW_GUARD_PORT=4231` → `>> serve :4231 — served bytes == disk bytes`, exit 0, all three defects
+PASS, 0 bytes stderr). The terminal run therefore MUST: (1) export `OVERFLOW_GUARD_PORT` to a verified-free
+port, removing the squatter class entirely; (2) run the guard standalone **immediately before** the predicate,
+capturing stdout, stderr and exit separately — a second *invocation* of an existing instrument, not a seventh
+instrument; (3) capture the predicate's three streams separately, because a GR133 crash is detectable only by
+zero-byte stdout. **Pre-authorised as MECHANICAL, spending the single repair:** clause (b) reporting
+`guard exited 1` for a defect whose standalone guard passed at the same tip, minutes earlier. Everything else
+substantive-shaped is the verdict.
+
+**GR144 — GR135 IS REFUTED IN A WAY THAT HELPS.** GR135 called the wrong-cwd signature *"textually identical to
+a real clause-(b) failure."* It is not. Wrong cwd emits `guard … is NOT COMMITTED — the fix is unmeasured, and
+unmeasured is not cleared`, a string no genuine failure can produce (genuine says `guard exited N`); post-
+landing it additionally emits `commit 0261ace15 is not an ancestor of origin/main` per defect. **One grep for
+`NOT COMMITTED` classifies it.** Guard exit **2** is likewise always mechanical — it fires in argument parsing
+or before Chrome, so it can never mean a measured defect. **The only genuinely ambiguous row is `guard exited
+1`**, and GR143 disambiguates it out of band.
+
+**GR145 — THE MOVE-SET IS 60 ORPHANS, NOT 25, BECAUSE THE SUCCESSOR'S INHERITANCE IS PROSE.** The baseline run
+nobody had ever executed reads: `roster: 142 children {"open":62,"done":80}` · `forwarded under successor : 0` ·
+`permanent human gate : 2` · `UNNAMED RESIDUE (orphans) : 60`. `cloud-console-hardening-epic` names 34 rows
+across six bands and **not one has been re-parented** — its three children are all `gr-bl-*` backlog rows.
+Clause (a) reads `parent_id` and nothing else (GR131), so **"named in a band" is worth exactly zero.** Settled
+arithmetic, re-derived at Decide: **62 live = 34 band-named + 4 self-orphans + 24 unnamed** (the 24-vs-25
+disagreement between verifiers was labelling — `gr-p5r9-seal-finishers-crit7-unstampable` is a fourth
+self-orphan, not a 25th unnamed row; the sets are identical). 60 orphans = 62 live − 2 in-roster human gates.
+
+**GR146 — THE CENSUS IS A DISCLOSURE, NOT A BAR, SO IT IS NOT A SEVENTH INSTRUMENT.** Widening the census from
+round 9's 18 rows to all 62 is not the widening GR140 forbids. GR140 forbids widening **what the predicate
+MEASURES** — `KNOWN_DEFECTS`, the clauses, the thresholds. The predicate does not read the census, cannot fail
+on it, and its exit code is byte-identical with or without it. A disposition line is a sentence, not a
+measurement. **HARD STOP, pre-committed here so it cannot be renegotiated under time pressure: if census work
+threatens the terminal run, THE RUN WINS** — the census is recorded as far as it got and the uncovered rows are
+named AS UNCOVERED. An honest partial census beats a delayed seal.
+
+**GR147 — THE 12-ROW DELTA IS RETIRED, WITH PROOF, AND ZERO FALSE-DONES EXIST.** Decide's own premise —
+"twelve rows closed since round 9 by agents outside this wave" — is wrong twice. It was **16** rows, and they
+were **round 9's own builder** executing its frozen table in one window (15:11:34Z–15:25:14Z). Proven by
+fetching all 80 done rows individually: exactly 16 carry `updated_at` inside that window, **set equality with
+the 18-row table is True**, and **zero** done rows were updated after it. Every positively-cited SHA is an
+ancestor of `origin/main`; both forbidden branch SHAs (`3d80a58bf`, `fcafc0d82`) appear **only inside their own
+refusal sentences**, exactly as GR130 demanded. The roster is quiescent, so the census can be built against a
+stable target. **One citation-form defect is disclosed, not reopened:** `gr-p5r7-badcode-shot-nondeterministic`
+closes asserting merge-SHA discipline while citing only PR #4833 — substantively sound (its merge commit
+`24fae1b9f` IS an ancestor), so the census names the SHA rather than the row being re-audited.
+
+**GR148 — A ROW WHOSE FIX LANDED IS CLOSED, NOT FORWARDED, EVEN WHEN NOBODY NOTICED.**
+`gr-backlog-bp-search-verb-discoverability` is fixed and landed: `bp search "…"` runs the query and prints its
+note to **stderr** (so JSON piping survives); an unknown noun and an unknown verb now produce visibly different
+errors. Merge SHA **`3f16c9f43`** (#4725), is-ancestor exit 0, implementation `internal/cli/cli.go:540-576`.
+Honest caveat recorded in the close: the doctrine sentence itself lives outside the repo, so criterion 3 is
+satisfied in substance, not in letter. **The roster therefore moves 62 → 61 live before a single re-parent.**
+Its twin `pds-bl-bp-search-verb-missing` belongs to PDS and is **cross-linked as refuted, never touched** —
+a foreign epic's row is not ours to close.
+
+**GR149 — THE THREE MECHANICAL TRAPS THAT WOULD MAKE A CORRECT PLAN PRODUCE A WRONG ROSTER.**
+(i) **`GET /v1/tasks` silently ignores `filter[parent_id]`** — bracket-encoded *and* bare, returning an
+unfiltered page spanning eleven parents. This defeats GR126's own prescribed remedy and is a **false
+confirmation, not an error**: a builder sourcing its work-list here would re-parent ~140 foreign rows and it
+would look like success. The only correct reads are `/v1/data/query/production/task?filter[parent_id]=…` and
+`bp task get <parent> -o json` → `.children`. (ii) **The rate-limit detector must be status-based.** Round 9's
+driver matched response TEXT for `429`/`rate_limited` and burned 12 spurious claim epochs; measured on today's
+roster, **8 of 62 live rows would return a 200 SUCCESS body containing "429"** and 4 also contain
+`rate_limited` — some in prose (this epic's own 2FA-throttle backlog), some in `_rev` digests and microsecond
+timestamps, which are **re-rolled on every write**, so whitelisting known-bad rows is unsound. Use `bp` exit
+**7** (uniquely `exitRateLimit`, regression-pinned), or HTTP status, or `jq -e '.error.code == "rate_limited"'`.
+A real 429 was induced at request 66 of a 75-request burst; `retry-after: 1`; pacing at `sleep 1.1` is proven
+safe and `1.0` leaves only network RTT as margin. (iii) **`bp task move` blocks on an interactive prod
+confirmation without `--yes`**, takes no epoch, and charges a full write token for a same-parent no-op —
+so `cloud-console-billing-live-gate` (GR138) is **skipped entirely**, never no-op-moved.
+
+**GR150 — SELF-ORPHANS TRAVEL AS CHILDREN, AND THE WAVE'S OWN SLICES MUST NOT SIGN A CLERICAL NO SEAL.** All
+four wave-adjacent rows sit under the epic root today and would each count as an orphan at run time — a
+self-inflicted failure unrelated to the epic's substance. Dispositions: `gr-p5r8-register-defect-commits` and
+`gr-p5r9-disposition-pass` become **children of `gr-p5r5-successor-seal`** (they are its sub-slices, and a
+child of a child is not a child — clause (a) reads direct children only) and are then closed on evidence;
+`gr-p5r9-seal-finishers-crit7-unstampable` **forwards to the successor**; `gr-p5r5-successor-seal`
+**re-parents itself into `cloud-console-hardening-epic` as its LAST move before the run**, while still
+in progress. This is tree structure, not a rename — the sub-slices genuinely belong to the seal.
+
+**GR151 — ROUND 9's WAVE PARTLY FLEW; THE RISK INVERTS FROM "TOO LITTLE TIME" TO "RE-DERIVING FINISHED WORK."**
+`gr-p5r9-disposition-pass` is substantively **done** — all 18 table rows read `done`, task at 6/8. Its two
+unmet criteria are **not one**, as the digest claimed: criterion 7 is the lead-close, and criterion 2 is a
+recorded **honest miss** (1 of 3 merge-gated stamps actioned, 2 declined for good reasons — one would have
+replaced true evidence with false, the other is structurally unstampable). **A lead closing it believing only
+criterion 7 is open will mis-stamp or 409.** `gr-p5r8-register-defect-commits` is **built and gated** at
+`18ab484aa`, its diff proven to be exactly three `commit:` lines (`diff` of both files with `commit:` lines
+removed exits 0 — every other byte identical), applying cleanly to today's tip. **But the branch was never
+pushed and no PR was ever opened** (`git branch -r --contains` empty, `gh pr list --head` empty). Round 1 is
+therefore *push → PR → gates → merge*, not a merge button — and `cloud.yml` fires on `cloud/**` with no
+sub-path filter, so a three-line `.mjs` edit drags the full cloud Elixir suite onto the critical path.
+
+**GR152 — THE CHARTER IS UNGATED, SO CENSUS LENGTH IS FREE.** Proven by mutation, not by reading: appending 200
+census-shaped rows (20,801 B) to this file leaves `check-doc-budgets.sh` at PASS/exit 0 and
+`docs-anchors-check.sh` at PASS/exit 0, neither script even naming the file — `.claude` is absent from the
+budget allowlist by omission and **pruned by name** from every anchors walk. The control proves the gate is
+live rather than inert: appending 200,000 B to `docs/INDEX.md` reds it immediately (`cap is 1200B`, exit 1).
+**The census may be as long as honesty requires.** The live schedule risk is elsewhere: PR #5046 adds a
+repo-wide **blocking, paths-filter-free** format-drift-ceiling job and is **currently red on its own PR** from
+drift introduced by three concurrently-merged Studio PRs — the exact collision shape it could inflict on this
+wave's unrelated three-line PR. Main carries no branch protection (404, rulesets `[]`), so enforcement is
+convention; the honest response is to check #5046's state before pushing round 1, not to build around it.
+
+### Ledger disposition — the census this wave ships
+
+`cloud-console-hardening-epic` is **verified, never re-filed**: published, top-level, `open`, six bands intact,
+three children. The second-successor hazard is closed — `gr-p5r3-successor-epic` reads `done`. **There is
+exactly one forwarding address.** Band 5's closing clause *"and the rest of the forwarded roster"* is deleted
+this wave and replaced by a closed list plus the sentence that a row arriving without a census line **arrived
+by accident: re-triage it, do not absorb it.** That clause is the only thing standing between a triage and a
+bulk sweep, because the predicate cannot tell them apart.
+
+Three findings this wave surfaced are **named and forwarded, never built** (GR146): the `/v1/tasks` filter
+false-confirmation, the CAS-free ledger-close bypass, and Band 4's need to own **both** directions of the
+server↔SPA seam — `gr-blk-console-refetch-storm` is the only row in the entire roster carrying a **live
+production measurement** (five endpoints requested eight times each in one authenticated page load, 40
+requests where 5 would do, no error surfacing it) and it is filed as over-consumption of the same seam Band 4
+already owns, not buried under UI residue.
+
+### The wave — three slices, two rounds, no new instrument
+
+- **`gr-p5r10-land-defect-commits`** (round 1, opus, `cloud/priv/static/__preview__/seal-predicate.mjs`) —
+  push `18ab484aa`, open the PR, carry it green through the full cloud suite, merge. **The diff must remain
+  exactly three `commit:` lines; one byte more voids the wave.** Unblocks clause (b) — the critical path,
+  because the predicate tests `git merge-base --is-ancestor <commit> origin/main` and a merge is not atomic
+  with anything.
+- **`gr-p5r10-census`** (round 1, opus, `.claude/workflows/bp-cloud-gui-remake-charter.md`) — author the
+  62-row disposition census and amend the successor's Band 5 to delete the remainder clause. Zero rows in an
+  unnamed remainder. Disjoint file set from round 1's other slice.
+- **`gr-p5r10-terminal-run`** (round 2, opus, `after: [gr-p5r10-land-defect-commits, gr-p5r10-census]`) —
+  execute the census's moves and closes, then run the predicate **LAST, once, atomically**, and record its
+  verbatim stdout, stderr, exit code, ISO stamp and roster count beneath the census, whichever way it exits.
+
+**Why the exit code is the signature and not the deliverable.** GR131 read clause (a) for the first time: it
+reads exactly three fields. GR132 proved `forwarded` is dead code in live mode, so **after a perfect triage the
+banner still reads "0 forwarded by name."** The predicate is structurally incapable of expressing what this
+epic did. The census exists because of that, not despite it. **THE CROWN IS DARK** — re-proven live today
+(`/v1/me` → `platform_operator:false`; `/v1/operator/warm-pool` → 403 against an anonymous 401): the operator
+console shipped fully built and remains unreachable because `PLATFORM_ADMIN_EMAILS` is still unset on the
+control plane. **"Seal" means CODE seal only, and the ending must say so in plain words.**
