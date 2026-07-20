@@ -683,3 +683,64 @@ Five rounds died of a prose verdict whose bar moved with the reader. This one ca
 to disk and mutation-proven before a builder flew, and the first thing that proof did was catch the
 predicate blessing a broken fix. If it exits non-zero, the successor is the honest handoff and the epic
 says so on the ledger.
+
+### Wave 2026-07-20 — phase-5 seal round 8, round 1 built + reviewed, grade A−
+
+**THE SEAL DID NOT LAND, AND THIS ENTRY DOES NOT PRETEND IT DID.** The frozen predicate was run
+live at review (`2026-07-20T12:46:47.300Z`, live ledger, roster **139** children
+`{in_progress:2, open:74, done:63}`) and returned **VERDICT: NO SEAL, real exit 1** — 74 live rows
+with no forwarding address (clause a) and 3 defects registered `commit: null` (clause b). That is the
+pre-committed acceptable outcome, reported as returned, not negotiated. Round 1 paid two of the three
+named slices; the third is fenced by the sequenced-rounds law, not by a stall.
+
+Round 1 (2/2 slices green, reviewed, fixed in place; Paper `cloud-gui-remake-wave-2026-07-20-seal-r4`
+holds the debrief):
+
+- **gr-p5r7-tablet-overflow** → `loop-epic/the-tablet-topbar-stops-overflowing-at-i-0-r` — GR108 fixed at
+  its REAL cause with the breakpoint-free pair (`.topbar-right > * { min-width: 0 }` + a clipping
+  `.billing-chip`), measured **0/44** across 721–1440 × 2 themes × 2 past-due scenarios; GR109 revived by
+  REORDER (the tablet stack now sits after the `.attention-row` base — column/flex-start, acts left 275 ==
+  main left 275 at 768, still a row at 900, no `!important`); GR115 folded by lifting the `.bp-console-*`
+  bases above the theater 720 block (320px/13px/13px at 700×800, `is-collapsed` twin control re-verified).
+  The cosmetic trio shipped WITH the correctness pair, so the past-due money message renders its full
+  169.78px at 768 instead of clipping to ~154.61px. **`overflow-guard.mjs` is the wave's real deliverable**:
+  a zero-dep CDP headless-Chrome guard that renders the real SPA through `serve.mjs`, sweeps 769/775/780/785
+  ABOVE the breakpoint, asserts served-bytes == disk-bytes (it refused a squatted port serving foreign bytes,
+  exit 1), and disables the network cache per GR125b. It is the instrument clause (b) delegates to, and the
+  first one in this epic that can parse the artifact it certifies.
+  Review re-proved the guard's failure power INDEPENDENTLY, three directions, standalone real exit codes:
+  removing only `min-width: 0` → **exit 0**; removing only the chip's `overflow: hidden` → **exit 0**
+  (a BROADER redundancy than the builder disclosed); removing the whole pair → **exit 1, 12 findings,
+  failing at 769/775/780** — above the breakpoint, exactly the class no media-scoped fix can reach.
+  `app.css` restored byte-identical after each. Two review fixes: the GR115 `is-collapsed` border control
+  used `&&` (it only fired when BOTH readings were wrong — a control that could not fail, in the wave whose
+  whole subject is controls that cannot fail) → `||`; and `.billing-chip`'s `text-overflow: ellipsis` is
+  INERT on a flex container, so the 769–782 band CLIPS rather than ellipsizing — documented in place rather
+  than sold as polish it does not deliver.
+- **gr-p5r7-reshoot-verify** → **no branch, no PR, by design** (`cloud/.gitignore:29` ignores
+  `__shots__/`; the ledger is the deliverable). 80/80 PNGs, **80 distinct sha256, zero duplicates** — the
+  prior matrix's 20 byte-identical duplicates are gone, so the vacuous count check was replaced by one that
+  can actually fail. The lying pair was re-proven distinct as the first act. Five accents opened and
+  pixel-sampled (evergreen mint / ember terracotta / fjord pale-cyan / charple orchid / iris indigo-violet).
+  Its builder nearly reported a defect that GR57 documents as deliberate, caught itself by reading the CSS,
+  and retracted it on the ledger — the symmetric failure to dismissing harness output, named honestly.
+  Two findings filed as published children: `gr-p5r7-ring-soft-accent-invariant` (unruled, not confirmed)
+  and `gr-p5r7-badcode-shot-nondeterministic`.
+
+**Deferred by the sequenced-rounds law, NOT stalled:** `gr-p5r5-successor-seal` (round 2) — it cannot run
+before `gr-p5r7-tablet-overflow` merges, because clause (b) reads `origin/main`.
+
+**Ledger fix — the seal's missing owner.** Running the predicate live exposed that **nothing in the ledger
+owned filling `KNOWN_DEFECTS[].commit`**. All three rows are `commit: null` ("unlanded at freeze"), so clause
+(b) is structurally unsatisfiable and a FLAWLESS `gr-p5r5-successor-seal` run would still return NO SEAL.
+Filed as **`gr-p5r8-register-defect-commits`** (priority 0, published). This is not a freeze violation: the
+freeze protects the BAR (clauses, thresholds, guard delegation); `commit` is the freeze's own designated
+input. Everything else audited honest — both slices `in_progress` with per-criterion evidence stamped as
+they worked, merge-gated criteria correctly left open for the lead, `gr-p5r8-bpconsole-dead-rule` already
+self-disclosing "FOLDED INTO gr-p5r7-tablet-overflow", and the seal-predicate criterion honestly recording
+that its clause-(a)/(c) run used the `--ledger` fixture channel while the three guard executions were real.
+
+**Next wave dispatch order:** (1) merge `gr-p5r7-tablet-overflow` (`…-i-0-r`) and close its criterion 10;
+(2) close `gr-p5r7-reshoot-verify` criterion 8 as *no PR by design*, NOT as abandoned; (3) **`gr-p5r8-register-defect-commits`
+— before any successor work**; (4) then and only then `gr-p5r5-successor-seal`, running the predicate LAST
+in its own claim. Skipping (3) burns the round-2 builder on a structurally impossible green.
