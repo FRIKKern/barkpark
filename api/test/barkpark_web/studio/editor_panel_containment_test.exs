@@ -177,6 +177,47 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # descendants in EVERY engine (unlike container-type — see @moduledoc).
   @containing_block_triggers ~w(contain transform filter will-change backdrop-filter perspective)
 
+  # ── The INVERSE census (spd-w5, charter D80) ─────────────────────────────
+  #
+  # Everything above this line inventories `position: fixed` PRESENT. That is
+  # one direction only, and D80 is the bug it structurally cannot see: a
+  # backdrop-shaped class that has LOST its positioning entirely. `.modal-backdrop`
+  # was emitted by `studio_components/editor_fields.ex` with NO rule anywhere in
+  # `api/` — it computed `position: static; display: block`, and since
+  # `components.ex` renders it as a SIBLING of the editor shell inside
+  # `.pane-layout` (`display: flex`) it became an in-flow flex ITEM of the pane
+  # row. Measured live at viewport 1280: the row went from
+  # [strip 44, list 260, editor-panel 976] to
+  # [strip 44, list 230.4, editor-panel 560, modal-backdrop 445.6] — the panel
+  # crushed onto its own 560px floor, `rowOverflow: 0`, no console error, two
+  # clicks from a normal document. No gate in this repo could have caught it.
+  #
+  # So: every backdrop-shaped class a Studio component emits must resolve to a
+  # NON-STATIC position — by a `root.html.heex` rule, or by an inline `style=`
+  # on the emitting element itself. Which of the two is a classification, not a
+  # free choice: an unclassified backdrop fails until someone looks at it.
+  #
+  #   :css_rule     — a `root.html.heex` rule declares its position.
+  #   :inline_style — the emitting element carries `position:` in `style="…"`.
+  #                   (That is also why `@inline_fixed_inventory` counts it.)
+  @backdrop_class_inventory %{
+    # editor_fields.ex secondary_picker_modal/1 — the D80 subject. Absolute, not
+    # fixed, per D52: `.pane-layout`/`.studio-shell`/`body` are all unpositioned,
+    # so it resolves against the initial containing block and stays out of
+    # @fixed_css_inventory, which this slice does not own.
+    "modal-backdrop" => :css_rule,
+    # modals.ex image picker — `position: fixed; inset: 0`, :layout_sibling above.
+    "image-picker-overlay" => :css_rule,
+    # confirm_modal.ex renders its own `style="position: fixed; inset: 0; …"`;
+    # there is no `.bp-modal-overlay` rule and none is needed.
+    "bp-modal-overlay" => :inline_style
+  }
+
+  # What counts as "backdrop-shaped": a class token whose name says it exists to
+  # cover something. Deliberately name-based — a scrim is named like a scrim, and
+  # ExUnit has no layout engine to recognise one any other way (see @moduledoc).
+  @backdrop_name_shapes ~w(backdrop overlay scrim)
+
   defp root_css, do: File.read!(@root)
 
   # Strip CSS comments so prose about `position: fixed` is never censused.
@@ -239,6 +280,96 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     |> Enum.join("\n")
     |> then(&Regex.scan(~r/position:\s*fixed/, &1))
     |> length()
+  end
+
+  # Every backdrop-shaped class token emitted from a `class=` attribute in the
+  # Studio sources, as %{class => [relative source path]}. Handles both the
+  # literal `class="…"` and the interpolated `class={…}` forms.
+  defp emitted_backdrop_classes do
+    for path <- studio_sources(), reduce: %{} do
+      acc ->
+        rel = Path.relative_to(path, @lib)
+
+        path
+        |> File.read!()
+        |> backdrop_tokens()
+        |> Enum.reduce(acc, fn token, acc ->
+          Map.update(acc, token, [rel], &Enum.uniq([rel | &1]))
+        end)
+    end
+  end
+
+  # The backdrop-shaped class tokens inside every `class=` attribute of a source.
+  defp backdrop_tokens(src) do
+    shape = Enum.join(@backdrop_name_shapes, "|")
+
+    ~r/class=(?:"([^"]*)"|\{([^}]*)\})/s
+    |> Regex.scan(src)
+    |> Enum.flat_map(fn match -> Enum.drop(match, 1) end)
+    |> Enum.flat_map(fn attr ->
+      ~r/[a-z0-9_-]*(?:#{shape})[a-z0-9_-]*/
+      |> Regex.scan(attr)
+      |> Enum.map(&List.first/1)
+    end)
+    |> Enum.uniq()
+  end
+
+  # Every selector in a stylesheet that declares `position:`, mapped to the set
+  # of values it declares. Same brace-stack walk as `fixed_position_selectors/1`,
+  # so a declaration inside `@media`/`@container` is attributed to its own
+  # selector — but it keeps the VALUE, which is the whole point of the inverse
+  # census: `static` is the failure this reads for.
+  defp declared_positions(css) do
+    css
+    |> decommented()
+    |> String.split("\n")
+    |> Enum.reduce({[], %{}}, fn line, {stack, found} ->
+      found =
+        case Regex.run(~r/(^|[\s;{])position:\s*([a-z-]+)/, line) do
+          [_, _, value] ->
+            selector =
+              case String.split(line, "{", parts: 2) do
+                [sel, _] -> String.trim(sel)
+                [_] -> List.first(stack, "<unattributed>")
+              end
+
+            Map.update(found, selector, MapSet.new([value]), &MapSet.put(&1, value))
+
+          nil ->
+            found
+        end
+
+      {push_pop_braces(line, stack), found}
+    end)
+    |> elem(1)
+  end
+
+  # The `position` values a bare `.class` selector declares anywhere in a sheet
+  # (a comma-list counts, `.a .class` deliberately does NOT — a descendant rule
+  # positions something else).
+  defp positions_for_class(css, class) do
+    css
+    |> declared_positions()
+    |> Enum.flat_map(fn {selector, values} ->
+      selector
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.any?(&(&1 == "." <> class))
+      |> if(do: MapSet.to_list(values), else: [])
+    end)
+    |> MapSet.new()
+  end
+
+  # The `position` values declared in an inline `style="…"` on an element that
+  # also carries `class="<class>"`, across the Studio sources.
+  defp inline_positions_for_class(class) do
+    for path <- studio_sources(),
+        src = File.read!(path),
+        # The attributes of one element: from the class attr to the tag close.
+        [element] <- Regex.scan(~r/class="[^"]*\b#{Regex.escape(class)}\b[^"]*".*?>/s, src),
+        [_, value] <- Regex.scan(~r/position:\s*([a-z-]+)/, element),
+        into: MapSet.new(),
+        do: value
   end
 
   defp studio_sources do
@@ -472,6 +603,111 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
         assert src =~ "document.body.appendChild" or src =~ "document.body.append(",
                "#{name} emits position: fixed but never portals to document.body"
       end
+    end
+  end
+
+  describe "the inverse census: no backdrop may be in flow (charter D80)" do
+    test "the backdrop-shaped classes emitted by Studio components are exactly the audited set" do
+      emitted = emitted_backdrop_classes()
+      known = MapSet.new(Map.keys(@backdrop_class_inventory))
+
+      assert MapSet.difference(MapSet.new(Map.keys(emitted)), known) == MapSet.new([]),
+             """
+             A NEW backdrop-shaped class is emitted by a Studio component:
+
+               #{emitted |> Map.drop(Map.keys(@backdrop_class_inventory)) |> inspect(pretty: true)}
+
+             Classify it in @backdrop_class_inventory — :css_rule if
+             root.html.heex positions it, :inline_style if the element carries
+             its own `style="position: …"`. An unclassified backdrop is exactly
+             the D80 bug: `.modal-backdrop` shipped with NO rule at all and
+             became an in-flow flex item of the pane row.
+             """
+
+      assert MapSet.difference(known, MapSet.new(Map.keys(emitted))) == MapSet.new([]),
+             "inventoried backdrop classes are no longer emitted anywhere: " <>
+               inspect(MapSet.to_list(MapSet.difference(known, MapSet.new(Map.keys(emitted)))))
+    end
+
+    test "every backdrop-shaped class resolves to a NON-STATIC position" do
+      css = root_css()
+
+      for {class, source} <- @backdrop_class_inventory do
+        positions =
+          case source do
+            :css_rule -> positions_for_class(css, class)
+            :inline_style -> inline_positions_for_class(class)
+          end
+
+        where =
+          case source do
+            :css_rule -> "a `.#{class} { … }` rule in root.html.heex"
+            :inline_style -> ~s(an inline `style="position: …"` on its own element)
+          end
+
+        refute MapSet.size(positions) == 0,
+               """
+               `.#{class}` is classified #{inspect(source)} but declares NO
+               `position` in #{where}.
+
+               That is the D80 defect verbatim: an unpositioned backdrop computes
+               `position: static; display: block`, and its parent `.pane-layout`
+               is a flex container — so the scrim becomes an in-flow COLUMN of
+               the pane row and crushes `.editor-panel` onto its 560px floor.
+               Give it `position: absolute; inset: 0;` (D52 — absolute, not
+               fixed, unless you also inventory it in @fixed_css_inventory).
+               """
+
+        refute MapSet.member?(positions, "static"),
+               """
+               `.#{class}` declares `position: static` in #{where}
+               (declared: #{inspect(MapSet.to_list(positions))}).
+
+               A static backdrop is laid out IN FLOW. Inside `.pane-layout`
+               that means it competes with `.editor-panel` for row width.
+               """
+      end
+    end
+
+    test "the inverse census is non-vacuous in BOTH directions" do
+      css = root_css()
+
+      # Direction 1 — the extractor SEES the real rule. If this cannot fire,
+      # the "no static" assertion above certifies nothing.
+      assert positions_for_class(css, "modal-backdrop") == MapSet.new(["absolute"]),
+             "the extractor cannot read `.modal-backdrop`'s own position out of " <>
+               "root.html.heex — the census above is vacuous"
+
+      # Direction 2a — a backdrop whose rule VANISHES is caught. This is the
+      # exact shape of the D80 regression: the class stays, the rule does not.
+      without_rule =
+        Regex.replace(~r/\n\s*\.modal-backdrop\s*\{.*?\n\s*\}/s, css, "\n")
+
+      refute without_rule =~ ".modal-backdrop {",
+             "the deliberate break did not actually remove the rule"
+
+      assert positions_for_class(without_rule, "modal-backdrop") == MapSet.new([]),
+             "the census reads a position for `.modal-backdrop` even with its " <>
+               "rule deleted — it would never catch the D80 regression"
+
+      # Direction 2b — a backdrop that is present but STATIC is caught too. The
+      # rule existing is not the invariant; being out of flow is.
+      made_static = css <> "\n.modal-backdrop { position: static; }\n"
+
+      assert MapSet.member?(positions_for_class(made_static, "modal-backdrop"), "static"),
+             "the census cannot see a `position: static` backdrop — the wrong " <>
+               "direction is exactly what @fixed_css_inventory already missed"
+
+      # And the inline path has its own non-vacuity: confirm_modal really does
+      # carry a non-static inline position, read from the source, not assumed.
+      inline = inline_positions_for_class("bp-modal-overlay")
+
+      assert MapSet.member?(inline, "fixed"),
+             "the inline reader cannot see confirm_modal's `position: fixed` — " <>
+               "the :inline_style classification is unaudited"
+
+      refute MapSet.member?(inline_positions_for_class("bp-planted-absent-overlay"), "fixed"),
+             "the inline reader reports a position for a class that does not exist"
     end
   end
 

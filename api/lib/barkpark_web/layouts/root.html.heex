@@ -1608,6 +1608,32 @@
       -webkit-appearance: none; appearance: none;
     }
     .pane-column--collapsed:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    /* The RE-OPENED pane's focus ring (spd-b20, charter D79).
+       `spd-w5-strip-aria-focus-return` cured "Enter drops focus to <body>" by
+       rendering `tabindex="-1" phx-mounted={JS.focus()}` on the pane a just-
+       handled `expand-pane` named — but focus landing on an element with no
+       focus indicator is only half a cure: the keyboard user's focus moved
+       somewhere they cannot see. Same ring as the strip they came FROM, so the
+       eye follows one continuous affordance across the expand.
+       Scoped to the tabindex attribute, so only a pane actually marked as a
+       focus target can ever draw it — a pane nobody navigated to has no way
+       to match.
+
+       MEASURED, not assumed (the review probed the live desk at 1280 before
+       shipping this): a PROGRAMMATIC `.focus()` on this pane matches
+       `:focus-visible` and paints `2px solid rgb(44,109,90)` at offset -2px in
+       ALL THREE modalities — after a key press, after a mouse click, and with
+       no prior input at all. So `:focus-visible` here is NOT the
+       keyboard-only filter it is on a tabbed control: Chrome grants it to
+       programmatic focus on a non-input element regardless of how the user got
+       there, and a MOUSE user who clicks the strip will also see the ring
+       until they click away. That is the accepted cost of the fix, recorded
+       rather than discovered later — `:focus` would behave identically here,
+       and the shared spelling keeps this ring textually in step with the
+       strip's. If the mouse-path ring is ever judged too loud, the lever is
+       `.pane-column[tabindex="-1"]:focus-visible:not(:hover)` or dropping the
+       mark on a pointer-initiated expand — NOT switching pseudo-class. */
+    .pane-column[tabindex="-1"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     /* The strip's INNER subtree is replaced synchronously in the click tick —
        by the time the box starts shrinking, the vertical label is already
        mounted, so a bare width transition shows a tiny rotated label adrift in
@@ -3149,6 +3175,49 @@
       font-size: 11px; color: var(--muted-text); font-style: italic;
       background: var(--bg-muted); border-radius: 4px;
     }
+
+    /* Secondary-picker modal shell (charter D80).
+       `.modal-backdrop` / `.modal-card` / `.modal-header` / `.modal-body` are
+       emitted by studio_components/editor_fields.ex `secondary_picker_modal/1`
+       and referenced by components/confirm_modal.ex, but NO rule for them has
+       ever existed in api/ — only `.bp-ae-modal-backdrop`. Unstyled, the
+       backdrop computed `position: static; display: block`, and because
+       components.ex renders it as a SIBLING of the editor shell inside
+       `.pane-layout` (`display: flex`) it became an in-flow flex ITEM of the
+       pane row: measured live at viewport 1280 on a classic doc, opening
+       "Open another" moved the row from [strip 44, list 260, editor-panel 976]
+       to [strip 44, list 230.4, editor-panel 560, modal-backdrop 445.6] — the
+       panel pinned to its own 560px floor, with rowOverflow 0 and no error.
+
+       ABSOLUTE, not fixed (charter D52). Neither `.pane-layout` nor
+       `.studio-shell` nor `body` is positioned, so this resolves against the
+       INITIAL containing block — which for a `height: 100vh` shell that never
+       scrolls the document is the viewport rect, i.e. exactly what `fixed`
+       would give — while staying out of `@fixed_css_inventory`, a census this
+       slice does not own. An absolutely-positioned box is also NOT clipped by
+       the overflow of an UNPOSITIONED ancestor, so `.pane-layout`'s
+       `overflow-x: auto` and `.studio-shell`'s `overflow: hidden` cannot crop
+       it. Colours use the `hsl(var(--x-hsl) / a)` form proven Δ0 on BOTH
+       colour gates (charter D53); an `rgba()` scrim would red design/check.mjs
+       Part E while studio-literal-check.sh stayed green. */
+    .modal-backdrop {
+      position: absolute; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+      background: hsl(var(--bp-scrim-hsl) / 0.45);
+    }
+    .modal-card {
+      position: relative; display: flex; flex-direction: column;
+      width: min(520px, 100%); max-height: min(80vh, 640px);
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: hidden;
+      box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25);
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-muted);
+    }
+    .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
+    .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
 
     .bp-secondary-candidates {
       list-style: none; margin: 12px 0 0 0; padding: 0;
