@@ -20,6 +20,13 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # never-cancel-main ratchet (honest-gates D12) — its subject IS the
+      # workflow tree, so it must trigger on ANY workflow edit. Without the
+      # `**` glob the gate could never see the file that reintroduces the
+      # hazard (only doc-gates.yml itself was triggered before), which is
+      # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
+      - ".github/workflows/**"
+      - "scripts/never-cancel-main-check.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -132,6 +139,13 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # never-cancel-main ratchet (honest-gates D12) — its subject IS the
+      # workflow tree, so it must trigger on ANY workflow edit. Without the
+      # `**` glob the gate could never see the file that reintroduces the
+      # hazard (only doc-gates.yml itself was triggered before), which is
+      # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
+      - ".github/workflows/**"
+      - "scripts/never-cancel-main-check.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -234,7 +248,10 @@ on:
 
 concurrency:
   group: doc-gates-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
+  # otherwise starves the suite (2026-06-10: 19 consecutive main runs
+  # cancelled, zero completions all day). Queued main runs collapse to one.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   doc-gates:
@@ -286,6 +303,23 @@ jobs:
         run: |
           bash scripts/connectors-catalog-drift-check.sh --selftest
           bash scripts/connectors-catalog-drift-check.sh
+
+      # Never-cancel-main ratchet (honest-gates D12). `cancelled` is a NON-PASS:
+      # a workflow that runs on push-to-main with `cancel-in-progress: true`
+      # cancels its own main runs under a fast push cadence (2026-06-10: 19
+      # consecutive main runs cancelled, zero completions all day). Commit
+      # a547ff75a fixed that with the `github.ref != 'refs/heads/main'` guard —
+      # but at SAMPLE scope: five workflows got it, cloud.yml and doc-gates.yml
+      # were missed and kept a bare `true` for 40 days. This gate forbids the
+      # regrowth. It reds ONLY on push-to-main + bare `true`; a pull_request-only
+      # workflow's bare `true` is behaviourally identical to the guard and is
+      # reported as NOTE, never as a failure. The bundled --selftest is a durable
+      # tripwire (distrust vacuous green): it proves the gate REDs on the
+      # hazardous shape and greens on each safe one, and plants nothing.
+      - name: Never-cancel-main concurrency ratchet (blocking)
+        run: |
+          bash scripts/never-cancel-main-check.sh --selftest
+          bash scripts/never-cancel-main-check.sh
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh
