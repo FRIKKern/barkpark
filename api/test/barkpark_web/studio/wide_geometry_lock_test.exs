@@ -287,6 +287,47 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         value!(block, ".pane-layout", "border-radius")
       end
     end
+
+    test "the census SEES a pane rule hidden in a multi-line selector list" do
+      # The escape hatch this parser used to have, exercised directly rather
+      # than reasoned about. Written across two lines, `.pane-column` used to
+      # be dropped entirely — the rule was keyed by its last line only — so a
+      # 180px regression could be smuggled past the census by adding one
+      # newline and one comma. The synthetic sheet below is the smallest
+      # shape that reproduces it.
+      sheet = """
+      @media (min-width: 1280px) {
+        .pane-column,
+        .some-other-thing {
+          width: 180px;
+        }
+      }
+      """
+
+      assert geometry_census(sheet) == [{".pane-column, .some-other-thing", ["width"]}],
+             """
+             A geometry rule on the pane families written as a multi-line
+             comma-separated selector list is invisible to the census. Every
+             assertion in this file would stay green while a `width` override
+             reached the wide desk.
+             """
+    end
+
+    test "an at-rule header above a rule is NOT swallowed into its selector" do
+      # The other half of the walk: it must stop at a line that is not a
+      # continuation. If it did not, the census key for every rule nested in
+      # a media/container query would carry the query header and match none
+      # of the declared entries.
+      sheet = """
+      @container content (max-width: 860px) {
+        .editor-panel {
+          min-width: 560px;
+        }
+      }
+      """
+
+      assert geometry_census(sheet) == [{".editor-panel", ["min-width"]}]
+    end
   end
 
   # --- parsing ---------------------------------------------------------
@@ -374,8 +415,10 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # Every {selector, sorted geometry props} pair in the sheet touching the
   # pane families, at ANY nesting depth — a rule inside `@media` or
   # `@container` is read exactly like a top-level one, which is the point.
-  defp geometry_census do
-    decommented(css())
+  defp geometry_census, do: geometry_census(css())
+
+  defp geometry_census(source) do
+    decommented(source)
     |> then(&Regex.scan(~r/([^{}]*)\{([^{}]*)\}/s, &1, capture: :all_but_first))
     |> Enum.map(fn [selector_chunk, body] -> {last_line(selector_chunk), body} end)
     |> Enum.filter(fn {selector, _body} -> pane_family?(selector) end)
@@ -385,16 +428,43 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   end
 
   # A selector chunk runs from the previous closing brace to this rule's
-  # opening brace, so the selector itself is its LAST non-empty line — the
-  # lines before it are the tail of an at-rule header or plain whitespace.
+  # opening brace, so the selector ENDS on the chunk's last non-empty line.
+  # It does not necessarily START there: a comma-separated selector list is
+  # routinely written one selector per line, and this sheet already contains
+  # such rules (the inspector's title/body pair, for one).
+  #
+  # Taking only the last line would key such a rule by its FINAL selector
+  # alone and drop the others — so a rule reading
+  #
+  #     .pane-column,
+  #     .something-else { width: 180px }
+  #
+  # would be censused as `.something-else` and its effect on `.pane-column`
+  # would never be declared. That is a silent hole in a lock whose entire
+  # value is having none, so the walk goes BACKWARD from the rule's own line
+  # and keeps taking while the line above ends in a comma — which is exactly
+  # what continuation means — and stops at anything else: an at-rule header,
+  # or plain whitespace. Rules written on one line are unaffected.
   defp last_line(chunk) do
     chunk
     |> String.split("\n")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
-    |> List.last()
-    |> Kernel.||("")
+    |> selector_lines()
+    |> Enum.join(" ")
     |> String.replace(~r/\s+/, " ")
+  end
+
+  defp selector_lines(lines) do
+    lines
+    |> Enum.reverse()
+    |> Enum.reduce_while([], fn line, acc ->
+      cond do
+        acc == [] -> {:cont, [line]}
+        String.ends_with?(line, ",") -> {:cont, [line | acc]}
+        true -> {:halt, acc}
+      end
+    end)
   end
 
   defp pane_family?(selector) do
