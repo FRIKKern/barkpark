@@ -29,6 +29,13 @@ defmodule BarkparkWeb.Icons do
       ~s(<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/>),
     "chevron-right" => ~s(<path d="m9 18 6-6-6-6"/>),
     "chevron-down" => ~s(<path d="m6 9 6 6 6-6"/>),
+    # spd-b39. `arrow-left` was ALREADY being asked for by name in three places
+    # — `layouts/studio.html.heex` (the back button), `chat_live.ex` (the
+    # un-archive toggle) and now the Tier-3 inspector dismissal — and `icon/1`
+    # answers an unknown name with the "file" fallback rather than raising, so
+    # every one of them has been silently painting a DOCUMENT glyph on a back
+    # control. Adding the entry fixes all three at once.
+    "arrow-left" => ~s(<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>),
     "plus" => ~s(<path d="M5 12h14"/><path d="M12 5v14"/>),
     "folder" =>
       ~s(<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>),

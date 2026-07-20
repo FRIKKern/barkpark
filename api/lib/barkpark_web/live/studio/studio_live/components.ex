@@ -94,13 +94,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
     show_editor = assigns.paper_block_mode && (canvas_on || assigns.paper_edit_mode)
 
+    # spd-b39 / D169 — TIER 3: the inspector is a SUMMONED DESTINATION, not a
+    # dock. The predicate is an ENUMERATION of the buckets where the wave-10
+    # geometry paints `position:absolute; inset:0` over an opaque surface —
+    # `bucket in ["narrow","phone"] and user_opened`.
+    #
+    # `!= "wide"` is FORBIDDEN here. The wave-10 ladder made standard +
+    # user-opened a REAL DOCKED state (the nav rail yields to one 44px back
+    # strip and the inspector sits IN FLOW beside the prose), so a negation
+    # would hand a docked panel destination semantics: it would inert the very
+    # prose the reader can still see and edit. Enumerate the covered buckets;
+    # never negate the uncovered one.
+    #
+    # `has_editor?` is implied — the sidebar itself renders under
+    # `:if={@paper_doc}`, so with no paper there is no destination to be in.
+    inspector_destination? =
+      assigns.paper_doc != nil and assigns.width_bucket in ["narrow", "phone"] and
+        assigns.sidebar_user_opened == true
+
     assigns =
       assign(assigns,
         slug: slug,
         title: title,
         edit_blocks: edit_blocks,
         canvas_on: canvas_on,
-        show_editor: show_editor
+        show_editor: show_editor,
+        inspector_destination: inspector_destination?
       )
 
     ~H"""
@@ -157,7 +176,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       </.document_header>
 
       <div class="editor-with-preview">
-        <div class="editor-body editor-panel-main bp-paper-body">
+        <%!-- spd-b39 / D164/D165 — the covered content leaves the a11y tree.
+              At Tier 3 the inspector is an opaque `inset:0` panel over this
+              body, so everything under it is unreachable by sight yet fully
+              reachable by Tab and by AT. `inert` is the honest fix.
+
+              IT MUST BE SERVER-RENDERED, never JS-set. Proven twice on the
+              deployed build: an imperative `el.inert = true` is stripped by
+              morphdom on the very next LiveView diff — and toggling the
+              inspector IS that diff — so a hook self-disables on first use
+              with no error to show for it. As a HEEx attribute the value is
+              part of the diff instead of a casualty of it.
+
+              `aria-modal` is REFUSED (D164): there is no outside content to
+              mark as outside — at phone `display_state/4` returns :hidden for
+              every pane, and a scrim beneath an opaque inset:0 panel can never
+              be hit-tested. The truthful semantics are the ones below: a named
+              landmark on the destination, a truthful `aria-expanded` on its
+              control, and `inert` on what the panel covers. --%>
+        <div class="editor-body editor-panel-main bp-paper-body" inert={@inspector_destination}>
           <%!-- The accessible name is added ONLY when the always-editable
                 canvas is the surface (@canvas_on keeps the OFF path
                 byte-identical, D3; @show_editor keeps the name honest — an
@@ -316,10 +353,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     visually_open? =
       assigns.panel_open && (assigns.width_bucket == "wide" || assigns.user_opened)
 
+    # spd-b39 / D169 — the SAME enumeration the paper view computes for `inert`
+    # (studio_paper_view above). Kept as an enumeration, never `!= "wide"`:
+    # standard + user-opened is the wave-10 DOCKED state, and a docked panel
+    # must not wear destination clothes.
+    destination? = assigns.width_bucket in ["narrow", "phone"] and assigns.user_opened == true
+
+    # D167 — the header tells the truth. At Tier 3 this panel is not a strip of
+    # chrome beside the document, it IS the screen, so its title must name the
+    # document you came from rather than the literal word "Document", and its
+    # control must point the way the action goes (back, not down). Mirrors the
+    # title expression in `studio_paper_view/1` above — same fallback ladder.
+    destination_title = (paper && Map.get(paper, :title)) || slug || "Paper"
+
     assigns =
       assign(assigns,
         status: status,
         slug: slug,
+        destination: destination?,
+        destination_title: destination_title,
         feedback: feedback,
         visually_open: visually_open?,
         labels: PaperCanvas.paper_labels(paper),
@@ -344,21 +396,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       data-user-opened={@user_opened && ""}
       data-role="inspector"
       data-test-id="paper-metadata-sidebar"
-      aria-label="Document metadata"
+      data-inspector-destination={@destination && ""}
+      aria-label={if @destination, do: "Document metadata for #{@destination_title}", else: "Document metadata"}
     >
       <div class="bp-doc-sidebar__head">
+        <%!-- D167. At Tier 3 this control is the ONLY way out of a full-screen
+              destination, so the glyph must point the way the action goes:
+              `arrow-left`, not `chevron-down`. It stays one button and one
+              event — `sidebar-toggle-panel` is already classified in caps.ex,
+              so the return grammar costs ZERO new capability entries.
+
+              `aria-expanded` is the truthful half of the D164 refusal: no
+              `aria-modal` anywhere, just an honest expanded/collapsed state on
+              the control that owns `#bp-doc-sidebar-body`. --%>
         <button
           type="button"
           class="bp-doc-sidebar__collapse"
           phx-click="sidebar-toggle-panel"
           aria-expanded={to_string(@visually_open)}
           aria-controls="bp-doc-sidebar-body"
-          title={if @visually_open, do: "Collapse document panel", else: "Expand document panel"}
-          data-test-id="sidebar-toggle-panel"
+          title={
+            cond do
+              @destination -> "Back to #{@destination_title}"
+              @visually_open -> "Collapse document panel"
+              true -> "Expand document panel"
+            end
+          }
+          data-test-id={if @destination, do: "sidebar-dismiss", else: "sidebar-toggle-panel"}
         >
-          <.icon name={if @visually_open, do: "chevron-down", else: "chevron-right"} size={16} />
+          <.icon
+            name={
+              cond do
+                @destination -> "arrow-left"
+                @visually_open -> "chevron-down"
+                true -> "chevron-right"
+              end
+            }
+            size={16}
+          />
         </button>
-        <span :if={@panel_open} class="bp-doc-sidebar__title">Document</span>
+        <span :if={@panel_open} class="bp-doc-sidebar__title">
+          {if @destination, do: @destination_title, else: "Document"}
+        </span>
       </div>
 
       <div :if={@panel_open} id="bp-doc-sidebar-body" class="bp-doc-sidebar__body">
@@ -610,19 +689,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the desktop first render stays byte-identical and the trail is testable
   # without a stylesheet. It renders only when there is somewhere to go back
   # to — an undrilled root desk gets no vestigial one-crumb trail.
+  #
+  # spd-b39 / D168 — the trail now reaches NARROW as well as phone, and it
+  # learns the inspector. Two facts forced both halves:
+  #
+  #   · at `narrow` the <nav> was never emitted at all (live-confirmed:
+  #     `document.querySelector('.bp-desk-crumbs')` is null at 800px), yet
+  #     `narrow` is one of the two buckets where the wave-10 geometry paints a
+  #     full-screen summoned inspector. A destination with no trail out of it
+  #     is a trap. The gate is the SAME enumeration the destination predicate
+  #     uses — `in ["narrow","phone"]`, never `!= "wide"`.
+  #   · when the inspector IS that destination, the document is no longer where
+  #     you are: the inspector is. So the trail grows a trailing inspector
+  #     segment and the document crumb — dead static text since it shipped —
+  #     becomes a real control that takes you back to the prose.
+  #
+  # Still zero new server events: the document crumb fires the SAME
+  # `sidebar-toggle-panel` the inspector's own back button fires, already in
+  # `@safe_events` (caps.ex:82). Nothing new to classify.
   attr(:panes, :list, required: true)
   attr(:editor_doc, :any, default: nil)
   attr(:width_bucket, :string, default: "wide")
+  attr(:sidebar_user_opened, :boolean, default: false)
 
   defp desk_crumbs(assigns) do
+    has_editor = assigns.editor_doc != nil
+
     assigns =
       assigns
-      |> assign(:has_editor, assigns.editor_doc != nil)
+      |> assign(:has_editor, has_editor)
       |> assign(:leaf_idx, length(assigns.panes) - 1)
+      # The inspector is the leaf only when it is actually the summoned
+      # destination: an editor must be open AND the user must have asked for
+      # the panel. Below Tier 3 this stays false and the trail renders exactly
+      # as it did before this slice.
+      |> assign(:inspector_leaf, has_editor and assigns.sidebar_user_opened == true)
 
     ~H"""
     <nav
-      :if={@width_bucket == "phone" and (length(@panes) > 1 or @has_editor)}
+      :if={@width_bucket in ["narrow", "phone"] and (length(@panes) > 1 or @has_editor)}
       class="bp-desk-crumbs"
       aria-label="Desk breadcrumb"
       data-test-id="desk-crumbs"
@@ -647,11 +752,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         ><%= pane.title %></button>
       <% end %>
       <span :if={@has_editor} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
+      <%!-- The document crumb. Static text while the document IS where you are;
+            a real control the moment the inspector takes over the screen, and
+            then it is the way back to the prose. Same event as the inspector's
+            own back button — no new capability. --%>
       <span
-        :if={@has_editor}
+        :if={@has_editor and not @inspector_leaf}
         class="bp-desk-crumb bp-desk-crumb--current"
         aria-current="page"
       ><%= @editor_doc.title || "Untitled" %></span>
+      <button
+        :if={@inspector_leaf}
+        type="button"
+        class="bp-desk-crumb"
+        phx-click="sidebar-toggle-panel"
+        data-test-id="desk-crumb-document"
+      ><%= @editor_doc.title || "Untitled" %></button>
+      <span :if={@inspector_leaf} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
+      <span
+        :if={@inspector_leaf}
+        class="bp-desk-crumb bp-desk-crumb--current"
+        aria-current="page"
+        data-test-id="desk-crumb-inspector"
+      >Document</span>
     </nav>
     """
   end
@@ -685,7 +808,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <%!-- The phone drill trail — a SIBLING BEFORE the pane row (D27), and at
           the phone bucket the ONLY route back out of a drilled pane or an open
           document. See `desk_crumbs/1` above. --%>
-    <.desk_crumbs panes={@panes} editor_doc={@editor_doc} width_bucket={@width_bucket} />
+    <.desk_crumbs
+      panes={@panes}
+      editor_doc={@editor_doc}
+      width_bucket={@width_bucket}
+      sidebar_user_opened={Map.get(assigns, :sidebar_user_opened, false) == true}
+    />
 
     <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
@@ -888,6 +1016,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
            pane (convergence/papers-in-studio); every other doc type opens the
            field form via studio_editor_shell. The left structure pane + the
            Papers list pane (rendered above) stay visible either way. -->
+      <%!-- spd-b39 — `width_bucket` below closes a thread that was MISSING.
+            `studio_paper_view/1` has declared the attr since spd-b29f and
+            passes it straight on to the inspector, but this — its ONLY call
+            site — never supplied it, so the component fell to its "wide"
+            default on every viewport. The b29f aria-expanded fix downstream was
+            therefore pinned to the wide branch, and the Tier-3 destination
+            predicate could never fire at all. One attribute closes it, and the
+            default keeps the pre-connect first paint byte-identical. --%>
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
@@ -907,6 +1043,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_unlinked={@backlinks_unlinked}
           sidebar_open={Map.get(assigns, :sidebar_open, true)}
           sidebar_user_opened={Map.get(assigns, :sidebar_user_opened, false) == true}
+          width_bucket={@width_bucket}
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}
           sidebar_slug_feedback={Map.get(assigns, :sidebar_slug_feedback)}
