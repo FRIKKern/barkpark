@@ -1921,6 +1921,14 @@
       width: auto;
       transform: none;
       box-shadow: none;
+      /* The overlay block also raises `z-index: 5`, and z-index applies to
+         flex items whatever their `position` — so without this the strip
+         would keep an overlay-tier stacking context it no longer earns.
+         Inert today (a 41px in-flow strip overlaps nothing), reset anyway:
+         the contract of this rule is `.is-collapsed`'s geometry exactly, and
+         a leftover from the state being overridden is how that contract
+         quietly stops being true. */
+      z-index: auto;
     }
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
