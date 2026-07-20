@@ -138,7 +138,16 @@ export function adjudicate(input = {}, opts = {}) {
   }
 
   const result = run(fact.rerun, { root, timeoutMs });
-  const mapped = EXECUTION_MAP[result?.verdict];
+  // Own-property lookup ONLY. A plain `EXECUTION_MAP[verdict]` inherits from
+  // Object.prototype, so an executor returning "toString" / "constructor" /
+  // "__proto__" would resolve to a function or {} — sailing past both the
+  // `undefined` and the `null` branch below and emitting a ruling whose verdict
+  // is not one of the ten names. That is the vocabulary-integrity guarantee
+  // failing open in the exact guard written to hold it closed.
+  const key = typeof result?.verdict === "string" ? result.verdict : null;
+  const mapped = key !== null && Object.hasOwn(EXECUTION_MAP, key)
+    ? EXECUTION_MAP[key]
+    : undefined;
 
   if (mapped === undefined) {
     // An enum name this engine does not know. Never absorb it into a pass —

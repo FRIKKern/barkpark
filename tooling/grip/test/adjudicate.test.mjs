@@ -188,6 +188,34 @@ test("an unrecognised executor verdict becomes UNAVAILABLE, never a pass", () =>
   assert.ok(ruling.reasons.includes("UNKNOWN-VERDICT"));
 });
 
+// A benign unknown name is the EASY half. The map is a plain object literal, so
+// it inherits Object.prototype — the names below all resolve to something
+// truthy through the prototype chain and, before the own-property guard, each
+// produced a ruling whose verdict was a function or `{}`: outside the ten
+// names entirely. Every ruling this engine emits must carry one of the ten,
+// whatever an executor hands back.
+const TEN = new Set(Object.values(VERDICTS));
+
+test("an inherited-key verdict name is UNAVAILABLE too, not a prototype value", () => {
+  for (const hostile of ["toString", "constructor", "valueOf", "hasOwnProperty", "__proto__", "isPrototypeOf"]) {
+    const ruling = adjudicate(CLEAN, { run: () => ({ verdict: hostile, reason: "" }) });
+    assert.equal(ruling.verdict, VERDICTS.UNAVAILABLE, `verdict "${hostile}" must be UNAVAILABLE`);
+    assert.ok(ruling.reasons.includes("UNKNOWN-VERDICT"), `verdict "${hostile}" must name UNKNOWN-VERDICT`);
+    assert.ok(TEN.has(ruling.verdict), `verdict "${hostile}" must stay inside the ten names`);
+  }
+});
+
+test("a non-string verdict is UNAVAILABLE, and never leaves the ten names", () => {
+  for (const hostile of [null, undefined, 0, 1, {}, [], true, Symbol.iterator]) {
+    const ruling = adjudicate(CLEAN, { run: () => ({ verdict: hostile, reason: "" }) });
+    assert.equal(ruling.verdict, VERDICTS.UNAVAILABLE, `verdict ${String(hostile)} must be UNAVAILABLE`);
+    assert.ok(TEN.has(ruling.verdict));
+  }
+  // and a runner that returns nothing at all
+  assert.equal(adjudicate(CLEAN, { run: () => undefined }).verdict, VERDICTS.UNAVAILABLE);
+  assert.equal(adjudicate(CLEAN, { run: () => null }).verdict, VERDICTS.UNAVAILABLE);
+});
+
 // ── CONFLICT — unit-tested, NOT wired into any live flow (D25) ────────────────
 //
 // No live caller populates subject/quantity, so these fixtures are hand-built
