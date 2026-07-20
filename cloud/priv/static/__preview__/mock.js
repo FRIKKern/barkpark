@@ -130,6 +130,40 @@
   var appHooks = null;
   globalThis.__bpTestHook = function (h) { appHooks = h; };
 
+  // Poll for a selector, then run fn(el). Every step of the 2FA drive below is
+  // gated on a DOM element the REAL app painted, never on a timer — a fixed
+  // sleep would race the mocked fetch and silently shoot the wrong phase.
+  function whenPresent(sel, fn, tries) {
+    tries = tries || 0;
+    var el = document.querySelector(sel);
+    if (el) { fn(el); return; }
+    if (tries < 60) window.setTimeout(function () { whenPresent(sel, fn, tries + 1); }, 50);
+  }
+
+  // GR76 — the account modal opens in its DEFAULT phase, which for
+  // "account-modal-2fa-badcode" is the 2FA OFF state. The scenario's whole
+  // subject (d.twoFactorConfirm → 422 invalid_otp) lives behind a form
+  // SUBMISSION: mock.js only opened the modal, so the badcode PNG came out
+  // byte-identical to its plain account-modal twin — 20 files whose names
+  // promised a state they did not show, and a green count that certified them.
+  // (Reproduced on origin/main: account-modal-light-1440-iris.png and
+  // account-modal-2fa-badcode-light-1440-iris.png shared sha256
+  // b3962224310076cd…) So drive the REAL enrollment through the REAL handlers —
+  // #a2f-start → POST enroll → #a2f-otp → #a2f-confirm → POST confirm → 422 —
+  // and let app.js paint its own #a2f-error. Nothing is faked into the DOM; the
+  // shot shows exactly what a user typing a wrong code sees.
+  function drive2faBadCode() {
+    whenPresent("#a2f-start", function (start) {
+      start.click();                       // POST /v1/account/two-factor/enroll
+      whenPresent("#a2f-otp", function (otp) {
+        otp.value = "000000";              // a code the 422 arm will reject
+        whenPresent("#a2f-confirm", function (confirm) {
+          confirm.click();                 // POST …/confirm → 422 invalid_otp
+        });
+      });
+    });
+  }
+
   if (params.get("modal") === "account") {
     window.addEventListener("load", function () {
       var tries = 0;
@@ -141,6 +175,9 @@
         var ready = chip && chip.textContent;
         if ((ready || tries > 40) && appHooks && appHooks.openAccountModal) {
           appHooks.openAccountModal();
+          // Scenario-specific post-open drive. Keyed on the scenario NAME, the
+          // same convention shoot.sh uses to derive ?modal=account at all.
+          if (scen === "account-modal-2fa-badcode") drive2faBadCode();
           return;
         }
         if (tries++ < 40) window.setTimeout(waitForMe, 50);
