@@ -744,3 +744,195 @@ that its clause-(a)/(c) run used the `--ledger` fixture channel while the three 
 (2) close `gr-p5r7-reshoot-verify` criterion 8 as *no PR by design*, NOT as abandoned; (3) **`gr-p5r8-register-defect-commits`
 — before any successor work**; (4) then and only then `gr-p5r5-successor-seal`, running the predicate LAST
 in its own claim. Skipping (3) burns the round-2 builder on a structurally impossible green.
+
+---
+
+## Wave 2026-07-20 — phase-5 seal round 9, DECIDE: the seal is a disclosure, not a rename
+
+The epic has attempted to seal SIX times. Round 8 built the thing that ends that — an executable predicate,
+frozen and committed BEFORE any builder flew. Round 9 executes it and takes the verdict without negotiation
+and without building a seventh instrument. But **the exit code is not the deliverable.** The predicate can
+only measure a mechanical property. A successor with no charter, no triage and no priorities passes clause
+(a) identically to a great one. What survives this epic is not the exit code; it is whether the next person
+can READ the ending. Eight verifiers ran against the round-8 plan. They confirmed the direction and
+contradicted the brief in nine places. The corrections are law.
+
+**GR130 — CITE MERGE SHAs, NEVER BRANCH SHAs. This epic's most expensive unforced error.**
+`origin/main` is a **linear squash chain** — `git log --format=%p` shows a single parent for every commit —
+so `git merge-base --is-ancestor <branch-head> origin/main` can **NEVER** pass and **always false-negatives**.
+Control, run both ways on the same landed fix: PR #4909's branch head `e4bb4bfae` reads **NOT ancestor**
+while its merge SHA `0261ace15` reads **IS ancestor**. Round 8's digest cited the MERGE sha for #4909 and the
+BRANCH sha for #4832 and drew opposite conclusions from that choice alone — declaring four landed user-facing
+fixes unlanded and calling it "the finding that most threatens a readable ending". It threatened nothing; it
+was a measurement error. Correct test: `gh pr view <n> --json mergeCommit`, or `git log -S'<string>' origin/main`.
+Root cause: **the charter records landing PLANS but never the merge SHA the landing produced** (`grep -c
+'7a5aff656'` on this file returned 0). That omission is what let branch SHAs become the citation of record.
+From here, a landing is recorded by its merge SHA, at landing time.
+
+**GR131 — CLAUSE (a)'S IMPLEMENTATION, READ FOR THE FIRST TIME BY ANYONE. It is weaker than every ruling assumed.**
+It reads exactly three fields from a task document: `_id`, `lifecycle_status`, `parent_id`. `close_reason`,
+`acceptance_criteria`, `evidence`, `assignee`, `tags`, `priority` — **zero hits each**. There is no
+forwarding-address field and no label field; "gate label" and "evidence-closure" exist only inside prose
+output strings. A row passes if its status is anything other than `open`/`in_progress` (**including arbitrary
+values** — a fixture with `lifecycle_status:'banana'` SEALS), **or** if it leaves the epic's direct children.
+A permanent human gate is not a field-borne disposition — it is a hardcoded `_id` match against three literals,
+so the charter's own repeated instruction to "label the human gates" has **zero mechanical effect**. Do it
+anyway, as disclosure; never count it as satisfying anything. Consequence: **the 74 re-parents cannot produce
+"a green that is still NO SEAL"** — no builder can be burned on an impossible clause-(a) green. The risk has
+moved from mechanical to narrative.
+
+**GR132 — `fwd` IS DEAD CODE IN LIVE MODE, AND THE BANNER WILL UNDER-REPORT THE TRIAGE.**
+`children` is the epic's direct children; `forwarded` is the successor's. A task has ONE `parent_id`, so a row
+**cannot be in both** — the moment it is re-parented it leaves `children` entirely and the `forwarded` branch
+can only ever fire under `--ledger` fixtures. Clause (a) therefore passes by **ABSENCE, not by naming**, and
+`--successor` has **zero effect on the live clause-(a) verdict**: a typo'd id and an omitted flag produce
+identical output. Two things follow. First, **ruling 3's stated premise is REFUTED** — a row routed honestly to
+another epic does NOT orphan and does NOT fail clause (a), so re-parenting everything under one successor buys
+**zero mechanical safety**. It remains the right choice, but as a pure DISCLOSURE choice, made with open eyes.
+Second, after a PERFECT triage the SEAL banner reads `Sealed N children: M evidence-closed, 0 forwarded by
+name to <successor>`. **The `0 forwarded` is structural.** The terminal run MUST pass `--successor
+cloud-console-hardening-epic` (without it the banner prints the literal word `null`), and the charter MUST
+record the **roster delta and the per-row disposition census alongside** the verbatim stdout, because the
+stdout alone cannot express what this epic did. Editing the banner is NOT the permitted edit and voids the wave.
+
+**GR133 — ABSENCE OF A `VERDICT:` LINE IS A CRASH, NEVER A VERDICT.** Both `fetchRoster` calls are unwrapped, so
+any transport failure throws before any output. A crash and a substantive NO SEAL **both exit 1**; the
+discriminator is stdout — a crash produces **zero bytes and no `=== SEAL PREDICATE ===` banner**. Recording a
+crash as NO SEAL would fabricate an ending. Capture stdout, stderr AND the exit code.
+
+**GR134 — BUCKET (c) IS A FALSE-NO-SEAL HAZARD IN EXACTLY THE WINDOW THE RE-PARENT CREATES.** `fetchById` is
+`try { … } catch { return null }`, so a gate that fails to resolve for ANY reason — one 429 from the shared
+60/min write bucket, a transient 500, a blip — reports `resolved:false` and forces NO SEAL with clause (a)
+perfectly clean. A throttled 74-row re-parent immediately followed by the atomic run sits in the worst window.
+**Settle, confirm all three gates resolve with a standalone `filter[_id]` query, then run.** A bucket-(c)
+failure with clause (a) clean is almost certainly mechanical and is the legitimate use of the one-repair rule.
+
+**GR135 — THE WRONG CWD MANUFACTURES A FALSE NO SEAL.** `REPO` defaults to `process.cwd()`. From anywhere but
+the repository root the predicate emits `guard … is NOT COMMITTED` three times and exits 1 **with a full
+banner** — textually identical to a real clause-(b) failure, and invisible to the GR133 crash test. Run from
+the repo root or pass `--repo`.
+
+**GR136 — THE SUCCESSOR ID IS UNVALIDATED, SO DECIDE FILES THE SUCCESSOR ITSELF.** The predicate never checks
+that the successor resolves: a typo yields `forwarded: 0 / orphans: 74` with no error, indistinguishable from
+"the re-parent never ran". No successor existed anywhere (2000-row ledger scan, 1921-doc search index,
+140-child roster, charter — all negative), and BOTH `gr-p5r3-successor-epic` and `gr-p5r5-successor-seal` sat
+open at 0/7 and 0/11 with every evidence field empty. Round 9's Decide therefore **filed the successor itself**:
+**`cloud-console-hardening-epic`**, published, top-level, carrying a six-band inheritance charter. The slug is
+fixed HERE. `gr-p5r5-successor-seal` VERIFIES it; it must never re-file it.
+
+**GR137 — THE FOUR SEAL-FINISHER DEFECTS LANDED. There is no false-done; there were four FALSE-OPENS.**
+PR #4832 squash-merged as **`7a5aff656`** at 2026-07-20T10:58:44Z, and `git diff 7a5aff656 f992663b4 --
+cloud/` is EMPTY for every defect file. All four are fixed on `origin/main`, proven by source inspection, not
+ancestry: `index-icon-link` (`<link rel="icon">` at index.html:15, favicon.ico ships at 15,086 bytes, pinned at
+`__app.test.mjs:1329`); `modal-survives-route` (GR105 `hashChangeEffects` at app.js:16097, keyed on
+`legacyRoute` so `#launch` stays route-identical, four pinning tests); `invite-ico-danger-variant`
+(`.invite-ico--danger` at app.css:3245, distinct `✕` glyph via `ICO_DEAD`); and `archives-doc-link` — **whose
+fix is a REMOVAL**, so every grep-for-presence reads like the defect (`grep -c 'archives-docs-link'` returns
+**0**; the ruling is written in-source at app.js:1621). 640 pass / 0 fail on a clean `origin/main` extraction.
+`gr-p5r6-seal-finishers` is honestly done at 7/8; its one unmet criterion is the lead's own un-stamped close-out.
+**These four are evidence-CLOSED, not forwarded** — forwarding them would tell the next reader the epic left
+four user-facing defects unfixed when it fixed all four.
+
+**GR138 — `cloud-console-billing-live-gate` STAYS UNDER `cloud-console-goal`.** Round 8's criterion demanded it
+be moved BY NAME into the successor. Refuted as necessary and rejected as correct: bucket (c) is
+**parent-independent** — it resolves by hardcoded id and reports `parent=cloud-console-goal
+in-epic-roster=false` with a checkmark. Its true owner is the billing epic. It is NAMED in the successor's
+charter so it is never lost, and OWNED where it is. Moving it would be taxonomy vandalism in reverse.
+
+**GR139 — THE FIRST ACT IS AMENDED: DO NOT RESET LOCAL MAIN.** The round-8 plan opened with `git reset --hard
+origin/main`. At Decide the primary checkout was **dirty with a concurrent session's uncommitted work** — 249
+lines across five `internal/taskboard/` files — which a hard reset destroys silently. The reset's *purpose*
+(measuring against `origin/main`, since `overflow-guard.mjs` does not exist in the un-reset tree and running
+there manufactures a false `guard is NOT COMMITTED` NO SEAL) is served strictly better by a **detached worktree
+at `origin/main`**, which is what round 9 used. The primary checkout stays on `main` and is never reset while
+other sessions share it. This charter section was authored and committed from that worktree on a branch.
+
+**GR140 — THE DISCLOSURE CENSUS: named, forwarded, NOT widened.** Clause (b) certifies the word KNOWN over only
+three hand-registered defects. At least eight live rows self-describe a user-facing defect outside those three
+(`gr-backlog-768-residue`, `gr-blk-modal-survives-route`, `gr-blk-index-icon-link`, `gr-backlog-favicon`,
+`gr-blk-archives-doc-link`, `gr-blk-invite-ico-danger-variant`, `gr-backlog-setmatrix-scroll-affordance`,
+`gr-blk-ok-danger-hue-separation`) — four of which GR137 now closes as landed. Separately, **the guard is
+ROUTE-BLIND**: it contains zero occurrences of `deepLink` or `location.hash` while its sibling `smoke.mjs`
+navigates with `hash: scen.deepLink || "#overview"`, so every instance-detail panel is structurally unreachable
+by it, and GR109's check samples **one of the four** scenarios that render `.attention-row`. A round-9 census
+measured all 86 scenarios at 768 with deepLinks applied and found **0 DIRTY** — so "GR109 clean" generalises
+BY MEASUREMENT, and the scope gap is real and **empty**. Both facts are recorded and forwarded
+(`gr-bl-overflow-guard-route-blind`). Neither widens KNOWN_DEFECTS. **Re-deriving the bar after seeing the
+roster is precisely what the freeze forbids, and it is how an epic never closes.**
+
+**GR141 — TWO PREMISES ABOUT THE RUN ENVIRONMENT WERE WRONG.** "Absent `BP_TOKEN`" is **not** a mechanical
+failure mode: the roster route serves unauthenticated, and the authenticated and unauthenticated runs are
+byte-identical apart from the timestamp — so the repair budget was reserved for a failure that cannot happen.
+And the guard is **healthy at the tip**: `overflow-guard.mjs` exits 0 and prints PASS for GR108, GR109 and
+GR115 individually and combined, with the served-bytes == disk-bytes anti-squat assertion firing every run,
+and refuses an unknown `--defect` id with exit 2 (no vacuous pass). **The browser half of clause (b) is not the
+blocker.** With the one permitted edit applied, clause (b) goes fully green live and **clause (a) becomes the
+sole remaining blocker** — the entire seal rests on the disposition.
+
+### Ledger disposition — what Decide decided, and what it did itself
+
+The live ledger drifted through the cycle: **139** at round 8's run → **140 {open:77, done:63}** at digest →
+**140 {done:64, open:76}** across verify, with the orphan count reading **74 in both runs** — a coincidence,
+not a frozen ledger. **GR126 holds: a verdict is valid only at an instant**, and the ~10-second run window is
+the only atomicity there is. Decide therefore plans against the disposition RULE, never a frozen count.
+
+Decide **filed the chartered successor itself** (GR136) rather than delegating it, killing both the typo hazard
+and the duplication hazard, and because ruling 2 — *the successor ships with a charter, its inheritance triaged
+into named bands* — is judgment work, not builder work. `cloud-console-hardening-epic` carries six bands.
+The security band ships with a **gradient**, because naming all five rows equally would overstate the residue:
+**2 live-and-real** (`gr-bl-peer-ip-container` — the container's Caddy hop arrives from the bridge gateway so
+the loopback-only trust silently no-ops, making session IPs uniformly blind AND collapsing the device-auth rate
+bucket to ONE global bucket; `gr-blk-sse-token-in-query` — the full-privilege session bearer travels in a URL
+query param at router.ex:9707), **1 real but narrower than written** (`gr-blk-oauth-head-mint` — the state
+nonce is consumed atomically, so this is a first-use RACE against `Plug.Head` from unfurlers and prefetchers,
+not a replay), **1 explicitly ruled clean** (`gr-backlog-tfa-confirm-throttle` — strictly weaker than what the
+session already holds), and **1 prospective and out-of-boundary** (`gr-backlog-console-redaction-allowlist` —
+today's allowlist covers every live secret; the gap is a future env var, in Go, outside `cloud/`).
+
+Band 2 records a finding the direction did not anticipate: of the five off-epic rows, **exactly one has a real
+home** (`gr-blk-studio-presence-perf-flake` → Felix pristine `task-96a908af98698118`). The other four have **no
+owning epic in bp at all** — repo-git hygiene, CI/merge-gate governance and Cloud test-infra currently live as
+unparented root tasks, `task-openapi-drift-chronic` (`parent_id:null`) being the same class. **That absence IS
+the finding.** The successor's charter says so plainly rather than inventing a destination, and preserves
+`gr-blk-primary-checkout-reconcile`'s own breakdown naming AXI/PDS/TLV/SPD as the true owners of its commits.
+
+### The wave — three slices, two rounds, no new instrument
+
+Round 1 dispatches two dependency-free slices with **disjoint file sets**; round 2 is the terminal act.
+
+- **`gr-p5r8-register-defect-commits`** (round 1, opus, `cloud/priv/static/__preview__/seal-predicate.mjs`) —
+  the ONE permitted edit: `commit: null` → `0261ace15`, registered against all three defects. Sound because
+  the SHA was proven **by diff, per defect** (GR108 = `.topbar-right > * { min-width: 0; }` at app.css:787,
+  breakpoint-free because children floor at `min-width:auto` and overflow at ~782px ABOVE the 768 breakpoint;
+  GR109 = the `.attention-row` tablet-stack block relocated to sit AFTER its base rule; GR115 = the
+  `.bp-console-*` block relocated BEFORE the shared media block) — three non-overlapping hunks with in-place
+  GR comments. Gate: `node --check` + the three clause-(b) checkmarks from a repo-root run.
+- **`gr-p5r9-disposition-pass`** (round 1, opus, **no files** — pure ledger) — executes an 18-row disposition
+  table Decide decided and verification proved: 11 closes on diff-verified merge SHAs, 3 merge-gated criteria
+  the lead closes (round 8's inherited steps 1 and 2), 4 honest ruling-closes that must SAY they are
+  ruling-closes. Two SHAs are explicitly forbidden as evidence — `fcafc0d82` (`task-050074a198b116c4`, cite
+  `301e035d8`) and `3d80a58bf` (`gr-backlog-768-residue`, cite the content proof) — because neither resolves
+  on `origin/main` and citing them would reproduce the sin one layer up.
+- **`gr-p5r5-successor-seal`** (round 2, opus, `after: [gr-p5r8-register-defect-commits, gr-p5r9-disposition-pass]`)
+  — re-parents survivors into `cloud-console-hardening-epic` and runs the predicate **LAST, once, atomically**,
+  from the repo root, with `--successor`, after sweeping the merge loops and confirming all three gates resolve.
+
+**Round 1 is deliberately thin, and that is the point.** Every act in this wave is disclosure, bookkeeping, or
+verification of an EXISTING artifact. Rounds 3–7 each discovered its evidence was thinner than its claim and
+spawned a new instrument; every instrument was excellent, and the seal receded by exactly one instrument per
+round. **A seventh widening is not rigor — it is how an epic never closes.**
+
+**NO SEAL is pre-authorised and terminal.** One repair attempt is allowed for a MECHANICAL failure (crash per
+GR133, wrong cwd per GR135, a bucket-(c) blip per GR134, an unresolvable successor per GR136). A **substantive**
+failure IS the verdict: it is recorded verbatim and the named successor is the ending. Whichever way it exits,
+the predicate's stdout, stderr, exit code, ISO stamp and roster count become this epic's terminal artifact —
+recorded here **alongside** the roster delta and the disposition census, because GR132 guarantees the banner
+cannot tell that story by itself.
+
+**Re-parent mechanics, measured for the first time.** `bp task move` is real, CAS-guarded, epoch-fencing and
+single-row (`batch:false`) — 74 rows means 74 sequential POSTs. The write bucket is **60/min, keyed global,
+SHARED** with every other write on the token; a 429 carries `retry-after: 1` and recovers in ~1s. Two traps:
+a same-parent no-op is **not free** (it still emits a `task.reparented` event and still burns a slot, so a
+blind catch-up pass costs real budget), and a **bare `?parent_id=` query is silently ignored**, returning an
+unfiltered page of up to 100 rows — a false confirmation, not an error. Bracket-encoded `filter[parent_id]`
+always.
