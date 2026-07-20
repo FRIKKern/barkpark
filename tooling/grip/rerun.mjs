@@ -67,6 +67,14 @@ const WRITE_SHAPES = [
   [/\bmutate\b/, "mutate"],
   [/\bpublish\b/, "publish"],
   [/\b(DROP|DELETE|INSERT|UPDATE|TRUNCATE|ALTER)\s/i, "SQL write"],
+  // The verbs above are SHELL verbs, so an interpreter's inline program wrote
+  // freely through its host language's API: `node -e 'require("fs").rmSync(…)'`
+  // and `python3 -c 'import os; os.remove(…)'` were both classified safe BEFORE
+  // this file gained quote awareness (verified against the pre-change module).
+  // Quoted code is scanned raw, so naming the APIs closes it. Same caveat as
+  // INTERPRETER_SHAPES below: a denylist of mutating APIs cannot be complete.
+  [/\b(rmSync|unlinkSync|rmdirSync|writeFileSync|appendFileSync|renameSync|truncateSync)\b/, "fs mutation API"],
+  [/\b(shutil\.rmtree|os\.(remove|unlink|rmdir|rename|truncate))\b/, "fs mutation API"],
   [/\bcurl\b[^|]*\s-X\s*(POST|PUT|PATCH|DELETE)/i, "curl write method"],
   [/\bcurl\b[^|]*\s(-d|--data|--data-raw|--data-binary|-F|--form|-T|--upload-file)\b/, "curl request body"],
   [/\bbp\s+\w+\s+(create|publish|patch|delete|close|claim|stamp|pulse|set)\b/, "bp write verb"],
@@ -84,6 +92,92 @@ const KNOWN_WRITERS = [
   [/research-coverage\/coverage\.mjs\s+scan\b/, "coverage.mjs scan writes coverage-report.json (coverage.mjs:75) despite the '(read-only)' comment at :8"],
 ];
 
+// ── QUOTE AWARENESS — the shapes above describe SHELL SYNTAX, not TEXT ───────
+//
+// Every regex above is a claim about what the shell will DO. A `>` or the word
+// `publish` sitting inside a quoted argument is DATA the command reads, not
+// syntax the shell executes — yet a raw scan cannot tell them apart, so all
+// five of these read-only commands were refused UNSAFE-RERUN:
+//
+//   grep -n "a > b" README.md                    → "output redirection to a file"
+//   grep -rn "npm publish instructions" docs/    → "package mutation"
+//   git log --grep="publish flow"                → "publish"
+//   git show HEAD:notes.md | grep "must mutate"  → "mutate"
+//   grep -n "chmod 644 is required" docs/x.md    → "filesystem mutation"
+//
+// That is D3's failure mode latent in the gate itself: a gate that punishes
+// honest work gets routed around within a wave. It already bit wave 1 once
+// (specimen 3's `<charter>` placeholder refused before it could run).
+//
+// THE TRAP INSIDE THE FIX. Blanking quoted spans unconditionally is a SECURITY
+// REGRESSION, because for some commands the quoted string is not data — it IS
+// the code being executed. `psql -c 'DROP TABLE docs'` and `sh -c 'rm -rf /tmp/y'`
+// become falsely safe under naive blanking. So an interpreter shape — a head
+// whose quoted argument is a program — is scanned RAW, keeping the pre-existing
+// (conservative) behaviour exactly.
+//
+// THIS DENYLIST IS NECESSARILY INCOMPLETE. It is a heuristic, not a shell
+// parser: there is no bounded list of every binary that will execute a string
+// handed to it, and a novel interpreter (or a wrapper around a listed one)
+// slips past. It errs toward REFUSAL — a shape it fails to recognise as an
+// interpreter is merely quote-blanked, and anything it recognises falls back to
+// the strictly-stricter raw scan — but it must never be read as a proof of
+// safety. The verdict it supports is "no write shape detected", never "this
+// command cannot write".
+const INTERPRETER_SHAPES = [
+  /\b(sh|bash|zsh|dash|ksh)\s+(-[a-zA-Z]+\s+)*-c\b/,   // sh -c '<program>'
+  /\bpsql\b[^|]*\s-c\b/,                                // psql -c '<SQL>'
+  /\b(mysql|sqlite3)\b[^|]*\s-e\b/,                     // mysql -e '<SQL>'
+  /\bnode\s+(-e|--eval)\b/,                             // node -e '<JS>'
+  /\bpython[\d.]*\s+-c\b/,                              // python -c '<py>'
+  /\b(perl|ruby)\s+-e\b/,                               // perl -e '<code>'
+  /\bawk\b/,                                            // awk '{system("…")}'
+  /\beval\b/,                                           // eval '<anything>'
+  /\bxargs\b[^|]*\s-I\b/,                               // xargs -I{} '<cmd>'
+  /\bssh\b[^|]*\s(["'])/,                               // ssh host '<remote cmd>'
+];
+
+/** Does this command hand its quoted argument to something that EXECUTES it? */
+function executesItsQuotedArgument(cmd) {
+  return INTERPRETER_SHAPES.some((re) => re.test(cmd));
+}
+
+/**
+ * Replace the CONTENTS of every quoted span with spaces, 1:1 (quote characters
+ * included), leaving unquoted text — real shell syntax — byte-identical. Offsets
+ * are preserved so a reported match still lines up with the original string.
+ *
+ * Returns null when the scan ends INSIDE an unterminated quote: that is a
+ * malformed command, and blanking its tail would hide whatever follows the
+ * stray quote. Callers fall back to the raw scan.
+ */
+export function blankQuotedSpans(command) {
+  const cmd = String(command || "");
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote === "'") {
+      // Single quotes are literal in POSIX sh — no escapes inside them.
+      out += ch === "'" ? ((quote = null), " ") : " ";
+    } else if (quote === '"') {
+      if (ch === "\\" && i + 1 < cmd.length) { out += "  "; i++; continue; }
+      out += ch === '"' ? ((quote = null), " ") : " ";
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += " ";
+    } else if (ch === "\\" && i + 1 < cmd.length) {
+      // An escaped character outside quotes is literal data (`\>` is a `>`
+      // glyph, not a redirect), so neutralise the pair — still 1:1.
+      out += "  ";
+      i++;
+    } else {
+      out += ch;
+    }
+  }
+  return quote === null ? out : null;
+}
+
 /**
  * Classify a command as safe to re-run, or refuse it. Pure; no execution.
  * @returns {{safe: boolean, reason: string}}
@@ -92,13 +186,17 @@ export function classifySafety(command) {
   const cmd = String(command || "").trim();
   if (!cmd) return { safe: false, reason: "empty command" };
 
+  // Scan the SYNTAX, not the text — except where the quoted text IS the syntax.
+  const blanked = executesItsQuotedArgument(cmd) ? null : blankQuotedSpans(cmd);
+  const scanned = blanked ?? cmd;
+
   for (const [re, why] of KNOWN_WRITERS) {
-    if (re.test(cmd)) return { safe: false, reason: `known writer: ${why}` };
+    if (re.test(scanned)) return { safe: false, reason: `known writer: ${why}` };
   }
   for (const [re, why] of WRITE_SHAPES) {
-    if (re.test(cmd)) return { safe: false, reason: `write-shaped verb: ${why}` };
+    if (re.test(scanned)) return { safe: false, reason: `write-shaped verb: ${why}` };
   }
-  if (WRITE_REDIRECT.test(cmd)) {
+  if (WRITE_REDIRECT.test(scanned)) {
     return { safe: false, reason: "write-shaped verb: output redirection to a file" };
   }
   return { safe: true, reason: "no write shape detected" };

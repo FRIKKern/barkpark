@@ -17,12 +17,24 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm,
+  blankQuotedSpans,
   admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim,
   VERDICT, SCOPE, GripError,
 } from "../rerun.mjs";
+
+// ── INVOCATION-AGNOSTIC BY CONSTRUCTION ──────────────────────────────────────
+// rerun.mjs's shell() spawns `/bin/sh -c` with NO cwd, so every command below
+// inherits whatever directory `node --test` was invoked from. Repo-root-relative
+// literals therefore made the suite report 29/30 from the root and 27/30 from
+// inside tooling/grip/ — a tally that moves with the caller is not a proof.
+// Everything cwd-sensitive resolves off THIS FILE instead, and interpolates
+// through JSON.stringify so a path with a space or a quote cannot re-parse.
+const RERUN_MJS = JSON.stringify(fileURLToPath(new URL("../rerun.mjs", import.meta.url)));
+const REPO_ROOT = JSON.stringify(fileURLToPath(new URL("../../../", import.meta.url)));
 
 // ── 1. REACHABILITY KEYS ON THE PAIR, NEVER THE CODE ALONE ───────────────────
 // Measured live from this worktree on 2026-07-20 — all four reproduced:
@@ -130,14 +142,14 @@ test("assertAbsenceClaim REFUSES to promote a NULL-READ into an absence claim", 
 test("grep's exit 1 is a REAL no-match, not a NULL-READ", () => {
   // The one tool whose empty output is a genuine read. Conflating it with
   // NULL-READ would make the gate reject every legitimate absence proof.
-  const r = runRerun("grep 'zzz_no_such_string_9f3a' tooling/grip/rerun.mjs");
+  const r = runRerun(`grep 'zzz_no_such_string_9f3a' ${RERUN_MJS}`);
   assert.equal(r.exit, 1);
   assert.equal(r.verdict, VERDICT.FAILED);
   assert.equal(admitsAbsenceClaim(r), true);
 });
 
 test("a real read comes back OK with bytes", () => {
-  const r = runRerun("grep -c 'VERDICT' tooling/grip/rerun.mjs");
+  const r = runRerun(`grep -c 'VERDICT' ${RERUN_MJS}`);
   assert.equal(r.verdict, VERDICT.OK);
   assert.ok(r.stdoutBytes > 0);
   assert.equal(admitsPassClaim(r), true);
@@ -217,10 +229,20 @@ test("the four commands doc-truth falsely 'confirmed' are no longer confirmed", 
 });
 
 test("a command that genuinely succeeds still reads OK — the gate is not just strict", () => {
-  const r = runRerun("git show HEAD:tooling/grip/rerun.mjs");
-  // Present in the worktree but possibly not yet committed; either way it must
-  // be a decisive, executed answer rather than a PATH-resolution guess.
-  assert.ok([VERDICT.OK, VERDICT.FAILED].includes(r.verdict), `got ${r.verdict}`);
+  // WAS VACUOUS. This accepted `[OK, FAILED].includes(verdict) && ran && ms >= 0`
+  // over an unanchored `git show HEAD:tooling/grip/rerun.mjs`. Run from a
+  // directory with no git repository at all it returns
+  // {verdict: FAILED, exit: 128, stdoutBytes: 0} — and PASSED. A test that
+  // passes whether or not the tool found anything proves nothing about the tool.
+  //
+  // Now: the file is KNOWN to be committed, so a real read is the only
+  // acceptable answer — exit 0 with bytes. `git -C <repo root>` anchors the
+  // read to the repo instead of the caller's cwd, so the assertion can be this
+  // strict without becoming a statement about where `node --test` was invoked.
+  const r = runRerun(`git -C ${REPO_ROOT} show HEAD:tooling/grip/rerun.mjs`);
+  assert.equal(r.verdict, VERDICT.OK, `got ${r.verdict}: ${r.reason}`);
+  assert.equal(r.exit, 0, "a committed file must read back cleanly, not merely 'decisively'");
+  assert.ok(r.stdoutBytes > 0, `a real read has bytes, got ${r.stdoutBytes}`);
   assert.equal(r.ran, true);
   assert.ok(r.ms >= 0);
 });
@@ -269,6 +291,86 @@ test("genuinely read-only commands are NOT refused", () => {
     "node x.mjs 2>/dev/null",
   ]) {
     assert.equal(classifySafety(cmd).safe, true, `should allow: ${cmd}`);
+  }
+});
+
+// ── 6b. QUOTE AWARENESS — a write VERB is not a write ────────────────────────
+//
+// The safety regexes describe SHELL SYNTAX. Scanned raw they also matched the
+// same characters sitting inside a quoted ARGUMENT, so these five read-only
+// commands were all refused UNSAFE-RERUN. That is D3's failure mode inside the
+// gate: punish honest work and the honest path gets routed around.
+
+test("a write verb or a '>' INSIDE a quoted argument no longer refuses a pure read", () => {
+  for (const cmd of [
+    `grep -n "a > b" README.md`,
+    `grep -rn "npm publish instructions" docs/README.md`,
+    `git log --grep="publish flow"`,
+    `git show HEAD:docs/notes.md | grep "must mutate state before publish"`,
+    `grep -n "chmod 644 is required" docs/setup.md`,
+    `grep -n 'rm -rf is destructive' docs/setup.md`,
+  ]) {
+    const s = classifySafety(cmd);
+    assert.equal(s.safe, true, `should allow (reads nothing but text): ${cmd} — got ${s.reason}`);
+  }
+});
+
+test("blanking is 1:1 and touches ONLY quoted spans, so unquoted syntax survives", () => {
+  // Offsets preserved: a reported match still lines up with the original.
+  const cmd = `grep -n "a > b" x.md > out.json`;
+  const blanked = blankQuotedSpans(cmd);
+  assert.equal(blanked.length, cmd.length, "blanking must be length-preserving");
+  assert.equal(blanked, `grep -n         x.md > out.json`);
+  // …and the surviving, genuinely-unquoted redirect is still caught.
+  assert.equal(classifySafety(cmd).safe, false);
+  assert.match(classifySafety(cmd).reason, /output redirection/);
+});
+
+test("an UNTERMINATED quote falls back to the raw scan rather than blanking a tail", () => {
+  // Blanking to end-of-string would hide everything after a stray quote.
+  assert.equal(blankQuotedSpans(`grep 'oops > out.json`), null);
+  assert.equal(classifySafety(`grep 'oops > out.json`).safe, false);
+});
+
+test("QUOTED CODE IS STILL CODE — an interpreter's quoted argument is scanned RAW", () => {
+  // The trap inside the fix: for these, the quoted string is not data being
+  // read, it is the program being executed. Naive blanking makes every one of
+  // them falsely safe.
+  for (const cmd of [
+    `sh -c 'rm -rf /tmp/y'`,
+    `/bin/sh -c "rm -rf /tmp/y"`,
+    `bash -e -c 'git push origin main'`,
+    `psql -c 'DROP TABLE docs'`,
+    `psql -U bp -d barkpark -c "DELETE FROM documents"`,
+    `sqlite3 db.sqlite -e 'DROP TABLE t'`,
+    `node -e 'require("fs").rmSync("/tmp/y")'`,
+    `python3 -c 'import os; os.remove("/tmp/y")'`,
+    `perl -e 'rm -rf y'`,
+    `awk '{system("rm -rf /tmp/y")}' f.txt`,
+    `eval 'rm -rf /tmp/y'`,
+    `xargs -I{} rm -rf {}`,
+    `ssh host 'rm -rf /tmp/y'`,
+  ]) {
+    assert.equal(classifySafety(cmd).safe, false, `quoted code must stay refused: ${cmd}`);
+  }
+});
+
+test("the quote fix did not reopen any shape section 6 already refused", () => {
+  // Fail-before/pass-after on the pre-existing denylist: every one of these was
+  // refused before quote awareness and must still be refused after it.
+  for (const cmd of [
+    "rm -rf api/_build",
+    "git push origin main",
+    "git commit -m x",
+    "curl -X POST http://127.0.0.1:4000/v1/data/mutate",
+    "curl -s -d '{}' http://127.0.0.1:4000/v1/x",
+    "bp doc publish task foo",
+    "psql -c 'DROP TABLE docs'",
+    "sed -i '' s/a/b/ README.md",
+    "node x.mjs > out.json",
+    "node tooling/research-coverage/coverage.mjs scan",
+  ]) {
+    assert.equal(classifySafety(cmd).safe, false, `must stay refused: ${cmd}`);
   }
 });
 
