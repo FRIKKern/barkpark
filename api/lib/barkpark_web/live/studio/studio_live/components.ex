@@ -48,6 +48,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
+  # D91: "the user explicitly asked for the inspector", threaded down to the
+  # <aside> as `data-user-opened`. Defaults false so an un-threaded call site
+  # gets the bucket-aware closed default rather than a silent always-open.
+  attr(:sidebar_user_opened, :boolean, default: false)
   attr(:sidebar_collapsed, :any, default: nil)
   attr(:sidebar_slug_draft, :string, default: nil)
   attr(:sidebar_slug_feedback, :any, default: nil)
@@ -230,6 +234,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           dataset={@dataset}
           workspace_label={@workspace_label}
           panel_open={@sidebar_open}
+          user_opened={@sidebar_user_opened}
           collapsed={@sidebar_collapsed}
           slug_draft={@sidebar_slug_draft}
           slug_feedback={@sidebar_slug_feedback}
@@ -257,6 +262,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:dataset, :string, required: true)
   attr(:workspace_label, :string, default: nil)
   attr(:panel_open, :boolean, default: true)
+  # D91. Distinct from `panel_open` and NOT a synonym for it: `panel_open` is
+  # the server's state (and it also gates whether the body/title exist in the
+  # DOM at all), while this says only whether the user ASKED. The pair spans
+  # three states, not two — collapsed (body absent), open-and-asked-for
+  # (visible everywhere), and open-but-never-asked, which below the `wide`
+  # bucket the cascade paints as the collapsed strip. CSS-hidden is not
+  # collapsed; do not conflate them.
+  attr(:user_opened, :boolean, default: false)
   attr(:collapsed, :any, default: nil)
   attr(:slug_draft, :string, default: nil)
   attr(:slug_feedback, :any, default: nil)
@@ -303,6 +316,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     ~H"""
     <aside
       class={"bp-doc-sidebar " <> if(@panel_open, do: "is-open", else: "is-collapsed")}
+      data-user-opened={@user_opened && ""}
       data-role="inspector"
       data-test-id="paper-metadata-sidebar"
       aria-label="Document metadata"
@@ -850,6 +864,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
           sidebar_open={Map.get(assigns, :sidebar_open, true)}
+          sidebar_user_opened={Map.get(assigns, :sidebar_user_opened, false) == true}
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}
           sidebar_slug_feedback={Map.get(assigns, :sidebar_slug_feedback)}

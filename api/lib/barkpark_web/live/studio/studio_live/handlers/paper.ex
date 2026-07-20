@@ -93,9 +93,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # persist, it rides `PaperCanvas.sidebar_meta_op/2`'s `{:doc_field, …}` shape,
   # NEVER the block pipeline.
 
-  @doc "Collapse / expand the whole metadata sidebar. Pure assign flip."
+  @doc """
+  Collapse / expand the whole metadata sidebar. Pure assign flip, plus the
+  explicit-open marker the bucket-aware first-paint default reads (charter D91).
+
+  Two assigns move together and mean different things. `sidebar_open` is what
+  the SERVER holds. `sidebar_user_opened` is whether the user asked for it —
+  the one input the server can supply without knowing the viewport, and the one
+  the `html:not([data-width-bucket="wide"]) … :not([data-user-opened])` rule in
+  root.html.heex yields to. Below `wide` the desk PAINTS the inspector closed
+  while `sidebar_open` still says true; that gap is deliberate and is precisely
+  what keeps D12's ~400ms flash from ever opening.
+
+  Which leaves one thing the flip has to get right: in that painted-closed
+  state the panel the user is looking at is CLOSED, so a click means OPEN, not
+  "toggle the assign". Resolving it reads `width_bucket` — the socket assign the
+  WidthBucket hook reconciles after connect. That is safe here and nowhere else
+  in this feature: a click happens long after connect, and it paints nothing
+  before the user acts, so consulting it costs no first-paint correctness. It
+  defaults to `wide` (mount's seed), which is also the conservative answer —
+  an unknown bucket behaves exactly as this handler always has.
+  """
   def sidebar_toggle_panel(socket) do
-    {:noreply, assign(socket, sidebar_open: !socket.assigns[:sidebar_open])}
+    open? = socket.assigns[:sidebar_open] == true
+    asked? = socket.assigns[:sidebar_user_opened] == true
+    wide? = socket.assigns[:width_bucket] in [nil, "wide"]
+
+    painted_closed? = open? and not asked? and not wide?
+    next_open? = if painted_closed?, do: true, else: not open?
+
+    {:noreply, assign(socket, sidebar_open: next_open?, sidebar_user_opened: next_open?)}
   end
 
   @doc """
