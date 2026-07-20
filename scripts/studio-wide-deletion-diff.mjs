@@ -18,7 +18,7 @@
 //   node scripts/studio-wide-deletion-diff.mjs --out <path>   # ALSO save the run JSON
 //   node scripts/studio-wide-deletion-diff.mjs --help
 //
-// WHY THIS FILE EXISTS (charter D156b). D102 records that wide is unmoved,
+// WHY THIS FILE EXISTS (charter D156). D102 records that wide is unmoved,
 // "measured by deleting the rules from every stylesheet at runtime and diffing
 // every field". That tooling was never committed — `rg 'deleteRule('` returned
 // ZERO repo-wide, and the static harness it ran on is not in the history
@@ -135,7 +135,7 @@ const WIDTHS = [1280, 1440];
  *  is what keeps the model honest. 1280 - 304 = 976; 1440 - 304 = 1136. */
 const RAIL_MODEL = [44, 260];
 
-/** The committed wide rows, for `--check-fidelity`. Source: charter D156b and
+/** The committed wide rows, for `--check-fidelity`. Source: charter D156 and
  *  `scripts/measurements/spd-visible-table-2026-07-20.json`. */
 const FIDELITY = {
   1280: { panel: 976, surface_border_box: 676, content: 596 },
