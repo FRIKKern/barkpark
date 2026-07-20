@@ -52,6 +52,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # <aside> as `data-user-opened`. Defaults false so an un-threaded call site
   # gets the bucket-aware closed default rather than a silent always-open.
   attr(:sidebar_user_opened, :boolean, default: false)
+  # spd-b29f — the desk's post-connect width bucket, threaded PAST this component
+  # to the inspector's collapse control so it can announce what the user SEES
+  # rather than what the server holds. Default "wide" matches mount's seed (D91),
+  # so an un-threaded call site renders byte-identically to the pre-b29f build.
+  attr(:width_bucket, :string, default: "wide")
   attr(:sidebar_collapsed, :any, default: nil)
   attr(:sidebar_slug_draft, :string, default: nil)
   attr(:sidebar_slug_feedback, :any, default: nil)
@@ -235,6 +240,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           workspace_label={@workspace_label}
           panel_open={@sidebar_open}
           user_opened={@sidebar_user_opened}
+          width_bucket={@width_bucket}
           collapsed={@sidebar_collapsed}
           slug_draft={@sidebar_slug_draft}
           slug_feedback={@sidebar_slug_feedback}
@@ -270,6 +276,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # bucket the cascade paints as the collapsed strip. CSS-hidden is not
   # collapsed; do not conflate them.
   attr(:user_opened, :boolean, default: false)
+  # spd-b29f. The third input the collapse control needs to tell the truth: below
+  # `wide`, spd-b29's cascade paints an open-but-never-asked-for inspector AS the
+  # collapsed strip (D102), so `panel_open` alone made the button announce
+  # aria-expanded="true" over 41px of chrome — the a11y lie #4633 landed to fix.
+  # Default "wide" is mount's own seed (D91): at first byte this component paints
+  # exactly what it painted before, and the announcement reconciles with the rest
+  # of the bucket-aware desk once the real bucket arrives post-connect.
+  attr(:width_bucket, :string, default: "wide")
   attr(:collapsed, :any, default: nil)
   attr(:slug_draft, :string, default: nil)
   attr(:slug_feedback, :any, default: nil)
@@ -292,11 +306,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         _ -> []
       end
 
+    # spd-b29f — what the control ANNOUNCES, as distinct from what the DOM holds.
+    # `panel_open` keeps its existing job (it gates whether the title/body exist
+    # at all); this says only "can the reader actually SEE an open panel right
+    # now". The three states of the D91 pair collapse to two here: open-and-asked
+    # and (below `wide`) open-but-never-asked are geometrically identical strips,
+    # so they must announce identically too. Never gate rendering on this — the
+    # pixels at first byte must not move, only the announcement.
+    visually_open? =
+      assigns.panel_open && (assigns.width_bucket == "wide" || assigns.user_opened)
+
     assigns =
       assign(assigns,
         status: status,
         slug: slug,
         feedback: feedback,
+        visually_open: visually_open?,
         labels: PaperCanvas.paper_labels(paper),
         relations:
           blocks
@@ -326,12 +351,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           type="button"
           class="bp-doc-sidebar__collapse"
           phx-click="sidebar-toggle-panel"
-          aria-expanded={to_string(@panel_open)}
+          aria-expanded={to_string(@visually_open)}
           aria-controls="bp-doc-sidebar-body"
-          title={if @panel_open, do: "Collapse document panel", else: "Expand document panel"}
+          title={if @visually_open, do: "Collapse document panel", else: "Expand document panel"}
           data-test-id="sidebar-toggle-panel"
         >
-          <.icon name={if @panel_open, do: "chevron-down", else: "chevron-right"} size={16} />
+          <.icon name={if @visually_open, do: "chevron-down", else: "chevron-right"} size={16} />
         </button>
         <span :if={@panel_open} class="bp-doc-sidebar__title">Document</span>
       </div>
