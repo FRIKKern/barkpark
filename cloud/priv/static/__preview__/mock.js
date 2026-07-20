@@ -133,11 +133,40 @@
   // Poll for a selector, then run fn(el). Every step of the 2FA drive below is
   // gated on a DOM element the REAL app painted, never on a timer — a fixed
   // sleep would race the mocked fetch and silently shoot the wrong phase.
+  // REVIEW ADDENDUM — the give-up is visible IN THE FRAME, not only in console.
+  // The original exhausted its 60 tries in silence and shot the DEFAULT phase
+  // under a filename promising the 422 — the exact lie this drive exists to
+  // kill, merely pushed one level down. The twin-sha assertion is a real
+  // backstop, but it reports "these two files match", not "the drive never
+  // arrived", and a reader chasing the wrong mechanism is precisely how
+  // .modal-root stayed dead for five waves.
+  //
+  // console.error ALONE would not have closed this — verified, not assumed: I
+  // broke the selector, re-shot, and the message never reached shoot.sh's log,
+  // because Chrome's `--headless --screenshot` discards console entirely. The
+  // only channel this harness actually captures is the PIXELS. So paint the
+  // failure into the document: the PNG then states its own invalidity, and a
+  // failed drive can never again be byte-identical to the twin it failed to
+  // differ from — it fails LOUDLY instead of collapsing back into a collision.
+  function driveGaveUp(sel) {
+    console.error('[preview] 2FA drive gave up waiting for "' + sel + '"');
+    var b = document.createElement("div");
+    b.setAttribute("data-preview-drive-failed", sel);
+    b.style.cssText =
+      "position:fixed;left:0;right:0;top:0;z-index:2147483647;background:#b00020;" +
+      "color:#fff;font:600 14px/1.5 system-ui,sans-serif;padding:12px 16px;text-align:left";
+    b.textContent =
+      'PREVIEW DRIVE FAILED — never found "' + sel + '". This shot shows the ' +
+      "DEFAULT modal phase, NOT the state its filename promises. Do not trust it.";
+    (document.body || document.documentElement).appendChild(b);
+  }
+
   function whenPresent(sel, fn, tries) {
     tries = tries || 0;
     var el = document.querySelector(sel);
     if (el) { fn(el); return; }
-    if (tries < 60) window.setTimeout(function () { whenPresent(sel, fn, tries + 1); }, 50);
+    if (tries < 60) { window.setTimeout(function () { whenPresent(sel, fn, tries + 1); }, 50); return; }
+    driveGaveUp(sel);
   }
 
   // GR76 — the account modal opens in its DEFAULT phase, which for
@@ -159,6 +188,12 @@
         otp.value = "000000";              // a code the 422 arm will reject
         whenPresent("#a2f-confirm", function (confirm) {
           confirm.click();                 // POST …/confirm → 422 invalid_otp
+          // REVIEW ADDENDUM: assert the drive ARRIVED. Clicking Confirm is not
+          // the same as rendering the rejection — app.js paints #a2f-error
+          // (role=alert) only once the 422 lands. Without this the drive merely
+          // ASSUMED its own subject; now a shot that never reached the 422 says
+          // so by name instead of quietly photographing the enroll form.
+          whenPresent("#a2f-error", function () {});
         });
       });
     });
