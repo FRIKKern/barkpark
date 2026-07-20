@@ -1165,6 +1165,241 @@ prose that preceded it.
 - **PDS-D144 — EVERY WAVE-8 BUILDER IS `opus`.** Fable 5 is spend-limited this session. Not a quality
   judgment — a hard constraint carried from the wish (PDS-D38/D56).
 
+### Wave 8 review amendments (2026-07-20, D145–D146)
+
+- **PDS-D145 — THE SKIP TRIPWIRE COUNTS BOOTSTRAP'S WALK ALONE.** Two writers now log the phrase
+  "skipping the content update": `Plugins.Bootstrap.skip_pulled/3` (one line per plugin-declared
+  row, the number the roster is reconciled against) and `Content.TagRegistry.skip_pulled/2` (the
+  core `tag` row, which the sentinel scope EXCLUDES by construction per D128). An unscoped
+  `grep -c` therefore reads 35 against 34 sentinelled rows and reds ROSTER DRIFT on a healthy
+  target — a merge-blocking false red manufactured by wave 8's own two slices, each correct in
+  isolation. Measured with the real emitted Logger lines, not approximations: unscoped 2,
+  Bootstrap-scoped 1. The assertion is now `Plugins\.Bootstrap: schema .*skipping the content
+  update`; the TagRegistry count is REPORTED but NOT asserted, because `SchemaBootstrap.init/1`
+  hardcodes dataset `"production"` and the count is legitimately 1 or 0 depending on `SOURCE_DS`.
+  D129 is undiminished: a third core writer still surfaces as a leg-A clobber of a sentinelled
+  row. `scripts/pds-schema-row-census.md` §5 had already specified this scoping — the doc caught
+  the harness, which is the direction this epic has been trying to achieve.
+
+- **PDS-D146 — THE INSTRUMENT RE-FREEZES AT BLOB `e219e97ccf7f33797c86a2b84d998d599b6bda31`.**
+  Supersedes `d299b6214` (the wave-8 builder's commit) and `5a7978e03`/`1f15017bf` (#4686, waves
+  6–7). Per D136 the PR body quotes the POST-MERGE OID, and the harness is FROZEN from attempt 1
+  of the re-climb. Every red in that run sorts per D100 — HARNESS BUG (filed; a corrected
+  assertion must be shown STILL FAILING on the pre-fix condition) or ENGINE FAIL (filed; fixed
+  only by a wave explicitly chartered to fix it).
+
+
+### Wave 9 decisions — THE RE-CLIMB, resumed (2026-07-20, PDS-D147–PDS-D177)
+
+_PDS-D147–PDS-D159 were DECIDED by the wave-9 cycle that died before a single rung ran; they were
+stranded in an unpushed commit against the ROTATING slot and are rescued here verbatim, re-prefixed._
+
+- **PDS-D147 — A zero-export dress rehearsal is authorized as a narrow carve-out from D101.** D101
+  forbids partial runs touching rungs 2–6 because of *cross-process target contamination*, not
+  because partial runs lie. A rehearsal that (a) spends zero export attempts, (b) runs under its own
+  `BARKPARK_HOME`/`PDS_SCRATCH_POINTER` root against its own scratch target, and (c) is never quoted
+  as crown evidence cannot cause the contamination D101 exists to prevent. *Why: rung 6 has never
+  been green against a real booted target, and discovering that with the irreplaceable export
+  already spent is the one outcome the wave cannot recover from.*
+
+- **PDS-D148 — Phase isolation is by EXPLICIT distinct exported roots, never by a fresh RUN_ID.**
+  `pds-pull-proof.sh:113` is `export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"` —
+  the RUN_TAG default fires **only when the var is unset**, and the reclimb brief *mandates*
+  exporting it. The claim that a fresh RUN_ID structurally forces a fresh target is **refuted in
+  code**. *Why: without this, phase B boots into the target phase A's rung 6 deliberately clobbered,
+  and criterion 1's "freshly booted scratch target" is silently false.*
+
+- **PDS-D149 — Criterion indices are ZERO-BASED, and the crown's substantive rung is index 6.**
+  `bp task stamp --help`: "N is the ZERO-BASED index — the first criterion is 0, NOT 1." So the
+  reclimb's "criterion 10" means *PR merged to main*, and the rung-6 criterion the whole wave exists
+  to pay was named **nowhere** in the closure arithmetic. *Why: this is D138's false-close re-armed —
+  unmet criteria never block a close, so an unnamed criterion dies quiet.*
+
+- **PDS-D150 — Closure requires THREE manual stamps across TWO tasks, after re-claiming the crown.**
+  Zero criteria on either crown task carry `merge_gate:true`, so `close.ex:355` autostamps nothing:
+  `pds-w1-crown-proof[6]`, `pds-w1-crown-proof[10]`, `pds-w8-crown-reclimb[8]`. Stamping is
+  holder-only with an epoch fence and the crown is unclaimed (released epoch 15 by `reopen-prober`).
+  *Why: the honest path is manual and forgettable; the dishonest path is a single close command.*
+
+- **PDS-D151 — `--criterion-text` is a `bp task stamp` flag; `bp task close` uses `--set criteria:=`.**
+  *Why: a lead typing `bp task close … --criterion-text` errors at the exact moment of closure.*
+
+- **PDS-D152 — Crown criterion 6's stored wording predates the sentinel and is amended BEFORE any
+  claim.** As stored it required only "an md5 digest is taken over the EIGHT columns … and the
+  digest is unchanged afterwards" — literally satisfied by the vacuous pre-#4771 rung wave 8
+  rejected; the word *sentinel* did not appear. Amending changes the task's `work_digest` and trips
+  close's fence for any live claim, so it happens while the crown is unclaimed. *Why: pre-declared
+  closure arithmetic is only a D122 substitute if the arithmetic actually encodes wave 8's
+  correction.*
+
+- **PDS-D153 — The sentinel is 7/8 effective, not 8/8, and no assertion in the rung can notice.**
+  `visibility = 'private'` is a literal, not a flip, so it is a no-op on any already-private row —
+  `ticket` (`tickets.ex:97`) is the one such row of the 34, against a schema default of `public`.
+  Fail-safe (a no-op column reds leg B, never greens it) and currently masked because 33 rows do
+  drift. There is also no pre-sentinel column digest: the write's effectiveness is asserted at ROW
+  granularity only (`RETURNING count(*)`). *Why: the pass banner's "sentinelled in all eight guarded
+  columns" is one column short of true — never repeat it verbatim as a proven fact.*
+
+- **PDS-D154 — The freeze value is a GIT BLOB hash. Verify with `git rev-parse`, never `shasum`.**
+  `git rev-parse origin/main:scripts/pds-pull-proof.sh` → `e219e97ccf7f33797c86a2b84d998d599b6bda31`
+  (exactly D146's pre-named value); `shasum -a 1` on the same bytes → `b9eb6e3a…`. *Why: a verifier
+  reaching for shasum at fire time concludes the freeze broke and burns the window on a phantom.*
+
+- **PDS-D155 — The deploy threat is api/+internal/ volume, NOT the cloud/ GUI cycle.** `deploy.yml:72`
+  gates the instance job on `^(api|internal|deploy|connectors)/`; `cloud/**` is absent, so a
+  cloud-only merge can never move guerrilla's sha, and `scripts/**` is not in `on.push.paths` at
+  all. Measured job-level truth (run-level counts overstate — skipped instance jobs still report
+  success): 33 guerrilla deploys/24h, median gap 22.6 min, min gap **9 seconds**, only 68.8% of gaps
+  exceed 10 min. *Why: the mitigation was right but aimed through the wrong lens — "pick a gap" is
+  not safe-by-default and must be re-sampled at fire time, never reused from a survey.*
+
+- **PDS-D156 — The attempt store is HOST-LOCAL and its state does not transfer between machines.**
+  `FULL_DIR` is the literal `/tmp/pds-full-export` while `BARKPARK_HOME` is RUN_TAG-scoped. Reuse is
+  provenance-gated (sha mismatch → "STALE … Not reused" → overwrite), never appended. *Why:
+  `attempts=1` is a fact about one Mac; the climb host may read 0 — bump `PDS_FULL_EXPORT_BUDGET`,
+  and **never** `PDS_FULL_EXPORT_MIN_MEM_MB`, which encodes a real OOM risk to the live content API
+  and is the most tempting and most dishonest act available.*
+
+- **PDS-D157 — Round 1 carries no builder for merges the lead already owns.** Waves 5, 6 and 8 all put
+  the climb in round 2 and never reached it. Round 1's three PRs merged 06:11–06:12Z and are already
+  live on guerrilla (served sha `65541e2d4` = the #4772 merge). *Why: repeating a wave shape whose
+  observed failure mode is "round 2 is never reached" is the same wave again.*
+
+- **PDS-D158 — `bp search query` EXISTS.** Ten surveyors across this cycle independently reported "no
+  such verb" — all ten ran `bp search "…"` without the `query` noun. `bp search query "…"` returns
+  918 documents. *Why: ten waves of lost prior-art coverage from one missing word.*
+
+- **PDS-D159 — A rehearsal red is a FILED TASK and a wave that does not climb, never a harness edit.**
+  The freeze holds under D134/D136/D146; any correction becomes a chartered wave-10 preflight slice
+  with its own fail-demo. *Why: the licence wave 8 used (D100) exists only for a rung that ACTUALLY
+  failed — thawing on suspicion breaks the exact rule that made wave 8's own thaw honest.*
+
+_PDS-D160–PDS-D177 are this cycle's, bought with eight verifier runs against live ground truth._
+
+- **PDS-D160 — Crown criterion 6's sentinel amendment is ALREADY LANDED; it is NOT re-written.**
+  The field is now 2256 bytes and contains `sentinel` 4×, LEG A, LEG B, and citations to
+  D130/D145/D146/D153. It was written at `2026-07-20T06:50:00.121968Z`; all 50 revisions at or
+  before `04:47:32Z` carry the 1411-char vacuous wording. Both surveyor camps told the truth — the
+  contradiction was a TIME-OF-READ artifact. *Why: re-writing correct text would clobber live
+  citations to decisions that are themselves still off-main.*
+
+- **PDS-D161 — The one real defect in the amended criterion 6 is the D153 parenthetical's INVERTED
+  SCOPE, fixed by a one-clause patch, never a rewrite.** As stored it reads "visibility is a
+  literal, hence a no-op on the already-private `ticket` row" — naming ONE exception. Measured on a
+  booted target: the literal `private` write is a no-op on 31 of the 34. *Why: as worded, a reader
+  dismisses a roster-wide hazard as a single row.*
+
+- **PDS-D162 — Exactly THREE of the 34 declare public — `command`, `paper`, `task` — not two, and
+  `task`'s is a bare Elixir struct literal.** `tasks/schema.ex:49` carries no `Map.get` default, so
+  it cannot be flipped by JSON or config. Live count on a booted target: 4 public across 35 rows
+  (`command`, `paper`, `tag`, `task`), 3 within the guarded 34. *Why: `pds-bl-legb-visibility-
+  false-red` is comfortably DORMANT — going all-private needs three independent flips across three
+  plugins, one of them an edit to Barkpark's own task substrate.*
+
+- **PDS-D163 — Criterion 10 gets the protection, not criterion 6: it must not be stamped until
+  rungs 3 and 4 are GREEN in THIS transcript.** No `merge_gate` key exists anywhere in the crown
+  document (20 criteria parsed, 0 occurrences), and criteria 0–5 and 7–9 are already met from the
+  wave-7 climb — so criterion 6 plus criterion 10 completes 11/11 and the next Stop event closes
+  the task with nobody typing a close command. *Why: PDS-D138's false close, re-armed in a shape
+  nobody has to type.*
+
+- **PDS-D164 — The full re-anchor of criteria 0–9 is DROPPED.** The survey's heaviest question came
+  back against it: criterion 6 was already amended, the round-1 engine fixes touch no rung except
+  6, and the Stop hook cannot fire without criterion 10. *Why: the minimum viable form buys the
+  same integrity at a fraction of the blast radius, and unstamping nine earned proofs would move
+  the crown backwards from 9/11 to 2/11 for an aesthetic.*
+
+- **PDS-D165 — The cmux Stop hook DEFEATS the work-digest fence by construction, so "amend while
+  unclaimed" is right for a different reason than assumed.** `close.ex:182` short-circuits
+  `check_work_digest` whenever `observed_rev` is non-nil, and `cmux_hook.go:245` ALWAYS passes a
+  fresh rev. Proven live: a close rejected `doc_changed_since_claim` succeeded unchanged once
+  `observed_rev` was supplied. *Why: no rule may rely on the fence catching a bad amendment — it
+  protects a human closer and is skipped for the hook.*
+
+- **PDS-D166 — `bp doc patch` on a task is EVENTUALLY CONSISTENT (~20–30 s) and the lag is
+  invisible to EVERY read perspective, including the hook's own `?perspective=drafts`.** Measured:
+  patch at t+0, published still stale at t+10 and t+20, landed between t+20 and t+30. *Why: an
+  immediate read-back reads stale and invites a DOUBLE write to the crown ledger — poll until
+  visible, never sleep-and-assume.*
+
+- **PDS-D167 — MOVE 2 IS ALREADY PAID; the mutation rehearsal is NOT re-run.** Wave 8 produced both
+  demos on unshipped copies (`.pds-demo1-nosentinel.sh`, `.pds-demo2-nostamp.sh`, deleted after
+  capture), and this cycle independently ran the FROZEN harness `--only 1,6` GREEN against a fresh
+  disjoint scratch target with both legs and both controls firing — leg A held digest
+  `d7897ebddcf7af64a7612b2f458ead0f` at 34/34 sentinels intact, leg B moved to
+  `c3b6f2d3950a9a9ec8f5f13e9c4243a7` wiping 0/34 — with the attempt store byte-identical `1` → `1`.
+  *Why: the rehearsal's central risk, that it is expensive or spends export budget, is refuted by
+  measurement rather than argument.*
+
+- **PDS-D168 — The SQL stamp-clear DISCHARGES "the provenance guard inverted"; "inverted" is the
+  wish's word, not the epic's.** PDS-D134 charters demand (ii) as "stamp cleared" and denies an
+  invertible branch in the same sentence; `git log -S invert` shows D134's own commit introduced
+  the word to this charter. On the merits stamp-clear is STRICTLY STRONGER: the guard is one
+  boolean over one runtime input, so clearing the stamp exercises the whole chain while an
+  inversion short-circuits it. *Why: a control that cannot prove its input is load-bearing is the
+  weaker control, and an inversion additionally forces a 124-of-786-module recompile inside rung
+  6's own 90 s reboot poll — a red that reads as "the target did not come back".*
+
+- **PDS-D169 — cond_b, not the attempt budget, is the binding constraint, and the floor is ALREADY
+  ~35 MB TOO LOW.** Eight live samples over six minutes: min 1345.15 / median 1788.07 / max 2017.89
+  MB against a 2200 MB floor — 0 of 8 passed, the best 182 MB short, with 685/2047 MB swap already
+  used. The wave-7 bundle's own meta gives 2483304 − 194228 kB = 2235 MB incremental demand, and
+  `pds-export-cost-derivation.md:259` already records the floor as below the demand it gates.
+  *Why: lowering `PDS_FULL_EXPORT_MIN_MEM_MB` would WIDEN a gate already too narrow to protect the
+  LIVE content API — the integrity ban and the arithmetic agree for once.*
+
+- **PDS-D170 — Scheduling is the ONLY honest lever on cond_b: the climb samples for a window up to
+  a declared bound, then reports honestly either way.** Wave 7's committed transcript reads
+  `(b) OK (2765 MB available, floor 2200 MB)` at 03:25Z, so windows are real, not hypothetical.
+  *Why: a run that aborts rungs 3/4 is a legitimate, reportable outcome; a run that lowers the
+  floor to avoid that is the single most tempting and most dishonest act available.*
+
+- **PDS-D171 — The climber NEVER stamps `pds-w1-crown-proof`. It stamps only its own task; the LEAD
+  stamps the crown off the committed transcript.** `pds-w5-criteria-reconcile` already established
+  that the climber must not author the criteria it will be judged by. *Why: it removes
+  self-attestation AND the ordering coupling between the ledger slice and the shot, which is what
+  lets both dispatch in round 1 instead of deferring the shot for a fourth wave.*
+
+- **PDS-D172 — Step 0b asserts ANCESTRY, not sha equality; the WORKTREE drifting ahead is a real
+  failing direction too.** `pds-pull-proof.sh:655` equality is a fast path; `:660`
+  `merge-base --is-ancestor DEPLOYED worktree` is the assertion. Guerrilla serves `65541e2d4`,
+  origin/main is `c30d4a2d2` — 1 ahead, 0 code-ahead — so 0b passes on the ancestry branch today.
+  *Why: the wish's restatement is looser than the code, and 0b never checks a dirty tree at all
+  (zero `git status`/`--porcelain` calls), so an uncommitted engine edit is invisible to it.*
+
+- **PDS-D173 — #4787 did NOT restart guerrilla, and `cloud/**` structurally cannot; the instance
+  trigger is `^(api|internal|deploy|connectors)/`.** `c30d4a2d2` touches only a Studio charter, a
+  measurements JSON and `scripts/studio-desk-measure.mjs`; `scripts/**` is not even in deploy.yml's
+  trigger paths. Job-level cadence sampled fresh: last instance-job completion 06:19:14Z, ZERO in
+  the strict last three hours, gaps ranging 33 s to 67 min. *Why: PDS's own lane (api/ + internal/)
+  is the real restart risk, and any cadence number must be re-sampled at fire time.*
+
+- **PDS-D174 — The 36/34 roster reconciles; ROSTER DRIFT will not red on bookkeeping.** #4772's
+  committed map (§1 "34 + `tag` + `metric` = 36") was cross-checked two independent ways — against
+  a tree-derived plugin roster at origin/main and against a live booted target — SET-IDENTICAL at
+  34. Every `34`/`36` in the harness is a comment; the tripwire is purely relational
+  (`RETURNING count(*)` vs the Bootstrap-prefix-scoped SKIP count). *Why: no slice may be spent
+  "fixing" a roster that is already right.*
+
+- **PDS-D175 — The harness is NOT RELOCATABLE: a bare copy cannot run.**
+  `git show origin/main:scripts/pds-pull-proof.sh > /tmp/x.sh && bash /tmp/x.sh --only 1,6` dies at
+  `:2546` on the missing sibling `SCAN_SCRIPT`, before any `--only` gating. *Why: every rehearsal
+  recipe must run from inside a checkout holding the whole `scripts/` trio, proven byte-identical
+  by `git rev-parse` — never `shasum` (PDS-D154, re-demonstrated live).*
+
+- **PDS-D176 — The two fail-demos exist ONLY in the bp ledger, and that gap is closed by a
+  COMMITTED RECORD, not by re-running them.** `gh pr view 4771 --json body | grep -icE
+  'demo1|demo2|nosentinel|nostamp|FAIL-DEMO'` returns 0, and both scratch copies were deleted after
+  capture. *Why: PDS-D100's precondition is about evidence being auditable, and re-running a demo
+  that already reddened buys nothing a verbatim quotation does not.*
+
+- **PDS-D177 — The charter lands in `.claude/workflows/bp-pds-charter.md` from a FRESH origin/main
+  worktree; the rotating slot is never touched and local main is never pushed.**
+  `bp-cloud-epic-charter.md` on origin/main belongs to the Studio Space-Priority Desk epic with
+  rounds 3–4 in flight, and local main sits 12 ahead / 99 behind carrying five epics' charters.
+  *Why: a wrong push costs another live epic its charter, and this is the third consecutive wave
+  needing a charter rescue.*
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -1369,7 +1604,106 @@ Wave 8 — pay the crown (DECIDED; 4 slices; ROUNDS ARE LAW; every builder `opus
   and `pds-w1-crown-proof` closed ONLY if every rung passes with its controls FIRING (PDS-D122).
 
 
+
+**Wave 9r — THE RE-CLIMB, RESUMED (this wave, 4 slices, ALL round 1, file-disjoint; every builder
+`opus` per PDS-D38/D56).** The premise correction wave 8 bought is carried; the shot has never been
+fired, and the binding constraint turned out to be MEMORY, not budget.
+
+| # | Slice | Task | Surface | Size | Model | Round |
+|---|---|---|---|---|---|---|
+| 1 | The one shot — sample for a cond_b window, fire ONE serial `--all`, report honestly | `pds-w9-the-shot` | `scripts/` transcripts | large | opus | 1 |
+| 2 | Crown ledger fence — fix criterion 6's D153 clause, protect criterion 10 | `pds-w9-crown-ledger-fence` | bp ledger + `scripts/pds-crown-ledger-2026-07-20.md` | small | opus | 1 |
+| 3 | Fail-demo provenance record — the two wave-8 reds become auditable on GitHub | `pds-w9-faildemo-record` | `scripts/pds-rung6-faildemo-record.md` | small | opus | 1 |
+| 4 | Charter record — rescue PDS-D145–D159, land PDS-D160–D177 | `pds-w9-charter-record` | `.claude/workflows/bp-pds-charter.md` | small | opus | 1 |
+
+Slice 1 owns the box, the pointer and the one attempt, and stamps ONLY its own task (PDS-D171).
+Slices 2–4 never touch the box. All four file sets are disjoint by construction.
+
+**Wave 10 — THE VACUITY VEIN** (filed as backlog now; licensed only by PDS-D100 once a rung
+actually fails, or by an explicit charter thaw — see PDS-D159): seven undemonstrated-passive rungs,
+rung 1's absent control, the stale `tag`-exclusion comment #4770 falsified, the TagRegistry guard's
+missing rung, and guerrilla's leftover SSR services that eat the memory cond_b gates.
+
 ## Wave log
+
+### Wave 8 2026-07-20 — "Pay the Crown" — R1 built + reviewed, grade A (paper `pds-wave-8-2026-07-20`)
+
+All three round-1 slices landed green and compose with zero conflicts (file-disjoint by
+design; union 6 files, 1096 insertions). The crown itself is NOT paid — `pds-w8-crown-reclimb`
+is round 2 and does not dispatch until these merge, which is the sequenced-rounds law working,
+not a shortfall.
+
+**The wave's real finding came from reading the two engine slices AGAINST EACH OTHER, and it
+was merge-blocking.** `pds-w8-tagregistry-guard` gives `TagRegistry` a skip warning that
+deliberately mirrors Bootstrap's wording — including the literal phrase *"skipping the content
+update"*. `pds-w8-rung6-sentinel`'s roster tripwire grepped that phrase UNSCOPED and asserted
+the count EQUALS the sentinel row count. But the sentinel scope excludes `tag` by construction
+(PDS-D128), so on a stamped target the two numbers are **35 and 34** and rung 6 reds ROSTER
+DRIFT on a perfectly healthy box. The first re-climb after both slices merged would have failed
+for a reason manufactured entirely by this wave — and it would have looked exactly like the
+roster drift the tripwire exists to catch. Neither builder could have seen it: both are correct
+in isolation and they were built in parallel. Proven with the writers' REAL emitted Logger lines
+rather than hand-written approximations: unscoped `grep -c` = 2, Bootstrap-scoped = 1.
+
+**PDS-D145 — THE TRIPWIRE COUNTS BOOTSTRAP'S WALK ALONE, AND THE CENSUS ALREADY SAID SO.** The
+right side of the `RETURNING == SKIP` assertion is `Plugins.Bootstrap: schema "…" …skipping the
+content update` — Bootstrap's own `Registry.all()` walk, which is what the roster is reconciled
+against. `TagRegistry`'s skip of the core `tag` row is counted SEPARATELY and REPORTED but NOT
+asserted, because `SchemaBootstrap.init/1` hardcodes dataset `"production"`: the count is
+legitimately 1 when `SOURCE_DS` is production and 0 otherwise, so asserting it would hard-code
+an assumption the harness does not otherwise make. D129's protection is undiminished — a third
+core writer still surfaces as a leg-A clobber of a sentinelled row. Note for the record: §5 of
+`scripts/pds-schema-row-census.md` had ALREADY specified the Bootstrap-scoped grep. **The doc
+was right and the instrument was wrong**, and the review aligned the instrument to the doc
+rather than the reverse — the first time in this epic that the committed derivation caught the
+harness rather than trailing it.
+
+**PDS-D146 — THE INSTRUMENT RE-FREEZES AT BLOB `e219e97ccf7f33797c86a2b84d998d599b6bda31`.**
+This supersedes the builder's `d299b6214`, which in turn superseded `5a7978e03`/`1f15017bf`
+(#4686). Per PDS-D136 the PR body must quote the POST-MERGE OID. The harness is FROZEN again
+from attempt 1 of the re-climb.
+
+Two smaller review fixes. The TagRegistry guard's fail-open `rescue` — which the builder named
+as "the branch most likely to matter in production and least covered here" — is now pinned by a
+NUL-byte fault injection (`22021 character_not_in_repertoire`) that raises out of
+`Content.get_schema/3` WITHOUT aborting the sandbox transaction, plus an assertion that the
+fault is not sticky; that is the one forcing function available, since `pull_provenance/2`
+guards every malformed shape it is handed. And `log_off` in step 6 was silently degrading: a
+failed redirection leaves the pipeline's exit status at `tr`'s, so `|| printf 0` never fires and
+the empty value makes `$((…))` restore the whole-file SKIP count the offset exists to prevent.
+
+The census doc got a DATED CORRECTION rather than a silent rewrite: it is accurate at its anchor
+sha `3be27f0fd`, but the sibling slice invalidates §2 in the same wave — post-merge `tag`
+SURVIVES leg A instead of reverting on both, and the `grep -c "pull_provenance\|Tenancy"` → `0`
+becomes evidence *of the defect* reproducible only at or before that sha. §1's arithmetic is
+untouched and was independently re-derived at review (34 SKIP / 34 REGISTER / `diff` IDENTICAL,
+`tag` and `metric` absent from both sets).
+
+Verified honest rather than assumed: the 22 failures in the wider Elixir run are
+`Tickets.ThreadTest` + `Tasks.Web.BoardLiveTest` and reproduce IDENTICALLY (22/22, same modules)
+on clean `origin/main` — the wave contributes zero. `pds-w1-crown-proof` is correctly reopened
+per PDS-D138/D139: lifecycle `open`, claim released so it is actually claimable, 9/11 with
+criteria 6 and 10 honestly unmet.
+
+Filed at review, none of it taken this wave: `pds-bl-legb-visibility-false-red` (leg B's
+per-column assertion can false-red on `visibility` if the plugin roster ever goes all-private —
+fails SAFE, so not re-climb-blocking, and the instrument is frozen),
+`pds-bl-tag-schema-frozen-in-stamped-slot` (the honest cost of D126: a stamped workspace never
+takes a `schema_attrs/0` update again, and D12's guarantee covers MISSING but not BROKEN), and
+`pds-bl-scripts-md-budgets-unenforced` (these derivation docs declare byte budgets that
+`check-doc-budgets.sh` does not gate — an unenforced gate that looks enforced is the same
+vacuous-green shape as a rung that measures nothing while printing PASS).
+
+**Next wave takes the crown.** Merge round 1 — `pds-w8-tagregistry-guard`, then
+`pds-w8-rung6-sentinel`, then `pds-w8-schema-row-census` (order is cosmetic; they are
+file-disjoint) — and only then dispatch `pds-w8-crown-reclimb`, whose four preconditions are
+unchanged and whose closing rule is unchanged: close `pds-w1-crown-proof` ONLY if every rung
+passes with its controls FIRING. `pds-w3-shares-fidelity` stays deferred until after a green
+re-climb (PDS-D143). One thing the re-climb must expect that no prior wave did: after step 6's
+guard-off control the target is clobbered, and a re-pull into a populated target is now known to
+500 with a masked 25P02 (`pds-bl-repull-into-populated-target-500`) — harmless within a single
+`--all` run, since step 6 is terminal and the next run boots a fresh target, but fatal to any
+plan that re-pulls in place.
 
 ### Wave 8 2026-07-20 — "Pay the Crown" — DECIDED, 3 R1 slices building (paper `pds-wave-8-2026-07-20`)
 
