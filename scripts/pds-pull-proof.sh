@@ -1373,21 +1373,50 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # ── the RSS sampler: 1 Hz ps over SSH, NO slot restart (PDS-D70) ──────────
   # RSS is MEASURED for THIS export, never quoted from a prior run's figure;
   # when no sampler can be started the run says so and quotes nothing (below).
-  local rss_log rss_pid beam_pid baseline_kb peak_kb
+  local rss_log rss_pid beam_pid beam_all beam_n baseline_kb peak_kb
   rss_log="$ART_DIR/full-export-rss.log"
   mkdir -p "$ART_DIR"
   : >"$rss_log"
-  beam_pid=""; rss_pid=""
+  beam_pid=""; rss_pid=""; beam_all=""; beam_n=0
   if ssh_available; then
-    beam_pid="$(ssh_src "pgrep -f beam.smp | head -1" | tr -d '[:space:]' || true)"
+    # ── WHICH BEAM (PDS-D135) ─────────────────────────────────────────────
+    #
+    # The selector was `pgrep -f beam.smp | head -1`, and BOTH halves were
+    # wrong. `-f` matches any process whose ARGV merely CONTAINS the literal,
+    # so the harness's own `ssh … pgrep -f beam.smp` shell is itself a match;
+    # and `head -1` is a PID sort, not an age sort, so under PID wraparound a
+    # freshly spawned foreign matcher outranks a long-running BEAM. A captured
+    # run sampled a monitoring shell (pid 619341) instead of the real BEAM
+    # (pid 663029) and under-read RSS by ~342x, while criterion 9 of the crown
+    # proof asks for the run's OWN measured peak. Wave 7 could only vouch for
+    # the figure with a manual `head1 == oldest` bracket; an instrument whose
+    # honesty depends on a human side-check is not an instrument.
+    #
+    # `-x` anchors on the process NAME (comm), so a shell whose argv mentions
+    # beam.smp cannot match at all; `-o` selects the OLDEST match — the BEAM
+    # that was already running when the export started, not one a mid-run
+    # deploy brought up.
+    #
+    # The source is a BLUE/GREEN box and legitimately runs TWO slots at once
+    # (measured live: pids 873329 and 875573 alive together, 466 MB and 208 MB).
+    # The oldest is reported as the primary, but EVERY comm-anchored BEAM is
+    # sampled and the peak is the MAX ACROSS THE SET — pinning one pid would
+    # silently under-read whenever the export is served by the other slot, and
+    # peak RSS is quoted as a box-level OOM-risk figure (PDS-D31), not as a
+    # per-process attribution.
+    beam_pid="$(ssh_src "pgrep -o -x beam.smp" | tr -d '[:space:]' || true)"
+    beam_all="$(ssh_src "pgrep -x beam.smp | tr '\n' ' '" | tr -s '[:space:]' ' ' || true)"
+    beam_n="$(printf '%s' "$beam_all" | wc -w | tr -d ' ')"
     baseline_kb="$(ssh_src "ps -o rss= -p ${beam_pid:-0}" | tr -d '[:space:]' || true)"
     if [ -n "$beam_pid" ]; then
       ssh -i "$SOURCE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=20 \
         -o StrictHostKeyChecking=accept-new "$SOURCE_SSH" \
-        "for i in \$(seq 1 900); do ps -o rss= -p $beam_pid 2>/dev/null || exit 0; sleep 1; done" \
+        "for i in \$(seq 1 900); do pgrep -x beam.smp | while read -r p; do ps -o rss= -p \$p 2>/dev/null; done; sleep 1; done" \
         >"$rss_log" 2>/dev/null &
       rss_pid=$!
-      info "rss sampler     1 Hz \`ps -o rss= -p $beam_pid\` over SSH (pid $rss_pid), baseline ${baseline_kb:-?} KB. No slot restart: cgroup memory.peak is 0444 on this kernel and only a restart resets it, at ~26 s of LIVE content-API downtime — so any cgroup figure would be CUMULATIVE-SINCE-BOOT, not this export's."
+      info "rss sampler     1 Hz \`ps -o rss=\` over SSH (pid $rss_pid) across ALL ${beam_n} comm-anchored beam.smp slot(s) [$(printf '%s' "${beam_all:-none}" | tr -s ' ' ' ')], primary (oldest) pid $beam_pid at baseline ${baseline_kb:-?} KB. Selector is \`pgrep -o -x beam.smp\`, NOT \`pgrep -f … | head -1\` (PDS-D135: -f self-matches this very ssh command and a PID sort is not an age sort). No slot restart: cgroup memory.peak is 0444 on this kernel and only a restart resets it, at ~26 s of LIVE content-API downtime — so any cgroup figure would be CUMULATIVE-SINCE-BOOT, not this export's."
+    else
+      info "rss sampler     NOT STARTED — no process on the source has comm == beam.smp. Nothing is quoted for RSS rather than sampling whatever a looser argv match happened to return."
     fi
   fi
 
@@ -1414,7 +1443,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   if [ "$peak_kb" -gt 0 ]; then
-    FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB, measured by a 1 Hz ps sampler over SSH across this export only (baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
+    FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB — the MAX over ${beam_n:-?} comm-anchored beam.smp slot(s), measured by a 1 Hz ps sampler over SSH across this export only (primary/oldest pid ${beam_pid:-?}, baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
   else
     FULL_RSS_LINE="beam.smp RSS was NOT measured this run (no sampler could be started) — no figure is quoted in its place"
   fi
@@ -1966,6 +1995,68 @@ for a in d["result"]["assets"]:
 # differ and the reboot comparison would report a clobber that never happened.
 GUARDED_DIGEST_SQL="SELECT md5(string_agg(dataset || '|' || name || '|' || coalesce(title,'') || '|' || coalesce(icon,'') || '|' || coalesce(visibility,'') || '|' || coalesce(owner_scoped::text,'') || '|' || coalesce(fields::text,'') || '|' || coalesce(cors_origins::text,'') || '|' || coalesce(desk_groups::text,'') || '|' || coalesce(list_preview::text,''), E'\n' ORDER BY dataset, name)) || ' rows=' || count(*) FROM schema_definitions"
 
+# The same eight, addressable one at a time. A whole-table digest answers "did
+# ANYTHING move"; leg B needs "did EVERY ONE of the eight move", because a
+# partial clobber that reverts six columns and leaves two alone still moves the
+# aggregate and would read as a clean control firing (PDS-D130).
+GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_groups list_preview"
+
+# ── THE 34 (PDS-D127/D128) ───────────────────────────────────────────────────
+#
+# `schema_definitions` on a pulled target holds 36 rows in three CLASSES, and
+# only one of them behaves the way the guard is about:
+#
+#   34  plugin-declared    Bootstrap walks them every boot. SURVIVE stamped,
+#                          REVERT cleared. These, and only these, are the guard.
+#    1  `tag`              TagRegistry writes it every boot from a five-key map,
+#                          BEFORE register_all_schemas/0 and outside the guard
+#                          entirely (PDS-D125). REVERTS on both legs.
+#    1  `metric`           declared by no local plugin, so Bootstrap's
+#                          Registry.all() walk never visits it. SURVIVES FOREVER
+#                          on both legs.
+#
+# A table-wide sentinel therefore reds leg A on `tag` and hangs leg B red
+# forever on `metric` — and the transcript would show a digest that moved with
+# the stamp present, which reads exactly like "the guard failed". Scope IS the
+# fix, not a detail of it.
+#
+# There is NO SQL discriminator for "plugin-declared": `schema_definitions` has
+# 23 columns and none records a source (`dataset_id IS NULL` is an artefact of
+# hand-insertion, not a marker). The exclusion list is a HAND-MAINTAINED roster,
+# which is exactly why the sentinel UPDATE's RETURNING count is asserted against
+# the SKIP count in the target's own server.log below (PDS-D129). That
+# cross-check is the only thing that turns a future guerrilla-only orphan, or a
+# third core writer, from a silent vacuous green into a loud red.
+sentinel_scope_sql() { # workspace_id -> the WHERE clause selecting exactly those 34
+  printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN ('tag','metric')" \
+    "$1" "$SOURCE_DS"
+}
+
+scoped_column_digests() { # workspace_id -> ONE tab-separated line, one md5 per
+                          # column, in GUARDED_COLUMNS order
+  local ws="$1" col sel=""
+  for col in $GUARDED_COLUMNS; do
+    [ -n "$sel" ] && sel="$sel || E'\t' || "
+    sel="${sel}md5(coalesce(string_agg(coalesce(${col}::text,'<null>'), E'\n' ORDER BY dataset, name),'<no-rows>'))"
+  done
+  tgt_psql "SELECT $sel FROM schema_definitions WHERE $(sentinel_scope_sql "$ws")" | head -1
+}
+
+columns_where() { # <same|diff> before_line after_line -> the column names whose
+                  # per-column digest is identical / differs, space separated
+  local want="$1" b="$2" a="$3" i=1 col out="" bv av
+  for col in $GUARDED_COLUMNS; do
+    bv="$(printf '%s' "$b" | cut -f "$i")"
+    av="$(printf '%s' "$a" | cut -f "$i")"
+    if { [ "$want" = "same" ] && [ "$bv" = "$av" ]; } ||
+       { [ "$want" = "diff" ] && [ "$bv" != "$av" ]; }; then
+      out="$out $col"
+    fi
+    i=$((i + 1))
+  done
+  printf '%s' "${out# }"
+}
+
 reboot_target() { # 0 = the target answered HTTP again
   local i code
   "$TARGET_TREE/bin/barkpark" stop >/dev/null 2>&1 || true
@@ -2011,29 +2102,152 @@ step_6() {
     return 0
   fi
 
-  local stamp_before digest_before digest_after
-  stamp_before="$(tgt_psql "SELECT coalesce(settings->'pull_provenance'->>'$SOURCE_DS','<none>') FROM workspaces WHERE settings ? 'pull_provenance' LIMIT 1" | head -1 || true)"
+  # ── read the stamp, AND the workspace it lives on (PDS-D132) ──────────────
+  #
+  # This read used to be `… WHERE settings ? 'pull_provenance' LIMIT 1` with no
+  # ORDER BY and no id, while the guard-off UPDATE below used the SAME predicate
+  # with NO LIMIT: the read sampled one arbitrary stamped workspace and the
+  # write cleared every one of them. Benign at exactly one stamped workspace,
+  # but the sentinel cannot reuse a resolution that does not exist — so the id
+  # is captured under a total order and fed to BOTH writes.
+  local stamp_row stamp_ws stamp_before digest_before digest_after
+  stamp_row="$(tgt_psql "SELECT id::text, coalesce(settings->'pull_provenance'->>'$SOURCE_DS','<none>') FROM workspaces WHERE settings ? 'pull_provenance' ORDER BY id LIMIT 1" | head -1 || true)"
+  stamp_ws="$(printf '%s' "$stamp_row" | cut -f1)"
+  stamp_before="$(printf '%s' "$stamp_row" | cut -f2)"
+  info "stamped slot    workspace ${stamp_ws:-<none>}"
+  info "                pull_provenance[$SOURCE_DS] = ${stamp_before:-<none>}"
+
+  # ── the stamp check HOISTS above digest_before (PDS-D133) ─────────────────
+  #
+  # It used to sit after the digest. Sentinelling a slot that turns out to be
+  # unstamped would leave a deliberately corrupted target standing with nothing
+  # to revert it, so validity is established before anything is written.
+  if [ -z "$stamp_ws" ] || [ "${stamp_before:-<none>}" = "<none>" ]; then
+    fail 6 "the import left NO pull_provenance stamp for dataset '$SOURCE_DS'. The guard is stamp-keyed, so an unstamped target is one the boot-time upsert is free to clobber — convergence below would be luck, not a guard. Nothing was written to the target."
+    return 0
+  fi
+
+  # ── THE SENTINEL (PDS-D128..D133) ─────────────────────────────────────────
+  #
+  # WHY THIS EXISTS AT ALL. Under step 0b's sha-parity precondition the target's
+  # plugin declarations are byte-identical to what is stored, and at
+  # stamp-present `bootstrap.ex` SKIPS the upsert entirely. So without a
+  # sentinel this rung measures NOTHING IN EITHER DIRECTION: leg B cannot move
+  # the digest, and leg A ("the eight columns did not change") would hold with
+  # the guard DELETED from the codebase. Writing a deliberate DRIFT into the 34
+  # first turns leg A from "nothing happened" into "the guard PRESERVED a
+  # drifted row across a reboot" — the hazard the guard actually exists for.
+  #
+  # TYPE SAFETY, and it is not cosmetic. `fields` and `desk_groups` are POSTGRES
+  # `jsonb[]` (`udt_name` `_jsonb`); Ecto's `{:array,:map}` is a different view
+  # of the same column. `fields || '[{"k":"v"}]'::jsonb` resolves as
+  # `array_append` and appends ONE element whose value is a JSON ARRAY. The
+  # UPDATE succeeds silently — `UPDATE 34`, no error — and the break surfaces
+  # only on the NEXT read, as an ArgumentError inside Repo.all -> /api/schemas
+  # 500 -> reboot_target polls for 90 s -> the rung ABORTS looking like an
+  # environment fault. Two-stage silence. Append a bare OBJECT; `coalesce` the
+  # nullable ones. `list_preview` is plain `jsonb`, so `||` there is an object
+  # MERGE and is correct as written.
+  #
+  # `visibility` is `validate_inclusion ~w(public private)`, so 'private' is the
+  # only legal alternate. It does NOT hide rows from /api/schemas
+  # (`Schema.list_schemas` has no visibility predicate) but it DOES 404
+  # anonymous document reads. THAT IS CONTAINED ONLY BECAUSE STEP 6 IS TERMINAL
+  # AMONG TARGET-READING RUNGS (PDS-D101/D116) — steps 2 and 5 run BEFORE it and
+  # `--all`'s own order is the only safe one. Re-ordering this rung earlier
+  # silently poisons every later read; do not.
+  #
+  # `dataset` and `name` are KEYS in the digest and are NEVER sentinelled.
+  local mark sentinel_id sentinel_rows
+  sentinel_id="$(printf '%s' "$RUN_ID" | tr -c 'A-Za-z0-9._-' '-')"
+  mark="PDS-SENTINEL-$sentinel_id"
+  say ""
+  info "SENTINEL        writing deliberate drift into all eight guarded columns"
+  info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ('tag','metric')"
+  sentinel_rows="$(tgt_psql "WITH upd AS (UPDATE schema_definitions SET title = '$mark', icon = '$mark', visibility = 'private', owner_scoped = NOT coalesce(owner_scoped, false), fields = coalesce(fields, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, cors_origins = coalesce(cors_origins, ARRAY[]::text[]) || ARRAY['$mark'], desk_groups = coalesce(desk_groups, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, list_preview = coalesce(list_preview, '{}'::jsonb) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb WHERE $(sentinel_scope_sql "$stamp_ws") RETURNING id) SELECT count(*) FROM upd" | head -1 | tr -d '[:space:]' || true)"
+  info "RETURNING       ${sentinel_rows:-<nothing>} rows sentinelled"
+  case "${sentinel_rows:-}" in
+    ''|*[!0-9]*)
+      fail 6 "the sentinel UPDATE returned no countable row count ('${sentinel_rows:-<nothing>}') — without a drifted row this rung measures nothing in either direction (at sha parity the boot-time upsert SKIPS, so leg A would hold with the guard deleted). Refusing to report a convergence that was never at risk."
+      return 0 ;;
+  esac
+  if [ "$sentinel_rows" -eq 0 ]; then
+    fail 6 "the sentinel UPDATE matched ZERO rows in workspace $stamp_ws / dataset '$SOURCE_DS'. There is nothing for the boot-time upsert to clobber, so both legs below would be vacuous."
+    return 0
+  fi
+
+  # digest_before now reflects the SENTINELLED state — that is the whole point.
   digest_before="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
-  if [ -z "$digest_before" ]; then
+  local cols_before
+  cols_before="$(scoped_column_digests "$stamp_ws")"
+  if [ -z "$digest_before" ] || [ -z "$cols_before" ]; then
     fail 6 "could not digest schema_definitions on the target — the eight guarded columns cannot be compared across a reboot, so a 'converged' verdict would be unmeasured"
     return 0
   fi
   info "before reboot   guarded-column digest $digest_before"
-  info "                pull_provenance[$SOURCE_DS] = ${stamp_before:-<none>}"
-  if [ "${stamp_before:-<none>}" = "<none>" ]; then
-    fail 6 "the import left NO pull_provenance stamp for dataset '$SOURCE_DS'. The guard is stamp-keyed, so an unstamped target is one the boot-time upsert is free to clobber — convergence below would be luck, not a guard."
+
+  # The SKIP count is read from the log the BOOT BELOW appends, so the offset is
+  # taken now. `bin/barkpark` APPENDS to $BARKPARK_HOME/server.log across
+  # reboots — counting the whole file would sum every boot this root ever had.
+  local log_off
+  log_off="$(wc -c <"$BARKPARK_HOME/server.log" 2>/dev/null | tr -d ' ' || printf 0)"
+
+  if ! reboot_target; then
+    fail 6 "the target did not come back after \`bin/barkpark stop\` + \`up\` (see $BARKPARK_HOME/reboot.log) — convergence cannot be measured across a boot that did not happen. NOTE: the target is SENTINELLED and was not reverted."
     return 0
   fi
 
-  if ! reboot_target; then
-    fail 6 "the target did not come back after \`bin/barkpark stop\` + \`up\` (see $BARKPARK_HOME/reboot.log) — convergence cannot be measured across a boot that did not happen"
+  # ── THE TRIPWIRE ON THE HAND-MAINTAINED ROSTER (PDS-D129) ─────────────────
+  #
+  # The boot just logged one WARNING per row the guard skipped. That count is
+  # Bootstrap's own opinion of how many plugin-declared rows live in this slot,
+  # derived from `Registry.all()` rather than from this script's exclusion list.
+  # If a future guerrilla-only orphan joins the table, or a third core writer
+  # appears, the two numbers diverge and this rung goes LOUD instead of quietly
+  # measuring a scope that no longer means what it says.
+  local skip_count register_count
+  skip_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -c 'skipping the content update' || true)"
+  register_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -c 'Plugins.Bootstrap: registered schema' || true)"
+  info "boot log        $skip_count SKIP (guard fired) · $register_count REGISTER, this boot only"
+  info "                REGISTER is informational: it is Logger.info and can be filtered out by log level, so only SKIP is asserted."
+
+  # Leg A's own reading is taken BEFORE the count assertions so that a red can
+  # say what actually happened to the columns rather than only that two numbers
+  # disagreed.
+  digest_after="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
+  local cols_after leg_a_changed survivors
+  cols_after="$(scoped_column_digests "$stamp_ws")"
+  leg_a_changed="$(columns_where diff "$cols_before" "$cols_after")"
+  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}"
+
+  # ZERO SKIPs is a different fact from a MISCOUNT, and conflating them puts a
+  # roster-drift diagnosis on a boot where the guard simply never ran.
+  if [ "${skip_count:-0}" -eq 0 ]; then
+    fail 6 "LEG A — THE GUARD DID NOT FIRE: $sentinel_rows rows were sentinelled and stamped, yet the boot logged ZERO guard SKIPs and $register_count plugin REGISTERs. The boot-time upsert walked straight through a stamped slot. Guarded columns that moved on those rows: ${leg_a_changed:-<none, which would be stranger still>}. This is what a broken or absent provenance guard looks like from outside the engine."
     return 0
   fi
-  digest_after="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
-  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}"
+  if [ "${skip_count:-0}" != "$sentinel_rows" ]; then
+    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} guard SKIPs. Those two numbers are derived independently — the sentinel from this script's hand-maintained exclusion list ('tag','metric'), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
+    return 0
+  fi
 
   if [ "$digest_before" != "$digest_after" ]; then
     fail 6 "the eight guarded columns CHANGED across the reboot ($digest_before -> ${digest_after:-unreadable}) — the boot-time plugin upsert clobbered pulled rows despite the provenance stamp"
+    return 0
+  fi
+  if [ -n "$leg_a_changed" ]; then
+    fail 6 "LEG A: the guard did NOT preserve the drifted rows — these guarded columns moved across the stamped reboot on the $sentinel_rows sentinelled rows: $leg_a_changed"
+    return 0
+  fi
+
+  # Leg A's positive statement, not merely "nothing moved": the deliberate drift
+  # is STILL THERE, row for row, after a boot that had every opportunity to
+  # revert it. `owner_scoped` is a per-row flip and so has no absolute value to
+  # assert — it is covered by the per-column digest above.
+  survivors="$(tgt_psql "SELECT count(*) FROM schema_definitions WHERE $(sentinel_scope_sql "$stamp_ws") AND title = '$mark' AND icon = '$mark' AND visibility = 'private' AND '$mark' = ANY(cors_origins) AND fields::text LIKE '%$sentinel_id%' AND desk_groups::text LIKE '%$sentinel_id%' AND list_preview::text LIKE '%$sentinel_id%'" | head -1 | tr -d '[:space:]' || true)"
+  info "sentinel intact ${survivors:-0} of $sentinel_rows rows still carry the drift"
+  if [ "${survivors:-0}" != "$sentinel_rows" ]; then
+    fail 6 "LEG A: only ${survivors:-0} of $sentinel_rows sentinelled rows still carry the deliberate drift after the stamped reboot — the guard is leaking rows even though the aggregate digest happened to hold."
     return 0
   fi
 
@@ -2044,14 +2258,16 @@ step_6() {
   # verbatim), so this is direct SQL — and the RETURNING value is ASSERTED,
   # because jsonb_set is a proven silent NO-OP when the parent path is absent.
   if [ "${PDS_STEP6_GUARD_DEMO:-1}" != "1" ]; then
-    pass 6 "content-and-presence convergence across a real reboot: the eight columns the boot-time upsert reverts are byte-identical ($digest_before) and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it."
+    pass 6 "content-and-presence convergence across a real reboot: $sentinel_rows rows were deliberately DRIFTED in all eight guarded columns and the guard preserved every one of them ($digest_before, unchanged; $survivors/$sentinel_rows sentinels intact; $skip_count SKIPs logged), and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it, and the target is left SENTINELLED."
     return 0
   fi
 
   say ""
   info "GUARD-OFF CONTROL — clearing the stamp by SQL, then booting again:"
+  # Scoped to the workspace the read above resolved (PDS-D132). The old form
+  # cleared EVERY stamped workspace while the read sampled one arbitrary one.
   local ret digest_clobbered
-  ret="$(tgt_psql "UPDATE workspaces SET settings = jsonb_set(settings,'{pull_provenance,$SOURCE_DS}','{}'::jsonb) WHERE settings ? 'pull_provenance' RETURNING settings->'pull_provenance'" | head -1 || true)"
+  ret="$(tgt_psql "UPDATE workspaces SET settings = jsonb_set(settings,'{pull_provenance,$SOURCE_DS}','{}'::jsonb) WHERE id = '$stamp_ws' RETURNING settings->'pull_provenance'" | head -1 || true)"
   info "RETURNING       ${ret:-<nothing>}"
   case "${ret:-}" in
     *"\"$SOURCE_DS\": {}"*)
@@ -2072,10 +2288,34 @@ step_6() {
     return 0
   fi
 
+  # ── LEG B ASSERTS PER-COLUMN REVERSION (PDS-D130) ─────────────────────────
+  #
+  # The whole-table digest moving is necessary and NOT sufficient. A clobber
+  # that reverted six of the eight and left two alone moves that aggregate just
+  # as convincingly, and the control would read as firing cleanly while two
+  # columns went unprotected. No partial-coverage path exists inside
+  # bootstrap.ex today — schema_definition.ex casts a strict superset of the
+  # eight in one Repo.update, pinned by the committed S7 probe — but the
+  # per-column assertion costs nothing and is the only shape that stays honest
+  # if that cast list ever narrows.
+  local cols_clobbered leg_b_unmoved survivors_after
+  cols_clobbered="$(scoped_column_digests "$stamp_ws")"
+  leg_b_unmoved="$(columns_where same "$cols_before" "$cols_clobbered")"
+  survivors_after="$(tgt_psql "SELECT count(*) FROM schema_definitions WHERE $(sentinel_scope_sql "$stamp_ws") AND (title = '$mark' OR icon = '$mark' OR '$mark' = ANY(cors_origins) OR fields::text LIKE '%$sentinel_id%' OR desk_groups::text LIKE '%$sentinel_id%' OR list_preview::text LIKE '%$sentinel_id%')" | head -1 | tr -d '[:space:]' || true)"
+  info "sentinel wiped  ${survivors_after:-?} of $sentinel_rows rows still carry ANY trace of the drift"
+  if [ -n "$leg_b_unmoved" ]; then
+    fail 6 "LEG B IS PARTIAL: with the stamp cleared, the boot reverted some guarded columns but left these UNCHANGED on the $sentinel_rows sentinelled rows: $leg_b_unmoved. The aggregate digest moved, which is exactly how a partial clobber hides (PDS-D130) — those columns are not covered by anything this rung can vouch for."
+    return 0
+  fi
+  if [ "${survivors_after:-1}" != "0" ]; then
+    fail 6 "LEG B: ${survivors_after} of $sentinel_rows rows still carry a trace of the sentinel after the guard-off boot, so the clobber did not fully revert the drift it is supposed to revert."
+    return 0
+  fi
+
   info "NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are"
   info "                sequenced BEFORE this control for exactly that reason; a"
   info "                re-pull is required before any further assertion about it."
-  pass 6 "content-and-presence convergence across a real reboot ($digest_before, unchanged, stamp intact) — AND the control fires: with the stamp cleared by asserted SQL, the very next boot changed those same eight columns (${digest_clobbered}). The green measures a guard, not a coincidence."
+  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly $skip_count guard SKIPs to match, and the stamped reboot preserved every column and all $survivors sentinels ($digest_before, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of $GUARDED_COLUMNS and wiped every trace of the drift (${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
