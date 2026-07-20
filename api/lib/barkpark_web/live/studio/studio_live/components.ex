@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
+  alias Phoenix.LiveView.JS
 
   # ── In-Studio live paper view (function component) ──────────────────────────
   #
@@ -95,22 +96,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     show_editor = assigns.paper_block_mode && (canvas_on || assigns.paper_edit_mode)
 
     # spd-b39 / D169 — TIER 3: the inspector is a SUMMONED DESTINATION, not a
-    # dock. The predicate is an ENUMERATION of the buckets where the wave-10
-    # geometry paints `position:absolute; inset:0` over an opaque surface —
-    # `bucket in ["narrow","phone"] and user_opened`.
+    # dock. The tier predicate itself now lives in ONE place —
+    # `inspector_destination?/2` at the bottom of this module — because this
+    # module used to compute the same enumeration twice (here, and again in
+    # `paper_metadata_sidebar/1`) and a two-copy predicate is a two-copy bug.
+    # It is a bare `defp` at MODULE BOTTOM on purpose: declared underneath an
+    # `attr(...)` block Phoenix binds the pending attrs to it and raises
+    # "cannot declare attributes for function inspector_destination?/2.
+    # Components must be functions with arity 1".
     #
-    # `!= "wide"` is FORBIDDEN here. The wave-10 ladder made standard +
-    # user-opened a REAL DOCKED state (the nav rail yields to one 44px back
-    # strip and the inspector sits IN FLOW beside the prose), so a negation
-    # would hand a docked panel destination semantics: it would inert the very
-    # prose the reader can still see and edit. Enumerate the covered buckets;
-    # never negate the uncovered one.
-    #
-    # `has_editor?` is implied — the sidebar itself renders under
-    # `:if={@paper_doc}`, so with no paper there is no destination to be in.
+    # `has_editor?` is NOT implied here (this component renders with or without
+    # a paper), so the paper check stays at this call site; the sidebar's own
+    # call site is already under `:if={@paper_doc}`.
     inspector_destination? =
-      assigns.paper_doc != nil and assigns.width_bucket in ["narrow", "phone"] and
-        assigns.sidebar_user_opened == true
+      assigns.paper_doc != nil and
+        inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
 
     assigns =
       assign(assigns,
@@ -354,10 +354,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       assigns.panel_open && (assigns.width_bucket == "wide" || assigns.user_opened)
 
     # spd-b39 / D169 — the SAME enumeration the paper view computes for `inert`
-    # (studio_paper_view above). Kept as an enumeration, never `!= "wide"`:
-    # standard + user-opened is the wave-10 DOCKED state, and a docked panel
-    # must not wear destination clothes.
-    destination? = assigns.width_bucket in ["narrow", "phone"] and assigns.user_opened == true
+    # (studio_paper_view above), now through the ONE shared predicate at the
+    # bottom of this module rather than a second hand-written copy.
+    destination? = inspector_destination?(assigns.width_bucket, assigns.user_opened)
 
     # D167 — the header tells the truth. At Tier 3 this panel is not a strip of
     # chrome beside the document, it IS the screen, so its title must name the
@@ -392,13 +391,73 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
     ~H"""
     <aside
+      id="bp-doc-sidebar"
       class={"bp-doc-sidebar " <> if(@panel_open, do: "is-open", else: "is-collapsed")}
       data-user-opened={@user_opened && ""}
       data-role="inspector"
       data-test-id="paper-metadata-sidebar"
       data-inspector-destination={@destination && ""}
       aria-label={if @destination, do: "Document metadata for #{@destination_title}", else: "Document metadata"}
+      tabindex={@destination && "-1"}
     >
+      <%!-- spd-w12 / D173 — THE KEYBOARD EXIT. Escape leaves the destination.
+
+            THE LISTENER IS THE HOOK'S OWN, AT BUBBLE PHASE, AND CAPTURE IS
+            FORBIDDEN. LiveView's `phx-window-keydown` would register the right
+            phase but offers NO client-side veto seam (`on()` is a bare
+            bubble-phase `window.addEventListener` and `bind()` pushes
+            unconditionally), and this binding needs a veto — see the aside
+            comment on the hook in root.html.heex. Capture in EITHER placement
+            eats the nested-menu grammar: measured in a real browser, a
+            window-CAPTURE hook with the command palette open runs FIRST
+            (hook=1 menu=1, so Escape closes the inspector instead of the
+            palette), and document-CAPTURE fails identically because the menus
+            register their own capture listener inside `open()`
+            (slash-menu.js:202) — mounted earlier, our hook is still first.
+            An aside-scoped listener is dead for the real case: an Escape
+            targeted at <body> never reaches it at all.
+
+            NESTED PRECEDENCE IS PRESERVED, NOT WORKED AROUND. The slash menu,
+            the wikilink menu, the `#` tag menu and the command palette each
+            `stopImmediatePropagation()` at document CAPTURE
+            (slash-menu.js:436-439, wikilink-menu.js:251-254), so a bubble-phase
+            window listener NEVER sees the first Escape while one of them is
+            open: the first Escape closes the menu, the second leaves the
+            destination. That is the nested-modal grammar for free.
+
+            NO `phx-keydown` MAY BE ADDED ANYWHERE INSIDE THIS SUBTREE. Standing
+            law: a focused element carrying `phx-keydown` suppresses EVERY
+            `phx-window-keydown` on the page — live_socket.js matches the RAW
+            event target with no ancestor walk — so one such attribute would
+            silently kill the desk's other window bindings.
+
+            FOCUS IN, THEN FOCUS BACK (D165/D163). `phx-mounted` moves focus
+            onto the destination landmark itself the moment Tier 3 renders
+            (this element exists ONLY at Tier 3, so mount IS the transition);
+            the dismiss controls carry `JS.focus(to: …)` back to the trigger.
+            Focus-return has NO precedent anywhere in `api/lib` — the one
+            APG-cited focus-trapping primitive in this repo lives in
+            `cloud/priv/static/app.js` and is OUT OF FENCE (D163); it is not
+            ported here, and `aria-modal` stays REFUSED (D164).
+            On sequencing: `inert`'s blur is ASYNCHRONOUS (~38ms), so
+            focus-in-first is an ARIA-correctness requirement and NOT a race
+            against a synchronous blur — and in this layout it cannot race at
+            all, because the focus target (this aside) is a SIBLING of the
+            inert `.editor-body`, never inside it. Any code that sets inert and
+            then synchronously reads `document.activeElement` reads stale
+            focus. --%>
+      <div
+        :if={@destination}
+        id="bp-inspector-escape"
+        phx-hook="InspectorEscape"
+        phx-mounted={JS.focus(to: "#bp-doc-sidebar")}
+        data-escape-key="Escape"
+        data-escape-event="sidebar-toggle-panel"
+        data-escape-veto=".bp-paper-format"
+        data-escape-return="#bp-doc-sidebar-toggle"
+        hidden
+      >
+      </div>
       <div class="bp-doc-sidebar__head">
         <%!-- D167. At Tier 3 this control is the ONLY way out of a full-screen
               destination, so the glyph must point the way the action goes:
@@ -411,8 +470,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               the control that owns `#bp-doc-sidebar-body`. --%>
         <button
           type="button"
+          id="bp-doc-sidebar-toggle"
           class="bp-doc-sidebar__collapse"
-          phx-click="sidebar-toggle-panel"
+          phx-click={dismiss_or_toggle(@destination, "#bp-doc-sidebar-toggle")}
           aria-expanded={to_string(@visually_open)}
           aria-controls="bp-doc-sidebar-body"
           title={
@@ -707,6 +767,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # Still zero new server events: the document crumb fires the SAME
   # `sidebar-toggle-panel` the inspector's own back button fires, already in
   # `@safe_events` (caps.ex:82). Nothing new to classify.
+  #
+  # spd-w12 / D180 — THE TRAIL REACHES STANDARD. With the wave-10 ladder
+  # engaged at `standard` the rail YIELDS to a 44px strip, so the measured
+  # affordance inventory on that screen is exactly two: the collapse toggle and
+  # the strip. That made `standard` the one bucket that hides the whole nav rail
+  # WITHOUT offering the trail that replaces it — the trail was gated
+  # `in ["narrow","phone"]` and stopped one bucket short of the tier that needs
+  # it. The gate widens to include the ladder tier, and ONLY when the ladder is
+  # actually engaged (`standard` + a user-opened panel): an untouched `standard`
+  # desk still has its rail and must render byte-identically.
+  #
+  # The gate stays an ENUMERATION. `!= "wide"` is FORBIDDEN (D169) and there is
+  # a live textual guard in the ladder test that refutes it in code — it strips
+  # comment lines first, so this prose explaining the ban does not false-red it.
+  # A negation would also be WRONG here and not merely banned: it would paint
+  # the trail on an untouched `standard` desk that still has its rail.
   attr(:panes, :list, required: true)
   attr(:editor_doc, :any, default: nil)
   attr(:width_bucket, :string, default: "wide")
@@ -719,15 +795,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       assigns
       |> assign(:has_editor, has_editor)
       |> assign(:leaf_idx, length(assigns.panes) - 1)
-      # The inspector is the leaf only when it is actually the summoned
-      # destination: an editor must be open AND the user must have asked for
-      # the panel. Below Tier 3 this stays false and the trail renders exactly
-      # as it did before this slice.
-      |> assign(:inspector_leaf, has_editor and assigns.sidebar_user_opened == true)
+      # The inspector is the leaf only where it is actually the summoned
+      # DESTINATION — the same shared predicate `inert` and the back arrow use.
+      # This is deliberately NARROWER than "the user opened the panel": at
+      # `standard` the wave-10 ladder docks the inspector IN FLOW beside prose
+      # the reader can still see, so the document is still where you are and
+      # the trail must not claim you have left it.
+      |> assign(
+        :inspector_leaf,
+        has_editor and inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
+      )
+      |> assign(:trail_visible, crumb_trail_bucket?(assigns.width_bucket, has_editor, assigns.sidebar_user_opened))
 
     ~H"""
     <nav
-      :if={@width_bucket in ["narrow", "phone"] and (length(@panes) > 1 or @has_editor)}
+      :if={@trail_visible and (length(@panes) > 1 or @has_editor)}
       class="bp-desk-crumbs"
       aria-label="Desk breadcrumb"
       data-test-id="desk-crumbs"
@@ -765,7 +847,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         :if={@inspector_leaf}
         type="button"
         class="bp-desk-crumb"
-        phx-click="sidebar-toggle-panel"
+        phx-click={dismiss_or_toggle(true, "#bp-doc-sidebar-toggle")}
         data-test-id="desk-crumb-document"
       ><%= @editor_doc.title || "Untitled" %></button>
       <span :if={@inspector_leaf} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
@@ -1453,4 +1535,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp beta_all_descriptors(_schema, _blocks), do: []
+
+  # ── The tier predicate — ONE definition, at module bottom ───────────────────
+  #
+  # spd-b39/spd-w12, charter D169/D181. Three call sites read this: the `inert`
+  # gate in `studio_paper_view/1`, the destination clothes in
+  # `paper_metadata_sidebar/1`, and the crumb trail's inspector leaf in
+  # `desk_crumbs/1`. It used to be written out twice by hand; the third reader
+  # is what made a shared definition non-optional.
+  #
+  # WHY IT LIVES DOWN HERE and not beside its first caller: Phoenix binds any
+  # pending `attr(...)` declarations to the next function defined in the module,
+  # so declared underneath an attr block this raises at COMPILE time —
+  # "cannot declare attributes for function inspector_destination?/2. Components
+  # must be functions with arity 1". Module bottom, after every component, is
+  # the only placement that compiles.
+  #
+  # It is an ENUMERATION of the buckets where the wave-10 geometry paints
+  # `position:absolute; inset:0` over an opaque surface. `!= "wide"` is
+  # FORBIDDEN: the wave-10 ladder made `standard` + user-opened a REAL DOCKED
+  # state (the rail yields to one 44px strip and the panel sits in flow beside
+  # the prose), so a negation would hand a docked panel destination semantics —
+  # it would `inert` prose the reader can still see and edit, announce a
+  # landmark for a screen the reader never left, and bind Escape to an exit
+  # from somewhere they are not. Enumerate the covered buckets; never negate
+  # the uncovered one.
+  defp inspector_destination?(width_bucket, user_opened) do
+    width_bucket in ["narrow", "phone"] and user_opened == true
+  end
+
+  # Where the desk crumb trail renders (D168 + D180). Two clauses of the same
+  # enumeration, never a negation: the buckets that have no rail at all, plus
+  # the ladder tier at the moment the ladder has taken the rail away.
+  defp crumb_trail_bucket?(width_bucket, has_editor, user_opened) do
+    width_bucket in ["narrow", "phone"] or
+      (width_bucket == "standard" and has_editor and user_opened == true)
+  end
+
+  # The dismissal command. One event either way — `sidebar-toggle-panel`, which
+  # is ALREADY classified in `caps.ex` `@safe_events`, so the whole keyboard and
+  # crumb grammar costs ZERO new capability entries and adds no `handle_event`
+  # head. At Tier 3 the push is followed by an explicit FOCUS RETURN to the
+  # trigger, so leaving a full-screen destination never drops focus on <body>
+  # (which is exactly what it did before this slice). Below Tier 3 the plain
+  # event string is emitted, byte-for-byte what shipped before.
+  defp dismiss_or_toggle(true, return_to),
+    do: JS.push("sidebar-toggle-panel") |> JS.focus(to: return_to)
+
+  defp dismiss_or_toggle(_not_destination, _return_to), do: "sidebar-toggle-panel"
 end

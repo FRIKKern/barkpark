@@ -6133,6 +6133,86 @@
       }
     };
 
+    // InspectorEscape — the KEYBOARD exit from the Tier-3 inspector destination
+    // (spd-w12, charter D166/D173). The element carrying this hook renders ONLY
+    // at Tier 3 (`:if={@destination}` in components.ex), so mount/destroyed are
+    // exactly entering and leaving the destination and there is no bucket check
+    // to keep in sync here — the server owns the tier.
+    //
+    // BUBBLE PHASE, ON window, AND CAPTURE IS FORBIDDEN. Three shapes were
+    // driven in a real browser against the deployed bundle and two of them lose:
+    //
+    //   · window CAPTURE — with the command palette open the hook runs FIRST
+    //     (hook=1 menu=1), so Escape closes the inspector instead of the
+    //     palette. The nested-modal grammar is destroyed.
+    //   · document CAPTURE — identical failure, and not by accident: the menus
+    //     register their capture listener inside open() (slash-menu.js:202),
+    //     which is always LATER than this hook's mount, so this hook is always
+    //     first.
+    //   · an aside-scoped listener — dead for the real case: an Escape targeted
+    //     at <body> never reaches the aside at all.
+    //
+    // Bubble phase on window is the one shape that both fires and yields. The
+    // menus (slash, wikilink, the # tag menu, the command palette)
+    // stopImmediatePropagation at document capture, so while one of them is open
+    // this listener never sees the first Escape: first Escape closes the menu,
+    // second leaves the destination. Nested precedence for free, preserved
+    // rather than worked around.
+    //
+    // WHY NOT phx-window-keydown. It registers the same phase, but LiveView has
+    // no client-side veto seam — on() is a bare bubble-phase window listener and
+    // bind() pushes unconditionally — and this binding NEEDS a veto:
+    //
+    // THE VETO. The format bubble's link input handles Escape with
+    // preventDefault() ONLY (format-bubble.js:115-118) and the bubble portals
+    // itself to document.body (:146), so it sits OUTSIDE .editor-body's inert
+    // subtree and its Escape reaches window unstopped — measured, a genuine
+    // double-fire. Typing a link URL and pressing Escape must close the link
+    // row, not throw the reader out of the inspector. The veto is scoped to
+    // .bp-paper-format, NEVER a bare "input" selector — that would veto Escape
+    // from every input on the desk, including the inspector's own slug field.
+    // The markdown source textarea is the other documented non-stopper, but it
+    // is inert-dead at Tier 3 (canvas/index.js:1750 appends it INSIDE
+    // .editor-body), so it is covered as honest insurance, not as a live case.
+    //
+    // On dismissal the hook returns focus to the trigger, mirroring the
+    // JS.focus(to:) the pointer path uses, so the keyboard and the mouse leave
+    // the destination in the same state.
+    Hooks.InspectorEscape = {
+      _vetoed() {
+        var sel = this.el.dataset.escapeVeto;
+        var active = document.activeElement;
+        if (!sel || !active) return false;
+        return !!(active.closest && active.closest(sel));
+      },
+      mounted() {
+        var key = this.el.dataset.escapeKey || "Escape";
+        var event = this.el.dataset.escapeEvent;
+        var returnTo = this.el.dataset.escapeReturn;
+
+        this._onKeydown = (e) => {
+          if (e.key !== key && !(key === "Escape" && e.key === "Esc")) return;
+          // Deliberately NOT gated on e.defaultPrevented: the one live
+          // double-firer preventDefaults its own Escape (format-bubble.js:117),
+          // so that check would silently do the veto's job and leave the real
+          // guard — the activeElement scope below — untested and unproven.
+          if (this._vetoed()) return;
+          if (!event) return;
+          this.pushEvent(event, {});
+          if (returnTo) {
+            var target = document.querySelector(returnTo);
+            if (target && target.focus) target.focus();
+          }
+        };
+
+        // Bubble phase — the third argument is deliberately absent/false.
+        window.addEventListener("keydown", this._onKeydown);
+      },
+      destroyed() {
+        window.removeEventListener("keydown", this._onKeydown);
+      }
+    };
+
     // EditorFocus — mirrors the Studio editor mode onto the <html> element so
     // CSS can switch the whole page into a frameless "focus" surface when the
     // Beta editor is open (Task barkpark-270j). Mirrors the ThemeToggle
