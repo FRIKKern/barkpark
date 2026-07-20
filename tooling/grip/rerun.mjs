@@ -75,6 +75,12 @@ const WRITE_SHAPES = [
   // INTERPRETER_SHAPES below: a denylist of mutating APIs cannot be complete.
   [/\b(rmSync|unlinkSync|rmdirSync|writeFileSync|appendFileSync|renameSync|truncateSync)\b/, "fs mutation API"],
   [/\b(shutil\.rmtree|os\.(remove|unlink|rmdir|rename|truncate))\b/, "fs mutation API"],
+  // Elixir/Erlang — this repo's primary runtime, so an `elixir -e` / `iex -e`
+  // rerun is a realistic shape here in a way `perl -e` is not. `File.rm!` has
+  // no trailing space, so the shell-verb `\brm\s` rule never saw it.
+  [/\bFile\.(rm|rm_rf|rm!|rm_rf!|write|write!|mkdir|mkdir_p|cp|cp_r|rename|touch)\b!?/, "Elixir File mutation API"],
+  [/\bRepo\.(insert|update|delete|insert_all|update_all|delete_all)\b!?/, "Ecto Repo write"],
+  [/\b(file|filelib)\s*:\s*(delete|write_file|make_dir|del_dir|rename)\b/, "Erlang file mutation API"],
   [/\bcurl\b[^|]*\s-X\s*(POST|PUT|PATCH|DELETE)/i, "curl write method"],
   [/\bcurl\b[^|]*\s(-d|--data|--data-raw|--data-binary|-F|--form|-T|--upload-file)\b/, "curl request body"],
   [/\bbp\s+\w+\s+(create|publish|patch|delete|close|claim|stamp|pulse|set)\b/, "bp write verb"],
@@ -135,11 +141,49 @@ const INTERPRETER_SHAPES = [
   /\beval\b/,                                           // eval '<anything>'
   /\bxargs\b[^|]*\s-I\b/,                               // xargs -I{} '<cmd>'
   /\bssh\b[^|]*\s(["'])/,                               // ssh host '<remote cmd>'
+  /\b(su|sudo)\s+(-[a-zA-Z]+\s+|\S+\s+)*-c\b/,          // su -c '<program>'
+  /\b(watch|nohup|timeout|flock|chroot|nice|ionice)\b/, // wrappers that take a command
+  /\b(elixir|iex|erl|mix\s+run)\b[^|]*\s(-e|--eval)\b/, // elixir -e '<code>'
 ];
+
+// Heads whose -c / -e flag takes DATA, not code: -e is a pattern for grep, an
+// expression for sed, and -c is a config assignment for git. These are the
+// commands the quote-awareness fix exists to stop refusing, so they must not be
+// swept up by the shape rule below.
+const DATA_FLAG_HEADS = /^(grep|egrep|fgrep|rg|ag|ack|sed|git|jq|comm|cut|sort|uniq|wc|head|tail|tr|nl)$/;
+
+// THE SHAPE RULE — a denylist of interpreter NAMES can never be complete, and
+// the review found four live bypasses proving it: `su -c`, `watch`, `elixir -e`
+// and `iex -e` all classified `rm -rf /tmp/y` as SAFE once quoted, because the
+// quoted span was blanked and no named shape matched. Each was a command this
+// module would then have EXECUTED.
+//
+// So the last line of defence keys on SHAPE, not on a name: any head that is
+// handed a quoted argument through the conventional inline-program flags
+// (-c / -e / --eval / --command / --exec) is treated as an interpreter unless
+// its head is a known data-flag tool. An unknown binary is assumed to execute
+// its quoted string.
+//
+// THE DIRECTION OF THE ERROR IS THE POINT, and it is now inverted from the
+// denylist it backstops. Getting the allowlist wrong costs a FALSE REFUSAL
+// (annoying, and visible immediately in the verdict message). Getting a
+// denylist wrong costs a FALSE PERMISSION on a command about to be run. A
+// security guard must fail toward refusal, so the unbounded set — every binary
+// that will execute a string — is the one that gets the conservative default.
+const INLINE_PROGRAM_FLAG = /(?:^|[|;&(]\s*)([\w./-]+)(?:\s+[^|;&]*?)?\s(?:-c|-e|--eval|--command|--exec)\s*["']/g;
+
+function headTakesCodeInQuotes(cmd) {
+  INLINE_PROGRAM_FLAG.lastIndex = 0;
+  for (let m; (m = INLINE_PROGRAM_FLAG.exec(cmd)) !== null; ) {
+    const head = m[1].split("/").pop();
+    if (!DATA_FLAG_HEADS.test(head)) return true;
+  }
+  return false;
+}
 
 /** Does this command hand its quoted argument to something that EXECUTES it? */
 function executesItsQuotedArgument(cmd) {
-  return INTERPRETER_SHAPES.some((re) => re.test(cmd));
+  return INTERPRETER_SHAPES.some((re) => re.test(cmd)) || headTakesCodeInQuotes(cmd);
 }
 
 /**

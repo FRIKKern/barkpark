@@ -457,3 +457,67 @@ test("live: prod distinguishes right-route from wrong-route", { skip: process.en
   assert.equal(wrong.code, 404);
   assert.equal(wrong.reachable, true);
 });
+
+// ── the shape rule: a name denylist can never be complete ────────────────────
+//
+// Review found four LIVE bypasses opened by quote-blanking: `su -c`, `watch`,
+// `elixir -e` and `iex -e` each classified `rm -rf /tmp/y` as SAFE once the
+// payload was quoted, because no named interpreter shape matched and the
+// quoted span was blanked away. Every one is a command this module would then
+// have EXECUTED. The fix keys on SHAPE — an unknown head handed a quoted
+// argument through -c/-e/--eval/--command/--exec is assumed to execute it —
+// with a small allowlist of heads whose -c/-e takes DATA (grep -e is a pattern,
+// sed -e an expression, git -c a config assignment).
+//
+// The error direction is the whole point and it is inverted from the denylist
+// it backstops: a wrong allowlist entry costs a false REFUSAL, visible at once
+// in the verdict message. A wrong denylist costs a false PERMISSION on a
+// command about to run.
+
+test("quoted payloads handed to an UNKNOWN head are refused, not blanked", () => {
+  const mustRefuse = [
+    "su -c 'rm -rf /tmp/y'",
+    "watch 'rm -rf /tmp/y'",
+    "elixir -e 'File.rm!(\"/tmp/y\")'",
+    "iex -e 'File.rm_rf(\"/tmp/y\")'",
+    "elixir -e 'Repo.delete_all(Doc)'",
+    "someexotic-runner -c 'rm -rf /tmp/y'",
+    "env sh -c 'rm -rf /tmp/y'",
+    "timeout 5 sh -c 'rm -rf /tmp/y'",
+    "node -e 'require(\"fs\").rmSync(\"/tmp/y\")'",
+    "psql -c 'DROP TABLE docs'",
+  ];
+  for (const cmd of mustRefuse) {
+    assert.equal(classifySafety(cmd).safe, false, `MUST REFUSE: ${cmd}`);
+  }
+});
+
+test("the shape rule does NOT re-refuse honest reads whose -c/-e takes data", () => {
+  const mustAllow = [
+    "grep -e 'npm publish' README.md",
+    "rg -e 'chmod 644' docs/",
+    "sed -n -e '1,5p' README.md",
+    "git -c core.pager=cat log --grep='publish flow'",
+    "grep -n 'a > b' README.md",
+    "grep -rn 'npm publish instructions' docs/",
+    "git log --grep='publish flow'",
+    "grep -n 'File.rm! is dangerous' docs/x.md",
+  ];
+  for (const cmd of mustAllow) {
+    const v = classifySafety(cmd);
+    assert.equal(v.safe, true, `MUST ALLOW: ${cmd} — refused as ${v.reason}`);
+  }
+});
+
+test("an Elixir/Erlang inline program cannot write through its own stdlib", () => {
+  // This repo's primary runtime, so `elixir -e` is a realistic rerun shape here
+  // in a way `perl -e` is not. File.rm! has no trailing space, so the shell-verb
+  // `\brm\s` rule never saw it.
+  for (const cmd of [
+    "elixir -e 'File.write!(\"/tmp/y\", \"x\")'",
+    "elixir -e 'File.cp_r(\"a\", \"b\")'",
+    "iex -e 'file:delete(\"/tmp/y\")'",
+  ]) {
+    assert.equal(classifySafety(cmd).safe, false, `MUST REFUSE: ${cmd}`);
+  }
+});
