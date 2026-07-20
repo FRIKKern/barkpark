@@ -138,6 +138,92 @@ bolted on afterward, which is worth nothing.
   mutation, and `pds-secret-scan.sh`'s exit-3 "CONTROL DID NOT BEHAVE AS A CONTROL" is exactly the
   DEMOTED idea in miniature — a non-firing control must never be absorbed into a normal pass.*
 
+- **D19 — A workflow file may NEVER `import`, `require`, `eval`, or read the clock. This is
+  permanent host design, not a gap, and NO capability task is filed against it.** *Why: the host
+  evaluator, extracted verbatim from the compiled binary and reproduced locally, parses with acorn
+  in module mode then compiles the body with `vm.Script` — a classic script, never a module — so
+  static `import` dies at compile with "Cannot use import statement outside a module"; dynamic
+  `import()` hits a hand-written `importModuleDynamically:()=>{throw sNe("import() is not available
+  in workflow scripts.")}`; `require` is undefined; and `createContext(…,{codeGeneration:{strings:
+  false,wasm:false}})` closes the smuggle-the-grammar-as-a-string workaround (`eval` and `new
+  Function` both raise EvalError). A separate AST walk hard-refuses `Date.now`/`Math.random`/`new
+  Date()` with "breaks resume". D17's probe is CLOSED: the answer is NO, in every direction.*
+
+- **D20 — The in-workflow half is GRAMMAR-FREE by construction, and deliberately dumber than
+  `record.mjs`.** It may check only that a fact's `rerun` is present and non-empty, and demote +
+  annotate in place. *Why: D19 forecloses sharing the grammar by import, so the only way to avoid a
+  sixth hand-copy — this epic's own defect class — is to put no grammar in the workflow at all. If
+  the in-workflow half ever needs to AGREE with `record.mjs` on a judgment call, that is the design
+  error, not a missing import.*
+
+- **D21 — Aiming the verify fleet by authority deficit is CUT, not deferred.** *Why: measured over
+  the frozen 1,902-entry corpus through the real `deriveLevel`, the deficit has CV 0.355, two
+  random facts TIE 48.9% of the time, entropy is 1.118 of a possible 2.322 bits, and L1+L2 together
+  are 1.8% — the signal is near-constant. And `FACT_ITEMS` has no `load_bearing` property at all, so
+  (load-bearing × authority deficit) has ZERO of its two structured inputs. Shipping it would
+  launder a near-constant into a ranking that looks measured and is not — the exact laundering this
+  epic exists to abolish, reintroduced one layer up.*
+
+- **D22 — The wave is launched by `scriptPath`, never by name, and the checkout is synced FIRST.**
+  *Why: the host does NOT snapshot workflow file content — a file swapped ~50s after a session
+  started delivered the NEW sentinel to the dispatched subagent — but the workflow NAME registry IS
+  a session-start snapshot. This wave was launched by name from a checkout 20 commits behind, so it
+  ran the pre-#4915 file and measured 0 `rerun` keys across 6,891 facts machine-wide. That 0% is an
+  offer never made, not a behaviour. The discrimination experiment has still never run.*
+
+- **D23 — "676 evidence strings, 24% quote a command" is RETIRED and may not be quoted again.**
+  Re-derived on the frozen fixture (n=1,902): command-quoting **14.6%**, file:line **59.3%**,
+  multi-sentence >200ch **22.4%**, bare `path:line` **3.4%**, `origin/main` **8.4%**. *Why: 676 came
+  from a `bp task ls` pull capped by that CLI's own paging bug and produced four different values
+  for one count. The enforcement-ambition cap SURVIVES and strengthens — 14.6% is lower than 24%.
+  Also: `has_command_field` is a DEAD field, false on 1902/1902 because `FACT_ITEMS` has no
+  `command` key; it is not a 0% command rate and must never be cited as one.*
+
+- **D24 — The adjudicator COMPOSES `record.mjs`'s `admitFact`; it re-derives no rejection class. The
+  verdict vocabulary is TEN names, not seven.** `FAILED`, `REACHABLE-WRONG-ROUTE` and
+  `HOST-UNREACHABLE` pass through as first-class verdicts. *Why: `admitFact` already emits
+  LEVEL-SKIP, PATHLESS-REF, INADMISSIBLE-CONTINUOUS, MISSING-SUBJECT, MISSING-CLAIM, BAD-DEPS,
+  UNKNOWN-LEVEL and demote-to-L6 — a superset of what the adjudicator brief asked a builder to
+  produce from `level.mjs` raw, and rejections ACCUMULATE rather than abort. And folding FAILED into
+  REJECTED collapses "your fact is FALSE" into "your fact is MALFORMED" — the exact distinction
+  `rerun.mjs` says its enum exists to prevent.*
+
+- **D25 — R4 CONFLICT ships as a directly unit-tested API and is NOT claimed live.** *Why: no live
+  schema carries `subject` or `quantity` at all (0 occurrences in SURVEY_SCHEMA/VERIFY_SCHEMA/
+  FACT_ITEMS), so nothing upstream can populate an R4 key this wave. Measured collision rates on the
+  real corpus are vacuous at every honest grain — 0.05% on exact claim, 2.4% on full `path:line`
+  (and all 37 colliding groups are CORROBORATION between compatible facts, not rival values) —
+  while coarsening to basename jumps to 61% by conflating exactly what unbuilt R2 must separate. The
+  only R4 specimen in the fixture is self-declared synthetic. A CONFLICT state that structurally
+  cannot fire, shipped as live, reads green forever.*
+
+- **D26 — D10 is AMENDED. Durable storage IS permitted from this wave, as ONE immutable file per
+  run, folded at read time.** `tooling/grip/ledger/<run>-<key>.json`; the row is `(subject,
+  quantity, rerun, derived_level, deps[], observed_at)` with **no value field**, and `observed_at`
+  means "when this recipe last ran", never "when this was true". `observed_at` is supplied by the
+  writer — the workflow has no clock (D19). *Why: the anti-goal becomes a property of the schema
+  rather than a discipline, because a ledger containing no truth cannot be mistaken for settled
+  truth. One-file-per-run makes D10's lost-write class impossible rather than managed: add/add
+  merges clean across concurrent worktrees (proven), and `tooling/grip/ledger/` is NOT gitignored
+  (unlike `tooling/research-coverage/research-ledger.json`, which is — D10's trap, confirmed live).
+  `tooling/research-coverage` stays OUT of scope and its own reproducibility block stands.*
+
+- **D27 — Verify WRITES the ledger rows; Decide COMMITS them.** *Why: the JS orchestrator genuinely
+  cannot persist (zero fs/exec/require in all three workflow files, D17), but the verify PHASE can —
+  its "no repo edits" line is a prompt sentence inside this wave's own surface fence, not a missing
+  capability. The Decide agent already writes AND commits a file by explicit path in the shared main
+  checkout, in-loop, with no worktree isolation — an in-loop committed write is precedented, not
+  speculative. So "verify-writes-back" is honest and needs no renaming: written and committed one
+  phase apart, in the same wave, never one build-cycle stale. The carve-out is narrow: write ONLY to
+  `tooling/grip/ledger/`, never commit, never touch anything else.*
+
+- **D28 — The fan-out floor throws have NEVER fired in a real run, and the charter says so.**
+  *Why: swept 659 workflow journals and every `wf_*.json` run record on this machine — zero
+  incidents, and every bp-epic-cycle run (including four dispatched AFTER the floor commit merged)
+  carries a byte-identical 54,073-char pre-floor script snapshot. Both throws were proven under a
+  builder-authored simulation, never in the loop. "The throw is the only enforcement that genuinely
+  fires" is an intent, not an observation, until a wave observes one.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -152,10 +238,30 @@ Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dep
 | 6 | `tgw1-acceptance-suite` — fail-before / pass-after / never-cry-wolf / catches-a-plant, every rejection class firing | 3 | large | tooling/grip |
 | 7 | `tgw1-workflow-gate-wiring` — probe the import seam, run the gate over every returned fact | 3 | medium | .claude/workflows |
 
-Later waves, in the ratified order: **wave 2** verify-writes-back (blocked on D10 — the
-research-coverage ledger must become reproducible first); **wave 3** survey-reads-leads; **wave
-4+** the server-side `type:fact` backend, whose grammar must live in an Elixir `before_publish`
-hook because schema-v2's cross-field `validations:` slot is parsed but inert.
+Wave 1 landed rows 1-4. Rows 5-7 are superseded by the wave-2 plan below: `tgw1-adjudicator` is
+rebuilt as `tgw2-adjudicator` under D24 (compose, don't re-derive), `tgw1-acceptance-suite` becomes
+`tgw2-acceptance-suite`, and `tgw1-workflow-gate-wiring` is promoted to the wave-2 PARENT with its
+build work split into `tgw2-inloop-gate` (round 1) and `tgw2-verify-writes-back` (round 2).
+
+### Wave 2 — verify-writes-back. Parent task `tgw1-workflow-gate-wiring`.
+
+**The wave-2 blocker is LIFTED by D26, not ignored.** D10's research-coverage clause stands
+untouched; the recipe ledger simply never joins that store.
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw2-grip-quote-safety` — quote-aware `classifySafety` + CWD-hardened, tightened `rerun.test.mjs` | 1 | medium | tooling/grip |
+| 2 | `tgw2-adjudicator` — the verdict engine COMPOSING `admitFact` (D24), ten verdicts, CONFLICT unit-only (D25) | 1 | large | tooling/grip |
+| 3 | `tgw2-recipe-ledger` — one immutable file per run, no value field, folded at read time (D26) | 1 | medium | tooling/grip |
+| 4 | `tgw2-inloop-gate` — the grammar-free in-workflow demotion+annotation at the one interception seam (D19/D20) | 1 | medium | .claude/workflows |
+| 5 | `tgw2-l4-artifact-census` — `GENERATED_ARTIFACT_PATTERNS` derived by running the emitters, not guessed | 1 | medium | tooling/grip |
+| 6 | `tgw2-wild-bulk-fanout-floor` — port the D15 throws to `wild-bulk-cycle`, and settle `minItems` empirically (D28) | 1 | small | .claude/workflows |
+| 7 | `tgw2-acceptance-suite` — fail-before / pass-after / never-cry-wolf, every verdict class proven able to fail | 2 | large | tooling/grip |
+| 8 | `tgw2-verify-writes-back` — the narrow verify-writes / Decide-commits carve-out (D27) | 2 | medium | .claude/workflows |
+
+Later waves, in the ratified order: **wave 3** survey-reads-leads; **wave 4+** the server-side
+`type:fact` backend, whose grammar must live in an Elixir `before_publish` hook because schema-v2's
+cross-field `validations:` slot is parsed but inert.
 
 ## Wave log
 
