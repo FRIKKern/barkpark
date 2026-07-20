@@ -165,6 +165,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @spec export(binary() | nil, keyword()) ::
           {:ok, binary()} | {:error, :workspace_id_required | :workspace_not_found}
   # @canonical capability:workspace-bundle aka:export_workspace,import_workspace,tenant_bundle,per_workspace_export doc:.claude/workflows/bp-cloud-build-charter.md
+  # File.read!/File.rm act on `path`, the engine-chosen temp tar from
+  # export_to_file/2 (bp-ws-bundle-<int>.tar under the fetch_env! spill dir);
+  # no request input reaches it. PR #5083 security review.
+  # sobelow_skip ["Traversal.FileModule"]
   def export(workspace_id, opts \\ []) do
     case export_to_file(workspace_id, opts) do
       {:ok, path} ->
@@ -276,6 +280,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   # ── Export ───────────────────────────────────────────────────────────────────
 
+  # Belt-and-braces File.rm sweeps `spills`, engine-built paths from
+  # Archive.spill_path (bp-ws-spill-<table>-<int>.copy, fetch_env! spill dir);
+  # `table` is catalog-derived (Catalog.live_e*), never request input.
+  # PR #5083 security review.
+  # sobelow_skip ["Traversal.FileModule"]
   defp do_export(%Workspace{} = ws, opts) do
     profile = normalize_profile!(Keyword.get(opts, :profile))
     target = resolve_dataset!(ws, Keyword.get(opts, :dataset))
@@ -711,6 +720,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # NOT a decoded-row count. The stream also yields an EMPTY TERMINAL CHUNK
   # (chunk_count = ceil(rows/max_rows) + 1; a zero-row table yields exactly
   # one), which contributes 0 rows and 0 bytes and needs no special case.
+  # File.open! targets `spill_path` (engine-built bp-ws-spill-<table>-<int>.copy,
+  # fetch_env! spill dir) and SQL.stream runs `sql`, a COPY ... TO STDOUT built
+  # by copy_out_sql from catalog-derived table/columns (Catalog.live_e*,
+  # information_schema); neither carries request input. PR #5083 security review.
+  # sobelow_skip ["Traversal.FileModule", "SQL.Stream"]
   defp run_copy_out(sql, spill_path) do
     inject_copy_fault!()
 

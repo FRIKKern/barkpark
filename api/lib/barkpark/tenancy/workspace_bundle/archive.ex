@@ -82,6 +82,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
       parity test.
     * `:dir` — where to create the tar (default: `spill_dir/0`).
   """
+  # File.chmod!/File.rm act on `spill` (caller-supplied table_files values,
+  # engine-built via Archive.spill_path from catalog-derived table names) and on
+  # `path` (engine-built bp-ws-bundle-<int>.tar, fetch_env! spill dir); no
+  # request/manifest input reaches either. PR #5083 security review.
+  # sobelow_skip ["Traversal.FileModule"]
   def pack(manifest, table_files, opts \\ []) when is_map(manifest) and is_map(table_files) do
     mtime = Keyword.get(opts, :mtime, :os.system_time(:second))
     dir = Keyword.get_lazy(opts, :dir, &spill_dir/0)
@@ -136,6 +141,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   tmpfs spill silently reinstates the RSS peak this whole path exists to
   remove.
   """
+  # File.mkdir_p! creates `dir`, which is
+  # Application.fetch_env!(:barkpark, :bundle_spill_dir): operator config, not
+  # attacker-influenced. PR #5083 security review.
+  # sobelow_skip ["Traversal.FileModule"]
   def spill_dir do
     # fetch_env!, not get_env with a `System.tmp_dir!()` fallback: an unset key
     # must fail loudly at the top of the export, never quietly pick the one

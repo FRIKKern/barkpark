@@ -157,7 +157,9 @@ defmodule BarkparkWeb.WorkspaceController do
   # (`bp-ws-bundle-<unique_integer>.tar` under the configured spill dir). No
   # request input reaches it at all — not the slug, not a query param — so
   # there is no traversal surface to defend.
-  # sobelow_skip ["Traversal.SendFile"]
+  # The `after File.rm(path)` deletes that same engine-chosen temp tar; no
+  # request input reaches the path, so it shares the SendFile argument above.
+  # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
   def export(conn, %{"workspace_slug" => slug} = params) do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
          {:ok, path} <- export_bundle(workspace, params) do
