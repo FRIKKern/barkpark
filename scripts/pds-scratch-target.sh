@@ -120,6 +120,39 @@ EOF
   fi
 }
 
+# ── TRAP 7 — /tmp is a symlink, so one root has two spellings ────────────────
+#
+# On macOS /tmp -> /private/tmp. `up` canonicalises with `cd -P` before writing
+# the pointer, so the pointer holds the PHYSICAL path — but resolve_home used to
+# hand back BARKPARK_HOME verbatim, so teardown's exact-string pointer compare
+# could NEVER match a caller who spelled the root /tmp/... The root was removed,
+# teardown printed PASS, and the pointer was left naming a path that no longer
+# exists; the next pointer-trusting call died with "scratch root ... does not
+# exist (already torn down?)". Both spellings must resolve identically (PDS-D107).
+#
+# Must work on an ALREADY-DELETED path — teardown compares the pointer AFTER the
+# root is gone — so resolve the deepest EXISTING ancestor and re-append the tail
+# rather than requiring the whole path to be there.
+canonicalize_path() {
+  local p="${1:-}" tail=""
+  [ -n "$p" ] || return 0
+  while [ ! -d "$p" ]; do
+    case "$p" in
+      /|.|..|"") break ;;
+    esac
+    tail="/$(basename -- "$p")$tail"
+    p="$(dirname -- "$p")"
+  done
+  [ ! -d "$p" ] || p="$(cd -P -- "$p" && pwd)"
+  # `${p%/}` strips the trailing slash so "/a" + "/b" never becomes "/a//b" — but
+  # for the root itself that leaves the EMPTY string, and "" does not match the
+  # `case "$home" in /) die` interlock guarding the rm -rf below. Keep "/" as "/"
+  # so that guard still fires on the one input it exists to refuse.
+  local out="${p%/}$tail"
+  [ -n "$out" ] || out="/"
+  printf '%s\n' "$out"
+}
+
 new_scratch_home() {
   local home
   if [ -n "${BARKPARK_HOME:-}" ]; then
@@ -128,7 +161,7 @@ new_scratch_home() {
   else
     home="$(mktemp -d /tmp/pds.XXXX)"
   fi
-  home="$(cd -P -- "$home" && pwd)"
+  home="$(canonicalize_path "$home")"
   assert_short_home "$home"
   printf '%s\n' "$home"
 }
@@ -143,7 +176,10 @@ resolve_home() {
   fi
   [ -n "$home" ] || die "no scratch target known — set BARKPARK_HOME=... or run \`$0 up\` first"
   [ -d "$home" ] || die "scratch root $home does not exist (already torn down?)"
-  printf '%s\n' "$home"
+  # Same canonicalisation `up` applied before writing the pointer (TRAP 7) — a
+  # caller spelling the root /tmp/... and a pointer holding /private/tmp/... are
+  # the same target, and teardown's pointer compare depends on saying so.
+  canonicalize_path "$home"
 }
 
 load_scratch_env() {
@@ -530,8 +566,13 @@ cmd_teardown() {
     log "removed $home"
   fi
 
-  if [ -f "$POINTER_FILE" ] && [ "$(cat "$POINTER_FILE")" = "$home" ]; then
+  # Clear the pointer ONLY if it names the root we just removed. Both sides are
+  # canonicalised (TRAP 7) so the two spellings of one root match; a pointer
+  # naming a DIFFERENT root is another concurrent session's live target and is
+  # left strictly alone.
+  if [ -f "$POINTER_FILE" ] && [ "$(canonicalize_path "$(cat "$POINTER_FILE")")" = "$home" ]; then
     rm -f "$POINTER_FILE"
+    log "cleared scratch pointer $POINTER_FILE"
   fi
 
   hr "teardown: $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
