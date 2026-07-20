@@ -3187,6 +3187,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .invite-ico--ok { background: var(--ok-soft); color: var(--ok); }
 .invite-ico--info { background: var(--info-soft); color: var(--info); }
 .invite-ico--warn { background: var(--warn-soft); color: var(--warn-strong); }
+/* gr-blk-invite-ico-danger-variant. The two failure-shaped landings both wore
+   ICO_WARN's "!" and were distinguishable only by reading the copy. The split
+   is by RECOVERABILITY, not by severity-vibe: warn = "this link is fine, come
+   back" (expired, and the retryable error — nothing changed, try again);
+   danger = "this link is dead" (revoked or already used), which no amount of
+   retrying fixes. --danger on --danger-soft over --surface is already an
+   AA-gated pairing in __css_check's CONTRAST_PAIRS, so this needs no new
+   token — and --danger-hsl stays hue 0 in both themes (per-accent separation
+   is gr-blk-ok-danger-hue-separation, deliberately not this slice). */
+.invite-ico--danger { background: var(--danger-soft); color: var(--danger); }
 .invite-title { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
 .invite-copy { font-size: 14px; color: var(--muted-text); margin: 0 0 20px; line-height: 1.55; }
 .invite-copy b { color: var(--text); font-weight: 600; }
@@ -3471,12 +3481,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .archives-note p { margin: 0; }
 .archives-note--warn { color: var(--text); }
-/* storage-unconfigured: a distinct, non-transient state (amber dot + docs +
-   Retry), not a red outage. The server owns the copy verbatim. */
+/* storage-unconfigured: a distinct, non-transient state (amber dot + what an
+   archive is + Retry), not a red outage. The server owns the headline copy
+   verbatim. */
 .archives-note--unconfigured { color: var(--text); }
 .archives-note-dot { width: 8px; height: 8px; border-radius: var(--pill); background: var(--warn); flex: 0 0 auto; }
-.archives-docs-link { font-size: 13px; color: var(--primary); text-decoration: none; }
-.archives-docs-link:hover { text-decoration: underline; }
+/* The in-place explanation that replaced the dead "How archives work" link
+   (gr-blk-archives-doc-link). `.archives-note` is a wrapping flex ROW, so the
+   sub-copy claims a full line of its own rather than being squeezed beside the
+   dot and the headline. Secondary voice — the headline stays --text. */
+.archives-note-sub {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--muted-text);
+  line-height: 1.5;
+  max-width: 62ch;
+}
 
 .archive-list {
   display: flex;

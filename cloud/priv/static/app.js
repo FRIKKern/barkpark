@@ -1614,13 +1614,25 @@
       return '<div class="loading">Loading archives&hellip;</div>';
     }
     // Storage unconfigured (deployment never wired object storage): a DISTINCT
-    // state — the server-owned copy verbatim, a "How archives work" docs link,
-    // and a Retry (harmless once storage IS wired). Amber dot, not a red error.
+    // state — the server-owned copy verbatim, a one-line explanation of what an
+    // archive IS, and a Retry (harmless once storage IS wired). Amber dot, not
+    // a red error.
+    //
+    // gr-blk-archives-doc-link: this used to be an anchor labelled "How
+    // archives work" pointing at the bare repo root — a user asking the
+    // question landed on a repository listing. There is no page in this repo
+    // that answers it (the only prose mention of instance archives anywhere is
+    // one verb-list line in docs/cli/HANDBOOK.md), and minting a docs URL that
+    // 404s is strictly worse than the dead end it replaces. So the affordance
+    // is made HONEST instead of relocated: the console says the thing in place,
+    // in the same voice the empty state already uses.
     if (model.notConfigured) {
       return '<div class="archives-note archives-note--unconfigured">' +
         '<span class="archives-note-dot" aria-hidden="true"></span>' +
         "<p>" + esc(model.message) + "</p>" +
-        '<a class="archives-docs-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">How archives work</a>' +
+        '<p class="archives-note-sub">An archive is a portable bundle of a whole instance — server, ' +
+        "DNS record and registry row as one unit — that you can resurrect on Hetzner or Azure. " +
+        "Wire object storage for this deployment and they show up here.</p>" +
         '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
     }
     if (model.error) {
@@ -3795,6 +3807,39 @@
   // "and open the flow" companion so a stale bookmark still reaches the launcher.
   function wantsLaunchFlow(hash) {
     return String(hash == null ? "" : hash).replace(/^#/, "") === "launch";
+  }
+
+  // Pure: what a hashchange must DO — { close, route }. GR105: "a hash change
+  // that ROUTES ELSEWHERE closes a modal the new route did not itself open."
+  //
+  // The naive fix — close on ANY hashchange — breaks the one hash path that
+  // OPENS a modal: the legacy `#launch` bookmark (D66), which applyRoute lands
+  // on Overview and then reopens the launch flow over. Keying the decision on
+  // the CANONICAL route makes that safe by construction, because
+  // legacyRoute("launch") === "overview": arriving at #launch from #overview is
+  // NOT a route change, nothing closes, and applyRoute's openLaunchModal()
+  // survives. Its `history.replaceState(…, "/#overview")` normalisation is
+  // route-identical for the same reason (and fires no hashchange at all).
+  //
+  // The `?modal=account` preview seam the accent x theme shot matrix depends on
+  // is QUERY-driven — mock.js drives openAccountModal() on window load at
+  // whatever hash the scenario deep-linked to — so no hashchange follows it,
+  // and a same-hash set fires no event either (see the notes at the reset-flow
+  // and scope-menu call sites). Neither can dismiss it.
+  //
+  // The close is UNGATED by the modal pin, exactly like logout. The pin (GR56)
+  // guards the two REFLEX dismissal routes (backdrop, Escape) so a once-only
+  // sheet is never thrown away by accident; a route change is not a reflex, it
+  // is the operator navigating — and the alternative IS the defect: a pinned
+  // recovery sheet floating over a Fleet page it does not belong to.
+  //
+  // ctx: { newFlow, activateFlow, signedIn }. Total over any input; never throws.
+  function hashChangeEffects(prev, next, ctx) {
+    ctx = ctx || {};
+    // /new and /activate render OUTSIDE the shell and are path+query driven.
+    if (ctx.newFlow || ctx.activateFlow) return { close: false, route: false };
+    if (!ctx.signedIn) return { close: false, route: false };
+    return { close: legacyRoute(prev) !== legacyRoute(next), route: true };
   }
 
   // Pure: the Fleet bucket a #fleet/<bucket> deep link selects (charter decision
@@ -10064,6 +10109,18 @@
     var ICO_INFO = '<div class="invite-ico invite-ico--info" aria-hidden="true">i</div>';
     var ICO_WARN = '<div class="invite-ico invite-ico--warn" aria-hidden="true">!</div>';
     var ICO_MAIL = '<div class="invite-ico invite-ico--info" aria-hidden="true">✉</div>';
+    // gr-blk-invite-ico-danger-variant — the RULING, so it is not left undecided.
+    // Two of these landings are failure-shaped and both wore ICO_WARN's "!", so
+    // they read as the same outcome at a glance. The line that actually matters
+    // to the person holding the link is RECOVERABILITY:
+    //   warn "!"    — the link is fine, come back: `expired` (ask for a fresh
+    //                 one) and `error` (transient, "nothing has changed", the
+    //                 card's own action is literally "Try again").
+    //   danger "✕"  — the link is DEAD: `invalid`, revoked or already used. No
+    //                 retry recovers it; the only path is a new invitation.
+    // So `error` deliberately KEEPS warn — it is not a lesser danger, it is a
+    // different category — and only the terminal fallback goes danger.
+    var ICO_DEAD = '<div class="invite-ico invite-ico--danger" aria-hidden="true">✕</div>';
 
     if (state === "joined") {
       return card(ICO_OK, "You're in",
@@ -10101,8 +10158,9 @@
         act("join", "Join " + team) +
           '<a class="invite-skip" href="#overview">Not now</a>');
     }
-    // "invalid" + any unknown state: the total fallback.
-    return card(ICO_WARN, "This invitation isn't valid any more",
+    // "invalid" + any unknown state: the total fallback. Terminal — the link is
+    // dead, not slow — so it wears the danger mark, never ICO_WARN's "!".
+    return card(ICO_DEAD, "This invitation isn't valid any more",
       "The link may have been revoked or already used. If you still need access, " +
         "ask the person who invited you to send a new one.",
       act("overview", "Go to your dashboard"));
@@ -16030,10 +16088,29 @@
       if (c) openInviteModal(c);
     });
 
+    // GR105: the hash the shell last ROUTED, seeded at wiring time so the very
+    // first hashchange compares against where the console booted. Only the
+    // listener writes it — a replaceState normalisation fires no event, so a
+    // stale entry here can only ever read as "the previous real route", which
+    // is exactly what the predicate wants.
+    var lastRoutedHash = (location && location.hash) || "";
     window.addEventListener("hashchange", function () {
-      if (isNewFlow()) return; // the /new deploy flow is path+query driven, not hash-routed
-      if (isActivateFlow()) return; // the /activate device-login screen is real-path, not hash-routed
-      if (session() && session().token) applyRoute();
+      var prev = lastRoutedHash;
+      var next = (location && location.hash) || "";
+      lastRoutedHash = next;
+      // /new is path+query driven and /activate is a real path — neither is
+      // hash-routed; the decision (and the modal-close rule) lives in the pure
+      // hashChangeEffects so a node test can pin it without a DOM.
+      var eff = hashChangeEffects(prev, next, {
+        newFlow: isNewFlow(),
+        activateFlow: isActivateFlow(),
+        signedIn: !!(session() && session().token),
+      });
+      // Close BEFORE routing: applyRoute is allowed to open a modal of its own
+      // (the legacy #launch bookmark does exactly that), and it must not be the
+      // thing we tear back down.
+      if (eff.close) closeModal();
+      if (eff.route) applyRoute();
     });
 
     // Cmd/Ctrl+K — the global command palette. preventDefault is UNCONDITIONAL for
@@ -16819,6 +16896,11 @@
       // proving the pin FAIL-OPENS behaviourally is the only honest gate, and a
       // source-regex guard is banned (one already passed on a commented-out line).
       modalDismissAllowed: modalDismissAllowed,
+      // GR105: the pure hashchange decision. The listener itself is registered
+      // inside init() (never bound in the sandbox), so the DECISION is what is
+      // pinned — a blanket "close on any hashchange" reds the #launch and
+      // preview-seam tests instead of silently blinding the shot matrix.
+      hashChangeEffects: hashChangeEffects,
       setModalPin: setModalPin, modalPinState: modalPinState,
       openModal: openModal, closeModal: closeModal,
       // GR58: the account modal is CLICK-opened, so the preview harness (which
