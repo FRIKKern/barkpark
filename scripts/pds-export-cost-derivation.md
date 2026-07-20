@@ -278,8 +278,8 @@ pre-fire readings, and the choice moves the number:
 | Candidate t=0 | Source | Derived incremental demand |
 |---|---|---|
 | 189,684 kB | `VmRSS` pre-fire sweep (crown transcript :67) | 2,239.86 MiB |
-| **194,228 kB** | **`ps -o rss=` single shot (:636, :778) — RULED t=0** | **2,235.43 MiB** |
-| 230,072 kB | sampler's first logged tick (:900) | 2,200.42 MiB |
+| **194,228 kB** | **`ps -o rss=` single shot (:648, :790) — RULED t=0** | **2,235.43 MiB** |
+| 230,072 kB | sampler's first logged tick (:912) | 2,200.42 MiB |
 
 The sampler's first tick is **not** t=0: it is taken at t≈+1 s, *after* the request fired, so it
 already contains part of the export's own allocation. Using it subtracts part of the very thing

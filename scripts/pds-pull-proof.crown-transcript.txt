@@ -344,7 +344,7 @@ remains the most tempting and most dishonest lever available.
   /1024-scaled peak. In the harness's own convention (pds-pull-proof.sh:1302,
   mem_kb / 1024): 2,483,304 − 194,228 =
   2,289,076 kB = 2,235.43 MiB, so the shortfall is 35.43 MiB. Baseline t=0 is
-  ruled to 194,228 kB (PDS-D185) — the sampler's first tick (230,072 kB, :900) is
+  ruled to 194,228 kB (PDS-D185) — the sampler's first tick (230,072 kB, :912) is
   taken at t≈+1s and already contains part of the export's own allocation. All
   three candidate baselines put the demand above 2200 MiB (2239.86 / 2235.43 /
   2200.42), so the ambiguity moves magnitude, never sign; and per PDS-D114 the
