@@ -199,6 +199,27 @@ defmodule BarkparkCloud.AccountsAuditTest do
       assert Enum.map(events, & &1.action) == ["site.created"]
     end
 
+    # REVIEW FIX (GR80 leg 2). The Activity page's Target chips send target_type
+    # with NO target_id; before the widening that combination fell through to the
+    # catch-all and the "filter" answered the entire unfiltered trail.
+    test ":target_type ALONE narrows to that noun — the Activity chip row's real request" do
+      team = team_fixture()
+      seed(team, "site.created", target_type: "site", target_id: "s-1")
+      seed(team, "site.deleted", target_type: "site", target_id: "s-2")
+      seed(team, "barkpark.go_live", target_type: "barkpark", target_id: "b-1")
+
+      sites = Accounts.list_audit_events(team, target_type: "site")
+      assert Enum.sort(Enum.map(sites, & &1.action)) == ["site.created", "site.deleted"]
+
+      boxes = Accounts.list_audit_events(team, target_type: "barkpark")
+      assert Enum.map(boxes, & &1.action) == ["barkpark.go_live"]
+
+      # An ABSENT or empty filter must never narrow — it is not a filter at all.
+      assert length(Accounts.list_audit_events(team, target_type: nil)) == 3
+      assert length(Accounts.list_audit_events(team, target_type: "")) == 3
+      assert length(Accounts.list_audit_events(team)) == 3
+    end
+
     test "is strictly team-scoped — never crosses teams" do
       team_a = team_fixture()
       team_b = team_fixture()

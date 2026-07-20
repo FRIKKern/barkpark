@@ -1038,13 +1038,24 @@
   // is reachable from node without a fetch. The current device is badged and its
   // Revoke button disabled: a signed-in user can never revoke themselves by
   // accident from here.
+  // GR81 — the session IP is SUPPRESSED here, deliberately, not forgotten. Every
+  // session the control plane records carries 172.18.0.1 (the Docker bridge
+  // gateway): trust_forwarded_ip honours X-Forwarded-For only from a LOOPBACK
+  // peer, and the control plane runs containerized behind Caddy, so the peer the
+  // Plug sees is always the bridge. The value is uniform garbage — identical for
+  // every client — so it can never separate "my usual login" from "a stranger",
+  // which is the only reason an IP earns a place on a security surface. No
+  // heuristic guard (an RFC1918 test would flag real corporate/VPN users AND
+  // would silently stop firing the day the router is fixed, with nothing telling
+  // the SPA it happened). REVERT this suppression — restore the ip_address lead
+  // on this row and the "IP address" rail row in renderActivateConfirm — once
+  // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
   function sessionRowHtml(x) {
     return '<div class="session-row">' +
       '<div class="session-main">' +
         '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
           (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
-        '<div class="session-meta">' + esc(x.ip_address || "unknown IP") +
-          " · active " + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
+        '<div class="session-meta">Active ' + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
       "</div>" +
       (x.current
         ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
@@ -2469,9 +2480,10 @@
   }
 
   // Delivery-log body states: populated card / honest empty line.
+  // (The UNFILTERED body — the filter-aware notifDeliveriesBodyHtml below owns
+  // both states; this stays as the zero-filter entry point its callers expect.)
   function notifDeliveriesHtml(list) {
-    if (!list || !list.length) return '<div class="wh-del-empty dim">No notifications have been delivered yet.</div>';
-    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+    return notifDeliveriesBodyHtml(list, false);
   }
 
   // The honest degrade when the deliveries route is absent (older control plane) or
@@ -2605,11 +2617,126 @@
       "</section>";
   }
 
+  // ── GR79 — the delivery-log filter panel ────────────────────────────────────
+  //
+  // A SERVER round-trip, not an in-memory sieve, and the distinction is the whole
+  // point. GET /v1/notifications/deliveries applies channel / status / event
+  // INSIDE the Ecto query (notifications.ex maybe_delivery_eq) and pages with a
+  // `before` keyset cursor on inserted_at (maybe_delivery_before); the router
+  // builds those opts from the query params and clamps limit at 200. So
+  // "show me the failures" here is a real page of failures drawn from the whole
+  // log — not the failures that happen to fall inside the newest 50 — and Load
+  // more walks the FILTERED trail. Client-side code cannot do either: it cannot
+  // see rows it never fetched, and it cannot paginate a keyset it does not drive.
+  //
+  // The vocabularies are the Delivery schema's own (@channels / @statuses); event
+  // is free text on the server, so it gets a text input rather than a chip row —
+  // inventing a closed event list would be a lie the moment a new event ships.
+  var NOTIF_DELIVERY_PAGE = 50;
+  var NOTIF_DELIVERY_CHANNELS = [
+    { value: null, label: "All channels" },
+    { value: "email", label: "Email" },
+    { value: "discord", label: "Discord" },
+    { value: "slack", label: "Slack" },
+    { value: "telegram", label: "Telegram" },
+    { value: "pushover", label: "Pushover" },
+    { value: "webhook", label: "Webhook" }
+  ];
+  var NOTIF_DELIVERY_STATUSES = [
+    { value: null, label: "Any result" },
+    { value: "sent", label: "Sent" },
+    { value: "failed", label: "Failed" },
+    { value: "pending", label: "Pending" }
+  ];
+  var notifDeliveryFilter = { channel: null, status: null, event: null };
+  var notifDeliveryRows = null; // the accumulated FILTERED page list
+
+  // Pure: the request URL for one page of the delivery log. An unset axis sends
+  // nothing; `before` is the ISO stamp of the oldest row already rendered, which
+  // is exactly the cursor maybe_delivery_before compares against (strictly older,
+  // so a page boundary can never duplicate or skip a row).
+  function notifDeliveriesQuery(before) {
+    var q = "/v1/notifications/deliveries?limit=" + NOTIF_DELIVERY_PAGE;
+    if (notifDeliveryFilter.channel) q += "&channel=" + encodeURIComponent(notifDeliveryFilter.channel);
+    if (notifDeliveryFilter.status) q += "&status=" + encodeURIComponent(notifDeliveryFilter.status);
+    if (notifDeliveryFilter.event) q += "&event=" + encodeURIComponent(notifDeliveryFilter.event);
+    if (before) q += "&before=" + encodeURIComponent(before);
+    return q;
+  }
+
+  // Pure: the keyset cursor for the next page — the OLDEST rendered row's stamp.
+  // The server orders by inserted_at DESC, so that is the last row in the list;
+  // a row with no stamp yields null, which correctly stops paging rather than
+  // silently restarting at page one.
+  function notifDeliveriesCursor(rows) {
+    if (!rows || !rows.length) return null;
+    var last = rows[rows.length - 1];
+    return (last && last.inserted_at) || null;
+  }
+
+  function notifDeliveryFiltered() {
+    return !!(notifDeliveryFilter.channel || notifDeliveryFilter.status || notifDeliveryFilter.event);
+  }
+
+  // Pure: the filter row — two chip axes in the activity feed's exact grammar
+  // (static per-branch class literals, never a concat modifier) plus the free-text
+  // event field. Same .actfilter-chip / .is-active vocabulary, so the two filter
+  // surfaces in this SPA read as one idea.
+  // The chip row's INNER markup — the one builder both the first render and the
+  // in-place repaint use, so an active-chip rule can never drift between them.
+  function notifDeliveryChipRowHtml() {
+    var chan = NOTIF_DELIVERY_CHANNELS.map(function (c) {
+      return notifDeliveryChipHtml("channel", c.value, c.label, (notifDeliveryFilter.channel || null) === c.value);
+    }).join("");
+    var stat = NOTIF_DELIVERY_STATUSES.map(function (s) {
+      return notifDeliveryChipHtml("status", s.value, s.label, (notifDeliveryFilter.status || null) === s.value);
+    }).join("");
+    return '<span class="dim">Channel</span>' + chan + '<span class="dim">Result</span>' + stat;
+  }
+
+  function notifDeliveryFiltersHtml() {
+    return '<div class="activity-filters" id="notif-del-filters" role="group" aria-label="Filter the delivery log">' +
+        notifDeliveryChipRowHtml() +
+      "</div>" +
+      '<div class="field">' +
+        '<label class="label" for="notif-del-event">Event</label>' +
+        '<input class="form-input" id="notif-del-event" type="text" spellcheck="false" autocomplete="off" ' +
+          'placeholder="e.g. instance_down — exact match, blank for every event" value="' +
+          esc(notifDeliveryFilter.event || "") + '">' +
+      "</div>";
+  }
+
+  // Static per-branch class literals (see actfilterChipHtml — same E3 discipline).
+  function notifDeliveryChipHtml(axis, value, label, active) {
+    var tail = ' type="button" data-notif-del-axis="' + esc(axis) +
+      '" data-notif-del-value="' + esc(String(value || "")) +
+      '" aria-pressed="' + (active ? "true" : "false") + '">' + esc(label) + "</button>";
+    return active
+      ? '<button class="actfilter-chip is-active"' + tail
+      : '<button class="actfilter-chip"' + tail;
+  }
+
+  // Delivery-log body states, filter-aware. An empty FILTERED log must never read
+  // as "nothing has ever been delivered" — that sentence would be false, and it
+  // is the exact lie a filter panel invites.
+  function notifDeliveriesBodyHtml(list, filtered) {
+    if (!list || !list.length) {
+      return filtered
+        ? '<div class="wh-del-empty dim">No sends match these filters. The log itself isn\'t empty &mdash; widen a filter to see the rest.</div>'
+        : '<div class="wh-del-empty dim">No notifications have been delivered yet.</div>';
+    }
+    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+  }
+
   function notifDeliveriesShellHtml() {
     return '<section class="set-section">' +
       '<h3 class="set-h">Delivery log</h3>' +
-      '<p class="set-purpose">The last 50 notification sends, newest first. Filtering isn\'t available yet.</p>' +
+      '<p class="set-purpose">Every notification send, newest first. Filters run on the server, so they search the whole log &mdash; not just the page you can see.</p>' +
+      notifDeliveryFiltersHtml() +
       '<div id="notif-deliveries-body"><div class="loading">Loading delivery log&hellip;</div></div>' +
+      '<div class="activity-more" id="notif-del-more" hidden>' +
+        '<button class="btn btn-ghost btn-sm" id="notif-del-load-more" type="button">Load more</button>' +
+      "</div>" +
       "</section>";
   }
 
@@ -2686,16 +2813,106 @@
       });
     });
 
+    wireNotifDeliveryFilters();
     loadNotifDeliveries();
   }
 
+  function toggleNotifDeliveryMore(show) {
+    var wrap = $("#notif-del-more");
+    if (wrap) wrap.hidden = !show;
+  }
+
+  // Page ONE of the (possibly filtered) log. A filter change re-enters here, so
+  // the accumulated list is dropped — a new filter is a new trail, and carrying
+  // the old rows over would mix two result sets under one heading.
   function loadNotifDeliveries() {
     var box = $("#notif-deliveries-body");
     if (!box) return;
-    api("GET", "/v1/notifications/deliveries").then(function (r) {
-      if (r.ok && r.data && Array.isArray(r.data.deliveries)) box.innerHTML = notifDeliveriesHtml(r.data.deliveries);
-      else box.innerHTML = notifDeliveriesErrorHtml();
+    box.innerHTML = '<div class="loading">Loading delivery log&hellip;</div>';
+    var filtered = notifDeliveryFiltered();
+    api("GET", notifDeliveriesQuery(null)).then(function (r) {
+      if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
+        notifDeliveryRows = null;
+        box.innerHTML = notifDeliveriesErrorHtml();
+        toggleNotifDeliveryMore(false);
+        return;
+      }
+      notifDeliveryRows = r.data.deliveries;
+      box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, filtered);
+      // A full page is the only honest reason to offer more: the server capped
+      // us, so there may be older rows. A short page IS the end of the trail.
+      toggleNotifDeliveryMore(notifDeliveryRows.length === NOTIF_DELIVERY_PAGE);
     });
+  }
+
+  // The next page of the SAME filtered trail, walked by the keyset cursor.
+  function loadMoreNotifDeliveries() {
+    var rows = notifDeliveryRows;
+    var before = notifDeliveriesCursor(rows);
+    if (!before) return;
+    var btn = $("#notif-del-load-more");
+    if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+    var restore = function () { if (btn) { btn.disabled = false; btn.textContent = "Load more"; } };
+    api("GET", notifDeliveriesQuery(before)).then(function (r) {
+      restore();
+      if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
+        toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
+        return;
+      }
+      var more = r.data.deliveries;
+      if (more.length) {
+        notifDeliveryRows = rows.concat(more);
+        var box = $("#notif-deliveries-body");
+        if (box) box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, notifDeliveryFiltered());
+      }
+      toggleNotifDeliveryMore(more.length === NOTIF_DELIVERY_PAGE);
+    });
+  }
+
+  // ONE delegated listener on the chip row + the event field's commit gestures.
+  // The event box commits on Enter or blur rather than per-keystroke: every
+  // keystroke would be a server round-trip on a route that hits Postgres, and a
+  // half-typed event name is a filter nobody asked for.
+  function wireNotifDeliveryFilters() {
+    var row = $("#notif-del-filters");
+    if (row && row.addEventListener) row.addEventListener("click", function (e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-notif-del-axis]") : null;
+      if (!chip) return;
+      var axis = chip.getAttribute("data-notif-del-axis");
+      if (axis !== "channel" && axis !== "status") return;
+      var next = chip.getAttribute("data-notif-del-value") || "";
+      next = next || null;
+      if ((notifDeliveryFilter[axis] || null) === next) return; // re-click = no-op
+      notifDeliveryFilter[axis] = next;
+      repaintNotifDeliveryFilters();
+      loadNotifDeliveries();
+    });
+
+    var ev = $("#notif-del-event");
+    if (ev && ev.addEventListener) {
+      var commit = function () {
+        var next = (ev.value || "").trim() || null;
+        if ((notifDeliveryFilter.event || null) === next) return;
+        notifDeliveryFilter.event = next;
+        loadNotifDeliveries();
+      };
+      ev.addEventListener("change", commit);
+      ev.addEventListener("keydown", function (e) {
+        if (e && (e.key === "Enter" || e.keyCode === 13)) {
+          if (e.preventDefault) e.preventDefault();
+          commit();
+        }
+      });
+    }
+
+    var more = $("#notif-del-load-more");
+    if (more && more.addEventListener) more.addEventListener("click", loadMoreNotifDeliveries);
+  }
+
+  // Repaint ONLY the chip row (the event input keeps its own DOM value + focus).
+  function repaintNotifDeliveryFilters() {
+    var row = $("#notif-del-filters");
+    if (row) row.innerHTML = notifDeliveryChipRowHtml();
   }
 
   function notifReadTransport() {
@@ -3193,8 +3410,26 @@
   // a 429 can't be instantly re-fired. 60 matches the backend limiter's FIXED
   // window (two_factor_rate_limiter.ex: @limit 5, @window_ms 60_000) — the old
   // 30 under-waited and invited a re-fire straight into the same 429. A server
-  // retry_after seam is backlog (gr-backlog-tfa-retry-after), not this constant.
+  // 60 is now only the FALLBACK: the challenge's 429 carries the server's own
+  // `retry_after` (router.ex — "the whole seconds left of the limiter's fixed
+  // window"), and tfaRetryAfterSecs below reads it. The constant survives for the
+  // one case the server can't speak to — a 429 with no body, or a proxy-shaped
+  // 429 — where a whole-window wait is the only safe guess.
   var TFA_RATE_WAIT_S = 60;
+
+  // Pure: the server's retry_after (seconds) off a challenge 429, or null when it
+  // is absent/unusable. Deliberately strict — a countdown is a PROMISE that the
+  // form comes back, so only a finite positive number is honoured; 0, negatives,
+  // NaN and non-numeric junk all fall back to the fixed-window constant rather
+  // than painting a button that re-enables instantly into the same 429. Ceil,
+  // because a fractional 4.2s left still means the caller must wait 5.
+  function tfaRetryAfterSecs(r) {
+    var raw = r && r.data ? r.data.retry_after : null;
+    if (raw === null || raw === undefined || raw === "") return null;
+    var n = Number(raw);
+    if (!isFinite(n) || n <= 0) return null;
+    return Math.ceil(n);
+  }
 
   // Pure classifier for a POST /v1/auth/login result: does it carry a session,
   // a two-factor challenge, or an error? Shared by submitAuth + newSubmitAuth so
@@ -3210,7 +3445,8 @@
     if (r && r.ok && r.data && r.data.token) {
       return { state: "success", token: r.data.token, team_id: (r.data.team_id != null ? r.data.team_id : null) };
     }
-    if (r && r.status === 429) return { state: "rate_limited" };
+    // The 429 carries the server's remaining window; null when it didn't say.
+    if (r && r.status === 429) return { state: "rate_limited", retryAfter: tfaRetryAfterSecs(r) };
     if (r && (r.status === 401 || (r.data && r.data.error === "invalid_code"))) return { state: "invalid_code" };
     return { state: "error" };
   }
@@ -3310,12 +3546,16 @@
       if (input && input.focus) input.focus();
     }
 
-    function paintRateLimited() {
-      root.innerHTML = twoFactorCardHtml({ mode: mode, rateLimited: true, waitSecs: TFA_RATE_WAIT_S, back: !!opts.onBack });
+    // `secs` is the server's retry_after when it sent one; null falls back to the
+    // fixed-window constant. Both the rendered label and the live countdown read
+    // the SAME number, so the button never re-enables before the limiter would.
+    function paintRateLimited(secs) {
+      var wait = secs != null && secs > 0 ? secs : TFA_RATE_WAIT_S;
+      root.innerHTML = twoFactorCardHtml({ mode: mode, rateLimited: true, waitSecs: wait, back: !!opts.onBack });
       wireBack();
       var btn = root.querySelector("#tfa-submit");
       if (!btn) return;
-      var left = TFA_RATE_WAIT_S;
+      var left = wait;
       var tick = setInterval(function () {
         left -= 1;
         if (left <= 0) { clearInterval(tick); paint(); } // the live form returns
@@ -3336,7 +3576,7 @@
       return api("POST", "/v1/auth/two-factor-challenge", body, { noAuth: true }).then(function (r) {
         var out = twoFactorChallengeOutcome(r);
         if (out.state === "success") { if (opts.onDone) opts.onDone({ token: out.token, team_id: out.team_id }); return; }
-        if (out.state === "rate_limited") { paintRateLimited(); return; }
+        if (out.state === "rate_limited") { paintRateLimited(out.retryAfter); return; }
         paint(out.state); // "invalid_code" (re-enabled form) | "error"
       });
     }
@@ -6382,7 +6622,7 @@
   }
 
   // Pure: one webhook row. Renders url/events/active + the autodisable banner, an
-  // action bar (toggle / rotate / deliveries / delete), and copy-as-CLI chips for
+  // action bar (toggle / rotate / test-send / deliveries / delete), and copy-as-CLI chips for
   // every action. State is rendered from the ROW, so a reconciled response
   // repaints the true state (D55: pre-C6.5 instances degrade to their stale
   // stamps honestly rather than to an optimistic guess).
@@ -6419,6 +6659,14 @@
         '<button class="btn btn-sm" type="button" data-wh-edit>Edit</button>' +
         toggleBtn +
         '<button class="btn btn-sm" type="button" data-wh-rotate>Rotate secret</button>' +
+        // GR45 test-send. The proxy route has been live all along
+        // (POST /v1/barkparks/:id/api/webhooks/:webhook_id/test-send → the
+        // instance's one-shot synthetic probe, SINGLE attempt, delivery row
+        // written with a NULL endpoint_id so a failed test never perturbs the
+        // auto-disable streak). No copy-as-CLI chip beside it on purpose: `bp
+        // cloud webhook` has no test-send verb today, and a chip for a command
+        // that does not exist is worse than no chip (backlog gr-bl-cli-test-send).
+        '<button class="btn btn-sm" type="button" data-wh-test>Send test</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
         '<span class="wh-toggle-note" role="status" hidden></span>' +
@@ -6515,6 +6763,65 @@
     if (!hasDetail) return eventId != null && eventId !== "" ? "event #" + eventId : "Delivery replayed";
     var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
     return "Delivery replayed · " + deliveryStatusLabel(d) + latency;
+  }
+
+  // Pure: the test-send verdict, in the SAME grammar replayToastBody uses — the
+  // toast names the endpoint's REAL answer (status + latency), never a canned
+  // "Sent!". The instance delivers the probe in one synchronous attempt and
+  // returns the delivery row, so there is normally a real verdict to report; the
+  // detail-free fallback only fires against an older instance whose response
+  // carries no status at all.
+  function testSendToastBody(delivery) {
+    var d = delivery || {};
+    var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
+    if (!hasDetail) return "Test payload delivered to the endpoint URL.";
+    var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
+    return "Test delivered · " + deliveryStatusLabel(d) + latency;
+  }
+
+  // REVIEW FIX (GR80 leg 3): the verdict is THREE-WAY, not two-way. deliveryTone
+  // answers ok | danger | info, and `info` is the honest third case — a delivery
+  // still `pending`, or an older instance that echoed no status at all. Folding
+  // it into "not accepted" produced a self-contradicting toast: a red "Endpoint
+  // rejected the test" headline over the body "Test payload delivered to the
+  // endpoint URL." Neither half was true. An unknown answer is reported as
+  // unknown; only a real non-2xx is an accusation against the endpoint.
+  function testSendVerdict(delivery) {
+    var tone = deliveryTone(delivery);
+    if (tone === "ok") return "accepted";
+    if (tone === "danger") return "rejected";
+    return "unconfirmed";
+  }
+
+  // Pure: did the endpoint ACCEPT the test? A 2xx is the only success. Anything
+  // else is NOT reported as success — the request succeeded, the delivery did
+  // not, and conflating those is how a broken endpoint gets a green toast.
+  function testSendAccepted(delivery) {
+    return testSendVerdict(delivery) === "accepted";
+  }
+
+  // Pure: the toast for one test-send verdict — title, kind and body resolved
+  // together so the headline can never contradict the sentence under it.
+  function testSendToast(delivery) {
+    var verdict = testSendVerdict(delivery);
+    if (verdict === "accepted") {
+      return { kind: "success", title: "Endpoint accepted the test", body: testSendToastBody(delivery) };
+    }
+    if (verdict === "rejected") {
+      return { kind: "error", title: "Endpoint rejected the test", body: testSendToastBody(delivery) };
+    }
+    // Unknown: either the row is still `pending` (the endpoint has not answered)
+    // or the instance echoed no status at all. Both read as "sent, verdict
+    // unknown" — never as a green tick and never as an accusation.
+    var d = delivery || {};
+    var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
+    return {
+      kind: "info",
+      title: "Test sent — no verdict yet",
+      body: hasDetail
+        ? testSendToastBody(delivery) + " — the endpoint hasn't answered yet."
+        : "Test payload delivered to the endpoint URL. This instance didn't report what the endpoint answered.",
+    };
   }
 
   // Pure: the enable/disable toggle's rendered state under the D18 optimistic
@@ -6728,6 +7035,38 @@
     on("[data-wh-delete]", function () { confirmDeleteWebhook(listBox, bp, ds, wh); });
     var del = card.querySelector("[data-wh-deliveries]");
     if (del) del.addEventListener("click", function () { toggleDeliveries(listBox, bp, ds, wh, del); });
+    var tst = card.querySelector("[data-wh-test]");
+    if (tst) tst.addEventListener("click", function () { sendWebhookTest(listBox, bp, ds, wh, tst); });
+  }
+
+  // GR45 test-send. Fires one synthetic `webhook.test` envelope at the endpoint
+  // and reports what the endpoint ACTUALLY answered. Three honesty rules, each
+  // borrowed from the replay affordance next to it (D-05 / D18):
+  //   • no confirm — a test is non-destructive and writes a delivery row with a
+  //     NULL endpoint_id, so it cannot auto-disable the endpoint it probes;
+  //   • the button owns its in-flight state, so the click has feedback before
+  //     the round-trip lands;
+  //   • the toast reconciles on the RESPONSE (data.data.delivery — the same
+  //     proxy envelope replay reads), and a non-2xx answer toasts as an ERROR.
+  //     A disabled endpoint is still probed at its URL, exactly like a replay.
+  // The open delivery log is refreshed after, so the new row appears where the
+  // operator is already looking.
+  function sendWebhookTest(listBox, bp, ds, wh, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+    var restore = function () { if (btn) { btn.disabled = false; btn.textContent = "Send test"; } };
+    api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/test-send", ds), {}).then(function (r) {
+      restore();
+      if (!r.ok) {
+        toast({ kind: "error", title: "Couldn't send the test", body: webhookMutationError(r.data) });
+        return;
+      }
+      var delivery = r.data && r.data.data && r.data.data.delivery;
+      toast(testSendToast(delivery));
+      // Only refresh a log the operator already has open — never expand it for them.
+      var card = findWhCard(listBox, wh.id);
+      var box = card && card.querySelector("[data-wh-deliveries-box]");
+      if (box && !box.hidden) loadDeliveries(listBox, bp, ds, wh);
+    });
   }
 
   // Replace ONE card node from a reconciled webhook row and re-wire it. Isolates
@@ -11077,12 +11416,29 @@
   // rows normalise to mergeTimeline's audit-entry shape; actor display is
   // backend-true (audit_json carries actor.email).
   //
-  // Filters are BACKEND-TRUE: GET /v1/audit accepts only target_type/target_id
-  // (router.ex ~1494), so the chips filter by target_type server-side. Actor /
-  // verb-class filtering has NO server params (backlog gr-backlog-audit-filter-
-  // params) — surfacing it as a client-only filter over a keyset-paginated feed
-  // would lie about completeness (it would filter one page, not the trail), so
-  // it is deliberately absent this wave.
+  // Filters are BACKEND-TRUE, on all THREE axes (GR80 leg 2). GET /v1/audit now
+  // accepts target_type/target_id, actor_user_id AND action_prefix (router.ex —
+  // `?actor_user_id= / ?action_prefix= narrow it`), every one of them applied
+  // INSIDE the Ecto query (accounts.ex maybe_audit_actor / maybe_audit_
+  // action_prefix). That is what makes them legitimate here: a client-side
+  // filter over a keyset-paginated feed would filter ONE PAGE and call it the
+  // trail. These filter the trail, and Load more keeps paging the filtered trail.
+  //
+  // Server-side guards worth knowing while reading the chips below:
+  //   • actor_user_id is Ecto.UUID.cast-guarded — a non-UUID is simply NOT a
+  //     filter (no 500), so a stale/garbage actor id degrades to "everyone"
+  //     rather than to an error state.
+  //   • action_prefix is LIKE '<prefix>%' with the caller's %, _ and \ ESCAPED,
+  //     so a prefix can never match more than it spells. `_` is a real character
+  //     in the vocabulary (notifications.channels_changed) and stays literal.
+  //   • a system/webhook event carries a NIL actor, so an actor filter never
+  //     matches one — which is honest, not a gap.
+  //   • target_type is sent WITHOUT a target_id from this row. Until this wave's
+  //     review that combination was a silent no-op server-side (accounts.ex
+  //     maybe_audit_target guarded on BOTH being binaries, so the chip lit and
+  //     the server answered the whole unfiltered trail); the widened clause makes
+  //     the Target axis genuinely narrow. This SPA change and that server change
+  //     must ship together — a chip that lies is worse than no chip.
 
   // The server-true target_type filter set — the two customer-facing nouns with
   // their own places (#fleet, #sites). `null` = the whole trail.
@@ -11091,7 +11447,75 @@
     { type: "barkpark", label: "Instances" },
     { type: "site", label: "Sites" }
   ];
-  var activityFilter = { target_type: null };
+
+  // The verb-class axis (action_prefix). Each value is a REAL prefix of the
+  // closed `noun.verb` vocabulary in AuditEvent @actions — never an invented one,
+  // because a prefix that matches nothing renders as a permanently-empty feed
+  // that looks like a bug. "site.deploy" is deliberately a partial noun: it is a
+  // legal prefix and it isolates site.deploy_requested from the rest of site.*,
+  // which is the triage question an admin actually asks.
+  var ACTIVITY_ACTION_FILTERS = [
+    { prefix: null, label: "All activity" },
+    { prefix: "site.deploy", label: "Deploys" },
+    { prefix: "webhook", label: "Webhooks" },
+    { prefix: "member", label: "Members" },
+    { prefix: "token", label: "Tokens" },
+    { prefix: "subscription", label: "Billing" }
+  ];
+
+  var activityFilter = { target_type: null, actor_user_id: null, action_prefix: null };
+
+  // The actor axis is DATA, not a constant: it is the team's member list, read
+  // once per session from GET /v1/teams/:id/members (the same route the Members
+  // settings panel uses). Until it lands — or if it can't be read at all — the
+  // axis degrades to "Everyone / Just me", built from /v1/me's own user id, so
+  // the axis is never a fake and never an empty row.
+  var activityActors = null; // [{id,email}] once read; null = not read yet
+  var activityActorsTried = false;
+
+  // Pure: the actor chip set from a member list + the /v1/me envelope. Never
+  // fabricates a name — a member with no email renders its short id.
+  function activityActorFilters(members, meEnv) {
+    var meId = (meEnv && meEnv.user && meEnv.user.id) || null;
+    var out = [{ id: null, label: "Everyone" }];
+    var list = Array.isArray(members) ? members : [];
+    if (!list.length) {
+      // No member list: the one actor we can name for certain is the caller.
+      if (meId) out.push({ id: meId, label: "Just me" });
+      return out;
+    }
+    list.forEach(function (m) {
+      var id = (m && (m.user_id || m.id)) || null;
+      if (!id) return;
+      var email = (m && m.email) || (m && m.user && m.user.email) || "";
+      var label = id === meId
+        ? "Just me"
+        : (email ? String(email).split("@")[0] : String(id).slice(0, 8));
+      out.push({ id: id, label: label });
+    });
+    return out;
+  }
+
+  // Read the member list once, then repaint the chip row in place. Failure is
+  // SILENT by design: the actor axis already has a working degraded shape, so a
+  // 403/404 here must not paint an error over a feed that loaded fine.
+  function ensureActivityActors() {
+    if (activityActorsTried) return;
+    activityActorsTried = true;
+    var tid = meCache && meCache.team && meCache.team.id;
+    if (!tid) return;
+    api("GET", "/v1/teams/" + encodeURIComponent(tid) + "/members").then(function (r) {
+      var list = (r && r.ok && r.data && r.data.members) || null;
+      if (!list || !list.length) return;
+      activityActors = list;
+      paintActivityFilters();
+    });
+  }
+
+  // Is ANY axis narrowing the trail right now? Drives the empty-state sentence.
+  function activityFiltered() {
+    return !!(activityFilter.target_type || activityFilter.actor_user_id || activityFilter.action_prefix);
+  }
   // The full accumulated normalised feed (grows with Load more), plus the
   // per-entry / per-group open memory (a repaint must re-open what was read).
   var activityEntries = null;
@@ -11116,27 +11540,52 @@
   }
 
   // The GET /v1/audit URL for the current filter + keyset cursor. Only the
-  // server-supported params (limit, before, target_type) are ever sent.
+  // server-supported params (limit, before, target_type, actor_user_id,
+  // action_prefix) are ever sent, and an unset axis sends NOTHING — an empty
+  // string would be an equally-honest no-op server-side, but omitting it keeps
+  // the request URL readable in the network panel, which is how a filter bug
+  // gets found.
   function activityQuery(before) {
     var q = "/v1/audit?limit=" + ACTIVITY_PAGE;
     if (activityFilter.target_type) q += "&target_type=" + encodeURIComponent(activityFilter.target_type);
+    if (activityFilter.actor_user_id) q += "&actor_user_id=" + encodeURIComponent(activityFilter.actor_user_id);
+    if (activityFilter.action_prefix) q += "&action_prefix=" + encodeURIComponent(activityFilter.action_prefix);
     if (before) q += "&before=" + encodeURIComponent(before);
     return q;
   }
 
-  // The filter chip row. Static per-branch class strings (the active/idle class
-  // is a full literal head, never a concat modifier) so __css_check resolves
-  // every class to a real rule. Rendered into the static #activity-filters slot.
+  // Pure: ONE chip. `axis` is the query param it drives; `value` is null for the
+  // axis's "all" chip. The class string is a STATIC per-branch literal — a full
+  // 'class="actfilter-chip is-active"' head, never "actfilter-chip" + modifier —
+  // because __css_check's static walker head-classifies concat sites and an
+  // inline modifier concat is an E3 hard-fail (the same discipline the row has
+  // carried since I-01; do not "simplify" it back into a ternary inside the
+  // attribute).
+  function actfilterChipHtml(axis, value, label, active) {
+    var tail = ' type="button" data-actfilter-axis="' + esc(axis) +
+      '" data-actfilter="' + esc(String(value || "")) +
+      '" aria-pressed="' + (active ? "true" : "false") + '">' + esc(label) + "</button>";
+    return active
+      ? '<button class="actfilter-chip is-active"' + tail
+      : '<button class="actfilter-chip"' + tail;
+  }
+
+  // The filter chip row — three server-true axes in the one static
+  // #activity-filters slot, each behind its own dim label so the groups read as
+  // groups rather than as one long undifferentiated chip run.
   function activityFiltersHtml() {
-    var cur = activityFilter.target_type || null;
-    return ACTIVITY_FILTERS.map(function (f) {
-      var active = cur === f.type;
-      var tail = ' type="button" data-actfilter="' + esc(String(f.type || "")) +
-        '" aria-pressed="' + (active ? "true" : "false") + '">' + esc(f.label) + "</button>";
-      return active
-        ? '<button class="actfilter-chip is-active"' + tail
-        : '<button class="actfilter-chip"' + tail;
+    var target = ACTIVITY_FILTERS.map(function (f) {
+      return actfilterChipHtml("target_type", f.type, f.label, (activityFilter.target_type || null) === f.type);
     }).join("");
+    var action = ACTIVITY_ACTION_FILTERS.map(function (f) {
+      return actfilterChipHtml("action_prefix", f.prefix, f.label, (activityFilter.action_prefix || null) === f.prefix);
+    }).join("");
+    var actors = activityActorFilters(activityActors, meCache).map(function (f) {
+      return actfilterChipHtml("actor_user_id", f.id, f.label, (activityFilter.actor_user_id || null) === f.id);
+    }).join("");
+    return '<span class="dim">Target</span>' + target +
+      '<span class="dim">Kind</span>' + action +
+      '<span class="dim">Who</span>' + actors;
   }
 
   function paintActivityFilters() {
@@ -11151,8 +11600,8 @@
     if (!body) return;
     var entries = activityEntries || [];
     if (!entries.length) {
-      var msg = activityFilter.target_type
-        ? "No activity for this filter yet."
+      var msg = activityFiltered()
+        ? "No activity matches these filters. The trail itself may not be empty — widen a filter to see the rest."
         : "Launches, removals, site changes, and subscription updates show up here.";
       body.innerHTML = '<div class="empty-state"><h2>No activity yet</h2><p>' + esc(msg) + "</p></div>";
       return;
@@ -11170,6 +11619,7 @@
     var body = $("#activity-body");
     body.innerHTML = '<div class="loading">Loading activity&hellip;</div>';
     paintActivityFilters();
+    ensureActivityActors();
     api("GET", activityQuery(null)).then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
@@ -11250,10 +11700,14 @@
     if (filters && filters.addEventListener) filters.addEventListener("click", function (e) {
       var chip = e.target && e.target.closest ? e.target.closest("[data-actfilter]") : null;
       if (!chip) return;
+      // The axis attribute tells us WHICH param the chip drives; an older chip
+      // without one is a target_type chip (the only axis that existed before).
+      var axis = chip.getAttribute("data-actfilter-axis") || "target_type";
+      if (axis !== "target_type" && axis !== "actor_user_id" && axis !== "action_prefix") return;
       var next = chip.getAttribute("data-actfilter") || "";
       next = next || null;
-      if ((activityFilter.target_type || null) === next) return; // re-click = no-op
-      activityFilter.target_type = next;
+      if ((activityFilter[axis] || null) === next) return; // re-click = no-op
+      activityFilter[axis] = next;
       // A new filter is a new feed: its open memory doesn't carry.
       activityExpanded = {};
       activityGroupOpen = {};
@@ -14888,7 +15342,13 @@
       activateCodeChip(code) +
       '<div class="rail-row"><span class="k">Device</span><span class="v plain">' +
         esc(data.client_name || "Unknown device") + "</span></div>" +
-      (data.ip_address ? '<div class="rail-row"><span class="k">IP address</span><span class="v">' + esc(data.ip_address) + "</span></div>" : "") +
+      // GR81 — no "IP address" rail row. The inspect body's ip_address is the
+      // Docker bridge gateway (172.18.0.1) for EVERY device, so on the one screen
+      // where an IP would actually be load-bearing ("is this machine mine?") it
+      // is a constant, and a constant can only mislead. See the full reasoning at
+      // sessionRowHtml; REVERT both sites together when gr-bl-peer-ip-container
+      // lands a real per-client peer IP. Device + client + expiry still carry the
+      // identification weight, and they genuinely vary.
       (data.user_agent ? '<div class="rail-row"><span class="k">Client</span><span class="v plain">' + esc(data.user_agent) + "</span></div>" : "") +
       (expiry ? '<div class="rail-row"><span class="k">Expiry</span><span class="v plain">' + esc(expiry) + "</span></div>" : "");
     activateSetBody(activatePanel(
@@ -16039,6 +16499,8 @@
       loginResponseKind: loginResponseKind, twoFactorChallengeOutcome: twoFactorChallengeOutcome,
       twoFactorCardHtml: twoFactorCardHtml, twoFactorErrorCopy: twoFactorErrorCopy,
       mountTwoFactorCard: mountTwoFactorCard, twoFactorRateWaitS: TFA_RATE_WAIT_S,
+      // GR80 leg 1: the challenge countdown now rides the server's retry_after.
+      tfaRetryAfterSecs: tfaRetryAfterSecs,
       // bp-login-ux W1 — /activate device-login approve page pure helpers.
       normalizeUserCode: normalizeUserCode, userCodeComplete: userCodeComplete,
       activateCodeFromSearch: activateCodeFromSearch, activateInspectState: activateInspectState,
@@ -16170,6 +16632,9 @@
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
       deliveryStatusLabel: deliveryStatusLabel, deliveryRowHtml: deliveryRowHtml,
       replayToastBody: replayToastBody, hookToggleState: hookToggleState,
+      // GR80 leg 3: the webhook test-send verdict helpers (pure).
+      testSendToastBody: testSendToastBody, testSendAccepted: testSendAccepted,
+      testSendVerdict: testSendVerdict, testSendToast: testSendToast,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
       // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.
@@ -16226,6 +16691,12 @@
       parseEnvBlob: parseEnvBlob, envModalBodyHtml: envModalBodyHtml,
       // I-01: the Activity feed — audit-row normalization + filter chips (pure).
       auditEntry: auditEntry, activityFiltersHtml: activityFiltersHtml,
+      // GR80 leg 2: the three-axis /v1/audit filter grammar (target_type +
+      // actor_user_id + action_prefix), its URL builder, and the actor-chip
+      // derivation — pure, so the harness can pin the exact request URLs.
+      activityQuery: activityQuery, activityFilterState: activityFilter,
+      activityActorFilters: activityActorFilters, actfilterChipHtml: actfilterChipHtml,
+      activityActionFilters: ACTIVITY_ACTION_FILTERS.slice(),
       parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
       inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
@@ -16462,6 +16933,12 @@
       notifEmailSectionHtml: notifEmailSectionHtml, notifChannelsSectionHtml: notifChannelsSectionHtml,
       notifChannelRowHtml: notifChannelRowHtml, notifMatrixSectionHtml: notifMatrixSectionHtml,
       notifMatrixCellHtml: notifMatrixCellHtml, notifDeliveriesShellHtml: notifDeliveriesShellHtml,
+      // GR79 leg 4: the delivery-log filter panel — the request-URL builder, the
+      // keyset cursor, the chip row and the filter-aware body (all pure).
+      notifDeliveriesQuery: notifDeliveriesQuery, notifDeliveriesCursor: notifDeliveriesCursor,
+      notifDeliveryFiltersHtml: notifDeliveryFiltersHtml, notifDeliveryChipHtml: notifDeliveryChipHtml,
+      notifDeliveriesBodyHtml: notifDeliveriesBodyHtml, notifDeliveryFilterState: notifDeliveryFilter,
+      notifDeliveryPage: NOTIF_DELIVERY_PAGE,
       notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
     });
   }
