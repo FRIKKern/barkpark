@@ -217,8 +217,39 @@ export function admitRecipe(input = {}) {
 
 // (subject, quantity). NUL-joined because neither field may contain it, so no
 // pair of distinct rows can collide by concatenation.
+//
+// Defensive about types on purpose: admitRecipe guarantees strings on the WRITE
+// path, but the fold reads bytes off disk that nothing re-admits, so a
+// hand-edited or truncated file can present a number here. See usableRow.
 export function recipeKey(recipe) {
-  return `${(recipe?.subject ?? "").trim()}\u0000${(recipe?.quantity ?? "").trim()}`;
+  const part = (v) => (typeof v === "string" ? v.trim() : "");
+  return `${part(recipe?.subject)}\u0000${part(recipe?.quantity)}`;
+}
+
+// Is this on-disk row usable by the fold?
+//
+// THE WRITE PATH IS NOT THE READ PATH. admitRecipe gates everything this module
+// WRITES, but the fold reads whatever is in the directory — a hand edit, a
+// truncated write, a row from a future schema. Two failure modes were live and
+// both are defects this module exists to make impossible, committed inside it:
+//
+//   - a non-string subject/quantity threw out of recipeKey, so ONE bad row took
+//     down the WHOLE fold. D6 calls a fold that reports a smaller, cleaner,
+//     wrong world a defect; a fold that reports NO world because a single byte
+//     rotted is worse, and it fails fatally in the one module that promises to
+//     fail informatively (`unreadable[]`).
+//   - a null row, a bare string, or a row with no subject silently keyed to the
+//     empty pair and merged every malformed row into one bogus entry — garbage
+//     accepted as a subject, the mirror defect.
+//
+// Both now land in `unreadable[]`, named, with file and index. Reported, never
+// skipped, never fatal.
+function usableRow(row) {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return "a row must be a plain object";
+  if (typeof row.subject !== "string" || row.subject.trim() === "") return "subject must be a non-empty string";
+  if (typeof row.quantity !== "string" || row.quantity.trim() === "") return "quantity must be a non-empty string";
+  if (typeof row.rerun !== "string" || row.rerun.trim() === "") return "rerun must be a non-empty string — the row IS the recipe";
+  return null;
 }
 
 export function digest(text) {
@@ -350,7 +381,19 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
   let rowCount = 0;
 
   for (const run of runs) {
-    for (const row of run.recipes) {
+    run.recipes.forEach((row, index) => {
+      const bad = usableRow(row);
+      if (bad !== null) {
+        // Reported at row granularity, with enough to find it by hand. The
+        // fold continues: one rotten row must never cost the other files.
+        unreadable.push({
+          file: run.file,
+          index,
+          reason: "MALFORMED-ROW",
+          message: `MALFORMED-ROW: ${run.file} row ${index} — ${bad}. The row is NOT folded; every other row is.`,
+        });
+        return;
+      }
       rowCount += 1;
       const key = recipeKey(row);
       if (!byKey.has(key)) {
@@ -369,7 +412,7 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
         run_id: run.run_id,
         file: run.file,
       });
-    }
+    });
   }
 
   const entries = [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -446,6 +489,14 @@ function selftest() {
         { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat b", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
       ];
       return foldLedger(runs).conflicts.length === 1;
+    }],
+    ["a rotten on-disk row is reported, and does not take the fold down with it", () => {
+      const folded = foldLedger([
+        { file: "good.json", run_id: "g", recipes: [{ subject: "s", quantity: "q", rerun: "cat a", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+        { file: "rot.json", run_id: "r", recipes: [{ subject: 42, quantity: "q", rerun: "cat a" }, null] },
+      ]);
+      return folded.entries.length === 1 && folded.unreadable.length === 2
+        && folded.unreadable.every((u) => u.reason === "MALFORMED-ROW");
     }],
     ["an honest row is ADMITTED (the control does not just say no to everything)", () => {
       const v = admitRecipe({ subject: "api/lib/x.ex", quantity: "line count", rerun: "wc -l api/lib/x.ex", deps: [], observed_at: "2026-07-20T00:00:00Z" });

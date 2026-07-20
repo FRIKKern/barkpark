@@ -430,3 +430,46 @@ test("the CLI folds a directory and exits nonzero only on an unreadable file", (
   const dirty = spawnSync(process.execPath, [LEDGER_SRC, "fold", dir], { encoding: "utf8" });
   assert.equal(dirty.status, 1);
 });
+
+// ── the fold survives a rotten row ───────────────────────────────────────────
+//
+// THE WRITE PATH IS NOT THE READ PATH. Every test above proves admitRecipe
+// gates what this module WRITES. Nothing re-admits what it READS: the fold
+// consumes bytes off disk that a hand edit, a truncated write or a future
+// schema can shape however it likes. Before the row guard, `{subject: 42}`
+// threw out of recipeKey and took the ENTIRE fold with it — including every
+// well-formed row in every other file — and a null row or a subject-less row
+// silently keyed to the empty pair, merging all of them into one bogus entry.
+// Garbage accepted as a subject and one rotten byte costing the whole store are
+// the two defects this module exists to make impossible.
+
+test("a non-string subject does not take down the whole fold", () => {
+  const folded = foldLedger([
+    { file: "good.json", run_id: "g", recipes: [{ subject: "api/x.ex", quantity: "lines", rerun: "wc -l api/x.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+    { file: "rot.json", run_id: "r", recipes: [{ subject: 42, quantity: "q", rerun: "cat a" }] },
+  ]);
+  assert.equal(folded.entries.length, 1, "the well-formed row in the OTHER file must survive");
+  assert.equal(folded.stats.rows, 1);
+  assert.equal(folded.unreadable.length, 1);
+  assert.equal(folded.unreadable[0].reason, "MALFORMED-ROW");
+  assert.equal(folded.unreadable[0].file, "rot.json");
+  assert.equal(folded.unreadable[0].index, 0, "the report must name WHICH row, or it cannot be found by hand");
+});
+
+test("null rows, bare strings and subject-less rows are REPORTED, never merged into one bogus entry", () => {
+  const folded = foldLedger([
+    { file: "rot.json", run_id: "r", recipes: [null, "hello", {}, { quantity: "q", rerun: "cat a" }, { subject: "s", quantity: "q" }] },
+  ]);
+  assert.equal(folded.entries.length, 0, "not one of these is a subject — none may become an entry");
+  assert.equal(folded.stats.rows, 0);
+  assert.equal(folded.unreadable.length, 5);
+  for (const u of folded.unreadable) {
+    assert.equal(u.reason, "MALFORMED-ROW");
+    assert.match(u.message, /row \d+/);
+  }
+});
+
+test("a rotten row is reported, not silently skipped — the fold's own D6 rule applied at row grain", () => {
+  const folded = foldLedger([{ file: "rot.json", run_id: "r", recipes: [{ subject: 1, quantity: "q", rerun: "cat a" }] }]);
+  assert.equal(folded.stats.unreadable, 1, "stats must carry it, or a caller reading stats alone sees a clean, smaller, wrong world");
+});
