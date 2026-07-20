@@ -87,7 +87,8 @@ what the table holds.
 | Class | count | stamp PRESENT (leg A) | stamp CLEARED (leg B) | writer |
 |---|---|---|---|---|
 | plugin-declared | 34 | **SURVIVE** (guard fires, `:ok` without update) | **REVERT** (guard released, `Repo.update` lands) | `Plugins.Bootstrap` |
-| `tag` | 1 | **REVERTS** (4 of the 8 guarded columns) | **REVERTS** (same 4) | `Content.TagRegistry` |
+| `tag` (at `3be27f0fd`) | 1 | **REVERTS** (4 of the 8 guarded columns) | **REVERTS** (same 4) | `Content.TagRegistry` |
+| `tag` (post wave-8 guard) | 1 | **SURVIVES** — see the correction in §2 below | **REVERTS** (4 of 8) | `Content.TagRegistry` |
 | `metric` | 1 | **SURVIVES** | **SURVIVES** | *nobody* |
 
 Behaviour per class was measured live on a real reboot by the wave-8 verify fleet and is
@@ -125,6 +126,29 @@ grep -c "pull_provenance\|Tenancy" api/lib/barkpark/content/tag_registry.ex
 before `register_all_schemas/0`, so `tag` is rewritten on **every** boot regardless of stamp
 (PDS-D125). That is why it appears in neither the SKIP set nor the REGISTER set — it is
 not on Bootstrap's path at all — and why it reverts on both legs.
+
+> **CORRECTION 2026-07-20 (review) — the paragraph above describes the engine as it stood
+> at the anchor sha `3be27f0fd`, and the SAME WAVE fixes it.** `pds-w8-tagregistry-guard`
+> gives `TagRegistry.register_attrs!/2` the shared `Tenancy.pulled_schema_row/2` predicate,
+> so from that merge onward `tag` is GUARDED on the update path. Three consequences a wave-9
+> reader must not miss:
+>
+> 1. **The class behaviour changes.** `tag` no longer "reverts on both legs". Post-merge it
+>    SURVIVES the stamped leg (like the 34) and REVERTS the cleared leg. Only its
+>    INSERT-when-absent stays unconditional, on purpose (PDS-D126/D12).
+> 2. **The `grep -c "pull_provenance\|Tenancy"` command above returns NON-ZERO post-merge.**
+>    Its `0` is evidence *of the defect*, reproducible only at or before `3be27f0fd`.
+> 3. **`tag` stays OUT of the sentinel roster regardless.** The `NOT IN ('tag','metric')`
+>    exclusion is unchanged and still correct — but the reason narrows. It is no longer
+>    "tag is unguarded"; it is that `tag` is written by a DIFFERENT writer whose skips are
+>    logged under its own `TagRegistry:` prefix and must not be summed into Bootstrap's
+>    count. §5's tripwire already specifies the Bootstrap-scoped grep, and the harness was
+>    corrected at review to match it (an unscoped count reads 35 against 34 and reds ROSTER
+>    DRIFT on a healthy target).
+>
+> What does NOT change: the arithmetic of §1. The 34 and the `rows=36` come from the wave-7
+> transcript, which predates this fix, and the SKIP/REGISTER sets it extracts are Bootstrap's
+> alone. The census baseline is intact; only `tag`'s per-leg row in §2's table moves.
 
 **`metric` — never walked, because Bootstrap iterates the registry, not the table.**
 `register_all_schemas/0` (`bootstrap.ex:61`) begins `plugins = Registry.all()` (`:63`) and
