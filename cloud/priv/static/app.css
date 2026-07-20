@@ -983,7 +983,7 @@ select.form-input {
    every card that still FITS. Shared primitive on purpose — every tall modal
    (launch, env editor, confirm sheets) inherits the same bug, so a
    `:has(.am-modal)`-scoped patch would only move it. */
-   REVIEW ADDENDUM: making the root a scroll container also opens a scroll-CHAIN
+   /* REVIEW ADDENDUM: making the root a scroll container also opens a scroll-CHAIN
    into the shell behind it — the shell is `inert` (pointer/keyboard) but inert
    does not stop a wheel, so reaching the bottom of a tall modal would start
    scrolling the page underneath. `overscroll-behavior: contain` closes that;
