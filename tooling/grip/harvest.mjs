@@ -308,7 +308,12 @@ const CHECKS = [
   {
     name: "corpus is size-bounded (fixture under 4 MB)",
     check: (c, _s, sizes) => sizes.corpus < 4 * 1024 * 1024,
-    plant: null, // size is a property of the bytes on disk, not of the parsed object
+    // The subject is a byte count, not the parsed object, so the plant mutates
+    // the (cloned) sizes the selftest hands it — the bound is a real control,
+    // not the one exemption in the set.
+    plant: (_c, _s, sizes) => {
+      sizes.corpus = 8 * 1024 * 1024;
+    },
   },
   {
     name: "every corpus evidence row carries its run id and a non-empty string",
@@ -332,19 +337,53 @@ const CHECKS = [
     },
   },
   {
-    name: "every specimen carries wrong_evidence, honest_counterpart and rerun",
+    name: "every specimen carries wrong_evidence and honest_counterpart",
     check: (_c, s) =>
       s.specimens.every(
         (x) =>
           typeof x.wrong_evidence === "string" &&
           x.wrong_evidence.length > 0 &&
           typeof x.honest_counterpart === "string" &&
-          x.honest_counterpart.length > 0 &&
-          typeof x.rerun === "string" &&
-          x.rerun.length > 0,
+          x.honest_counterpart.length > 0,
       ),
     plant: (_c, s) => {
-      s.specimens[0] = { ...s.specimens[0], rerun: "" };
+      s.specimens[0] = { ...s.specimens[0], honest_counterpart: "" };
+    },
+  },
+  {
+    // A RATIFIED specimen must carry a real command. An UNRATIFIED one has no
+    // ratified command to carry and must say so in `rerun: null` +
+    // no_rerun_reason — never in prose parked in the `rerun` field. Prose there
+    // passes a presence check VACUOUSLY, and downstream (the executor, the
+    // acceptance suite) would hand "n/a — the ratified table did not…" to
+    // /bin/sh. The absence of a command is data; it must be typed as absence.
+    name: "ratified specimens carry an executable rerun; unratified carry rerun:null + a reason",
+    check: (_c, s) =>
+      s.specimens.every((x) => {
+        if (x.ratified === true) {
+          return typeof x.rerun === "string" && x.rerun.trim().length > 0 && !/^n\/a\b/i.test(x.rerun.trim());
+        }
+        return x.rerun === null && typeof x.no_rerun_reason === "string" && x.no_rerun_reason.length > 20;
+      }),
+    plant: (_c, s) => {
+      const u = s.specimens.find((x) => x.ratified === false);
+      if (u) u.rerun = "n/a — no command was ratified for this row";
+    },
+  },
+  {
+    // The no_lag side was CONSTRUCTED, not observed — its box_head/origin_main
+    // are placeholder strings. Slice 6 consumes this fixture; without the flag
+    // it can read "<equal to origin_main>" as a commit id and build a proof on
+    // fiction. The flag is the fixture telling the truth about itself.
+    name: "specimen 1's no_lag side declares itself SYNTHETIC (its shas are placeholders)",
+    check: (_c, s) => {
+      const x = s.specimens.find((y) => y.id === 1);
+      const nl = x?.sides?.no_lag;
+      return nl?.synthetic === true && typeof nl.synthetic_note === "string" && nl.synthetic_note.length > 20;
+    },
+    plant: (_c, s) => {
+      const x = s.specimens.find((y) => y.id === 1);
+      if (x?.sides?.no_lag) delete x.sides.no_lag.synthetic;
     },
   },
   {
@@ -478,11 +517,16 @@ function runSelftest({ corpus, specimens, sizes }) {
     }
     const mc = clone(corpus);
     const ms = clone(specimens);
-    c.plant(mc, ms);
+    // sizes is cloned and handed to the plant too, so a check whose subject is
+    // the BYTE COUNT rather than the parsed object is still plantable. Without
+    // this it printed `skip` forever — honest, but an unproven control, and an
+    // unproven control is the vacuity D18 exists to forbid.
+    const msizes = clone(sizes);
+    c.plant(mc, ms, msizes);
     planted++;
     let stillPasses;
     try {
-      stillPasses = c.check(mc, ms, sizes) === true;
+      stillPasses = c.check(mc, ms, msizes) === true;
     } catch {
       stillPasses = false; // a throw is a rejection, which is a firing control
     }

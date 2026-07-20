@@ -16,7 +16,14 @@
       "R3": "no fact is stored without a demonstration the method COULD have answered differently — rejection at WRITE time",
       "R4": "conflicting facts are BOTH stored and flagged, never resolved by write order"
     },
-    "caught_by_vocabulary": ["R1", "R2", "R3", "R4", "UNCAUGHT"],
+    "caught_by_vocabulary": [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "UNCAUGHT"
+    ],
+    "caught_by_is_a_hypothesis": "Every `caught_by` label below is a HYPOTHESIS for the acceptance suite (slice 6) to TEST, never a verified fact. This fixture's own gate checks its STRUCTURE, not its semantics: a specimen labelled R1 that R1 does not actually catch passes here and fails only in slice 6. Reading these labels as measured catches would be the level-skip this fixture documents, committed against the fixture itself.",
     "frozen_at": "2026-07-20",
     "freeze_doctrine": "Freeze the COMMAND and the identity of what was read (sha, ref, host). Never freeze a measured number as a standing assertion — numbers drift, and a frozen number encodes a fact that may already be false. Where a specimen names a figure, it is recorded as an observation WITH its observed_at, never as an assertion.",
     "rerun_verification": "Every `rerun` below was executed on 2026-07-20 from a clean worktree; `last_rerun` records what it returned. Re-run them — do not trust these transcripts.",
@@ -51,6 +58,8 @@
         },
         "no_lag": {
           "description": "The control NOT firing: box HEAD equals origin/main. The level-skip is still a level-skip — the L2 read simply happened to agree with L1 this time. This side is frozen so the specimen does not depend on the lag persisting; an auto-deploy can close it within the hour.",
+          "synthetic": true,
+          "synthetic_note": "CONSTRUCTED, not observed. The lag side was captured live; this side was hand-written because the box WAS behind at freeze time, so an equal-HEAD observation did not exist to capture. box_head and origin_main below are PLACEHOLDER STRINGS, not shas — any consumer that reads them as commit ids is reading fiction. The side exists to pin the ASSERTION (reject the L1 claim even when the answer agrees), never to supply data.",
           "box_head": "<equal to origin_main>",
           "origin_main": "<equal to box_head>",
           "commits_behind_observed": 0,
@@ -172,11 +181,12 @@
       "level_skip": "none — a unit/identity confusion at ONE level",
       "wrong_evidence": "the panel is 420px wide",
       "honest_counterpart": "The two figures measure different things (different element or different state), both read at the same level. Naming them as one quantity is the error.",
-      "rerun": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen.",
+      "rerun": null,
       "caught_by": "UNCAUGHT",
       "uncaught_reason": "Both values were read at the same authority level, so R1 — which only compares read-level against claim-level — has nothing to compare and structurally cannot fire. This is the same class as specimen 4 and needs R2's dependency recording, not R1.",
       "why_frozen_anyway": "Frozen as an explicit NEGATIVE control: the suite must NOT claim to catch it. A fixture that quietly counts this as a catch would inflate the grammar's measured power, which is the vacuity this epic exists to prevent.",
-      "number_is_frozen": false
+      "number_is_frozen": false,
+      "no_rerun_reason": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen."
     },
     {
       "id": 102,
@@ -185,11 +195,12 @@
       "level_skip": "none — an R4 conflict, not a level-skip",
       "wrong_evidence": "the parent has 82 children",
       "honest_counterpart": "Two reads of the same quantity disagree (82 and 86). Neither is a promotion across levels; they are conflicting facts about one subject.",
-      "rerun": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen.",
+      "rerun": null,
       "caught_by": "UNCAUGHT",
       "uncaught_reason": "This is an R4 case (conflicting facts must BOTH be stored and flagged, never resolved by write order), not an R1 level-skip. R1 cannot fire on it. It belongs to the conflict engine in slice 5, keyed on (subject, quantity) — and per D7 it is only admissible at all if the quantity is a DISCRETE predicate rather than a drifting count.",
       "why_frozen_anyway": "Frozen as an explicit NEGATIVE control for the R1 grammar and as a positive fixture for the LATER R4 conflict engine. Labelled honestly so wave 1 cannot bank it as a catch.",
-      "number_is_frozen": false
+      "number_is_frozen": false,
+      "no_rerun_reason": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen."
     }
   ]
 }
