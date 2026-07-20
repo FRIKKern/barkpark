@@ -17,8 +17,15 @@
 //   node scripts/studio-desk-measure.mjs --json     # JSON matrix only
 //   node scripts/studio-desk-measure.mjs --doc=<slug>   # measure a NAMED document
 //   node scripts/studio-desk-measure.mjs --doc=any      # first row that opens
+//   node scripts/studio-desk-measure.mjs --out <path>   # ALSO save the run JSON
+//   node scripts/studio-desk-measure.mjs --help
 //
 // (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.)
+//
+// A run that is not written to disk survives only as terminal scrollback, and
+// this epic has already lost one 54-row sweep that way (D131) — it exists now
+// only as prose in a closed task, with one cell blank at byte level. `--out`
+// writes the complete run, and committed runs live in `scripts/measurements/`.
 //
 // ── The designed-in impossibilities ──────────────────────────────────────────
 // Each one makes a specific historical overturn structurally unreachable:
@@ -228,6 +235,75 @@ import path from 'node:path';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const JSON_ONLY = process.argv.includes('--json');
+
+/** Absolute path, with every symlink on it collapsed. `fs.realpathSync` throws
+ *  on a path that does not exist, which is a legitimate state for `argv[1]`
+ *  (`node --eval`, a REPL), so it falls back to plain resolution rather than
+ *  taking the process down. See the entrypoint guard at the bottom for WHY
+ *  this exists — it is the whole of D130. */
+function realResolve(p) {
+  const abs = path.resolve(p);
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/** `--out <path>` / `--out=<path>` — where to write the complete run JSON.
+ *  Returns null when the flag is absent (stdout stays the only output, which is
+ *  how the instrument behaved for its first two waves — see D131). */
+function resolveOutPath(argv = process.argv.slice(2)) {
+  const eq = argv.find((a) => a.startsWith('--out='));
+  let raw = eq ? eq.slice('--out='.length) : null;
+  if (raw === null) {
+    const i = argv.indexOf('--out');
+    if (i === -1) return null;
+    raw = argv[i + 1] ?? '';
+    if (raw.startsWith('-')) {
+      die(`--out was followed by \`${raw}\`, which is another flag, not a path. ` +
+          `Pass the file to write: --out scripts/measurements/<name>.json`);
+    }
+  }
+  raw = raw.trim();
+  if (!raw) die('--out was passed with an empty value — name the file to write the run JSON to');
+  return path.resolve(process.cwd(), raw);
+}
+
+const OUT_PATH = resolveOutPath();
+
+/** Function, not a const string: it interpolates DEFAULT_DOC, which is declared
+ *  below this point and would be in its temporal dead zone at module init. */
+function usage() {
+  return `
+studio-desk-measure.mjs — THE INSTRUMENT (charter D81: no gate authority).
+
+  Measures the DEPLOYED Studio desk in a real authenticated browser and prints a
+  matrix of 9 widths x 3 forced faces x 2 inspector states = 54 rows. 54 rows is
+  a COMPLETE run (D121); it is not a short one.
+
+USAGE
+  node scripts/studio-desk-measure.mjs [options]
+
+OPTIONS
+  --json              JSON matrix only — suppress the human table on stdout.
+  --doc=<slug>        Measure a NAMED document (default: ${DEFAULT_DOC}).
+  --doc=any           Drill the first Papers row that opens a paper surface.
+  --out <path>        Write the COMPLETE run JSON (all rows + run-level
+                      provenance) to <path>, creating parent directories.
+                      Committed runs live in scripts/measurements/. Without
+                      this the table exists only as terminal scrollback (D131).
+  -h, --help          This text.
+
+ENVIRONMENT
+  BP_DESK_DOC         Env form of --doc.
+
+NOTES
+  A full authenticated sweep takes ~30-60s observed (D115) — NOT the ~10 minutes
+  older comments claimed. It needs deployed guerrilla, ssh to the box for the
+  provenance bracket, and the guerrilla admin token in ~/.config/barkpark.
+`;
+}
 
 /** The COMMITTED default drill target (D97). It must be a document that exists,
  *  is published, and is not being rewritten by a concurrent wave — so it is one
@@ -1725,7 +1801,90 @@ async function main() {
         `  The JSON matrix below is unaffected and is the authoritative record.\n\n`);
     }
   }
+  if (OUT_PATH) writeRunArtifact(run, OUT_PATH);
+
   process.stdout.write(JSON.stringify(run, null, 2) + '\n');
+}
+
+/** Persist the COMPLETE run — every row plus a flattened run-level provenance
+ *  block — to disk (D131).
+ *
+ *  Why this exists: the instrument's first two waves could print a 54-row matrix
+ *  and nothing else. The wave-7 sweep therefore survives only as prose pasted
+ *  into a closed task's evidence field, with `viewport 500 / user-opened` blank
+ *  at byte level — a first-party data gap nobody can now go back and fill. A
+ *  table that cannot be retrieved gets re-derived, wrongly, by whoever needs it
+ *  next, which is this epic's chronic disease wearing a different hat.
+ *
+ *  `artifact` is a CONVENIENCE header, not a second source of truth: every field
+ *  in it is copied from the record below it, so a reader answering "what SHA,
+ *  which slot, how many rows, did the bracket hold" does not have to reassemble
+ *  them from four places and get one wrong. The full record stays authoritative.
+ *
+ *  It writes AFTER the provenance bracket closes, by design: a run that failed
+ *  the bracket calls `die()` and never reaches here, so no file on disk can ever
+ *  carry an unbracketed matrix. */
+function writeRunArtifact(run, outPath) {
+  run.artifact = {
+    written_to: outPath,
+    written_at: new Date().toISOString(),
+    // Proof the run came from a real repo checkout and not a copy under /tmp
+    // — which, before D130 was fixed, was where it silently did nothing.
+    invoked_from_cwd: process.cwd(),
+    instrument_realpath: realResolve(fileURLToPath(import.meta.url)),
+    argv: process.argv.slice(1),
+    row_count: run.rows.length,
+    expected_row_count: WIDTHS.length * FACES.length * 2,
+    row_count_note:
+      `${WIDTHS.length} widths x ${FACES.length} forced faces x 2 inspector states. ` +
+      `54 is a COMPLETE run (D121); 162 was a miscount that multiplied rows by the ` +
+      `three figures each row reports.`,
+    served_sha: run.provenance?.served_sha ?? null,
+    slot_active: run.provenance?.slot_active ?? null,
+    provenance_pre_read_at: run.provenance?.read_at ?? null,
+    provenance_post_read_at: run.provenance_post?.read_at ?? null,
+    provenance_bracket_matched: run.provenance_bracket?.matched ?? null,
+    sweep_direction: run.sweep_direction,
+    doc_target: run.doc_target,
+    measured_document: run.measured_document ?? null,
+    drill_attempts: run.drill?.attempts ?? null,
+    drill_rows_in_list: run.drill?.rows_in_list ?? null,
+    non_vacuity_guard: summariseNonVacuity(run),
+    warnings: run.warnings,
+    unsettled_rows: run.rows.filter((r) => !r.settle?.settled).length,
+  };
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  const bytes = JSON.stringify(run, null, 2) + '\n';
+  fs.writeFileSync(outPath, bytes);
+
+  // stderr, never stdout: `--json` promises stdout is nothing but the matrix,
+  // and a helpful line that breaks `| jq` is not helpful.
+  process.stderr.write(
+    `\n  [artifact] wrote ${run.rows.length} rows (${bytes.length} bytes) to ${outPath}\n` +
+    `             sha ${run.artifact.served_sha} · slot ${(run.artifact.slot_active || []).join(', ') || 'NONE'} · ` +
+    `bracket ${run.artifact.provenance_bracket_matched ? 'MATCHED' : 'MISMATCH'} · ` +
+    `guard ${run.artifact.non_vacuity_guard.applies_in_rows} applies / ${run.artifact.non_vacuity_guard.passed_in_rows} passed\n\n`);
+}
+
+/** The non-vacuity guard's standing, as a structure rather than a sentence — so
+ *  a later reader can filter on it instead of parsing the human table. `applies`
+ *  0 is NOT a pass; it means no scrim rendered anywhere and the guard proved
+ *  nothing, which is exactly the state that must never be mistaken for good
+ *  news (D31/D39/D112). */
+function summariseNonVacuity(run) {
+  const applies = run.rows.filter((r) => r.occlusion?.non_vacuity?.guard_applies);
+  const passed = applies.filter((r) => r.occlusion.non_vacuity.forced_sample_differs);
+  return {
+    applies_in_rows: applies.length,
+    passed_in_rows: passed.length,
+    vacuous: applies.length === 0,
+    note: applies.length === 0
+      ? 'No scrim rendered in any row, so the guard had nothing to prove. This is NOT a pass — ' +
+        'every dimming figure in this run is unverified by it.'
+      : 'Where the scrim renders, forcing its pointer-events moved the hit-test; the dimming ' +
+        'figures in those rows are derived from a rule that actually matches the deployed CSS.',
+  };
 }
 
 // ── human table ──────────────────────────────────────────────────────────────
@@ -1975,7 +2134,29 @@ function printTable(run) {
 // can trust, and a full authenticated run (~30-60s observed, ~2min worst case,
 // and it needs deployed guerrilla plus an admin token) is far too heavy to be
 // the only way to see it fire.
-const INVOKED_DIRECTLY = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+//
+// BOTH SIDES GO THROUGH REALPATH (D130). This comparison used to be
+//
+//     path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+//
+// which is asymmetric: Node resolves ESM module URLs through realpath, but
+// `argv[1]` is whatever the shell handed over, verbatim. macOS `/tmp` is a
+// symlink to `/private/tmp`, so `node /tmp/spd-measure.mjs` compared
+// '/tmp/…' against '/private/tmp/…', INVOKED_DIRECTLY was false, and the
+// process exited 0 having written ZERO bytes to stdout AND stderr. Piped
+// through `tee` that yields an empty file at exit 0 — indistinguishable from a
+// tooling hiccup and one careless `| tail` from being read as "no failures".
+// That is the precise inversion of this instrument's own contract (D81/D97):
+// a rotted run must be VISIBLY rotted, never silently absent. Any symlink on
+// either path — /tmp, a checkout reached through one, a `ln -s` convenience
+// shim — reintroduced it, so the fix is symmetry, not a special case for /tmp.
+const INVOKED_DIRECTLY =
+  !!process.argv[1] && realResolve(process.argv[1]) === realResolve(fileURLToPath(import.meta.url));
+
+if (INVOKED_DIRECTLY && (process.argv.includes('--help') || process.argv.includes('-h'))) {
+  process.stdout.write(usage());
+  process.exit(0);
+}
 
 if (INVOKED_DIRECTLY) {
   main().catch((err) => {
