@@ -61,11 +61,108 @@ function normalizeHost(host) {
 // A read whose TARGET is one of these is a read of an emitted artifact, not of
 // source: it derives L4. Exported so later slices (the adjudicator, the
 // executor) share one list instead of forking it.
+//
+// DERIVED FROM THE EMITTERS, NOT GUESSED. The list below is the census of what
+// the repo's generators actually write:
+//   * design/emit.mjs — its exported ARTIFACTS array (18 entries) plus the
+//     paper-editor mirror post-step.
+//   * the tooling/ emitters — every `writeFileSync` site under tooling/, with
+//     each output constant resolved to its real path.
+// The previous list was wrong in BOTH directions and this fixes both.
+//
+// THE MARKER-SPLICE BOUNDARY (the rule that decides membership).
+// design/emit.mjs writes an artifact in one of two shapes, and only ONE of them
+// is a generated file:
+//   (a) WHOLE FILE — kinds "go" / "ts" / "elixir": build() returns the entire
+//       file body and emit overwrites it. internal/*/tokens_gen.go,
+//       internal/semrole/chrome_gen.go, web/lib/tokens.gen.ts,
+//       api/lib/**/tokens_gen.ex. Nothing hand-authored survives a regen, so a
+//       read of one of these is an ARTIFACT read → L4.
+//   (b) MARKER SPLICE — kinds "css" / "html": build() returns a block that is
+//       spliced between BEGIN/END GENERATED markers inside an OTHERWISE
+//       HAND-AUTHORED file — api/lib/barkpark_web/layouts/root.html.heex,
+//       web/app/globals.css, cloud/priv/static/app.css,
+//       api/lib/barkpark_web/controllers/session_html.ex, and the rest.
+// A MARKER-SPLICED FILE IS **NOT** A GENERATED ARTIFACT AND MUST NEVER MATCH
+// HERE. It is partly source: the file's identity, structure and the great
+// majority of its bytes are hand-written, and a read of it is overwhelmingly
+// likely to be a read of that hand-written part. Levelling it L4 would DEFLATE
+// the authority of an honest source read — the mirror-image bug of the
+// inflation this list exists to stop, and a new bug of our own. The splice
+// targets are therefore deliberately absent below, and the near-miss tests in
+// test/level.test.mjs pin that absence so a future widening cannot silently
+// swallow them.
+//
+// REMOVED: /(^|\/)design\/(dist|out|generated|emitted)\//. It matched NOTHING
+// real — design/emit.mjs has never written into such a directory (see the two
+// shapes above), so every regenerable token file derived L3, i.e. SOURCE-
+// checkout authority for a file that is not source. That is authority
+// INFLATION, the exact failure this epic exists to stop.
+//
+// Suffix sets are deliberately NARROW — exactly the extensions the census
+// found (`_gen.go`, `_gen.ex`, `.gen.ts`). A new emitter extension is a
+// deliberate edit here plus its pair of tests, never a speculative alternation.
 export const GENERATED_ARTIFACT_PATTERNS = Object.freeze([
+  // --- hand-placed, already correct ---
   /(^|\/)docs\/openapi\.json$/,
-  /(^|\/)design\/(dist|out|generated|emitted)\//,
-  /\.golden\.json$/,
-  /(^|\/)tooling\/[^/\s]+\/[^/\s]+-report\.json$/,
+  /\.golden\.json$/, // api/test/support/fixtures/*.golden.json — verified real
+
+  // --- design/emit.mjs, shape (a): WHOLE-FILE emits ---
+  // internal/{taskboard,pdrender,semrole}/tokens_gen.go, internal/semrole/chrome_gen.go
+  /(^|\/)[^/\s]*_gen\.go$/,
+  // api/lib/barkpark/portable_doc/render/tokens_gen.ex, api/lib/barkpark_web/studio/tokens_gen.ex
+  /(^|\/)[^/\s]*_gen\.ex$/,
+  // web/lib/tokens.gen.ts
+  /(^|\/)[^/\s]*\.gen\.ts$/,
+
+  // --- tooling/ emitters: the report family ---
+  // Widened past .json: quality/consistency/combined/status/fit also emit the
+  // .html rendering and combined/ emits the .csv, all from the same run.
+  /(^|\/)tooling\/[^/\s]+\/[^/\s]+-report\.(?:json|html|csv)$/,
+
+  // --- tooling/ emitters: named single-file outputs ---
+  // Each resolved from its emitter's output constant. Enumerated rather than
+  // globbed because tooling/<seg>/ ALSO holds hand-authored config and
+  // fixtures (blast-radius/config.json, consistency/config.json,
+  // cody/bindings.json, doc-truth/doc-refs.json) which must keep deriving L3.
+  /(^|\/)tooling\/blast-radius\/(?:index|last-impact|verdict-cache)\.json$/,
+  /(^|\/)tooling\/symbol-graph\/symbols\.json$/,
+  /(^|\/)tooling\/map\/manifest\.json$/,
+  /(^|\/)tooling\/file-importance\/(?:file-signals|file-batches)\.json$/,
+  /(^|\/)tooling\/file-importance\/importance-chart\.(?:csv|html)$/,
+  /(^|\/)tooling\/consistency\/verdict-cache\.json$/,
+  /(^|\/)tooling\/fit\/scoring-config\.json$/,
+  /(^|\/)tooling\/research-coverage\/research-ledger\.json$/,
+  /(^|\/)tooling\/barkpark-sync\/(?:nodes\.json|codebase-graph\.html)$/,
+  /(^|\/)tooling\/concept-map\/boundary-baseline\.json$/,
+
+  // --- tooling/ emitters: the fan-out directories, TWO levels deep ---
+  // batches/ and results/ are rmSync'd and rebuilt on every run
+  // (intentions, usefulness, consistency, research-coverage, file-importance),
+  // review-batches/ by intentions/review.mjs, dossiers/ by blast-radius.
+  /(^|\/)tooling\/[^/\s]+\/(?:batches|review-batches|results|dossiers)\/[^/\s]+\.json$/,
+
+  // KNOWN, DELIBERATE OMISSION — tooling/grip/fixtures/evidence-corpus.json.
+  // harvest.mjs writes it, so by the census rule above it IS an emitted
+  // artifact and belongs on this list. It is held out on purpose, and the
+  // reason is worth stating rather than leaving as a silent gap:
+  //
+  // L4 sits BELOW L3 on the ladder, so adding it would make checkCeiling start
+  // REJECTING the in-flight L3 claims of every slice that cites a read of the
+  // frozen corpus — this wave's own siblings included. That is a real cost paid
+  // to avoid a mid-wave break, NOT a judgment that the file is source. It is
+  // filed as tgw2-l4-grip-corpus-selfref and should be added once the wave that
+  // depends on those L3 citations has merged.
+  //
+  // The same question hangs over tooling/concept-map/boundary-baseline.json,
+  // which IS listed above: it is regenerable, but it is also checked in and
+  // read as a reference. The two are ruled differently today and that
+  // inconsistency is known, not overlooked.
+
+  // --- tooling/ emitters: the scalar hand-off files ---
+  // batch-count.txt / review-count.txt / issues-stale.txt / taxonomy-input.txt
+  // are written by the same runs that build the batches they describe.
+  /(^|\/)tooling\/[^/\s]+\/(?:batch-count|review-count|issues-stale|taxonomy-input)\.txt$/,
 ]);
 
 function isGeneratedArtifactPath(token) {
