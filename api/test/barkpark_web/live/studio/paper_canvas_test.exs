@@ -1447,6 +1447,162 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       refute html =~ ~s(id="bp-doc-sidebar-body")
       refute html =~ ~s(data-test-id="sidebar-section-publish")
     end
+
+    # spd-b29f — the PANEL control's own announcement, isolated from the five
+    # SECTION toggles. The pre-existing loose `assert html =~ aria-expanded="true"`
+    # above is satisfied by any section, which is exactly how the painted-closed
+    # lie survived a wave; these read the panel button's OWN attributes out of the
+    # markup so a regression cannot hide behind a neighbour.
+    defp panel_toggle(html) do
+      [head, tail] = String.split(html, ~s(data-test-id="sidebar-toggle-panel"), parts: 2)
+      # attributes sit BEFORE the test-id on the opening tag, the glyph after it
+      (head |> String.split("<button") |> List.last()) <> String.slice(tail, 0, 300)
+    end
+
+    # `<.icon>` inlines the SVG, so the glyph is only identifiable by its path
+    # data (Icons.icons/0: chevron-down "m6 9 6 6 6-6", chevron-right "m9 18 6-6-6-6").
+    defp chevron(control) do
+      cond do
+        control =~ ~s(d="m6 9 6 6 6-6") -> "chevron-down"
+        control =~ ~s(d="m9 18 6-6-6-6") -> "chevron-right"
+        true -> "no-chevron"
+      end
+    end
+
+    test "below WIDE, an open-but-never-asked-for panel announces itself CLOSED (spd-b29f)" do
+      # spd-b29's cascade paints exactly this state as the 41px collapsed strip
+      # (D102), so a control saying aria-expanded="true" here is the a11y lie
+      # #4633 landed to fix — two geometrically identical states must not
+      # announce opposite things.
+      for bucket <- ~w(standard narrow phone) do
+        control =
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: false, width_bucket: bucket})
+          )
+
+        assert control =~ ~s(aria-expanded="false"),
+               "#{bucket}: painted-closed panel must not announce itself expanded"
+
+        assert control =~ "Expand document panel",
+               "#{bucket}: title must offer the EXPAND direction over a closed strip"
+
+        assert chevron(control) == "chevron-right",
+               "#{bucket}: chevron must point the expand direction over a closed strip"
+      end
+    end
+
+    test "an EXPLICIT user open announces itself OPEN at every bucket (spd-b29f)" do
+      # data-user-opened makes the b29 rule stop matching, so the panel really is
+      # visible — the announcement must follow the pixels back.
+      for bucket <- ~w(wide standard narrow phone) do
+        control =
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: true, width_bucket: bucket})
+          )
+
+        assert control =~ ~s(aria-expanded="true"),
+               "#{bucket}: user-opened panel is genuinely open"
+
+        assert control =~ "Collapse document panel"
+        assert chevron(control) == "chevron-down"
+      end
+    end
+
+    test "a server-CLOSED panel announces closed regardless of bucket (spd-b29f)" do
+      for bucket <- ~w(wide standard narrow phone) do
+        control = panel_toggle(render_sidebar(%{panel_open: false, width_bucket: bucket}))
+
+        assert control =~ ~s(aria-expanded="false"),
+               "#{bucket}: collapsed panel is never expanded"
+      end
+    end
+
+    test "FIRST BYTE IS UNMOVED — the wide default renders byte-identically (D12/D91)" do
+      # The server cannot know the bucket at first paint; mount seeds "wide", so
+      # an un-threaded call site and an explicitly-wide one must be the same
+      # bytes, and the wide render must still announce OPEN. If this ever fails,
+      # the change has started painting before the client is known — too far.
+      unthreaded = render_sidebar(%{panel_open: true, user_opened: false})
+      seeded = render_sidebar(%{panel_open: true, user_opened: false, width_bucket: "wide"})
+
+      assert unthreaded == seeded,
+             "threading width_bucket must not change what renders at first byte"
+
+      control = panel_toggle(unthreaded)
+      assert control =~ ~s(aria-expanded="true")
+      assert control =~ "Collapse document panel"
+      assert chevron(control) == "chevron-down"
+    end
+
+    test "the panel body/title still key off panel_open ALONE — only the announcement moved" do
+      # DOM PRESENCE is deliberately untouched by spd-b29f: below wide the body
+      # is still in the document (CSS hides it), because gating it on the bucket
+      # would change what paints at first byte and re-open D12.
+      html = render_sidebar(%{panel_open: true, user_opened: false, width_bucket: "narrow"})
+      assert html =~ ~s(id="bp-doc-sidebar-body")
+      assert html =~ ~s(class="bp-doc-sidebar__title")
+      assert html =~ "bp-doc-sidebar is-open"
+      assert html =~ ~s(data-test-id="sidebar-section-publish")
+    end
+
+    # REVIEW FIX (spd-b29f review). The announcement lives in components.ex
+    # (`visually_open?`) and the ACTION lives in
+    # `Handlers.Paper.sidebar_toggle_panel/1` (`painted_closed?`). They are
+    # exact negations of one another today and nothing said so — the builder
+    # named this coupling as the most likely way the slice rots, and a comment
+    # is not a guard. The invariant is the one a reader can actually check with
+    # their eyes: a button that says "Expand" must EXPAND when it is pressed,
+    # and a button that says "Collapse" must COLLAPSE. Pinning that end to end
+    # catches a drift in EITHER file, from either side.
+    test "the control's announcement and its ACTION agree at every bucket (spd-b29f review)" do
+      for bucket <- ~w(wide standard narrow phone),
+          open? <- [true, false],
+          asked? <- [true, false] do
+        before_control =
+          panel_toggle(
+            render_sidebar(%{panel_open: open?, user_opened: asked?, width_bucket: bucket})
+          )
+
+        announced_open? = before_control =~ ~s(aria-expanded="true")
+
+        socket = %Phoenix.LiveView.Socket{
+          assigns: %{
+            __changed__: %{},
+            sidebar_open: open?,
+            sidebar_user_opened: asked?,
+            width_bucket: bucket
+          }
+        }
+
+        {:noreply, after_socket} = PaperHandler.sidebar_toggle_panel(socket)
+
+        after_control =
+          panel_toggle(
+            render_sidebar(%{
+              panel_open: after_socket.assigns.sidebar_open,
+              user_opened: after_socket.assigns.sidebar_user_opened,
+              width_bucket: bucket
+            })
+          )
+
+        assert after_control =~ ~s(aria-expanded="true") == not announced_open?,
+               """
+               THE CONTROL LIES ABOUT WHAT PRESSING IT DOES.
+
+               bucket=#{bucket} panel_open=#{open?} user_opened=#{asked?}:
+               the button announced #{if announced_open?, do: "OPEN", else: "CLOSED"},
+               and one press left it announcing the SAME thing.
+
+               `visually_open?` in components.ex and `painted_closed?` in
+               Handlers.Paper.sidebar_toggle_panel/1 are the same predicate
+               written twice, in two files, in opposite polarity. They have
+               drifted. Below `wide` an open-but-never-asked panel is PAINTED
+               closed, so a press must mean OPEN — not "toggle the assign" —
+               and the announcement must say CLOSED beforehand. Whichever of
+               the two moved, move the other with it.
+               """
+      end
+    end
   end
 
   describe "a sidebar edit never touches body blocks (doctrine Rule 4)" do
