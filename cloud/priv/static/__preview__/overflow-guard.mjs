@@ -1,0 +1,486 @@
+#!/usr/bin/env node
+// overflow-guard.mjs — the browser-geometry guard the seal predicate's clause
+// (b) shells out to (seal-predicate.mjs → `node overflow-guard.mjs --defect
+// <id>`). A missing or failing run here is NO SEAL, never a pass.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHY THIS IS A BROWSER MEASUREMENT AND NOT A SOURCE REGEX (GR118)
+// ─────────────────────────────────────────────────────────────────────────────
+//  The predicate's first draft asserted GR108 as "does a .topbar rule exist
+//  inside the 768 block" — the charter's THEORY of the cause. Dry-run both
+//  directions it was EXACTLY INVERTED: it printed DEFECT against the correct
+//  fix (0/44 overflow) and CLEAN against the broken one (14/16 still
+//  overflowing). __app.test.mjs is text-based and passed 640/640 on BOTH
+//  patches; cssom-parity.mjs asks whether a selector REACHED the CSSOM, and a
+//  cascade-dead rule is present in the CSSOM — it just loses. So the dead-rule
+//  class had NO coverage from any instrument in this epic. A source regex
+//  tests a story about the pixels; only a browser tests the pixels. This file
+//  loads the real SPA through serve.mjs, renders it in headless Chrome, and
+//  asserts computed style and geometry.
+//
+//  THE SWEEP GOES ABOVE 768 OR IT CANNOT FAIL (GR116): the broken band reaches
+//  ~782 — 769px measured 775.22 light / 776.92 dark pre-fix — so a sweep that
+//  stops at the breakpoint goes green while a live scrollbar sits one pixel
+//  above it (measured 13/44 failures once the sweep extended past 768).
+//
+//  THE THREE DEFECTS IT MEASURES
+//    GR108-tablet-topbar-overflow   page-level horizontal overflow at
+//        721-1440 x 2 themes x 2 past-due scenarios (44 checks), plus the
+//        cosmetic half: the past-due billing chip must NOT be truncated at
+//        768 — the unconditional min-width:0 pair alone clips the money
+//        message, and shipping it without the 768-block trio trades a
+//        scrollbar for a truncated "Payment failed · fix billing".
+//    GR109-attention-row-dead-rule  at 768 the stacked .attention-row must
+//        compute align-items:flex-start with .attention-acts left-aligned to
+//        .attention-main (pre-fix: stacked but CENTRED, acts left 441.28).
+//        At 900 the row must still be a row (the stack stays scoped <=768).
+//    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
+//        the authored 40vh cap (320px) and the 13px legibility floor, same
+//        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
+//        rules discarded the media block's declarations at equal
+//        specificity). Includes the .bp-console.is-collapsed twin control.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  EVIDENCE HYGIENE, EACH PROVEN LIVE THIS EPIC (GR125)
+// ─────────────────────────────────────────────────────────────────────────────
+//  (a) SERVED BYTES == DISK BYTES, asserted before anything is measured. A
+//      preview server from a FOREIGN worktree once squatted the port and
+//      served the primary checkout's origin/main bytes, making a patched run
+//      print baseline output. 20 worktrees share this checkout. On mismatch
+//      this guard exits non-zero naming the stale server — it never measures
+//      the wrong tree silently.
+//  (b) Network.setCacheDisabled — Chrome memory-caches app.css across
+//      same-URL navigations; without this a mutation phase measures the
+//      ORIGINAL stylesheet and reports a false "did not flip".
+//  (c) The GR115 fixture is injected by SELECTOR-built DOM, and mutations to
+//      app.css (in the proofs) are selector-anchored — .new-console-body and
+//      .bp-console-body are byte-identical declaration blocks, so a plain
+//      string replace patches the wrong twin.
+//
+//  RUN
+//    node cloud/priv/static/__preview__/overflow-guard.mjs                 # all three
+//    node cloud/priv/static/__preview__/overflow-guard.mjs --defect GR108-tablet-topbar-overflow
+//    OVERFLOW_GUARD_PORT=4321 node …                                      # port override
+//    CHROME=/path/to/chrome node …
+//
+//  Exit codes: 0 = every requested defect measured fixed · 1 = a defect is
+//  still measurable, the server is stale/squatted, or the run broke ·
+//  2 = GUARD (no Chrome, unknown --defect) refused before measuring.
+//
+//  ZERO DEPENDENCIES — Node 22 native fetch + native WebSocket speak CDP
+//  directly (the Cdp class is cssom-parity.mjs's, unchanged). Teardown is
+//  hand-bounded exactly like cssom-parity's: nothing here ever blocks on a
+//  child process without a cap.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
+const PORT = Number(process.env.OVERFLOW_GUARD_PORT || 4199);
+const BASE = `http://127.0.0.1:${PORT}`;
+
+const DEFECTS = [
+  "GR108-tablet-topbar-overflow",
+  "GR109-attention-row-dead-rule",
+  "GR115-bpconsole-dead-rule",
+];
+
+// The sweep envelope. 769/775/780/785 are ABOVE the breakpoint on purpose —
+// see the header: a sweep capped at 768 cannot fail on this defect class.
+const WIDTHS = [721, 750, 768, 769, 775, 780, 785, 800, 900, 1024, 1440];
+const HEIGHT = 800;
+
+const SERVER_CAP = 8000;
+const DEVTOOLS_CAP = 15000;
+const RENDER_CAP = 12000;
+const EVAL_CAP = 10000;
+const BROWSER_CLOSE_CAP = 2000;
+const TERM_POLL_CAP = 3000;
+const KILL_POLL_CAP = 2000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── args ─────────────────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+let only = null;
+const di = argv.indexOf("--defect");
+if (di !== -1) {
+  only = argv[di + 1];
+  if (!DEFECTS.includes(only)) {
+    process.stderr.write(
+      `!! GUARD (exit 2): unknown --defect "${only}". Known: ${DEFECTS.join(", ")}\n`,
+    );
+    process.exit(2);
+  }
+}
+const requested = only ? [only] : DEFECTS;
+
+// ── chrome discovery (cssom-parity.mjs's, unchanged) ─────────────────────────
+function findChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  const candidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+  for (const c of candidates) {
+    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
+  }
+  return null;
+}
+
+class Cdp {
+  constructor(ws) {
+    this.ws = ws;
+    this.seq = 0;
+    this.pending = new Map();
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.id == null) return;
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+      this.pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.method + ": " + JSON.stringify(msg.error)));
+      else p.resolve(msg.result);
+    });
+    ws.addEventListener("close", () => {
+      for (const [, p] of this.pending) p.reject(new Error("CDP socket closed"));
+      this.pending.clear();
+    });
+  }
+
+  static async connect(wsUrl) {
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener("open", resolve, { once: true });
+      ws.addEventListener("error", () => reject(new Error("CDP connect failed: " + wsUrl)), { once: true });
+    });
+    return new Cdp(ws);
+  }
+
+  send(method, params = {}, sessionId) {
+    const id = ++this.seq;
+    const frame = { id, method, params };
+    if (sessionId) frame.sessionId = sessionId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject: (e) => reject(Object.assign(e, { method })) });
+      try { this.ws.send(JSON.stringify(frame)); }
+      catch (e) { this.pending.delete(id); reject(e); }
+    });
+  }
+
+  close() { try { this.ws.close(); } catch { /* already gone */ } }
+}
+
+// ── the run ──────────────────────────────────────────────────────────────────
+async function main() {
+  const chromeBin = findChrome();
+  if (!chromeBin) {
+    process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
+    process.exit(2);
+  }
+
+  // 1. Serve the tree. If the port is already held, our child dies with
+  //    EADDRINUSE — that is fine IF AND ONLY IF whoever holds it serves this
+  //    tree's exact bytes; the assertion below decides, never the spawn.
+  const serveChild = spawn("node", [path.join(HERE, "serve.mjs"), "--port", String(PORT)], {
+    stdio: "ignore",
+  });
+
+  let chrome = null;
+  let cdp = null;
+  const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
+
+  const reap = async (p) => {
+    if (!alive(p)) return;
+    try { p.kill("SIGTERM"); } catch { /* gone */ }
+    let waited = 0;
+    while (alive(p) && waited < TERM_POLL_CAP) { await sleep(50); waited += 50; }
+    if (alive(p)) {
+      try { p.kill("SIGKILL"); } catch { /* gone */ }
+      waited = 0;
+      while (alive(p) && waited < KILL_POLL_CAP) { await sleep(50); waited += 50; }
+      if (alive(p)) process.stderr.write(`!! TEARDOWN SHOUT: pid ${p.pid} SURVIVED SIGKILL. Reap it by hand: kill -9 ${p.pid}\n`);
+    }
+  };
+
+  let profile = null;
+  const teardown = async () => {
+    if (cdp) {
+      await Promise.race([cdp.send("Browser.close").catch(() => {}), sleep(BROWSER_CLOSE_CAP)]);
+      cdp.close();
+    }
+    await reap(chrome);
+    await reap(serveChild);
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
+  };
+
+  const die = async (msg, code = 1) => {
+    await teardown();
+    process.stderr.write(`\n!! OVERFLOW GUARD: ${msg}\n`);
+    process.exit(code);
+  };
+
+  // Wait for SOMETHING to answer on the port (ours or a squatter's).
+  let up = false;
+  for (let w = 0; w < SERVER_CAP; w += 100) {
+    try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
+    await sleep(100);
+  }
+  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+
+  // 2. SERVED BYTES == DISK BYTES (GR125a). Compared for every file the
+  //    measurement depends on, plus the injected shell "/" against the same
+  //    injection serve.mjs performs — so a squatter serving a different
+  //    index.html is caught too, not only a different stylesheet.
+  const fetchBytes = async (p) => Buffer.from(await (await fetch(`${BASE}${p}`, { cache: "no-store" })).arrayBuffer());
+  for (const rel of ["/app.css", "/app.js", "/__preview__/mock.js", "/__preview__/scenarios.mjs"]) {
+    const served = await fetchBytes(rel);
+    const disk = fs.readFileSync(path.join(ROOT, rel.slice(1)));
+    if (!served.equals(disk)) {
+      return die(
+        `STALE SERVER on :${PORT} — ${rel} served ${served.length} B, disk holds ${disk.length} B.\n` +
+        `   A server rooted at a DIFFERENT tree (a foreign worktree?) is squatting this port.\n` +
+        `   Measuring against it would certify the wrong bytes — refusing.`,
+      );
+    }
+  }
+  {
+    const shell = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+    const APP_TAG = '<script src="/app.js"></script>';
+    const expected = shell.includes(APP_TAG)
+      ? shell.replace(APP_TAG, '<script src="/__preview__/mock.js"></script>\n    ' + APP_TAG)
+      : shell;
+    const served = (await fetchBytes("/")).toString("utf8");
+    if (served !== expected) {
+      return die(`STALE SERVER on :${PORT} — the injected shell "/" does not match this tree's index.html.`);
+    }
+  }
+  process.stdout.write(`>> serve      :${PORT} — served bytes == disk bytes (app.css, app.js, mock.js, scenarios.mjs, shell)\n`);
+
+  // 3. Chrome.
+  profile = fs.mkdtempSync(path.join(os.tmpdir(), "overflow-guard-"));
+  chrome = spawn(
+    chromeBin,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--hide-scrollbars", // classic-macOS overlay parity: clientWidth == emulated width
+      `--user-data-dir=${profile}`,
+      "--remote-debugging-port=0",
+      "about:blank",
+    ],
+    { stdio: "ignore" },
+  );
+
+  const portFile = path.join(profile, "DevToolsActivePort");
+  let devPort = null;
+  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+    try {
+      const raw = fs.readFileSync(portFile, "utf8").split("\n");
+      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
+    } catch { /* not written yet */ }
+    await sleep(100);
+  }
+  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+
+  let sessionId;
+  try {
+    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
+    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+    ({ sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }));
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+    // GR125(b): Chrome memory-caches app.css across same-URL navigations —
+    // without this, a mutated stylesheet measures as the original.
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+  } catch (err) {
+    return die(`CDP bring-up failed: ${err.message}`);
+  }
+
+  const evalJs = async (expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+    if (r.exceptionDetails) throw new Error("page eval threw: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    return r.result.value;
+  };
+
+  const setViewport = (width, height = HEIGHT) =>
+    cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
+
+  // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
+  const nav = async (url, readyExpr) => {
+    await cdp.send("Page.navigate", { url }, sessionId);
+    for (let w = 0; w < RENDER_CAP; w += 100) {
+      try { if (await evalJs(`!!(${readyExpr})`)) return; } catch { /* navigating */ }
+      await sleep(100);
+    }
+    throw new Error(`page never became ready: ${url} (waited on: ${readyExpr})`);
+  };
+
+  const failures = [];
+  const fail = (defect, msg) => { failures.push({ defect, msg }); process.stdout.write(`   ✗ ${msg}\n`); };
+  const okLine = (msg) => process.stdout.write(`   ✓ ${msg}\n`);
+
+  try {
+    // ── GR108: page-level overflow sweep + the chip's money message ─────────
+    if (requested.includes("GR108-tablet-topbar-overflow")) {
+      process.stdout.write(`\nGR108-tablet-topbar-overflow — ${WIDTHS.length} widths x 2 themes x 2 scenarios\n`);
+      let checks = 0, offenders = 0;
+      for (const scen of ["billing-past-due", "overview-past-due"]) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(768);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}`,
+            `document.querySelector('.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
+          );
+          const row = [];
+          for (const width of WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;` +
+              `return {sw:d.scrollWidth, cw:d.clientWidth, theme:d.getAttribute('data-theme')};})()`,
+            );
+            checks++;
+            const over = m.sw > m.cw;
+            if (over) { offenders++; fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — horizontal scrollbar`); }
+            row.push(`${width}:${m.sw}${over ? "!" : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join(" ")}\n`);
+
+          // Cosmetic half at the breakpoint: the past-due money message must be
+          // whole at 768 — correctness-only clips it to ~154.61 of ~169.78px.
+          await setViewport(768);
+          const chip = await evalJs(
+            `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
+            `var r=c.getBoundingClientRect();` +
+            `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
+          );
+          if (!chip) fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@768: #billing-chip missing`);
+          else if (chip.sw > chip.cw + 1) fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@768: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`);
+          else okLine(`${scen}/${theme}@768: chip whole — ${chip.w}px, scrollWidth ${chip.sw} <= clientWidth ${chip.cw} ("${chip.text}")`);
+        }
+      }
+      if (!failures.some((f) => f.defect === "GR108-tablet-topbar-overflow")) {
+        okLine(`0/${checks} overflowing across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint)`);
+      }
+    }
+
+    // ── GR109: the stacked attention row is left-aligned, not centred ───────
+    if (requested.includes("GR109-attention-row-dead-rule")) {
+      process.stdout.write(`\nGR109-attention-row-dead-rule — overview-past-due attention queue\n`);
+      await setViewport(768);
+      await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelector('.attention-row .attention-acts')`);
+      const m = await evalJs(
+        `(function(){var row=document.querySelector('.attention-row');var cs=getComputedStyle(row);` +
+        `var main=row.querySelector('.attention-main').getBoundingClientRect();` +
+        `var acts=row.querySelector('.attention-acts').getBoundingClientRect();` +
+        `return {dir:cs.flexDirection, align:cs.alignItems,` +
+        ` mainLeft:Math.round(main.left*100)/100, actsLeft:Math.round(acts.left*100)/100};})()`,
+      );
+      if (m.dir !== "column") fail("GR109-attention-row-dead-rule", `@768 flex-direction is "${m.dir}", expected "column" — the stack itself died`);
+      if (m.align !== "flex-start") fail("GR109-attention-row-dead-rule", `@768 align-items is "${m.align}", expected "flex-start" — the authored rule is cascade-dead (row stacks but stays centred)`);
+      if (Math.abs(m.actsLeft - m.mainLeft) > 1) fail("GR109-attention-row-dead-rule", `@768 .attention-acts left ${m.actsLeft} != .attention-main left ${m.mainLeft} — buttons are centred, not left-aligned`);
+      if (!failures.some((f) => f.defect === "GR109-attention-row-dead-rule")) {
+        okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft}`);
+      }
+      // The stack must stay scoped to the tablet block — at 900 it is a row.
+      await setViewport(900);
+      const wide = await evalJs(`getComputedStyle(document.querySelector('.attention-row')).flexDirection`);
+      if (wide !== "row") fail("GR109-attention-row-dead-rule", `@900 flex-direction is "${wide}", expected "row" — the tablet stack leaked above its breakpoint`);
+      else okLine(`@900 still a row — the stack is scoped to <=768`);
+    }
+
+    // ── GR115: the 720-block console declarations actually take effect ──────
+    if (requested.includes("GR115-bpconsole-dead-rule")) {
+      process.stdout.write(`\nGR115-bpconsole-dead-rule — computed console styles at 700x800\n`);
+      await setViewport(700, 800);
+      await nav(`${BASE}/?scen=empty&theme=light`, `document.querySelector('.topbar')`);
+      // The .bp-console mounts on instance-detail timelines; the cascade is a
+      // stylesheet property, so a minimal fixture rendered against the REAL
+      // served stylesheet measures the same computed values the timeline gets.
+      // Both console families are byte-identical declaration blocks (GR125c) —
+      // the fixture carries BOTH so the twin proves the reorder fixed the dead
+      // one without touching the live one.
+      const m = await evalJs(
+        `(function(){var host=document.createElement('div');host.id='gr115-fixture';` +
+        `host.innerHTML='<div class="bp-console"><button class="bp-console-toggle">` +
+        `<span class="bp-console-caret"></span>Console</button>` +
+        `<div class="bp-console-body"><div class="bp-console-line">` +
+        `<span class="bp-console-text">line</span></div></div></div>` +
+        `<div class="new-console"><button class="new-console-toggle">Console</button>` +
+        `<div class="new-console-body">line</div></div>';` +
+        `document.body.appendChild(host);` +
+        `var bp=host.querySelector('.bp-console'),tog=host.querySelector('.bp-console-toggle'),` +
+        `body=host.querySelector('.bp-console-body'),caret=host.querySelector('.bp-console-caret'),` +
+        `nb=host.querySelector('.new-console-body');` +
+        `var out={bpMax:getComputedStyle(body).maxHeight,bpFs:getComputedStyle(body).fontSize,` +
+        `togFs:getComputedStyle(tog).fontSize,newMax:getComputedStyle(nb).maxHeight,` +
+        `newFs:getComputedStyle(nb).fontSize};` +
+        // Twin control (.bp-console.is-collapsed, GR115): transition:none on the
+        // caret first, or the synchronous read returns the transition's START
+        // value and manufactures a false red.
+        `caret.style.transition='none';tog.style.transition='none';` +
+        `bp.classList.add('is-collapsed');` +
+        `out.togBorderStyle=getComputedStyle(tog).borderBottomStyle;` +
+        `out.togBorderWidth=getComputedStyle(tog).borderBottomWidth;` +
+        `out.caretTransform=getComputedStyle(caret).transform;` +
+        `host.remove();return out;})()`,
+      );
+      // 40vh of the 800px emulated viewport = 320px; pre-fix computes 260px.
+      if (m.bpMax !== "320px") fail("GR115-bpconsole-dead-rule", `.bp-console-body max-height computes ${m.bpMax}, expected 320px (40vh @ 800) — the 720-block cap is cascade-dead`);
+      if (m.bpFs !== "13px") fail("GR115-bpconsole-dead-rule", `.bp-console-body font-size computes ${m.bpFs}, expected 13px — the legibility floor ("no theater text falls below 13px") is false`);
+      if (m.togFs !== "13px") fail("GR115-bpconsole-dead-rule", `.bp-console-toggle font-size computes ${m.togFs}, expected 13px`);
+      if (m.newMax !== "320px" || m.newFs !== "13px") fail("GR115-bpconsole-dead-rule", `.new-console twin regressed: max-height ${m.newMax} font-size ${m.newFs}, expected 320px/13px`);
+      // The twin control re-run after the reorder: is-collapsed still wins.
+      // REVIEW FIX: this was `&&`, which only fires when BOTH readings are
+      // wrong — a toggle computing `solid` at a 0px width would have passed a
+      // control whose whole job is to fail. `||` is strictly stronger and still
+      // green on the fix (style `none` forces the computed width to `0px`, so
+      // both operands are false together).
+      if (m.togBorderStyle !== "none" || m.togBorderWidth !== "0px") fail("GR115-bpconsole-dead-rule", `.bp-console.is-collapsed .bp-console-toggle border-bottom is ${m.togBorderStyle}/${m.togBorderWidth}, expected none/0px`);
+      const mat = /matrix\(([-\d.e]+),\s*([-\d.e]+),/.exec(m.caretTransform || "");
+      if (!mat || Math.abs(Number(mat[1])) > 1e-3 || Math.abs(Number(mat[2]) + 1) > 1e-3) {
+        fail("GR115-bpconsole-dead-rule", `.bp-console.is-collapsed caret transform is "${m.caretTransform}", expected rotate(-90deg)`);
+      }
+      if (!failures.some((f) => f.defect === "GR115-bpconsole-dead-rule")) {
+        okLine(`bp-console body ${m.bpMax}/${m.bpFs}, toggle ${m.togFs}; twin ${m.newMax}/${m.newFs}; is-collapsed border ${m.togBorderStyle}, caret ${m.caretTransform}`);
+      }
+    }
+  } catch (err) {
+    return die(`measurement broke: ${err.message}`);
+  }
+
+  await teardown();
+
+  process.stdout.write("\n");
+  if (failures.length) {
+    const byDefect = [...new Set(failures.map((f) => f.defect))];
+    process.stderr.write(`OVERFLOW GUARD FAIL — ${failures.length} finding(s) in: ${byDefect.join(", ")}\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`OVERFLOW GUARD PASS — ${requested.join(", ")} measured fixed in a real browser\n`);
+  process.exit(0);
+}
+
+main().catch((err) => {
+  process.stderr.write(`!! OVERFLOW GUARD crashed: ${err && err.stack ? err.stack : err}\n`);
+  process.exit(1);
+});
