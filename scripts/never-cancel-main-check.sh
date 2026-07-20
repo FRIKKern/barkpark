@@ -43,13 +43,54 @@ cd "$(dirname "$0")/.."
 # alone cannot discriminate a dep error from a real verdict — the text does).
 scan() {
   python3 - "$1" <<'PY'
-import sys, glob, os
+import sys, glob, os, fnmatch
 
 try:
     import yaml
 except ImportError:
     print("HARNESS-UNAVAILABLE: PyYAML not importable; this is NOT a verdict on the workflows")
     sys.exit(2)
+
+
+def triggers_push_to_main(on):
+    """True iff this `on:` block fires on a push to main.
+
+    Deliberately over-approximating on the shapes GitHub treats as "every
+    branch": a `push:` with NO `branches` filter runs on main, and so does one
+    that only sets `branches-ignore` without naming main. Reading only a literal
+    `branches: [main]` list — as the first cut of this gate did — classes both
+    of those as PR-only and lets a bare `true` through as a NOTE, which is the
+    gate under-detecting the exact hazard it exists to forbid.
+    """
+    if not isinstance(on, dict):
+        # `on: push` / `on: [push, pull_request]` carry no branch filter at all,
+        # so they fire on every branch, main included.
+        if on == "push":
+            return True
+        return isinstance(on, list) and "push" in on
+
+    if "push" not in on:
+        return False
+    push = on["push"]
+    if not isinstance(push, dict):
+        # `push:` with a null/scalar body = no filter = all branches.
+        return True
+
+    def as_list(v):
+        if isinstance(v, str):
+            return [v]
+        return v if isinstance(v, list) else []
+
+    branches = as_list(push.get("branches"))
+    ignore = as_list(push.get("branches-ignore"))
+
+    if branches:
+        # Patterns are globs: `main`, `ma*n` and `*` all select main.
+        return any(fnmatch.fnmatch("main", str(p)) for p in branches)
+    if ignore:
+        return not any(fnmatch.fnmatch("main", str(p)) for p in ignore)
+    # No filter of either kind → every branch, including main.
+    return True
 
 root = sys.argv[1]
 for path in sorted(glob.glob(os.path.join(root, "*.yml")) + glob.glob(os.path.join(root, "*.yaml"))):
@@ -72,9 +113,7 @@ for path in sorted(glob.glob(os.path.join(root, "*.yml")) + glob.glob(os.path.jo
     if conc.get("cancel-in-progress") is not True:
         continue
 
-    push = on.get("push") if isinstance(on, dict) else None
-    branches = push.get("branches") if isinstance(push, dict) else None
-    on_main = isinstance(branches, list) and "main" in branches
+    on_main = triggers_push_to_main(on)
 
     name = os.path.basename(path)
     if on_main:
@@ -138,6 +177,68 @@ jobs:
     steps: [{ run: "true" }]
 EOF
 
+  # HAZARDOUS — `push:` with NO branches filter runs on every branch, main
+  # included. The first cut of this gate read only a literal `branches: [main]`
+  # list and classed this as PR-only, letting the hazard through as a NOTE.
+  cat >"$tmp/nofilter.yml" <<'EOF'
+name: nofilter
+on:
+  push:
+concurrency:
+  group: nofilter-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: [{ run: "true" }]
+EOF
+
+  # HAZARDOUS — a glob that selects main, and the scalar (non-list) branches
+  # form. Both are valid GitHub syntax and both were invisible before.
+  cat >"$tmp/globbed.yml" <<'EOF'
+name: globbed
+on:
+  push:
+    branches: ma*n
+concurrency:
+  group: globbed-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: [{ run: "true" }]
+EOF
+
+  # HAZARDOUS — branches-ignore that does not name main, so main still fires.
+  cat >"$tmp/ignoreother.yml" <<'EOF'
+name: ignoreother
+on:
+  push:
+    branches-ignore: [dependabot/**]
+concurrency:
+  group: ignoreother-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: [{ run: "true" }]
+EOF
+
+  # SAFE — branches-ignore that DOES name main: push-to-main never fires.
+  cat >"$tmp/ignoremain.yml" <<'EOF'
+name: ignoremain
+on:
+  push:
+    branches-ignore: [main]
+concurrency:
+  group: ignoremain-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: [{ run: "true" }]
+EOF
+
   # SAFE — push-to-main + explicit never-cancel.
   cat >"$tmp/nevercancel.yml" <<'EOF'
 name: nevercancel
@@ -153,15 +254,29 @@ jobs:
     steps: [{ run: "true" }]
 EOF
 
-  local out
-  out="$(scan "$tmp")"
+  local out scan_status=0
+  # `|| scan_status=$?` so `set -e` cannot abort the assignment and discard the
+  # captured text — see the same guard on the real scan below.
+  out="$(scan "$tmp")" || scan_status=$?
+  if [ "$scan_status" -ne 0 ] || grep -q '^HARNESS-UNAVAILABLE' <<<"$out"; then
+    echo "SELFTEST HARNESS FAILURE (exit $scan_status) — this is NOT a verdict on the workflows:" >&2
+    echo "$out" >&2
+    exit 2
+  fi
 
   local failed=0
   if ! grep -q '^FAIL hazard.yml' <<<"$out"; then
     echo "SELFTEST FAILED: the gate did NOT red on push-to-main + bare true" >&2
     failed=1
   fi
-  for safe in guarded.yml nevercancel.yml; do
+  # The main-selecting shapes that carry no literal `branches: [main]` list.
+  for hazard in nofilter.yml globbed.yml ignoreother.yml; do
+    if ! grep -q "^FAIL $hazard" <<<"$out"; then
+      echo "SELFTEST FAILED: the gate did NOT red on $hazard — it fires on main but names no literal 'main' branch" >&2
+      failed=1
+    fi
+  done
+  for safe in guarded.yml nevercancel.yml ignoremain.yml; do
     if grep -q "^FAIL $safe" <<<"$out"; then
       echo "SELFTEST FAILED: the gate red on the safe shape $safe" >&2
       failed=1
@@ -189,10 +304,19 @@ if [ "${1:-}" = "--selftest" ]; then
   exit 0
 fi
 
-RESULT="$(scan .github/workflows)"
+# `|| SCAN_STATUS=$?` is load-bearing. `scan` exits 2 when the YAML harness is
+# unavailable, and under `set -e` a bare `RESULT="$(scan …)"` assignment aborts
+# the script THERE — exiting 2 with the HARNESS-UNAVAILABLE text still sitting
+# in the discarded capture. The step then failed with an EMPTY log, and a reader
+# had no way to tell a missing PyYAML from a real finding. That is charter D3
+# defeated by the very script that cites it: the discriminating text must reach
+# the log, so the failure is captured here and re-emitted below.
+SCAN_STATUS=0
+RESULT="$(scan .github/workflows)" || SCAN_STATUS=$?
 
-if grep -q '^HARNESS-UNAVAILABLE' <<<"$RESULT"; then
-  echo "$RESULT" >&2
+if [ "$SCAN_STATUS" -ne 0 ] || grep -q '^HARNESS-UNAVAILABLE' <<<"$RESULT"; then
+  echo "never-cancel-main gate could not RUN (harness exit ${SCAN_STATUS}) — this is NOT a verdict on the workflows." >&2
+  echo "${RESULT:-(the harness produced no output)}" >&2
   exit 2
 fi
 
