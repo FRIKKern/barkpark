@@ -8,6 +8,8 @@ defmodule Barkpark.Tenancy do
   """
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
   alias Barkpark.Audit.ExportSink
@@ -588,6 +590,94 @@ defmodule Barkpark.Tenancy do
   end
 
   def pull_provenance(_workspace), do: %{}
+
+  # ─── The pull-provenance guard predicate (PDS-D21/D22, PDS-D125/D126) ──────
+  #
+  # ONE home, TWO boot-time writers. `Plugins.Bootstrap.upsert_one/3` walks the
+  # plugin registry; `Content.TagRegistry.register_attrs!/2` writes the core
+  # `tag` schema straight through, outside that walk and outside
+  # `SchemaBootstrap`'s rescue. Both land on `Content.upsert_schema/2`, which
+  # reads first and UPDATES in place, so both can clobber a pulled row — and
+  # they clobber DIFFERENT column sets, because `Ecto.Changeset.cast/3` only
+  # touches keys PRESENT in the attrs map (Bootstrap builds attrs from
+  # `Map.from_struct` and reverts eight; TagRegistry declares five keys and
+  # reverts four). The write-shape differs; the question "is the row this
+  # upsert would match pulled data?" does not. It is answered exactly once,
+  # here, and a second copy of it would be the fork the canonical-impl doctrine
+  # exists to prevent.
+  #
+  # WHAT THE READ ACTUALLY MATCHES. `Content.get_schema/3` on empty opts narrows
+  # to the DEFAULT project's dataset_id (`resolve_read_dataset_id` →
+  # `read_default_project_id([])`), so this is DEFAULT-DATASET-SLOT matching:
+  # a properly-backfilled FOREIGN row is never matched, a row sitting in the
+  # Default slot is. Post-PDS-D9 the Default slot IS the pulled workspace.
+  #
+  # WHAT CALLERS DO WITH IT IS THEIR OWN CONTRACT. This predicate answers a
+  # question; it does not decide the skip. Bootstrap skips the whole upsert
+  # (insert included — its rows are plugin-declared and a missing one is
+  # log-and-continue). TagRegistry skips the UPDATE only and still inserts when
+  # absent, because PDS-D12 puts it outside the boot rescue precisely so a
+  # missing core `tag` schema fails the boot closed rather than booting a system
+  # whose publish wall can resolve nothing (PDS-D126).
+
+  @doc """
+  The schema row a boot-time upsert of `name`/`dataset` would MATCH, when that
+  row is pull-provenance-stamped data — else `nil`.
+
+  Returns the `%Barkpark.Content.SchemaDefinition{}` itself (not a boolean) so a
+  caller that wants to return the surviving row can do so without a second read;
+  `pulled_schema_row?/2` is the boolean face of the same answer.
+
+  A row counts as pulled when it exists, carries a `workspace_id`, and that
+  workspace carries a non-empty `pull_provenance` stamp for the row's own
+  dataset SLUG (a stamp on a sibling dataset does NOT cover this one).
+
+  Fail-OPEN by design: any raise from the read degrades to `nil` (= "not
+  pulled", proceed unguarded). This sits on the boot path, so the guard's own
+  read must never be what breaks a boot — losing the guard is recoverable, a
+  boot loop is not.
+  """
+  @spec pulled_schema_row(term(), term()) :: Content.SchemaDefinition.t() | nil
+  # @canonical capability:pull-provenance-schema-guard aka:pulled_row,provenance_covered,clobber guard,schema bootstrap guard
+  def pulled_schema_row(name, dataset) when is_binary(name) and is_binary(dataset) do
+    case Content.get_schema(name, dataset) do
+      {:ok, %Content.SchemaDefinition{} = existing} ->
+        if provenance_covered?(existing, dataset), do: existing, else: nil
+
+      _ ->
+        nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Tenancy.pulled_schema_row: pull-provenance guard read failed for " <>
+          "#{inspect(name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
+      )
+
+      nil
+  end
+
+  def pulled_schema_row(_name, _dataset), do: nil
+
+  @doc """
+  Boolean face of `pulled_schema_row/2`: does a boot-time upsert of
+  `name`/`dataset` match a pull-provenance-stamped row?
+  """
+  @spec pulled_schema_row?(term(), term()) :: boolean()
+  def pulled_schema_row?(name, dataset), do: not is_nil(pulled_schema_row(name, dataset))
+
+  defp provenance_covered?(%Content.SchemaDefinition{workspace_id: nil}, _dataset), do: false
+
+  defp provenance_covered?(%Content.SchemaDefinition{} = existing, dataset) do
+    # The row's own `dataset` STRING is the dataset SLUG the stamp is keyed by.
+    slug = existing.dataset || dataset
+
+    existing.workspace_id
+    |> get_workspace_by_id()
+    |> pull_provenance(slug)
+    |> map_size()
+    |> Kernel.>(0)
+  end
 
   @doc """
   Persist the pull-provenance stamp for ONE dataset slug of a workspace.
