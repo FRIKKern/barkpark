@@ -217,6 +217,30 @@ defmodule Barkpark.Content.TagRegistryProvenanceTest do
       refute Tenancy.pulled_schema_row?(@tag_type, nil)
       assert Tenancy.pulled_schema_row(nil, nil) == nil
     end
+
+    # The `rescue` is the branch most likely to matter in production and the
+    # hardest to reach: `pull_provenance/2` guards every shape it is handed, so
+    # only a fault in the READ ITSELF can get there. A NUL byte is rejected as
+    # `22021 character_not_in_repertoire`, which raises out of `get_schema/3`
+    # WITHOUT aborting the surrounding sandbox transaction — so the fail-open
+    # can be proven without savepoint juggling or a poisoned connection.
+    test "a RAISE inside the guard's own read fails OPEN — the boot proceeds unguarded", ctx do
+      pulled = insert_pulled_tag_row!(ctx)
+      {:ok, _} = Tenancy.set_pull_provenance(ctx.default_ws.id, @dataset, @stamp)
+
+      log =
+        capture_log(fn ->
+          assert Tenancy.pulled_schema_row("tag\0injected", @dataset) == nil
+          refute Tenancy.pulled_schema_row?("tag\0injected", @dataset)
+        end)
+
+      assert log =~ "proceeding unguarded"
+
+      # And the fault is not sticky: the very next read on a healthy name still
+      # answers correctly, so one bad read can never latch the guard off.
+      assert %SchemaDefinition{id: id} = Tenancy.pulled_schema_row(@tag_type, @dataset)
+      assert id == pulled.id
+    end
   end
 
   # ── helpers ───────────────────────────────────────────────────────────────
@@ -279,10 +303,21 @@ defmodule Barkpark.Content.TagRegistryProvenanceTest do
 
   # `capture_log/1` swallows the return value; this keeps the log quiet AND
   # hands back what the call under test returned.
+  #
+  # `capture_log/1` runs `fun` INLINE in this process, so a raise propagates
+  # before the receive is ever reached — the bounded wait is not protecting
+  # against that. It is there so that if the shape above ever changes (fun
+  # moved to a spawned process, a send dropped), the test fails in a second
+  # with a legible message instead of hanging until the ExUnit timeout.
   defp capture_log_value(fun) do
     ref = make_ref()
     parent = self()
     capture_log(fn -> send(parent, {ref, fun.()}) end)
-    receive do: ({^ref, value} -> value)
+
+    receive do
+      {^ref, value} -> value
+    after
+      1_000 -> flunk("capture_log_value/1: the call under test never sent its result")
+    end
   end
 end
