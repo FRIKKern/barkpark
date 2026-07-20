@@ -250,6 +250,45 @@ for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA'
   }
 }
 
+// ── The in-loop provenance gate (charter D20) ────────────────────────────────
+// SCOPE, SAID HONESTLY: this gates THE WAVE'S FACT FLOW — the facts[] arrays the
+// survey and verify fleets hand back to THIS workflow — and NOT every write in
+// the repo. An agent that writes durably mid-turn stored its fact long before
+// any report reaches this line; nothing here can reach back and touch that.
+//
+// DELIBERATELY DUMBER THAN THE GRAMMAR. The real level ladder lives in
+// tooling/grip/ (level.mjs derives, record.mjs adjudicates) and can never run
+// here: a workflow file is compiled as a CLASSIC SCRIPT inside a vm context with
+// codeGeneration disabled, so import, require, eval and new Function are all
+// closed doors by host design (charter D19 — settled, do not re-probe). So this
+// half asks the ONE question a program can answer with no vocabulary at all: is
+// `rerun` present and non-empty? If this check ever needs to AGREE with
+// record.mjs on a judgment call, that is a design error, not a missing import.
+//
+// DEMOTE, NEVER DROP. A dropped fact is a silent loss — the same defect class as
+// a silent promotion. Length in === length out, always. The demotion and its
+// reason ride ON the fact so the next Fable SEES both.
+function gateFactProvenance(reports) {
+  let total = 0
+  let demoted = 0
+  for (const report of reports || []) {
+    const facts = (report && report.facts) || []
+    for (const fact of facts) {
+      if (!fact || typeof fact !== 'object') continue
+      total++
+      const rerun = typeof fact.rerun === 'string' ? fact.rerun.trim() : ''
+      if (rerun) continue
+      demoted++
+      // Annotated on the RESOLVED object, never in the schema: FACT_ITEMS is
+      // additionalProperties:false, and that constraint governs what the MODEL
+      // may return — it says nothing about what we may add after the fact.
+      fact.provenance = 'DEMOTED-NO-RERUN'
+      fact.provenance_note = 'no rerun command on this fact — it cannot be re-derived, so treat it as an unverified belief and never quote it above the level of agent memory (charter D3: demote, never reject; add a one-line rerun command and it levels up in ten seconds).'
+    }
+  }
+  return { total, demoted }
+}
+
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave'],
@@ -387,7 +426,12 @@ COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): 
     )
   )
 )).filter(Boolean)
-log(`${surveys.length}/${surveyAssignments.length} surveyors reported`)
+// ONE interception, in place, right at the resolve — `surveys` is serialised
+// TWICE downstream (in full into Digest, projected into Decide), and gating each
+// serialisation site separately would be the copies-that-must-agree defect in
+// miniature. Mutating here means every downstream reader sees the gated array.
+const surveyGrip = gateFactProvenance(surveys)
+log(`${surveys.length}/${surveyAssignments.length} surveyors reported; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
@@ -456,7 +500,9 @@ COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — pa
     )
   )
 )).filter(Boolean)
-log(`${verifications.length}/${verifyAssignments.length} verifiers reported; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs`)
+// Same single interception for the verify round, at its own resolve.
+const verifyGrip = gateFactProvenance(verifications)
+log(`${verifications.length}/${verifyAssignments.length} verifiers reported; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 5: Decide — one Fable mind finalizes charter + wave + tasks ──
 phase('Decide')
