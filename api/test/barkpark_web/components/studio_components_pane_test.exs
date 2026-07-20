@@ -95,9 +95,10 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
 
       assert html =~ ~s(<button type="button")
 
-      # It expands the pane it names, and it says which one out loud — the
-      # hover `title` alone reaches neither keyboard nor screen-reader users.
-      assert html =~ ~s(aria-expanded="false")
+      # It says which pane it goes back to out loud — the hover `title` alone
+      # reaches neither keyboard nor screen-reader users. (`aria-expanded` was
+      # dropped here by spd-w5/D79: it never flipped and never could, because
+      # activating the strip destroys it. See the panes.ex moduledoc.)
       assert html =~ ~s(aria-label="Back to Post")
       assert html =~ ~s(title="Back to Post")
 

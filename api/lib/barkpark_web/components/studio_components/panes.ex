@@ -11,6 +11,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   """
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
+
   attr :status, :string, required: true
 
   def status_badge(assigns) do
@@ -64,10 +66,48 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   promoted this 44px strip to the desk's PRIMARY back-navigation at narrow
   widths (`PaneBuilder.display_state/4` collapses the whole nav row to it), and
   a `phx-click` div is unreachable by keyboard and silent to a screen reader —
-  a nav dead end for anyone not using a mouse. It therefore carries
-  `aria-expanded="false"` (it expands the pane it names), an explicit
+  a nav dead end for anyone not using a mouse. It therefore carries an explicit
   `aria-label` alongside the hover `title`, and `aria-hidden` on the decorative
   chevron — which points LEFT, the direction the action actually goes.
+
+  ## The strip is NAVIGATION, not a disclosure (spd-w5, charter D79)
+
+  It shipped with `aria-expanded="false"`, and a live browser reading of the
+  authenticated desk found `[aria-expanded="true"]` returning **zero elements
+  across the whole document in every state** — the attribute never flipped and
+  carried no `aria-controls`, so it was decorative.
+
+  That is structural, not an oversight. A disclosure button PERSISTS through
+  both of its states — it is a control *beside* the region it shows and hides.
+  This strip **is the pane, collapsed**: it and the expanded pane are ONE
+  control in two states (same server-side pane, same `id`), and activating it
+  DESTROYS it — the `<button>` is replaced by the expanded `<div>`, so no
+  element survives to carry `aria-expanded="true"`. Making the attribute
+  truthful would mean inventing a second, persistent toggle on every expanded
+  pane; making it *appear* truthful (e.g. `aria-expanded` on the plain
+  container `<div>`) would be invalid ARIA, since the attribute is only
+  supported on a handful of roles. An ARIA state that can never change is a
+  lie to assistive technology and is worse than its absence, so it is REMOVED.
+
+  What remains is a navigation control that re-composes the pane row: it
+  truncates `nav_path` and replaces the row's contents. `aria-controls`
+  therefore names the region whose contents it changes — the pane row
+  (`#studio-panes`), passed by the caller via `:controls`, an ancestor that
+  provably exists in the DOM at the moment the attribute is read. It does NOT
+  point at the pane's own `id`: the strip and the expanded pane share that id,
+  so a self-reference would be the same decoration wearing a new name.
+
+  ## Focus return (`:focus_on_mount`)
+
+  Because the strip is destroyed by its own activation, the browser drops focus
+  to `<body>` — measured live: a keyboard user who tabs to the only route back
+  out of a drilled pane is thrown to the top of the tab order the moment they
+  use it (D79; same defect class D54 recorded for the inspector). The expanded
+  pane therefore renders `tabindex="-1" phx-mounted={JS.focus()}` when the
+  caller passes `focus_on_mount: true` — LiveView's own declarative mount hook,
+  not an imperative `element.focus()` grab and no JS hook of our own. The
+  caller sets it only for the pane a just-handled `expand-pane` named, so an
+  initial page load (where every pane mounts) never steals focus.
 
   Its `class` attribute is FROZEN byte-identical at
   `class="pane-column pane-column--collapsed"` (charter D55): the width-bucket
@@ -101,6 +141,15 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # foreign `data-role` values already live on the Tasks board surface.
   attr :data_role, :any, default: nil
   attr :data_priority, :any, default: nil
+  # Collapsed strip only: the DOM id of the region whose contents this control
+  # replaces (the pane row). Rendered as `aria-controls`; nil renders nothing,
+  # so every legacy call site stays byte-identical. See the moduledoc — it is
+  # deliberately NOT this pane's own id, which the strip already carries.
+  attr :controls, :string, default: nil
+  # Expanded column only: land keyboard focus on this pane when it mounts.
+  # Set by the caller for the pane a just-handled `expand-pane` named, so the
+  # initial page load (where every pane mounts) never steals focus.
+  attr :focus_on_mount, :boolean, default: false
 
   slot :header_actions
   slot :inner_block, required: true
@@ -137,7 +186,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         phx-value-idx={@phx_value_idx}
         title={"Back to #{@title}"}
         aria-label={"Back to #{@title}"}
-        aria-expanded="false"
+        aria-controls={@controls}
       >
         <div class="pane-header">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
@@ -149,7 +198,14 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <div class="pane-column-collapsed-label"><%= @title %></div>
       </button>
     <% else %>
-      <div class={@col_class} id={@id} data-role={@role_attr} data-priority={@priority_attr}>
+      <div
+        class={@col_class}
+        id={@id}
+        data-role={@role_attr}
+        data-priority={@priority_attr}
+        tabindex={@focus_on_mount && "-1"}
+        phx-mounted={@focus_on_mount && JS.focus()}
+      >
         <div class="pane-header">
           <span class="pane-header-titlewrap">
             <span class="pane-header-title"><%= @title %></span>

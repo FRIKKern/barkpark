@@ -240,10 +240,67 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
 
       assert has_element?(
                view,
-               ~s(button.pane-column--collapsed[aria-expanded="false"][phx-click="expand-pane"])
+               ~s(button.pane-column--collapsed[phx-click="expand-pane"])
              )
 
       assert html =~ ~s(aria-label="Back to Post")
+    end
+
+    # spd-w5 / charter D79. `aria-expanded` shipped hardcoded to "false" and a
+    # live browser reading found `[aria-expanded="true"]` returning ZERO
+    # elements document-wide in every state: activating the strip destroys it,
+    # so nothing survives to carry the true state. An ARIA state that can never
+    # change is a lie to assistive tech; it is gone, and `aria-controls` names
+    # the region the control actually replaces.
+    test "the strip claims no expanded state and its aria-controls resolves to a real id",
+         %{conn: conn} do
+      {:ok, view, _html} = open_doc(conn)
+      html = set_bucket(view, "narrow")
+
+      # Scoped to the strip's own tag: the workspace switcher's `aria-expanded`
+      # is a REAL disclosure (a persistent trigger beside a menu it toggles) and
+      # is correct — the strip's was not.
+      assert [[strip_tag]] = Regex.scan(~r/<button[^>]*pane-column--collapsed[^>]*>/, html)
+
+      refute strip_tag =~ "aria-expanded",
+             "the strip must claim no ARIA expanded state it cannot keep — D79"
+
+      assert [[_, controls]] =
+               Regex.scan(~r/pane-column--collapsed"[^>]*aria-controls="([^"]+)"/, html)
+
+      assert html =~ ~s(id="#{controls}"),
+             "aria-controls=\"#{controls}\" must point at an element that EXISTS in the " <>
+               "same document — an unresolvable referent is the decoration it replaced"
+
+      assert controls == "studio-panes",
+             "the strip re-composes the pane row; that row is the region it controls"
+    end
+
+    # The second half of D79: after Enter, `document.activeElement` was BODY —
+    # a keyboard user who tabs to the only route back out of a drilled pane is
+    # thrown to the top of the tab order the moment they use it.
+    test "activating the strip marks the re-opened pane to take focus on mount", %{conn: conn} do
+      {:ok, view, _html} = open_doc(conn)
+      before_click = set_bucket(view, "narrow")
+
+      refute before_click =~ "phx-mounted",
+             "no pane may grab focus before the user has navigated — an initial " <>
+               "render that focuses a pane steals focus on every page load"
+
+      after_click = view |> element("button.pane-column--collapsed") |> render_click()
+
+      assert after_click =~ ~s(tabindex="-1")
+
+      assert after_click =~ "phx-mounted",
+             "the pane the strip named must take focus when it mounts, or focus " <>
+               "falls to <body> exactly as it did before this fix"
+
+      # The focus target is the EXPANDED pane, never a strip: the strip is gone.
+      assert [[focused]] =
+               Regex.scan(~r/<div\s+class="pane-column[^"]*"[^>]*phx-mounted="[^"]*"/, after_click)
+
+      refute focused =~ "pane-column--collapsed"
+      assert focused =~ "focus"
     end
 
     test "the button strip still navigates back when clicked", %{conn: conn} do
