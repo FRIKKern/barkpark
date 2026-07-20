@@ -2,10 +2,20 @@
 
 # The crown ledger amendment of 2026-07-20 — two defects, one write
 
-`pds-w1-crown-proof` is the PDS crown task: eleven acceptance criteria, nine of them
+`pds-w1-crown-proof` is the PDS crown task: **twelve** acceptance criteria, nine of them
 already met from the wave-7 climb. This file is the committed record of the only two
 edits made to its stored criterion WORDING during wave 9, why each was made, and what
 guarantees the edit route does and does not give.
+
+> **Count correction (2026-07-20, wave 10).** This header read "eleven acceptance
+> criteria" until the amendment in [§ Criterion 11](#criterion-11--the-single-run-attribution-fence-added-after-this-record-was-written)
+> at the foot of this file. A twelfth criterion — the SINGLE-RUN ATTRIBUTION FENCE — was
+> added to the array *after* the body below was written, and nothing updated this record.
+> **Everything from "What was wrong" down to "Standing note" describes the ELEVEN-entry
+> array as it stood at the wave-9 amendment and is left unedited on purpose** — it is an
+> accurate historical account of that write, and its `{"met": 9, "total": 11}` figures are
+> correct *as of that moment*. The live array today is twelve. Read the foot of this file
+> before repairing anything from the body.
 
 ## What was wrong
 
@@ -116,3 +126,64 @@ defects it repaired:
 - Anyone repairing this document again should re-read the full array immediately before
   patching, change only the strings they intend to change, assert the untouched entries
   byte-identical, and record the revs here.
+
+---
+
+## Criterion 11 — the SINGLE-RUN ATTRIBUTION FENCE, added AFTER this record was written
+
+Appended 2026-07-20 (wave 10). **Why this section exists:** before it, the fence lived in the
+live task array and *nowhere else* — no charter decision, no ledger entry, no verdict file.
+A grep for "attribution fence" / "MOSAIC" across `.claude/workflows/bp-pds-charter.md` and
+`scripts/pds-crown-*.md` returned only `PDS-D179`, which is about a *different* mosaic question
+and explicitly "must never be cited as if it says 'mosaic forbidden'". Meanwhile this file
+declares itself the crown's durable recovery source — "This file is the durable copy; the
+server's copy is not" — while describing an ELEVEN-entry array.
+
+That combination is a silent-deletion trap. The documented repair procedure at the foot of this
+file is to "re-read the full array immediately before patching, change only the strings they
+intend to change, assert the untouched entries byte-identical". Anyone who instead reconstructs
+the array from *this record* — its designated purpose — rebuilds eleven entries and drops the
+fence. `bp doc patch --set 'acceptance_criteria:=[...]'` replaces the WHOLE array and raises no
+error on a shortened one, and the fence's own job is to block an automatic close, so its removal
+would surface as the crown closing *more* easily, not as a failure. Neither side reports
+anything. Hence: the text goes here, verbatim.
+
+### Verbatim stored text, index 11 (1252 UTF-8 bytes)
+
+> SINGLE-RUN ATTRIBUTION FENCE (added by the wave-9 ledger-fence slice, pds-w9-crown-ledger-fence). The crown may not close on a MOSAIC. Every one of criteria 0-10 must cite ONE IDENTICAL RUN_ID, and that run must be the run whose full bundle actually existed. As of the fence being added, 9 of 11 read met but ONLY criterion 0 names a run at all (20260720T032558Z-28651); criteria 1,2,3,4,5,7,8,9 carry evidence with NO run id, so they cannot be attributed to any climb. A fresh climb produces a fresh RUN_ID, so stamping criterion 6 from it would pay the crown with a run that proved none of the other nine. THIS CRITERION EXISTS PARTLY TO BLOCK THE AUTO-CLOSE: the cmux Stop hook closes the task when every criterion reads met, with nobody typing a close command — so an 11-of-11 mosaic would close the crown silently. With this 12th criterion present, that cannot happen by default. TO SATISFY: either (a) re-prove criteria 0-10 from ONE serial climb and stamp each with that run's id in the evidence, or (b) explicitly REFUSE the crown, naming the rung that failed. Both are honest outcomes; a mosaic is not. The LEAD verifies the run ids are identical before this is marked met — it is never stamped by a builder alongside the rung it just ran.
+
+### Provenance correction
+
+The fence's text credits itself to the wave-9 ledger-fence slice: "added by the wave-9
+ledger-fence slice, `pds-w9-crown-ledger-fence`". **That attribution is not supported by that
+slice's own record.** `pds-w9-crown-ledger-fence` (lifecycle `done`, 7 criteria) closed with AC-4
+evidence reading, verbatim:
+
+> criteria_progress before {'met':9,'total':11} -> after {'met':9,'total':11}. Per-criterion diff of met/evidence across all 11 rows: NONE changed (programmatic comparison of before vs after JSON). Criterion 6 after: met=False, evidence length 0. Criterion 10 after: met=False, evidence length 0. Criteria 0,1,2,3,4,5,7,8,9 byte-identical in criterion text AND met AND evidence. Key sets identical per row; array length 11 -> 11.
+
+"array length 11 -> 11" is that slice proving it added no criterion. Its scope was the two
+WORDING repairs recorded in the body above, and its evidence asserts the array length was
+unchanged. So the fence was added by some *later* write that left no record of itself anywhere —
+the mis-citation is recorded here rather than corrected in the stored text, because rewriting the
+live criterion to fix a credit line would mean another unfenced whole-array patch (see the
+Standing note) for no functional gain. **Treat "added by the wave-9 ledger-fence slice" as
+unverified.** The fence's *content* is unaffected; only its authorship line is wrong.
+
+### If you are repairing the crown array from this file
+
+**Criterion 10's stored text has also moved since the body above was written.** The "After (914
+characters)" quotation in [§ Criterion 10](#criterion-10--before-and-after-verbatim) is the wave-9
+state and is now stale: a concurrent wave-10 patch on 2026-07-20 at 17:06:39Z took it to 948 UTF-8
+bytes, replacing "in the wave-9 transcript" with "in the transcript of the wave that pays this
+criterion" (verified against the live array at review time: 948 bytes, `wave-9 transcript` absent).
+That edit changed no `met` flag, no `evidence` field and no array length. It is left
+uncorrected above for the same reason as the rest of the body — it is an accurate record of the
+wave-9 write — but **do not copy criterion 10's text out of this file to pass as
+`--criterion-text`**; re-read it from the server immediately before any stamp.
+
+The live array is **twelve** entries, indices 0-11 (zero-based, PDS-D149). Index 11 is the text
+quoted above. Its `met` flag was `false` at the time of this writing, with empty evidence. Do not
+patch an eleven-entry array over it. The pre-declared reading of what this criterion requires —
+the run-id census, why wave 9's run id can never pay criteria 3 and 4, the cite-vs-re-prove
+contradiction in the fence's own two verbs, and the two stamp hazards — is at
+`scripts/pds-crown-fence-arithmetic-2026-07-20.md`.
