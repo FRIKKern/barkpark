@@ -2191,6 +2191,11 @@ step_6() {
   # reboots — counting the whole file would sum every boot this root ever had.
   local log_off
   log_off="$(wc -c <"$BARKPARK_HOME/server.log" 2>/dev/null | tr -d ' ' || printf 0)"
+  # A failed REDIRECTION leaves the pipeline's exit status at `tr`'s (0), so the
+  # `|| printf 0` never fires and `log_off` comes back EMPTY, which `$((…))`
+  # then reads as 0 — silently restoring the whole-file count this offset exists
+  # to prevent. Normalise explicitly rather than relying on that arithmetic.
+  case "${log_off:-}" in ''|*[!0-9]*) log_off=0 ;; esac
 
   if ! reboot_target; then
     fail 6 "the target did not come back after \`bin/barkpark stop\` + \`up\` (see $BARKPARK_HOME/reboot.log) — convergence cannot be measured across a boot that did not happen. NOTE: the target is SENTINELLED and was not reverted."
@@ -2205,11 +2210,24 @@ step_6() {
   # If a future guerrilla-only orphan joins the table, or a third core writer
   # appears, the two numbers diverge and this rung goes LOUD instead of quietly
   # measuring a scope that no longer means what it says.
-  local skip_count register_count
-  skip_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -c 'skipping the content update' || true)"
+  # THE GREP IS SCOPED TO BOOTSTRAP, AND THAT SCOPING IS LOAD-BEARING (PDS-D125).
+  #
+  # There are now TWO writers that log the phrase "skipping the content update":
+  # `Plugins.Bootstrap.skip_pulled/3` (one line per plugin-declared row it
+  # skipped — the number this roster is reconciled against) and, since the
+  # TagRegistry guard landed, `Content.TagRegistry.skip_pulled/2` (exactly the
+  # `tag` row, which the sentinel scope DELIBERATELY EXCLUDES). An unscoped
+  # count returns 35 against 34 sentinelled rows and reds ROSTER DRIFT on a
+  # perfectly healthy target — a false red caused by the sibling fix in this
+  # very wave. The count must therefore come from Bootstrap's walk alone.
+  local skip_count register_count tag_skip_count
+  skip_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -cE 'Plugins\.Bootstrap: schema .*skipping the content update' || true)"
   register_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -c 'Plugins.Bootstrap: registered schema' || true)"
-  info "boot log        $skip_count SKIP (guard fired) · $register_count REGISTER, this boot only"
-  info "                REGISTER is informational: it is Logger.info and can be filtered out by log level, so only SKIP is asserted."
+  tag_skip_count="$(tail -c "+$((log_off + 1))" "$BARKPARK_HOME/server.log" 2>/dev/null | grep -cE 'TagRegistry: core .*skipping the content update' || true)"
+  info "boot log        $skip_count Bootstrap SKIP (guard fired) · $register_count REGISTER, this boot only"
+  info "                $tag_skip_count TagRegistry SKIP (the core \`tag\` row, outside the sentinel scope)"
+  info "                REGISTER is informational: it is Logger.info and can be filtered out by log level, so only the Bootstrap SKIP count is asserted."
+  info "                The TagRegistry count is reported, NOT asserted: \`SchemaBootstrap.init/1\` hardcodes dataset \"production\", so it is legitimately 1 when SOURCE_DS is production and 0 otherwise."
 
   # Leg A's own reading is taken BEFORE the count assertions so that a red can
   # say what actually happened to the columns rather than only that two numbers
@@ -2223,11 +2241,11 @@ step_6() {
   # ZERO SKIPs is a different fact from a MISCOUNT, and conflating them puts a
   # roster-drift diagnosis on a boot where the guard simply never ran.
   if [ "${skip_count:-0}" -eq 0 ]; then
-    fail 6 "LEG A — THE GUARD DID NOT FIRE: $sentinel_rows rows were sentinelled and stamped, yet the boot logged ZERO guard SKIPs and $register_count plugin REGISTERs. The boot-time upsert walked straight through a stamped slot. Guarded columns that moved on those rows: ${leg_a_changed:-<none, which would be stranger still>}. This is what a broken or absent provenance guard looks like from outside the engine."
+    fail 6 "LEG A — THE GUARD DID NOT FIRE: $sentinel_rows rows were sentinelled and stamped, yet the boot logged ZERO Bootstrap guard SKIPs and $register_count plugin REGISTERs. The boot-time upsert walked straight through a stamped slot. Guarded columns that moved on those rows: ${leg_a_changed:-<none, which would be stranger still>}. This is what a broken or absent provenance guard looks like from outside the engine."
     return 0
   fi
   if [ "${skip_count:-0}" != "$sentinel_rows" ]; then
-    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} guard SKIPs. Those two numbers are derived independently — the sentinel from this script's hand-maintained exclusion list ('tag','metric'), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
+    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} Bootstrap guard SKIPs (the core \`tag\` row's own TagRegistry skip, ${tag_skip_count:-0} this boot, is excluded from both sides on purpose). Those two numbers are derived independently — the sentinel from this script's hand-maintained exclusion list ('tag','metric'), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
     return 0
   fi
 
@@ -2315,7 +2333,7 @@ step_6() {
   info "NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are"
   info "                sequenced BEFORE this control for exactly that reason; a"
   info "                re-pull is required before any further assertion about it."
-  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly $skip_count guard SKIPs to match, and the stamped reboot preserved every column and all $survivors sentinels ($digest_before, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of $GUARDED_COLUMNS and wiped every trace of the drift (${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
+  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly $skip_count Bootstrap guard SKIPs to match (plus ${tag_skip_count:-0} TagRegistry skip of the core \`tag\` row, which the scope excludes), and the stamped reboot preserved every column and all $survivors sentinels ($digest_before, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of $GUARDED_COLUMNS and wiped every trace of the drift (${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
