@@ -160,3 +160,60 @@ hook because schema-v2's cross-field `validations:` slot is parsed but inert.
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave inherits -->
+
+### Wave 2026-07-20 — round 1, the substrate. Grade A−.
+
+Paper: `source-of-truth-grip-wave-2026-07-20`. Four round-1 slices built and
+reviewed; rounds 2-3 deferred by design (sequenced-rounds law), not stalled.
+
+**Landed** (final branches carry a reviewer `-r` commit):
+
+| Slice | Branch | What |
+|---|---|---|
+| `tgw1-level-grammar` | `…derive-the-authority-level-from-the-reru-0-r` | `level.mjs` + `record.mjs`: level derived from the `rerun` command alone, claim as ceiling, LEVEL-SKIP / PATHLESS-REF / INADMISSIBLE-CONTINUOUS. 34 tests. |
+| `tgw1-fixture-quarry` | `…freeze-the-evidence-corpus-and-the-six-r-1-r` | Frozen evidence corpus (1,902 evidence / 652 proofs, deterministic sample) + the six ratified specimens and two labelled negative controls. 19 checks, 19 controls proven able to fail. |
+| `tgw1-rerun-executor` | `…re-execute-a-rerun-command-and-report-a--2-r` | `rerun.mjs`: actually executes, `(code, exit)` reachability, UNAVAILABLE / NULL-READ / ASYNC-DEFERRED / UNSAFE-RERUN. 30 tests. |
+| `tgw1-workflow-provenance-seam` | `…give-both-workflow-schemas-a-rerun-field-3-r` | `rerun` on `facts[]` in both cycles, the `bp search query` fix (D16), JS fan-out floors (D15), plus a module-scope schema self-check. |
+
+**Charter landed with this wave.** The charter was authored at `448eee5f9` and
+never reached `origin/main`; three of four builders reported they could not read
+D1-D18 and worked from their task briefs. It rides the `tgw1-level-grammar-r`
+branch. Merge that branch and the dangling pointer closes.
+
+**Defects the review found and fixed** — all three were the epic's own failure
+mode committed inside the tooling built to prevent it:
+
+1. **False promotion to L1.** `curl http://[::1]:4000/…` derived L1. The URL host
+   extractor stopped at the first colon and captured a bare `[`, which failed
+   the loopback test. `LOOPBACK_HOST` already listed `::1` — the intent was
+   there, nothing exercised it. A ceiling set too high is a level-skip.
+2. **The probe's authority laundered onto the command's.** The executor's HTTP
+   branch ruled on the bounded reachability probe and DISCARDED the literal
+   command's exit, so `curl <live 200 host> | grep -c ABSENT_NEEDLE` returned
+   verdict OK with `admits.pass: true`. The probe now governs reachability only;
+   the literal exit governs the verdict. Mutation-proven (29 pass → 28/1 fail).
+3. **A frozen `rerun` that could never run.** Specimen 3 carried an unfilled
+   `<charter>` placeholder — a template posing as a command — and its `>` tripped
+   the write-redirect guard, so the executor refused it UNSAFE-RERUN before
+   execution. Found by running the fixture's commands through the other two
+   slices; that cross-slice check is worth repeating every wave.
+
+Also closed: vacuous `rerun: "n/a — …"` prose on unratified specimens (now
+`null` + `no_rerun_reason`, so absence is typed as absence); the synthetic
+no-lag side now declares itself synthetic; the one unproven control (the 4 MB
+size bound) is now plantable; the workflow schema contract is a module-scope
+throw instead of a throwaway probe, mutation-proven twice.
+
+**What the next wave inherits.** Merge round 1, then dispatch by dependency:
+`tgw1-adjudicator` (round 2) once grammar + executor are in; then
+`tgw1-acceptance-suite` and `tgw1-workflow-gate-wiring` (round 3) once the
+adjudicator merges. The adjudicator is where the wave's honest gaps become
+visible and must be closed rather than inherited: the six `caught_by` labels are
+HYPOTHESES the acceptance suite has to test, `GENERATED_ARTIFACT_PATTERNS` is
+still a guess (`tgw-bl-l4-artifact-inventory`), `KNOWN_WRITERS` has one
+hand-seeded entry (`tgw1-writer-census`), and specimen 4 remains honestly
+UNCAUGHT — R1 structurally cannot catch it, so R2 dependency recording is the
+real next capability (`tgw-bl-r2-dependency-enrichment-substrate`).
+
+D10 still holds: nothing is stored durably, and `tooling/research-coverage`
+stays blocked until its ledger is reproducible.
