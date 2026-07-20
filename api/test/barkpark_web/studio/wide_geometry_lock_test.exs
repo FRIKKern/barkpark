@@ -470,6 +470,36 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
              """
     end
 
+    # REVIEW FIX (spd-w5 review). The census above enumerates only NAMED
+    # container queries, because that is the only shape `container_at_rules/1`
+    # can parse. An UNNAMED `@container (max-width: …)` is legal CSS and is the
+    # sharpest version of D114's hazard: with no name it resolves against the
+    # NEAREST ancestor query container, which is whichever of `content`/`panel`
+    # happens to be closer — by proximity rather than by contract, and it would
+    # slip past both the census (which never sees it) and the name pin (which
+    # has nothing to compare). This counts every `@container` token in the sheet
+    # and requires the named parse to account for all of them.
+    test "there are no UNNAMED container queries — every one declares its box" do
+      src = decommented(css())
+      total = length(Regex.scan(~r/@container\b/, src))
+      named = length(container_at_rules())
+
+      assert total == named,
+             """
+             #{total - named} `@container` at-rule(s) in root.html.heex declare NO
+             container name.
+
+             An unnamed container query resolves against the nearest ancestor
+             query container. This sheet deliberately has two — `content` (the
+             reading column) and `panel` (that column PLUS the docked 300px
+             inspector) — so "nearest" is an accident of markup, not a decision,
+             and the two answers differ by 300px (charter D113/D114).
+
+             Name it, then add it to @container_at_rules with the marker that
+             identifies its subject and a sentence saying why that box is right.
+             """
+    end
+
     test "the pin RED-tests: a mis-pointed at-rule is caught by name" do
       # The mutation this file was written against, run in-process against a
       # synthetic sheet so the guarantee does not depend on anyone repeating
