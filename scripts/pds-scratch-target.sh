@@ -28,8 +28,26 @@
 # tree's api/uploads, or anything on a remote. bin/barkpark and bin/barkpark-pg
 # are used AS-IS and are never modified.
 #
-# COST: a cold tree pays TWO full compiles (ensure_secrets runs MIX_ENV=dev, the
-# server boots MIX_ENV=prod) — >10 min cold, ~90s warm.
+# COST — there are TWO regimes and only ONE thing decides which you are in: is
+# api/_build EMPTY? (_build is per-checkout and is never shared, so a fresh
+# worktree is always cold.) Tell them apart before budgeting:
+#
+#   [ -n "$(ls -A api/_build 2>/dev/null)" ] && echo warm || echo COLD
+#
+#   COLD (empty api/_build): TWO full compiles — ensure_secrets runs MIX_ENV=dev,
+#     the server boots MIX_ENV=prod. >10 minutes is realistic.
+#   WARM (populated api/_build — measured at 290 MB across 71 deps):
+#     first `up` of a session   32.742s  (~20s of that is `mix deps.get`
+#                                        RESOLVING deps, not compiling)
+#     later `up` in the session  9.830s  (deps already resolved)
+#     teardown                   8.068s
+#     teardown + up (one cycle) 20.240s
+#
+# Every WARM figure above was measured on a real host on 2026-07-20 with
+# api/_build populated. The old "~90s warm" in this header was wrong by ~4.5x
+# and made re-arming a target look far more expensive than it is. Full record,
+# incl. how to hold a pre-booted SPARE target (drives the miss cost to ~0):
+# scripts/pds-scratch-target-cost-2026-07-20.md.
 
 set -euo pipefail
 
@@ -42,8 +60,21 @@ BARKPARK_BIN="$REPO_ROOT/bin/barkpark"
 PG_BIN_SCRIPT="$REPO_ROOT/bin/barkpark-pg"
 
 # Pointer to the most recent scratch root, so `verify`/`teardown`/`env` work in
-# a later shell without the caller having to remember the mktemp path. Override
-# with PDS_SCRATCH_POINTER for concurrent scratch targets.
+# a later shell without the caller having to remember the mktemp path.
+#
+# CONCURRENT TARGETS (the spare-target recipe — two proven coexisting live on
+# 2026-07-20, disjoint HTTP ports :22940/:30540 and disjoint Postgres :41596/
+# :20104, with the host dev server on :4000 untouched across BOTH teardowns,
+# because free_port() probes before binding):
+#
+#   PDS_SCRATCH_POINTER=/tmp/pds-scratch-spare.last \
+#     BARKPARK_HOME=<pinned spare root> scripts/pds-scratch-target.sh up
+#
+# BOTH vars must be pinned, not just one. `up` writes the pointer path
+# UNCONDITIONALLY (see the `printf ... >"$POINTER_FILE"` below), and the pointer
+# is ONE global path — so a second `up` on the default pointer silently
+# repoints `teardown`/`env` at the new root and STRANDS the first target's
+# Postgres. Details: scripts/pds-scratch-target-cost-2026-07-20.md.
 POINTER_FILE="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch-target.last}"
 
 # Postgres caps a unix-socket path at 103 bytes (see TRAP 3). barkpark-pg puts
@@ -252,7 +283,7 @@ cmd_up() {
   log "tree           $REPO_ROOT"
 
   if [ ! -d "$API_DIR/_build" ] || [ -z "$(ls -A "$API_DIR/_build" 2>/dev/null)" ]; then
-    warn "api/_build is empty — COLD tree: two full compiles (MIX_ENV=dev for secrets, MIX_ENV=prod for the server), expect >10 minutes. Warm runs take ~90s."
+    warn "api/_build is empty — COLD tree: two full compiles (MIX_ENV=dev for secrets, MIX_ENV=prod for the server), expect >10 minutes. WARM (populated api/_build) is a different regime entirely: 32.7s first boot of a session, 9.8s after, 20.2s for a full teardown+respawn cycle — measured 2026-07-20, see scripts/pds-scratch-target-cost-2026-07-20.md."
   fi
 
   # TRAP 1 — bin/barkpark cmd_up only checks `command -v mix`; on a fresh
