@@ -22,6 +22,26 @@
 # and force-kills the moment it does — measured 89s→17s for a 4-shot batch,
 # ~3.6s for a single shot. (macOS has no timeout(1), so this is hand-rolled.)
 #
+# WHY the reap watchdog (charter GR99): the poll-kill above bounded only the
+# PNG-settle poll, never the REAP, and this harness wedged FOUR times across
+# waves — ~28min, 7h18m, 7h46m, 10h30m+ — always in the same place. `sample` on
+# a live wedged run: 2395 of ~2400 stack frames in __wait4, i.e. blocked in
+# `wait "$cpid"`, PAST the SIGTERM, so the following `kill -9` this file used to
+# call "a guaranteed KILL" was unreachable code. bash `wait` has no timeout, so
+# only an EXTERNAL watchdog can bound it — see the reap block in shot().
+#
+# THE HARNESS'S OWN FALSE-GREEN CLASSES, now guarded (charter GR98). Each of
+# these shipped a full-looking matrix that was wrong:
+#   - server dies mid-run ⇒ every remaining shot is an ERR_CONNECTION_REFUSED
+#     page with a non-zero size, and the old `png_size > 0` gate printed `ok`
+#     for all of them. Liveness is now re-checked PER SHOT, not once at boot.
+#   - two runs sharing one $OUT interleave silently (measured: 49 files against
+#     44 `ok` lines). A concurrent run is now refused by a lock in $OUT, and the
+#     completion line counts THIS run's shots instead of `find`ing the whole
+#     directory — so stale or foreign files can no longer inflate the proof.
+#   - an unknown SCEN name was silently dropped and the run still printed
+#     ">> Done". Unmatched SCEN entries now abort before anything is shot.
+#
 # Env:
 #   CHROME  chrome/chromium binary (auto-detected on macOS/Linux otherwise)
 #   OUT     output dir (default: cloud/priv/static/__preview__/__shots__/, gitignored)
@@ -30,6 +50,10 @@
 #   ACCENT  comma-list of accent identities — evergreen|ember|fjord|charple|iris —
 #           each appends &accent=<name> to the URL (mock.js:70 seam) and -<name>
 #           to the filename. Unset ⇒ one pass, no ?accent=, filenames unchanged.
+#   REAP_BUDGET  seconds the watchdog gives one Chrome reap before killing the
+#           process TREE (default: 10).
+#   OUT_REUSE=1  silence the "$OUT already holds N PNGs" notice. It is only a
+#           notice — a CONCURRENT run is refused by the lock, always.
 #
 # ROUTE FIDELITY (GR66): each shot requests the scenario's OWN pathname and
 # search, not always "/". app.js gates isNewFlow/isActivateFlow on the exact
@@ -42,6 +66,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${PORT:-4180}"
 OUT="${OUT:-$HERE/__shots__}"
+REAP_BUDGET="${REAP_BUDGET:-10}"
 
 # ── locate a Chrome/Chromium binary ──────────────────────────────────────────
 find_chrome() {
@@ -96,13 +121,39 @@ SCEN_TABLE="$(HERE="$HERE" node --input-type=module -e '
 THEMES=(light dark)
 WIDTHS=(1440 768) # desktop + tablet — the second pass the slice mandates
 
+# ── the live census, DERIVED ─────────────────────────────────────────────────
+# Never hand-write these numbers. A frozen count in a comment goes stale the
+# next time scenarios.mjs grows and then lies to every reader (GR53/GR80/GR83);
+# the header here said "72 of 81" long after the truth was 73 of 86.
+ALL_SCEN="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f1 | grep -v '^$' || true)"
+SCEN_TOTAL="$(printf '%s\n' "$ALL_SCEN" | grep -c . || true)"
+SCEN_DEEP="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f2 | grep -c . || true)"
+
 # ── optional SCEN filter (comma-list) ────────────────────────────────────────
-# Unset ⇒ shoot every scenario. Set ⇒ shoot only the named ones (an unknown
-# name simply never matches — no error, so a typo is visible as a missing PNG).
+# Unset ⇒ shoot every scenario. Set ⇒ shoot only the named ones.
 # A space-padded allowlist; membership is a padded-substring test so this runs
 # on bash 3.2 (macOS default — no associative arrays).
+#
+# VALIDATED, because the padded-substring test is an EXACT match: a typo, or a
+# scenario that does not exist yet, used to match nothing at all and be silently
+# dropped while the run still printed ">> Done" over a short matrix. Fail here,
+# naming the entry, before a single pixel is shot.
 WANT_SCEN=""
-if [[ -n "${SCEN:-}" ]]; then WANT_SCEN=" ${SCEN//,/ } "; fi
+if [[ -n "${SCEN:-}" ]]; then
+  WANT_SCEN=" ${SCEN//,/ } "
+  unknown=""
+  for want in ${SCEN//,/ }; do
+    if [[ " $(printf '%s ' $ALL_SCEN)" != *" $want "* ]]; then unknown="$unknown $want"; fi
+  done
+  if [[ -n "$unknown" ]]; then
+    echo "!! shoot.sh: SCEN names match no scenario:$unknown" >&2
+    echo "   $SCEN_TOTAL scenarios exist in scenarios.mjs. Closest by prefix:" >&2
+    for want in $unknown; do
+      printf '%s\n' "$ALL_SCEN" | grep -i -- "${want%%-*}" | sed 's/^/     /' >&2 || true
+    done
+    exit 1
+  fi
+fi
 
 # ── optional ACCENT axis (comma-list) ────────────────────────────────────────
 # Unset ⇒ a single pass with NO ?accent= (evergreen fallback in CSS) and the
@@ -114,13 +165,52 @@ else
   ACCENTS=("") # the empty accent = old behavior (no ?accent=, no filename suffix)
 fi
 
+# ── $OUT must be OURS ────────────────────────────────────────────────────────
+# The measured defect was two runs writing into one $OUT AT THE SAME TIME: they
+# interleave silently and the old whole-directory `find` counted the other run's
+# files as this run's proof — 49 files against 44 `ok` lines, a matrix that read
+# complete and was not.
+#
+# So the hard guard is a LOCK on the concurrent writer, NOT a ban on re-using a
+# directory. Those are different things and conflating them would break the
+# everyday path: `make cloud-shots` shoots into the DEFAULT $OUT every time, so
+# refusing a non-empty dir would fail every second run for no safety gain. A
+# sequential re-shoot is normal — shot() already overwrites each PNG it takes,
+# and the per-run counter below means stale files can no longer inflate anyone.
 mkdir -p "$OUT"
+LOCK="$OUT/.shoot.lock"
+if [[ -f "$LOCK" ]]; then
+  other="$(cat "$LOCK" 2>/dev/null || true)"
+  if [[ -n "$other" ]] && kill -0 "$other" 2>/dev/null; then
+    echo "!! shoot.sh: another shoot.sh (pid $other) is ALREADY writing into $OUT" >&2
+    echo "   Concurrent runs interleave silently — that is how a 44-shot run" >&2
+    echo "   once reported 49. Point this run at a different OUT= and retry." >&2
+    exit 1
+  fi
+  echo ">> note: clearing a stale lock from pid ${other:-?} (no such process)"
+fi
+echo $$ > "$LOCK"
+
+# The lock and the server both have to be released however we exit — including
+# the loud aborts below, which are new exit paths.
+cleanup() {
+  if [[ -n "${SERVER_PID:-}" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi
+  if [[ "$(cat "$LOCK" 2>/dev/null || true)" == "$$" ]]; then rm -f "$LOCK"; fi
+}
+trap cleanup EXIT
+
+# Not a refusal — a disclosure. Stale PNGs in $OUT are fine, but you should know
+# they are there, because THIS run only reports the shots it actually took.
+existing_png="$(find "$OUT" -maxdepth 1 -name '*.png' 2>/dev/null | grep -c . || true)"
+if [[ "$existing_png" -gt 0 && "${OUT_REUSE:-}" != "1" ]]; then
+  echo ">> note: \$OUT already holds $existing_png PNG(s) from an earlier run."
+  echo ">>       This run overwrites only what it re-shoots and counts only its own."
+fi
 
 # ── start the preview server ─────────────────────────────────────────────────
 node "$HERE/serve.mjs" --port "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
-cleanup() { kill "$SERVER_PID" 2>/dev/null || true; }
-trap cleanup EXIT
+# (cleanup + EXIT trap are installed above, with the $OUT lock.)
 
 # Wait for the server to answer — and fail fast if it never does (dead node,
 # EADDRINUSE, …) instead of emitting 20 confusing per-shot failures.
@@ -138,9 +228,29 @@ fi
 
 echo ">> Chrome: $CHROME_BIN"
 echo ">> Shooting into: $OUT"
+echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink"
 
 # Portable file size (macOS `stat -f%z`, GNU `stat -c%s`), 0 if absent.
 png_size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+
+# Is the preview server still answering? Checked ONCE at boot was not enough:
+# when node died mid-run every remaining shot captured Chrome's
+# ERR_CONNECTION_REFUSED page — non-zero bytes, so the old size-only gate
+# printed `ok` for each one and delivered a FULL-COUNT matrix of wrong images.
+server_alive() {
+  kill -0 "$SERVER_PID" 2>/dev/null || return 1
+  curl -sf -o /dev/null --max-time 5 "http://localhost:$PORT/" 2>/dev/null
+}
+
+# This run's own tally — never a whole-directory find (see the $OUT guard).
+SHOTS_OK=0
+SHOTS_FAILED=0
+
+# fd 3 is the REAL stderr. The reap watchdog silences its own fd 2 so bash's
+# "Terminated: 15 sleep" job notice — emitted every single shot, once the
+# watchdog is retired early — does not bury the honest failures in this log.
+# Its own alarm still has to be seen, so that goes to fd 3.
+exec 3>&2
 
 shot() {
   local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}"
@@ -163,8 +273,10 @@ shot() {
   # FRAGMENT, so the fragment MUST come LAST. mock.js:32 reads accent from
   # location.search, which excludes everything past `#`, and falls back to
   # evergreen SILENTLY — so the old `$deep$accent_q` ordering dropped the accent
-  # for the 72 of 81 scenarios that carry a deepLink, making every
-  # accent-suffixed filename a lie (charter GR58). Do not reorder.
+  # for every scenario that carries a deepLink — the large majority; the run
+  # banner prints the live count, DERIVED, because the number this comment used
+  # to freeze ("72 of 81") was already two scenario additions out of date —
+  # making every accent-suffixed filename a lie (charter GR58). Do not reorder.
   local url="http://localhost:$PORT${spath:-/}?scen=$scen&theme=$theme$accent_q$search_q$modal_q$deep"
   # …and this is the tripwire that makes "do not reorder" enforceable. shoot.sh
   # has no automated coverage at all, which is exactly how the original bug
@@ -225,15 +337,49 @@ shot() {
     sleep 0.1
     waited=$((waited + 100))
   done
-  # Reap: TERM, then a beat, then a guaranteed KILL — proof the spawned Chrome
-  # is never left alive (kill -0 returns non-zero once it's gone).
+  # ── Reap, WATCHDOGGED ──────────────────────────────────────────────────────
+  # TERM, then wait. The `wait` is the wedge: bash has no wait-with-timeout, and
+  # a Chrome that ignores TERM parks this script in __wait4 forever (four
+  # measured wedges, up to 10h30m — the `kill -9` below is unreachable until
+  # `wait` returns, so it never saved anyone). macOS has no timeout(1), so the
+  # bound has to come from OUTSIDE the wait: a watchdog that outlives it.
+  #
+  # It kills the process TREE. `pkill -9 -P` is NOT optional — a version that
+  # killed only $cpid demonstrably left an orphaned renderer behind. Both kills
+  # are scoped to a pid THIS script launched; never a broad pattern, because a
+  # foreign shoot.sh may be running on the same host.
   kill "$cpid" 2>/dev/null || true
+  (
+    exec 2>/dev/null # only bash's job notice for our own sleep; alarm goes to fd 3
+    sleep "$REAP_BUDGET"
+    if kill -0 "$cpid"; then
+      echo "  !! watchdog: chrome $cpid ignored TERM for ${REAP_BUDGET}s — killing tree" >&3
+      pkill -9 -P "$cpid" || true
+      kill -9 "$cpid" || true
+    fi
+  ) &
+  local wd=$!
   wait "$cpid" 2>/dev/null || true
+  # Retire the watchdog and its own sleep, so a fast shot leaves nothing behind.
+  pkill -P "$wd" 2>/dev/null || true
+  kill "$wd" 2>/dev/null || true
+  wait "$wd" 2>/dev/null || true
   kill -9 "$cpid" 2>/dev/null || true
   rm -rf "$profile"
+  # Size alone is NOT proof: an ERR_CONNECTION_REFUSED page is a perfectly
+  # healthy non-empty PNG. Re-check the server before calling this shot good.
+  if ! server_alive; then
+    echo "!! shoot.sh: preview server on :$PORT stopped answering mid-run." >&2
+    echo "!! ${scen}/${theme}/${width}${accent_sfx} and everything after it would be" >&2
+    echo "!! Chrome's ERR_CONNECTION_REFUSED page — non-empty, and NOT the screen." >&2
+    echo "!! Aborting: $SHOTS_OK shot(s) before this point are usable, this one is not." >&2
+    exit 1
+  fi
   if [[ "$(png_size "$png")" -gt 0 ]]; then
+    SHOTS_OK=$((SHOTS_OK + 1))
     echo "  ok  $(basename "$png")"
   else
+    SHOTS_FAILED=$((SHOTS_FAILED + 1))
     echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx}"
   fi
 }
@@ -253,4 +399,11 @@ while IFS=$'\x1f' read -r scen deep spath ssearch; do
   done
 done <<< "$SCEN_TABLE"
 
-echo ">> Done. $(find "$OUT" -name '*.png' | wc -l | tr -d ' ') PNGs in $OUT"
+# THIS run's tally, not `find "$OUT"` — the directory may legitimately hold a
+# previous run's PNGs (OUT_REUSE=1), and counting those as ours is exactly the
+# inflation that made a 44-shot run report 49.
+if (( SHOTS_FAILED > 0 )); then
+  echo ">> Done with FAILURES. $SHOTS_OK ok, $SHOTS_FAILED failed, into $OUT"
+  exit 1
+fi
+echo ">> Done. $SHOTS_OK PNG(s) shot this run into $OUT"
