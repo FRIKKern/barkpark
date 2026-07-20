@@ -157,8 +157,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   MEMORY (PDS-D205): this entry point reads the finished tar back into ONE
   full-size binary, so it costs the bundle's size in RAM. That contract is kept
   deliberately — it is what the whole md5-parity fidelity suite is written
-  against, and there is exactly one non-test caller of `export/2` in `lib`. The
-  HTTP edge uses `export_to_file/2` instead and never materializes the bundle.
+  against, and after this slice `export/2` has NO non-test caller in `lib`: the
+  HTTP edge moved to `export_to_file/2`, which never materializes the bundle.
+  The binary entry point is kept solely so the fidelity suite keeps its
+  `{:ok, binary()}` contract.
   """
   @spec export(binary() | nil, keyword()) ::
           {:ok, binary()} | {:error, :workspace_id_required | :workspace_not_found}
