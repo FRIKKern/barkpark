@@ -1,0 +1,324 @@
+══════════════════════════════════════════════════════════════════════════════
+PDS CROWN — WAVE 10: THE INSTRUMENTED CLIMB THAT REFUSED ITSELF
+run pdsw10-sentinel-20260720 · 0 attempts spent · 0 exports fired · APPEND-ONLY
+══════════════════════════════════════════════════════════════════════════════
+
+HONESTY BANNER — READ THIS BEFORE ANY NUMBER BELOW.
+
+  Nothing was written to guerrilla by this run. Every remote command was a read
+  (/proc, ps, git rev-parse, systemctl is-active, systemctl list-units). No
+  restart was manufactured. No deploy was requested and none was waited for.
+
+  NO EXPORT WAS FIRED. Not one. `pds-pull-proof.sh --all` was never invoked.
+  The export attempts store at /tmp/pds-full-export/attempts reads 1 BEFORE this
+  run and 1 AFTER it. This run spent ZERO of the budget, because the fire
+  predicate never cleared and a refused predicate costs nothing.
+
+  THIS RUN DOES NOT PAY CROWN CRITERION 10. It does not pay anything. It is a
+  REFUSAL, stated in the terms PDS-D193 set out, with the dataset that forced it
+  attached in full. Per PDS-D171 this run does not stamp, close or amend
+  `pds-w1-crown-proof` — the climber does not pay the criteria it is judged by.
+
+  This file does NOT append into the wave-9 transcript (PDS-D196 refuses that in
+  advance). scripts/pds-pull-proof.crown-transcript.txt (wave 7) and
+  scripts/pds-pull-proof.crown-transcript-w8.txt (wave 8/9) stand untouched.
+
+  bp task    pds-w10-instrumented-climb   (parent pds-w10-climb-in-the-post-deploy-window)
+  wave paper pds-wave-10-2026-07-20       — READ, never written by this run
+  sentinel   scripts/pds-window-sentinel.sh
+  harness    scripts/pds-pull-proof.sh, FROZEN at blob
+             e219e97ccf7f33797c86a2b84d998d599b6bda31 — verified by
+             `git rev-parse`, never `shasum` (PDS-D154)
+
+  RESULT     0 of 61 sampled draws satisfied the PDS-D193 fire predicate.
+             The blocking leg is (ii), beam VmSwap <= 100000 kB: 1 pass in 61.
+             And leg (ii) is ANTI-correlated with leg (i) by construction —
+             r = +0.677 between MemAvailable and beam VmSwap, and ZERO of 61
+             samples satisfied both at once. See §4. This is the finding.
+
+──────────────────────────────────────────────────────────────────────────────
+1. WHAT THIS WAVE WAS SENT TO DO
+──────────────────────────────────────────────────────────────────────────────
+
+Crown criterion 6 is PAID (wave 8/9, rung 6, control firing in both directions).
+Criterion 10 was REFUSED on cond_b — the full-export memory precondition — and
+that refusal was explicitly NOT permanent. Wave 10's job was to pay it or to
+refuse it again in writing.
+
+The premise this wave was NOT allowed to use: an armed post-deploy rig. That is
+refuted (PDS-D190/D191, on top of PDS-D93). A deploy is a memory TROUGH first,
+it breaks precondition (a) by moving the served sha out from under rung 0a's
+pin, and it aborts on precondition (d) in 4 of 4 measured deploys.
+
+The premise this wave WAS given: PDS-D92 check-and-go, instrumented. Poll. Fire
+on the first draw satisfying PDS-D193's four legs:
+
+  (i)   MemAvailable_MiB >= 2300        [kB / 1024, NEVER / 1000]
+  (ii)  beam VmSwap      <= 100000 kB
+  (iii) the bp-site-build-* running-unit listing is EMPTY
+  (iv)  exactly ONE of blue/green reads active
+
+──────────────────────────────────────────────────────────────────────────────
+2. THE INSTRUMENT
+──────────────────────────────────────────────────────────────────────────────
+
+scripts/pds-window-sentinel.sh. One ssh round-trip per sample, key
+~/.ssh/barkpark_indx (the default identity is DENIED on this host). Per sample it
+reads: UTC stamp; MemAvailable and SwapFree from /proc/meminfo; the live beam pid
+via `pgrep -o -x beam.smp` — NEVER `pgrep -f` (PDS-D135: the -f form can select a
+foreign low-pid process whose cmdline merely contains the literal, with a
+captured ~342x RSS under-read) — with that pid's VmRSS and VmSwap from
+/proc/<pid>/status; ELAPSED via `ps -o etime=`; the served sha via
+`git -C /opt/barkpark rev-parse HEAD`; the bp-site-build-* running-unit listing;
+and `systemctl is-active` for both slots.
+
+Every sample appends a 14-column TSV row — FIRE or STAND-DOWN, no exceptions.
+The refusals are the dataset, not the noise around it. §5 is the whole log.
+
+Two properties of the instrument are load-bearing and both were built in:
+
+  UNKNOWN IS A FAIL. An unreadable VmSwap fails leg (ii) rather than passing it.
+  This predicate does not clear on absence of evidence.
+
+  THE PREDICATE TIGHTENS ONLY. PDS_SENTINEL_MEM_FLOOR_MIB below 2300 or
+  PDS_SENTINEL_SWAP_CEIL_KB above 100000 is a hard refusal to run, not a warning.
+  A sentinel whose floor can be dialled down is a rubber stamp with extra steps.
+  This mattered: §4's finding is exactly the kind that tempts a loosening.
+
+Gate: `bash -n` clean, `shellcheck -S error` clean, and clean at -S warning too.
+
+──────────────────────────────────────────────────────────────────────────────
+3. PREFLIGHT — PDS-D192, ALL THREE LEGS, CLEAN
+──────────────────────────────────────────────────────────────────────────────
+
+Run in one shell before any fire could occur (`pds-window-sentinel.sh preflight`,
+exit 0):
+
+  (a) OK — HEAD is 0 commits behind origin/main
+  (b) OK — scripts/pds-pull-proof.sh blob
+           e219e97ccf7f33797c86a2b84d998d599b6bda31 == freeze
+  (c) OK — live served sha 49b629fef074339b80836fb87496f5a6f37324da is an
+           ancestor of HEAD (49b629fef074339b80836fb87496f5a6f37324da)
+
+  HONEST DEVIATION ON LEG (a): this is an isolated worktree branch
+  (worktree-wf_80f89451-4c2-32) with NO upstream, so a literal `git pull --rebase`
+  errors "no upstream configured". Substituted `git fetch origin` +
+  `git rev-list --count HEAD..origin/main` == 0, which tests the same property
+  rung 0b hard-fails on: the worktree must not be behind the served sha. The
+  `--pull` flag still runs the literal pull where an upstream exists. Recorded
+  here rather than quietly papered over, because leg (a) is the leg that, when
+  wrong, lets a run burn the export, green rungs 3/4 and STILL exit RESULT: FAIL
+  (fail() at :164-168 only increments a counter).
+
+Preflight was never the blocker. The blocker is §4.
+
+──────────────────────────────────────────────────────────────────────────────
+4. THE FINDING — PDS-D193 LEGS (i) AND (ii) ARE ANTI-CORRELATED
+──────────────────────────────────────────────────────────────────────────────
+
+61 samples over 31 minutes, 2026-07-20T17:08:47Z .. 17:39:24Z, 30 s cadence,
+one continuously-live BEAM (pid 1222791, started Mon Jul 20 16:50:47 2026).
+
+  leg (i)   MemAvailable >= 2300 MiB       42/61   (68.9%)
+  leg (ii)  beam VmSwap <= 100000 kB        1/61   ( 1.6%)   <-- THE BLOCKER
+  leg (iii) no bp-site-build-* running     39/61   (63.9%)
+  leg (iv)  exactly one active slot        61/61   (100.0%)
+
+  legs (i)+(iii)+(iv) together             38/61   (62.3%)
+  ALL FOUR — the fire predicate             0/61   ( 0.0%)
+
+Read those last two lines together. Everything the export actually needs —
+headroom, a quiet box, a stable slot — was available in 62.3% of draws. The
+predicate still never cleared, because of leg (ii) alone.
+
+WHY LEG (ii) NEVER CLEARS, AND WHY IT CANNOT BE WAITED OUT.
+
+beam VmSwap climbs monotonically from BEAM start and only resets on a slot
+restart:
+
+  elapsed 17:59   VmSwap  81156 kB   RSS 617296 kB   mem 1973 MiB
+  elapsed 21:05   VmSwap 120120 kB   RSS 736196 kB   mem 2028 MiB
+  elapsed 24:08   VmSwap 133644 kB   RSS 709184 kB   mem 2152 MiB
+  elapsed 27:11   VmSwap 514516 kB   RSS 343352 kB   mem 2319 MiB
+  elapsed 30:15   VmSwap 511832 kB   RSS 310116 kB   mem 2719 MiB
+  elapsed 36:22   VmSwap 392136 kB   RSS 757948 kB   mem 2198 MiB
+  elapsed 48:36   VmSwap 389184 kB   RSS 451028 kB   mem 2552 MiB
+
+The single leg-(ii) pass in 61 draws is the FIRST sample, at BEAM uptime 17:59.
+It crossed the 100000 kB ceiling by uptime ~18:30 and never came back under it.
+So leg (ii) is satisfiable only inside roughly the first eighteen minutes after a
+slot restart — which is precisely the interval PDS-D93/D190/D191 refuted for
+firing. The predicate's one open window sits inside the one region the charter
+forbids entering.
+
+AND THE TWO LEGS PULL IN OPPOSITE DIRECTIONS. This is the part that is not a
+scheduling problem:
+
+  Pearson r (MemAvailable_MiB vs beam VmSwap_kB) = +0.677 over n=61
+    ^ the r is POSITIVE and the legs are still opposed: leg (i) wants mem HIGH
+      and leg (ii) wants VmSwap LOW, so a positive r between the QUANTITIES is
+      exactly an anti-correlation between the two legs' SATISFACTION.
+  mean MemAvailable when VmSwap <  200000 kB (n=14):  2080 MiB
+  mean MemAvailable when VmSwap >= 200000 kB (n=47):  2515 MiB
+  samples satisfying BOTH leg (i) and leg (ii):       0 of 61
+
+guerrilla is MemTotal 3911580 kB (3820 MiB) with vm.swappiness=10 and 2 GB of
+swap, roughly half of it already consumed. On a box that size the headroom leg
+(i) reads is LITERALLY PRODUCED by the kernel swapping the BEAM out — watch RSS
+fall from 736196 kB to 310116 kB while VmSwap rises from 120120 kB to 511832 kB
+and MemAvailable climbs 2028 -> 2719 MiB. Leg (i) and leg (ii) are two readings
+of the same axis, taken with opposite signs. Demanding both at once asks the box
+for a state it does not produce.
+
+The 2300 MiB floor was NOT lowered. The 100000 kB ceiling was NOT raised. The
+sentinel hard-refuses a softened predicate, by design, and it was never asked to.
+Loosening leg (ii) to whatever the box happens to read would have manufactured a
+green here in about four seconds, and it would have been a lie.
+
+CONTEXT THAT WIDENS TWO OTHER LEGS. `journalctl --since -60min | grep -c
+bp-site-build` returns 164 for the hour containing this run, and 28 slot
+start/stop events on the day. That build storm is what holds leg (iii) at 63.9%
+and depresses leg (i): a running site build cost 379 MiB and 496 MiB in the two
+independent 90 s steps PDS-D193 cites, and this log shows the same shape — see
+17:14:26Z (mem 1743 MiB, two builds running).
+
+──────────────────────────────────────────────────────────────────────────────
+5. REDS, SORTED — EVERY ONE FILED, NONE FIXED MID-PROOF
+──────────────────────────────────────────────────────────────────────────────
+
+There is exactly one red in this run, and it is not an ENGINE FAIL and not a
+HARNESS BUG. It is a PREDICATE DEFECT, and it gets its own line rather than being
+squeezed into a category it does not fit:
+
+  PREDICATE DEFECT — PDS-D193 leg (ii) is unsatisfiable in conjunction with leg
+  (i) on this box. 0/61. Diagnosed in §4 with r=+0.677 and a mechanism.
+  FILED: bp task `pds-w11-d193-leg-tension` (published, priority 0, parent
+  pds-w10-climb-in-the-post-deploy-window). NOT fixed here — re-deriving a fire
+  predicate mid-proof is how a wave grades its own homework.
+
+  HARNESS BUG — none observed. pds-pull-proof.sh was never invoked, so this run
+  vouches for nothing about it beyond its blob being unchanged.
+
+  ENGINE FAIL — none observed. The export engine was never exercised. This run
+  makes NO claim, positive or negative, about rungs 3, 4 or 6.
+
+The known non-red preconditions, recorded so the next wave does not re-derive
+them: /tmp/pds-full-export/attempts reads 1 against a default budget of 1, so
+cond_c FAILS at defaults and aborts BEFORE cond_b is consulted (PDS-D137, third
+recurrence). The parked wave-7 bundle is STALE and takes the stale branch at
+:1272-1274 — no zero-attempt reuse is available. The fire shell prepared for this
+run therefore exported PDS_FULL_EXPORT_BUDGET=2 and
+PDS_FULL_EXPORT_MIN_MEM_MB=2500 (a TIGHTENING over the 2200 default, never a
+lowering), PDS_CONTROL_PG=postgres, BARKPARK_HOME=/private/tmp/pds-w10 and
+PDS_SCRATCH_POINTER=/private/tmp/pds-w10.last (/private/tmp, not /tmp, per
+runbook:40-52), with PDS_AMMO_FILE unset (PDS-D102). That shell was never
+executed, because its first act is the sentinel draw and the draw never cleared.
+
+──────────────────────────────────────────────────────────────────────────────
+6. THE OUTCOME, STATED PLAINLY
+──────────────────────────────────────────────────────────────────────────────
+
+Rungs 3, 4 and 6 did NOT green together under one run id, because no run was
+made. The crown's last rung is NOT paid by this wave.
+
+The refusal names its gate: PDS-D193 leg (ii), beam VmSwap <= 100000 kB, 1 pass
+in 61 draws, and 0 draws in 61 satisfying it jointly with leg (i). The dataset
+behind that sentence is §7, in full, unfiltered, including the 60 rows that say
+nothing more interesting than "not yet".
+
+What this wave DID pay: it turned "the window never seems to open" into a
+measured, mechanistic statement about WHY, with the instrument to re-measure it
+committed alongside. Waves 5, 6 and 8 put the climb in round 2 and never reached
+it. This one reached it, fired the sentinel 61 times, and came back with the
+reason instead of an excuse.
+
+The floor was never lowered. The harness was never edited —
+`git diff origin/main -- scripts/pds-pull-proof.sh` is EMPTY at the end of this
+run. No restart was manufactured, no deploy was requested or waited for, and
+firing was decided on a memory draw every single time.
+
+──────────────────────────────────────────────────────────────────────────────
+7. THE SENTINEL LOG IN FULL — 61 DRAWS, EVERY ONE OF THEM
+──────────────────────────────────────────────────────────────────────────────
+
+Committed here rather than left as a loose file, so the dataset cannot drift away
+from the claim it backs. Reproduce with:
+
+  PDS_SENTINEL_LOG=/private/tmp/pds-w10-sentinel.tsv \
+    ./scripts/pds-window-sentinel.sh watch --interval 30 --max-samples 60
+
+Columns: utc (date is 2026-07-20 throughout) · verdict · MemAvailable in MiB
+(kB/1024) · SwapFree kB · beam VmRSS kB · beam VmSwap kB · BEAM ELAPSED ·
+count of running bp-site-build-* units · active slots as blue/green.
+
+The served sha read 49b629fef074339b80836fb87496f5a6f37324da in all 61 samples
+and is elided for width. The 27 running-build observations resolve to two unit
+families: 22x bp-site-build-astro-search, 5x bp-site-build-live-auto.
+
+utc       verd   mem_MiB swapfree  rss_kB   vmswap_kB elapsed  bld slots
+17:08:47  stand  1973    1124976   617296   81156     17:59    2   1/0
+17:09:20  stand  1969    1048560   608168   125716    18:32    1   1/0
+17:09:51  stand  1731    1049388   669812   125400    19:03    2   1/0
+17:10:21  stand  2035    1051280   603652   121208    19:33    1   1/0
+17:10:52  stand  2447    1045136   627872   124252    20:04    0   1/0
+17:11:23  stand  2424    1048976   641296   120532    20:34    0   1/0
+17:11:53  stand  2028    1049488   736196   120120    21:05    1   1/0
+17:12:24  stand  1905    1053584   748240   119876    21:36    1   1/0
+17:12:54  stand  2377    1037340   677668   135496    22:06    0   1/0
+17:13:25  stand  2397    1037852   657272   135296    22:37    0   1/0
+17:13:55  stand  2028    1044508   698984   134604    23:07    1   1/0
+17:14:26  stand  1743    1045788   848872   133784    23:38    1   1/0
+17:14:56  stand  2152    1046300   709184   133644    24:08    2   1/0
+17:15:27  stand  1914    1026492   653460   153800    24:39    1   1/0
+17:15:57  stand  2783    235052    223836   560260    25:09    1   1/0
+17:16:28  stand  2908    582960    231412   543628    25:40    0   1/0
+17:16:58  stand  2831    621872    272344   541788    26:10    0   1/0
+17:17:29  stand  2266    643632    281788   528420    26:41    1   1/0
+17:17:59  stand  2319    663600    343352   514516    27:11    1   1/0
+17:18:30  stand  2752    666160    288056   513848    27:42    0   1/0
+17:19:01  stand  2456    671536    332244   512684    28:13    2   1/0
+17:19:32  stand  2262    672816    275128   512188    28:43    1   1/0
+17:20:02  stand  2725    674608    336696   511928    29:14    0   1/0
+17:20:33  stand  2699    674864    337936   511888    29:45    0   1/0
+17:21:03  stand  2719    676144    310116   511832    30:15    0   1/0
+17:21:34  stand  2695    677168    326484   511636    30:46    0   1/0
+17:22:04  stand  2769    678960    304824   511172    31:16    0   1/0
+17:22:35  stand  2684    707376    355128   483100    31:47    0   1/0
+17:23:06  stand  2563    708144    345144   482740    32:17    2   1/0
+17:23:36  stand  2228    712752    315256   482236    32:48    1   1/0
+17:24:07  stand  2688    714288    347692   480912    33:19    0   1/0
+17:24:38  stand  2684    714800    333896   480872    33:49    0   1/0
+17:25:08  stand  2698    714800    315708   480800    34:20    0   1/0
+17:25:39  stand  2584    787760    455928   416848    34:51    0   1/0
+17:26:09  stand  2624    806960    427204   398916    35:21    0   1/0
+17:26:40  stand  2036    813616    443392   393856    35:52    1   1/0
+17:27:10  stand  2198    816688    757948   392136    36:22    0   1/0
+17:27:41  stand  2112    817456    582368   391908    36:53    1   1/0
+17:28:12  stand  2023    818736    467560   391420    37:23    1   1/0
+17:28:42  stand  2559    819504    451560   391188    37:54    0   1/0
+17:29:13  stand  1908    820784    457832   391024    38:25    1   1/0
+17:29:43  stand  1941    821296    617320   390972    38:55    1   1/0
+17:30:14  stand  2523    821808    470228   390800    39:26    0   1/0
+17:30:44  stand  2576    822064    453588   390788    39:56    0   1/0
+17:31:15  stand  2563    822320    445632   390772    40:27    0   1/0
+17:31:46  stand  2564    822320    451800   390692    40:57    0   1/0
+17:32:16  stand  2538    823088    462720   390608    41:28    0   1/0
+17:32:47  stand  2560    823344    448240   390588    41:59    0   1/0
+17:33:17  stand  2541    825392    447124   390560    42:29    0   1/0
+17:33:48  stand  2558    825648    448288   390332    43:00    0   1/0
+17:34:18  stand  2543    825648    444668   390312    43:30    0   1/0
+17:34:49  stand  2568    826672    447040   390104    44:01    0   1/0
+17:35:20  stand  2539    826672    448104   390080    44:31    0   1/0
+17:35:50  stand  2559    827696    446780   389504    45:02    0   1/0
+17:36:21  stand  2513    827696    469756   389416    45:33    0   1/0
+17:36:51  stand  2563    827952    447736   389372    46:03    0   1/0
+17:37:22  stand  2558    828208    446428   389340    46:34    0   1/0
+17:37:52  stand  2561    828464    447476   389276    47:04    0   1/0
+17:38:23  stand  2533    828720    455392   389264    47:35    0   1/0
+17:38:53  stand  2570    828720    447708   389196    48:05    0   1/0
+17:39:24  stand  2552    828720    451028   389184    48:36    0   1/0
+
+──────────────────────────────────────────────────────────────────────────────
+END OF RECORD — pdsw10-sentinel-20260720
+0 exports fired · 0 attempts spent · 1 named refusal · 1 follow-up task filed
+──────────────────────────────────────────────────────────────────────────────
