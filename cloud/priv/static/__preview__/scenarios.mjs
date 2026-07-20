@@ -2769,10 +2769,33 @@ export function route(name, method, path) {
 
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).
+  // REVIEW FIX (GR80 leg 2): the three filter axes are applied SERVER-side, so
+  // the harness models them here too. Without this the harness answered the
+  // unfiltered trail to a filtered request — a filtered feed would render rows
+  // that contradict its own lit chips, which is exactly the class of harness lie
+  // #4593 was opened for. Mirrors accounts.ex: maybe_audit_target needs BOTH
+  // target_type and target_id, maybe_audit_actor is equality on actor_user_id,
+  // maybe_audit_action_prefix is LIKE '<prefix>%' with the metacharacters escaped
+  // (so a plain startsWith is the faithful model). target_type narrows on its own
+  // — the widened maybe_audit_target clause this review added, because that is
+  // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
-    return d.auditDenied
-      ? { status: 403, body: { error: "forbidden" } }
-      : { status: 200, body: { events: d.audit } };
+    if (d.auditDenied) return { status: 403, body: { error: "forbidden" } };
+    const q = new URLSearchParams(String(path || "").split("?")[1] || "");
+    const ttype = q.get("target_type");
+    const tid = q.get("target_id");
+    const actor = q.get("actor_user_id");
+    const prefix = q.get("action_prefix");
+    const before = q.get("before");
+    const events = (d.audit || []).filter((e) => {
+      if (ttype && String(e.target_type || "") !== ttype) return false;
+      if (ttype && tid && String(e.target_id || "") !== tid) return false;
+      if (actor && String((e.actor && e.actor.id) || e.actor_user_id || "") !== actor) return false;
+      if (prefix && !String(e.action || "").startsWith(prefix)) return false;
+      if (before && !(String(e.inserted_at || "") < before)) return false;
+      return true;
+    });
+    return { status: 200, body: { events } };
   }
 
   // Wave 3 (OC16): the fleet usage SUMMARY — the cached-sample read the Overview

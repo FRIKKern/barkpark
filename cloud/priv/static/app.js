@@ -6757,10 +6757,18 @@
   // clean re-attempt reads "Delivery replayed · 200 OK in N ms"; a failed target
   // reads the honest "HTTP 500 in N ms". An older instance that echoes no delivery
   // detail degrades to the plain event ack rather than inventing a status.
+  function replayToastBody(delivery, eventId) {
+    var d = delivery || {};
+    var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
+    if (!hasDetail) return eventId != null && eventId !== "" ? "event #" + eventId : "Delivery replayed";
+    var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
+    return "Delivery replayed · " + deliveryStatusLabel(d) + latency;
+  }
+
   // Pure: the test-send verdict, in the SAME grammar replayToastBody uses — the
   // toast names the endpoint's REAL answer (status + latency), never a canned
   // "Sent!". The instance delivers the probe in one synchronous attempt and
-  // returns the delivery row, so there is always a real verdict to report; the
+  // returns the delivery row, so there is normally a real verdict to report; the
   // detail-free fallback only fires against an older instance whose response
   // carries no status at all.
   function testSendToastBody(delivery) {
@@ -6771,20 +6779,49 @@
     return "Test delivered · " + deliveryStatusLabel(d) + latency;
   }
 
-  // Pure: did the endpoint ACCEPT the test? A 2xx is the only success. Anything
-  // else is reported as a failure the operator must act on — the request
-  // succeeded, the delivery did not, and conflating those is how a broken
-  // endpoint gets a green toast.
-  function testSendAccepted(delivery) {
-    return deliveryTone(delivery) === "ok";
+  // REVIEW FIX (GR80 leg 3): the verdict is THREE-WAY, not two-way. deliveryTone
+  // answers ok | danger | info, and `info` is the honest third case — a delivery
+  // still `pending`, or an older instance that echoed no status at all. Folding
+  // it into "not accepted" produced a self-contradicting toast: a red "Endpoint
+  // rejected the test" headline over the body "Test payload delivered to the
+  // endpoint URL." Neither half was true. An unknown answer is reported as
+  // unknown; only a real non-2xx is an accusation against the endpoint.
+  function testSendVerdict(delivery) {
+    var tone = deliveryTone(delivery);
+    if (tone === "ok") return "accepted";
+    if (tone === "danger") return "rejected";
+    return "unconfirmed";
   }
 
-  function replayToastBody(delivery, eventId) {
+  // Pure: did the endpoint ACCEPT the test? A 2xx is the only success. Anything
+  // else is NOT reported as success — the request succeeded, the delivery did
+  // not, and conflating those is how a broken endpoint gets a green toast.
+  function testSendAccepted(delivery) {
+    return testSendVerdict(delivery) === "accepted";
+  }
+
+  // Pure: the toast for one test-send verdict — title, kind and body resolved
+  // together so the headline can never contradict the sentence under it.
+  function testSendToast(delivery) {
+    var verdict = testSendVerdict(delivery);
+    if (verdict === "accepted") {
+      return { kind: "success", title: "Endpoint accepted the test", body: testSendToastBody(delivery) };
+    }
+    if (verdict === "rejected") {
+      return { kind: "error", title: "Endpoint rejected the test", body: testSendToastBody(delivery) };
+    }
+    // Unknown: either the row is still `pending` (the endpoint has not answered)
+    // or the instance echoed no status at all. Both read as "sent, verdict
+    // unknown" — never as a green tick and never as an accusation.
     var d = delivery || {};
     var hasDetail = d.last_status_code != null || d.status_code != null || (d.status != null && d.status !== "");
-    if (!hasDetail) return eventId != null && eventId !== "" ? "event #" + eventId : "Delivery replayed";
-    var latency = d.last_latency_ms != null ? " in " + d.last_latency_ms + " ms" : "";
-    return "Delivery replayed · " + deliveryStatusLabel(d) + latency;
+    return {
+      kind: "info",
+      title: "Test sent — no verdict yet",
+      body: hasDetail
+        ? testSendToastBody(delivery) + " — the endpoint hasn't answered yet."
+        : "Test payload delivered to the endpoint URL. This instance didn't report what the endpoint answered.",
+    };
   }
 
   // Pure: the enable/disable toggle's rendered state under the D18 optimistic
@@ -7024,11 +7061,7 @@
         return;
       }
       var delivery = r.data && r.data.data && r.data.data.delivery;
-      if (testSendAccepted(delivery)) {
-        toast({ kind: "success", title: "Endpoint accepted the test", body: testSendToastBody(delivery) });
-      } else {
-        toast({ kind: "error", title: "Endpoint rejected the test", body: testSendToastBody(delivery) });
-      }
+      toast(testSendToast(delivery));
       // Only refresh a log the operator already has open — never expand it for them.
       var card = findWhCard(listBox, wh.id);
       var box = card && card.querySelector("[data-wh-deliveries-box]");
@@ -11400,6 +11433,12 @@
   //     in the vocabulary (notifications.channels_changed) and stays literal.
   //   • a system/webhook event carries a NIL actor, so an actor filter never
   //     matches one — which is honest, not a gap.
+  //   • target_type is sent WITHOUT a target_id from this row. Until this wave's
+  //     review that combination was a silent no-op server-side (accounts.ex
+  //     maybe_audit_target guarded on BOTH being binaries, so the chip lit and
+  //     the server answered the whole unfiltered trail); the widened clause makes
+  //     the Target axis genuinely narrow. This SPA change and that server change
+  //     must ship together — a chip that lies is worse than no chip.
 
   // The server-true target_type filter set — the two customer-facing nouns with
   // their own places (#fleet, #sites). `null` = the whole trail.
@@ -16595,6 +16634,7 @@
       replayToastBody: replayToastBody, hookToggleState: hookToggleState,
       // GR80 leg 3: the webhook test-send verdict helpers (pure).
       testSendToastBody: testSendToastBody, testSendAccepted: testSendAccepted,
+      testSendVerdict: testSendVerdict, testSendToast: testSendToast,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
       // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.

@@ -435,6 +435,17 @@ defmodule BarkparkCloud.Accounts do
   defp maybe_audit_target(query, type, id) when is_binary(type) and is_binary(id),
     do: where(query, [e], e.target_type == ^type and e.target_id == ^id)
 
+  # REVIEW FIX (GR80 leg 2): `target_type` ALONE is a legitimate filter — "show me
+  # everything that happened to instances" — and it is the one the Activity page's
+  # chip row has been sending since I-01. Before this clause the pair-guard above
+  # fell through to the catch-all, so `?target_type=barkpark` with no `target_id`
+  # was silently a NO-OP: the chip lit, the request went out, and the server
+  # answered the whole unfiltered trail. That is a filter UI that lies, which is
+  # worse than no filter UI. An empty string stays a no-op (an absent filter must
+  # never narrow to nothing).
+  defp maybe_audit_target(query, type, _id) when is_binary(type) and type != "",
+    do: where(query, [e], e.target_type == ^type)
+
   defp maybe_audit_target(query, _type, _id), do: query
 
   # actor_user_id arrives from a query string, so it is NOT trusted to be a UUID:

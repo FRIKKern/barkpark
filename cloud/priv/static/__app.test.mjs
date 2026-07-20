@@ -8829,6 +8829,42 @@ test("GR80 leg 3: the test-send toast names the endpoint's real answer, and a no
   assert.equal(hooks.testSendToastBody(null), "Test payload delivered to the endpoint URL.");
 });
 
+test("REVIEW FIX (GR80 leg 3): the verdict is three-way and the toast never contradicts itself", () => {
+  // deliveryTone answers ok | danger | info. Folding `info` into "not accepted"
+  // paired a red "Endpoint rejected the test" headline with the body "Test
+  // payload delivered to the endpoint URL." — both halves false at once.
+  assert.equal(hooks.testSendVerdict({ last_status_code: 204 }), "accepted");
+  assert.equal(hooks.testSendVerdict({ last_status_code: 500 }), "rejected");
+  assert.equal(hooks.testSendVerdict({ status: "failed_giveup" }), "rejected");
+  for (const unknown of [null, {}, { status: "pending" }, { last_status_code: 302 }]) {
+    assert.equal(hooks.testSendVerdict(unknown), "unconfirmed",
+      "no 2xx and no failure is UNKNOWN: " + JSON.stringify(unknown));
+    assert.equal(hooks.testSendAccepted(unknown), false, "unknown is never a green tick");
+  }
+
+  // The toast resolves title, kind and body TOGETHER, so no headline can
+  // contradict the sentence beneath it.
+  const ok = hooks.testSendToast({ last_status_code: 200, last_latency_ms: 84 });
+  assert.equal(ok.kind, "success");
+  assert.match(ok.body, /200 OK/);
+
+  const bad = hooks.testSendToast({ last_status_code: 500 });
+  assert.equal(bad.kind, "error");
+  assert.match(bad.title, /rejected/);
+  assert.match(bad.body, /500/);
+
+  // The case the fix exists for: an instance that echoed no delivery at all.
+  const quiet = hooks.testSendToast(undefined);
+  assert.equal(quiet.kind, "info", "never an error toast for an answer we never got");
+  assert.ok(!/rejected/i.test(quiet.title), "an unknown answer is not an accusation");
+  assert.match(quiet.body, /didn't report/);
+
+  // A still-pending row says so rather than claiming a delivered verdict.
+  const pending = hooks.testSendToast({ status: "pending" });
+  assert.equal(pending.kind, "info");
+  assert.match(pending.body, /hasn't answered yet/);
+});
+
 test("GR80 leg 3: the webhook action bar offers Send test, and no CLI chip for a verb bp lacks", () => {
   const card = hooks.webhookCardHtml(
     { id: "wh_1", url: "https://example.com/hook", active: true }, "acme", "production");
