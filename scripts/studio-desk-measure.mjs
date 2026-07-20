@@ -15,6 +15,10 @@
 //
 //   node scripts/studio-desk-measure.mjs            # human table + JSON matrix
 //   node scripts/studio-desk-measure.mjs --json     # JSON matrix only
+//   node scripts/studio-desk-measure.mjs --doc=<slug>   # measure a NAMED document
+//   node scripts/studio-desk-measure.mjs --doc=any      # first row that opens
+//
+// (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.)
 //
 // ── The designed-in impossibilities ──────────────────────────────────────────
 // Each one makes a specific historical overturn structurally unreachable:
@@ -58,6 +62,45 @@
 //      and it would have been overturn #7. Bare `serif`/`ui-serif` is BANNED as
 //      a probe face (D49): it measures narrower than both real faces and
 //      INFLATES ch, masking the very bug D39 exists to catch.
+//
+// ── Three more, learned when this instrument became the seal's SPOF (D97) ────
+//
+//   7. THE DRILL NAMES ITS DOCUMENT, so a failed run is an INSTRUMENT failure
+//      and never a desk fact. It used to click the FIRST `[phx-click="select"]`
+//      row in a Papers list that concurrent epic waves rewrite live — 104 rows,
+//      newest first, and the newest row changed between two runs. Three
+//      independent verifiers hit a 30s `waitForSelector('.bp-paper-surface')`
+//      timeout that later passed on the same served SHA. A wave that reads that
+//      timeout as a desk fact records a NON-measurement as a measurement, which
+//      is this epic's exact disease. Now: `--doc=<slug>` (env `BP_DESK_DOC`)
+//      with a committed default targets `[phx-value-id="<slug>"]` directly, the
+//      click+wait is retried, and the landed URL is asserted to carry that very
+//      slug. `--doc=any` restores the old first-row behaviour but SKIPS rows
+//      that yield no paper surface instead of failing on them. Every failure on
+//      this path is worded as an instrument failure and lists what it saw.
+//
+//   8. PROVENANCE IS BRACKETED, NOT STAMPED ONCE. `readProvenance()` used to run
+//      once, before the browser launched, and that single snapshot went into all
+//      54 records. Caught in the act: a bracketed sweep ran 59.7s and observed
+//      `barkpark-slot@green` entering at 00:45:38Z INSIDE the 00:44:51–00:45:50
+//      window (blue-only -> blue+green -> green-only across three reads, SHA
+//      constant). A same-SHA rotation is benign; a MERGE landing mid-window is
+//      equally invisible and would silently misattribute every later row to a
+//      commit that no longer matched what was served. Now the SHA and slot are
+//      re-read AFTER the sweep, `compareProvenance()` diffs them, and any
+//      difference FAILS THE RUN LOUDLY. Every row also carries its own
+//      `measured_at`, so a rotation can be located in time rather than inferred.
+//
+//   9. THE VISIBLE VERDICT IS AUTHORED. `visible_content_px` was measured but
+//      the table's `ok?` column was, by its own legend, "the LAYOUT measure
+//      against >=55ch — not a verdict on the visible measure", so the number the
+//      seal turns on had no verdict at all. Now every record carries
+//      `content_ch` / `content_meets_55ch` AND `visible_ch` /
+//      `visible_meets_55ch`, and the table prints `lay?` and `vis?` side by
+//      side. Both ratios are computed IN-PAGE, in the same face-forced scope
+//      that produced the box and the probe, so a cross-face division (D83/D86,
+//      overturn #7 averted) is structurally unreachable rather than merely
+//      discouraged.
 //
 // ── Sweep direction ──────────────────────────────────────────────────────────
 // DESCENDING, always (D80). `bucket(w, held)` applies its +32px dead-band on
@@ -128,6 +171,28 @@ import path from 'node:path';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const JSON_ONLY = process.argv.includes('--json');
+
+/** The COMMITTED default drill target (D97). It must be a document that exists,
+ *  is published, and is not being rewritten by a concurrent wave — so it is one
+ *  of this epic's OWN sealed wave Papers, never "whatever is newest". If it ever
+ *  falls off the Papers pane's first page the run fails LOUDLY naming it, which
+ *  is the correct outcome: pass `--doc=<slug>` and the matrix says which
+ *  document it measured. */
+const DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19';
+
+/** `--doc=any` re-enables the old first-row drill, but skipping rows that do not
+ *  open a paper surface rather than dying on the first one that does not. */
+const ANY_DOC = 'any';
+
+function resolveDocTarget() {
+  const flag = process.argv.find((a) => a.startsWith('--doc='));
+  const raw = (flag ? flag.slice('--doc='.length) : process.env.BP_DESK_DOC || DEFAULT_DOC).trim();
+  if (!raw) die('--doc= was passed with an empty value — name a document slug, or `any`');
+  const source = flag ? '--doc flag' : (process.env.BP_DESK_DOC ? 'BP_DESK_DOC env' : 'committed default');
+  return raw === ANY_DOC
+    ? { mode: 'any', slug: null, source }
+    : { mode: 'named', slug: raw, source };
+}
 
 /** The nine widths, DESCENDING (D80). 500 is the floor this matrix commits to;
  *  sub-500 belongs to spd-b6-sub500-phone-proof. */
@@ -206,12 +271,46 @@ function readProvenance() {
   const loaded = slotRaw.split('\n').map((l) => l.trim()).filter(Boolean);
   const active = loaded.filter((l) => /\bactive\b/.test(l) && /\brunning\b/.test(l));
   return {
+    read_at: new Date().toISOString(),
     served_sha: servedSha,
     slot_units_loaded: loaded,
     slot_active: active.map((l) => (l.match(/barkpark-slot@(\w+)\.service/) || [null, 'unknown'])[1]),
     slot_read_method: `ssh root@157.180.90.121 "systemctl list-units 'barkpark-slot@*' --all --no-legend"`,
     sha_read_method: 'ssh root@157.180.90.121 "cd /opt/barkpark && git rev-parse HEAD"',
   };
+}
+
+/**
+ * The bracket (D97). A sweep takes ~10 minutes; the deployment underneath it is
+ * not frozen for our convenience. Returns a list of human-readable differences
+ * between the pre-run and post-run reads — EMPTY means every row in between was
+ * served by the same code from the same process.
+ *
+ * Exported so this can be exercised directly, without a 10-minute authenticated
+ * run, which is the only way to know the check is not vacuous.
+ */
+export function compareProvenance(pre, post) {
+  const out = [];
+  if (pre.served_sha !== post.served_sha) {
+    out.push(
+      `SERVED SHA CHANGED MID-SWEEP: ${pre.served_sha} (read ${pre.read_at}) -> ` +
+      `${post.served_sha} (read ${post.read_at}). A deploy landed inside the measurement window. ` +
+      `Rows measured before it describe one build and rows after it describe another, and NOTHING ` +
+      `in the matrix says which is which — this is precisely the silent misattribution the bracket exists to catch.`);
+  }
+  const preSlot = [...pre.slot_active].sort().join(',');
+  const postSlot = [...post.slot_active].sort().join(',');
+  if (preSlot !== postSlot) {
+    out.push(
+      `LIVE SLOT CHANGED MID-SWEEP: [${preSlot || 'none'}] (read ${pre.read_at}) -> ` +
+      `[${postSlot || 'none'}] (read ${post.read_at}). ` +
+      (pre.served_sha === post.served_sha
+        ? `The SHA held, so this is most likely a benign same-SHA rotation — but the app RESTARTED under ` +
+          `the sweep, so earlier rows were served by a different process than later ones and this run ` +
+          `cannot certify a single serving state.`
+        : `Combined with the SHA change above, this is a deploy.`));
+  }
+  return out;
 }
 
 // ── auth (D24e login-ticket flow) ────────────────────────────────────────────
@@ -390,6 +489,17 @@ async (faceOverride) => {
   // ── the inspector, in its DEFAULT state (server-default open — D57). The
   //    LAYOUT measure and the VISIBLE measure are reported side by side: a
   //    matrix that reports only the layout box reads as spin.
+  //
+  //    THE DOCKED CASE IS NOT A MISSING SUBTRACTION — DO NOT "FIX" IT. When the
+  //    inspector is IN FLOW (computed position static/relative, i.e. docked) it
+  //    is a sibling column that already took its width out of the panel before
+  //    the surface was laid out. The surface's own content box is therefore
+  //    ALREADY the width the reader sees, and visible == content is the correct
+  //    answer, not an oversight. Subtracting the docked inspector's overlap here
+  //    would double-count it and under-report the visible measure at exactly the
+  //    two widths (1280, 1440) where this epic's verdict is MEET. We subtract
+  //    ONLY when the inspector is out of flow (absolute/fixed), where it covers
+  //    the column the surface was already sized for.
   const sidebar = document.querySelector('.bp-doc-sidebar');
   const sRect = surface.getBoundingClientRect();
   const contentLeft = sRect.left + borL + padL;
@@ -435,6 +545,21 @@ async (faceOverride) => {
 
   const pR = panel.getBoundingClientRect();
 
+  // ── THE VERDICTS. Both are computed HERE, inside the scope that forced this
+  //    row's face and measured this row's boxes with this row's own probe span.
+  //    That is deliberate and structural: there is no place in this function
+  //    where another face's px-per-ch is in scope, so the cross-face division
+  //    that manufactured the false "1280 fails at 53.95ch Georgia" (D83/D86,
+  //    overturn #7 averted) cannot be written here even by accident.
+  //
+  //    visible_meets_55ch is the verdict this epic seals on: the measure a
+  //    reader actually SEES, against the same >=55ch bar as the layout measure.
+  //    Neither is rounded toward the criterion — the comparison is on the raw
+  //    ratio and only the REPORTED figure is rounded.
+  const CRITERION_CH = 55;
+  const contentCh = chProbePx > 0 ? contentPx / chProbePx : null;
+  const visibleCh = chProbePx > 0 ? visibleContentPx / chProbePx : null;
+
   restore();
 
   return {
@@ -476,7 +601,16 @@ async (faceOverride) => {
     surface_max_width_px: maxWidthPx,
     content_px: round(contentPx),
     visible_content_px: round(visibleContentPx),
-    measure_note: 'content_px is the LAYOUT measure; visible_content_px subtracts the inspector overlap where the inspector is out of flow (D57)',
+    measure_note: 'content_px is the LAYOUT measure; visible_content_px subtracts the inspector overlap where the inspector is out of flow (D57). Where the inspector is DOCKED (in flow) visible == content by design: layout already shrank the surface, so subtracting again would double-count.',
+    criterion_ch: CRITERION_CH,
+    content_ch: round(contentCh, 2),
+    content_meets_55ch: contentCh === null ? null : contentCh >= CRITERION_CH,
+    visible_ch: round(visibleCh, 2),
+    visible_meets_55ch: visibleCh === null ? null : visibleCh >= CRITERION_CH,
+    verdict_note:
+      'Both ch figures divide THIS row\\'s box by THIS row\\'s own probe span, measured under THIS ' +
+      'row\\'s forced face (D83/D86 — no cross-face division). visible_meets_55ch is the VISIBLE ' +
+      'verdict; content_meets_55ch is the LAYOUT verdict. They are different questions.',
     floor: {
       min_inline_size_raw: minInlineRaw,
       min_inline_size_px: round(minInlinePx),
@@ -558,38 +692,138 @@ async function waitForDeskSettled(page, { quietMs = 800, timeoutMs = 20_000 } = 
 
 // ── entry states ─────────────────────────────────────────────────────────────
 
-/** Drill by CLICKING, exactly as a user does: root desk -> type -> document.
- *  Returns the document path the drill landed on, so the cold-load state
- *  measures the very same document. */
-async function drillToDocument(page, base) {
+/** Every failure inside the drill is an INSTRUMENT failure, never a desk fact
+ *  (D97). The wording is not decoration: three verifiers read a drill timeout as
+ *  evidence about the desk, which is how a non-measurement gets recorded as a
+ *  measurement. */
+const drillDie = (msg, seen) =>
+  die(`INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout; ` +
+      `the harness never reached a document to measure.\n\n  ${msg}` +
+      (seen ? `\n\n  What the drill saw:\n${seen}` : '') +
+      `\n\n  This is not a measurement and must not be recorded as one. Re-run, or pass ` +
+      `--doc=<slug> to name a different document (--doc=any takes the first row that opens).`);
+
+/** Open the Papers list pane. Returns the pane locator. */
+async function openPapersPane(page, base) {
   await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
   await waitForDeskSettled(page);
 
   const typeItem = page.locator('.pane-column .pane-item', { hasText: 'Papers' }).first();
-  if (await typeItem.count() === 0) die('the root desk has no "Papers" entry to drill into — cannot reach the drilled state');
+  if (await typeItem.count() === 0) {
+    drillDie('the root desk rendered no "Papers" entry to drill into.');
+  }
   await typeItem.click();
   await waitForDeskSettled(page);
+  return page.locator('.pane-column').last();
+}
+
+/** One click-and-wait attempt at a located row. Resolves to the landed pathname,
+ *  or null if no paper surface appeared. Never throws on a miss — a miss is data
+ *  the caller uses to try the next candidate. */
+async function tryOpenRow(page, row, { timeoutMs = 20_000 } = {}) {
+  try {
+    await row.click({ timeout: 10_000 });
+    await page.waitForSelector('.bp-paper-surface', { timeout: timeoutMs });
+    await waitForDeskSettled(page);
+    const landed = new URL(page.url()).pathname;
+    return /\/studio\/paper\/[^/]+$/.test(landed) ? landed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drill by CLICKING, exactly as a user does: root desk -> Papers -> document.
+ *  Returns the document path the drill landed on, so the cold-load state
+ *  measures the very same document.
+ *
+ *  DETERMINISM (D97). The Papers list is ordered newest-first and concurrent
+ *  epic waves publish into it continuously, so "the first row" is a moving
+ *  target: 104 rows were observed and the first one changed between two runs of
+ *  this very script. A named target is matched on `[phx-value-id]` — the slug
+ *  the row carries — and the landed URL is asserted to carry that same slug, so
+ *  the matrix cannot claim a document it did not measure. */
+async function drillToDocument(page, base, target) {
+  const pane = await openPapersPane(page, base);
+  const rows = pane.locator('[phx-click="select"]');
+  const rowCount = await rows.count();
+  if (rowCount === 0) {
+    drillDie('the Papers list pane rendered no [phx-click="select"] document row — nothing to open.');
+  }
 
   // `select` is the document-open event. The pane header's own buttons
   // (airdrop-open / access-open / new-document) are NOT it — clicking those
   // opens a modal and the drill silently never happens.
-  const docItem = page.locator('.pane-column').last().locator('[phx-click="select"]').first();
-  if (await docItem.count() === 0) die('the Papers list pane rendered no [phx-click="select"] document row — nothing to open');
-  await docItem.click();
-  await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
-  await waitForDeskSettled(page);
-
-  const landed = new URL(page.url()).pathname;
-  if (!/\/studio\/paper\/[^/]+$/.test(landed)) {
-    die(`the drill did not land on a document URL (got ${landed}) — refusing to label this state "drilled"`);
+  if (target.mode === 'named') {
+    const attempts = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // Re-locate every attempt: the list re-renders under us, and a handle
+      // captured before a patch is exactly what made the old drill flaky.
+      const named = pane.locator(`[phx-click="select"][phx-value-id="${target.slug}"]`).first();
+      if (await named.count() === 0) {
+        const visible = await rows.evaluateAll(
+          (els) => els.slice(0, 8).map((e) => e.getAttribute('phx-value-id')));
+        drillDie(
+          `the Papers list has no row with phx-value-id="${target.slug}" ` +
+          `(target came from the ${target.source}).`,
+          `    ${rowCount} rows rendered. First 8 slugs:\n` +
+          visible.map((s) => `      ${s}`).join('\n') +
+          `\n    If the target has simply aged off the list, pass --doc=<slug> with one of these.`);
+      }
+      const landed = await tryOpenRow(page, named);
+      if (landed) {
+        const slugInUrl = decodeURIComponent(landed.split('/').pop());
+        if (slugInUrl !== target.slug) {
+          drillDie(
+            `clicked the row for "${target.slug}" but landed on "${slugInUrl}" (${landed}). ` +
+            `Refusing to label this run with a document it did not open.`);
+        }
+        return { path: landed, slug: slugInUrl, attempts: attempt, rows_in_list: rowCount };
+      }
+      attempts.push(`attempt ${attempt}: clicked the row, no .bp-paper-surface appeared`);
+      await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
+      await waitForDeskSettled(page);
+      await openPapersPane(page, base);
+    }
+    drillDie(
+      `three attempts to open "${target.slug}" all failed to produce a .bp-paper-surface.`,
+      attempts.map((a) => `      ${a}`).join('\n'));
   }
-  return landed;
+
+  // `--doc=any`: the historical first-row behaviour, but a row that does not
+  // open a paper surface is SKIPPED rather than fatal. Some documents in this
+  // list are not papers and never render the surface.
+  const skipped = [];
+  const budget = Math.min(rowCount, 10);
+  for (let i = 0; i < budget; i++) {
+    const row = pane.locator('[phx-click="select"]').nth(i);
+    const slug = await row.getAttribute('phx-value-id');
+    const landed = await tryOpenRow(page, row);
+    if (landed) {
+      return {
+        path: landed,
+        slug: decodeURIComponent(landed.split('/').pop()),
+        attempts: i + 1,
+        rows_in_list: rowCount,
+        skipped_rows: skipped,
+      };
+    }
+    skipped.push(slug ?? '(no phx-value-id)');
+    await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
+    await waitForDeskSettled(page);
+    await openPapersPane(page, base);
+  }
+  drillDie(
+    `none of the first ${budget} of ${rowCount} rows opened a paper surface (--doc=any).`,
+    skipped.map((s) => `      skipped ${s}`).join('\n'));
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async function main() {
   const { pw, resolvedFrom, version: pwVersion } = resolvePlaywright();
+  const docTarget = resolveDocTarget();
+  // PRE half of the bracket (D97). The POST half runs after the sweep and a
+  // difference fails the run — see compareProvenance().
   const provenance = readProvenance();
   const srv = readGuerrillaServer();
 
@@ -628,7 +862,18 @@ async function main() {
       'Each face is ACTUALLY forced via --paper-font-serif on .bp-paper-surface and the WHOLE ' +
       'box re-measured under it. No ch figure anywhere divides one face box by another face ' +
       'advance (D75). Bare serif/ui-serif is banned as a probe face (D49).',
+    doc_target: docTarget,
+    doc_target_note:
+      'The drill targets a NAMED document (D97). It used to click the first row of a Papers list ' +
+      'that concurrent waves rewrite live, which made a failed run indistinguishable from a desk ' +
+      'fact. `--doc=<slug>` / BP_DESK_DOC override the committed default; `--doc=any` restores ' +
+      'first-row behaviour, skipping rows that open no paper surface.',
     provenance,
+    provenance_note:
+      'BRACKETED (D97): `provenance` is the PRE-sweep read and `provenance_post` the POST-sweep ' +
+      'read of the same two facts. `provenance_bracket.matched` false means the run FAILED — a ' +
+      'published matrix always carries a matched bracket. Each row also carries its own ' +
+      '`measured_at`, so a mid-sweep rotation can be located in time rather than inferred.',
     warnings: [],
     rows: [],
   };
@@ -647,9 +892,11 @@ async function main() {
     // ── the drilled state, reached the way a user reaches it. This also tells
     //    us WHICH document to cold-load, so both states measure the same one.
     await page.setViewportSize({ width: WIDTHS[0], height: 900 });
-    const docPath = await drillToDocument(page, srv.base);
+    const drill = await drillToDocument(page, srv.base, docTarget);
+    const docPath = drill.path;
+    run.drill = drill;
     run.measured_url = srv.base + docPath;
-    run.measured_document = decodeURIComponent(docPath.split('/').pop());
+    run.measured_document = drill.slug;
 
     /** One (width x face) block against whatever is currently on screen. */
     const sweepRow = async (width, state) => {
@@ -705,6 +952,9 @@ async function main() {
             `this row's ch is NOT the named face.`);
         }
         run.rows.push({
+          // Per-row wall clock (D97). Without it a bracket mismatch tells you
+          // THAT the deployment moved but not WHICH rows straddle it.
+          measured_at: new Date().toISOString(),
           viewport_px: width,
           entry_state: state,
           face: face.id,
@@ -745,6 +995,30 @@ async function main() {
     await browser.close();
   }
 
+  // ── CLOSE THE BRACKET (D97). The sweep is over; re-read the two facts every
+  //    row was stamped with. If either moved, every row's provenance is a claim
+  //    the run cannot support, so the run FAILS rather than publishing a matrix
+  //    whose stamps are fiction. A ~10 minute run is cheap enough to discard.
+  const provenancePost = readProvenance();
+  const mismatches = compareProvenance(provenance, provenancePost);
+  run.provenance_post = provenancePost;
+  run.provenance_bracket = {
+    matched: mismatches.length === 0,
+    mismatches,
+    window_ms: Date.parse(provenancePost.read_at) - Date.parse(provenance.read_at),
+    method: 'served SHA + active slot read over ssh immediately before the browser launched and immediately after the sweep',
+  };
+  if (mismatches.length) {
+    die(`PROVENANCE BRACKET FAILED — the deployment moved UNDER the sweep, so all ` +
+        `${run.rows.length} records carry a provenance stamp this run cannot support. ` +
+        `Discarding the matrix.\n\n` +
+        mismatches.map((m) => `  - ${m}`).join('\n\n') +
+        `\n\n  Window: ${provenance.read_at} -> ${provenancePost.read_at} ` +
+        `(${Math.round((Date.parse(provenancePost.read_at) - Date.parse(provenance.read_at)) / 1000)}s). ` +
+        `Every row carries its own \`measured_at\`, so a partial salvage is possible — but this ` +
+        `harness will not do it silently. Wait for the deploy to finish and re-run.`);
+  }
+
   // The contract is "it prints a matrix". The JSON matrix IS the deliverable;
   // the human table is a convenience rendered from it. A formatting bug in the
   // table (one null where a number was expected, at the very end of a ~10min
@@ -778,6 +1052,14 @@ function printTable(run) {
   L(`  served SHA    ${run.provenance.served_sha}   (read live over ssh)`);
   L(`  live slot     ${run.provenance.slot_active.join(', ') || 'NONE ACTIVE'}   (queried, never assumed — D71)`);
   L(`  slot units    ${run.provenance.slot_units_loaded.join(' | ') || '(none loaded)'}`);
+  if (run.provenance_bracket) {
+    L(`  provenance    BRACKETED — pre ${run.provenance.read_at} / post ${run.provenance_post.read_at} ` +
+      `(${Math.round(run.provenance_bracket.window_ms / 1000)}s): ` +
+      `${run.provenance_bracket.matched ? 'SHA and slot both held across the whole sweep' : 'MISMATCH'} (D97)`);
+  }
+  L(`  drill target  ${run.doc_target.mode === 'any' ? 'first row that opens (--doc=any)' : run.doc_target.slug} ` +
+    `(from the ${run.doc_target.source})` +
+    (run.drill ? `; opened on attempt ${run.drill.attempts} of ${run.drill.rows_in_list} rows` : ''));
   L(`  sweep         ${run.sweep_direction} (D80); cold-load re-navigates per row, drilled must not`);
   L(`  platform      ${run.platform} — scrollbar ${run.rows[0]?.scrollbar_width_px ?? '?'}px (macOS overlay; D83)`);
   L('');
@@ -785,11 +1067,14 @@ function printTable(run) {
   const cols = [
     ['viewport', 9], ['face', 15], ['bucket', 9], ['panes', 16], ['panel', 7],
     ['gutter', 7], ['content', 8], ['px/ch', 8], ['ch', 7], ['floor?', 7],
-    ['xscroll', 8], ['strip', 6], ['crumb', 6], ['insp', 6], ['visible', 8], ['ok?', 4],
+    ['xscroll', 8], ['strip', 6], ['crumb', 6], ['insp', 6], ['lay?', 6],
+    ['visible', 8], ['vis-ch', 8], ['vis?', 5],
   ];
   const pad = (v, w) => String(v).padEnd(w);
-  const chOf = (r) => (r.content_px !== null && r.ch.probe_px_per_ch ? r.content_px / r.ch.probe_px_per_ch : null);
-  const RULE = '  ' + '-'.repeat(130);
+  // The row's OWN in-page figures. Never recomputed here from another row's
+  // px/ch — the table renders verdicts, it does not author them (D83/D86).
+  const chOf = (r) => (r.content_ch ?? null);
+  const RULE = '  ' + '-'.repeat(150);
 
   for (const state of ['drilled', 'cold-load']) {
     const rows = run.rows.filter((r) => r.entry_state === state);
@@ -820,14 +1105,16 @@ function printTable(run) {
         pad(r.panes.strips_visible, 6),
         pad(r.crumbs.visible ? r.crumbs.count : 0, 6),
         pad(r.inspector.present ? (r.inspector.overlays_surface ? 'ovl' : 'dock') : 'n/a', 6),
+        pad(r.content_meets_55ch ? 'MEET' : 'FAIL', 6),
         pad(r.visible_content_px, 8),
-        pad(ch !== null && ch >= 55 ? 'MEET' : 'FAIL', 4),
+        pad(r.visible_ch === null ? '?' : r.visible_ch.toFixed(2), 8),
+        pad(r.visible_meets_55ch ? 'MEET' : 'FAIL', 5),
       ].join(''));
     }
     L('');
   }
 
-  L('  ' + '='.repeat(130));
+  L('  ' + '='.repeat(150));
   L('  content = surface.clientWidth - READ paddingLeft/Right (never width-80 — D72/D78).');
   L('  ch      = content_px / a width:1ch probe span CHILD of .bp-paper-surface, in THAT face (D31/D83).');
   L('  floor?  = min-inline-size forced to 0 and re-measured; a width change IS the bind (not arithmetic).');
@@ -836,18 +1123,50 @@ function printTable(run) {
   L('  visible = content_px minus the inspector overlap where it overlays — the measure a reader SEES (D57).');
   L('  panes   = VISIBLE .pane-column widths. strip/crumb are VISIBLE counts, not DOM counts.');
   L('  *       = the desk never settled at this width; treat the row as a moving target.');
-  L('  ok?     = the LAYOUT measure against >=55ch. It is not a verdict on the visible measure.');
+  L('  lay?    = the LAYOUT verdict: content_px / this row\'s own px/ch, against >=55ch.');
+  L('  vis?    = the VISIBLE verdict: visible_content_px / this row\'s own px/ch, against >=55ch.');
+  L('            Same bar, different question — vis? is what a reader actually gets. Where the');
+  L('            inspector is DOCKED the two agree BY DESIGN: layout already took the inspector\'s');
+  L('            width out of the surface, so subtracting it again would double-count (see the');
+  L('            comment on the docked case in PAGE_MEASURE — this is not a missing subtraction).');
+  L('  Both ch figures divide THIS row\'s box by THIS row\'s probe span under THIS row\'s forced');
+  L('  face. No figure anywhere divides one face\'s box by another face\'s advance (D83/D86).');
   L('');
+
+  // The visible census — the number this wave's seal ruling turns on, stated as
+  // a count rather than left for a reader to tally out of 54 rows.
+  for (const state of ['drilled', 'cold-load']) {
+    const rows = run.rows.filter((r) => r.entry_state === state);
+    if (!rows.length) continue;
+    const meet = rows.filter((r) => r.visible_meets_55ch);
+    const lay = rows.filter((r) => r.content_meets_55ch).length;
+    L(`  VISIBLE VERDICT (${state}): ${meet.length} of ${rows.length} cells MEET >=55ch of VISIBLE measure ` +
+      `(the LAYOUT measure meets in ${lay}).`);
+    if (meet.length === 0) {
+      L('    None — at any width, in any face. Every cell in this state reads under the criterion.');
+    } else {
+      const byWidth = [...new Set(meet.map((r) => r.viewport_px))].sort((a, b) => b - a);
+      for (const w of byWidth) {
+        const at = meet.filter((r) => r.viewport_px === w);
+        L(`    viewport ${String(w).padStart(4)}px: ${at.map((r) => `${r.face} ${r.visible_ch.toFixed(2)}ch`).join(', ')}`);
+      }
+      const missWidths = [...new Set(rows.filter((r) => !r.visible_meets_55ch).map((r) => r.viewport_px))]
+        .sort((a, b) => b - a);
+      L(`    FAIL at: ${missWidths.join(', ')}px (all faces unless listed above).`);
+    }
+    L('');
+  }
 
   // The epic's own criterion, answered with a number, honestly either way.
   L('  THE EPIC\'S HEADLINE CRITERION — >=55ch of CONTENT at viewport 900px:');
   L('');
   for (const state of ['drilled', 'cold-load']) {
     for (const r of run.rows.filter((x) => x.viewport_px === 900 && x.entry_state === state)) {
-      const ch = chOf(r), vch = r.visible_content_px / r.ch.probe_px_per_ch;
+      const ch = chOf(r), vch = r.visible_ch;
       L(`    ${pad(state, 11)} ${pad(r.face, 16)} content ${String(r.content_px).padEnd(7)}px = ` +
-        `${ch.toFixed(2).padStart(6)}ch  ${ch >= 55 ? 'MEETS' : 'FAILS'}   ` +
-        `(visible ${String(r.visible_content_px).padEnd(6)}px = ${vch.toFixed(2)}ch)   ` +
+        `${ch.toFixed(2).padStart(6)}ch  ${r.content_meets_55ch ? 'MEETS' : 'FAILS'}   ` +
+        `(visible ${String(r.visible_content_px).padEnd(6)}px = ${vch.toFixed(2)}ch ` +
+        `${r.visible_meets_55ch ? 'MEETS' : 'FAILS'})   ` +
         `${r.ch.probe_px_per_ch}px/ch, ${r.font.resolved_family ?? 'UNRESOLVED'} @ ${r.font.font_size_px}px`);
     }
     L('');
@@ -885,8 +1204,16 @@ function printTable(run) {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
-  process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
-  process.exit(1);
-});
+// Run only when INVOKED, so `compareProvenance` can be imported and exercised
+// directly. A bracket check that has never been seen to fire is a check nobody
+// can trust, and a ~10-minute authenticated run is far too expensive to be the
+// only way to see it fire.
+const INVOKED_DIRECTLY = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (INVOKED_DIRECTLY) {
+  main().catch((err) => {
+    process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
+    process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
+    process.exit(1);
+  });
+}
