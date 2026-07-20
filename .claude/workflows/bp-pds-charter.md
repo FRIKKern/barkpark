@@ -1658,6 +1658,203 @@ D203 are new — findings the build round produced that the Decide phase could n
   `pds-window-availability-2026-07-20.md` §1b and §3b; open task
   `pds-w10-correlation-truncation-correction`.
 
+### Wave 11 — THE ENGINE, NOT THE WINDOW (2026-07-20, PDS-D204–PDS-D216)
+
+- **PDS-D204 — TRANSPORT AMENDED: `send_file/3` SUPERSEDES D199's `send_chunked`.** D199 and the root
+  task's criterion 1 both name `send_chunked`; both are amended, on measurement, not preference. Probed
+  against REAL Bandit 1.12.0 (not the Plug test adapter, which fakes the transport): `send_file` holds
+  status 200, `content-type: application/x-tar`, the `content-disposition` attachment header, and
+  `content-length` **exactly equal to `File.stat!` size** (3000037 == 3000037), body md5 identical, no
+  `transfer-encoding`. `send_chunked` DROPS `content-length` and adds `transfer-encoding: chunked`.
+  Content-Length is the load-bearing header — the frozen harness's acquisition line treats a
+  `<1024`-byte body as a dead attempt and the CLI sizes its receipt from the stream. Bandit rides the
+  real `:file.sendfile` syscall here because Caddy terminates TLS and `prod.exs` has no `https:` block
+  (the SSL transport's hand-rolled `pread`+`ssl:send` fallback is never entered). **Two unpredicted
+  facts that both cut FOR send_file:** Bandit GZIPS `send_resp` bodies when the client offers it
+  (4,000,000 → 3,912 bytes, `content-encoding: gzip`), so today's CLI path pays a FIFTH uncounted
+  full-size in-memory compression that `send_file` deletes; and the harness's `curl_src` never sends
+  `--compressed`, so the 2235.43 MiB figure is uncontaminated — **the floor re-derivation MUST keep
+  acquiring without gzip or it will not compare like with like.** The one regression is cosmetic:
+  `send_resp` emits `vary: accept-encoding` and `send_file` does not. *Why: the successor must keep the
+  header every client and the frozen harness actually depend on, and drop the one nobody reads.*
+
+- **PDS-D205 — `export/2` KEEPS `{:ok, binary()}`; THE PATH SHAPE LANDS AS A SEPARATE ENTRY POINT.**
+  D199's "ZERO changes to the 27 export and 20 unpack call sites" is FALSE as specified and the census
+  is short by half: 1214-line `workspace_bundle_test.exs` is 27/20, but repo-wide it is **56 export +
+  37 unpack across four test files** — D199 omits `workspace_bundle_dev_profile_test.exs` (23/15), the
+  file that carries the PDS-D31 secret-leak proof, entirely. A bare `{:ok, path}` return was BUILT and
+  RUN: **41 tests, 29 failures**, all one class (`InvalidBundleError` — a path IS a binary, so
+  `import_bundle/2`'s `is_binary` guard passes and `extract!/1` fails on path TEXT). Preserving the
+  binary contract and streaming the producer underneath was ALSO built and run: **41 tests, 2
+  failures**, both producer-shape, **zero fidelity tests broken** — every md5-parity, row_count-parity,
+  round-trip, merge-convergence and secret-scan assertion green, row counts IDENTICAL. So:
+  `export/2` keeps `{:ok, binary()}` for its 56 test callers; a new public `export_to_file/2` returns
+  `{:ok, path}` and `workspace_controller.ex` is its ONLY caller (there is exactly one non-test caller
+  of `export/2` in all of `lib`). *Why: the measured cost of the two shapes is 29 edits versus 2.*
+
+- **PDS-D206 — THE TWO TEST EDITS ARE NAMED, AND ONE OF THEM HAS A FORBIDDEN "FIX".**
+  (a) `workspace_bundle_test.exs:867` traces `Repo.query!/3` by name and asserts `>10` COPY calls; the
+  streamed producer never calls it, so it goes `0 > 10`. It must be **re-sited onto `Repo.transaction/2`**,
+  because a 4-cell probe matrix proved PDS-D42 INVERTS under streaming: txn `:infinity` + stream
+  `timeout: 300` survived 3002 ms (the stream-level `:timeout` is **INERT**), while txn `300` + stream
+  `:infinity` died at 310 ms (the stream **cannot override** the transaction budget). A builder who
+  moves `timeout: :infinity` onto the `SQL.stream` call ships a green suite and silently reinstates
+  Ecto's 15,000 ms default in prod — the exact live failure D42 exists to close.
+  (b) `workspace_bundle_dev_profile_test.exs:62` asserts `length(copies) == length(dev_copy_tables())`
+  and goes **51 vs 17**, because `capture_queries` is TELEMETRY-based and `SQL.stream` emits one
+  `[:barkpark, :repo, :query]` event PER FETCH. **The correct fix is `Enum.uniq` over the COPY sql
+  strings before `length`. Relaxing the equality to `>=` is FORBIDDEN** — it would gut the PDS-D31
+  skip-not-post-filter proof, whose whole content is that a denied table is never queried AT ALL.
+  *Why: nobody named (b); a builder told "one edit, the trace test" would meet it and be tempted by the
+  one repair that converts a real proof into a vacuous one.*
+
+- **PDS-D207 — BYTE-IDENTITY IS THE DESIGN TARGET; MEMBER-LEVEL EQUIVALENCE IS THE GATE. D199's
+  MANIFEST-**LAST** IS AMENDED TO MANIFEST-**FIRST**.** Proven on OTP 27 (erts 15.2.7.10):
+  `erl_tar:open`+`add`-by-path is BYTE-IDENTICAL to today's `erl_tar:create` (`cmp` exit 0) **iff**
+  four conditions hold — manifest FIRST (`manifest_LAST identical_to_create = false`, `cmp` differs at
+  char 1); `{mtime,M},{atime,M},{ctime,M},{uid,0},{gid,0}` passed explicitly (without them the real
+  stat uid=501 leaks in); the spill file's **mode is 0644** (mode is the ONE field with no `add_opt` —
+  a 0600 spill diverges at byte offsets 105/106/153 — so `File.chmod(path, 0o644)` is mandatory); and
+  the path is a **charlist** (an Elixir string is a binary, so `:erl_tar.add` silently archives the
+  path TEXT as the member body — 115 bytes where the spill was 6000, no error). Holds for >100-char
+  names, empty tables and default-umask spills. **BUT the gate may not be an unpinned two-export
+  `cmp`:** today's engine is NOT self-reproducible — two identical-input `create` calls 1.1 s apart
+  differ (`add1/4` stamps `mtime = os:system_time(seconds)`), and the manifest independently carries
+  `exported_at`. Correcting the Vision's claim: the named tripwire hashes the MANIFEST's declared
+  per-table md5 (`workspace_bundle_test.exs:355`), not the tar bytes, and `pds-pull-proof.sh` never
+  hashes the bundle at all — byte-identity has always been asserted in prose and measured at member
+  level. So the GATE is the root task's own criterion 3 (identical member names + identical per-table
+  row counts + identical per-table md5) plus **ONE new pinned-mtime byte-identity test**.
+  *Why: the achievable target and the honest gate are different objects, and conflating them would
+  red the suite against the CURRENT engine.*
+
+- **PDS-D208 — `/tmp` ON GUERRILLA IS EXT4, NOT tmpfs; THE SPILL DIRECTORY IS CONFIGURED, AND THE
+  FREE-SPACE THRESHOLD IS DERIVED, NEVER BAKED.** The direction's sharpest attack is dead:
+  `findmnt -T /tmp` → `/ /dev/sda1 ext4`, one physical disk (`sda1` 37.9G), `/tmp` is not a separate
+  mount, `PrivateTmp=no`, and no `TMPDIR`/`TMP`/`TEMP` override exists anywhere in the boot chain
+  including the live BEAM's `/proc/<pid>/environ`. `df -B1 /` → **14,251,499,520 bytes = 13.27 GiB**
+  free (not "14G" — that is a round-up). RAM 3.7 Gi against disk 13.27 GiB is exactly the asymmetry
+  THE SPILL exploits. Fresh COPY-time byte counts taken live today: **mutation_events 622,978,576 B**
+  (61,614 rows, 9.02 s), revisions 498,201,323, documents 96,336,433, audit_events 19,282,039;
+  `pg_database_size` = 942 MB, corroborating the ~941 MB framing. Peak transient disk under
+  delete-as-you-add = bundle-so-far + largest single table ≈ **1.458 GiB**; a doubly-pessimistic bound
+  where the discipline fails entirely is 1.989 GiB. Headroom ≈ 9.1x / 6.7x. **Disk is not the
+  constraint.** But mutation_events has read 241 MB → 478 MB → 623 MB across this epic's own life, so
+  a hardcoded guard would rot exactly as the frozen 2200 floor did: the preflight check computes its
+  threshold LIVE from `pg_total_relation_size` over the fat tables, and the spill directory comes from
+  configuration with a non-tmpfs default anchored under the release data dir plus a runtime assertion
+  that the chosen path is not tmpfs. *Why: the one filesystem fact was load-bearing for all three
+  rivals, and the one constant everyone wanted to bake is the one that provably moves.*
+
+- **PDS-D209 — THE STORAGE HALF OF THE HONEST ENVELOPE WAS NEVER WRITTEN, AND IT SHIPS WITH THE
+  SPILL.** Proven with a REAL `ENOSPC` (a 2 MB HFS+ volume with 4 KB free, `TMPDIR` pointed at it),
+  not a mock: `:ok = :erl_tar.create(...)` does NOT raise `File.Error` — erl_tar RETURNS
+  `{:error, :enospc}` and archive.ex hard-matches, so what reaches the edge is a **`MatchError`**,
+  which escapes D43's deliberately two-clause rescue and renders verbatim
+  `{"error":{"code":"internal_error","message":"unknown error",…}}` — **the exact string
+  `workspace_controller.ex:146`'s own docstring says D43 eliminated.** This is the export half of the
+  identical `=`-on-a-tuple defect PDS-D50 already fixed on the import side; pack was left carrying it.
+  A rescue that adds only `File.Error` MISSES the dominant path. THE FIX: a typed
+  `WorkspaceBundle.BundleIoError` (`"export_io_failed"`) raised by a `case` at every IO site, plus ONE
+  new clause beside the DBConnection one returning the existing 503 envelope with reason
+  **`"storage_unavailable"`**, distinct from `database_unavailable` because they are different retries.
+  **A bare `rescue e ->` or a wide `File.Error` is FORBIDDEN** — D43's narrowness (`:214-217`) is the
+  guarantee, not decoration. Also widen for **`Postgrex.Error` narrowed to `:query_canceled`**: the
+  same configuration produced BOTH that and `DBConnection.ConnectionError` on different runs, so a
+  streamed COPY timeout can escape D43 by a race. *Why: shipping the spill without this trades a memory
+  bug for a NEW opaque-500 path on the exact resource the fix newly depends on.*
+
+- **PDS-D210 — CLEANUP IS TWO-TIER, AND DISCONNECT IS SETTLED IN THE FAVOURABLE DIRECTION.** A real
+  socket killed mid-transfer of a 300 MB `send_file` raised a **catchable `Bandit.TransportError`**;
+  the `try/after` FIRED and the spill was removed. A brutal `Process.exit(pid, :kill)` did NOT run
+  `after` and leaked the file. So `try/after` per spill file AND around the tar is SUFFICIENT for
+  raise/throw/normal-exit/disconnect — and a **janitor is genuinely REQUIRED**, not belt-and-braces,
+  because the scenario the spill exists to survive is the Linux OOM killer, which SIGKILLs the whole
+  BEAM so no `after` clause anywhere in the VM runs. Today one stray tar leaks per crash; the spill
+  makes it N-per-crash on the box whose disk headroom is the entire premise. No disk-space check and
+  no janitor exist anywhere in `api/lib` (0 hits for enospc/disk_free/statvfs; one hit for
+  `bp-ws-bundle`, the path construction itself). The janitor sweeps `bp-ws-bundle-*` and
+  `bp-ws-spill-*` under the configured spill dir at application boot — a crashed BEAM's leftovers are
+  collected by its successor, the only mechanism that works when `after` cannot run — and its
+  staleness threshold must clear the longest OBSERVED export+transfer duration (wave-7 measured full
+  exports at ~130 s server-side alone), never a guessed "5 minutes". *Why: one mechanism cannot cover
+  both an unwinding exception and a SIGKILL, and the epic's own measurement says both happen.*
+
+- **PDS-D211 — THE FLOOR LAW IS AMENDED, AND THE AMENDMENT IS STRICTLY STRONGER THAN WHAT IT
+  REPLACES.** "NEVER lower `PDS_FULL_EXPORT_MIN_MEM_MB`" becomes **"THE FLOOR MUST NEVER SIT BELOW THE
+  MEASURED DEMAND OF THE ENGINE ACTUALLY DEPLOYED."** That forbids wave 9's temptation absolutely,
+  CONDEMNS today's 2200 (which sits 35.43 MiB below the measured 2235.43 MiB and therefore already
+  violates it), and permits — requires — re-derivation when the engine changes. **Ordering is law:**
+  the floor moves ONLY AFTER the spill is merged AND deployed, ONLY off a fresh peak-minus-baseline
+  measurement against the deployed engine with a PDS-D104 paired idle control, in kB/1024. At no
+  instant does a gate sit below the demand of the engine running. No thaw is required and none is
+  permitted: `pds-pull-proof.sh:131` is a bare bash default with **zero validation**, no anti-loosening
+  guard for this knob exists in code anywhere, the window sentinel's `check_predicate_integrity` guards
+  a DIFFERENT private knob (`PDS_SENTINEL_MEM_FLOOR_MIB`) and disclaims this one in its own header, and
+  D193 already set the env-only precedent by TIGHTENING it. The frozen blob stays
+  `e219e97ccf7f33797c86a2b84d998d599b6bda31`. *Why: "never lower" was a proxy for the real invariant,
+  and a proxy that condemns an honest re-derivation while permitting a floor already below demand is
+  the weaker law.*
+
+- **PDS-D212 — THE REACH IS DEFERRED TO WAVE 12, NAMED, NOT ATTEMPTED.** Three preconditions were
+  reproduced by RUNNING the harness, not read. (i) Step 0b FAILS from the primary checkout — "the
+  deployed sha bd2e72a897… is NOT an ancestor of the worktree e1c9ba13…" — but PASSES from a clean
+  `origin/main` worktree ("deploy provenance holds … 1 commit(s) behind — 0 code, 1 docs-only"), so
+  this is CHECKOUT HYGIENE, not a harness or engine defect. (ii) `/tmp/pds-full-export/attempts` reads
+  **1 against a default budget of 1** — exhausted. (iii) The parked 1.03 GB bundle is **STALE**
+  (`served_sha 15e057f83…` vs deployed `bd2e72a897…`), so the reuse guard refuses it and a fresh export
+  would be taken. Raising `PDS_FULL_EXPORT_BUDGET` is explicitly pre-authorised by D137/D156 and has
+  been executed twice already; resetting the attempts file or repointing `PDS_FULL_EXPORT_DIR` stays
+  FORBIDDEN. **But the climb may not fire this wave regardless:** spending a sanctioned attempt against
+  the engine this wave exists to replace buys nothing, and D211 forbids moving the floor before the new
+  engine is deployed. The unsplit `--all` climb is wave 12's opening act, from a clean `origin/main`
+  worktree, after the spill is merged and deployed and the floor re-derived. *Why: a named refusal is a
+  win, and firing the climb early would burn the one knob the charter lets us turn.*
+
+- **PDS-D213 — THE DUPLICATE TASK IS SETTLED AND THE CODE COMMENT IS REPOINTED.**
+  `pds-bl-streaming-workspace-export` supersedes `pds-backlog-streamed-bundle-channel` for the EXPORT
+  half: same parent (`task-2ac1f95237c4a8e5`), same defect, but the younger filing cites the current
+  line numbers, carries `wave_paper`, and is named by the wave Paper's own opening line as this wave's
+  root. The older task is RE-SCOPED to the IMPORT half only (D214) rather than closed, because that
+  half is real and unfixed. `workspace_bundle.ex:636`'s comment — which still names the older slug, as
+  does D199 — is repointed by the engine slice. *Why: two open tasks on the same lines is a licence for
+  two PRs to collide.*
+
+- **PDS-D214 — THE IMPORT PATH STAYS IN-MEMORY, ON AN HONEST BASIS, BECAUSE THE OLD BASIS WAS FALSE.**
+  The justification that "wave 7 proved a ~941 MB import affordable on the scratch target" is
+  FACTUALLY WRONG: **no wave has ever imported a full bundle anywhere.** Every recorded import — step
+  1's export/import pair, step 6's reboot re-import — uses the `--profile dev` scrubbed bundle at
+  51.6–55.9 MB, roughly 1/17th. The full bundle is `curl`-ed to a file and only ever tar-extracted on
+  disk for byte/row scanning; `import_bundle` is never called on it. The out-of-scope call SURVIVES on
+  a weaker, honest basis: the scratch target runs on the LOCAL 16 GB Mac (`hw.memsize` =
+  17,179,869,184), never on guerrilla, with no concurrent live traffic and no lock-free public route.
+  Fixing it would double the blast radius on exactly the functions D37 warned about, for zero movement
+  on cond_b. FILED, not fixed. *Why: the call is right and the reason given for it was invented — the
+  epic records which is which.*
+
+- **PDS-D215 — `workspace_bundle_dev_profile_test.exs:265` IS A PRE-EXISTING LATENT FALSE-GREEN AND IT
+  IS FIXED THIS WAVE.** The file's moduledoc (`:5-9`) asserts "every deny assertion is paired with a
+  `:full`-profile positive control so a vacuous green … is impossible." **That is false at :265** — the
+  one unguarded raw `refute` on a bundle value in the entire suite. Demonstrated by construction: a
+  mirror of :265 against a bundle that provably carries the secret gave "1 test, 0 failures" while
+  `File.read!(bundle) =~ secret` ALSO passed. L33/L36 are safe precisely because L33 is a positive
+  control that would fail loudly. One line to add the control; the wave walks directly past it.
+  *Why: a file that documents an anti-vacuity discipline it does not actually keep is worse than one
+  that claims nothing.*
+
+- **PDS-D216 — THE PAIRED IDLE CONTROL IS A PREREQUISITE OF THE POST-FIX NUMBER, NOT A NICE-TO-HAVE.**
+  The canonical 2235.43 MiB (2,483,304 − 194,228 kB, D185's t=0 ruling, kB/1024) came from a 1 Hz `ps`
+  sampler that satisfies only the STATED-RATE half of D104 — `grep` for "idle"/"paired" in
+  `pds-pull-proof.sh` returns ZERO hits, and `pds-bl-rss-instrument-paired-control` is still 0 of 5.
+  The root task's own criterion 2 demands "a paired idle control per PDS-D104". So the measurement
+  lands as its OWN slice that builds the paired-control instrument beside the frozen harness (never
+  inside it) and re-derives 2235.43 MiB's successor by the same procedure plus the control. The 1 Hz
+  sampler reports a LOWER bound (D114) — it understates, which is the safe direction for a floor.
+  `pgrep -o -x beam.smp` stays mandatory (D135: `-f` self-matches the ssh command line, `head -1` is a
+  PID sort not an age sort; one captured run under-read by 342x). *Why: "same procedure as the number
+  it must beat" and "satisfies the task's own acceptance bar" are two different claims, and the wave
+  must not silently substitute the first for the second.*
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -1883,6 +2080,84 @@ rung 1's absent control, the stale `tag`-exclusion comment #4770 falsified, the 
 missing rung, and guerrilla's leftover SSR services that eat the memory cond_b gates.
 
 ## Wave log
+
+### Wave 11 2026-07-20 — "The Spill" — R1 built + reviewed, grade A− (paper `pds-wave-11-2026-07-20`)
+
+Wave 10 refuted the scheduling fix on measurement (0 of 61 joint clearances, D202). The crown's last
+rung is unreachable by timing and reachable only by making the export not NEED 2.2 GB at once. This
+wave builds the engine. Root task `pds-bl-streaming-workspace-export`.
+
+**THE DEMAND IS FOUR STACKED MATERIALISATIONS, NOT ONE DOUBLING** — and D105/D199 name only two:
+`run_copy_out/1` is `Repo.query!` + `IO.iodata_to_binary` (never streamed, no decision ever mentioned
+it); the reduce retains every table in one live `dumps` map; `erl_tar.create` + `File.read!` makes a
+second full copy; `send_resp(200, bundle)` a fourth. Wave 7 measured the sum at 2235.43 MiB, so the
+frozen 2200 floor sits **35.43 MiB BELOW the demand it gates**. A fifth was found this wave: Bandit
+gzips `send_resp` bodies for the CLI (D204).
+
+**THE MECHANISM (all delivery-shape, ZERO fidelity change per D74).** PRODUCER —
+`Ecto.Adapters.SQL.stream` over the COPY inside `Repo.transaction`, chunks written straight to a
+per-table spill while folding `:crypto.hash_update` and accumulating `row_count`. CONTAINER —
+`:erl_tar.open`/`add`-by-path (chunked at 64 KiB by erl_tar itself: a 20 MB file added with a
+**12,960-byte process-memory delta**), manifest FIRST. TRANSPORT — `send_file`, Content-Length
+preserved, zero client changes. HYGIENE — delete each spill as it is added; typed IO errors; a boot
+janitor for the SIGKILL case.
+
+**WHAT VERIFICATION CHANGED IN THE PLAN, ALL ADOPTED.** The tmpfs attack died (ext4, 13.27 GiB free).
+The sandbox CAN host a COPY-bound cursor (39 fidelity tests green against a streamed producer). But
+"zero test edits" is FALSE (29 failures under a path return; **exactly 2** under a preserved binary
+contract — D205), byte-identity is NOT free (mode/uid/gid/charlist, manifest-FIRST — D207), the
+charter had already ruled the other way on transport (amended by D204), the import justification was
+invented (D214), disk-full escapes the honest envelope into a bare 500 (D209), and the reach is
+blocked by three preconditions nobody had named (deferred by D212).
+
+**R1 (dependency-free, file-disjoint, all opus):**
+
+- R1 `pds-w11-spill-engine` (opus, L): the four moves end-to-end + `export_to_file/2` + the two named
+  test edits + the pinned-mtime byte-identity test + D215's one-line control.
+  Gate: `cd api && CC=/usr/bin/clang mix test test/barkpark/tenancy/workspace_bundle_test.exs
+  test/barkpark/tenancy/workspace_bundle_dev_profile_test.exs
+  test/barkpark_web/controllers/workspace_controller_test.exs` (79 tests green at baseline).
+- R1 `pds-w11-spill-janitor` (opus, M): boot-time sweep of `bp-ws-bundle-*` / `bp-ws-spill-*` with a
+  derived threshold and a liveness guard. New file + `application.ex`; disjoint from the engine.
+- R1 `pds-w11-paired-control-measure` (opus, M): the D104 paired-control peak instrument, BESIDE the
+  frozen harness. `scripts/pds-*` only; disjoint.
+
+**R2 (deferred — the lead dispatches after the deps MERGE):**
+
+- R2 `pds-w11-storage-honest-envelope` (opus, M) AFTER `pds-w11-spill-engine`: `BundleIoError`, the
+  `storage_unavailable` 503 clause, the `:query_canceled` widening, the live free-space preflight.
+- R2 `pds-w11-floor-rederivation` (opus, M) AFTER `pds-w11-spill-engine` + `pds-w11-paired-control-measure`:
+  measure the deployed spill engine, re-derive the floor off the measurement, amend the env value.
+  **Never before the engine is deployed (D211).**
+
+**EXPLICITLY OUT OF SCOPE, in writing:** the import path (D214), `pds-w3-shares-fidelity` (D143), any
+change to bundle CONTENT, any narrowing of the control bundle (D198), the crown climb itself (D212).
+Fence: `api/lib/barkpark/tenancy/` + `internal/cli` + `scripts/pds-*`, PLUS explicit exceptions for
+`api/lib/barkpark_web/controllers/workspace_controller.ex` (D199 flagged this) and
+`api/lib/barkpark/application.ex` (janitor supervision only).
+
+**REVIEW OUTCOME (2026-07-20, grade A−).** All three R1 slices built green and hold up on adversarial
+read; every slice gate re-ran green on the reviewer's final state (engine 82/0, janitor 38/0, measure
+bash-n+shellcheck+freeze-blob). Final branches for the lead to integrate, in order: engine
+`loop-epic/the-spill-stream-the-copy-producer-tar-f-0-r`, janitor
+`loop-epic/the-spill-janitor-collect-at-boot-what-a-1-r`, measure
+`loop-epic/the-paired-control-peak-instrument-give--2-r`. ONE load-bearing defect found and fixed in
+review: the janitor read config key `:workspace_bundle_spill_dir` while the engine writes to
+`:bundle_spill_dir` — the janitor would have swept an empty dir forever while spills piled up out of
+sight (the exact silent-wrong-answer this epic keeps killing). Aligned both onto `:bundle_spill_dir`.
+Two moduledoc drifts also corrected (`export/2`'s stale "one non-test caller"; the janitor's key
+prose). What this wave PROVES BY CONSTRUCTION but NOT YET BY MEASUREMENT: that peak RSS is materially
+below 2.2 GB — the WISH's actual question — which is `pds-w11-floor-rederivation`'s (round 2) to
+answer against the deployed engine; until then the crown's payability is an argument, not a number.
+The liveness sidecar (`own/1`/`disown/1`) also ships UNWIRED (the fence forbade editing the engine),
+so the derived 3600 s mtime cutoff is the only guard on a real box until round 2 wires it — folded
+into `pds-w11-storage-honest-envelope`, which already edits `workspace_bundle.ex`. Ledger clean: all
+three slices in_progress with real criteria stamped, only merge-gated "PR merged" left for the lead;
+round-2 slices open/unclaimed by design; builder backlog (`pds-w11-router-export-comment-drift`,
+`pds-w11-janitor-engine-handshake`) filed under the epic. MERGE ORDER for round 2: dispatch
+`pds-w11-storage-honest-envelope` after the engine merges (same three files — must not run beside it);
+dispatch `pds-w11-floor-rederivation` only after the engine is MERGED AND DEPLOYED and the measure
+instrument has merged. Crown climb stays wave 12 (D212), gated on the measured floor.
 
 ### Wave 10 2026-07-20 — "The Predicate Refused Itself" — R1 built + reviewed, grade A− (paper `pds-wave-10-2026-07-20`)
 
