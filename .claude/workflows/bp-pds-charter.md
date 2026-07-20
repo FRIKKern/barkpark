@@ -1184,3 +1184,66 @@ cites D86/D89, which exist only in the amended charter). Then dispatch `pds-w1-c
 single owner, strictly serial, one `BARKPARK_HOME` / one `PDS_SCRATCH_POINTER` / one ATTEMPT-counted
 export. Only after its transcript lands does `pds-w3-shares-fidelity` go, because it moves the
 census baseline (PDS-D45 — the manifest's `dataset_slugs` came back `[]`, re-confirmed live).
+
+### Wave 6 2026-07-20 — PREFLIGHT round 1 built + reviewed, grade A− (paper `pds-wave-6-2026-07-20`)
+
+Round 1 shipped THREE disjoint preflight slices — one file each, no collisions. All gates re-run
+green on the reviewer's final state. THE CLIMB DID NOT RUN: `pds-w1-crown-proof` is round 2 by the
+sequenced-rounds law and dispatches only after these three merge (PDS-D111). The epic's headline
+claim remains UNPAID and the ladder has still never been run end to end.
+
+- `pds-w6-charter-amendment` → `loop-epic/the-wave-6-charter-reaches-origin-main-d-0-r` (no code
+  fixes; the `-r` branch exists only to carry THIS wave-log entry). D91–D111 + the wave-6 roadmap
+  landed on origin/main, copied VERBATIM from local main's `32b8cded4` via `git show` — never
+  re-authored (PDS-D90). Strict superset proven three ways at review: `--numstat` = `193 0`, zero
+  `^<` lines with all hunks pure-append, and byte-identity with the source commit. D-numbers
+  1..111 contiguous, zero duplicates; the four H2s are the only H2s; the Wave-log body was left
+  byte-identical for Review to extend.
+  THE GATE LITERAL WAS WRONG AND THE ARTIFACT WAS HEALTHY: Decide asserted 1187 lines, the truth is
+  1186 (`993 + 193 − 0`). The builder corrected the ASSERTION and left the ARTIFACT alone, which is
+  the load-bearing call — padding to 1187 would have committed an invented line into ratified
+  memory, and the mutation demo shows the original gate PASSES a corrupted charter and FAILS the
+  true one. Filed as `pds-w6-gate-linecount-offbyone`, not fixed away.
+- `pds-w6-preflight-harness-fixes` → `loop-epic/the-last-legal-harness-edit-before-the-f-1-r`
+  (review fix `35b1f4f4c`). THE LAST LEGAL HARNESS EDIT BEFORE THE FREEZE (PDS-D100). Five proven
+  instrument bugs fixed, each with a mutation proof that the corrected assertion still fails on its
+  pre-fix condition: D94 (`--no-start` starts no dep apps, so `Repo.start_link` died — proven live
+  against a booted scratch target), D96 (a boot crash reported as "a sentinel RAISED", i.e. a FALSE
+  ENGINE FAIL), D97 (step 4's missing `PULL_BUNDLE` cross-invocation guard + a PASS claiming a
+  DEV leg that never ran), D98 (gate (d) failing OPEN on a GitHub 503), D99 (`grep -c … || echo 0`
+  yielding `0\n0`, silently skipping the D68 gate). D109/D110 deliberately untouched.
+  REVIEW FIX: the D96 branch routed BOTH no-`REPO IS` cases to one message asserting "the scratch
+  Repo never connected (exit $rc)" — but with `rc=0` the probe ran to completion and printed
+  neither marker, so the message named a cause it had not measured. That is the same defect class
+  D96 exists to remove, one layer in. Split: `rc!=0` keeps the boot wording, `rc=0` reports
+  UNDIAGNOSED and explicitly a HARNESS bug. All four polarities re-proven — critically, a GENUINE
+  sentinel raise is still reported as a raise, so the fix cannot swallow an engine finding.
+  REVIEW ALSO RESOLVED the builder's two open self-doubts with measurement rather than argument:
+  real `gh run list` on an empty result exits 0 (4/4), so D98's fail-closed gate will NOT spuriously
+  block the climb; and the step-4 guard's top-of-step placement is the ESTABLISHED idiom, since
+  steps 5 and 6 place the identical guard at the top of their own step.
+- `pds-w6-scratch-pointer-canonicalize` → `loop-epic/teardown-clears-the-pointer-it-wrote-the-2-r`
+  (review fix `970c21527`). PDS-D107: the write path canonicalised with `cd -P` while the read path
+  returned `BARKPARK_HOME` verbatim, so teardown's exact-string pointer compare could never match
+  where `/tmp` is a symlink to `/private/tmp` — every run removed the root, printed PASS, and
+  stranded a dangling pointer. One `canonicalize_path` helper now backs all three sites; both sides
+  of the compare are canonicalised, which makes the non-clobber property hold STRUCTURALLY (it
+  collapses two spellings of one root and can never merge two different roots) rather than by luck.
+  REVIEW FIX: `canonicalize_path('/')` returned the EMPTY STRING (`${p%/}` strips the root's only
+  character), and `''` does not match the `case "$home" in /) die "refusing to remove"` interlock
+  guarding the `rm -rf` in `cmd_teardown`. Harmless in effect (`rm -rf ''` is a no-op) but a safety
+  interlock that silently stops firing is not a safety interlock. Root now round-trips as `/`.
+
+WHAT DID NOT HAPPEN: the wish's headline job, `pds-w1-crown-proof`, did NOT run — BY DESIGN, and it
+stays `open` at 0/11. Wave 5 was an enabling wave; wave 6 round 1 was ALSO an enabling wave, and
+says so plainly rather than dressing three instrument repairs up as a verdict on the data plane.
+Two waves of enablers without a climb is the risk this epic must now retire.
+
+NEXT WAVE: merge round 1 — the charter branch FIRST (both harness slices cite D-numbers that exist
+only in the amended charter), then the two `-r` script branches, whose file sets are disjoint. Then
+dispatch `pds-w1-crown-proof` ALONE: single owner, strictly serial, one `BARKPARK_HOME`, one
+`PDS_SCRATCH_POINTER`, ONE attempt-counted full export, harness FROZEN from attempt 1. Run PREFLIGHT
+first (`--plan`, `--only 0a,0b,7`, a scratch boot + `--only 0c`, a `bp` verb check, a source
+MemAvailable read, a parked-bundle `.meta` check) — it costs zero export budget and decides whether
+the climb dispatches at all. `pds-w3-shares-fidelity` STAYS HELD behind the transcript: it moves the
+census baseline (PDS-D45).
