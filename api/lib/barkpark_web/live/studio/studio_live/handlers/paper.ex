@@ -114,6 +114,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   defaults to `wide` (mount's seed), which is also the conservative answer —
   an unknown bucket behaves exactly as this handler always has.
   """
+  # ── D179 — THE DISMISS IS NOT NAVIGATION, AND THAT IS RULED, NOT DEFAULTED ──
+  #
+  # At `narrow` and `phone` a user-summoned inspector paints as a FULL-SCREEN
+  # DESTINATION (the wave-10 geometry: `position:absolute; inset:0` over an
+  # opaque surface), and #5014 gave it the vocabulary of one — an arrow-left,
+  # a header that names the document, and a crumb trail whose last segment is
+  # the inspector itself. This handler is nonetheless a PURE ASSIGN: no
+  # `push_patch`, no `push_navigate`, no pushState anywhere in the chain. So
+  # browser Back from that destination does not close the inspector — it
+  # leaves the Studio entirely.
+  #
+  # The asymmetry is sharpest against the SIBLING control rendered beside it:
+  # a pane crumb fires `expand-pane`, which DOES `push_patch`
+  # (Handlers.Scope.expand_pane/2, scope.ex:175-178). Two adjacent controls in
+  # one trail, one history-bearing and one not.
+  #
+  # RULED (b) — keep the affordance, keep the click non-navigational, record
+  # why here, and lock it. The alternatives were refused with reasons, not
+  # forgotten:
+  #
+  #   (a) a URL-borne sidebar param. The URL grammar carries only
+  #       dataset / path / desk, and `append_desk_query/2`
+  #       (studio_live/paths.ex:86) is the ONLY query writer — so a sidebar
+  #       param has to be designed against `?desk=` preservation AND against
+  #       `expand-pane`'s own push_patch, which knows nothing about
+  #       `sidebar_user_opened` and would silently drop the param on every
+  #       crumb click. That is a design task, not a line change.
+  #   (c) drop the destination vocabulary. That unwinds #5014's merged, tested
+  #       Tier-3 exit; a full-screen state with no way out is the worse lie.
+  #
+  # Locked in `studio_live_navigational_truth_test.exs`: dismissing at Tier 3
+  # emits NO patch and NO navigate, with the `expand-pane` crumb standing as
+  # the contrast control that proves the refutation is able to fail.
+  #
+  # SCOPE: measured on a 2-segment paper path only (see the same caveat on
+  # `PaneBuilder.display_state/5`); deeper nav depth is filed separately.
   def sidebar_toggle_panel(socket) do
     open? = socket.assigns[:sidebar_open] == true
     asked? = socket.assigns[:sidebar_user_opened] == true

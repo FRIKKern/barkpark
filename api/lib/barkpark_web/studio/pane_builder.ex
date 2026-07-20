@@ -858,6 +858,58 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   """
   @spec display_state(non_neg_integer(), pos_integer(), boolean(), String.t(), boolean()) ::
           :full | :strip | :hidden
+
+  # ── D180 — WHAT THE SURVIVING STRIP ACTUALLY DOES ────────────────────────
+  #
+  # The 44px strip this clause leaves behind carries `phx-click="expand-pane"`,
+  # and spd-b47 was filed on the belief that the ladder and `expand-pane`
+  # collide: "the ladder is not a pane state — it is driven by
+  # `sidebar_user_opened`, which `expand-pane` does not touch." THAT MECHANISM
+  # IS FALSE, and so are both outcomes the task predicted from it (a dead
+  # control; or the inspector squeezed back under the reading bar). Both are
+  # refuted by execution, not by argument.
+  #
+  # `expand-pane` DOES reach `sidebar_user_opened` — TRANSITIVELY:
+  #
+  #   Handlers.Scope.expand_pane/2 (scope.ex:170-178) `push_patch`
+  #     -> handle_params -> rebuild_panes/1
+  #     -> the fall-through clause (shared.ex:806-811)
+  #     -> clear_paper_view/1
+  #     -> `assign(sidebar_assigns(nil))` (shared/paper.ex:755)
+  #
+  # and `sidebar_assigns(nil)` re-seeds `sidebar_user_opened: false`. Read off
+  # the live socket after the click: `assigns.sidebar_user_opened = false`.
+  #
+  # So the measured outcome is a THIRD one, which neither option named. At
+  # `standard` with this ladder engaged the sole surviving pane is
+  # `{idx: 1, "Papers"}`, and clicking it CLOSES THE WHOLE DOCUMENT:
+  #
+  #   panes AFTER strip click:  ["pane-structure", "pane-papers"]
+  #   editor open AFTER:        false
+  #   strips AFTER:             []
+  #
+  # The rail reverts to ordinary full display because there is no longer an
+  # editor for it to yield to. The strip is a DOCUMENT-CLOSE, not an
+  # inspector-dismiss, and it needs no suppression: expand-pane already
+  # implies dismiss.
+  #
+  # AND THERE IS NO AFFORDANCE LIE. `expand_pane/2` truncates with
+  # `Enum.take(nav_path, idx)`; pane 0 IS the root pane and each ordinary
+  # segment contributes exactly one pane, so the strip's label names its own
+  # destination in every topology measured — ["paper", slug] -> {1, "Papers"}
+  # -> the Papers list; ["open", "paper", slug] -> {0, "Structure"} -> the desk
+  # root. No off-by-one to fix.
+  #
+  # SCOPE, STATED HONESTLY RATHER THAN GENERALISED: every figure above comes
+  # from a 2-SEGMENT paper path (panes = [Structure, Papers]). A deeper nav
+  # path would make the surviving strip an INTERMEDIATE pane, where `take/2`
+  # lands on a list instead of closing the document. That case is NOT measured
+  # here — it is filed as `b47-strip-behaviour-unmeasured-beyond-two-panes`.
+  # This ruling claims the 2-segment topology only.
+  #
+  # Locked by `studio_live_navigational_truth_test.exs`, which pins the pane
+  # ids AND editor-open false AND `sidebar_user_opened == false` — pane ids
+  # alone would stay green if the reset chain above were refactored away.
   def display_state(idx, num_panes, true, "standard", true) do
     if idx == num_panes - 1, do: :strip, else: :hidden
   end
