@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write # so a failed nightly run can surface itself to a human
 
 concurrency:
   group: paper-readers-production
@@ -53,3 +54,21 @@ jobs:
           path: ${{ runner.temp }}/paper-reader-audit.json
           if-no-files-found: warn
           retention-days: 30
+
+      # Retaining the JSON witness is not the same as telling anyone. This gate
+      # ran red for three consecutive nights against the live corpus — including
+      # the PDS crown-proof transcript — and nothing reached a human, because a
+      # cron job's red X is only visible to whoever thinks to open the Actions
+      # tab. GITHUB_TOKEN is built in, so this needs no secret at all.
+      - name: Report failure to a human
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: paper-readers
+          CI_FAILURE_DETAIL: |
+            The nightly production Paper reader audit failed: at least one
+            published Paper broke a reader edge (GUI / email / source / CLI /
+            TUI). The exact per-Paper JSON witness is attached to the run as
+            the `paper-reader-audit-<run_id>` artifact — read `.failures[]`
+            there for which Papers failed and on which edge.
+        run: bash scripts/file-ci-failure-issue.sh
