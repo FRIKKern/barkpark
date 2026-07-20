@@ -415,10 +415,12 @@ const EXPECTATIONS = {
     includes: ['data-invite-act="join"', "Northwind Trading", "invite-skip", "Not now"],
   },
   "invite-expired": {
-    what: "the calm expired dead-end with one next action",
+    what: "the calm expired dead-end with one next action, still WARN (recoverable)",
     container: "view-invite",
-    includes: ["has expired", 'data-invite-act="overview"'],
-    excludes: ['data-invite-act="join"'],
+    // The other half of the ruling: expired is "ask for a fresh one", not a
+    // dead link, so it must NOT drift into the danger mark.
+    includes: ["has expired", 'data-invite-act="overview"', "invite-ico--warn"],
+    excludes: ['data-invite-act="join"', "invite-ico--danger"],
   },
   "invite-already-member": {
     what: "the already-a-member card with one next action",
@@ -427,10 +429,13 @@ const EXPECTATIONS = {
     excludes: ['data-invite-act="join"'],
   },
   "invite-invalid": {
-    what: "the revoked/used dead-end with one next action",
+    what: "the revoked/used dead-end with one next action, wearing the DANGER mark",
     container: "view-invite",
-    includes: ["isn&#39;t valid any more", 'data-invite-act="overview"'],
-    excludes: ['data-invite-act="join"'],
+    // gr-blk-invite-ico-danger-variant: a dead link and a retryable error used
+    // to be the same "!" glyph. This is the mounted proof the danger variant
+    // reaches the real render path, not just the pure helper.
+    includes: ["isn&#39;t valid any more", 'data-invite-act="overview"', "invite-ico--danger"],
+    excludes: ['data-invite-act="join"', "invite-ico--warn"],
   },
   // C8: the tab strip registers Timeline and marks it active on the deep link.
   // (The feed itself mounts through element-level querySelector, which this
@@ -890,7 +895,11 @@ const EXPECTATIONS = {
       const arch = (reg.get("archives-body") || {}).innerHTML || "";
       assert.ok(arch.includes("archives-note--unconfigured"), "archives shows the DISTINCT storage-unconfigured state");
       assert.ok(arch.includes("Archive storage isn"), "the server's not_configured copy renders verbatim");
-      assert.ok(arch.includes("How archives work"), "the docs link renders");
+      // gr-blk-archives-doc-link: the "How archives work" anchor pointed at the
+      // bare repo root — nothing in the repo answers the question, so the
+      // affordance became the answer itself rather than a relocated dead end.
+      assert.ok(arch.includes("archives-note-sub"), "the in-place explanation renders");
+      assert.ok(!arch.includes("github.com"), "and no invented docs URL took its place");
       assert.ok(arch.includes("data-archives-retry"), "a working Retry renders");
     },
   },

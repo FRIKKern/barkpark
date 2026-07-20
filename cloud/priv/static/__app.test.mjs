@@ -1227,6 +1227,133 @@ test("legacyRoute('launch') remaps to Overview, and wantsLaunchFlow flags the re
   assert.equal(hooks.wantsLaunchFlow(null), false); // total over junk
 });
 
+// ── hashChangeEffects: a modal may not survive a route change (gr-blk-modal-  ─
+//    survives-route / GR105) — and the two hash paths that OPEN a modal must
+//    keep working. The listener itself is registered inside init(), which never
+//    binds in this sandbox, so the DECISION is what is pinned here. A blanket
+//    "close on any hashchange" reds the two guard tests below rather than
+//    silently blinding the accent x theme shot matrix.
+const SIGNED_IN = { newFlow: false, activateFlow: false, signedIn: true };
+
+test("hashChangeEffects closes an open modal when the hash routes ELSEWHERE", () => {
+  for (const [from, to] of [
+    ["#overview", "#fleet"],
+    ["#fleet", "#sites"],
+    ["#settings/billing", "#activity"],
+    ["#instance/abc", "#instance/def"], // a different instance is a different place
+    ["#instance/abc/overview", "#instance/abc/logs"], // …so is a different tab
+    ["#fleet", "#fleet/attention"], // …and so is a filtered bucket
+    ["#overview", "#/invitations/accept?token=t"],
+  ]) {
+    const eff = hooks.hashChangeEffects(from, to, SIGNED_IN);
+    assert.equal(eff.close, true, `${from} → ${to} must close the modal`);
+    assert.equal(eff.route, true, `${from} → ${to} must still route`);
+  }
+});
+
+test("hashChangeEffects leaves the LEGACY #launch deep link able to open its modal", () => {
+  // legacyRoute("launch") === "overview", so #overview → #launch is not a route
+  // change: nothing closes, applyRoute runs and openLaunchModal() survives.
+  const arrive = hooks.hashChangeEffects("#overview", "#launch", SIGNED_IN);
+  assert.equal(arrive.close, false, "#launch must not close the modal it is about to open");
+  assert.equal(arrive.route, true, "#launch must still route (that is what opens the flow)");
+  // applyRoute normalises the address bar back to /#overview via replaceState.
+  // That fires no hashchange at all, but even if it ever did it is route-
+  // identical — so it can never tear down the launch modal either.
+  assert.equal(hooks.hashChangeEffects("#launch", "#overview", SIGNED_IN).close, false);
+  // The flat Settings bookmarks canonicalise the same way — an old #billing
+  // link landing on #settings/billing is one place, not two.
+  assert.equal(hooks.hashChangeEffects("#billing", "#settings/billing", SIGNED_IN).close, false);
+});
+
+test("hashChangeEffects never dismisses the ?modal=account preview seam", () => {
+  // The account modal is QUERY-opened (mock.js drives openAccountModal on
+  // window load at whatever hash the scenario deep-linked to), so the only
+  // hashchange that could reach it is a same-route one — and a same-hash set
+  // fires no event at all. Pinned across every hash the shot matrix uses: if
+  // any of these self-closes, the harness photographs an empty screen and the
+  // matrix goes quietly false-green.
+  const shotHashes = [
+    "", "#overview", "#fleet", "#sites", "#activity", "#billing",
+    "#notifications", "#operator", "#settings/env", "#settings/members",
+    "#settings/providers", "#settings/tokens", "#/auth/reset?token=demo",
+    "#/invitations/accept?token=tok-preview-valid",
+  ];
+  for (const h of shotHashes) {
+    assert.equal(
+      hooks.hashChangeEffects(h, h, SIGNED_IN).close, false,
+      `a same-route hashchange at ${JSON.stringify(h)} must not close the account modal`,
+    );
+  }
+  assert.equal(typeof hooks.openAccountModal, "function", "the seam mock.js drives still exists");
+});
+
+test("hashChangeEffects does nothing on the non-hash-routed screens or signed out", () => {
+  // (deepEqual is unusable across the vm realm — the sandbox's Object.prototype
+  // is a different reference — so each effect is asserted by field.)
+  const dead = (label, eff) => {
+    assert.equal(eff.close, false, label + ": must not close");
+    assert.equal(eff.route, false, label + ": must not route");
+  };
+  dead("/new", hooks.hashChangeEffects("#overview", "#fleet", { newFlow: true, signedIn: true }));
+  dead("/activate", hooks.hashChangeEffects("#overview", "#fleet", { activateFlow: true, signedIn: true }));
+  dead("signed out", hooks.hashChangeEffects("#overview", "#fleet", { signedIn: false }));
+  dead("no ctx", hooks.hashChangeEffects("#overview", "#fleet", undefined)); // total over junk ctx
+  // Total over junk hashes too: null/undefined both canonicalise to overview.
+  const junk = hooks.hashChangeEffects(null, undefined, SIGNED_IN);
+  assert.equal(junk.close, false);
+  assert.equal(junk.route, true);
+});
+
+// ── gr-blk-invite-ico-danger-variant: the two failure-shaped landings are no ──
+//    longer the same glyph. The split is recoverability, not severity.
+test("invite landings: only the DEAD link wears the danger mark; retryable stays warn", () => {
+  const dead = hooks.inviteStateHtml("invalid", {});
+  assert.match(dead, /invite-ico--danger/, "a revoked/used link is terminal → danger");
+  assert.doesNotMatch(dead, /invite-ico--warn/);
+  for (const state of ["error", "expired"]) {
+    const html = hooks.inviteStateHtml(state, {});
+    assert.match(html, /invite-ico--warn/, `${state} is recoverable → warn, not danger`);
+    assert.doesNotMatch(html, /invite-ico--danger/);
+  }
+  // The unknown-state fallback rides the same terminal card.
+  assert.match(hooks.inviteStateHtml("who-knows", {}), /invite-ico--danger/);
+});
+
+// ── gr-blk-index-icon-link: link integrity, both directions. ─────────────────
+//    favicon.ico shipped and was served for the whole epic while index.html
+//    referenced it zero times. This is a STATIC document, so a text read is the
+//    only way to check it — but the assertion that earns its keep is that the
+//    referenced path RESOLVES ON DISK, which is the defect class in both
+//    directions: an asset nobody links, or a link to an asset nobody ships.
+test("index.html references a favicon that actually ships", () => {
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const m = html.match(/<link[^>]*\srel="icon"[^>]*\shref="([^"]+)"/);
+  assert.ok(m, "index.html declares a rel=icon link");
+  const href = m[1];
+  assert.ok(href.startsWith("/"), `the icon is same-origin (E7: offline-renderable), got ${href}`);
+  assert.ok(
+    fs.existsSync(new URL("." + href, import.meta.url)),
+    `the icon target ${href} exists in priv/static`,
+  );
+  // Golden Rule 4: <head> stays non-blocking. The one pre-paint script there is
+  // the theme shim; nothing this slice added may grow that count.
+  const head = html.slice(0, html.indexOf("</head>"));
+  assert.equal((head.match(/<script/g) || []).length, 1, "no new <script> entered <head>");
+});
+
+// ── gr-blk-archives-doc-link: the affordance is honest, not relocated. ────────
+test("the storage-unconfigured archives note explains itself instead of linking nowhere", () => {
+  const html = hooks.archivesPanelHtml(
+    hooks.archivesModel({ ok: false, error: "Archive storage isn't configured for this deployment." }),
+  );
+  assert.match(html, /archives-note--unconfigured/);
+  assert.doesNotMatch(html, /archives-docs-link/, "the dead repo-root link is gone");
+  assert.doesNotMatch(html, /github\.com/, "and was not replaced by another invented URL");
+  assert.match(html, /archives-note-sub/, "the in-place explanation took its place");
+  assert.match(html, /data-archives-retry/, "Retry survives");
+});
+
 test("parseHash resolves both the old flat and the new canonical Settings hashes to one view", () => {
   for (const h of ["#billing", "#settings/billing"]) {
     sandbox.location.hash = h;
@@ -8060,7 +8187,7 @@ test("gr-p3: fleetRow — a live+behind box reads its lifecycle + a chip, NEVER 
 });
 
 // ── gr-p3 D-01: archives — the DISTINCT storage-unconfigured state ───────────
-test("gr-p3: archivesModel — the not_configured server copy is a DISTINCT state (docs + Retry)", () => {
+test("gr-p3: archivesModel — the not_configured server copy is a DISTINCT state (explanation + Retry)", () => {
   const m = hooks.archivesModel({ ok: false, error: "Archive storage isn't configured for this deployment." });
   assert.equal(m.notConfigured, true);
   assert.equal(m.error, true);
@@ -8068,7 +8195,10 @@ test("gr-p3: archivesModel — the not_configured server copy is a DISTINCT stat
   assert.match(html, /archives-note--unconfigured/);
   assert.match(html, /archives-note-dot/);
   assert.match(html, /Archive storage isn/);            // server copy, verbatim (esc-stable fragment)
-  assert.match(html, /How archives work/);              // the docs link
+  // gr-blk-archives-doc-link: this used to assert the "How archives work" link.
+  // Nothing in the repo answers that question, so the anchor pointed at the
+  // bare repo root — the affordance is now the explanation itself, in place.
+  assert.match(html, /archives-note-sub/);
   assert.match(html, /data-archives-retry/);            // and a working Retry
 });
 
@@ -8079,7 +8209,7 @@ test("gr-p3: archivesModel — a GENERIC store outage stays the transient error 
   const html = hooks.archivesPanelHtml(m);
   assert.match(html, /archives-note--warn/);
   assert.equal(html.indexOf("archives-note--unconfigured"), -1);
-  assert.equal(html.indexOf("How archives work"), -1); // no docs link on a transient outage
+  assert.equal(html.indexOf("archives-note-sub"), -1); // no "what an archive is" aside on a transient outage
   assert.match(html, /data-archives-retry/);
 });
 

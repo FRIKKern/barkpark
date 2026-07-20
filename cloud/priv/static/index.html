@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Barkpark Cloud</title>
     <meta name="description" content="Barkpark Cloud — fleet, launch, billing & providers control plane." />
+    <!-- favicon.ico ships in priv/static and IS in the router's Plug.Static
+         allowlist, but nothing referenced it — a served asset with no link, so
+         every tab wore the browser's blank page glyph. Same-origin only (E7:
+         the console must render fully offline) and a LINK, never a script —
+         Golden Rule 4 keeps <head> non-blocking. `sizes=any` declares this
+         multi-resolution .ico as covering every slot, so the browser stops
+         probing for an SVG mark we do not ship. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <!-- Inter is self-hosted (@font-face in app.css → /fonts/) so the console
          renders fully offline — no third-party hosts (charter decision 27). -->
     <!-- Pre-paint theme: mode key mirrors `var THEME = "bpcloud.theme"` in app.js;
