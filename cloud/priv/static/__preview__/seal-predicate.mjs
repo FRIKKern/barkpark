@@ -83,19 +83,19 @@ const KNOWN_DEFECTS = [
   {
     id: 'GR108-tablet-topbar-overflow',
     desc: 'Horizontal scrollbar at 721-782px on the two past-due screens; .topbar-right children will not shrink (min-width:auto)',
-    commit: null,                                            // unlanded at freeze
+    commit: '0261ace15',                                     // landed: .topbar-right > * { min-width: 0 } (app.css:787)
     guard: 'cloud/priv/static/__preview__/overflow-guard.mjs',
   },
   {
     id: 'GR109-attention-row-dead-rule',
     desc: '.attention-row stacks but stays centred — the authored align-items:flex-start is killed by a later base rule at equal specificity',
-    commit: null,
+    commit: '0261ace15',                                     // landed: tablet-stack block moved after its base rule (app.css:2704-2713)
     guard: 'cloud/priv/static/__preview__/overflow-guard.mjs',
   },
   {
     id: 'GR115-bpconsole-dead-rule',
     desc: '.bp-console-body/.bp-console-toggle never take the authored 40vh cap or the 13px legibility floor at <=720px — same cascade-order death as GR109',
-    commit: null,
+    commit: '0261ace15',                                     // landed: base block moved before the shared 720px media block (app.css:2420-2477)
     guard: 'cloud/priv/static/__preview__/overflow-guard.mjs',
   },
 ];
