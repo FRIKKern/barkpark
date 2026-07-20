@@ -37,6 +37,38 @@ const SURVEY_MODEL = A.survey_model || 'sonnet'
 const LEAD_MODEL = A.lead_model || 'opus'
 const CUTTER_MODEL = A.cutter_model || 'opus'
 const REVIEWER_MODEL = A.reviewer_model || 'opus'
+// Fan-out FLOORS. Every maxItems below is an upper bound; nothing but a floor stops
+// a thinking phase from returning one item, or zero. The ratified anti-goal — a
+// cycle must never spend FEWER agents to look decisive — was prose, and prose does
+// not run.
+//
+// These are THROWS even though all four sites ALSO declare minItems. That is not
+// because minItems is unenforced — it IS enforced — but because it does not do the
+// job a floor needs. Settled by reading the host (2.1.215), not by running a wave:
+// the host compiles the workflow-supplied schema with Ajv and runs it inside the
+// StructuredOutput tool call, so a short array IS caught. But (1) it is caught in
+// the SUBAGENT's turn and handed back as a retryable tool error — pressure on one
+// agent, never a decision the orchestrator gets to make; (2) minItems is not in the
+// host's strict-schema keyword allowlist, so carrying it disqualifies the schema
+// from strict structured-output mode entirely; and (3) when the retries run out the
+// workflow reports "subagent completed without calling StructuredOutput", naming
+// the wrong cause. A floor that reports the wrong reason is worse than none.
+//
+// PLACEMENT IS LOAD-BEARING. The host runs pipeline()/parallel() stages under
+// Promise.allSettled: a throw INSIDE a stage is swallowed into a logged `null`, not
+// a cycle abort. So the per-domain probe floor below is deliberately paired — it
+// throws in-stage to stop THAT domain from spending its scouts, and a second
+// top-level check turns the resulting dropped domain into a real abort before the
+// next phase spends anything.
+//
+// HONESTY, per charter D28: these throws have never fired in a real run, and
+// neither have bp-epic-cycle's. They were proven under a node:vm harness that
+// reproduces the host evaluator, over n = 0, 1, floor-1, floor, floor+1. A harness
+// is not a wave; nothing here has been observed firing in the loop.
+const DOMAIN_FLOOR = 3
+const PROBE_FLOOR = 10
+const BUNDLE_FLOOR = 3
+const CUT_TASK_FLOOR = 4
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS CYCLE:\n${A.lead_notes}` : ''
 const CHARTER_LINE = CHARTER_PATH ? `An epic charter exists at ${CHARTER_PATH} — read it; its decisions bind this cycle.` : ''
 
@@ -410,6 +442,10 @@ ${TASKS_BLOCK}${LEAD_NOTES}`,
   { label: 'planner', phase: 'Plan', schema: PLAN_SCHEMA, model: 'fable', effort: 'high' }
 )
 if (!planner) throw new Error('Plan phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
+// Floor 1/4 — the partition. Fires before Recon spends a single domain lead.
+if ((planner.domains || []).length < DOMAIN_FLOOR) {
+  throw new Error(`Domain fan-out floor: the planner returned ${(planner.domains || []).length} domain(s), below the floor of ${DOMAIN_FLOOR}. The whole cycle is partitioned here — recon, survey, digest, cut and review all fan out per domain — so a short partition silently narrows every later phase at once, and the cycle still reports itself complete. Re-run Plan with a real ${DOMAIN_FLOOR}-way disjoint partition rather than proceeding.`)
+}
 const CYCLE_PAPER = planner.paper_id
 const EPIC_TASK = planner.epic_task_id
 log(`Planner cut 3 domains: ${planner.domains.map((d) => d.slug).join(', ')}; paper ${CYCLE_PAPER}; epic task ${EPIC_TASK}`)
@@ -439,6 +475,14 @@ Design 10-20 survey probes for cheap Sonnet surveyors. Each probe is one scout: 
   async (recon, d) => {
     if (!recon) return null
     const probes = (recon.survey || []).slice(0, 20)
+    // Floor 2/4 — the real agent fan-out: one Sonnet scout per probe. Fires before
+    // this domain's surveyors are spent. NOTE: pipeline() runs stages under
+    // Promise.allSettled, so this throw is swallowed into a dropped domain rather
+    // than aborting the cycle — the top-level surviving-domain check after the
+    // pipeline is what actually stops the run. Both halves are required.
+    if (probes.length < PROBE_FLOOR) {
+      throw new Error(`Survey fan-out floor [${d.slug}]: the domain lead designed ${probes.length} probe(s), below the floor of ${PROBE_FLOOR}. Each probe is one cheap Sonnet scout, and width is the cheapest part of a cycle — a thin probe set is how a domain's defects stay invisible and get rebuilt later at full price. Re-run Recon for this domain with a real ${PROBE_FLOOR}-20 probe sweep rather than proceeding.`)
+    }
     log(`[${d.slug}] lead designed ${probes.length} probes; surveying`)
     const reports = (await parallel(
       probes.map((q) => () =>
@@ -468,6 +512,13 @@ COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — pa
   }
 )).filter(Boolean)
 
+// The enforcing half of floor 2/4. A domain whose lead died, or whose probe floor
+// threw in-stage, comes back as a swallowed `null` and is filtered away above —
+// leaving the cycle to digest 2 domains while still calling itself a 3-domain
+// sweep. Fires before Digest spends a Fable.
+if (surveyed.length < DOMAIN_FLOOR) {
+  throw new Error(`Domain survival floor: only ${surveyed.length} of ${DOMAIN_FLOOR} domains survived Recon+Survey. A domain drops out here when its lead died or its probe floor fired, and pipeline() swallows both into a silent null — so the cycle would digest a partial sweep and report it as whole. Check the pipeline[] failure lines above for the real cause, then resume the run rather than proceeding on ${surveyed.length}/${DOMAIN_FLOOR} of the codebase.`)
+}
 const totalCandidates = surveyed.reduce((n, s) => n + s.reports.reduce((m, r) => m + (r.fix_candidates || []).length, 0), 0)
 log(`Survey complete: ${surveyed.length}/3 domains, ${totalCandidates} raw fix candidates`)
 
@@ -496,6 +547,11 @@ ${PAPER_BLOCK}${LEAD_NOTES}`,
   { label: 'digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'fable', effort: 'xhigh' }
 )
 if (!digest) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
+// Floor 3/4 — one bundle per domain, one Opus task-cutter per bundle. Fires before
+// Cut spends a cutter, and before the reduce below would fault on a missing array.
+if ((digest.bundles || []).length < BUNDLE_FLOOR) {
+  throw new Error(`Bundle fan-out floor: the digest returned ${(digest.bundles || []).length} bundle(s), below the floor of ${BUNDLE_FLOOR}. One bundle becomes one Opus task-cutter, so a dropped bundle is a domain that got surveyed and then silently cut nothing — the most expensive way to lose work in this cycle. Re-run Digest with one bundle per surveyed domain rather than proceeding.`)
+}
 log(`Digest cut 3 bundles (${digest.bundles.reduce((n, b) => n + b.findings.length, 0)} vetted findings); dropped: ${digest.dropped.slice(0, 120)}`)
 
 const domainBySlug = {}
@@ -533,6 +589,19 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
   })
 )).filter(Boolean)
 
+// Floor 4/4 — the build fan-out: one task becomes one builder. Checked per domain
+// BEFORE the flatMap, so the error names which cutter came up short rather than
+// reporting a healthy-looking total that hides one empty domain. Fires before
+// Preflight spends a Sonnet per task.
+if (cuts.length < BUNDLE_FLOOR) {
+  throw new Error(`Cutter survival floor: only ${cuts.length} of ${BUNDLE_FLOOR} task-cutters returned. parallel() swallows a died cutter into a null that is filtered away here, so the cycle would build one domain's fixes and report a full sweep. Check the parallel[] failure lines above, then resume the run rather than proceeding.`)
+}
+for (const c of cuts) {
+  const cutCount = (c.tasks || []).length
+  if (cutCount < CUT_TASK_FLOOR) {
+    throw new Error(`Cut fan-out floor [${c.domain}]: this cutter filed ${cutCount} task(s), below the floor of ${CUT_TASK_FLOOR}. Every task is one builder, so a thin cut is a domain that was surveyed at full price and then fixed at none — and the cycle's own report would still read as a completed sweep of that domain. Re-run Cut for this domain against its bundle (${CUT_TASK_FLOOR}-20 tasks) rather than proceeding.`)
+  }
+}
 const allCutTasks = cuts.flatMap((c) => (c.tasks || []).slice(0, 20).map((t) => ({ ...t, domain_slug: c.domain })))
 log(`Cut: ${allCutTasks.length} tasks filed across ${cuts.length}/3 domains`)
 if (allCutTasks.length === 0) {
