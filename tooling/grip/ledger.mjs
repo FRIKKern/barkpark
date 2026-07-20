@@ -39,9 +39,14 @@
 // appeal to, so a conflict is simply what the FOLD OBSERVES: two rival recipes
 // over one (subject, quantity) are BOTH kept and BOTH flagged, and are
 // resolved by re-running both TODAY — never by whichever file arrived first.
-// (R4.) The adjudicator slice has not merged, so this module emits the
-// `{ reason: "CONFLICT", … }` shape rather than importing its vocabulary; when
-// it lands, the constant below is the single place to re-point.
+// (R4.) This module emits the `{ reason: "CONFLICT", … }` shape rather than
+// importing adjudicate.mjs's vocabulary — deliberately, and not merely because
+// that slice was unmerged when this was written. The DURABLE STORE must not
+// depend on the VERDICT ENGINE: the store is what a verifier writes at the end
+// of a phase, the engine is what a reviewer runs over facts in flight, and
+// making the cheap half import the expensive one couples them for one shared
+// string. The name is byte-identical to VERDICTS.CONFLICT on purpose, and the
+// constant below is the single place to re-point should that ever change.
 //
 // NO CLOCK, NO RANDOMNESS. `observed_at` and `run_id` are REQUIRED
 // writer-supplied arguments; nothing here calls the current time or a random
