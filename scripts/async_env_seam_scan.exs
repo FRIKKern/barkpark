@@ -48,7 +48,7 @@ defmodule Barkpark.AsyncEnvSeamScan do
   phrase (`media_test.exs` says "async: true" in prose while being `async: false`).
   """
 
-  @call_re ~r/Application\.(?:put_env|delete_env)\s*\(/
+  @call_re ~r/Application\.(?:put_env|put_all_env|delete_env)\s*\(/
   @async_true_re ~r/^\s*use\s+[A-Z][\w.]*.*?\basync:\s*true\b/
   @allow_re ~r/^\s*#\s*async-env-seam-allow:(?<reason>.*)$/
 
@@ -175,7 +175,39 @@ defmodule Barkpark.AsyncEnvSeamScan do
   end
 
   defp async_true?(code) do
-    code |> String.split("\n") |> Enum.any?(&Regex.match?(@async_true_re, &1))
+    code
+    |> String.split("\n")
+    |> join_use_continuations()
+    |> Enum.any?(&Regex.match?(@async_true_re, &1))
+  end
+
+  # `use ExUnit.Case, async: true` is normally one line, but the formatter wraps
+  # it when the line is long:
+  #
+  #     use SomeVeryLong.NamespacedCase,
+  #       async: true
+  #
+  # A per-line match sees neither half as a declaration and the module walks
+  # through the ratchet. So a line whose trimmed form ends in `,` is joined to
+  # the next before matching. Only the JOINED text is used for the async
+  # decision — `call_line/1` still reads the original lines, so reported line
+  # numbers stay true to the file.
+  defp join_use_continuations(lines) do
+    lines
+    |> Enum.reduce([], fn line, acc ->
+      case acc do
+        [prev | rest] ->
+          if String.ends_with?(String.trim_trailing(prev), ",") do
+            [prev <> " " <> String.trim_leading(line) | rest]
+          else
+            [line | acc]
+          end
+
+        [] ->
+          [line]
+      end
+    end)
+    |> Enum.reverse()
   end
 
   defp call_line(code) do

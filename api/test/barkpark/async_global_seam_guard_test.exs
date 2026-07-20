@@ -61,6 +61,31 @@ defmodule Barkpark.AsyncGlobalSeamGuardTest do
 
     assert %{kind: :async_true_global_env_swap} =
              AsyncEnvSeamScan.inspect_source("qualified.exs", qualified)
+
+    # The formatter wraps a long `use` across two lines; a per-line match sees
+    # neither half as a declaration and the module walks through the ratchet.
+    wrapped = """
+    defmodule Offender do
+      use Barkpark.DataCase,
+        async: true
+
+      setup do: Application.put_env(:barkpark, :search_intel_record_async, true)
+    end
+    """
+
+    # `put_all_env` is the bulk form of the same node-global write.
+    bulk = """
+    defmodule Offender do
+      use ExUnit.Case, async: true
+      setup do: Application.put_all_env(barkpark: [{Barkpark.Media.ImageBackend.Vix, []}])
+    end
+    """
+
+    assert %{kind: :async_true_global_env_swap} =
+             AsyncEnvSeamScan.inspect_source("wrapped.exs", wrapped)
+
+    assert %{kind: :async_true_global_env_swap} =
+             AsyncEnvSeamScan.inspect_source("bulk.exs", bulk)
   end
 
   test "the predicate does not over-match — async: false and allowlisted both clean" do
@@ -79,7 +104,19 @@ defmodule Barkpark.AsyncGlobalSeamGuardTest do
     end
     """
 
+    # Continuation-joining must not turn every wrapped `use` into an offender:
+    # the joined text still has to say `async: true`.
+    wrapped_sync = """
+    defmodule Fine do
+      use Barkpark.DataCase,
+        async: false
+
+      setup do: Application.put_env(:barkpark, :search_intel_record_async, true)
+    end
+    """
+
     assert AsyncEnvSeamScan.inspect_source("serialized.exs", serialized) == nil
     assert AsyncEnvSeamScan.inspect_source("allowed.exs", allowed) == nil
+    assert AsyncEnvSeamScan.inspect_source("wrapped_sync.exs", wrapped_sync) == nil
   end
 end

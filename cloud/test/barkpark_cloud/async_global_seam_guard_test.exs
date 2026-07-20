@@ -94,6 +94,37 @@ defmodule BarkparkCloud.AsyncGlobalSeamGuardTest do
                AsyncEnvSeamScan.inspect_source("delete.exs", src)
     end
 
+    test "names a MULTI-LINE use declaration — the formatter wraps long ones" do
+      # `mix format` splits `use ...Case, async: true` when the line is long.
+      # A per-line match sees neither half as a declaration, and the module
+      # walks straight through the ratchet.
+      src = """
+      defmodule Offender do
+        use BarkparkCloud.DataCase,
+          async: true
+
+        setup do
+          Application.put_env(:barkpark_cloud, OAuth, client_secret: nil)
+        end
+      end
+      """
+
+      assert %{kind: :async_true_global_env_swap, line: 6} =
+               AsyncEnvSeamScan.inspect_source("wrapped.exs", src)
+    end
+
+    test "names put_all_env — the bulk form of the same node-global write" do
+      src = """
+      defmodule Offender do
+        use ExUnit.Case, async: true
+        test "x", do: Application.put_all_env(barkpark_cloud: [{OAuth, []}])
+      end
+      """
+
+      assert %{kind: :async_true_global_env_swap} =
+               AsyncEnvSeamScan.inspect_source("bulk.exs", src)
+    end
+
     test "names a bare allowlist marker carrying no reason" do
       src = """
       defmodule Offender do
@@ -160,6 +191,23 @@ defmodule BarkparkCloud.AsyncGlobalSeamGuardTest do
       """
 
       assert AsyncEnvSeamScan.inspect_source("stub.exs", src) == nil
+    end
+
+    test "a multi-line use declaring async: FALSE is still not named" do
+      # The continuation-joining above must not turn every wrapped `use` into
+      # an offender — the joined text still has to say `async: true`.
+      src = """
+      defmodule Fine do
+        use BarkparkCloud.DataCase,
+          async: false
+
+        setup do
+          Application.put_env(:barkpark_cloud, OAuth, client_secret: nil)
+        end
+      end
+      """
+
+      assert AsyncEnvSeamScan.inspect_source("wrapped_sync.exs", src) == nil
     end
 
     test "a module that swaps env but is NOT a test case is not named" do
