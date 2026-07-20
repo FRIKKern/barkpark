@@ -69,6 +69,11 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
   @narrow ~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened]|
   @phone ~S|html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened]|
 
+  # The Tier-3 exit (D167) — the same two buckets, the same `[data-user-opened]`
+  # qualifier, applied to the one control that closes the destination.
+  @narrow_exit @narrow <> " .bp-doc-sidebar__collapse"
+  @phone_exit @phone <> " .bp-doc-sidebar__collapse"
+
   describe "the summoned destination takes the whole content pane" do
     test "narrow and phone are declared together and carry full-pane geometry" do
       block = block!([@narrow, @phone])
@@ -139,6 +144,42 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
 
       assert src =~ ~S|.editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after|,
              "the b29/D91 scrim guard lost its `:not([data-user-opened])` carve-out"
+    end
+
+    test "the Tier-3 exit is a 44px touch target, scoped so no docked tier can reach it" do
+      # The exit earns its own lock because the destination is useless without
+      # it: at Tier 3 the panel covers 100% of the content pane, so this button
+      # is the ONLY way back to the document. Un-tripwired it regressed to a
+      # 16x16 icon box — under every touch-target floor there is — and nothing
+      # in this file noticed.
+      block = block!([@narrow_exit, @phone_exit])
+
+      assert value!(block, "min-width") == "44px"
+      assert value!(block, "min-height") == "44px"
+
+      # Without this the 16px glyph sits at the flex-start edge of its new 44px
+      # box and the visual mark is 14px from where the finger is aimed.
+      assert value!(block, "justify-content") == "center"
+
+      # DISJOINT FROM THE PAINTED-CLOSED STRIP BY CONSTRUCTION. The strip is
+      # `.is-open:not([data-user-opened])`; this rule requires
+      # `[data-user-opened]`. No element satisfies both, so the strip's own 16px
+      # button — and every docked tier — is structurally unreachable from here.
+      # That is what lets a 44px minimum ship without moving a docked pixel.
+      for sel <- [@narrow_exit, @phone_exit] do
+        assert String.contains?(sel, "[data-user-opened]"),
+               "the Tier-3 exit lost its `[data-user-opened]` qualifier — it can now " <>
+                 "reach the painted-closed strip, whose 16px button is deliberate"
+      end
+
+      # And scoped by ENUMERATION, never negation: `:not([data-width-bucket="wide"])`
+      # would also catch `standard`, whose inspector still docks.
+      refute String.contains?(block!([@narrow_exit, @phone_exit]), "wide")
+
+      for bucket <- ~w(wide standard) do
+        refute String.contains?(@narrow_exit <> @phone_exit, ~s|data-width-bucket="#{bucket}"|),
+               "the Tier-3 exit reaches the `#{bucket}` bucket, whose inspector docks"
+      end
     end
 
     test "no motion property is introduced on the summoned panel" do
@@ -233,23 +274,73 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
              """
     end
 
-    test "the scrim is untouched where it is still wanted — wide, and the b29 default" do
-      # A wide-bucket pane narrow enough to overlay still dims: there the
-      # inspector is a 300px overlay over a document that remains visible
-      # beside and under it, which is precisely when a scrim earns its keep.
-      assert winning_content(%{bucket: "wide", user_opened: true, pane: 700}) == ~s|""|,
-             """
-             The wide bucket lost its scrim.
+    test "the wide scrim is ABOLISHED too — D170 retires this file's old wide row" do
+      # THIS ROW USED TO ASSERT THE OPPOSITE. It read "the scrim is untouched
+      # where it is still wanted — wide", on the assumption that a wide pane
+      # squeezed under 860px overlays a document that stays visible beside it.
+      # Wave-11 measured that assumption and it does not hold: the state is
+      # reachable by arithmetic and unreachable in fact. Papers route to a fixed
+      # [44,260] shell, so `.editor-panel` is `vw - 304` at every wide viewport —
+      # 976 at 1280 and 1136 at 1440, both clear of the 860px generator by more
+      # than 100px. The rule dimmed nothing; it only kept a carve-out alive.
+      for user_opened <- [true, false] do
+        assert winning_content(%{bucket: "wide", user_opened: user_opened, pane: 700}) == "none",
+               """
+               The wide scrim is back (user_opened=#{user_opened}).
 
-             This slice is scoped to `narrow` and `phone`. A wide pane squeezed
-             under 860px still overlays a VISIBLE document, which is the one
-             state where dimming is the honest signal rather than an
-             indeterminate half-suspension.
-             """
+               D170 abolished it unconditionally at `wide`: both a
+               server-defaulted and a user-summoned inspector sit in the same
+               [44,260] shell, so neither can bring the pane under 860 and
+               neither earns a scrim.
+               """
+      end
 
       # And the b29 default (below wide, never asked for) stays suppressed —
       # the strip is invisible, so dimming under it was always nonsense.
       assert winning_content(%{bucket: "narrow", user_opened: false, pane: 700}) == "none"
+    end
+
+    test "abolishing wide is THIS rule's doing — mutation control" do
+      mutated =
+        Regex.replace(
+          ~r/html\[data-width-bucket="wide"\]\s*\.editor-with-preview:has\(\.bp-doc-sidebar\.is-open\)::after \{[^}]*\}/,
+          decommented(css()),
+          ""
+        )
+
+      refute mutated == decommented(css()),
+             "the mutation matched nothing — the wide-abolition control is vacuous"
+
+      assert winning_content(%{bucket: "wide", user_opened: true, pane: 700}, mutated) == ~s|""|,
+             """
+             With the wide suppression deleted the scrim STILL does not render,
+             so the row above is not measuring D170's rule.
+             """
+    end
+
+    test "THE POSITIVE CONTROL: the generator is live code, not a rule we killed everywhere" do
+      # D153's positive control used to be the wide row retired above. Once
+      # `wide` is abolished the honest replacement is the generator's OWN
+      # threshold, exercised where nothing suppresses it. `standard` is that
+      # place: its inspector still docks and no bucket rule carves it out, so a
+      # standard pane under 860px is the one live scrim left in the sheet.
+      #
+      # In the browser this same control is the FORCED-CONTAINER one — pin
+      # `.editor-panel` to 861px and the computed `::after` content is `none`,
+      # pin it to 860px and it is `""`, at 1280 and at 1440 alike. Both forms
+      # test the generator rather than a bucket that never reached it.
+      assert winning_content(%{bucket: "standard", user_opened: true, pane: 860}) == ~s|""|,
+             """
+             NOTHING in this sheet renders a scrim any more.
+
+             Every `content: none` above is then free: the suppressions are not
+             beating a generator, they are decorating a dead rule. Re-derive
+             before accepting any green in this file.
+             """
+
+      # …and one pixel the other side of the generator's own threshold, nothing
+      # matches at all — which is what makes the row above a threshold test.
+      assert winning_content(%{bucket: "standard", user_opened: true, pane: 861}) == nil
     end
   end
 
