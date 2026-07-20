@@ -97,11 +97,29 @@ fi
 NEW="$(comm -23 "$DRIFTED" "$ROSTER")"
 
 if [ -n "$NEW" ]; then
+  NEW_N="$(printf '%s\n' "$NEW" | grep -c '^')"
   echo "FAIL: files drifted out of format that are NOT on the committed ceiling roster:" >&2
+  # shellcheck disable=SC2001  # per-LINE prefixing of a multi-line string; ${//} substitutes globally, not per line
   echo "$NEW" | sed 's#^#      api/#' >&2
   echo "" >&2
   echo "      The ceiling is shrink-only. Run in api/:" >&2
   echo "        mix format $(echo "$NEW" | tr '\n' ' ')" >&2
+
+  # A gate must say what it means. One or two off-roster files is ordinary new
+  # drift. A DOZEN at once, in a PR that did not touch a dozen files, is almost
+  # certainly a formatter-version disagreement — and a reader who cannot tell
+  # those two apart learns to dismiss this check, which is the precise failure
+  # this ratchet exists to end. So the gate names the hypothesis itself.
+  if [ "$NEW_N" -ge 10 ]; then
+    echo "" >&2
+    echo "      NOTE: $NEW_N files at once is a lot. If your PR did not touch them," >&2
+    echo "      suspect a FORMATTER VERSION disagreement, not new drift. This roster" >&2
+    echo "      is generated on CI's pinned Elixir (see .github/workflows/elixir.yml);" >&2
+    echo "      a different local Elixir can reformat the same source differently." >&2
+    echo "      Check 'elixir --version' against the pin before formatting anything." >&2
+    echo "      The remedy is to REGENERATE .format-drift-ceiling on the pinned" >&2
+    echo "      toolchain — never to add continue-on-error to this job." >&2
+  fi
   exit 1
 fi
 

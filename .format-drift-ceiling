@@ -18,6 +18,24 @@
 #   -  3 owned by sibling wave-1 slice hg-w1-totp-window-stable-population,
 #      which formats its own files.
 # Wave-2 item 5 retires the remainder and drops the job's continue-on-error.
+#
+# TOOLCHAIN SKEW — the open risk on this file, and what is actually known.
+# This roster was generated under local Elixir 1.19.5; CI pins 1.18.1. If the
+# two formatters disagreed on any of the 50 migrated files, those files would
+# re-drift on CI, land off-roster, and red the blocking `format-ceiling` job on
+# every PR. Two measurements bound that risk, neither of them a proof:
+#   1. Local 1.19.5 reproduced the Decide-time drift population EXACTLY — 92
+#      true / 97 under the naive relative-path grep. The toolchains agree on
+#      WHICH files drift.
+#   2. The whole cloud/ tree is format-clean under local 1.19.5, and cloud.yml
+#      runs the identical check BLOCKING and GREEN on the pinned 1.18.1. That
+#      is a project's worth of Elixir on which the two formatters agree
+#      byte-for-byte (reviewer, 2026-07-20).
+# Neither measurement covers these specific 50 files' constructs, so the first
+# CI run of this job is still the real verdict. If it reds on files you did not
+# touch, REGENERATE this roster on the pinned toolchain — do not add
+# continue-on-error to the ceiling job. That would recreate the exact declaw
+# this file exists to end.
 count: 42
 
 lib/barkpark_web/live/studio/sheet_grid/ops.ex
