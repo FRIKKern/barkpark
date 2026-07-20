@@ -13,10 +13,14 @@
 #     LEDGER_BASE      optional — ledger base URL (default guerrilla)
 #     EXPECTED_WORKER  optional — if set, the task's claim.worker must equal it
 #   Exit codes:
-#     0  pass   — task exists, lifecycle_status == in_progress, claim present
-#                 (and matches EXPECTED_WORKER when that is set)
-#     1  fail   — a DEFINITIVE violation: no task ref, task not found, task not
-#                 in_progress, unclaimed, or wrong worker. The PR must not merge.
+#     0  pass   — the change is TASK-BACKED: the task exists and either
+#                   • lifecycle_status == in_progress with a claim.worker, or
+#                   • lifecycle_status == done with a claim.closed_by
+#                 (and the actor matches EXPECTED_WORKER when that is set)
+#     1  fail   — a DEFINITIVE violation: no task ref, task not found, task
+#                 still open, in_progress with no worker, done without ever
+#                 having been claimed/closed through the engine, cancelled, or
+#                 wrong worker. The PR must not merge.
 #     2  neutral — the ledger could not be reached (network error / 5xx). The
 #                 caller treats this as pass-with-warning: a ledger outage must
 #                 never freeze merges (an infra blip is not a policy violation).
@@ -25,6 +29,28 @@
 # neutral means "the rule could not be checked". Collapsing them would either
 # turn a guerrilla outage into a merge freeze (if 2→1) or let a genuinely
 # unbacked PR through whenever the ledger hiccups (if 1→2). Keep them separate.
+#
+# Why `done` can pass. The invariant is "this change is task-backed", NOT
+# "someone is actively typing right now". A task closed on met acceptance
+# criteria is the SUCCESS case, and the deadlock it used to create was
+# unrecoverable: a done task cannot be re-claimed to satisfy an in_progress-only
+# rule, because the claimable allowlist is ~w(open blocked) (claim.ex:26,
+# queue.ex:35). Observed 3x on 2026-07-20 and hand-waived each time — a gate
+# that reds correct work teaches its readers to dismiss it.
+#
+# Why `claim.closed_by` and not `landed.prs`. content.landed.{prs,...} is the
+# DESIGNED positive PR link (close.ex:290), but it is dead data: 0 of 400 done
+# tasks sampled from the live ledger carry it, and the Go CLI structurally
+# cannot send it — client_close_payload_test.go:103 pins the close body to
+# exactly worker_id/observed_epoch/lifecycle_status. Gating on it today yields a
+# gate that can never be green. `closed_by` is populated on 375/400 and proves
+# the task went through the claim/close ENGINE rather than being hand-flipped
+# via `bp doc patch`. Populating landed.prs is filed as wave-2 work.
+#
+# Why not blanket `done` == pass: that is the gate lying in the other direction.
+# A `done` doc with no claim at all was never worked through the engine, so it
+# is no evidence of task backing. Time proximity (closed_at recency) is
+# deliberately NOT used: nearness in time is not causation.
 
 set -uo pipefail
 
@@ -63,23 +89,44 @@ esac
 # Parse the flattened doc. doc.get wraps the document under `.result`; a
 # published task carries lifecycle_status and claim at the top level. A 2xx with
 # no result (defensive — Sanity-style null-doc) is still a definitive "missing".
-read -r found lifecycle worker < <(python3 - "$tmp" <<'PY'
+# Fields are emitted TAB-separated with "." as the absent sentinel, and read
+# with IFS=$'\t' — a worker or closed_by string containing a space would
+# otherwise shift every later field one position and the gate would silently
+# read the wrong value out of a well-formed ledger response. Every field carries
+# a sentinel, so no field is ever empty and the positional read is total.
+# `claimed` distinguishes "claim object exists" from "claim is null", so a done
+# task that was never worked reads differently from one closed through the
+# engine. Any literal tab inside a value is squashed to a space by the emitter
+# below, so the separator can never be forged from the data side.
+IFS=$'\t' read -r found lifecycle worker closed_by claimed < <(python3 - "$tmp" <<'PY'
 import json, sys
+
+
+def emit(*fields):
+    # Tabs and newlines are stripped from values so a ledger string can never
+    # forge a field separator or a second record.
+    print("\t".join(str(f).replace("\t", " ").replace("\n", " ") for f in fields))
+
+
 try:
     with open(sys.argv[1]) as f:
         d = json.load(f)
 except Exception:
-    print("error . .")
+    emit("error", ".", ".", ".", "no")
     sys.exit(0)
 doc = d.get("result")
 if isinstance(doc, list):
     doc = doc[0] if doc else None
 if not isinstance(doc, dict) or not doc.get("_id"):
-    print("missing . .")
+    emit("missing", ".", ".", ".", "no")
     sys.exit(0)
-claim = doc.get("claim") or {}
-worker = claim.get("worker") or "."
-print("found", doc.get("lifecycle_status") or ".", worker)
+raw = doc.get("claim")
+claim = raw if isinstance(raw, dict) else {}
+emit("found",
+     doc.get("lifecycle_status") or ".",
+     claim.get("worker") or ".",
+     claim.get("closed_by") or ".",
+     "yes" if claim else "no")
 PY
 )
 
@@ -88,11 +135,41 @@ case "$found" in
   missing) fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task" ;;
 esac
 
-[ "$lifecycle" = "in_progress" ] || fail "task '${TASK_ID}' is '${lifecycle}', not 'in_progress' — claim it before opening the PR (bp task claim ${TASK_ID} <worker>)"
-[ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — re-claim it"
+# The task-backed predicate. Exactly two lifecycles can back a change, and each
+# needs its own proof that the claim/close ENGINE — not a hand-flip — produced
+# the state. `actor` is whoever that proof names; EXPECTED_WORKER is checked
+# against it below.
+case "$lifecycle" in
+  in_progress)
+    # A hand-flip through `bp doc patch` can set lifecycle_status without ever
+    # going through claim, leaving in_progress with no worker. (This is NOT the
+    # TTL sweeper: apply_reap/1 writes worker->nil AND lifecycle->"open" in one
+    # Repo.update_all, ttl_sweeper.ex:256/:269/:284, asserted at
+    # ttl_sweeper_test.exs:126-128. schema.ex:147-161 warns about the hand-flip
+    # in its own comment.)
+    [ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — that state comes from editing lifecycle_status directly (bp doc patch) instead of going through the claim/close engine. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    actor="$worker"
+    verdict="in_progress, claimed by '${worker}'"
+    ;;
+  done)
+    # done is the SUCCESS case, but only when the close went through the engine.
+    if [ "$claimed" = "no" ]; then
+      fail "task '${TASK_ID}' is done but carries no claim at all — it was never worked through the claim/close engine, so it is no evidence this change is task-backed"
+    fi
+    [ "$closed_by" != "." ] || fail "task '${TASK_ID}' is done but its claim carries no closed_by — the lifecycle was flipped by hand rather than closed through the engine (bp task close ${TASK_ID} <worker> <epoch>)"
+    actor="$closed_by"
+    verdict="done, closed by '${closed_by}'"
+    ;;
+  open)
+    fail "task '${TASK_ID}' is still 'open' — claim it before opening the PR (bp task claim ${TASK_ID} <worker>)"
+    ;;
+  *)
+    fail "task '${TASK_ID}' is '${lifecycle}' — only 'in_progress' (claimed) or 'done' (closed through the engine) back a change"
+    ;;
+esac
 
-if [ -n "${EXPECTED_WORKER:-}" ] && [ "$EXPECTED_WORKER" != "$worker" ]; then
-  fail "task '${TASK_ID}' is claimed by '${worker}', not the PR author's mapped worker '${EXPECTED_WORKER}'"
+if [ -n "${EXPECTED_WORKER:-}" ] && [ "$EXPECTED_WORKER" != "$actor" ]; then
+  fail "task '${TASK_ID}' names worker '${actor}', not the PR author's mapped worker '${EXPECTED_WORKER}'"
 fi
 
-pass "task '${TASK_ID}' is in_progress, claimed by '${worker}'"
+pass "task '${TASK_ID}' is task-backed — ${verdict}"
