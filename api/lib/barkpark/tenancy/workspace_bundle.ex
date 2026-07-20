@@ -153,13 +153,48 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   An unknown profile, an unknown dataset slug, or a slug owned by TWO sibling
   projects of the same workspace raises `ExportScopeError` — a scope mistake is
   never silently resolved into a wrong bundle.
+
+  MEMORY (PDS-D205): this entry point reads the finished tar back into ONE
+  full-size binary, so it costs the bundle's size in RAM. That contract is kept
+  deliberately — it is what the whole md5-parity fidelity suite is written
+  against, and there is exactly one non-test caller of `export/2` in `lib`. The
+  HTTP edge uses `export_to_file/2` instead and never materializes the bundle.
   """
   @spec export(binary() | nil, keyword()) ::
           {:ok, binary()} | {:error, :workspace_id_required | :workspace_not_found}
   # @canonical capability:workspace-bundle aka:export_workspace,import_workspace,tenant_bundle,per_workspace_export doc:.claude/workflows/bp-cloud-build-charter.md
-  def export(workspace_id, opts \\ [])
+  def export(workspace_id, opts \\ []) do
+    case export_to_file(workspace_id, opts) do
+      {:ok, path} ->
+        try do
+          {:ok, File.read!(path)}
+        after
+          File.rm(path)
+        end
 
-  def export(workspace_id, opts) when is_binary(workspace_id) do
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  @doc """
+  Export a workspace to a bp-export-v1 bundle ON DISK, returning `{:ok, path}`.
+
+  Same options, same errors, same BYTES as `export/2` — the difference is that
+  the tar is never held in memory. Peak RAM is one COPY chunk (the producer
+  streams each table straight to a spill file) and `:erl_tar` reads each spill
+  back in bounded 64 KiB chunks, so a 941 MB bundle costs kilobytes rather than
+  four stacked full-size materializations of itself.
+
+  THE CALLER OWNS THE FILE and must delete it — `try/after File.rm(path)` around
+  whatever consumes it. `Barkpark.Media`-style long-lived storage this is not:
+  the path is a per-request temp tar.
+  """
+  @spec export_to_file(binary() | nil, keyword()) ::
+          {:ok, Path.t()} | {:error, :workspace_id_required | :workspace_not_found}
+  def export_to_file(workspace_id, opts \\ [])
+
+  def export_to_file(workspace_id, opts) when is_binary(workspace_id) do
     case Repo.uuid_or_nil(workspace_id) do
       nil ->
         {:error, :workspace_id_required}
@@ -172,7 +207,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
   end
 
-  def export(_nil_or_other, _opts), do: {:error, :workspace_id_required}
+  def export_to_file(_nil_or_other, _opts), do: {:error, :workspace_id_required}
 
   @doc """
   Re-import a bundle binary. Returns `{:ok, stats}` where `stats.manifest` is
@@ -256,45 +291,61 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       # denied table is never queried and its bytes never materialize.
       |> reject_denied_tables(profile)
 
-    {members, dumps} =
-      Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, dumps} ->
-        cols = Catalog.non_generated_columns(Repo, table)
-        order_cols = Catalog.order_columns(Repo, table)
-        sql = copy_out_sql(table, kind, cols, order_cols, ctx)
-        {dump, row_count} = run_copy_out(sql)
+    dir = Archive.spill_dir()
 
-        member = %{
-          "name" => table,
-          "partition" => partition,
-          "import_strategy" => import_strategy(kind),
-          "columns" => cols,
-          "order_columns" => order_cols,
-          "row_count" => row_count,
-          "md5" => md5_hex(dump)
-        }
+    # Every spill path is computed UP FRONT so the `after` clause below can
+    # clean up whatever the reduce created before it died — a reduce
+    # accumulator is not in scope from `after`, and a half-finished export must
+    # never strand hundreds of MB per table.
+    spills =
+      Map.new(specs, fn {table, _partition, _kind} -> {table, Archive.spill_path(dir, table)} end)
 
-        {[member | members], Map.put(dumps, table, dump)}
-      end)
+    try do
+      {members, files} =
+        Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
+          cols = Catalog.non_generated_columns(Repo, table)
+          order_cols = Catalog.order_columns(Repo, table)
+          sql = copy_out_sql(table, kind, cols, order_cols, ctx)
+          spill = Map.fetch!(spills, table)
+          {row_count, md5} = run_copy_out(sql, spill)
 
-    # PDS-D3: `format` stays EXACTLY bp-export-v1 (import's hard equality check
-    # is the compatibility contract); everything new is an ADDITIVE key an old
-    # consumer ignores.
-    manifest = %{
-      "format" => Archive.format(),
-      "grain" => Archive.grain(),
-      "workspace_id" => ws.id,
-      "workspace_slug" => ws.slug,
-      "exported_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "dataset_slugs" => dataset_slugs,
-      "profile" => Atom.to_string(profile),
-      "dataset" => target && target.slug,
-      "source_workspace" => ws.slug,
-      "source_dataset" => target && target.slug,
-      "source_server" => Keyword.get(opts, :source_server),
-      "tables" => Enum.reverse(members)
-    }
+          member = %{
+            "name" => table,
+            "partition" => partition,
+            "import_strategy" => import_strategy(kind),
+            "columns" => cols,
+            "order_columns" => order_cols,
+            "row_count" => row_count,
+            "md5" => md5
+          }
 
-    Archive.pack(manifest, dumps)
+          {[member | members], Map.put(files, table, spill)}
+        end)
+
+      # PDS-D3: `format` stays EXACTLY bp-export-v1 (import's hard equality check
+      # is the compatibility contract); everything new is an ADDITIVE key an old
+      # consumer ignores.
+      manifest = %{
+        "format" => Archive.format(),
+        "grain" => Archive.grain(),
+        "workspace_id" => ws.id,
+        "workspace_slug" => ws.slug,
+        "exported_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "dataset_slugs" => dataset_slugs,
+        "profile" => Atom.to_string(profile),
+        "dataset" => target && target.slug,
+        "source_workspace" => ws.slug,
+        "source_dataset" => target && target.slug,
+        "source_server" => Keyword.get(opts, :source_server),
+        "tables" => Enum.reverse(members)
+      }
+
+      Archive.pack(manifest, files, dir: dir)
+    after
+      # Belt and braces: `Archive.pack/3` already deletes each spill the moment
+      # it is added, so on the happy path every one of these is a no-op enoent.
+      Enum.each(Map.values(spills), &File.rm/1)
+    end
   end
 
   # ── Profile + dataset scope resolution (PDS-D28/D29) ─────────────────────────
@@ -632,13 +683,57 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # 700 MiB, 2.65 GiB after a FAILED export, 2.90 GiB after the successful one,
   # on a 3819 MB box. A dead export has already paid nearly the full cost — so
   # do NOT wrap this in a naive retry loop; two attempts is an OOM, not a
-  # second chance. The real fix for size is streaming
-  # (pds-backlog-streamed-bundle-channel), deliberately not this slice.
-  defp run_copy_out(sql) do
+  # second chance. The real fix for size was streaming
+  # (pds-bl-streaming-workspace-export) — which is what this function now is.
+  #
+  # THE STREAM. `Repo.query!` buffered the ENTIRE `COPY … TO STDOUT` as
+  # `res.rows` and then `IO.iodata_to_binary` made a second full copy of it.
+  # `Ecto.Adapters.SQL.stream/4` fetches in bounded chunks instead; each chunk
+  # goes straight to the table's spill file while the member md5 folds forward
+  # incrementally, so peak RAM per table is ONE chunk rather than the whole
+  # table.
+  #
+  # THE TRANSACTION IS MANDATORY, NOT STYLISTIC: `Ecto.Adapters.SQL.reduce/6`
+  # raises "cannot reduce stream outside of transaction". And the `:timeout`
+  # MUST sit on `Repo.transaction/2` — a 4-cell probe matrix proved the
+  # stream-level `:timeout` is INERT (txn `:infinity` + stream 300 ms survived
+  # 3002 ms) and cannot override the transaction's budget (txn 300 ms + stream
+  # `:infinity` died at 310 ms). Moving it onto the `SQL.stream` call ships a
+  # green suite while silently reinstating Ecto's 15,000 ms default in prod —
+  # the exact live failure PDS-D42 exists to close. The test that pins this
+  # reads the option off `Repo.transaction/2` via `:erlang.trace`.
+  #
+  # ROW COUNT: `length(chunk.rows)` summed across chunks reproduces the old
+  # `length(res.rows)` EXACTLY — both count COPY CopyData wire messages, and
+  # Postgrex's `:max_rows` chunks on that identical unit. It is deliberately
+  # NOT a decoded-row count. The stream also yields an EMPTY TERMINAL CHUNK
+  # (chunk_count = ceil(rows/max_rows) + 1; a zero-row table yields exactly
+  # one), which contributes 0 rows and 0 bytes and needs no special case.
+  defp run_copy_out(sql, spill_path) do
     inject_copy_fault!()
-    res = Repo.query!(sql, [], timeout: copy_out_timeout())
-    dump = IO.iodata_to_binary(res.rows)
-    {dump, length(res.rows)}
+
+    {row_count, digest} =
+      File.open!(spill_path, [:write, :binary, :raw], fn io ->
+        {:ok, acc} =
+          Repo.transaction(
+            fn ->
+              Repo
+              |> Ecto.Adapters.SQL.stream(sql, [])
+              |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->
+                # `rows: nil` is defensive; the terminal chunk carries [].
+                rows = chunk.rows || []
+                # iodata all the way down — never flattened into a binary.
+                :ok = IO.binwrite(io, rows)
+                {count + length(rows), :crypto.hash_update(hash, rows)}
+              end)
+            end,
+            timeout: copy_out_timeout()
+          )
+
+        acc
+      end)
+
+    {row_count, digest |> :crypto.hash_final() |> Base.encode16(case: :lower)}
   end
 
   defp copy_out_timeout do
@@ -827,6 +922,4 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # Double-quote an identifier (column/table name) — every name originates from
   # the live catalog, never user input; the quote-doubling is belt-and-suspenders.
   defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
-
-  defp md5_hex(bytes), do: :crypto.hash(:md5, bytes) |> Base.encode16(case: :lower)
 end

@@ -123,10 +123,16 @@ defmodule BarkparkWeb.WorkspaceController do
   GET /api/workspaces/:workspace_slug/export — stream the complete bp-export-v1
   bundle for a workspace as an `application/x-tar` attachment (admin-gated).
 
-  SYNC: `WorkspaceBundle.export/2` materializes the whole tar binary in memory,
-  sent in one `send_resp/3`. An unknown slug collapses to 404 (no existence leak
-  beyond the admin gate); the resolved workspace always carries a valid UUID, so
-  the engine's fail-closed `:workspace_id_required` guard is never reached here.
+  SYNC, but CONSTANT-MEMORY: `WorkspaceBundle.export_to_file/2` streams the
+  bundle to a per-request temp tar and this action `send_file/3`s it, so a
+  941 MB bundle never becomes a 941 MB binary in the request process (PDS-D204;
+  this is the ONLY caller of `export_to_file/2` — `export/2` keeps its
+  `{:ok, binary()}` contract for the fidelity suite). `send_file/3` uses the
+  same queued response headers and computes Content-Length from `File.stat!`,
+  so the wire shape is unchanged: 200, `application/x-tar`, no chunked
+  transfer-encoding. An unknown slug collapses to 404 (no existence leak beyond
+  the admin gate); the resolved workspace always carries a valid UUID, so the
+  engine's fail-closed `:workspace_id_required` guard is never reached here.
 
   ## Scope query params (PDS W1 — additive, both optional)
 
@@ -145,16 +151,32 @@ defmodule BarkparkWeb.WorkspaceController do
   A COPY that dies mid-dump answers 503 `export_failed` + a retry hint (PDS-D43),
   never the old bare 500 `internal_error / unknown error`.
   """
+  # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
+  # stronger argument than the three media_controller sites: `path` is a
+  # freshly-created per-request temp tar whose name the ENGINE chose
+  # (`bp-ws-bundle-<unique_integer>.tar` under the configured spill dir). No
+  # request input reaches it at all — not the slug, not a query param — so
+  # there is no traversal surface to defend.
+  # sobelow_skip ["Traversal.SendFile"]
   def export(conn, %{"workspace_slug" => slug} = params) do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         {:ok, bundle} <- export_bundle(workspace, params) do
-      conn
-      |> put_resp_content_type("application/x-tar", nil)
-      |> put_resp_header(
-        "content-disposition",
-        "attachment; filename=#{export_filename(params, workspace)}"
-      )
-      |> send_resp(200, bundle)
+         {:ok, path} <- export_bundle(workspace, params) do
+      # The engine hands ownership of the tar to us. `send_file/3` has finished
+      # writing to the socket by the time it returns, so deleting here is safe —
+      # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
+      # which this `after` clause still fires on. (SIGKILL is out of reach by
+      # construction; sweeping orphans is pds-w11-spill-janitor's job.)
+      try do
+        conn
+        |> put_resp_content_type("application/x-tar", nil)
+        |> put_resp_header(
+          "content-disposition",
+          "attachment; filename=#{export_filename(params, workspace)}"
+        )
+        |> send_file(200, path)
+      after
+        File.rm(path)
+      end
     else
       nil ->
         {:error, :not_found}
@@ -206,7 +228,7 @@ defmodule BarkparkWeb.WorkspaceController do
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-    WorkspaceBundle.export(workspace.id, opts)
+    WorkspaceBundle.export_to_file(workspace.id, opts)
   rescue
     e in WorkspaceBundle.ExportScopeError ->
       {:error, {:export_scope, e.code, Exception.message(e)}}

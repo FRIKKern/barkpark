@@ -10,7 +10,13 @@ import Config
 config :barkpark,
   ecto_repos: [Barkpark.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
-  media_upload_dir: Path.expand("../uploads", __DIR__)
+  media_upload_dir: Path.expand("../uploads", __DIR__),
+  # Where the workspace-bundle export streams its per-table spills and
+  # assembles the tar. Anchored under the app's own data dir, NEVER a bare
+  # System.tmp_dir!/0 — `Archive.spill_dir/0` asserts at runtime that the
+  # chosen path is not memory-backed, because a tmpfs spill would reinstate
+  # the full-bundle RSS peak the streamed export exists to remove.
+  bundle_spill_dir: Path.expand("../tmp/bundle-spill", __DIR__)
 
 # Configure the endpoint
 config :barkpark, BarkparkWeb.Endpoint,

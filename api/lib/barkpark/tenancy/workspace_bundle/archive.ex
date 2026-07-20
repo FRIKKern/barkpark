@@ -24,8 +24,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   members are the RAW `COPY … TO STDOUT` text bytes — the byte carrier
   (charter D2), never `Envelope.render` output (charter D9).
 
-  `:erl_tar` has no in-memory create, so packing writes a short-lived temp tar
-  and reads it back; extraction is fully in-memory from the bundle binary.
+  Packing is FILE-TO-FILE and constant-memory (PDS-D207): each table member is
+  a per-table SPILL file the producer streamed to disk, added to the tar by
+  PATH — `:erl_tar` reads an added file in bounded 64 KiB chunks — and deleted
+  the moment it is in. Extraction is still fully in-memory from the bundle
+  binary (the import path is deliberately unchanged, PDS-D214).
   """
 
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
@@ -34,29 +37,166 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   @grain "workspace"
   @manifest_name ~c"manifest.json"
 
+  # The janitor's contract (pds-w11-spill-janitor sweeps by prefix): a per-table
+  # streamed dump is `bp-ws-spill-*`, the assembled tar is `bp-ws-bundle-*`.
+  # Every name carries `System.unique_integer/1` because the blue and green
+  # slots share ONE real /tmp (`PrivateTmp=no`), so two concurrent exports on
+  # the same box must never collide on a filename.
+  @spill_prefix "bp-ws-spill-"
+  @bundle_prefix "bp-ws-bundle-"
+
+  # A memory-backed filesystem defeats the entire point of spilling: the bytes
+  # we "wrote to disk" would still be resident, and a ~941 MB export would
+  # reproduce the RSS peak it exists to remove.
+  @memory_backed_fstypes ~w(tmpfs ramfs devtmpfs)
+
   @doc """
-  Pack a manifest map + a `%{table => copy_bytes}` map into a bundle binary.
+  Pack a manifest map + a `%{table => spill_path}` map into a bundle tar ON
+  DISK, returning the tar's path. The caller owns the returned file and must
+  delete it.
+
+  Each spill is deleted the MOMENT it has been added, so peak transient disk is
+  `tar-so-far + the largest single table` rather than twice the bundle.
+
+  ## Byte-identity (PDS-D207)
+
+  Four conditions, each independently proven necessary on OTP 27, keep the tar
+  byte-identical to what the old in-memory `:erl_tar.create/3` produced:
+
+    1. `manifest.json` is added FIRST — manifest-last diverges at char 1.
+    2. `{:mtime, _}` / `{:atime, _}` / `{:ctime, _}` / `{:uid, 0}` / `{:gid, 0}`
+       are passed EXPLICITLY on every add; without them the real stat uid of
+       the running user (501 locally, 0 in prod) leaks into the header.
+    3. `File.chmod(spill, 0o644)` — mode is the one header field with no
+       add-option, and a 0600 spill diverges at byte offsets 105/106/153.
+    4. Paths are CHARLISTS. `:erl_tar.add/4` treats a binary as CONTENT and a
+       charlist as a FILENAME, so an Elixir string path silently archives the
+       path TEXT as the member body, with no error.
+
+  ## Options
+
+    * `:mtime` — the header timestamp stamped on every member (default: now).
+      Pinning it is what makes two packs of the same members byte-identical;
+      the engine itself does NOT pin (it stamps the real export time), so a
+      two-export `cmp` is NOT a valid regression test — see the transport
+      parity test.
+    * `:dir` — where to create the tar (default: `spill_dir/0`).
   """
-  def pack(manifest, table_dumps) when is_map(manifest) and is_map(table_dumps) do
-    manifest_bytes = Jason.encode!(manifest, pretty: true)
-
-    members =
-      [{@manifest_name, manifest_bytes}] ++
-        Enum.map(table_dumps, fn {table, bytes} ->
-          {~c"tables/" ++ String.to_charlist(table) ++ ~c".copy", bytes}
-        end)
-
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "bp-ws-bundle-#{System.unique_integer([:positive])}.tar"
-      )
+  def pack(manifest, table_files, opts \\ []) when is_map(manifest) and is_map(table_files) do
+    mtime = Keyword.get(opts, :mtime, :os.system_time(:second))
+    dir = Keyword.get_lazy(opts, :dir, &spill_dir/0)
+    path = Path.join(dir, "#{@bundle_prefix}#{System.unique_integer([:positive])}.tar")
 
     try do
-      :ok = :erl_tar.create(String.to_charlist(path), members, [])
-      File.read!(path)
-    after
-      File.rm(path)
+      {:ok, tar} = :erl_tar.open(String.to_charlist(path), [:write])
+
+      try do
+        # A BINARY source — erl_tar archives it as the member's content.
+        :ok =
+          :erl_tar.add(
+            tar,
+            Jason.encode!(manifest, pretty: true),
+            @manifest_name,
+            add_opts(mtime)
+          )
+
+        Enum.each(table_files, fn {table, spill} ->
+          File.chmod!(spill, 0o644)
+          member = ~c"tables/" ++ String.to_charlist(table) ++ ~c".copy"
+          # A CHARLIST source — erl_tar streams it from disk, 64 KiB at a time.
+          :ok = :erl_tar.add(tar, String.to_charlist(spill), member, add_opts(mtime))
+          File.rm(spill)
+        end)
+      after
+        :erl_tar.close(tar)
+      end
+
+      path
+    catch
+      # Never strand a half-written multi-hundred-MB tar on a raise, a throw,
+      # or an exit. (SIGKILL is out of reach here by construction — that is the
+      # janitor's job, pds-w11-spill-janitor.)
+      kind, reason ->
+        File.rm(path)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp add_opts(mtime) do
+    [{:mtime, mtime}, {:atime, mtime}, {:ctime, mtime}, {:uid, 0}, {:gid, 0}]
+  end
+
+  @doc """
+  The directory streamed spills and assembled tars are written to, created if
+  absent and ASSERTED not to be memory-backed.
+
+  Configured via `:bundle_spill_dir` (`BARKPARK_BUNDLE_SPILL_DIR` at runtime),
+  defaulting under the app's own data dir rather than a bare
+  `System.tmp_dir!/0` — on a systemd box `/tmp` is a plausible tmpfs, and a
+  tmpfs spill silently reinstates the RSS peak this whole path exists to
+  remove.
+  """
+  def spill_dir do
+    # fetch_env!, not get_env with a `System.tmp_dir!()` fallback: an unset key
+    # must fail loudly at the top of the export, never quietly pick the one
+    # directory most likely to BE the tmpfs the assertion below exists to
+    # refuse. Same idiom as `Barkpark.Media.upload_dir/0`.
+    dir = Application.fetch_env!(:barkpark, :bundle_spill_dir)
+
+    File.mkdir_p!(dir)
+    assert_not_tmpfs!(dir)
+    dir
+  end
+
+  @doc """
+  Raise unless `dir` lives on a disk-backed filesystem.
+
+  `mounts` is injectable — as `[{mount_point, fstype}]` — precisely so this
+  decision is testable on a host with no `/proc/mounts` (macOS), where the
+  live reader returns `[]` and the assertion abstains rather than guessing.
+  Guerrilla's `/tmp` is ext4 on sda1 with 13.27 GiB free; this is the code
+  KNOWING that rather than the operator remembering it.
+  """
+  def assert_not_tmpfs!(dir, mounts \\ read_mounts()) do
+    dir = Path.expand(dir)
+
+    case fstype_for(dir, mounts) do
+      {mount_point, fstype} when fstype in @memory_backed_fstypes ->
+        raise ArgumentError,
+              "bundle spill dir #{dir} is on #{fstype} (#{mount_point}) — a memory-backed " <>
+                "filesystem defeats spilling entirely (the export would pay full RSS again). " <>
+                "Point :bundle_spill_dir / BARKPARK_BUNDLE_SPILL_DIR at disk-backed storage."
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc false
+  def spill_path(dir, table) do
+    Path.join(dir, "#{@spill_prefix}#{table}-#{System.unique_integer([:positive])}.copy")
+  end
+
+  # Longest matching mount point wins — /dev/shm must beat / for /dev/shm/x,
+  # and the boundary is a path SEGMENT, so /dev/shmx never matches /dev/shm.
+  defp fstype_for(dir, mounts) do
+    mounts
+    |> Enum.filter(fn {mount_point, _fstype} ->
+      dir == mount_point or
+        String.starts_with?(dir, String.trim_trailing(mount_point, "/") <> "/")
+    end)
+    |> Enum.max_by(fn {mount_point, _} -> String.length(mount_point) end, fn -> nil end)
+  end
+
+  defp read_mounts do
+    case File.read("/proc/mounts") do
+      {:ok, body} ->
+        for line <- String.split(body, "\n", trim: true),
+            [_dev, mount_point, fstype | _] <- [String.split(line, " ", trim: true)],
+            do: {mount_point, fstype}
+
+      {:error, _} ->
+        []
     end
   end
 
