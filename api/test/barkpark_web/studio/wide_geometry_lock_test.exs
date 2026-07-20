@@ -173,14 +173,20 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # desk never carries, or behind a variant class (`--collapsed`,
   # `.sheet-editor`, `.editor-with-preview`) that is opt-in per surface.
   #
-  # COUNT, wave 11: 15 entries -> 25. The delta is exactly TEN, every one of
+  # COUNT, wave 11: 15 entries -> 26. The delta is exactly ELEVEN, every one of
   # them a `.bp-doc-sidebar` rule that `pane_family?/1` could not see until
   # this wave: seven declaring the inspector's own tiers (the element, the
   # docked and overlaid `.is-open` rules, `.is-collapsed`, and the three
-  # `__head`/`__collapse`/`__body` children that merely share the prefix) and
-  # three Tier-3 destination rules shipped by #4923. Nothing was removed, and
-  # no pre-existing entry changed shape — `expected -- actual` is empty in
-  # both directions except for the additions.
+  # `__head`/`__collapse`/`__body` children that merely share the prefix),
+  # three Tier-3 destination rules shipped by #4923, and the Tier-3 exit's
+  # 44px `min-width` landed by this wave's sibling CSS slice. Nothing was
+  # removed, and no pre-existing entry changed shape — `expected -- actual` is
+  # empty in both directions except for the additions.
+  #
+  # The eleventh arrived at INTEGRATION, not at build time, and that is the
+  # census earning its keep rather than a defect: this file taught itself to
+  # see the sidebar family in the same wave a sibling slice added a rule to it,
+  # so the first thing the new eye saw was the new rule. Review declared it.
   #
   # (The BEFORE count is 15, not 14. Any brief saying 14 predates spd-w5 /
   # charter D114, which added the fifteenth: the
@@ -226,6 +232,20 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
      ~w(display)},
     {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened], html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened]|,
      ~w(width)},
+    # The Tier-3 EXIT's 44px touch target (charter D167), landed by the sibling
+    # slice this same wave. It is in the census because `min-width` is a
+    # geometry property and the selector is in the sidebar family — this file
+    # made itself able to see exactly this rule, and then saw it. The entry is a
+    # census REFRESH, not a code fix: Review integrated the two branches, the
+    # census reported the rule as "New in the stylesheet (found, not declared
+    # here)", and the honest response to a tripwire that fires correctly is to
+    # declare what fired it.
+    #
+    # It is narrow/phone-scoped on BOTH halves of the list, so the wide desk
+    # cannot reach it and epic criterion 2's band is untouched — which the
+    # `scoped?` test below re-derives per-part rather than taking on trust.
+    {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse, html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse|,
+     ~w(min-width)},
 
     # --- phone bucket: html[data-width-bucket="phone"], never wide ---
     {~S|html[data-width-bucket="phone"] .pane-layout:has(> .editor-panel) .pane-column|,
