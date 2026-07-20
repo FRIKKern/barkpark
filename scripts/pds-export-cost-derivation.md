@@ -240,7 +240,7 @@ canonical source for the export's measured cost.
 | Quantity | This doc (inferred, 02:52Z) | Crown transcript (measured, 03:25Z) |
 |---|---|---|
 | Bundle size | 941,046,272 B (D41, 897.4 MiB) | **1,037,336,576 B** (989.3 MiB) — the source grew |
-| Peak incremental demand | ≈ +1.75 GiB (inference from `pack/2`) | **≈ +2,231 MB (2.18 GiB)** — 194,228 kB baseline → 2,483,304 kB peak |
+| Peak incremental demand | ≈ +1.75 GiB (inference from `pack/2`) | **≈ +2,235.43 MiB (2.18 GiB)** — 194,228 kB baseline → 2,483,304 kB peak |
 | Implied multiplier on payload | ~2× (code reading) | **~2.25×** (2.18 GiB / 0.966 GiB) |
 
 **The inference held, and was conservative.** The ~2× read of `pack/2` was directionally
@@ -257,9 +257,40 @@ Two things the measurement changes materially:
 2. **The gate-(b) finding is sharpened, not contradicted.** §4 observed `MemAvailable` below
    the 2200 MB floor on all six samples and concluded the leg "would abort on headroom right
    now" — true at 02:52Z; the gate read open (2846 MB) at 03:25Z, so the window did open. The
-   stronger finding is the transcript's: the 2200 MB floor is **~31 MB below the demand it
+   stronger finding is the transcript's: the 2200 MB floor is **~35.43 MiB below the demand it
    gates**. Passing gate (b) is therefore not evidence the export is affordable. Neither
    document lowers the floor.
+
+### 6b.1 The arithmetic, and which baseline is t=0 (added 2026-07-20, wave 9)
+
+**Unit correction.** Earlier revisions of this row and of the crown transcript's §5 stated the
+growth as 2231 and the shortfall as 31, in mislabelled MB. That was a unit-mixing slip: a
+`/1000`-scaled read of the baseline (194) subtracted from a `/1024`-scaled peak (2425). Worked
+in the SAME convention the harness itself uses for the floor — `mem_mb=$((mem_kb / 1024))`,
+`scripts/pds-pull-proof.sh:1302` — the subtraction is
+`2,483,304 − 194,228 = 2,289,076 kB = 2,235.43 MiB`, so the 2200 MB floor sits **35.43 MiB
+below** the demand it gates, not 31. The direction of the finding is unchanged; only its
+magnitude was understated.
+
+**Which baseline is t=0 — PDS-D185 rules 194,228 kB.** The transcript carries three candidate
+pre-fire readings, and the choice moves the number:
+
+| Candidate t=0 | Source | Derived incremental demand |
+|---|---|---|
+| 189,684 kB | `VmRSS` pre-fire sweep (crown transcript :67) | 2,239.86 MiB |
+| **194,228 kB** | **`ps -o rss=` single shot (:648, :790) — RULED t=0** | **2,235.43 MiB** |
+| 230,072 kB | sampler's first logged tick (:912) | 2,200.42 MiB |
+
+The sampler's first tick is **not** t=0: it is taken at t≈+1 s, *after* the request fired, so it
+already contains part of the export's own allocation. Using it subtracts part of the very thing
+being measured — and it errs in the direction that flatters the floor. The `ps` single shot is
+the last reading taken strictly before the fire, so it is the honest zero.
+
+**The ambiguity moves magnitude, never sign.** All three candidates exceed 2200 MiB
+(2,239.86 / 2,235.43 / 2,200.42), so under every available reading of the baseline the floor is
+below the demand it gates. And per **PDS-D114** the 1 Hz RSS sampler reports a **lower bound** on
+the true peak — a transient above the sample grid is invisible — so 2,235.43 MiB understates the
+real demand rather than overstating it.
 
 Still not closed by either file: the disk-headroom gap in `System.tmp_dir!()` named in §6.
 

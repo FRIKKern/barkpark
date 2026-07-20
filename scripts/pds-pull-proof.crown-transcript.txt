@@ -316,9 +316,9 @@ THE FULL-FIDELITY EXPORT IS ARCHITECTURALLY UNAFFORDABLE ON THIS BOX, and this
 run is the first to measure it rather than estimate it.
 
     full bundle           HTTP 200 · 1,037,336,576 bytes · 130 s
-    beam.smp RSS baseline 194,228 kB   (≈ 190 MB, fully resident, VmSwap 0)
-    beam.smp RSS peak     2,483,304 kB (≈ 2425 MB)
-    growth attributable   ≈ 2,231 MB for ONE request
+    beam.smp RSS baseline 194,228 kB   (≈ 190 MiB, fully resident, VmSwap 0)
+    beam.smp RSS peak     2,483,304 kB (≈ 2425 MiB)
+    growth attributable   ≈ 2,235 MiB for ONE request
     box total             3.8 GB
 
 `send_resp(200, bundle)` materialises the whole tar as ONE BEAM binary, and the
@@ -330,13 +330,25 @@ tree. This is FILED (pds-bl-streaming-workspace-export), not fixed.
 
 AND A QUANTIFIED CONSEQUENCE THAT WAS PREVIOUSLY ONLY SUSPECTED: the harness's
 own headroom floor is TOO LOW BY MEASUREMENT. Gate (b) admits the export at
-MemAvailable ≥ 2200 MB, but this export grew the BEAM by ≈ 2231 MB. The floor is
-~31 MB BELOW the demand it is supposed to gate. This run survived because
+MemAvailable ≥ 2200 MB, but this export grew the BEAM by ≈ 2235.43 MiB. The floor
+is ~35.43 MiB BELOW the demand it is supposed to gate. This run survived because
 MemAvailable at fire was 2846 MB — 646 MB of margin the gate does not require —
 not because the floor was adequate. A run that passed gate (b) at 2200–2400 MB
 would be firing a request it cannot afford, at the live content API.
 That is a finding, not a licence: the floor was NOT lowered, and lowering it
 remains the most tempting and most dishonest lever available.
+
+  [CORRECTION 2026-07-20, wave 9 — preamble only, raw bytes below untouched]
+  This block previously stated the growth as 2231 and the shortfall as 31, in
+  mislabelled MB — a /1000-scaled read of the baseline subtracted from a
+  /1024-scaled peak. In the harness's own convention (pds-pull-proof.sh:1302,
+  mem_kb / 1024): 2,483,304 − 194,228 =
+  2,289,076 kB = 2,235.43 MiB, so the shortfall is 35.43 MiB. Baseline t=0 is
+  ruled to 194,228 kB (PDS-D185) — the sampler's first tick (230,072 kB, :912) is
+  taken at t≈+1s and already contains part of the export's own allocation. All
+  three candidate baselines put the demand above 2200 MiB (2239.86 / 2235.43 /
+  2200.42), so the ambiguity moves magnitude, never sign; and per PDS-D114 the
+  1 Hz peak is a LOWER bound. Derivation: scripts/pds-export-cost-derivation.md §6b.1.
 
 RELATED, AND FIRST-CLASS: gate (b) is ANTI-CORRELATED WITH HEALTH. MemAvailable
 crosses the floor partly BECAUSE the BEAM has been swapped out, so the gate opens
