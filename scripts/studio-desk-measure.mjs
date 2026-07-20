@@ -1648,13 +1648,34 @@ async function drillToDocument(page, base, target) {
  * (D97): it says the harness never reached the state it names, and nothing
  * whatsoever about the desk's layout.
  */
-async function openInspectorByRealClick(page, { maxClicks = 3 } = {}) {
+// REVIEW FIX (wave 10). `fatal` decides whether an unreachable user-opened
+// state kills the run or is reported as a named skip, and the two callers want
+// OPPOSITE answers for the same reason D97 gives.
+//
+// The MATRIX sweep keeps `fatal: true`: a user-opened row it could not reach is
+// not a desk fact, and inventing one is the thing D97 forbids.
+//
+// The ROUND TRIP passes `fatal: false`, because there the old behaviour
+// reintroduced the exact defect this slice was filed to END. `runRoundTrip`
+// runs mid-sweep, and nothing writes to disk until the provenance bracket
+// closes — so one `die()` here discarded every row already collected and left
+// a ZERO-BYTE run, which D138 rules an INSTRUMENT FAILURE rather than a desk
+// fact. A missing toggle at one width must cost the round trip, never the
+// matrix. This makes the open leg symmetric with `dismissInspectorByRealClick`,
+// which already returned a named skip rather than throwing.
+async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
+  const unreachable = (reason) => {
+    if (fatal) die(reason);
+    return { reached: false, skip_reason: reason };
+  };
+
   const toggle = page.locator('[data-test-id="sidebar-toggle-panel"]').first();
   if (await toggle.count() === 0) {
-    die(`INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
-        `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
-        `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
-        `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
+    return unreachable(
+      `INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
+      `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
+      `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
+      `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
   }
 
   const observe = () => page.evaluate(() => {
@@ -1701,11 +1722,12 @@ async function openInspectorByRealClick(page, { maxClicks = 3 } = {}) {
       };
     }
   }
-  die(`INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
-      `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
-      `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
-      `recorded as one (D97).\n\n  What it saw after each click:\n` +
-      clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+  return unreachable(
+    `INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
+    `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
+    `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
+    `recorded as one (D97).\n\n  What it saw after each click:\n` +
+    clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
 }
 
 // ── dismissal, the destination, and the round trip ───────────────────────────
@@ -1902,7 +1924,24 @@ async function runRoundTrip(page, measureFace) {
     const before = {};
     for (const face of FACES) before[face.id] = await measureFace(face);
 
-    const opened = await openInspectorByRealClick(page);
+    // Non-fatal here BY DESIGN — see the note on openInspectorByRealClick. A
+    // width whose toggle cannot be reached costs this pass and nothing else;
+    // the matrix rows already collected survive and still reach disk.
+    const opened = await openInspectorByRealClick(page, { fatal: false });
+    if (!opened.reached) {
+      return {
+        ran: false,
+        skipped_at_viewport_px: width,
+        skip_reason: opened.skip_reason,
+        open_attempt: opened,
+        note: 'SKIPPED BY NAME on the OPEN leg, never silently. There is no user-opened state to ' +
+              'return from, so there is no round trip to measure. The matrix and every other pass ' +
+              'in this run are unaffected, and the run still writes its artifact — a mid-sweep ' +
+              'abort here would have discarded every collected row and written ZERO bytes, which ' +
+              'D138 rules an INSTRUMENT FAILURE rather than a desk fact.',
+      };
+    }
+
     const dismissed = await dismissInspectorByRealClick(page);
     if (!dismissed.dismissed) {
       return {
