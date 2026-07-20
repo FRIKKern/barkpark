@@ -52,10 +52,14 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     * `.editor-panel` — the content pane. `min-width: 560px` and the
       `container-type`/`container-name` pair are both NEW this epic and both
       are permitted BY NAME by D94's re-authored criterion 2 — which is
-      exactly why they need pinning rather than waiving: `container-name:
-      content` is the query base every `@container content (...)` floor in
-      this sheet resolves against, so losing it silently disables the
-      protected measure rather than breaking it loudly.
+      exactly why they need pinning rather than waiving. It names the `panel`
+      container: this box is the reading column PLUS the docked inspector, and
+      the rules that reason about the pane as a whole query it.
+    * `.editor-with-preview .editor-panel-main.bp-paper-body` — the reading
+      column, and the `content` container since `spd-w5`. It declares no box
+      geometry at all, only which box the protected measure resolves against;
+      losing that name sends the floor walking up to `.editor-panel` again,
+      which silently reinstates the 300px error rather than breaking loudly.
 
   ## The second half: the wide bucket must get those rules VERBATIM
 
@@ -76,11 +80,41 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   is the wave-6 instrument's measured matrix at viewport 1280/1440; this file
   is what keeps those rows from rotting between waves.
 
-  This slice READS `root.html.heex` and never edits it (D16/D92 — `spd-b29`
-  is that file's sole owner this round). It is also file-disjoint from
-  `measure_parity_test.exs`, which is `spd-s7`-fenced; the small parsing
-  helpers below are duplicated on purpose rather than shared, so that this
-  lock cannot be weakened by an edit to a file this slice may not touch.
+  ## The third half: WHICH BOX each container query resolves against
+
+  Added by `spd-w5` (charter D114), because the two mechanisms above are both
+  blind to it in a way that is structural rather than accidental.
+
+  The census keys every rule by its selector, and `last_line/1` deliberately
+  HALTS at at-rule headers — it has its own negative control asserting exactly
+  that, because a census key carrying `@container content (max-width: 860px)`
+  would match none of the declared entries. So at-rule headers are excluded by
+  design, and nothing else in five suites reads them either.
+
+  That blindness has teeth. `.editor-panel` is the reading column PLUS the
+  docked 300px Document inspector, and until `spd-w5` it was named `content` —
+  so the protected-measure floor asked "is the PANE ≥720px?" and applied the
+  answer to a column up to 300px narrower (charter D113). Moving the name onto
+  the column is the fix; the hazard is that HALF the move also passes. Renaming
+  the container while leaving the 860px inspector gate pointed at `content` was
+  deliberately sabotaged and re-run before this pin existed: **73 tests, 0
+  failures across five suites**, with the overlay-vs-dock threshold silently
+  resolving against a box missing the very 300px its number is built from, at
+  every width.
+
+  So `@container_at_rules` pins each at-rule's NAME against the SUBJECT it
+  governs, identified by a marker only that rule's body contains. Its own
+  sabotage control keeps it honest.
+
+  ## The fence
+
+  Through round 1 this file READ `root.html.heex` and never edited it (D16/D92
+  — `spd-b29` owned the sheet that round). `spd-w5` moves the container name
+  IN that sheet, so the fence lifted for that slice by name and the sheet and
+  this lock now land together. It stays file-disjoint from
+  `measure_parity_test.exs`; the small parsing helpers below are duplicated on
+  purpose rather than shared, so this lock cannot be weakened by an edit to a
+  file aimed at the other one.
   """
   use ExUnit.Case, async: true
 
@@ -126,10 +160,53 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     # --- per-surface variant classes, not the default desk ---
     {".editor-panel.sheet-editor", ~w(container-type)},
     {".editor-with-preview .editor-panel-main", ~w(flex min-width)},
+    # spd-w5: the reading column's own query base. This one DOES apply at
+    # 1280/1440 — see the scoped? allowlist below for why that is deliberate.
+    {".editor-with-preview .editor-panel-main.bp-paper-body", ~w(container-name container-type)},
     {".editor-with-preview.has-onix-preview .editor-panel-main", ~w(flex max-width)},
 
     # --- a different element that merely shares the name prefix ---
     {".pane-column-collapsed-label", ~w(display flex overflow)}
+  ]
+
+  # THE AT-RULE PIN (spd-w5, charter D114). Every `@container` at-rule in the
+  # sheet, as {container name, condition, a marker only THIS rule's body
+  # contains, why that name is the right box}.
+  #
+  # This is the one hazard the geometry census structurally cannot see. The
+  # census keys each rule by its selector, and `last_line/1` deliberately halts
+  # at at-rule headers (see its own negative control below) — so which box a
+  # container query resolves against is read by nothing else in five suites.
+  # Mis-point one and the rule keeps applying at a threshold measured against a
+  # box up to 300px off, silently.
+  @container_at_rules [
+    {"content", "min-width: 720px", ".bp-paper-surface",
+     """
+     The protected measure's subject is the READING COLUMN. It asks whether
+     the column can honour a 55ch floor, so it must measure the column — not
+     the pane, which also holds the docked 300px inspector. Measuring the pane
+     is what let the gate say "yes, 976px" about a 676px column at viewport
+     1280 and push the surface into a 12px overflow (charter D85).
+     """},
+    {"panel", "max-width: 860px", ".bp-doc-sidebar.is-open",
+     """
+     The overlay-vs-dock threshold's subject is the WHOLE PANE. 860 is
+     560 (the content floor) + 300 (the docked inspector) — a sum over the
+     pane, deciding whether both terms still fit side by side. Resolving it
+     against the reading column would subtract the inspector from the box and
+     then ask whether the inspector fits: off by exactly the term the number
+     is built from.
+     """},
+    {"panel", "max-width: 720px", ".editor-with-preview.has-onix-preview",
+     """
+     The ONIX 60/40 split's subject is the WHOLE PANE. Its two halves are
+     siblings inside `.editor-panel`, and the question is how much room the
+     two of them have between them — which one half cannot answer about
+     itself. The ONIX surface is also not `.bp-paper-body`, so it carries no
+     `content` container at all: a `content` query here would resolve against
+     the nearest ancestor container, landing on `panel` by luck rather than by
+     contract.
+     """}
   ]
 
   describe "the wide desk's box geometry, pinned as literal constants" do
@@ -192,7 +269,7 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
              "the back strip became compressible — it is a fixed rail by contract"
     end
 
-    test ".editor-panel carries its 560px floor and the `content` query base" do
+    test ".editor-panel carries its 560px floor and the `panel` query base" do
       block = block!(".editor-panel")
 
       assert value!(block, ".editor-panel", "flex") == "1"
@@ -202,22 +279,55 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
              "the content pane's own floor moved — the priority squeeze bottoms out elsewhere now"
 
       # These two are NEW this epic and permitted BY NAME by D94's re-authored
-      # criterion 2. Permitted is not the same as unpinned: `container-name:
-      # content` is the query base that every `@container content (...)` floor
-      # in this sheet resolves against, so losing it disables the protected
-      # measure SILENTLY instead of breaking it loudly.
+      # criterion 2. Permitted is not the same as unpinned.
+      #
+      # `container-type` must stay: it is what makes this box a query
+      # container at all, AND its layout containment is the subject of
+      # `editor_panel_containment_test.exs`'s Blink containing-block guard
+      # (charter D114). Only the NAME moved in spd-w5.
       assert value!(block, ".editor-panel", "container-type") == "inline-size"
 
-      assert value!(block, ".editor-panel", "container-name") == "content",
+      assert value!(block, ".editor-panel", "container-name") == "panel",
              """
-             `.editor-panel` no longer names the `content` container.
+             `.editor-panel` no longer names the `panel` container.
 
-             Every protected-measure floor in this sheet is written
-             `@container content (...)`. With no container named `content` the
-             query resolves against the nearest ancestor container or against
-             nothing at all, and the floor stops applying — with no error, no
-             red, and no visible break until someone measures. That failure
-             mode is this epic's whole disease (charter D39/D40).
+             This box is the reading column PLUS the docked Document
+             inspector, and it is named for what it is. It used to be named
+             `content`, which was a lie of 300px: the protected-measure floor
+             asked `@container content (min-width: 720px)` and got an answer
+             about a box up to 300px wider than the column it protects — at
+             viewport 1280, a 976px pane gating a 676px column, which is the
+             mechanism behind charter D85's measured 12px overflow. spd-w5
+             moved the name `content` onto the reading column's own box
+             (`.editor-with-preview .editor-panel-main.bp-paper-body`) and left
+             `panel` here for the two rules whose SUBJECT really is the whole
+             pane: the inspector's overlay-vs-dock threshold (860 = 560 + 300,
+             a sum over the pane) and the ONIX split.
+
+             If this reverted to `content`, both query bases collapse back
+             onto one box and the floor silently re-acquires the 300px error —
+             no error, no red, nothing visible until someone measures. That
+             failure mode is this epic's whole disease (charter D39/D40/D114).
+             """
+    end
+
+    test "the reading column is its own `content` query base" do
+      block = block!(".editor-with-preview .editor-panel-main.bp-paper-body")
+
+      assert value!(block, ".editor-with-preview .editor-panel-main.bp-paper-body", "container-type") ==
+               "inline-size"
+
+      assert value!(block, ".editor-with-preview .editor-panel-main.bp-paper-body", "container-name") ==
+               "content",
+             """
+             The reading column no longer names the `content` container.
+
+             `.bp-paper-surface` is a descendant of this box, and the protected
+             measure floor is written `@container content (min-width: 720px)`.
+             With no `content` container on the column, that query walks up to
+             the nearest ancestor container — which is `.editor-panel`, i.e.
+             exactly the 300px-too-wide box spd-w5 moved it off (charter
+             D113/D114). The floor would keep applying and keep being wrong.
              """
     end
   end
@@ -257,7 +367,24 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
               ".editor-panel.sheet-editor",
               ".editor-with-preview .editor-panel-main",
               ".editor-with-preview.has-onix-preview .editor-panel-main",
-              ".pane-column-collapsed-label"
+              ".pane-column-collapsed-label",
+              # A REAL WIDENING OF THE PERMITTED SET, not boilerplate (spd-w5,
+              # charter D114). Unlike every other entry above, this rule DOES
+              # apply at viewport 1280 and 1440 — the paper editor declares a
+              # query container on its reading column in every bucket, by
+              # design, because the protected measure has to be able to ask
+              # about that column at wide widths too (wide is precisely where
+              # the docked inspector makes the pane and the column differ by
+              # 300px, which is the whole reason the name moved).
+              #
+              # It is admitted here on the ground that it declares NO box
+              # geometry: `container-type`/`container-name` change what a
+              # query resolves against, not what any box measures. The census
+              # above pins those two property names, so a later edit that adds
+              # a real geometry property (a width, a flex, a min-width) to this
+              # same rule reds the census and lands back in front of a reader
+              # rather than riding in on this allowance.
+              ".editor-with-preview .editor-panel-main.bp-paper-body"
             ]
 
         assert scoped?,
@@ -270,6 +397,147 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
                viewport 1280 and 1440, which is epic criterion 2's own band.
                """
       end
+    end
+  end
+
+  describe "every @container at-rule queries the box its SUBJECT lives in" do
+    test "each at-rule's container NAME matches the subject it governs" do
+      found = container_at_rules()
+
+      for {name, condition, marker, why} <- @container_at_rules do
+        matching = Enum.filter(found, fn {_n, _c, body} -> String.contains?(body, marker) end)
+
+        assert length(matching) == 1,
+               """
+               The subject marker `#{marker}` appears in #{length(matching)} @container
+               at-rules, not exactly one.
+
+               This pin identifies each at-rule by something only IT contains,
+               so that the name it queries can be checked against the box that
+               name has to resolve against. A marker that matches zero rules
+               means the rule was deleted or its subject renamed; a marker that
+               matches several means the pin has stopped identifying anything
+               and every assertion below it is vacuous.
+               """
+
+        [{actual_name, actual_condition, _body}] = matching
+
+        assert actual_condition == condition,
+               "the at-rule governing `#{marker}` now reads `(#{actual_condition})`, " <>
+                 "not `(#{condition})` — its threshold moved"
+
+        assert actual_name == name,
+               """
+               WRONG QUERY BASE: the at-rule governing `#{marker}` queries
+               `#{actual_name}`, but its subject requires `#{name}`.
+
+               #{why}
+
+               THIS IS THE HAZARD THIS TEST EXISTS FOR (charter D114). A
+               mis-pointed at-rule is not a broken rule — it is a rule that
+               keeps applying, at a threshold measured against the wrong box,
+               with no error and no red. The same edit was deliberately
+               sabotaged and re-run before this pin existed: 73 tests, 0
+               failures, with the inspector's overlay-vs-dock threshold
+               silently resolving against a box missing the inspector's own
+               300px, at every width.
+
+               The geometry census in this file structurally cannot see this:
+               `last_line/1` halts at at-rule headers BY DESIGN (its own
+               negative control asserts that), so at-rule headers are excluded
+               from the census and nothing else in five suites reads them.
+               """
+      end
+    end
+
+    test "the at-rule census is exactly these three — a new one lands in front of a reader" do
+      actual = container_at_rules() |> Enum.map(fn {n, c, _} -> {n, c} end) |> Enum.sort()
+      expected = @container_at_rules |> Enum.map(fn {n, c, _, _} -> {n, c} end) |> Enum.sort()
+
+      assert actual == expected,
+             """
+             The set of `@container` at-rules in root.html.heex has CHANGED.
+
+             Missing (declared here, not found): #{inspect(expected -- actual)}
+             New (found, not declared here): #{inspect(actual -- expected)}
+
+             Every container query in this sheet has to declare which box it
+             reasons about — `content` (the reading column) or `panel` (the
+             column plus the docked inspector). Those two differ by 300px, and
+             picking the wrong one is silent. Add your rule here with the
+             subject marker that identifies it and a sentence saying why its
+             box is the right one.
+             """
+    end
+
+    # REVIEW FIX (spd-w5 review). The census above enumerates only NAMED
+    # container queries, because that is the only shape `container_at_rules/1`
+    # can parse. An UNNAMED `@container (max-width: …)` is legal CSS and is the
+    # sharpest version of D114's hazard: with no name it resolves against the
+    # NEAREST ancestor query container, which is whichever of `content`/`panel`
+    # happens to be closer — by proximity rather than by contract, and it would
+    # slip past both the census (which never sees it) and the name pin (which
+    # has nothing to compare). This counts every `@container` token in the sheet
+    # and requires the named parse to account for all of them.
+    test "there are no UNNAMED container queries — every one declares its box" do
+      src = decommented(css())
+      total = length(Regex.scan(~r/@container\b/, src))
+      named = length(container_at_rules())
+
+      assert total == named,
+             """
+             #{total - named} `@container` at-rule(s) in root.html.heex declare NO
+             container name.
+
+             An unnamed container query resolves against the nearest ancestor
+             query container. This sheet deliberately has two — `content` (the
+             reading column) and `panel` (that column PLUS the docked 300px
+             inspector) — so "nearest" is an accident of markup, not a decision,
+             and the two answers differ by 300px (charter D113/D114).
+
+             Name it, then add it to @container_at_rules with the marker that
+             identifies its subject and a sentence saying why that box is right.
+             """
+    end
+
+    test "the pin RED-tests: a mis-pointed at-rule is caught by name" do
+      # The mutation this file was written against, run in-process against a
+      # synthetic sheet so the guarantee does not depend on anyone repeating
+      # it by hand. `panel` flipped to `content` on the inspector gate.
+      sabotaged = """
+      @container content (max-width: 860px) {
+        .bp-doc-sidebar.is-open { position: absolute; }
+      }
+      """
+
+      [{name, condition, _body}] = container_at_rules(sabotaged)
+
+      assert {name, condition} == {"content", "max-width: 860px"},
+             "the parser cannot read an at-rule's name — the pin above is vacuous"
+
+      # And the pin's own comparison is what rejects it.
+      {expected_name, _c, _m, _w} =
+        Enum.find(@container_at_rules, fn {_n, _c, marker, _w} ->
+          marker == ".bp-doc-sidebar.is-open"
+        end)
+
+      refute name == expected_name,
+             "the sabotage is indistinguishable from the correct sheet — re-read D114"
+    end
+
+    test "the parser reads a name even when the at-rule body nests braces" do
+      # The real 860px rule contains a nested `:has()` block, so a naive
+      # first-closing-brace scan would truncate its body and lose the marker.
+      sheet = """
+      @container panel (max-width: 860px) {
+        .bp-doc-sidebar.is-open { position: absolute; }
+        .editor-with-preview:has(.bp-doc-sidebar.is-open)::after { content: ""; }
+        .bp-doc-field { flex-wrap: wrap; }
+      }
+      """
+
+      assert [{"panel", "max-width: 860px", body}] = container_at_rules(sheet)
+      assert body =~ ".bp-doc-field"
     end
   end
 
@@ -465,6 +733,40 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         true -> {:halt, acc}
       end
     end)
+  end
+
+  # Every `@container <name> (<condition>) { <body> }` in the sheet, with the
+  # body BRACE-MATCHED rather than scanned to the first `}`: the real 860px
+  # rule nests a `:has()` block, so a naive scan would truncate its body and
+  # lose the very selector that identifies it.
+  defp container_at_rules(source \\ nil) do
+    src = decommented(source || css())
+
+    ~r/@container\s+([A-Za-z][\w-]*)\s*\(([^)]*)\)\s*\{/
+    |> Regex.scan(src, return: :index)
+    |> Enum.map(fn [{match_start, match_len}, name_at, condition_at] ->
+      {
+        slice(src, name_at),
+        normalise(slice(src, condition_at)),
+        balanced_body(src, match_start + match_len - 1)
+      }
+    end)
+  end
+
+  defp slice(src, {at, len}), do: binary_part(src, at, len)
+
+  # `open_at` is the byte index of the at-rule's own `{`. Bytes are safe to
+  # walk here: any multi-byte character's bytes are all >= 0x80, so none of
+  # them can be mistaken for a brace.
+  defp balanced_body(src, open_at), do: balance(src, open_at + 1, 1, open_at + 1)
+
+  defp balance(src, i, depth, start) do
+    case :binary.at(src, i) do
+      ?{ -> balance(src, i + 1, depth + 1, start)
+      ?} when depth == 1 -> binary_part(src, start, i - start)
+      ?} -> balance(src, i + 1, depth - 1, start)
+      _ -> balance(src, i + 1, depth, start)
+    end
   end
 
   defp pane_family?(selector) do
