@@ -22,14 +22,23 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   There is no single "editor measure". There are two, on two selectors, with
   two different values and two different gates:
 
-    * **paper** — `.editor-panel .bp-paper-surface`, `calc(55ch + 80px)`,
-      gated behind `@container content (min-width: 720px)`. The `+ 80px` is
-      not decoration: `box-sizing: border-box` is global and the surface
-      carries `padding: 56px 40px`, so a bare `55ch` would floor the BORDER
-      box and deliver 55ch − 80px of text. The container gate is equally
-      load-bearing — `calc(55ch + 80px)` is ~631–688px depending on the serif,
+    * **paper** — `.editor-panel .bp-paper-surface`,
+      `calc(55ch + 2 * var(--paper-gutter))`, gated behind
+      `@container content (min-width: 720px)`. The addend is not decoration:
+      `box-sizing: border-box` is global and the surface pads both sides with
+      `--paper-gutter`, so a bare `55ch` would floor the BORDER box and
+      deliver 55ch − two gutters of text. The container gate is equally
+      load-bearing — the floor computes to ~631–688px depending on the serif,
       above `.editor-panel`'s own 560px floor, so an UNGATED raise would
       materialise a horizontal scrollbar at every narrow width.
+
+      Both the token and the gate's query base moved in spd-w5 (charter
+      D103/D113/D114) and NEITHER moved a pixel — the token because the gate
+      is inert wherever the narrow gutters apply, the query base because it
+      only ever mis-measured. `content` now names the reading column's own
+      box rather than `.editor-panel`, which is that column PLUS the docked
+      300px inspector. WHICH box each `@container` at-rule queries is pinned
+      by `wide_geometry_lock_test.exs`, not here.
     * **classic** — `.editor-body.editor-panel-main:not(.bp-paper-body)`,
       a flat `48ch`, no container gate (a ~420px chrome-font measure, safely
       under the 560px panel floor).
@@ -41,13 +50,26 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   ## What "parity" means here
 
   The Studio edit surface and the PUBLIC reader share one `.bp-paper-surface`
-  rule: `max-width: 720px; padding: 56px 40px` → a **640px content column**.
-  The Studio-only floor must therefore add back exactly the reader's own
-  horizontal padding, or the protected measure quietly under-delivers against
-  the column it is supposed to match. That relation — floor addend ==
-  2 × reader side padding — is derived from the CSS on both sides here, never
-  hardcoded twice, so changing the reader's padding reds this test instead of
-  silently shrinking the Studio measure.
+  rule: `max-width: 720px; padding: 56px var(--paper-gutter)` → a **640px
+  content column** at the base 40px gutter. The Studio-only floor must add
+  back exactly the reader's own horizontal padding, or the protected measure
+  quietly under-delivers against the column it is supposed to match.
+
+  Since spd-w5 both sides read ONE token, the relation is no longer
+  something a plain comparison can catch — `2 * gutter` versus `2 * gutter` is true
+  whatever the gutter is. What replaced that tautology is the pair of pins the
+  token cannot make true by itself:
+
+    * the **multiplier** — the floor gives back exactly TWO gutters, because a
+      box has two sides;
+    * the **consumption** — the surface's padding really does read the token,
+      so the floor is not compensating for a number nothing renders;
+
+  plus a **breakpoint-desync guard**: the padding is viewport-`@media`'d while
+  the floor is `@container`-gated, two different axes, so every breakpoint
+  that restyles the surface must BOTH redeclare the token AND consume it.
+  Charter D103 measured that drift's cost at zero pixels today; the guard is
+  what keeps that true rather than lucky.
 
   ## Blast radius (folds spd-b8)
 
@@ -65,8 +87,11 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   is spd-s9's measured matrix on guerrilla; this file is what keeps that
   measurement from rotting between waves.
 
-  This slice READS `root.html.heex`; it never edits it (file-disjoint from
-  spd-s5, which owns the shell this round).
+  This slice READ `root.html.heex` and did not edit it through round 1. That
+  fence LIFTED for spd-w5 (charter D77's ruling, carried by D113): the floor's
+  addend and the surface's padding cannot be unified from one side, so the
+  brief granted this file explicit edit rights alongside the sheet. It is
+  still file-disjoint from every other test that reads the sheet.
   """
   use ExUnit.Case, async: true
 
@@ -152,6 +177,34 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
     end
   end
 
+  # The base `--paper-gutter`, read off the surface rule itself rather than
+  # restated here — the whole point of the token is that this number lives in
+  # exactly one place.
+  defp base_gutter! do
+    value =
+      css()
+      |> blocks!(@reader_selector)
+      |> value!("--paper-gutter", @reader_selector)
+
+    case Regex.run(~r/^(\d+)px$/, value) do
+      [_, px] ->
+        String.to_integer(px)
+
+      nil ->
+        flunk("`#{@reader_selector}` declares `--paper-gutter: #{value}`, which is not a px length")
+    end
+  end
+
+  # Every `@media (<header>) { … .bp-paper-surface { <body> } … }` block that
+  # restyles the reader surface, as {header, that rule's body}. Written against
+  # the sheet's one-rule-per-media-line shape, which is what the breakpoints
+  # actually use.
+  defp nested_surface_blocks do
+    ~r/@media\s*\(([^)]*)\)\s*\{\s*#{Regex.escape(@reader_selector)}\s*\{([^{}]*)\}/
+    |> Regex.scan(decommented(css()), capture: :all_but_first)
+    |> Enum.map(fn [header, body] -> {String.trim(header), body} end)
+  end
+
   # The body of an `@container <header> { … }` at-rule, brace-matched.
   defp at_rule_body!(src, header) do
     src = decommented(src)
@@ -161,7 +214,7 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
         flunk("""
         THE PAPER FLOOR'S GATE IS GONE: no `@container #{header}` in root.html.heex.
 
-        That gate is not tidiness. calc(55ch + 80px) is ~631px (Iowan) / ~688px
+        That gate is not tidiness. The floor computes to ~631px (Iowan) / ~688px
         (Georgia), both ABOVE `.editor-panel`'s 560px floor, so an ungated floor
         newly materialises a horizontal scrollbar at every narrow width (D39).
         """)
@@ -247,7 +300,7 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   end
 
   describe "the paper floor (D39) — .editor-panel .bp-paper-surface" do
-    test "is calc(55ch + 80px) and lives INSIDE the 720px container gate" do
+    test "is calc(55ch + 2 * var(--paper-gutter)) and lives INSIDE the 720px gate" do
       gate_body = at_rule_body!(css(), @paper_gate)
 
       assert gate_body =~ @paper_floor_selector,
@@ -267,67 +320,135 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
           @paper_floor_selector
         )
 
-      assert floor == "calc(55ch + 80px)",
+      assert floor == "calc(55ch + 2 * var(--paper-gutter))",
              """
              The protected paper measure changed: `#{floor}`.
 
              A bare `55ch` floors the BORDER box (box-sizing: border-box is
-             global) and delivers 55ch − 80px of text; `min(100%, 55ch)`
+             global) and delivers 55ch − 2 gutters of text; `min(100%, 55ch)`
              silently no-ops. Both have shipped here before and both read as
              "criterion met" while the document sat at ~48ch.
+
+             The addend is `2 * var(--paper-gutter)` and not a literal since
+             spd-w5: the token is declared and redeclared on `.bp-paper-surface`
+             itself, so the floor and the padding it compensates for can no
+             longer drift (charter D103). That change closes ZERO pixels at
+             ZERO widths — it is coherence, not a measure fix.
              """
     end
 
-    test "the floor's px addend is exactly the public reader's horizontal padding" do
+    test "the floor adds back exactly TWO of the reader's own gutters" do
       floor =
         css()
         |> at_rule_body!(@paper_gate)
         |> blocks!(@paper_floor_selector)
         |> value!("min-inline-size", @paper_floor_selector)
 
-      [_, ch, addend] = Regex.run(~r/calc\(\s*(\d+)ch\s*\+\s*(\d+)px\s*\)/, floor)
-      {ch, addend} = {String.to_integer(ch), String.to_integer(addend)}
+      # THE MULTIPLIER PIN. The old assertion here compared the floor's literal
+      # px addend against the reader's literal side padding. Once both sides
+      # read ONE token that comparison goes tautological — `2 * gutter` versus
+      # `2 * gutter` is true whatever the gutter is — so what is pinned instead
+      # is the only number the token cannot carry: how MANY gutters the border
+      # box has to give back. It is two, because a box has two sides.
+      [_, ch, multiplier, token] =
+        Regex.run(~r/calc\(\s*(\d+)ch\s*\+\s*(\d+)\s*\*\s*var\(\s*(--[\w-]+)\s*\)\s*\)/, floor) ||
+          flunk("""
+          The paper floor is no longer `calc(<n>ch + <k> * var(--token))`: `#{floor}`.
 
-      # The PUBLIC reader column — the same rule the reader renders. This is the
-      # thing the Studio measure is at parity WITH.
+          spd-w5 made the floor consume the same gutter token the surface pads
+          with, so the two cannot drift. A floor that restates a literal px
+          addend is the drift this shape exists to prevent (charter D103).
+          """)
+
+      assert String.to_integer(multiplier) == 2,
+             """
+             MEASURE PARITY BROKEN: the floor adds back #{multiplier} gutter(s), not 2.
+
+             `box-sizing: border-box` is global and the surface pads BOTH sides,
+             so the floor must give back two gutters or the protected CONTENT
+             measure silently under-delivers by the difference.
+             """
+
+      assert token == "--paper-gutter",
+             "the floor consumes `#{token}`, which is not the token the surface pads with"
+
+      assert String.to_integer(ch) == 55,
+             "the epic's protected measure is 55ch; the sheet now says #{ch}ch"
+    end
+
+    test "the reader's padding CONSUMES the same token the floor does" do
+      # THE CONSUMPTION PIN, the other half of the multiplier. A token that is
+      # declared but not consumed leaves the padding stale while the floor
+      # tracks a number nothing renders — which reads exactly like parity and
+      # is not.
       reader = blocks!(css(), @reader_selector)
       padding = value!(reader, "padding", @reader_selector)
-      [_, side] = Regex.run(~r/^\d+px\s+(\d+)px$/, padding)
-      side = String.to_integer(side)
 
-      assert addend == 2 * side,
+      assert padding =~ ~r/^\d+px\s+var\(\s*--paper-gutter\s*\)$/,
              """
-             MEASURE PARITY BROKEN.
+             The public reader column pads `#{padding}`.
 
-             The public reader column is `#{@reader_selector} { padding: #{padding} }`
-             → #{side}px of side padding, #{2 * side}px total. The Studio-only floor adds
-             back #{addend}px, so the protected CONTENT measure is
-             #{ch}ch − #{2 * side - addend}px, not #{ch}ch.
-
-             Both surfaces render the same `.bp-paper-surface`; the Studio floor
-             exists only to keep the panel from squeezing that column. Change the
-             padding and this addend moves with it, or the Studio quietly wraps a
-             line earlier than the reader does.
+             It must read its side padding from `var(--paper-gutter)` — the same
+             token the Studio floor adds back. Both surfaces render this one
+             rule; the moment the padding restates a literal, the floor is
+             compensating for a number the surface no longer uses and the Studio
+             wraps a line at a different word than the reader (charter D103).
              """
-
-      assert ch == 55,
-             "the epic's protected measure is 55ch; the sheet now says #{ch}ch"
     end
 
     test "the reader column the floor is measured against is still 720px wide" do
       reader = blocks!(css(), @reader_selector)
       max_width = value!(reader, "max-width", @reader_selector)
-      padding = value!(reader, "padding", @reader_selector)
-      [_, side] = Regex.run(~r/^\d+px\s+(\d+)px$/, padding)
+      side = base_gutter!()
 
       assert max_width == "720px",
              "the public reader column moved to #{max_width}; re-derive the parity story"
 
-      content = 720 - 2 * String.to_integer(side)
+      content = 720 - 2 * side
 
       assert content == 640,
              "the reader's content column is now #{content}px, not the 640px the " <>
                "Studio floor was sized against"
+    end
+
+    test "every breakpoint that restyles the surface redeclares AND consumes the gutter" do
+      # THE BREAKPOINT-DESYNC GUARD — new with the token, and the reason the
+      # token is safe. The surface's padding is viewport-`@media`'d (40 → 24 →
+      # 16px) while the floor is `@container`-gated, so the two are keyed off
+      # DIFFERENT axes. That is survivable only while every breakpoint keeps
+      # both halves in step:
+      #
+      #   * redeclare but not consume → the padding is stale at that width
+      #   * consume but not redeclare → the floor gives back the WIDEST gutter
+      #     at a width that no longer has one, over-reserving silently
+      #
+      # Charter D103 measured the drift's cost at ZERO pixels today (the gate
+      # is inert wherever the narrow gutters apply). This guard is what keeps
+      # that true rather than lucky.
+      nested = nested_surface_blocks()
+
+      assert nested != [],
+             "no `@media` block restyles `#{@reader_selector}` any more — if the " <>
+               "breakpoints were deleted, the reader's responsive padding is GONE"
+
+      for {header, body} <- nested do
+        assert body =~ ~r/--paper-gutter\s*:/,
+               """
+               `@media #{header}` restyles `#{@reader_selector}` without redeclaring
+               `--paper-gutter`.
+
+               Its padding therefore changes while the Studio floor keeps giving
+               back the base 40px gutter — over-reserving at exactly the widths
+               where the column is tightest.
+               """
+
+        assert body =~ ~r/padding\s*:[^;}]*var\(\s*--paper-gutter\s*\)/,
+               """
+               `@media #{header}` redeclares `--paper-gutter` but pads with a
+               literal, so the token it sets is dead and the padding it renders
+               is unpinned. Redeclare and consume, or do neither.
+               """
+      end
     end
 
     test "relaxes to 0 at phone so the lone surface can never exceed the viewport" do

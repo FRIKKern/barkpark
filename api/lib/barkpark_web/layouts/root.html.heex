@@ -1263,9 +1263,18 @@
        a single-pane drill. Width buckets come from the pre-paint <head>
        script (html[data-width-bucket]: wide ≥1280 · standard 1024–1279 ·
        narrow 640–1023 · phone <640, +32px widen hysteresis) — pure client
-       stamping, no server round-trip. Container queries key on
-       .editor-panel (container-name: content). Charter:
-       bp-cloud-epic-charter.md D1–D5, D10, D12, D13, D16.
+       stamping, no server round-trip.
+
+       TWO query bases, on purpose (spd-w5, charter D114). `.editor-panel` is
+       `panel` — the whole content pane, column plus docked inspector — and
+       the reading column's own box is `content`. Every @container rule below
+       names the one its SUBJECT actually lives in: the protected measure asks
+       about the column (`content`), the overlay-vs-dock threshold and the
+       ONIX split ask about the pane (`panel`). They differ by the inspector's
+       300px, which is exactly the bug that made this split necessary.
+
+       Charter: bp-cloud-epic-charter.md D1–D5, D10, D12, D13, D16;
+       bp-studio-space-priority-charter.md D113/D114.
        Two laws hold everywhere below:
        • ZERO DESKTOP CHANGE — every rule here is inert at ≥1280 viewports
          (floors/clamps only bite under squeeze; both @container thresholds
@@ -1288,16 +1297,42 @@
        epic's own ≥55ch criterion. Adding the horizontal padding back makes the
        floor mean what it says: 55ch of CONTENT box.
 
-       The @container gate is LOAD-BEARING, not tidiness. calc(55ch + 80px) is
+       The @container gate is LOAD-BEARING, not tidiness. The floor computes to
        ~631px (Iowan) / ~688px (Georgia), both ABOVE .editor-panel's 560px
        floor, so an ungated raise would newly materialise a horizontal
        scrollbar at every narrow width (D39: .editor-body declares only
        overflow-y, so the spec promotes overflow-x to auto and IT is the
        scroller — .editor-panel's overflow:hidden is never reached). Gating on
-       720px of content width means the floor applies only where the panel can
-       actually honour it; below that the surface simply fills the panel. */
+       720px of reading-column width means the floor applies only where the
+       column can actually honour it; below that the surface fills the column.
+
+       THE GATE ASKS ABOUT THE READING COLUMN, and until spd-w5 it did not
+       (charter D113/D114). `content` used to name .editor-panel — the reading
+       column PLUS the docked Document inspector — so this rule asked "is the
+       PANE ≥720px?" and then applied the answer to a column up to 300px
+       narrower. At viewport 1280 that is a 976px pane gating a 676px column:
+       the gate says yes, the column cannot honour it, and the surface
+       overflows (D85 measured 12px of it under forced Georgia). The name now
+       sits on the column's own box, declared immediately below.
+
+       The addend is `2 * var(--paper-gutter)` rather than a literal 80px so
+       the floor and the surface's own padding cannot drift apart (D103's
+       coherence defect: a viewport-@media'd gutter beside a container-scoped
+       floor hardcoding the widest of its three values). This closes ZERO
+       pixels at ZERO widths — measured, twice (D93/D103) — and is shipped as
+       coherence, never as a measure fix. */
+    /* The reading column's own box IS the `content` container. .bp-paper-surface
+       is a descendant of it (components.ex renders
+       `.editor-body.editor-panel-main.bp-paper-body > .bp-paper-shell.bp-paper-surface`),
+       so the floor above keeps its name and simply starts querying the right
+       box. Scoped deliberately: the CLASSIC editor body carries its own 48ch
+       floor (D40, below) and the Sheets surface opts out of containment
+       entirely, so neither wants a container declared here. */
+    .editor-with-preview .editor-panel-main.bp-paper-body {
+      container-type: inline-size; container-name: content;
+    }
     @container content (min-width: 720px) {
-      .editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 80px); }
+      .editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 2 * var(--paper-gutter)); }
     }
     /* Classic-editor measure floor (D40). This lived at the top of this
        section as `.editor-panel .editor-body { min-inline-size: 48ch }` and
@@ -1319,8 +1354,18 @@
        560px content floor + the 300px docked inspector — a docked sidebar
        would starve the document, so it overlays from the right edge
        instead. Pure CSS: the server's sidebar_open default is unchanged.
-       Anchors to .editor-panel's position:relative. */
-    @container content (max-width: 860px) {
+       Anchors to .editor-panel's position:relative.
+
+       QUERIES `panel`, NOT `content` (spd-w5, charter D114). 860 = 560 + 300
+       is a sum over the WHOLE PANE — the column it wants to protect plus the
+       inspector it is deciding the fate of — so its subject is .editor-panel
+       and its query base must be too. Pointing this at `content` (the reading
+       column) would resolve the threshold against a box already missing the
+       inspector's own 300px: off by exactly the term the number is built
+       from, at every width, silently. That mistake ships green through 73
+       tests in five suites; the at-rule-name pin in wide_geometry_lock_test.exs
+       is what catches it. */
+    @container panel (max-width: 860px) {
       .bp-doc-sidebar.is-open {
         position: absolute;
         inset: 0 0 0 auto;
@@ -1354,9 +1399,19 @@
       .bp-doc-field { flex-wrap: wrap; }
     }
 
-    /* ONIX / content-preview split: below 720px of content width the 60/40
-       row starves both halves — stack it, preview below the form. */
-    @container content (max-width: 720px) {
+    /* ONIX / content-preview split: below 720px of CONTENT-PANE width the
+       60/40 row starves both halves — stack it, preview below the form.
+
+       QUERIES `panel` (spd-w5, charter D114). The 60/40 row IS the pane's own
+       inner split — .editor-panel-main and .bp-onix-preview are siblings, and
+       the decision is about how much room the two of them have between them.
+       The reading column cannot answer that: it is one of the two halves
+       being measured, so querying `content` here would ask a term of the sum
+       about the sum. (There is also no `content` container on this path at
+       all — the ONIX surface is not .bp-paper-body — so a `content` query
+       would silently resolve against the nearest ancestor container instead,
+       which is `panel` by luck rather than by contract.) */
+    @container panel (max-width: 720px) {
       .editor-with-preview.has-onix-preview { flex-direction: column; }
       .editor-with-preview.has-onix-preview .bp-onix-preview {
         flex: 0 0 40%;
@@ -1736,16 +1791,29 @@
        without first visiting StudioLive. Kept here as the canonical
        location for the editor-pane palette. ──────────────────── */
     /* spd-s1 (charter D4): the content pane is the PROTECTED winner of the
-       layout negotiation — min-width:560px is its hard floor, and it becomes
-       the `content` container the responsive-desk @container rules (see the
-       "Responsive desk (space-priority)" section) query against.
+       layout negotiation — min-width:560px is its hard floor.
+
+       IT IS THE `panel` CONTAINER, NOT THE `content` ONE (spd-w5, charter
+       D113/D114). It used to be named `content`, and that name was a lie of
+       300px: this box holds the reading column AND the docked Document
+       inspector, so every `@container content (…)` floor resolved against a
+       box wider than the column it protected. The name `content` now lives on
+       the reading column's own box (see the "Responsive desk" section); what
+       stays here is `panel` — the query base for the rules whose SUBJECT is
+       the whole pane, i.e. the inspector's overlay-vs-dock threshold and the
+       ONIX split. Those two genuinely reason about the pane, not the column.
+
+       container-type STAYS `inline-size` (D114). Only the NAME moved: the
+       type is what makes this box a query container at all, and stripping it
+       reds editor_panel_containment_test.exs's Blink containing-block guard.
+
        position:relative is REQUIRED here: container-type does NOT create a
        positioning context, and the narrow-width inspector overlay anchors to
        this box. */
     .editor-panel {
       flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden;
       position: relative; min-width: 560px;
-      container-type: inline-size; container-name: content;
+      container-type: inline-size; container-name: panel;
     }
     /* CONTAINMENT CARVE-OUT (spd-s1 review). `container-type: inline-size`
        computes to `contain: layout style inline-size`, and LAYOUT containment
@@ -1907,7 +1975,7 @@
        rather than inventing a hidden state — the strip and its control stay
        on screen and clickable, which is the whole difference from the refuted
        CSS-only shape. `position`/`width`/`box-shadow` are reset because the
-       `@container content (max-width: 860px)` block above promotes the open
+       `@container panel (max-width: 860px)` block above promotes the open
        panel to an absolute overlay; without the reset it would still float
        over the document, merely emptied.
 
@@ -3532,16 +3600,31 @@
     }
     /* Measure parity: the reader article column is 720px / 40px side padding
        (640px measure). The edit surface matches it exactly so a line wraps at
-       the same word on both. */
+       the same word on both.
+
+       --paper-gutter IS THE SIDE PADDING, and it is a token so that the
+       Studio's protected floor can consume the SAME number instead of
+       restating it (spd-w5, charter D103). The floor is
+       `calc(55ch + 2 * var(--paper-gutter))`: a floor that hardcodes 80px
+       while this rule drops to 24px below 767px is a latent trap for the next
+       author — arithmetically wrong by 32px in the band, even though the gate
+       measured inert there, so the drift costs ZERO pixels today and is
+       corrected as COHERENCE, never as a measure fix (D93/D103/D113).
+
+       Each breakpoint redeclares the token AND consumes it. Redeclaring
+       without consuming would leave the padding stale; consuming without
+       redeclaring would leave the floor reading the widest gutter at a width
+       that no longer has one. measure_parity_test.exs guards both halves. */
     .bp-paper-surface {
+      --paper-gutter: 40px;
       max-width: 720px;
       margin: 0 auto;
-      padding: 56px 40px;
+      padding: 56px var(--paper-gutter);
       min-height: 100%;
       box-sizing: border-box;
     }
-    @media (max-width: 767px) { .bp-paper-surface { padding: 48px 24px; } }
-    @media (max-width: 479px) { .bp-paper-surface { padding: 32px 16px; } }
+    @media (max-width: 767px) { .bp-paper-surface { --paper-gutter: 24px; padding: 48px var(--paper-gutter); } }
+    @media (max-width: 479px) { .bp-paper-surface { --paper-gutter: 16px; padding: 32px var(--paper-gutter); } }
     /* The editor-body wrapper around the paper surrenders its zinc padding +
        720px clamp so the paper page owns the full scroll area and paints the
        warm background edge-to-edge. */
