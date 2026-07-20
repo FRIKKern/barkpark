@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-20T06:08:21.153Z",
+  "generated_at": "2026-07-20T06:25:56.805Z",
   "instrument": "scripts/studio-desk-measure.mjs",
   "contract": "prints a matrix, or exits non-zero naming the failed selector — no gate authority",
   "playwright_version": "1.59.1",
@@ -20,13 +20,13 @@
   },
   "doc_target_note": "The drill targets a NAMED document (D97). It used to click the first row of a Papers list that concurrent waves rewrite live, which made a failed run indistinguishable from a desk fact. `--doc=<slug>` / BP_DESK_DOC override the committed default; `--doc=any` restores first-row behaviour, skipping rows that open no paper surface.",
   "provenance": {
-    "read_at": "2026-07-20T06:08:20.790Z",
-    "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+    "read_at": "2026-07-20T06:25:56.524Z",
+    "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
     "slot_units_loaded": [
-      "barkpark-slot@green.service loaded active running Barkpark content instance (slot green)"
+      "barkpark-slot@blue.service loaded active running Barkpark content instance (slot blue)"
     ],
     "slot_active": [
-      "green"
+      "blue"
     ],
     "slot_read_method": "ssh root@157.180.90.121 \"systemctl list-units 'barkpark-slot@*' --all --no-legend\"",
     "sha_read_method": "ssh root@157.180.90.121 \"cd /opt/barkpark && git rev-parse HEAD\""
@@ -39,21 +39,21 @@
   ],
   "rows": [
     {
-      "measured_at": "2026-07-20T06:08:27.083Z",
+      "measured_at": "2026-07-20T06:26:01.750Z",
       "viewport_px": 1440,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 822,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -335,21 +335,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:27.113Z",
+      "measured_at": "2026-07-20T06:26:01.781Z",
       "viewport_px": 1440,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 822,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -615,21 +615,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:27.151Z",
+      "measured_at": "2026-07-20T06:26:01.815Z",
       "viewport_px": 1440,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 822,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -891,21 +891,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:28.038Z",
+      "measured_at": "2026-07-20T06:26:02.686Z",
       "viewport_px": 1280,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -1187,21 +1187,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:28.076Z",
+      "measured_at": "2026-07-20T06:26:02.721Z",
       "viewport_px": 1280,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -1467,21 +1467,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:28.126Z",
+      "measured_at": "2026-07-20T06:26:02.761Z",
       "viewport_px": 1280,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -1743,21 +1743,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:29.023Z",
+      "measured_at": "2026-07-20T06:26:03.637Z",
       "viewport_px": 1024,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -2039,21 +2039,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:29.058Z",
+      "measured_at": "2026-07-20T06:26:03.672Z",
       "viewport_px": 1024,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -2319,21 +2319,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:29.097Z",
+      "measured_at": "2026-07-20T06:26:03.712Z",
       "viewport_px": 1024,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -2595,21 +2595,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:30.191Z",
+      "measured_at": "2026-07-20T06:26:04.690Z",
       "viewport_px": 900,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1034,
+        "settle_ms": 931,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -2890,21 +2890,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:30.226Z",
+      "measured_at": "2026-07-20T06:26:04.723Z",
       "viewport_px": 900,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1034,
+        "settle_ms": 931,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -3169,21 +3169,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:30.274Z",
+      "measured_at": "2026-07-20T06:26:04.750Z",
       "viewport_px": 900,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1034,
+        "settle_ms": 931,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -3444,21 +3444,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:31.160Z",
+      "measured_at": "2026-07-20T06:26:05.612Z",
       "viewport_px": 800,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -3739,21 +3739,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:31.198Z",
+      "measured_at": "2026-07-20T06:26:05.646Z",
       "viewport_px": 800,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -4018,21 +4018,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:31.232Z",
+      "measured_at": "2026-07-20T06:26:05.671Z",
       "viewport_px": 800,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -4293,21 +4293,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:32.121Z",
+      "measured_at": "2026-07-20T06:26:06.541Z",
       "viewport_px": 764,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 825,
+        "settle_ms": 818,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -4588,21 +4588,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:32.154Z",
+      "measured_at": "2026-07-20T06:26:06.573Z",
       "viewport_px": 764,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 825,
+        "settle_ms": 818,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -4867,21 +4867,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:32.190Z",
+      "measured_at": "2026-07-20T06:26:06.603Z",
       "viewport_px": 764,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 825,
+        "settle_ms": 818,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -5142,21 +5142,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:33.083Z",
+      "measured_at": "2026-07-20T06:26:07.475Z",
       "viewport_px": 700,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 834,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -5437,21 +5437,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:33.122Z",
+      "measured_at": "2026-07-20T06:26:07.511Z",
       "viewport_px": 700,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 834,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -5716,21 +5716,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:33.159Z",
+      "measured_at": "2026-07-20T06:26:07.541Z",
       "viewport_px": 700,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 834,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -5991,21 +5991,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:34.046Z",
+      "measured_at": "2026-07-20T06:26:08.410Z",
       "viewport_px": 640,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 817,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -6286,21 +6286,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:34.083Z",
+      "measured_at": "2026-07-20T06:26:08.444Z",
       "viewport_px": 640,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 817,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -6565,21 +6565,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:34.131Z",
+      "measured_at": "2026-07-20T06:26:08.475Z",
       "viewport_px": 640,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 817,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -6840,21 +6840,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:35.243Z",
+      "measured_at": "2026-07-20T06:26:09.456Z",
       "viewport_px": 500,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -7131,21 +7131,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:35.279Z",
+      "measured_at": "2026-07-20T06:26:09.491Z",
       "viewport_px": 500,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -7406,21 +7406,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:35.326Z",
+      "measured_at": "2026-07-20T06:26:09.521Z",
       "viewport_px": 500,
       "inspector_state": "default",
       "user_opened_overlay_asserted": null,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -7677,21 +7677,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:40.572Z",
+      "measured_at": "2026-07-20T06:26:14.038Z",
       "viewport_px": 1440,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -7973,21 +7973,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:40.607Z",
+      "measured_at": "2026-07-20T06:26:14.069Z",
       "viewport_px": 1440,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -8253,21 +8253,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:40.651Z",
+      "measured_at": "2026-07-20T06:26:14.121Z",
       "viewport_px": 1440,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 820,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":1136,\"connected\":true}"
       },
@@ -8529,21 +8529,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:41.539Z",
+      "measured_at": "2026-07-20T06:26:14.992Z",
       "viewport_px": 1280,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -8825,21 +8825,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:41.574Z",
+      "measured_at": "2026-07-20T06:26:15.026Z",
       "viewport_px": 1280,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -9105,21 +9105,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:41.622Z",
+      "measured_at": "2026-07-20T06:26:15.061Z",
       "viewport_px": 1280,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": false,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"wide\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":976,\"connected\":true}"
       },
@@ -9381,21 +9381,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:42.532Z",
+      "measured_at": "2026-07-20T06:26:15.944Z",
       "viewport_px": 1024,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 830,
+        "settle_ms": 825,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -9752,21 +9752,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:42.583Z",
+      "measured_at": "2026-07-20T06:26:15.978Z",
       "viewport_px": 1024,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 830,
+        "settle_ms": 825,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -10107,21 +10107,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:42.647Z",
+      "measured_at": "2026-07-20T06:26:16.025Z",
       "viewport_px": 1024,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 830,
+        "settle_ms": 825,
         "live_socket_connected": true,
         "signature": "{\"b\":\"standard\",\"n\":2,\"w\":[44,260],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -10458,21 +10458,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:43.750Z",
+      "measured_at": "2026-07-20T06:26:17.007Z",
       "viewport_px": 900,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 930,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -10826,21 +10826,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:43.786Z",
+      "measured_at": "2026-07-20T06:26:17.042Z",
       "viewport_px": 900,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 930,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -11178,21 +11178,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:43.827Z",
+      "measured_at": "2026-07-20T06:26:17.080Z",
       "viewport_px": 900,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 1037,
+        "settle_ms": 930,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":856,\"connected\":true}"
       },
@@ -11526,21 +11526,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:44.722Z",
+      "measured_at": "2026-07-20T06:26:17.948Z",
       "viewport_px": 800,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 835,
+        "settle_ms": 823,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -11894,21 +11894,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:44.760Z",
+      "measured_at": "2026-07-20T06:26:17.980Z",
       "viewport_px": 800,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 835,
+        "settle_ms": 823,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -12246,21 +12246,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:44.807Z",
+      "measured_at": "2026-07-20T06:26:18.018Z",
       "viewport_px": 800,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 835,
+        "settle_ms": 823,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":756,\"connected\":true}"
       },
@@ -12594,21 +12594,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:45.702Z",
+      "measured_at": "2026-07-20T06:26:18.895Z",
       "viewport_px": 764,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 819,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -12962,21 +12962,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:45.738Z",
+      "measured_at": "2026-07-20T06:26:18.931Z",
       "viewport_px": 764,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 819,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -13314,21 +13314,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:45.774Z",
+      "measured_at": "2026-07-20T06:26:18.971Z",
       "viewport_px": 764,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 829,
+        "settle_ms": 819,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":720,\"connected\":true}"
       },
@@ -13662,21 +13662,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:46.677Z",
+      "measured_at": "2026-07-20T06:26:19.849Z",
       "viewport_px": 700,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 832,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -14030,21 +14030,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:46.714Z",
+      "measured_at": "2026-07-20T06:26:19.884Z",
       "viewport_px": 700,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 832,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -14382,21 +14382,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:46.765Z",
+      "measured_at": "2026-07-20T06:26:19.935Z",
       "viewport_px": 700,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 832,
+        "settle_ms": 822,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":656,\"connected\":true}"
       },
@@ -14730,21 +14730,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:47.657Z",
+      "measured_at": "2026-07-20T06:26:20.809Z",
       "viewport_px": 640,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -15098,21 +15098,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:47.691Z",
+      "measured_at": "2026-07-20T06:26:20.845Z",
       "viewport_px": 640,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -15450,21 +15450,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:47.730Z",
+      "measured_at": "2026-07-20T06:26:20.884Z",
       "viewport_px": 640,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 828,
+        "settle_ms": 821,
         "live_socket_connected": true,
         "signature": "{\"b\":\"narrow\",\"n\":1,\"w\":[44],\"c\":0,\"p\":596,\"connected\":true}"
       },
@@ -15798,21 +15798,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:48.740Z",
+      "measured_at": "2026-07-20T06:26:21.870Z",
       "viewport_px": 500,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "native",
       "face_forced_to": null,
       "face_note": "no override — the deployed --paper-font-serif stack",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 935,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -16154,21 +16154,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:48.773Z",
+      "measured_at": "2026-07-20T06:26:21.906Z",
       "viewport_px": 500,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "georgia",
       "face_forced_to": "Georgia, 'Times New Roman', serif",
       "face_note": "forced Georgia",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 935,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -16494,21 +16494,21 @@
       "scrollbar_width_px": 0
     },
     {
-      "measured_at": "2026-07-20T06:08:48.812Z",
+      "measured_at": "2026-07-20T06:26:21.941Z",
       "viewport_px": 500,
       "inspector_state": "user-opened",
       "user_opened_overlay_asserted": true,
       "face": "source-serif-4",
       "face_forced_to": "'Source Serif 4', serif",
       "face_note": "forced self-hosted Source Serif 4",
-      "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+      "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
       "slot_active": [
-        "green"
+        "blue"
       ],
       "sweep_direction": "descending",
       "settle": {
         "settled": true,
-        "settle_ms": 935,
+        "settle_ms": 923,
         "live_socket_connected": true,
         "signature": "{\"b\":\"phone\",\"n\":0,\"w\":[],\"c\":3,\"p\":500,\"connected\":true}"
       },
@@ -16899,9 +16899,9 @@
       "viewport_px": 1024,
       "sampler": "installed at document_start via addInitScript, sampling requestAnimationFrame from first paint",
       "sample_window_ms": 2500,
-      "frames_captured": 185,
+      "frames_captured": 187,
       "first_frame": {
-        "t_ms": 77,
+        "t_ms": 66,
         "position": "static",
         "width_px": 41,
         "left_px": 983,
@@ -16911,7 +16911,7 @@
         "bucket": "standard"
       },
       "last_frame": {
-        "t_ms": 2511,
+        "t_ms": 2505,
         "position": "static",
         "width_px": 41,
         "left_px": 983,
@@ -16956,13 +16956,13 @@
     "probe_note": "diagnostic only — no gate authority (D81)"
   },
   "provenance_post": {
-    "read_at": "2026-07-20T06:08:55.428Z",
-    "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+    "read_at": "2026-07-20T06:26:28.030Z",
+    "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
     "slot_units_loaded": [
-      "barkpark-slot@green.service loaded active running Barkpark content instance (slot green)"
+      "barkpark-slot@blue.service loaded active running Barkpark content instance (slot blue)"
     ],
     "slot_active": [
-      "green"
+      "blue"
     ],
     "slot_read_method": "ssh root@157.180.90.121 \"systemctl list-units 'barkpark-slot@*' --all --no-legend\"",
     "sha_read_method": "ssh root@157.180.90.121 \"cd /opt/barkpark && git rev-parse HEAD\""
@@ -16970,28 +16970,28 @@
   "provenance_bracket": {
     "matched": true,
     "mismatches": [],
-    "window_ms": 34638,
+    "window_ms": 31506,
     "method": "served SHA + active slot read over ssh immediately before the browser launched and immediately after the sweep"
   },
   "artifact": {
-    "written_to": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-30/scripts/measurements/spd-visible-table-2026-07-20.json",
-    "written_at": "2026-07-20T06:08:55.433Z",
-    "invoked_from_cwd": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-30",
-    "instrument_realpath": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-30/scripts/studio-desk-measure.mjs",
+    "written_to": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-34/scripts/measurements/spd-visible-table-2026-07-20.json",
+    "written_at": "2026-07-20T06:26:28.031Z",
+    "invoked_from_cwd": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-34",
+    "instrument_realpath": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-34/scripts/studio-desk-measure.mjs",
     "argv": [
-      "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-30/scripts/studio-desk-measure.mjs",
+      "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_fe846020-131-34/scripts/studio-desk-measure.mjs",
       "--out",
       "scripts/measurements/spd-visible-table-2026-07-20.json"
     ],
     "row_count": 54,
     "expected_row_count": 54,
     "row_count_note": "9 widths x 3 forced faces x 2 inspector states. 54 is a COMPLETE run (D121); 162 was a miscount that multiplied rows by the three figures each row reports.",
-    "served_sha": "3be27f0fd1e4dcaeca2180c76b96a420ba064ea2",
+    "served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
     "slot_active": [
-      "green"
+      "blue"
     ],
-    "provenance_pre_read_at": "2026-07-20T06:08:20.790Z",
-    "provenance_post_read_at": "2026-07-20T06:08:55.428Z",
+    "provenance_pre_read_at": "2026-07-20T06:25:56.524Z",
+    "provenance_post_read_at": "2026-07-20T06:26:28.030Z",
     "provenance_bracket_matched": true,
     "sweep_direction": "descending",
     "doc_target": {

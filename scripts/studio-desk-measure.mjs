@@ -259,7 +259,11 @@ function resolveOutPath(argv = process.argv.slice(2)) {
   if (raw === null) {
     const i = argv.indexOf('--out');
     if (i === -1) return null;
-    raw = argv[i + 1] ?? '';
+    if (i === argv.length - 1) {
+      die('--out was the last argument, with no path after it. ' +
+          'Pass the file to write: --out scripts/measurements/<name>.json');
+    }
+    raw = argv[i + 1];
     if (raw.startsWith('-')) {
       die(`--out was followed by \`${raw}\`, which is another flag, not a path. ` +
           `Pass the file to write: --out scripts/measurements/<name>.json`);
@@ -270,7 +274,23 @@ function resolveOutPath(argv = process.argv.slice(2)) {
   return path.resolve(process.cwd(), raw);
 }
 
-const OUT_PATH = resolveOutPath();
+/** Resolved at the ENTRYPOINT, not here, for two reasons that both bit:
+ *
+ *  1. `die` is a `const` declared ~80 lines below this point. Calling
+ *     `resolveOutPath()` at module scope put every one of its error paths in
+ *     `die`'s temporal dead zone, so a malformed `--out` produced a raw
+ *     `ReferenceError: Cannot access 'die' before initialization` stack trace
+ *     instead of the named, one-line failure it carefully composed. That is the
+ *     same class of defect as D130 — the instrument failing in a shape nobody
+ *     can read — reintroduced by the fix for it.
+ *  2. Parsing `process.argv` at module scope couples IMPORT to the importer's
+ *     command line. This file is deliberately importable (the provenance-compare
+ *     path has no browser in it); an importer whose own argv happened to carry a
+ *     bad `--out` would have died on `import`.
+ *
+ *  Resolution still happens BEFORE `main()`, so a bad path is rejected in
+ *  milliseconds rather than after a ~30-60s authenticated sweep (D115). */
+let OUT_PATH = null;
 
 /** Function, not a const string: it interpolates DEFAULT_DOC, which is declared
  *  below this point and would be in its temporal dead zone at module init. */
@@ -2159,9 +2179,14 @@ if (INVOKED_DIRECTLY && (process.argv.includes('--help') || process.argv.include
 }
 
 if (INVOKED_DIRECTLY) {
-  main().catch((err) => {
-    process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
-    process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
-    process.exit(1);
-  });
+  // `resolveOutPath` runs INSIDE this chain so a malformed `--out` lands in the
+  // same handler as every other MeasureError — one failure shape, by name.
+  Promise.resolve()
+    .then(() => { OUT_PATH = resolveOutPath(); })
+    .then(main)
+    .catch((err) => {
+      process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
+      process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
+      process.exit(1);
+    });
 }
