@@ -809,6 +809,63 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   end
 
   @doc """
+  The Tier-2 ladder (charter D148/D151): the same table, plus the one input
+  the desk was missing — whether the user SUMMONED the Document inspector.
+
+  Additive by arity, not by edit. Elixir dispatches `/5` separately from
+  `/4`, so the five clauses above are unreachable from here except through
+  the explicit delegation in the fall-through clause. That is the whole
+  design: `inspector_open? == false` is `/4` VERBATIM in every one of the
+  40 cells, and exactly one cell family moves when it is true.
+
+  The moving cell — `"standard"` with a document open and the inspector
+  summoned — runs the ladder step the epic's Vision declared and never
+  shipped: the nav rail yields so the inspector can dock IN FLOW instead of
+  overlaying the prose. The rule is the `"narrow"`-with-editor rule reused
+  verbatim: every pane `:hidden` except the LAST, which survives as a 44px
+  `:strip` back affordance. Measured at viewport 1024, this takes
+  `panes.visible_pane_widths_px` from `[44, 260]` to `[44]`
+  (`scripts/measurements/spd-visible-table-2026-07-20.json`), so panel goes
+  720 -> 980px, surface border-box 680, gutter 80, content 600. Divided by
+  each face's OWN probe-derived advance at 18px: 60.00ch resolved Iowan Old
+  Style (10.0000 px/ch), 54.31ch forced Georgia (11.0469 px/ch), 65.42ch
+  forced Source Serif 4 (9.1719 px/ch). The cell that ships today is
+  378.958px = 37.90 / 34.30 / 41.32ch on those same three faces, so the
+  honest headline is +220px against today's user-opened cell.
+
+  Forced Georgia's 54.31ch is an INHERITED shortfall — the default (not
+  user-opened) cell is already 54.22ch and this ladder adds 0.09ch. It is
+  owned by `spd-b42-georgia-default-shortfall-inflow-width`, not by this
+  clause, and D149 refuses the 292px and 260px dock trims that would chase
+  it here.
+
+  Every OTHER bucket delegates, and each refusal is a decision:
+
+    * `"wide"` — Tier 1 moves ZERO cells. At 1280/1440 the inspector
+      already docks with room to spare; yielding the rail there would spend
+      navigation to buy width nobody is short of.
+    * `"narrow"` with an editor — already the terminal state of this same
+      ladder (D35). There is nothing left to yield.
+    * `"narrow"` / `"standard"` with NO editor — no document means no
+      Document inspector, so `inspector_open?` cannot be true in a way that
+      renders. Delegation keeps the desk honest if it ever is.
+    * `"phone"` — the document already owns the viewport.
+
+  Needs no CSS. The overlay and its 55%-black scrim live entirely inside
+  `@container panel (max-width: 860px)` in root.html.heex; at panel 980 that
+  block stops matching, `.bp-doc-sidebar.is-open`'s `flex: 0 0 300px`
+  returns, and the scrim `::after` structurally cannot render.
+  """
+  @spec display_state(non_neg_integer(), pos_integer(), boolean(), String.t(), boolean()) ::
+          :full | :strip | :hidden
+  def display_state(idx, num_panes, true, "standard", true) do
+    if idx == num_panes - 1, do: :strip, else: :hidden
+  end
+
+  def display_state(idx, num_panes, has_editor?, bucket, _inspector_open?),
+    do: display_state(idx, num_panes, has_editor?, bucket)
+
+  @doc """
   Convert a Structure node's children into pane items. Dividers stay as
   `:divider`; plugin-contributed `:plugin_link` items render as
   `:plugin_link` rows the LV turns into outbound navigation (NOT
