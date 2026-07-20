@@ -82,7 +82,19 @@ die() { printf 'sentinel: %s\n' "$*" >&2; exit 2; }
 # ── the guard on the guard ───────────────────────────────────────────────────
 # A sentinel whose own floor can be dialled down is a rubber stamp with extra
 # steps. Loosening either leg is a hard stop, not a warning.
+#
+# Both legs are validated as integers FIRST. `[ abc -lt 2300 ]` is a bash error
+# that evaluates FALSE, so a non-numeric floor would slip past the comparison
+# below and then silently disable leg (i) at the comparison in take_sample —
+# the exact bypass this function exists to prevent. Same for the cadence knobs:
+# a non-numeric --max-samples makes `[ 1 -le abc ]` error, the watch loop never
+# executes, and the run reports a STAND-DOWN it never measured.
 check_predicate_integrity() {
+  is_int "$MEM_FLOOR_MIB" || die "PDS_SENTINEL_MEM_FLOOR_MIB='$MEM_FLOOR_MIB' is not an integer. The predicate is not evaluable."
+  is_int "$SWAP_CEIL_KB"  || die "PDS_SENTINEL_SWAP_CEIL_KB='$SWAP_CEIL_KB' is not an integer. The predicate is not evaluable."
+  is_int "$INTERVAL"      || die "--interval / PDS_SENTINEL_INTERVAL='$INTERVAL' is not an integer."
+  is_int "$MAX_SAMPLES"   || die "--max-samples / PDS_SENTINEL_MAX_SAMPLES='$MAX_SAMPLES' is not an integer."
+  [ "$MAX_SAMPLES" -ge 1 ] || die "--max-samples must be >= 1; '$MAX_SAMPLES' would report a stand-down with zero draws taken."
   if [ "$MEM_FLOOR_MIB" -lt "$MEM_FLOOR_LAW" ]; then
     die "refusing to run: PDS_SENTINEL_MEM_FLOOR_MIB=$MEM_FLOOR_MIB is BELOW the D193 floor of $MEM_FLOOR_LAW MiB. The predicate tightens only."
   fi

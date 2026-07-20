@@ -155,6 +155,9 @@ AND THE TWO LEGS PULL IN OPPOSITE DIRECTIONS. This is the part that is not a
 scheduling problem:
 
   Pearson r (MemAvailable_MiB vs beam VmSwap_kB) = +0.677 over n=61
+    ^ the r is POSITIVE and the legs are still opposed: leg (i) wants mem HIGH
+      and leg (ii) wants VmSwap LOW, so a positive r between the QUANTITIES is
+      exactly an anti-correlation between the two legs' SATISFACTION.
   mean MemAvailable when VmSwap <  200000 kB (n=14):  2080 MiB
   mean MemAvailable when VmSwap >= 200000 kB (n=47):  2515 MiB
   samples satisfying BOTH leg (i) and leg (ii):       0 of 61
