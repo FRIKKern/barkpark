@@ -519,6 +519,27 @@ const accountSessions = [
   { id: "sess_cli", user_agent: "barkpark-cli/0.9", ip_address: "84.212.31.7", last_used_at: tMinus(2 * 86400), current: false },
 ];
 
+// GR63/GR76 — the TALL shape. Two sessions (above) is the SHORT shape, which was
+// never broken; NINE is the shape that broke on live, where the modal grew past
+// the viewport and stranded Log out / Revoke all below the fold. Same shape as
+// __app.test.mjs's TALL_SESSIONS fixture.
+//
+// Honest about what this scenario proves: at the harness's 1000px window height
+// nine session rows FIT, so a shot of this scenario DOCUMENTS the tall anatomy —
+// it does not by itself prove the overflow behaviour. The scroll containment
+// that fixes the real break is pinned by the GR63 node test, not by this PNG.
+// (ip_address is still on every row: the wire shape is unchanged, the SPA just
+// refuses to draw it — GR81.)
+const accountSessionsTall = Array.from({ length: 9 }, (_, i) => ({
+  id: "sess_tall_" + i,
+  user_agent: i === 0
+    ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/126.0"
+    : "barkpark-cli/0.9",
+  ip_address: "84.212.31." + (7 + i),
+  last_used_at: tMinus((i + 1) * 3600),
+  current: i === 0,
+}));
+
 // ── me / subscription helpers ────────────────────────────────────────────────
 // onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
 // vocabulary is CLOSED — subscription | instance | published_doc — and the
@@ -2457,6 +2478,34 @@ export const SCENARIOS = {
       ],
     },
   },
+  // The ZERO-STAGING console: nothing is registered on the staging channel and
+  // the warm pool is empty. Both are DESIGNED states, not errors, and both are
+  // states prod is genuinely in today — which is exactly why they deserve a shot
+  // rather than an assumption. The gate sentence here is the THIRD one (GR50):
+  // Registry.staging_gate_open?/0 fails OPEN on an empty staging list, so "open"
+  // alone is not a vouch and the copy must say there is nothing ahead of prod.
+  "operator-zero-staging": {
+    label: "Operator console — zero staging boxes and an empty warm pool: the gate is open but vouches for nothing",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      operatorAutoupdate: { halted: false },
+      operatorFleet: {
+        barkparks: [
+          { id: "5b2c1e00-0000-4000-8000-0000000000e1", name: "acme-prod", channel: "prod", update_state: "current", autoupdate_triggered_at: null },
+          { id: "5b2c1e00-0000-4000-8000-0000000000e2", name: "beta-prod", channel: "prod", update_state: "current", autoupdate_triggered_at: null },
+        ],
+        staging_gate_open: true,
+      },
+      operatorWarmPool: { ready: 0 },
+      operatorDeliveries: [],
+    },
+  },
   // FAIL-CLOSED (GR49): registering "operator" in VIEWS also made init()'s route
   // validator accept a deep-linked #operator for ANYBODY, so a non-operator who
   // types the hash must be BOUNCED to Overview — the sidebar gate alone is not
@@ -2508,6 +2557,22 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       accountSessions: accountSessions,
+    },
+  },
+  // GR76 (folds gr-backlog-tall-modal-scenario). shoot.sh reaches the account
+  // modal by the "account-modal" NAME PREFIX, so this scenario is auto-covered
+  // with zero harness change — do NOT teach shoot.sh about it.
+  "account-modal-tall": {
+    label: "Account modal — the NINE-session shape (the one that broke on live); escape hatches sit below the list",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessionsTall,
     },
   },
   "account-modal-2fa-badcode": {
@@ -2874,9 +2939,25 @@ export function route(name, method, path) {
   if (p === "/v1/notifications/channels" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
   if (p === "/v1/notifications/events" && method === "PUT") return { status: 200, body: { settings: d.notifSettings || {} } };
   if (p === "/v1/notifications/test" && method === "POST") return { status: 202, body: { ok: true } };
+  // GR79: the delivery log filters and pages SERVER-side, so the harness models
+  // the query params too — otherwise a "filtered" scenario would render the
+  // unfiltered fixture and the round-trip claim would be untested. Mirrors
+  // notifications.ex exactly: maybe_delivery_eq is an equality match that
+  // IGNORES an empty string, and maybe_delivery_before is strictly-older on
+  // inserted_at over a newest-first list.
   if (p === "/v1/notifications/deliveries" && method === "GET") {
     if (d.notifDeliveriesError) return { status: 500, body: { error: "internal" } };
-    return { status: 200, body: { deliveries: d.notifDeliveries || [] } };
+    const qs = new URLSearchParams(String(path || "").split("?")[1] || "");
+    const eq = (row, field) => {
+      const want = qs.get(field);
+      return !want ? true : String(row[field] || "") === want;
+    };
+    const before = qs.get("before");
+    const rows = (d.notifDeliveries || []).filter((row) =>
+      eq(row, "channel") && eq(row, "status") && eq(row, "event") &&
+      (!before || String(row.inserted_at || "") < before));
+    const limit = Math.min(Number(qs.get("limit")) || 50, 200);
+    return { status: 200, body: { deliveries: rows.slice(0, limit) } };
   }
   // G-06 MEMBERS: the roster + invitations reads. Team-scoped under /v1/teams/:id.
   // A scenario carries `members`/`invitations` fixtures; absent → honest empty

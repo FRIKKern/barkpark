@@ -255,6 +255,36 @@ const EXPECTATIONS = {
       assert.ok(!html.includes('id="a2f-otp"'), "the off state must not draw the enroll form");
     },
   },
+  "account-modal-tall": {
+    what: "the NINE-session account modal — every row rendered, the escape hatches still present BELOW the list, no IP anywhere",
+    check(reg, hooks) {
+      const sessions = SCENARIOS["account-modal-tall"].data.accountSessions;
+      assert.equal(sessions.length, 9, "the fixture must carry the tall shape, not the two-row short one");
+      const rows = sessions.map((s) => hooks.sessionRowHtml(s)).join("");
+      assert.equal((rows.match(/class="session-row"/g) || []).length, 9, "nine session rows render");
+      assert.equal((rows.match(/session-revoke/g) || []).length, 8,
+        "the current device is never self-revokable; the other eight are");
+      // GR81: the fixture still SENDS an ip_address on every row; the panel
+      // refuses to draw it, because on live every one of them is 172.18.0.1.
+      assert.ok(!/84\.212\.31\./.test(rows), "no session IP is rendered");
+
+      // Splice the rows in where loadSessions puts them, then pin that the
+      // lockout-bearing controls survive at the bottom of a tall modal.
+      hooks.openModal(hooks.accountModalHtml(
+        hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal-tall"].data.me)));
+      const shell = reg.get("modal-body").innerHTML || "";
+      const html = shell.replace(/(<div id="sessions-box"[^>]*>)[\s\S]*?(<\/div>)/, "$1" + rows + "$2");
+      for (const id of ["sessions-revoke-all", "modal-logout"]) {
+        assert.ok(html.includes('id="' + id + '"'), "the tall modal keeps id=" + JSON.stringify(id));
+      }
+      const lastRow = html.lastIndexOf("session-row");
+      assert.ok(html.indexOf('id="modal-logout"') > lastRow,
+        "Log out sits BELOW the whole session list — the anatomy that stranded it on live");
+      // Honest about the limit: at the harness's 1000px height nine rows FIT, so
+      // this documents the tall shape rather than proving overflow containment.
+      assert.ok(html.includes(">Close<") && html.includes(">Log out<"), "the footer survives the tall list");
+    },
+  },
   "account-modal-2fa-badcode": {
     what: "enrollment rejected — 422 invalid_otp renders INLINE in the .form-error grammar, the form survives, and no toast fires",
     check(reg, hooks) {
@@ -515,11 +545,16 @@ const EXPECTATIONS = {
     excludes: ["Approve this sign-in?", "Too many attempts", "expired or was already used"],
   },
   "activate-confirm": {
-    what: "the confirm screen naming the requesting machine + Approve/Deny",
+    what: "the confirm screen naming the requesting machine + Approve/Deny, with the (always-172.18.0.1) IP suppressed",
     container: "activate-body",
-    includes: ["Approve this sign-in?", "bp on nimbus.local", "203.0.113.7",
+    includes: ["Approve this sign-in?", "bp on nimbus.local",
       'id="activate-approve"', 'id="activate-deny"'],
-    excludes: ["Too many attempts", "expired or was already used", "Unknown device"],
+    // GR81: the fixture STILL sends an ip_address (the wire shape is unchanged);
+    // the screen refuses to draw it, because in prod that field is the Docker
+    // bridge gateway for every device and so cannot answer "is this machine
+    // mine?". Revert with gr-bl-peer-ip-container.
+    excludes: ["Too many attempts", "expired or was already used", "Unknown device",
+      "203.0.113.7", "IP address"],
   },
   "activate-gone": {
     what: "the expired/used dead-end offering a fresh-code retry",
@@ -1301,9 +1336,18 @@ const EXPECTATIONS = {
       assert.ok(html.includes("Event routing") && html.includes("set-matrix-grid"), "the routing matrix renders");
       assert.ok(html.includes("set-matrix-cell"), "matrix cells render as toggles");
       assert.ok(html.includes("Always sent to every enabled channel"), "the test row is stated as always-send, not a toggle");
-      // Delivery log: the async sub-mount populated the last-50 rows in the webhook
-      // grammar (mono recipient + toned status pill), with no fake filter UI.
-      assert.ok(html.includes("Delivery log") && html.includes("last 50"), "the delivery-log section frames the last 50");
+      // Delivery log: the async sub-mount populated the rows in the webhook
+      // grammar (mono recipient + toned status pill). GR79: the filter panel is a
+      // REAL server round-trip now, so the section must SAY the filters search the
+      // whole log (the old copy promised the last 50 and disowned filtering), and
+      // both filter axes must render in the shared .actfilter-chip grammar.
+      assert.ok(html.includes("Delivery log"), "the delivery-log section renders");
+      assert.ok(html.includes("Filters run on the server"), "the section states that filtering is server-side");
+      assert.ok(!html.includes("Filtering isn't available yet"), "the disowning sentence is gone");
+      assert.ok(html.includes('data-notif-del-axis="channel"') && html.includes('data-notif-del-axis="status"'),
+        "both chip axes render");
+      assert.ok(html.includes('id="notif-del-event"'), "the free-text event filter renders (event is not a closed vocabulary)");
+      assert.ok(html.includes("actfilter-chip is-active"), "each axis lights its own active chip");
       const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
       assert.ok(log.includes("wh-del-row"), "the log renders rows in the webhook-deliveries grammar");
       assert.ok(log.includes("wh-del-status--danger"), "a failed delivery reads danger-toned");
@@ -1544,6 +1588,28 @@ const EXPECTATIONS = {
       const digest = reg.get("op-digest-body").innerHTML || "";
       assert.ok(digest.includes("smtp: connection timed out"), "the failed send carries its verbatim error");
       assert.ok(digest.includes("Sent") && digest.includes("Failed"), "both outcomes render");
+    },
+  },
+  "operator-zero-staging": {
+    what: "Operator console (zero staging, empty pool) — the gate is open but vouches for NOTHING, and an empty pool is a designed state",
+    check(reg) {
+      assert.equal(reg.get("view-operator").hidden, false, "the Operator view renders for an operator");
+      const canary = reg.get("op-canary-body").innerHTML || "";
+      // GR50's THIRD gate sentence: open-because-empty is not open-because-vouched.
+      assert.ok(canary.includes("no staging instance is registered"),
+        "an empty staging list must NOT read as a green vouch");
+      assert.ok(!canary.includes("a staging instance is current on the newest release"),
+        "the vouching sentence must never fire without a staging box");
+      assert.ok(!canary.includes("closed"), "the gate is genuinely open — it just guarantees nothing");
+      for (const name of ["acme-prod", "beta-prod"]) assert.ok(canary.includes(name), "the prod queue still renders " + name);
+      // Empty warm pool: the designed-state sentence, never an error, never a bar.
+      const warm = reg.get("op-warm-body").innerHTML || "";
+      assert.ok(warm.includes("The pool is empty right now"), "an empty pool reads as a designed state");
+      assert.ok(!warm.includes("unavailable"), "an empty pool is never reported as unreadable");
+      assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar, no invented denominator");
+      // And the digest is honestly empty rather than absent.
+      const digest = reg.get("op-digest-body").innerHTML || "";
+      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty digest renders");
     },
   },
   "operator-denied": {

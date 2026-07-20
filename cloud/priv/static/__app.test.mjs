@@ -4114,7 +4114,14 @@ test("renderActivateConfirm: names the requesting machine + explicit Approve/Den
     const html = dom.body();
     assert.ok(html.includes("Approve this sign-in?"));
     assert.ok(html.includes("bp on nimbus.local"), "names the device");
-    assert.ok(html.includes("203.0.113.7"), "shows the requesting IP");
+    // GR81: the IP is SUPPRESSED even when the server sends one. Every inspect
+    // body carries the Docker bridge gateway (the control plane is containerized
+    // and trust_forwarded_ip only honours X-Forwarded-For from a loopback peer),
+    // so the value is identical for every device and cannot answer the only
+    // question this screen asks. This assertion is the tripwire on the revert:
+    // when gr-bl-peer-ip-container lands a real per-client peer IP, flip it back.
+    assert.ok(!html.includes("203.0.113.7"), "the fixture IP is not rendered");
+    assert.ok(!html.includes("IP address"), "no IP row even when the server sent one");
     assert.ok(html.includes('id="activate-approve"'));
     assert.ok(html.includes('id="activate-deny"'));
   });
@@ -7402,14 +7409,72 @@ test("I-01 coalesceEntries by target: same target folds, unrelated targets never
   assert.equal(split.length, 2, "adjacent but different targets never merge");
 });
 
-test("I-01 activityFiltersHtml: the server-true target_type chips, All active by default", () => {
+test("I-01 activityFiltersHtml: three server-true axes, each with exactly one active chip", () => {
   const html = hooks.activityFiltersHtml();
-  assert.ok(html.includes('data-actfilter=""'), "the All chip");
+  assert.ok(html.includes('data-actfilter-axis="target_type"'), "the target_type axis");
   assert.ok(html.includes('data-actfilter="barkpark"'), "Instances → target_type=barkpark");
   assert.ok(html.includes('data-actfilter="site"'), "Sites → target_type=site");
-  // Exactly one active chip; no actor/verb filter is offered (server has none).
-  assert.equal((html.match(/actfilter-chip is-active/g) || []).length, 1, "one chip active");
-  assert.ok(!/actor|verb/i.test(html), "no actor/verb filter UI — the backend has no such params");
+  // GR80 leg 2: the two axes the server gained. Both are real query params on
+  // GET /v1/audit, applied inside the Ecto query — never a client-side sieve.
+  assert.ok(html.includes('data-actfilter-axis="action_prefix"'), "the action_prefix axis");
+  assert.ok(html.includes('data-actfilter="site.deploy"'), "Deploys → action_prefix=site.deploy");
+  assert.ok(html.includes('data-actfilter-axis="actor_user_id"'), "the actor_user_id axis");
+  // Exactly one chip active PER AXIS — three axes, three "all" chips lit.
+  assert.equal((html.match(/actfilter-chip is-active/g) || []).length, 3, "one chip active per axis");
+  // Every chip is a STATIC per-branch class literal (never "actfilter-chip" +
+  // modifier) — the __css_check E3 discipline this row has carried since I-01.
+  assert.ok(!/actfilter-chip"\s*\+/.test(html), "no concat modifier leaked into a class");
+});
+
+test("GR80 leg 2: every action_prefix chip value is a real prefix of the closed audit vocabulary", () => {
+  // The server LIKE-matches '<prefix>%' with metacharacters escaped, so a prefix
+  // that no action starts with renders a permanently-empty feed that reads as a
+  // bug. These are the AuditEvent @actions nouns the chips claim.
+  const ACTIONS = ["site.deploy_requested", "webhook.created", "webhook.test_sent",
+    "member.invited", "token.minted", "subscription.activated"];
+  for (const f of hooks.activityActionFilters) {
+    if (f.prefix === null) continue;
+    assert.ok(ACTIONS.some((a) => a.startsWith(f.prefix)),
+      "action_prefix " + JSON.stringify(f.prefix) + " must prefix a real action");
+  }
+});
+
+test("GR80 leg 2: activityQuery sends every set axis and omits every unset one", () => {
+  const st = hooks.activityFilterState;
+  const reset = () => { st.target_type = null; st.actor_user_id = null; st.action_prefix = null; };
+  reset();
+  const bare = hooks.activityQuery(null);
+  assert.ok(!/target_type|actor_user_id|action_prefix|before/.test(bare), "unfiltered page one is bare: " + bare);
+
+  st.target_type = "site";
+  st.action_prefix = "site.deploy";
+  st.actor_user_id = "9f1c2d3e-0000-4000-8000-000000000001";
+  const filtered = hooks.activityQuery(null);
+  assert.ok(filtered.includes("&target_type=site"), filtered);
+  assert.ok(filtered.includes("&actor_user_id=9f1c2d3e-0000-4000-8000-000000000001"), filtered);
+  assert.ok(filtered.includes("&action_prefix=site.deploy"), filtered);
+
+  // Load more keeps every axis AND adds the keyset cursor — the filtered TRAIL
+  // pages, not one page of it.
+  const more = hooks.activityQuery("2026-07-19T10:00:00.000000Z");
+  assert.ok(more.includes("&action_prefix=site.deploy") && more.includes("&before=2026-07-19T10%3A00%3A00.000000Z"), more);
+  reset();
+});
+
+test("GR80 leg 2: the actor axis degrades to Everyone/Just me with no member list", () => {
+  const meEnv = { user: { id: "usr_ada", email: "ada@acme.com" } };
+  const bare = hooks.activityActorFilters(null, meEnv);
+  assert.equal(bare.map((f) => f.label).join("|"), "Everyone|Just me", "no members → the one actor we can name");
+  assert.equal(bare[1].id, "usr_ada");
+
+  // With members, the caller is still "Just me" (never listed twice) and the
+  // others read as their email local-part.
+  const full = hooks.activityActorFilters(
+    [{ user_id: "usr_ada", email: "ada@acme.com" }, { user_id: "usr_bob", email: "bob@acme.com" }], meEnv);
+  assert.equal(full.map((f) => f.label).join("|"), "Everyone|Just me|bob");
+  // A member with no email and no id degrades honestly rather than rendering blank.
+  const odd = hooks.activityActorFilters([{ user_id: "usr_zed" }, {}], meEnv);
+  assert.equal(odd.map((f) => f.label).join("|"), "Everyone|usr_zed");
 });
 
 // ── search-template W8: site theme-edit pure helpers ────────────────────────
@@ -8713,4 +8778,131 @@ test("G-04 notifPageHtml: admin composes every section; member gets read-only + 
 test("G-04 notifTransportLabel: the platform transport reads friendly", () => {
   assert.equal(hooks.notifTransportLabel("instance"), "Barkpark platform");
   assert.equal(hooks.notifTransportLabel("smtp"), "SMTP");
+});
+
+// ── GR80 leg 1: the two-factor challenge countdown rides the server ──────────
+
+test("GR80 leg 1: tfaRetryAfterSecs takes the server's number and rejects unusable ones", () => {
+  assert.equal(hooks.tfaRetryAfterSecs({ status: 429, data: { error: "rate_limited", retry_after: 37 } }), 37);
+  // A fractional 4.2s left still means the caller must wait 5.
+  assert.equal(hooks.tfaRetryAfterSecs({ data: { retry_after: 4.2 } }), 5);
+  assert.equal(hooks.tfaRetryAfterSecs({ data: { retry_after: "12" } }), 12, "a stringified number is still a number");
+  // Everything unusable falls back (null) rather than painting a button that
+  // re-enables instantly straight into the same 429.
+  for (const bad of [undefined, null, "", 0, -5, "soon", NaN, Infinity]) {
+    assert.equal(hooks.tfaRetryAfterSecs({ data: { retry_after: bad } }), null,
+      "retry_after " + JSON.stringify(String(bad)) + " must fall back");
+  }
+  assert.equal(hooks.tfaRetryAfterSecs({ data: {} }), null);
+  assert.equal(hooks.tfaRetryAfterSecs(null), null);
+});
+
+test("GR80 leg 1: the challenge 429 carries retryAfter; the constant is only the fallback", () => {
+  const withHint = hooks.twoFactorChallengeOutcome({ ok: false, status: 429, data: { error: "rate_limited", retry_after: 18 } });
+  assert.equal(withHint.state, "rate_limited");
+  assert.equal(withHint.retryAfter, 18, "the server's window drives the countdown");
+  const bare = hooks.twoFactorChallengeOutcome({ ok: false, status: 429, data: {} });
+  assert.equal(bare.state, "rate_limited");
+  assert.equal(bare.retryAfter, null, "no server hint → null, so the mount falls back to the constant");
+  // The fixed-window constant survives ONLY as that fallback.
+  assert.equal(hooks.twoFactorRateWaitS, 60);
+  // The card renders whatever seconds it is handed — the mount resolves the
+  // fallback once and feeds both the label and the ticker from the same number.
+  assert.match(hooks.twoFactorCardHtml({ rateLimited: true, waitSecs: 18 }), /Try again in 18s/);
+  assert.match(hooks.twoFactorCardHtml({ rateLimited: true }), /Try again in 60s/);
+});
+
+// ── GR80 leg 3: the webhook test-send verdict ────────────────────────────────
+
+test("GR80 leg 3: the test-send toast names the endpoint's real answer, and a non-2xx is an error", () => {
+  const ok = { last_status_code: 200, last_latency_ms: 84, status: "ok" };
+  assert.equal(hooks.testSendAccepted(ok), true);
+  assert.match(hooks.testSendToastBody(ok), /Test delivered/);
+  assert.match(hooks.testSendToastBody(ok), /in 84 ms/);
+  // A 500 is a delivered-but-rejected test: the request succeeded, the delivery
+  // did not, and the toast must not conflate them.
+  const bad = { last_status_code: 500, last_latency_ms: 12, status: "failed_giveup" };
+  assert.equal(hooks.testSendAccepted(bad), false);
+  assert.match(hooks.testSendToastBody(bad), /500/);
+  // An older instance that returns no verdict at all degrades honestly.
+  assert.equal(hooks.testSendToastBody({}), "Test payload delivered to the endpoint URL.");
+  assert.equal(hooks.testSendToastBody(null), "Test payload delivered to the endpoint URL.");
+});
+
+test("GR80 leg 3: the webhook action bar offers Send test, and no CLI chip for a verb bp lacks", () => {
+  const card = hooks.webhookCardHtml(
+    { id: "wh_1", url: "https://example.com/hook", active: true }, "acme", "production");
+  assert.match(card, /data-wh-test/, "the action bar carries the test-send affordance");
+  assert.match(card, />Send test</);
+  assert.ok(!/webhook test-send acme/.test(card), "no copy-as-CLI chip: bp cloud webhook has no test-send verb");
+  // The existing bar is intact — this is an addition, not a re-composition.
+  for (const hook of ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-deliveries", "data-wh-delete"]) {
+    assert.ok(card.includes(hook), "the bar keeps " + hook);
+  }
+});
+
+// ── GR79 leg 4: the delivery log is a server round-trip with a keyset cursor ──
+
+test("GR79: notifDeliveriesQuery sends every set filter and pages with before", () => {
+  const st = hooks.notifDeliveryFilterState;
+  const reset = () => { st.channel = null; st.status = null; st.event = null; };
+  reset();
+  assert.equal(hooks.notifDeliveriesQuery(null), "/v1/notifications/deliveries?limit=50",
+    "an unfiltered first page sends nothing but the limit");
+
+  st.channel = "discord";
+  st.status = "failed";
+  assert.equal(hooks.notifDeliveriesQuery(null),
+    "/v1/notifications/deliveries?limit=50&channel=discord&status=failed");
+
+  // Load more carries EVERY axis plus the cursor: it walks the filtered trail,
+  // not a filtered slice of the newest page.
+  assert.equal(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z"),
+    "/v1/notifications/deliveries?limit=50&channel=discord&status=failed&before=2026-07-18T09%3A00%3A00.000000Z");
+
+  // A free-text event is encoded, never interpolated raw.
+  reset();
+  st.event = "instance down & out";
+  assert.match(hooks.notifDeliveriesQuery(null), /&event=instance%20down%20%26%20out/);
+  reset();
+});
+
+test("GR79: the keyset cursor is the OLDEST rendered row, and a stamp-less row stops paging", () => {
+  const rows = [
+    { id: "d1", inserted_at: "2026-07-19T10:00:00.000000Z" },
+    { id: "d2", inserted_at: "2026-07-18T09:00:00.000000Z" },
+  ];
+  assert.equal(hooks.notifDeliveriesCursor(rows), "2026-07-18T09:00:00.000000Z",
+    "server orders inserted_at DESC, so the oldest rendered row is last");
+  assert.equal(hooks.notifDeliveriesCursor([]), null);
+  assert.equal(hooks.notifDeliveriesCursor(null), null);
+  assert.equal(hooks.notifDeliveriesCursor([{ id: "d3" }]), null,
+    "no stamp → no cursor → paging STOPS rather than silently restarting at page one");
+});
+
+test("GR79: an empty FILTERED log never claims nothing was ever delivered", () => {
+  assert.match(hooks.notifDeliveriesBodyHtml([], false), /No notifications have been delivered yet/);
+  const filtered = hooks.notifDeliveriesBodyHtml([], true);
+  assert.match(filtered, /No sends match these filters/);
+  assert.ok(!/No notifications have been delivered yet/.test(filtered),
+    "the unfiltered sentence would be FALSE here — it is the exact lie a filter panel invites");
+  assert.match(hooks.notifDeliveriesBodyHtml([{ recipient: "a@b.c", status: "sent" }], true), /wh-del-card/);
+});
+
+test("GR79: the filter chips are static per-branch class literals in the shared grammar", () => {
+  const html = hooks.notifDeliveryFiltersHtml();
+  assert.match(html, /data-notif-del-axis="channel"/);
+  assert.match(html, /data-notif-del-axis="status"/);
+  // Both vocabularies are the Delivery schema's own — nothing invented.
+  for (const v of ["email", "discord", "slack", "telegram", "pushover", "webhook"]) {
+    assert.ok(html.includes('data-notif-del-value="' + v + '"'), "channel " + v + " is a real @channels member");
+  }
+  for (const v of ["sent", "failed", "pending"]) {
+    assert.ok(html.includes('data-notif-del-value="' + v + '"'), "status " + v + " is a real @statuses member");
+  }
+  // event is FREE TEXT server-side, so it must not be faked as a closed chip row.
+  assert.match(html, /id="notif-del-event"/);
+  // E3 discipline: full literal heads only, exactly two lit chips (one per axis).
+  assert.equal((html.match(/actfilter-chip is-active/g) || []).length, 2);
+  assert.ok(!/actfilter-chip"\s*\+/.test(html), "no concat modifier leaked into a class");
 });
