@@ -2013,6 +2013,81 @@
       .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
       content: none;
     }
+
+    /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
+       At `narrow` and `phone` the user-opened inspector stops being a panel
+       beside the document and becomes a DESTINATION over it, at the full width
+       of the content pane. Below 900px the dock-vs-overlay argument is closed
+       by measurement, not taste: D113 measured `.editor-panel`'s left edge at
+       44px at EVERY sub-wide width — the rail has already yielded everything it
+       has — and a 300px dock at viewport 800 leaves the reader 376px against
+       the overlay's measured 396.9px. The dock is WORSE. There is no shape at
+       these widths in which the inspector and the document share the pane and
+       the document survives, so the desk stops pretending: one of them is on
+       screen at a time, and the user picks which.
+
+       AND SO DIMMING IS ABOLISHED, NOT TUNED. The shipped defect D127 names is
+       INDETERMINACY, not a disliked number: a 55% scrim over the whole content
+       box dims the prose rather than hiding it, so the reader is left in a
+       half-suspended read that is neither a clean mode nor a viable dock. A
+       panel that covers the pane completely needs no scrim to say it is on
+       top — it says so by being the only thing there. The scrim is therefore
+       switched OFF for this state (below), not lightened: nowhere does this
+       desk end up with prose at 55% black under a panel.
+
+       WHY THIS IS A NEW SELECTOR AND NOT AN EDIT (D91/b29). The bucket-aware
+       default above carries `:not([data-user-opened])` on both its geometry
+       rule and its scrim guard, so neither of them fires for the state below —
+       the panel the user explicitly asked for is exactly what they carve out.
+       This rule is the other half of that carve-out, finally saying what the
+       asked-for panel DOES below `wide`, and `data-user-opened` is already
+       server-stamped from the `sidebar_user_opened` assign (components.ex), so
+       the signal it keys on is in the DOM at first paint.
+
+       WHY IT DECLARES ITS OWN GEOMETRY rather than leaning on the
+       `@container panel (max-width: 860px)` overlay block above: that block is
+       a PANE-width query and `narrow` runs to 1023px, so a desk whose list
+       panes have all collapsed to 44px strips presents a pane wider than 860px
+       inside the narrow bucket and the overlay rule does not fire at all. The
+       bucket is the contract here, so the bucket rule carries the whole shape.
+
+       SCOPE IS LOAD-BEARING, same as D92's. Bucket-keyed on `narrow` and
+       `phone` only: nothing here can match at `wide` (epic criterion 2's own
+       band, where the inspector docks and costs nothing) or at `standard`,
+       whose answer is a different slice's to give.
+
+       NO MOTION, deliberately. A fade would spend its whole duration painting
+       a translucent panel over live prose — a transient re-run of the exact
+       dimming this rule exists to abolish — and a slide would plant a
+       `transform` containing block inside the pane whose containment hazard has
+       its own tripwire file (`editor_panel_containment_test.exs`). A mode
+       either shows the document or it does not; the switch between them is
+       instant, and no transition or animation property is introduced here. */
+    html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened],
+    html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened] {
+      position: absolute;
+      inset: 0;
+      width: auto;
+      z-index: 5;
+      /* The pane is fully covered, so the two chrome cues that said "there is
+         a document to my left" are now lies: nothing shows through to cast a
+         shadow onto, and nothing sits beside the border. */
+      border-left: 0;
+      box-shadow: none;
+    }
+    /* Dimming abolished for the summoned state. The overlay scrim is a
+       `::after` on `.editor-with-preview` keyed on `:has(.bp-doc-sidebar.is-open)`,
+       and `.is-open` is true here — so without this the desk would dim a
+       document that is already completely covered, which is both pointless and
+       the half-suspended read D127 ruled a defect. `content: none` is the same
+       suppression idiom as the b29 scrim guard directly above (a `::after` with
+       no `content` generates no box at all — this is zero rendered scrims, not
+       a transparent one). Specificity (0,5,1) over the container rule's (0,3,1)
+       and later in source order, so it wins on both counts. */
+    html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
+    html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
+      content: none;
+    }
     .bp-doc-sidebar__head {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
