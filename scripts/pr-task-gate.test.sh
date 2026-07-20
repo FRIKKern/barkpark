@@ -6,19 +6,28 @@
 # Run: bash scripts/pr-task-gate.test.sh   (exit 0 = all green)
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+# Hard-exit on a failed cd: silently running from the wrong directory would make
+# every `bash "$GATE"` a "file not found" — which the harness would read as an
+# exit code, not as a broken run. A gate must never be able to go vacuously green.
+cd "$(dirname "$0")/.." || { echo "TEST HARNESS FAIL: cannot cd to the repo root" >&2; exit 99; }
 GATE="scripts/pr-task-gate.sh"
+[ -f "$GATE" ] || { echo "TEST HARNESS FAIL: $GATE not found from $PWD" >&2; exit 99; }
 
 fixtures="$(mktemp -d)"
-trap 'kill "${SRV_PID:-0}" 2>/dev/null; rm -rf "$fixtures"' EXIT
+# `wait` after the kill reaps the server so bash does not print a job-control
+# "Terminated: 15" line AFTER the passing summary — trailing scare-text on a
+# green run is how a gate teaches its readers to stop trusting its output.
+trap 'kill "${SRV_PID:-0}" 2>/dev/null; wait "${SRV_PID:-0}" 2>/dev/null; rm -rf "$fixtures"' EXIT
 
 # The gate GETs /v1/data/doc/production/task/<id>. Lay fixtures at that path so
 # a plain static file server answers exactly what the ledger would.
 mkdir -p "$fixtures/v1/data/doc/production/task"
-doc() { # doc <id> <lifecycle> <worker|->
-  local id="$1" lc="$2" w="$3"
-  local claim="null"
-  [ "$w" != "-" ] && claim="{\"worker\":\"$w\",\"epoch\":1}"
+doc() { # doc <id> <lifecycle> <worker|-> [closed_by]
+  local id="$1" lc="$2" w="$3" cb="${4:--}"
+  local claim="null" fields=""
+  [ "$w"  != "-" ] && fields="\"worker\":\"$w\",\"epoch\":1"
+  [ "$cb" != "-" ] && fields="${fields:+$fields,}\"closed_by\":\"$cb\""
+  [ -n "$fields" ] && claim="{$fields}"
   cat > "$fixtures/v1/data/doc/production/task/$id" <<EOF
 {"result":{"_id":"$id","_type":"task","lifecycle_status":"$lc","claim":$claim}}
 EOF
@@ -26,6 +35,20 @@ EOF
 doc active   in_progress fable-tob
 doc openone   open        -
 doc claimless in_progress -
+# Non-in_progress lifecycles WITH a worker present. Without these, the gate's
+# lifecycle discrimination and its claim.worker check are indistinguishable on
+# the fixture set: the only non-in_progress case was `openone`, whose claim is
+# null, so it is really caught by the worker check — and deleting the lifecycle
+# check entirely left the harness fully GREEN. These two are the only fixtures
+# that can tell the two checks apart. Do not remove them.
+doc donetask "done"      fable-tob
+doc canctask cancelled fable-tob
+# The done path. `doneclosed` went through the claim/close engine (claim carries
+# closed_by) and is the SUCCESS case the gate used to red. `donebare` has claim:
+# null — done but never worked — and `donetask` above was hand-flipped to done
+# while its claim still only carries a worker. Only the first is task-backed.
+doc doneclosed "done" fable-tob fable-tob
+doc donebare   "done" -
 # 404 fixture: an id with no file → http.server returns 404 for /task/ghost
 # (missing.json below is a malformed-JSON body served with 200 to test parsing)
 printf 'not json{' > "$fixtures/v1/data/doc/production/task/garbled"
@@ -71,6 +94,12 @@ check "no task ref fails"           1 'TASK_ID='
 check "wrong worker fails"          1 'TASK_ID=active EXPECTED_WORKER=nobody'
 check "right worker passes"         0 'TASK_ID=active EXPECTED_WORKER=fable-tob'
 check "unreachable ledger neutral"  2 'TASK_ID=active LEDGER_BASE=http://127.0.0.1:1'
+check "done+worker, no closed_by"   1 'TASK_ID=donetask'
+check "cancelled+worker fails"      1 'TASK_ID=canctask'
+check "done+closed_by passes"       0 'TASK_ID=doneclosed'
+check "done with no claim fails"    1 'TASK_ID=donebare'
+check "done+closed_by right worker" 0 'TASK_ID=doneclosed EXPECTED_WORKER=fable-tob'
+check "done+closed_by wrong worker" 1 'TASK_ID=doneclosed EXPECTED_WORKER=nobody'
 
 echo "---"
 echo "passed: $pass  failed: $fail"

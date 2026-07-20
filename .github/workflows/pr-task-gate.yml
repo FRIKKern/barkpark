@@ -31,6 +31,19 @@ on:
   pull_request:
     # No paths filter: any change needs a task, so every PR is checked. The job
     # is cheap (one HTTPS GET), and the merge-base cutoff grandfathers old PRs.
+    #
+    # `edited` is load-bearing: without it the default set is opened/synchronize/
+    # reopened, so a PR that failed for a missing or wrong `Task:` trailer stays
+    # STICKY-red after the body is corrected. The workaround seen in the wild was
+    # closing and reopening the PR. Both escape hatches are safe on `edited`: the
+    # merge-base cutoff step has no `if:` and recomputes `enforced` fresh from
+    # base.sha on every trigger, and the hotfix auto-file is keyed on the PR
+    # number via createIfNotExists, so re-firing cannot duplicate it.
+    #
+    # Residue, named not hidden: adding a `hotfix!` LABEL after open emits a
+    # `labeled` event, not `edited`, so the hotfix lane keeps the same non-refire
+    # property. Widening to `labeled` is deliberately out of scope here.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
