@@ -109,7 +109,7 @@ const ALLOW_PREFIXES = [
   // rules in app.css today — verified via `.<family>` grep before allowing.
   "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
   "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
-  "notice",                     // noticeHtml(): + (tone ? " notice-"+esc(tone) : "") (.notice / .notice-ok|warn|error)
+  "notice",                     // fleetRolloutBannerHtml(): + NOTICE_TONE_CLASS[tone] (.notice / .notice-ok|warn|error)
   "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
   "dep-current",                // + (rolledBack ? " dep-current--restored" : "") (.dep-current[--restored])
   "prov-overall",               // + state (.prov-overall rules)
@@ -126,6 +126,13 @@ const ALLOW_PREFIXES = [
   "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
   // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
   "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
+  // gr-p5r5-css-families: the three var-then-concat sites rewritten to inline
+  // concat, so the walker finally reads a literal head instead of "". These were
+  // never missing CSS — every composed class below has had a rule all along; the
+  // `var cls = …` form simply hid the site from the static walker.
+  "set-matrix-cell",               // notifMatrixCellHtml(): + (isDefault ? " set-matrix-cell--default" : "")
+  "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
+  "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -160,17 +167,21 @@ const ALLOW_HOOK_CLASSES = [
 // in styleguide.html or the app.css token blocks may be listed here: this epic
 // owns those, so their drift MUST hard-fail.
 const KNOWN_GAPS = [
-  // E2 — emitted class with no rule in app.css (author real styles or remove).
-  { file: "index.html", cls: "activate-screen", why: "activate view container; no .activate-screen rule (backlog: author or drop)" },
-  { file: "app.js", cls: "fleet-infra", why: "fleet infra column; no .fleet-infra rule (backlog: author or drop)" },
-  { file: "app.js", cls: "fresh-label", why: "freshness label; no .fresh-label rule (backlog: author or drop)" },
-  { file: "app.js", cls: "metrics-body", why: "metrics panel body; no .metrics-body rule (backlog: author or drop)" },
-  { file: "app.js", cls: "activate-rail", why: "activate step rail; no .activate-rail rule (backlog: author or drop)" },
-  { file: "app.js", cls: "bp-lc-hex", why: "lifecycle hex swatch; zero .bp-lc-* rules exist (backlog: author or drop)" },
-  { file: "app.js", cls: "notice-", why: "detector tail-fragment of noticeHtml()'s ' notice-'+tone concat; the real classes are notice/notice-ok|warn|error (backlog: rewrite the concat)" },
+  // gr-p5r5-css-families retired EIGHT of the nine entries that stood here: the
+  // six family E2s (all six now have authored rules in app.css), the phantom
+  // "notice-" E2 (fleetRolloutBannerHtml now emits whole class names), and the
+  // E3 head:"" entry (all THREE var-then-concat sites — notifMatrixCellHtml,
+  // freshnessBadge and usageMeterHtml's quota trailer — are inline-concat now).
   // E3 — dynamic class heads the static walker cannot classify (var-then-concat).
-  { file: "app.js", head: "", why: "two `var cls = …` then concat sites the static walker can't head-classify (backlog: inline-concat rewrite)" },
-  { file: "app.js", head: "bp-lc-", why: "lifecycle hex row builds `bp-lc-` + kind; zero .bp-lc-* rules exist (backlog: author or drop)" },
+  // The SOLE survivor, and it is NOT a missing-rule gap: .bp-lc-info|warn|ok|
+  // danger|hex all have rules now, but E3 is an ALLOW_PREFIXES MEMBERSHIP
+  // question, not a rule-existence one, so authoring the CSS clears the
+  // "bp-lc-hex" E2 and leaves this firing. Kept demoted rather than allowlisted
+  // deliberately: unlike every other allowlisted head, the composed suffix here
+  // is a REGEX CAPTURE from an arbitrary committed fixture file, so the closed
+  // role set (info|warn|ok|danger) is an assumption about that file's contents
+  // rather than a property of this code. Demoting keeps it printed on every run.
+  { file: "app.js", head: "bp-lc-", why: "coherenceFixtureToHtml paints regex-captured role words as `bp-lc-` + word; .bp-lc-* rules now exist, but the suffix set comes from fixture text, so this stays reported rather than allowlisted" },
 ];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line

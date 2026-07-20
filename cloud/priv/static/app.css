@@ -231,6 +231,40 @@ html[data-bp-theme="iris"][data-theme="dark"] {
 }
 /* END GENERATED: tokens */
 
+/* coherence-fixture legend chips (coherenceFixtureToHtml) — the committed TUI
+   golden text painted in the SAME lifecycle vocabulary as .bp-inst--* above, so
+   the terminal surface and the console speak one palette. The role words follow
+   the .notice tone-suffix grammar (role word → role token, no new colours); the
+   hex cell is .token-chip-shaped and carries a leading swatch of the literal
+   #rrggbb the fixture names. --hex is declared here with a safe default and
+   OVERRIDDEN inline per cell by coherenceFixtureToHtml — the default is what
+   makes the chip legible if that inline style is ever dropped. */
+.bp-lc-info { color: var(--info); }
+.bp-lc-warn { color: var(--warn); }
+.bp-lc-ok { color: var(--ok); }
+.bp-lc-danger { color: var(--danger); }
+.bp-lc-hex {
+  --hex: currentColor;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  color: var(--muted-text);
+}
+.bp-lc-hex::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--hex);
+}
+
 :root {
   /* GR7 alias bridge (GUI-remake wave 2): the shell vocabulary
      (--bg/--surface/--muted-surface/--text/--muted-text/--dim/--border), the
@@ -879,6 +913,10 @@ select.form-input {
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
 /* The mono metadata line: region · size · version · channel · autoupdate. */
 .fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
+/* fleetInfraLine — .fleet-meta's denser twin (region · size only), on the v4
+   instance card where the full region·size·version·channel·autoupdate line would
+   crowd the stat row. Same mono voice, one step quieter and one step tighter. */
+.fleet-infra { font-size: 11px; color: var(--dim); font-family: var(--mono); margin-top: 2px; }
 .fleet-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .fleet-version { font-size: 12px; color: var(--dim); font-family: var(--mono); }
 /* The inline update chip (v4 "vX available"). Orthogonal to the status pill —
@@ -910,6 +948,11 @@ select.form-input {
   border: 1px solid var(--border);
 }
 .fresh-badge .fresh-dot { width: 7px; height: 7px; border-radius: var(--pill); background: var(--dim); flex: 0 0 auto; }
+/* The badge's two texts are NOT peers: .fresh-label is the verdict word ("Live",
+   "Failed", "Not deployed") and .fresh-meta is the quiet trailer already dimmed
+   to .75. The label therefore takes the weight — and never wraps, so a long
+   trigger·when trailer can never break the verdict across two lines. */
+.fresh-badge .fresh-label { font-weight: 600; white-space: nowrap; }
 .fresh-badge .fresh-meta { color: var(--muted-text); opacity: .75; }
 .fresh-badge--up { color: var(--text); }
 .fresh-badge--up .fresh-dot { background: var(--ok); }
@@ -2384,6 +2427,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .prov-overall-fill { transition: none; }
 }
 
+/* ===================== /activate DEVICE LOGIN (bp-login-ux W1) =====================
+   The device-auth screen borrows the /new shell wholesale (.new-screen +
+   .new-topbar + .new-center + .new-body), so .activate-screen is the identity
+   hook that lets this flow diverge WITHOUT forking that shell. The one real
+   divergence: /new is a multi-step wizard whose column grows downward, while
+   /activate is a single short decision — top-aligned, a 3-row confirm card is
+   left stranded against 100vh of empty page. So this screen optically centres
+   its card instead (the bottom bias keeps it off dead-centre). */
+.activate-screen .new-center { align-items: center; padding-bottom: 72px; }
+
+/* The approve-screen fact rail. The .rail-row / .k / .v children are already
+   styled globally, so this is the WRAPPER only — .detail-rail's surface, border
+   and radius, at the tighter vertical padding a 3–4 row confirm panel wants (the
+   rows carry their own 8px, and .rail-row:first-of-type drops the top border). */
+.activate-rail {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 4px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
 /* ========================================================= C3 PROVISION TIMELINE
    ONE component, every mount (unified-provision-view): the instance-detail
    timeline renders the SAME .new-step rows as the /new progress screen — ring,
@@ -2781,6 +2846,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
+/* Rendered as the compound `fleet-body metrics-body`, so this is the metrics
+   DELTA on .fleet-body's column, not a second panel: the grid's own 12px rhythm
+   (panel gap and card gap agree) and a floor tall enough that the one-line
+   "Loading metrics…" state does not collapse the panel and then snap it taller
+   when the first grid paints. */
+.metrics-body { gap: 12px; min-height: 96px; }
 /* Aligned to the C10 .usage-card chrome so Metrics + Usage read as one system:
    the same radius/padding/shadow, the label + headline value on one row, and a
    full-width area-filled hero sparkline. */
@@ -3238,7 +3309,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border: 1px solid var(--border);
   color: var(--text);
 }
-.vf-chip--pass { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+/* GR77/GR90 — the ember pass/fail wash collision, fixed on a HUE-INDEPENDENT
+   axis. Both washes used to derive from --ok-soft / --danger-soft, and --ok-hsl
+   is mapped 1:1 to --primary-hsl for EVERY identity while --danger-hsl is pinned
+   at hue 0. Under ember the brand sits ~19° from red where the other four sit
+   150°+ away, so the two washes converged: sampled RGB distance 6.1 (light) /
+   8.3 (dark) against 19.5–48.2 elsewhere — a 2.5–6x outlier, and the one defect
+   the ~1,585-shot accent matrix found.
+   The fix separates the pair on ALPHA, not hue, so it works identically in all
+   five identities and gets no worse where hue already separates. --ok-hsl is NOT
+   touched (it must keep tracking the brand) and the FAIL wash is NOT touched
+   either — deepening it was measured and rejected: it does separate (ember-light
+   6.1 → 45.9 at 0.28) but it drags the --danger glyph from 4.71:1 to 3.71:1,
+   and because __css_check measures the --danger-soft TOKEN rather than this
+   rule, that regression would have shipped under a green gate.
+   So the PASS chip becomes the quiet one instead — the honest reading anyway: a
+   passing check should not shout, and the fail chip keeps its full weight. The
+   spread across all ten theme-states collapses from [6.1 … 48.2] to
+   [27.7 … 42.5]; ember-light goes 6.1 → 27.7 and ember-dark 8.3 → 32.4. The
+   border keeps the tone at full 0.28 so the pass chip stays an OBJECT, not a
+   tint (measured 15.6–21.9 from bare --surface). */
+.vf-chip--pass { background: hsl(var(--ok-hsl) / 0.07); border-color: hsl(var(--ok-hsl) / 0.28); }
 .vf-chip--fail { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
 .vf-chip--unknown { background: var(--muted-surface); color: var(--muted-text); }
 .vf-chip-glyph { flex: 0 0 auto; }
