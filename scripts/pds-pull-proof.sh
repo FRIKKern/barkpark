@@ -796,7 +796,14 @@ step_0c() {
     # ENGINE finding out of an environment failure — the most expensive line an
     # append-only transcript can carry (PDS-D96).
     info "$(tail -20 "$out" | sed 's/^/  /')"
-    fail 0c "the scratch Repo never connected (exit $rc) — no 'REPO IS' line was printed, so NEITHER sentinel ran. This is a BOOT failure against $pg_db:$pg_port, NOT a partition finding: the sentinels are UNMEASURED, neither passed nor failed. See the tail above."
+    # rc=0 here means the heredoc RAN TO COMPLETION yet printed neither marker,
+    # which is not a connection failure but an unrecognised harness state — say
+    # so rather than guessing a cause, since guessing is the defect D96 fixes.
+    if [ "$rc" -eq 0 ]; then
+      fail 0c "the 0c probe exited 0 but printed NEITHER 'REPO IS' NOR 'SENTINELS OK' — an unrecognised state, not a measurement. The cause is UNDIAGNOSED (the probe's own output is above); what is certain is that NEITHER sentinel is known to have run against $pg_db:$pg_port, so the sentinels are UNMEASURED — this is NOT a partition finding. File it as a HARNESS bug, never as an engine one."
+    else
+      fail 0c "the scratch Repo never connected (exit $rc) — no 'REPO IS' line was printed, so NEITHER sentinel ran. This is a BOOT failure against $pg_db:$pg_port, NOT a partition finding: the sentinels are UNMEASURED, neither passed nor failed. See the tail above."
+    fi
   else
     info "$(tail -20 "$out" | sed 's/^/  /')"
     fail 0c "a sentinel RAISED (exit $rc) after the Repo reached $pg_db:$pg_port — see the message above. A new/unclassified tenant table must be classified, not bypassed."
