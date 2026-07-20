@@ -1,5 +1,11 @@
 defmodule Barkpark.Search.IntelligenceTest do
-  use Barkpark.DataCase, async: true
+  # async: false — this module swaps node-global env
+  # (`:barkpark, :search_intel_record_async`) to exercise the off-request INSERT
+  # path. Application env is ONE value for the whole node — the SQL sandbox
+  # isolates the DB connection, never the VM-global env (see
+  # api/test/barkpark/application_env_isolation_test.exs, which proves the leak
+  # channel). Ratchet: scripts/async_env_seam_scan.exs.
+  use Barkpark.DataCase, async: false
 
   import Ecto.Query
 

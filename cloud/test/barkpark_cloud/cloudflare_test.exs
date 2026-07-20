@@ -6,7 +6,12 @@ defmodule BarkparkCloud.CloudflareTest do
   error branches), and the Real client's PURE request builders + fail-closed
   guards. NO DB, NO boot — mirrors `vercel_test.exs`'s pure + Fake sections.
   """
-  use ExUnit.Case, async: true
+  # async: false — this module swaps node-global env (`:barkpark_cloud,
+  # Cloudflare`, incl. `:client`). The second proven live race: while the swap
+  # is held, site_cf_deploy_test.exs drives do_bind_cloudflare/5 through
+  # `Cloudflare.client()` with no process scoping and reads
+  # `{:error, :http_client_not_configured}`. Ratchet: scripts/async_env_seam_scan.exs.
+  use ExUnit.Case, async: false
 
   alias BarkparkCloud.Cloudflare
   alias BarkparkCloud.Cloudflare.{Fake, Real}
