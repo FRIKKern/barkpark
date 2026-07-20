@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -293,6 +294,54 @@ func usageSuggestVerb(out *writer, tree *manifest.Tree, noun, typedVerb string) 
 		}
 	}
 	usageNoun(out, tree, noun)
+}
+
+// soleReadVerb reports the ONE verb a verbless invocation of n can safely be
+// re-dispatched to, and whether that inference may fire at all. See the rule
+// documented at the dispatch site (cli.go): exactly one verb, non-writing, and
+// the typed token must not be a near-typo of that verb (a mistyped verb is a
+// typo to correct, not an argument to forward) nor look like a flag.
+func soleReadVerb(n *manifest.TreeNoun, typed string) (*manifest.Command, bool) {
+	if len(n.Verbs) != 1 {
+		return nil, false
+	}
+	sole := n.Verbs[0]
+	if sole.Writes || strings.HasPrefix(typed, "-") || typed == "" {
+		return nil, false
+	}
+	if _, isTypo := nearestVerb(typed, []string{sole.Verb}); isTypo {
+		return nil, false
+	}
+	return sole, true
+}
+
+// noVerbMsg is the error line for a REAL noun followed by no valid verb. It
+// never says the noun is unknown (that was the bug), and it carries the fix in
+// the message itself — which matters because `-o json` renders only this string
+// in the error envelope and skips the usage help block entirely.
+func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
+	verbs := make([]string, 0, len(n.Verbs))
+	for _, c := range n.Verbs {
+		verbs = append(verbs, c.Verb)
+	}
+	base := fmt.Sprintf("no verb %q under `barkpark %s` — `%s` is a known noun", typed, noun, noun)
+	if len(n.Verbs) == 1 {
+		// One obvious answer, but not auto-run (a writing verb, or the token
+		// looked like a typo/flag) — name the literal corrected command. When the
+		// token is a near-typo of that verb it IS the mistyped verb, so it must be
+		// replaced rather than appended as an argument (`search quer` →
+		// `search query`, never `search query quer`).
+		sole := n.Verbs[0].Verb
+		fixed := fmt.Sprintf("barkpark %s %s", noun, sole)
+		if _, isTypo := nearestVerb(typed, []string{sole}); !isTypo && typed != "" && !strings.HasPrefix(typed, "-") {
+			fixed += " " + typed
+		}
+		return fmt.Sprintf("%s; did you mean `%s`?", base, fixed)
+	}
+	if len(verbs) == 0 {
+		return base + "; it declares no verbs"
+	}
+	return fmt.Sprintf("%s with verbs: %s", base, strings.Join(verbs, ", "))
 }
 
 // nearestNoun returns the known noun closest to typed by Levenshtein distance,

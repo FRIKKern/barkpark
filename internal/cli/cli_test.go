@@ -2649,3 +2649,129 @@ func TestExecuteBuiltinHelpHonoursGlobalHelp(t *testing.T) {
 		}
 	}
 }
+
+// --- verbless dispatch on a REAL noun -----------------------------------------
+
+// TestExecuteRealNounFreeTextInfersSoleVerb pins the reported symptom: SIX
+// independent agents in one wave typed `bp search "<text>"`, read back
+// `unknown command "search" "<text>"`, concluded their bp was too stale to
+// search Barkpark, and fell back to grep against standing doctrine. `search` is
+// a real manifest noun whose one verb is `query` — so dispatch must never call
+// the noun unknown, and (one obvious, non-writing answer) may run it.
+func TestExecuteRealNounFreeTextInfersSoleVerb(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+	// Point at a closed port: the inference is what is under test, not the HTTP
+	// round trip, and this keeps the test off any locally-running Barkpark.
+	t.Setenv("BARKPARK_API_URL", "http://127.0.0.1:1")
+
+	out, _ := captureExecuteCode(t, []string{"search", "PDS crown proof"})
+
+	// The regression itself: the noun must never be reported as unknown. Match
+	// both the human line and the JSON error envelope (which escapes the quotes).
+	if strings.Contains(out, `unknown command "search"`) || strings.Contains(out, `unknown command \"search\"`) {
+		t.Errorf("real noun `search` reported as an unknown command; got:\n%s", out)
+	}
+	// …and the corrected command must be named, verbatim and runnable.
+	if !strings.Contains(out, "barkpark search query") {
+		t.Errorf("output never names `barkpark search query`; got:\n%s", out)
+	}
+}
+
+// TestExecuteRealNounMultiVerbNamesTheNoun guards the non-inferable half of the
+// rule: `doc` has many verbs, so nothing is guessed — but the error must still
+// say the NOUN is fine and list the verbs, and still exit 2.
+func TestExecuteRealNounMultiVerbNamesTheNoun(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out, code := captureExecuteCode(t, []string{"doc", "PDS crown proof"})
+
+	if code != exitUsage {
+		t.Errorf("usage error exit = %d, want %d", code, exitUsage)
+	}
+	if strings.Contains(out, `unknown command "doc"`) || strings.Contains(out, `unknown command \"doc\"`) {
+		t.Errorf("real noun `doc` reported as an unknown command; got:\n%s", out)
+	}
+	if !strings.Contains(out, "no verb") || !strings.Contains(out, "known noun") {
+		t.Errorf("error does not name the real problem; got:\n%s", out)
+	}
+}
+
+// TestExecuteUnknownNounStillSuggests is the no-regression guard: a genuinely
+// unknown noun keeps its noun-typo suggestion and its exit code, and an
+// unrelated word still gets no misleading hint.
+func TestExecuteUnknownNounStillSuggests(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out, code := captureExecuteCode(t, []string{"serach", "query", "x"})
+	if code != exitUsage {
+		t.Errorf("unknown-noun exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(out, `unknown command \"serach\"`) && !strings.Contains(out, `unknown command "serach"`) {
+		t.Errorf("unknown noun lost its unknown-command line; got:\n%s", out)
+	}
+	// An unknown noun must never be mistaken for the known-noun path.
+	if strings.Contains(out, "no verb") {
+		t.Errorf("unknown noun took the known-noun error path; got:\n%s", out)
+	}
+
+	// The suggestion block itself (usageSuggestNouns) is human-output only, so
+	// assert its matcher directly: the typo still resolves, the unrelated word
+	// still gets nothing. TestNearestNoun pins the shared table.
+	nouns := tree0(t).NounNames()
+	if best, ok := nearestNoun("serach", nouns); !ok || best != "search" {
+		t.Errorf("nearestNoun(serach) = %q,%v; want search,true", best, ok)
+	}
+	if best, ok := nearestNoun("zqxwvut", nouns); ok {
+		t.Errorf("unrelated word got a misleading suggestion: %q", best)
+	}
+}
+
+// tree0 loads the full fixture manifest tree for the dispatch tests above.
+func tree0(t *testing.T) *manifest.Tree {
+	t.Helper()
+	_, tr := loadTreeFrom(t, fullManifest)
+	return tr
+}
+
+// TestSoleReadVerbRule drives the inference predicate directly, including the
+// cases the fixture manifest cannot express (a WRITING sole verb).
+func TestSoleReadVerbRule(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	search, ok := lookupNoun(tree, "search")
+	if !ok {
+		t.Fatal("search noun missing from the fixture manifest")
+	}
+	if sole, inferable := soleReadVerb(search, "PDS crown proof"); !inferable || sole.Verb != "query" {
+		t.Errorf("soleReadVerb(search, free text) = %v,%v; want query,true", sole, inferable)
+	}
+	// A near-typo of the sole verb is a mistyped VERB, not an argument — it must
+	// fall through to the typo suggestion rather than be forwarded as a query.
+	if _, inferable := soleReadVerb(search, "quer"); inferable {
+		t.Error("a near-typo of the sole verb must not be inferred as an argument")
+	}
+	// Flag-shaped and empty tokens are never arguments to an inferred verb.
+	for _, typed := range []string{"--json", "-x", ""} {
+		if _, inferable := soleReadVerb(search, typed); inferable {
+			t.Errorf("soleReadVerb(search, %q) fired; want no inference", typed)
+		}
+	}
+
+	// Multi-verb noun: never guess across several verbs.
+	doc, _ := lookupNoun(tree, "doc")
+	if _, inferable := soleReadVerb(doc, "PDS crown proof"); inferable {
+		t.Error("multi-verb noun must never infer a verb")
+	}
+
+	// A destructive sole verb is suggested, never run.
+	destructive := &manifest.TreeNoun{
+		Name:  "nuke",
+		Verbs: []*manifest.Command{{Noun: "nuke", Verb: "purge", Writes: true}},
+	}
+	if _, inferable := soleReadVerb(destructive, "everything"); inferable {
+		t.Error("a writing sole verb must never be inferred")
+	}
+	if msg := noVerbMsg(destructive, "nuke", "everything"); !strings.Contains(msg, "barkpark nuke purge everything") {
+		t.Errorf("noVerbMsg must name the literal corrected command; got %q", msg)
+	}
+}
