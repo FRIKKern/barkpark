@@ -182,6 +182,29 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
       end
     end
 
+    test "the crumb trail is VISIBLE at narrow, not merely emitted there (D168)" do
+      # THE HALF-SHIPPED FEATURE THIS CATCHES. The markup half of D168 widened
+      # `desk_crumbs/1` from phone-only to `in ["narrow","phone"]`, so the desk
+      # now EMITS a breadcrumb nav at narrow — and that nav carries the document
+      # crumb, which is the trail's way back out of the summoned destination.
+      # This sheet's rule was written when the trail was a phone-drill
+      # affordance and read `.bp-desk-crumbs { display: none }` with a single
+      # phone override, so the narrow markup landed inside a `display: none`.
+      #
+      # A server emitting an escape route no reader can see is worse than not
+      # emitting it: the DOM then asserts an affordance the desk does not
+      # offer, and AT announces a link out of a trap that does not exist.
+      block = block!([~S|html[data-width-bucket="narrow"] .bp-desk-crumbs|, ~S|html[data-width-bucket="phone"] .bp-desk-crumbs|])
+
+      assert value!(block, "display") == "flex",
+             "the narrow crumb trail is emitted by desk_crumbs/1 but not painted by this sheet"
+
+      # And the base rule still hides it everywhere else — the trail is opt-in
+      # per bucket, so `standard` and `wide` (whose inspectors dock beside a
+      # document that never leaves the screen) keep their unchanged chrome.
+      assert value!(block!([".bp-desk-crumbs"]), "display") == "none"
+    end
+
     test "no motion property is introduced on the summoned panel" do
       block = block!([@narrow, @phone])
 

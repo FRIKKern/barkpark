@@ -1461,10 +1461,26 @@
 
     /* Breadcrumb drill strip — spd-s6 PRE-PROVISION (D13/D16: this file is
        single-owner per round, so the phone drill's full CSS contract ships
-       NOW and spd-s6 touches only .ex/test files). Hidden in every bucket
-       except phone. Crumbs are @panes titles; clicks reuse the existing
-       "expand-pane" nav_path truncation — zero new server events. */
+       NOW and spd-s6 touches only .ex/test files). Crumbs are @panes titles;
+       clicks reuse the existing "expand-pane" nav_path truncation — zero new
+       server events.
+
+       SHOWN AT `narrow` AS WELL AS `phone` (charter D168). This rule used to
+       read "hidden in every bucket except phone", and it was correct while the
+       trail was a phone-drill affordance. Wave 11 made it load-bearing at
+       `narrow` too: `desk_crumbs/1` now EMITS the nav at both buckets, because
+       `narrow` is one of the two widths where the summoned inspector covers the
+       whole content pane, and the document crumb is the trail's way back out of
+       it. Leaving this rule phone-only would have shipped the markup half of
+       D168 into a `display: none` — the server emitting an escape route that no
+       reader can see, which is worse than not emitting it, since the DOM would
+       assert an affordance the desk does not offer.
+
+       Enumeration, not negation, for the same reason as the Tier-3 exit below:
+       `:not(wide)` would also catch `standard`, whose inspector docks beside a
+       document that never leaves the screen and therefore needs no trail. */
     .bp-desk-crumbs { display: none; }
+    html[data-width-bucket="narrow"] .bp-desk-crumbs,
     html[data-width-bucket="phone"] .bp-desk-crumbs {
       display: flex; align-items: center; gap: 4px;
       min-height: 36px; padding: 0 12px;
