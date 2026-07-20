@@ -977,3 +977,255 @@ speak about the deployed render, with D150's per-face prediction registered BEFO
 bucket precondition on every reading, and D153's positive control MANDATORY. Fold
 `spd-instrument-open-leg-stale-locator` into that slice: it owns the instrument file.
 Paper: `spd-inspector-shape-wave-11-2026-07-20`.
+
+## Wave-12 amendment (PAY THE EXEMPTION'S PRICE, 2026-07-20) — D172–D181
+
+> Restored to this branch by wave-12 **Review** (D68). D172–D181 and the wave-12 roadmap
+> were committed to **LOCAL main only** (`f55af5a03`, unpushed, `6c65b6209`-style) while all
+> five built slices shipped code comments citing D173–D181 into a tree whose `origin/main`
+> charter topped out at **D171** — the **6th recorded recurrence** of the D135/D68 disease
+> (wave 11 was the 5th). Transcribed verbatim here onto **E's `-r` branch** so the decisions
+> the code cites reach `origin/main` WITH the code that cites them. The lesson stands, again:
+> a charter commit on local `main` is not written until it is on a branch headed for `origin/main`.
+
+- **D172 — MOVE 0 was already paid, and `git merge-tree` lied about it.** The wave opened believing
+  `4bc01ec78` and `925839169` sat on loop-epic branches with no PR. Both are on `origin/main`, squashed as
+  `1b71730d8` (#5015) and `aef158da9` (#5016), merged 2026-07-20 on sibling `-r` branches; three
+  independent surveyors reproduced it and `gh pr view` lists both target SHAs verbatim. Round zero had
+  nothing to do. **Instrument warning, bought here:** legacy 3-arg `git merge-tree` reported CLEAN where a
+  real `git merge --no-commit --no-ff` found conflicts. It is not trusted in this repo.
+- **D173 — Escape owns a guarded window listener at BUBBLE phase, and CAPTURE is forbidden.** D166 is
+  upheld and refined by a real browser run rather than re-argued. The veto set is NOT empty: the
+  format-bubble link input's Escape branch is `preventDefault()`-only (`format-bubble.js:115-118`) and the
+  bubble portals itself to `document.body` (`:146`), so it escapes `.editor-body`'s `inert` —
+  `A preventDefault-only reaches window BUBBLE: 1 => DOUBLE-FIRE CONFIRMED`. The refinement is the new
+  law: **a capture-phase hook breaks D166's free nested precedence in both placements that fire.**
+  `C window-CAPTURE hook w/ palette open: hook=1 menu=1 => HOOK RUNS FIRST — IT EATS THE PALETTE ESCAPE`,
+  and document-capture fails identically because the menus register their capture listener inside `open()`
+  (`slash-menu.js:202`), so the hook is always first: `F doc-CAPTURE hook mounted BEFORE menu open():
+  hook=1 menu=1`. An aside-scoped listener is DEAD for the real cases (`D2: Escape targeted at <body>
+  reached aside-capture = 0`). The one shape that works is D166's own — window BUBBLE plus an
+  `activeElement` veto: `H1 veto hook, focus IN link input: dismissals=0 => veto WORKS`; `H2 veto hook,
+  focus on destination button: dismissals=1 => exit FIRES CORRECTLY`. Veto scope is `.bp-paper-format`
+  (never a bare `input`, which would veto Escape from every input on the desk). The markdown source
+  textarea is inert-dead (`canvas/index.js:1750` appends inside `.editor-body`) and is kept only as honest
+  insurance. Corrected line numbers: the swallowers are `slash-menu.js:436-439` and
+  `wikilink-menu.js:251-254`, not the 283/120 the briefs carried.
+- **D174 — `api/assets/paper-editor/` stays out of fence this wave, and the reason is the BUNDLE, not
+  purity.** The cheapest behavioural fix is one line — `stopPropagation()` in the format-bubble Escape
+  branch, measured clean (`E1 stopPropagation added: window BUBBLE=0 => double-fire ELIMINATED`;
+  `E2 with palette open: menu=1 window BUBBLE=0 => palette precedence INTACT`). The "out of fence" claim
+  as stated was false (charter:137 chartered `spd-b10f` directly into that directory). **But source edits
+  do not ship.** The layout loads a committed, minified 496KB artifact (`root.html.heex:5741`) whose last
+  build is `4c8032701` (#2891) — **five commits stale**. Shipping one line means rebuilding that artifact
+  and dragging five unreviewed commits into the deployed editor, in the same wave whose deliverable is a
+  deployed measurement. That would confound the terminal run. Filed, not taken. (My proofs still bind:
+  `git log 4c8032701..origin/main` over the three Escape sources is EMPTY.)
+- **D175 — The scrim generator is NOT dead everywhere: the secondary-pane breach makes `standard` +
+  user-opened LIVE, and it is this wave's sharpest finding.** D170's conclusion at wide survives — its own
+  unconditional kill switch (`root.html.heex:2066-2069`, specificity (0,4,2) over the generator's (0,3,1))
+  holds regardless of geometry. **Its supporting arithmetic does not.** `panel = vw − 304 ≥ 976` fails the
+  moment a 360px `.bp-secondary-pane` is open. `secondary_doc` is assigned in exactly three places
+  repo-wide — `mount.ex:186` (seed), `handlers/secondary.ex:82` (set), `:92` (clear on close) — and **no
+  navigation handler clears it**. Open a non-paper document, click "Open another", then navigate to a
+  paper: at `standard` + user-opened the Tier-2 ladder leaves nav `[44]`, so
+  `panel = 1024 − 44 − 360 = 620 < 860`, the generator matches, and **no suppression rule covers
+  `standard` + `[data-user-opened]`** — the b29 guard (`:2028`) excludes user-opened, D165's abolition is
+  narrow/phone-scoped, D170's is wide-scoped. That is a real, uncaught, visible 55%-black scrim over prose
+  the reader is actively reading, with the inspector genuinely docked beside it: the exact D127 defect,
+  reached through an orthogonal feature. Coverage is zero — `grep -rl secondary_doc api/test/` returns
+  nothing. **Ruled: BOTH halves ship.** `secondary_doc` clears on primary-document navigation AND
+  `standard` + user-opened gets its suppression rule. Resting the abolition on an invariant alone is
+  precisely what D170 already did once, and this is the invariant breaking.
+- **D176 — D153's live-run law is unsatisfiable from real rows, and D170's stated control is IMPOSSIBLE
+  as written.** Post-ladder every reachable cell either lifts the panel clear of 860 or is suppressed, so
+  no fresh run can render a scrim in `run.rows`. D170 claims the forced-container control "was executed on
+  the deployed build … verified at both 1280 and 1440" — **it cannot have been**: at wide, D170's own
+  unconditional suppressor makes the reading byte-identical with the generator present and deleted
+  (`WITH GENERATOR: wide true none none` / `GENERATOR DELETED: wide true none none`). The control is real
+  but it discriminates in **exactly one cell** — `standard` + user_opened, `861 → none`, `860 → ""` — and
+  that cell flips to `none/none` when the generator is deleted. Two further traps are law: a fixture
+  omitting `data-width-bucket` produces a **FALSE GREEN** indistinguishable from the standard cell, and
+  the shipped `--positive-control` is a different mechanism entirely (an unconditional `!important`
+  `::after`) that **passes on a fixture with no generator at all**. D153 is amended: the positive control
+  is the FORCED-CONTAINER control at `standard`, executed offline against a committed fixture, and it may
+  never be quoted as a desk row. Viewport is irrelevant to it — the suppressors key on the stamped
+  attribute, the generator on the forced container width; do not re-encode viewports into this control.
+- **D177 — The instrument's third state has COLLAPSED into the second; the destination is DERIVED, not
+  summoned.** `DESTINATION_CONTROLS` (`studio-desk-measure.mjs:1756-1762`) names two selectors that exist
+  nowhere on `origin/main`. The destination is *entailed* by `bucket in ["narrow","phone"] and
+  user_opened`, so the instrument's `user-opened` rows at narrow/phone **already are** the destination —
+  the separate state is a duplicate reached through an env override. Compounding it,
+  `applies_at: (w) => w < 1280` includes **1024, which is `standard` and refuses the predicate**
+  (`components.ex:111-113` against the bands at `root.html.heex:1264`) — three pre-loaded false-failure
+  rows. **Ruled: retire the summoned third state.** Stamp `is_destination` on the user-opened rows from
+  the `[data-inspector-destination]` marker; the row count returns to 54 with 18 carrying it. Those 18
+  report `visible_meets_55ch: NULL`, **never FALSE** — a reading column covered by design is not a failing
+  measure, and a FALSE there is an instrument defect, not a desk fact.
+- **D178 — `fatal:false` does not protect the open leg, and the zero-byte run is back.**
+  `openInspectorByRealClick` resolves ONE locator to `[data-test-id="sidebar-toggle-panel"]` before its
+  retry loop (`:1672`) and never re-checks presence, while #5014 flips that same button to
+  `sidebar-dismiss` at Tier 3 (`components.ex:425`). Proven in a real browser against a forcing fixture:
+  the second iteration blocks for the full auto-wait and throws a **raw Playwright TimeoutError at
+  11093ms, `instanceof MeasureError === false`** — and throws identically at 11072ms **with
+  `fatal:false`**, the exact mode `runRoundTrip` uses (`:1930`) so an unreachable toggle costs only that
+  pass. `main()` has a `finally` but no `catch` (`:2613`) and `writeRunArtifact` runs only after it exits
+  normally (`:2676`), so the throw writes **zero bytes** — D138's defect reintroduced through a different
+  door than the one wave 10 closed. The fix is proven: a non-blocking presence re-check per iteration
+  yields the function's own named skip, `MeasureError` at 1090ms. The dismiss leg is robust not because
+  Locators are lazy but because `DISMISS_CONTROLS` is a **priority list of both spellings** resolved by
+  `firstPresent()`; the open leg gets the same shape.
+- **D179 — Browser Back leaves the desk; the affordance is KEPT and the reason is recorded in code.**
+  `sidebar_toggle_panel/1` is a pure assign (`handlers/paper.ex:117-126`) — proven by mutation, not
+  reading: injecting a `push_patch` there cascaded 15/26 failures, and removing `push_patch` from the
+  sibling `expand_pane/2` reds exactly the two control assertions with `expected … to patch, but got
+  none`. So a destination shipping an arrow, a document name and a crumb while Back silently exits the
+  Studio is a real lie of the chevron's own family. Option (a), a URL-borne sidebar param, must be
+  designed against `?desk=` preservation (`paths.ex:86-92`) and against `expand-pane`'s own push_patch
+  (`scope.ex:170-178`), which knows nothing about `sidebar_user_opened`; option (c) unwinds #5014.
+  **Ruled (b): keep the affordance, record in code why the DOM is a full-screen destination while the
+  click stays non-navigational, and lock it with a no-patch test.** The lock pins pane ids AND
+  `editor open: false` AND `sidebar_user_opened == false` — pinning pane ids alone stays green if the
+  reset chain is refactored away.
+- **D180 — spd-b47's live outcome is a THIRD one neither option named, and the strip's label is
+  truthful.** Measured on a live process: at `standard` with the ladder engaged the surviving strip is
+  `{1, "Papers"}`, and clicking it yields `panes ["pane-structure","pane-papers"], editor open: false,
+  strips []` — it closes the whole document. Not a dead control, not a squeezed inspector. The task's
+  stated mechanism is also false: `expand-pane` DOES reach `sidebar_user_opened`, **transitively**, via
+  `rebuild_panes → clear_paper_view → sidebar_assigns(nil)`. `pane idx N → Enum.take(nav_path, N)` is
+  coherent because pane 0 IS the root pane and each ordinary segment contributes exactly one pane, so the
+  label names its destination in every topology — **there is no affordance lie**. But the ladder tier has
+  exactly TWO affordances and the crumb trail is not one of them: `desk_crumbs/1` is gated
+  `in ["narrow","phone"]`, so `standard` is the one bucket that hides the whole rail **without** offering
+  the trail. That is a live gap against "cheap and plural" and it ships with the keyboard exit.
+- **D181 — An ungated Escape binding ships SILENTLY GREEN, so its own test is mandatory.** Mutating the
+  tier gate to bare `true` reds **exactly one test — the probe's own**; with the probe removed and the
+  mutation still applied the suite is `167 tests, 0 failures`, while the mutation demonstrably lands the
+  binding on `class="bp-doc-sidebar is-collapsed"` with no `data-user-opened` (Escape becomes a global
+  open-the-inspector key at every bucket, including wide). Two corollaries bought the same way:
+  `render_keydown` does **not** enforce `phx-key` — with `phx-key="Banana"` the behavioural Escape test
+  stayed GREEN, so the key is pinnable **only** by asserting the rendered attribute literally; and a
+  shared `defp` must live at module bottom, because placing it under an `attr(...)` block raises
+  `CompileError … cannot declare attributes for function inspector_destination?/2`. Corrections to numbers
+  now in circulation: negating the tier predicate reds **2** tests, not 3, and `phx-window-keydown` occurs
+  **17** times in `api/lib`, not 12/14/15/16 — cite none of the four.
+
+## Roadmap — wave 12 (PAY THE EXEMPTION'S PRICE, CLOSE THE BRACKET)
+
+Per D19 every model column reads `opus`. Round 1 is file-disjoint by D160/D16 — `root.html.heex` has
+exactly one owner, and this round it is **E**, because the Studio's `phx-hook`s are defined INLINE in
+that file (`Hooks.WidthBucket`, `Hooks.EditorFocus`, ~line 6027-6280), so the guarded window listener
+D173 mandates cannot live anywhere else. That single fact sequences the wave: **S** carries D175's
+suppression rule into the same file and is therefore round 2, behind E. Rounds 2 and 3 are the lead's
+post-merge dispatch.
+
+| # | Slice | Task | Round | After | Model | Size |
+|---|---|---|---|---|---|---|
+| E | Escape at bubble phase with the `activeElement` veto, focus in and focus RETURN, and the crumb trail reaches `standard` (D173/D180/D181) | `tier3-keyboard-exit-and-focus-return` | 1 | — | opus | large |
+| N | Navigational truth — the strip closes the document, Back leaves the desk, both ruled in code and locked (D179/D180) | `spd-b47-ladder-backstrip-expand-collision` | 1 | — | opus | medium |
+| I | The instrument's three preconditions — the open leg's stale locator, the collapsed third state, the 1024 false-failure rows (D177/D178) | `spd-instrument-open-leg-stale-locator` | 1 | — | opus | medium |
+| P | The forced-container threshold control becomes runnable code, offline, and it can FAIL (D176) | `scrim-threshold-forced-container-control` | 1 | — | opus | medium |
+| T | The icon vocabulary tripwire and the warning card that paints a document (D46's class, generalized) | `icons-unknown-name-tripwire` | 1 | — | opus | small |
+| S | The secondary-pane breach — `secondary_doc` clears on navigation AND `standard` gets its rule (D175) | `spd-standard-bucket-scrim-unruled` | 2 | E | opus | medium |
+| R | The bracketed deployed run — round-trip fidelity, the derived destination, the bucket precondition (D150/D171/D176/D177) | `inspector-shape-bracketed-deployed-run` | 3 | E, I, P | opus | medium |
+
+## Wave log — wave 12
+
+### Wave 2026-07-20 — Wave 12 (PAY THE EXEMPTION'S PRICE), Review. Grade A−.
+
+**Round 1's five file-disjoint slices all built green and cohere.** The wave provisions the
+payment D127's exemption owes: the keyboard exit and its focus round trip (E), the two
+navigational lies ruled and locked (N), the instrument's three terminal-run preconditions
+fixed (I), the forced-container scrim control made runnable and able to FAIL (P), and the icon
+vocabulary tripwire that also fixed a 14-week-live bug (T). The live *consummation* — the
+bracketed deployed run R — is correctly deferred to round 3; this wave makes it possible.
+
+**What landed, per slice (final branch = the `-r` carrier).**
+- **E — `tier3-keyboard-exit-and-focus-return`** (`…escape-at-bubble-phase-focus-in-and-focu-0-r`,
+  carries the charter). `Hooks.InspectorEscape` inline in `root.html.heex`: a window BUBBLE-phase
+  Escape listener with an `activeElement` veto scoped to `.bp-paper-format`, rendered only at Tier 3
+  via a `:if={@destination}` hook element carrying the `data-escape-*` contract. Capture is refused
+  in code with the measured reason (it eats the nested-menu grammar). Focus IN via
+  `phx-mounted={JS.focus(to: #bp-doc-sidebar)}` onto a `tabindex=-1` landmark; focus RETURN via
+  `dismiss_or_toggle/2` = `JS.push |> JS.focus(to: #bp-doc-sidebar-toggle)` on both the back button
+  and the document crumb. ZERO new `caps.ex` entries (reuses `sidebar-toggle-panel`), no new
+  `handle_event` head. The duplicated tier predicate collapsed to ONE shared `defp
+  inspector_destination?/2` at module bottom, now read by four callers. Crumb trail widened to reach
+  `standard` when the ladder is engaged — closing exactly the gap N's D180 comment names. The D181
+  binding test asserts the RENDERED attributes literally (render_keydown does not enforce phx-key)
+  in an inversion-sensitive quadruple. Review re-ran the two non-Elixir gates on the final branch:
+  `studio-literal-check` PASS (367 files) and `design/check.mjs` PASS (18 surfaces, Part H 270
+  contrast checks, ratchet undisturbed by the added JS).
+- **N — `spd-b47-ladder-backstrip-expand-collision`** (`…navigational-truth-the-strip-closes-the--1-r`).
+  Ships NO behaviour: two rulings in code (D180 the strip is a DOCUMENT-CLOSE reached transitively
+  through `clear_paper_view/1`; D179 the Tier-3 dismiss is a pure assign while Back leaves the desk)
+  and a new lock file with a real `refute_patch/2` made falsifiable by TWO contrast controls that
+  `assert_patch`. The strip lock pins pane ids AND editor-open false AND `sidebar_user_opened ==
+  false` off `:sys.get_state`. Honest 2-segment-path scope caveat, residue filed.
+- **I — `spd-instrument-open-leg-stale-locator`** (`…the-instrument-s-three-preconditions-the-2-r`).
+  Review re-ran the real-chromium forcing repro: **6/6 PASS** (before = raw TimeoutError@10s, after =
+  named MeasureError@1s; rename-followed to reached:true; fatal:false returns a named skip). `node
+  --check` green. `is_destination` now DERIVED from the server `[data-inspector-destination]` marker
+  (54 rows / 18 destination, verified by direct export call); the 1024 false-failure rows retired via
+  a `WIDTH_BANDS` table mirroring the pre-paint EDGES.
+- **P — `scrim-threshold-forced-container-control`** (`…the-forced-container-threshold-control-b-3-r`).
+  Review re-ran the gate: `node --check` + `--self-test` **green**, with the exact discriminating cell
+  (`standard`+user_opened: `none`@861 / `""`@860), the false-green trap REJECTED, and the
+  generator-deletion self-test proving the control CAN fail. Satisfies D176/D153.
+- **T — `icons-unknown-name-tripwire`** (`…the-icon-vocabulary-tripwire-and-the-war-4-r`). Added the
+  missing Lucide `alert-triangle` (correct `m21.73 18-8-14` path), fixing `chat_readiness_card/1`
+  which had painted the plain document glyph on every AI-not-ready warning. A `lib/`-wide balanced-brace
+  tripwire over `known_icon?/1` with real non-vacuity guards (>30 sites, >3 files, >10 names). Unknown
+  policy is compile-time resolved: raise in `:test`, `Logger.warning` + fallback in `:dev`/`:prod`
+  (`:dev` grouped with `:prod` because `tab_icon/1` passes tenant strings verbatim).
+
+**Cross-slice coherence.** E and N cohere precisely: N's D180 comment documents that `standard`
+hides the rail without offering the trail, and E closes exactly that gap by widening
+`crumb_trail_bucket?/3` to the ladder tier. Shared `inspector_destination?/2` predicate — no
+duplicated helpers. I and P are file-disjoint from each other and from the Elixir slices; R (round 3)
+consumes both. No conflicting UI states.
+
+**Review made no code changes — all five slices were already correct.** The only mutation this phase
+made was the charter restore above and the epic heartbeat.
+
+**The gate-run honesty.** Round-1's JS slices (I, P) were re-run to green in the review worktree
+against real Chromium. E's two non-Elixir gates were re-run green. The Elixir `mix test` portions of
+E/N/T were NOT independently re-run: this worktree has no `deps/`, and borrowing `_build` across
+worktrees is structurally broken (D61/elixir-build-borrow-broken); a fresh `deps.get`+compile risks
+OOM on this shared host. Those three rest on the builders' green scoped runs, full adversarial static
+review, and CI's `elixir` workflow (`Test (Elixir 1.18.1 / OTP 27.0)`) as the merge backstop.
+
+**Ledger audited HONEST — no lies to fix.** All five built tasks: `lifecycle: in_progress`, parent
+`inspector-dismissal-and-return-grammar`, `wave_paper` linked, every non-merge criterion stamped with
+substantial evidence (195–1162 bytes) as they worked, the merge-gated final criterion correctly
+`met: false` / empty for the lead. Deferred S (round 2) and R (round 3) sit `open` and unclaimed per
+the sequenced-rounds law. Five residue tasks filed, published and parented mid-run
+(`b47-strip-behaviour-unmeasured-beyond-two-panes`, `scrim-control-uncied-and-fixture-drift`,
+`icons-tab-icon-tenant-guard`, `spd-instrument-nondeterminism-characterised`, and the two above). No
+task outside this wave was touched.
+
+**What the lead must know before merging.**
+1. **E's `-r` branch carries the charter** (D172–D181 + this log). If E is dropped, the decisions the
+   other four slices cite must move to another merged branch, or `origin/main` again resolves them to
+   nothing. Prefer merging E; the five round-1 branches are otherwise file-disjoint and order-free.
+2. **Close the merge-gated criterion** on each task: E index **12**, N **9**, I **9**, P **8**, T **6**.
+3. **T changes `icon/1` to RAISE on unknown names in `:test` globally.** The scoped gate (544/0) is
+   green; watch the FULL `elixir` suite on CI for any other test rendering an unmapped icon name.
+4. **The live payment is round 3.** R (`inspector-shape-bracketed-deployed-run`) is the artefact that
+   converts D127's exemption from provisioned to PAID by measurement; it needs E+I+P merged AND the box
+   deployed, then folds `spd-instrument-open-leg-stale-locator` (already built as I) and quotes P's
+   forced-container control as D153's positive.
+5. **Nothing this wave ran against the deployed build** — E's Escape behaviour (capture-vs-bubble
+   resolution, the veto on a real focused input, focus-return after inert's ~38ms async blur) is proven
+   only at the server/rendered-wiring level; the browser proof is R's, by name.
+
+**Next wave.** Merge round 1 (E first for the charter, then N/I/P/T in any order; `.ex`/`.heex` wait
+for the `elixir` gate, Format is advisory D23). Then dispatch **S** (`spd-standard-bucket-scrim-unruled`,
+round 2) the moment E merges — it carries D175's suppression rule into `root.html.heex`, which E owns
+this round. Then, after E+I+P merge AND guerrilla serves the merge SHA (D47/D63), dispatch **R**
+(round 3) — the deployed run that finally pays the exemption. Grade **A−**: five clean, honest,
+adversarially-tested slices with two real bugs fixed and no bloat; docked for the 6th-time
+charter-to-local-main defect that Review again had to rescue, and because the wish's verb ("pay") is
+provisioned by this wave but consummated only by the deferred R.
+
+Paper: `spd-inspector-exemption-paid-wave-12-2026-07-20`.
