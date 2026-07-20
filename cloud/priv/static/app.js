@@ -2586,9 +2586,12 @@
 
   function notifMatrixCellHtml(s, event, col) {
     var st = notifCellState(s, event, col.type);
-    var cls = "set-matrix-cell" + (st.isDefault ? " set-matrix-cell--default" : "");
     var dis = col.type !== "email" && st.enabled === false ? " disabled" : "";
-    return '<label class="' + cls + '"><input type="checkbox" data-notif-cell data-event="' + esc(event) +
+    // Inline-concat (not `var cls = …`) so __css_check's static walker reads a
+    // literal head "set-matrix-cell" instead of "" — both composed classes have
+    // rules; the var form only ever hid that from the checker.
+    return '<label class="set-matrix-cell' + (st.isDefault ? " set-matrix-cell--default" : "") +
+      '"><input type="checkbox" data-notif-cell data-event="' + esc(event) +
       '" data-channel="' + esc(col.type) + '"' + (st.on ? " checked" : "") + dis +
       ' aria-label="' + esc(event) + " via " + esc(col.label) + '"></label>';
   }
@@ -5937,11 +5940,18 @@
   // one place the brake IS operated. The button is the DEFAULT (no opts) so the
   // existing one-argument pins stay green and no caller changes behaviour by
   // accident; #fleet passes {readonly:true} explicitly.
+  // Tone → the COMPLETE modifier class. The old form concatenated the fragment
+  // " notice-" with esc(tone), which made __css_check harvest a phantom class
+  // "notice-" that nothing ever renders (its lone E2 KNOWN_GAPS entry). A closed
+  // lookup emits whole, real class names instead — and an unrecognised tone now
+  // degrades to a bare .notice rather than composing a class that has no rule.
+  var NOTICE_TONE_CLASS = { ok: " notice-ok", warn: " notice-warn", error: " notice-error" };
+
   function fleetRolloutBannerHtml(state, opts) {
     var b = fleetRolloutBanner(state);
     if (!b) return "";
     var readonly = !!(opts && opts.readonly);
-    return '<div class="notice' + (b.tone ? " notice-" + esc(b.tone) : "") + '" role="status">' +
+    return '<div class="notice' + (NOTICE_TONE_CLASS[b.tone] || "") + '" role="status">' +
       "<b>" + esc(b.title) + "</b> " + esc(b.body) +
       (readonly
         ? ' <a class="notice-link" href="#operator">Operator console</a>'
@@ -8439,11 +8449,13 @@
   function freshnessBadge(s) {
     var m = freshnessModel(s);
     if (!m) return "";
-    var cls = "fresh-badge fresh-badge--" + m.dot + (m.rebuilding ? " is-rebuilding" : "");
     var title = m.rebuilding
       ? "Auto-deploy in progress — a content publish is rebuilding this site"
       : (m.label + " · " + m.meta);
-    return '<span class="' + cls + '" title="' + esc(title) + '">' +
+    // Inline-concat so the walker reads the literal head "fresh-badge fresh-badge--"
+    // (ALLOW_PREFIXES) rather than ""; dot ∈ up|down|deploy|rebuild, all real rules.
+    return '<span class="fresh-badge fresh-badge--' + m.dot + (m.rebuilding ? " is-rebuilding" : "") +
+      '" title="' + esc(title) + '">' +
       '<span class="fresh-dot" aria-hidden="true"></span>' +
       '<span class="fresh-label">' + esc(m.label) + "</span>" +
       '<span class="fresh-meta">' + esc(m.meta) + "</span>" +
@@ -14136,13 +14148,17 @@
       var manage = d.bar.tone === "over" && d.key === "instances"
         ? '<a class="usage-bar-action" href="#settings/billing">Manage plan</a>'
         : "";
-      var quotaCls = d.bar.tone === "ok" ? "usage-bar-quota dim" : "usage-bar-quota";
+      // Inline-concat so the walker reads the literal head "usage-bar-quota"
+      // rather than "" (GR89: the THIRD var-then-concat site — rewriting only
+      // the notif/freshness pair and dropping the head:"" gap reds this line).
+      // Both composed classes are styled; "ok" simply dims the quota trailer.
+      var quotaDim = d.bar.tone === "ok" ? " dim" : "";
       barHtml =
         '<div class="usage-bar usage-bar--' + d.bar.tone + '" role="progressbar" aria-label="' + esc(d.label) + ' quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + d.bar.pct + '" aria-valuetext="' + esc(d.bar.quotaText) + '">' +
           '<span class="usage-bar-fill" style="width:' + d.bar.pct + '%"></span>' +
         "</div>" +
         '<div class="usage-bar-meta token-meta">' +
-          '<span class="' + quotaCls + '">' + esc(d.bar.quotaText) + "</span>" +
+          '<span class="usage-bar-quota' + quotaDim + '">' + esc(d.bar.quotaText) + "</span>" +
           manage +
         "</div>";
     }
