@@ -60,6 +60,19 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       geometry at all, only which box the protected measure resolves against;
       losing that name sends the floor walking up to `.editor-panel` again,
       which silently reinstates the 300px error rather than breaking loudly.
+    * `.bp-doc-sidebar.is-open` — the inspector, added in WAVE 11 and the
+      largest hole this file ever had. `.editor-panel` is the reading column
+      PLUS this box, so the dock's 300px is the reading measure's other term at
+      every wide viewport — and it is one of the two numbers in
+      `@container panel (max-width: 860px)` (860 = 560 + 300), which this file
+      already pinned while pinning nothing about where the 300 came from.
+      `pane_family?/1` matched only `pane-layout` / `pane-column` /
+      `editor-panel`, so the whole family was invisible to the census: changing
+      the basis `0 0 300px` -> `0 0 200px` — 44px onto the wide reading column
+      — passed **16 of 16, before and after**. Both tiers are pinned now, the
+      docked flex item and the overlaid `width: 300px` inside the 860px
+      at-rule, because once the panel is absolutely positioned the basis stops
+      applying to it at all and the two can drift apart.
 
   ## The second half: the wide bucket must get those rules VERBATIM
 
@@ -73,12 +86,33 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   variant class that the wide desk does not carry by default. A new override
   reds this test and its author has to declare which bucket it belongs to.
 
-  ## Why the checks are TEXT-based
+  ## Why the checks are TEXT-based — and what a GREEN here does NOT mean
 
   ExUnit has no layout engine — it cannot observe a computed width. It can
   only observe the source facts that produce one. The live-browser counterpart
   is the wave-6 instrument's measured matrix at viewport 1280/1440; this file
   is what keeps those rows from rotting between waves.
+
+  Read a green from this file as exactly one claim, and no more:
+
+    * IT PROVES: the sheet's TEXT still declares the pinned box geometry, with
+      the same literal values, on the same selectors, and that no rule
+      declaring pane-or-inspector box geometry has appeared, vanished or
+      changed which properties it declares — every override still gated behind
+      a bucket the wide desk never carries or a variant it does not opt into.
+    * IT DOES NOT PROVE: any pixel. Cascade order, specificity, inherited
+      values, the browser's own flex resolution and every property outside
+      `@geometry_props` are all invisible here. `flex: 0 0 300px` being present
+      in the source is not the inspector measuring 300px on screen — a
+      later-winning rule, a `transform`, or a container query resolving
+      against a different box can all leave this file green and the desk
+      wrong. That half is the deployed run's job (wave 11's live measurement
+      against the production build), not this file's.
+
+  The distinction is not pedantry: this epic has twice declared a measure
+  criterion met on a floor that had never once applied (charter D39/D40). A
+  text lock is a tripwire against silent EDITS, not a substitute for
+  measurement.
 
   ## The third half: WHICH BOX each container query resolves against
 
@@ -138,12 +172,60 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # rule?" — every one of them is gated behind a bucket attribute the wide
   # desk never carries, or behind a variant class (`--collapsed`,
   # `.sheet-editor`, `.editor-with-preview`) that is opt-in per surface.
+  #
+  # COUNT, wave 11: 15 entries -> 25. The delta is exactly TEN, every one of
+  # them a `.bp-doc-sidebar` rule that `pane_family?/1` could not see until
+  # this wave: seven declaring the inspector's own tiers (the element, the
+  # docked and overlaid `.is-open` rules, `.is-collapsed`, and the three
+  # `__head`/`__collapse`/`__body` children that merely share the prefix) and
+  # three Tier-3 destination rules shipped by #4923. Nothing was removed, and
+  # no pre-existing entry changed shape — `expected -- actual` is empty in
+  # both directions except for the additions.
+  #
+  # (The BEFORE count is 15, not 14. Any brief saying 14 predates spd-w5 /
+  # charter D114, which added the fifteenth: the
+  # `.editor-with-preview .editor-panel-main.bp-paper-body`
+  # container-name/container-type pair below.)
   @geometry_census [
     # --- the wide desk's own boxes: these ARE the wide bucket ---
     {".pane-layout", ~w(display flex overflow-x overflow-y)},
     {".pane-column", ~w(display flex-shrink min-width width)},
     {".pane-column--collapsed", ~w(flex-shrink max-width min-width width)},
     {".editor-panel", ~w(container-name container-type display flex min-width overflow)},
+
+    # --- the inspector, wave 11: ALSO the wide bucket ---
+    #
+    # `.editor-panel` is the reading column plus this box, so every pixel
+    # declared here is a pixel the wide reading measure does not get. These
+    # are not "phone" rules that happen to mention the sidebar; the docked
+    # 300px tier is what viewport 1280 and 1440 actually render.
+    {".bp-doc-sidebar", ~w(display overflow)},
+    # TWO rules key on this one selector, and both belong here: the top-level
+    # docked tier (`flex: 0 0 300px; min-width: 0`) and the overlay tier
+    # nested inside `@container panel (max-width: 860px)` (`width: 300px`).
+    # The census keys by selector and is blind to at-rule headers by design
+    # (see `last_line/1`), so the two arrive indistinguishable — which is why
+    # their VALUES are pinned separately and by tier below.
+    {".bp-doc-sidebar.is-open", ~w(flex min-width)},
+    {".bp-doc-sidebar.is-open", ~w(width)},
+    {".bp-doc-sidebar.is-collapsed", ~w(flex)},
+    {".bp-doc-sidebar__head", ~w(display)},
+    {".bp-doc-sidebar__collapse", ~w(display)},
+    {".bp-doc-sidebar__body", ~w(overflow-y)},
+
+    # --- Tier-3, the summoned destination (#4923): explicitly NOT wide ---
+    #
+    # Every one of these is negatively or positively gated away from the wide
+    # bucket — `html:not([data-width-bucket="wide"])` subtracts it by name,
+    # and the narrow/phone pair never matches there. That scoping is the whole
+    # reason these rules were allowed to move geometry at all (charter D92):
+    # epic criterion 2 is measured at 1280/1440 and they may not reach it.
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])|,
+     ~w(flex width)},
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body|,
+     ~w(display)},
+    {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened], html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened]|,
+     ~w(width)},
 
     # --- phone bucket: html[data-width-bucket="phone"], never wide ---
     {~S|html[data-width-bucket="phone"] .pane-layout:has(> .editor-panel) .pane-column|,
@@ -330,6 +412,65 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
              D113/D114). The floor would keep applying and keep being wrong.
              """
     end
+
+    test "the docked inspector is EXACTLY 300px — the reading column's other term" do
+      # Two rules key on this selector and the census cannot tell them apart
+      # (it is blind to at-rule headers by design), so they are separated here
+      # by the tier each one declares: the docked tier is the flex item, the
+      # overlay tier is the absolutely-positioned one.
+      blocks = blocks!(".bp-doc-sidebar.is-open")
+
+      assert length(blocks) == 2,
+             """
+             `.bp-doc-sidebar.is-open` now has #{length(blocks)} rules, not 2.
+
+             The inspector has exactly two tiers: docked (a flex item beside
+             the reading column) and overlaid (absolute, inside `@container
+             panel (max-width: 860px)`). A third rule is a third tier nobody
+             declared, and whichever one wins is source-order dependent.
+             """
+
+      {docked, overlay} = Enum.split_with(blocks, &String.contains?(&1, "flex:"))
+      [docked] = docked
+      [overlay] = overlay
+
+      # THE NUMBER. D149 rules the dock stays 300px, and this assertion is the
+      # only thing in five suites that says so. `.editor-panel` is the reading
+      # column PLUS this box, so at viewport 1280 and 1440 every pixel here is
+      # a pixel the reading measure does not get — and the `panel` at-rule's
+      # 860px threshold is literally 560 + 300, so moving this desynchronises
+      # the overlay decision from the geometry it decides about.
+      #
+      # Before this pin existed, 300px -> 200px passed 16 of 16.
+      assert value!(docked, ".bp-doc-sidebar.is-open (docked)", "flex") == "0 0 300px",
+             """
+             The docked inspector's flex basis moved off 300px.
+
+             This box sits INSIDE `.editor-panel`, beside the reading column,
+             at every wide viewport — so its basis is a term in the wide
+             reading measure, and changing it moves epic criterion 2's own
+             band without touching any rule this file used to watch. That is
+             not hypothetical: `pane_family?/1` was blind to `.bp-doc-sidebar`
+             until wave 11, and 300px -> 200px passed 16 of 16 both before and
+             after while moving 44px of wide reading column.
+
+             It is also one of the two terms in `@container panel (max-width:
+             860px)` — 860 = 560 (the content floor) + 300 (this). Move one
+             without the other and the overlay-vs-dock threshold starts
+             answering about a layout that no longer exists (charter D149).
+             """
+
+      # `min-width: 0` is what lets the basis be the whole story: without it a
+      # flex item's automatic minimum is its content, and a long metadata value
+      # would push the dock past 300px and eat the column silently.
+      assert value!(docked, ".bp-doc-sidebar.is-open (docked)", "min-width") == "0"
+
+      # The overlay tier carries the same 300px as an explicit width, because
+      # once it is `position: absolute` it is no longer a flex item and the
+      # basis above stops applying to it at all.
+      assert value!(overlay, ".bp-doc-sidebar.is-open (overlay)", "width") == "300px",
+             "the overlaid inspector's width drifted from the docked tier's 300px"
+    end
   end
 
   describe "the wide bucket gets those rules verbatim — no unscoped override" do
@@ -356,14 +497,49 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
              """
     end
 
-    test "every geometry override outside the four base rules is bucket- or variant-scoped" do
-      base = [".pane-layout", ".pane-column", ".pane-column--collapsed", ".editor-panel"]
+    test "every geometry override outside the base rules is bucket- or variant-scoped" do
+      # The boxes that ARE the wide desk. `.bp-doc-sidebar` and its docked
+      # `.is-open` tier joined in wave 11 — not as an exemption but as an
+      # admission: they render at 1280 and 1440, so their values are pinned as
+      # literal constants above rather than waved through here.
+      base = [
+        ".pane-layout",
+        ".pane-column",
+        ".pane-column--collapsed",
+        ".editor-panel",
+        ".bp-doc-sidebar",
+        ".bp-doc-sidebar.is-open"
+      ]
 
-      for {selector, _props} <- geometry_census(), selector not in base do
+      # EVERY selector in a comma-separated list is checked, not just the one
+      # the census key happens to end on. #4923's Tier-3 rules are written as
+      # narrow/phone pairs, and "the first half is scoped" says nothing about
+      # the second — a list whose tail reached the wide desk would otherwise
+      # ride in on its head's scoping.
+      for {key, _props} <- geometry_census(),
+          selector <- String.split(key, ", "),
+          selector not in base do
         scoped? =
           String.starts_with?(selector, ~S|html[data-width-bucket="phone"] |) or
+            String.starts_with?(selector, ~S|html[data-width-bucket="narrow"] |) or
             String.starts_with?(selector, ~S|html[data-editor-focus="beta"] |) or
+            # NEGATIVE scoping, and the strongest form available: the wide
+            # bucket is subtracted by name. #4923's summoned-destination rules
+            # move real geometry (`flex`, `width`) and are allowed to precisely
+            # because `html:not([data-width-bucket="wide"])` cannot match in
+            # epic criterion 2's own band (charter D92).
+            String.starts_with?(selector, ~S|html:not([data-width-bucket="wide"]) |) or
             selector in [
+              # Inspector variants and children. `.is-collapsed` is a state the
+              # desk carries only when the user has collapsed the panel, and
+              # the three `__`-children are inner chrome: they lay out the
+              # inspector's own header and scroll body and declare nothing
+              # about how much room the inspector takes from the document.
+              ".bp-doc-sidebar.is-collapsed",
+              ".bp-doc-sidebar__head",
+              ".bp-doc-sidebar__collapse",
+              ".bp-doc-sidebar__body",
+              ".bp-doc-sidebar__title",
               ".editor-panel.sheet-editor",
               ".editor-with-preview .editor-panel-main",
               ".editor-with-preview.has-onix-preview .editor-panel-main",
@@ -615,6 +791,23 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # Zero matches raises HERE, naming the selector, rather than returning an
   # empty block that every assertion below would pass against vacuously.
   defp block!(selector) do
+    case blocks!(selector) do
+      [one] ->
+        one
+
+      many ->
+        flunk(
+          "`#{selector}` now has #{length(many)} base rules — the winner is " <>
+            "source-order dependent; collapse it to one"
+        )
+    end
+  end
+
+  # Every rule whose selector line is exactly `selector`, for the selectors
+  # that legitimately have more than one tier (the inspector's docked and
+  # overlaid `.is-open` rules). Zero matches still raises HERE, for the same
+  # reason `block!/1` does.
+  defp blocks!(selector) do
     esc = Regex.escape(selector)
 
     found =
@@ -623,9 +816,6 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       |> List.flatten()
 
     case found do
-      [one] ->
-        one
-
       [] ->
         flunk("""
         SELECTOR MATCHED ZERO RULES: `#{selector}`
@@ -640,10 +830,7 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         """)
 
       many ->
-        flunk(
-          "`#{selector}` now has #{length(many)} base rules — the winner is " <>
-            "source-order dependent; collapse it to one"
-        )
+        many
     end
   end
 
@@ -769,10 +956,23 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     end
   end
 
+  # The families whose box geometry IS the wide desk.
+  #
+  # `bp-doc-sidebar` joined this list in wave 11, and it was not an oversight
+  # being tidied up — it was a hole proven by mutation. `.editor-panel` is the
+  # reading column PLUS the docked inspector, so the inspector's own width is a
+  # term in the reading measure at every wide viewport. With the predicate
+  # blind to it, changing `.bp-doc-sidebar.is-open`'s basis from `0 0 300px` to
+  # `0 0 200px` — 100px off the dock, 44px onto the wide reading column after
+  # the pane's own floor takes its share — left this file at 16 of 16 PASSING,
+  # before and after. The census never saw the rule, so there was nothing to
+  # compare; see the `.bp-doc-sidebar.is-open` literal pin above for the value
+  # side of the same fix.
   defp pane_family?(selector) do
     String.contains?(selector, "pane-layout") or
       String.contains?(selector, "pane-column") or
-      String.contains?(selector, "editor-panel")
+      String.contains?(selector, "editor-panel") or
+      String.contains?(selector, "bp-doc-sidebar")
   end
 
   defp declared_geometry_props(body) do
