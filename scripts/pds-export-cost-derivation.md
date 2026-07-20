@@ -228,6 +228,43 @@ which matches only the real `beam.smp`.
 
 ---
 
+## 6b. SUPERSEDED IN PART — the peak was measured, hours later (added 2026-07-20, review)
+
+**Dated correction, appended at wave-7 review; nothing above is rewritten.** §4 and §6 state
+that no export peak was measured and ask to be re-derived if crown-proof rungs 3/4 execute.
+**They executed.** The concurrent slice `pds-w1-crown-proof` fired its one budgeted attempt at
+03:25:47Z — roughly 30 minutes after this document's last sample — and its measurements are in
+`scripts/pds-pull-proof.crown-transcript.txt` §5. That transcript, not this file, is the
+canonical source for the export's measured cost.
+
+| Quantity | This doc (inferred, 02:52Z) | Crown transcript (measured, 03:25Z) |
+|---|---|---|
+| Bundle size | 941,046,272 B (D41, 897.4 MiB) | **1,037,336,576 B** (989.3 MiB) — the source grew |
+| Peak incremental demand | ≈ +1.75 GiB (inference from `pack/2`) | **≈ +2,231 MB (2.18 GiB)** — 194,228 kB baseline → 2,483,304 kB peak |
+| Implied multiplier on payload | ~2× (code reading) | **~2.25×** (2.18 GiB / 0.966 GiB) |
+
+**The inference held, and was conservative.** The ~2× read of `pack/2` was directionally
+correct and slightly *under*-estimated the real demand. §4's mechanism paragraph therefore
+stands as written; only its "no peak was measured" caveat is retired.
+
+Two things the measurement changes materially:
+
+1. **§4's "narrowing" of D105 is itself narrowed.** This document declined the word
+   "permanently" for want of a measured peak. With a measured peak of ~2.18 GiB incremental
+   on a 3.8 GB box, the crown transcript states the unaffordability verdict as first-class.
+   That verdict rests on one measurement, not a distribution — but it is a measurement, which
+   is what §4 said was missing.
+2. **The gate-(b) finding is sharpened, not contradicted.** §4 observed `MemAvailable` below
+   the 2200 MB floor on all six samples and concluded the leg "would abort on headroom right
+   now" — true at 02:52Z; the gate read open (2846 MB) at 03:25Z, so the window did open. The
+   stronger finding is the transcript's: the 2200 MB floor is **~31 MB below the demand it
+   gates**. Passing gate (b) is therefore not evidence the export is affordable. Neither
+   document lowers the floor.
+
+Still not closed by either file: the disk-headroom gap in `System.tmp_dir!()` named in §6.
+
+---
+
 ## 7. Provenance
 
 - Citations verified at `origin/main` `d1345255418fd336f8720d65728843c4a7de694e`, 2026-07-20.
