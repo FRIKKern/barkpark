@@ -527,7 +527,9 @@ VERIFICATION REPORTS (the deep round — proofs[] carry actually-run output; tru
 ${JSON.stringify(verifications, null, 2)}
 
 SURVEY REPORTS (the wide round, already distilled by the synthesis — consult for detail, not direction):
-${JSON.stringify(surveys.map((s) => ({ key: s.key, findings: s.findings, relevant_files: s.relevant_files })), null, 2)}
+${JSON.stringify(surveys.map((s) => ({ key: s.key, findings: s.findings, facts: s.facts })), null, 2)}
+
+Any survey fact carrying provenance DEMOTED-NO-RERUN has no command that re-derives it: treat it as an unverified belief at the level of agent memory, never as a settled measurement, and do not build a slice on one without first giving it a rerun command.
 
 Your job:
 1. DECIDE: finalize the key choices (decide them — don't list options). Where verification contradicted the direction, follow the evidence.

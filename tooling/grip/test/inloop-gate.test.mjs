@@ -219,6 +219,30 @@ test("both survey serialisation sites are DOWNSTREAM of the single survey interc
   assert.ok(decideSite > gateAt, "Decide projects surveys BEFORE the gate runs");
 });
 
+// Being downstream of the gate is necessary but NOT sufficient: a projection
+// that drops facts[] is downstream of the gate and still blind to every
+// demotion it made. The Decide phase is where the next wave's slices get filed,
+// so a Decide that cannot see which facts are unre-derivable files slices on
+// sand — the wiring would be half-connected while reading as done.
+test("the Decide projection actually CARRIES facts, so the demotion reaches the phase that files tasks", () => {
+  const site = SOURCE.indexOf("JSON.stringify(surveys.map(");
+  assert.notEqual(site, -1, "the Decide projection of surveys moved — relocate by pattern");
+  const projection = SOURCE.slice(site, SOURCE.indexOf("\n", site));
+  assert.match(
+    projection,
+    /facts:\s*s\.facts/,
+    "the Decide projection must carry facts[] — without it every DEMOTED-NO-RERUN annotation the gate writes is invisible to Decide",
+  );
+  assert.doesNotMatch(
+    projection,
+    /relevant_files/,
+    "relevant_files is not a SURVEY_SCHEMA property — it always projects undefined and reads as a carried field that is not carried",
+  );
+  // and the prompt must TELL Decide what the annotation means, or it is data
+  // the model has no instruction to act on.
+  assert.match(SOURCE, /DEMOTED-NO-RERUN has no command that re-derives it/);
+});
+
 test("the verify serialisation site is DOWNSTREAM of the single verify interception", () => {
   const gateAt = SOURCE.indexOf(`gateFactProvenance(verifications)`);
   assert.notEqual(gateAt, -1, "the verify interception is gone");
