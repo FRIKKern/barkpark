@@ -871,6 +871,135 @@ prose that preceded it.
   harness edit must be on origin/main BEFORE the freeze (D100), and the climb is one job by
   construction — the sequenced-rounds law forbids dispatching it beside its unmerged dependencies.
 
+### Wave 7 amendments — "The Swept Instrument" (decided 2026-07-20, paper `pds-wave-7-2026-07-20`)
+
+- **PDS-D112 — THE HEADROOM GATE IS NOT THE BLOCKER; the premise that framed six waves is REFUTED
+  by measurement.** Gate (b)'s own read path, sampled 260 times over 21.5 minutes against a WARM
+  107-minute BEAM, cleared the 2200 MB floor in **227 samples (87.3%)**, longest continuous open run
+  **640 s**, mean 2600 MB. An independent pre-existing sampler covering the identical window agreed
+  at **225/259 (86.9%)** — 0.4 pp apart, two instruments. `sar` reproduces PDS-D92's four-day claim
+  almost exactly (07/17 62.5% · 07/18 70.1% · 07/19 52.1% · 07/20 57.1% vs the charter's stated
+  51.7–73.4%). Why: the four "all below" readings (1908, ~2087, 1979–2111, 2158) all land inside ONE
+  depressed trough (01:00–02:11Z, which `sar` independently records as five consecutive below-floor
+  10-minute samples). Four samples of one trough is ONE observation, not four. **The "measured
+  window" design is DROPPED as over-engineered; PDS-D92's check-and-go is the climb procedure.**
+
+- **PDS-D113 — THE REAL BLOCKER IS THE FROZEN INSTRUMENT'S OWN SAMPLER, and its fix is
+  ENVIRONMENTAL, not a harness edit.** `pds-pull-proof.sh:1382` selects the sampled process with
+  `pgrep -f beam.smp | head -1`. `-f` matches the FULL COMMAND LINE, so any process whose args merely
+  contain the string matches, and `head -1` takes the LOWEST PID. Verified live at 02:36:39Z by three
+  independent verifiers and again by Decide: `head -1` → **619341, a sampler shell, RSS 1844 kB**;
+  `pgrep -o beam.smp` → **663029, the real BEAM**. Firing today prints *"beam.smp RSS peaked at
+  1 MB"* into the honesty banner at `:1417` as the run's OWN measured peak, on the single
+  unrepeatable attempt — precisely the confident-wrong number PDS-D103 exists to forbid, and
+  unfalsifiable after the fact. FILED, never fixed (the freeze holds). Why the fix is legal: the
+  defect fires only when a lower-PID matcher EXISTS, so sweeping the box until
+  `pgrep -f beam.smp | head -1` **==** `pgrep -o beam.smp` makes the frozen sampler correct without
+  touching one byte of it. The equality is asserted immediately BEFORE and AFTER the attempt and both
+  readings go in the transcript. Corollary: the BEAM's PID is always RECENT (it respawns on every
+  `api/**` auto-deploy), so ANY long-lived shell predating the last restart wins `head -1` — the bug
+  is INTERMITTENT, which is worse than deterministic, and a plausible-looking number after the sweep
+  is not proof the sampler was sound.
+
+- **PDS-D114 — NO RSS FIGURE IS ENTITLED TO THE BANNER WITHOUT ITS SWAP CONTEXT.** The ">2x method
+  divergence" (750–867 vs 256–438 vs 385 MB) is NOT a method divergence: six measurement methods
+  (`ps -C`, `ps -p`, `VmRSS`, `statm`, cgroup `memory.current`, `memory.peak`) agree to within 0.5%
+  at the same instant — 992188 kB on all four per-process methods. What varies is TIME, and the
+  driver is SWAP: the same PID went 1,024,468 kB → 216,852 kB in 55 seconds while `VmSwap` rose
+  51,624 → 874,760 kB. The stable invariant is **RSS + VmSwap ≈ 1.07–1.35 GB**. So RSS on this box is
+  a swap-residency meter, not a memory-consumption meter, and the harness's 1 Hz RSS peak is a LOWER
+  BOUND whose value depends on sampling phase. The transcript quotes the harness's figure verbatim
+  AND annotates it as such, with `VmSwap` sampled alongside out-of-band. If the D113 sweep cannot be
+  proven, the run must take the `:1419` branch and quote NO figure at all.
+
+- **PDS-D115 — GATE (b) IS ANTI-CORRELATED WITH HEALTH, and this is a first-class verdict.**
+  MemAvailable crosses the floor partly BECAUSE the BEAM is being swapped out: at 02:13:23Z
+  VmSwap 859,944 kB / MemAvail 2,206,172 kB, and 7 of 8 samples PASSED the gate in exactly that
+  state. So gate (b) opens most reliably in the condition where materialising a 941 MB single binary
+  is MOST dangerous — the working set is on disk and the export must fault it all back. This is not a
+  reason to fire or not fire (changing the criterion would be a harness edit), but the floor is not a
+  safety property and the transcript must say so.
+
+- **PDS-D116 — ONE `--all` INVOCATION, NEVER SPLIT.** Step 6's terminality is enforced by
+  `canonical_order()` (`:2240`, silently re-sorts ANY `--only` list into ladder order and prints a
+  NOTE) plus step 4's own PULL_BUNDLE-this-run guard (`:1665`, PDS-D97) — NOT by anything inside
+  `step_6`, whose only cross-step precondition is `PULL_BUNDLE` (`:2003`, step 1's artifact). Both
+  mechanisms are PER-INVOCATION. A split climb (bank the cheap ladder now, take 3/4 later on the same
+  target) defeats both: step 4 would scan a step-6-clobbered target with nothing to stop it and print
+  CLEAN off contaminated state. Severability still holds WITHIN one run — `run_steps` (`:2256`) is an
+  unconditional loop with no short-circuit, so an aborted 3/4 still lets 5/6/7/8 execute.
+
+- **PDS-D117 — THE RUNBOOK CARRIES THE INVOCATION; the harness must never self-heal it.** The
+  harness pins `BARKPARK_HOME` / `PDS_SCRATCH_POINTER` per-invocation from a `date+$$` RUN_TAG
+  (`:113-114`), while `pds-scratch-target.sh` mktemps its own root when they are unset
+  (`:156-166`) — so two unpinned invocations allocate two different roots and every target rung
+  ABORTs `env:scratch-target-not-booted`. Reproduced before booting anything. The danger is that this
+  ABORT is INDISTINGUISHABLE at a glance from an honest environmental blocker, and the exit-2 BLOCKED
+  result reads like a designed severable outcome. Both vars are exported to ONE shared short root
+  (the harness's own `target_hint()` at `:296-299` prints the correct form), `PDS_CONTROL_PG` is
+  EXPORTED, `PDS_AMMO_FILE` is UNSET. Correcting the runbook is legal post-freeze; teaching the
+  harness to self-heal is not.
+
+- **PDS-D118 — 0c AND 1 PASS COLD; THE WAVE INHERITS NO PREFLIGHT DEBT.** Run live on the frozen
+  harness (worktree == origin/main == 1f15017bf, `git diff --stat` empty before and after) against a
+  real booted scratch target: **2 PASS · 0 ABORT · 0 FAIL, exit 0**, attempt budget untouched. 0c
+  printed `REPO IS barkpark:21980` asserted from INSIDE the BEAM — PDS-D64's wrong-database defect is
+  refuted in practice and PDS-D94's `ensure_all_started(:ecto_sql)` fix holds COLD on a
+  never-before-existing target. Step 1 exported 55,533,056 bytes / 34 blobs in 7 s and imported exit
+  0 in 6 s, with the manifest grain assertion evaluating LIVE values (`profile='dev'
+  dataset='production'`). Two bounds recorded rather than glossed: 0c's never-exported
+  `PDS_PG_PASSWORD` defaults to `""` and holds ONLY because the scratch target's `pg_hba.conf` is
+  `trust` — unexercised, not robust; and step 1's grain assertion has **no firing control**, the only
+  asserting rung without one (contrast `:1584`, `:1768`, `:1893`), so "it matched" must never be
+  written up as "the grain guard is proven able to catch a workspace-grain bundle."
+
+- **PDS-D119 — #4686's ELIXIR RED WAS A FLAKE; THE FREEZE RESTS ON A SOUND INSTRUMENT — but the
+  gate did not hold, and the transcript says so.** Re-run on the IDENTICAL sha `35b1f4f4c`:
+  **11957 tests, 0 failures** (the original failed run: Sheets `EnginePerfTest` linearity 6.1x vs a
+  6.0 ceiling). Main's own Elixir Test gate on the frozen HEAD `1f15017bf` is green. Causally
+  decisive: #4686 changed **exactly one file**, `scripts/pds-pull-proof.sh`, and across the whole
+  base→merge range NO `api/` file changed at all — `git log 08c5756bd..1f15017bf --
+  api/lib/barkpark/plugins/sheets/` is EMPTY, and the engine has not been touched since #2044. A
+  regression in code nobody edited is not a regression. But `main` is NOT branch-protected
+  (`gh api …/branches/main/protection` → 404) and #4686 DID merge on a red: the honest sentence is
+  "the gate did not hold and the red was empty", never a phrasing that implies it held.
+
+- **PDS-D120 — D105's CITATIONS ARE CORRECT; ITS HEADLINE ARITHMETIC IS NOT.** The digest's claim
+  that "all four file:line citations point at wrong functions" was itself produced from a STALE
+  checkout — the same trap the wish warned about. At origin/main, `workspace_bundle.ex:259-276` is
+  exactly the `Enum.reduce` building the live `dumps` map, `archive.ex:56-57` is inside `pack/2` (the
+  EXPORT path, not `unpack/1` at `:66`), and `workspace_controller.ex:157` is inside `export/2` (not
+  `import/2` at `:258`). **Do not "correct" them.** What IS wrong is the premise "a 3.8 GB box whose
+  BEAM idles at 750–867 MB" — an arbitrary swap-phase sample (D114). D105 is re-derived from
+  COMMITTED footprint (RSS + VmSwap), and the 941 MB base is cited to PDS-D41's live measurement,
+  never implied to be derivable from the three source files. The mechanism claim itself stands
+  unchanged and is confirmed by code: two concurrent full-size binaries, unchunked, with no Mutex /
+  Semaphore / `:global` / rate limit anywhere near the route, beside an in-tree streaming
+  counter-example at `export_controller.ex:15,22`.
+
+- **PDS-D121 — THE DELIVERABLE'S TITLE IS "PDS Crown Transcript — The Cold BEAM, the Full Bundle,
+  and the Line It Could Not Cross".** Scored offline against all seven live PDS papers with a faithful
+  replica of `dedup_wall.ex`'s algorithm (title+tag tokens, its literal stopword set, Jaccard, refuse
+  at ≥0.55 AND ≥3 shared): worst case **0.208**, under both the 0.30 advise and 0.55 refuse
+  thresholds. Why it matters: PDS-D108 records three dedup rejections on this epic already, and the
+  wall fires only at PUBLISH (`dedup_wall.ex:92`), never on a bare create — so a draft create proves
+  nothing.
+
+- **PDS-D122 — THE CLOSING RULE IS UNCHANGED, and D112 does not soften it.** The crown-proof task
+  closes ONLY if rungs 3 and 4 pass WITH their controls FIRING off the one full bundle AND 1/2/5/6
+  pass against a real booted target. A severable headroom ABORT of 3/4 remains an honest designed
+  outcome that does NOT close the task. Why restate it: now that the gate is known to be open most of
+  the time, the temptation shifts from "lower the floor" to "call a lucky partial the crown proof."
+
+- **PDS-D123 — `bp search` bare is not a verb; the doctrine that depends on it silently fails.**
+  SIX independent verifiers typed `bp search "<text>"`, got `unknown command "search"`, and fell back
+  to grepping the tree — while standing doctrine says search Barkpark BEFORE grepping. The manifest
+  noun is `search` with verb `query`: `bp search query "<text>"` returns 872 documents. Why it is in
+  scope: `internal/cli/` is PDS's own lane, the dispatch site is one function
+  (`cli.go:498` `usageSuggestNouns`), and a verb-less noun that has an obvious default is a
+  one-line-class fix with a real test — an epic that measures its own honesty should not ship a
+  research instruction that cannot be executed.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -1034,9 +1163,70 @@ Wave 6 — THE CLIMB (IN FLIGHT; 4 slices; ROUNDS ARE LAW; paper `pds-wave-6-202
   `scripts/pds-pull-proof.crown-transcript.txt` (append-only, D87) + a published Barkpark paper +
   every FAIL filed as a task rather than fixed away (D100).
 
+Wave 7 — "The Swept Instrument" (DECIDED 2026-07-20; 4 slices, ALL ROUND 1, all opus per D38/D56):
+
+- R1 `pds-w1-crown-proof` (opus, L): THE CLIMB. Sweep the box until
+  `pgrep -f beam.smp | head -1` == `pgrep -o beam.smp` (D113), invoke ONE `--all` with pinned
+  `BARKPARK_HOME`/`PDS_SCRATCH_POINTER`, exported `PDS_CONTROL_PG`, unset `PDS_AMMO_FILE` (D117),
+  check-and-go on gate (b) (D112). Deliver `scripts/pds-pull-proof.crown-transcript.txt`
+  (append-only), DELETE `scripts/pds-pull-proof.first-run.txt` in the same PR (D87), add
+  `scripts/pds-crown-runbook.md`, publish the paper titled per D121.
+- R1 `pds-w7-export-cost-derivation` (opus, M): re-derive D105 from committed footprint
+  (RSS + VmSwap), re-verify its three citations at a NAMED sha, correct the stale-checkout claim.
+  `scripts/pds-export-cost-derivation.md`. Read-only on guerrilla, single-shot reads ONLY.
+- R1 `pds-w7-sheets-perf-flake` (opus, S): the linearity guard reds main on loaded runners with
+  ~1.0–1.2x real headroom. `api/test/barkpark/sheets/engine_perf_test.exs`.
+- R1 `pds-w7-bp-search-verbless` (opus, S): `bp search "<text>"` must not dead-end (D123).
+  `internal/cli/`.
+
+FILED, NOT BUILT (the freeze forbids touching the instrument):
+`pds-bl-harness-pgrep-wrong-process` (D113) · `pds-bl-step1-grain-no-control` (D118) ·
+`pds-bl-artdir-no-cleanup` · `pds-bl-gate-b-anticorrelated` (D115) ·
+`pds-bl-deployed-sha-override-unimplemented` · `pds-bl-templates-deploy-noop`.
+
 HELD BEHIND THE TRANSCRIPT: `pds-w3-shares-fidelity` — it moves the census baseline (D45/D74).
 
+
 ## Wave log
+
+### Wave 7 2026-07-20 — "The Swept Instrument" — DECIDED, 4 R1 slices building (paper `pds-wave-7-2026-07-20`)
+
+The verify round moved the ground under the wave's own direction, and the correction is the best news
+the epic has had in seven waves: **the headroom gate was never the blocker.** 227 of 260 samples of
+gate (b)'s own read path cleared the floor (87.3%), a second independent sampler agreed to 0.4 pp,
+and `sar` reproduced PDS-D92 across four retained days. The four readings that framed waves 6 and 7
+were four samples of ONE trough. PDS-D93's refutation of the deploy pounce also survived, with a
+sharper proof than wave 6 had: the live restart curve shows a memory TROUGH first (t+15s → 1761 MB),
+and the night's largest open window (785 s) had nothing to do with a deploy.
+
+What replaced it is a defect nobody had looked for. Three verifiers independently found, and Decide
+re-confirmed live at 02:36:39Z, that the FROZEN harness samples the wrong process:
+`pgrep -f beam.smp | head -1` returns a 1.8 MB sampler shell, not the 200–990 MB BEAM. Firing today
+would have written *"beam.smp RSS peaked at 1 MB"* into the honesty banner as the run's own measured
+peak, on the one unrepeatable attempt. It is FILED, not fixed — and its remedy is environmental
+(sweep the box until `head -1` == `pgrep -o`), so the freeze holds and the sampler still comes out
+correct. That is the wave: the instrument gets swept, not edited.
+
+Two contradictions closed on the way. The ">2x RSS method divergence" was never a method divergence —
+six methods agree to 0.5% at the same instant, and what moves is swap (RSS + VmSwap ≈ 1.07–1.35 GB is
+the invariant). And #4686's Elixir red, which shadowed the freeze, re-ran green on the identical sha
+(11957 tests, 0 failures) against a PR containing zero Elixir.
+
+Round 1 (4 slices, disjoint files, all `opus` per D38/D56):
+
+- `pds-w1-crown-proof` → the climb + transcript + paper (`scripts/pds-pull-proof.crown-transcript.txt`,
+  `scripts/pds-crown-runbook.md`, deletes `scripts/pds-pull-proof.first-run.txt`).
+- `pds-w7-export-cost-derivation` → D105 re-derived from committed footprint
+  (`scripts/pds-export-cost-derivation.md`).
+- `pds-w7-sheets-perf-flake` → the linearity guard that reds main
+  (`api/test/barkpark/sheets/engine_perf_test.exs`).
+- `pds-w7-bp-search-verbless` → `bp search "<text>"` dead-ends six verifiers (`internal/cli/`).
+
+The closing rule is unchanged (D122): the crown proof closes only if 3 and 4 pass with their controls
+firing off the one full bundle AND 1/2/5/6 pass against a real booted target. A severable headroom
+ABORT is honest and does not close it — and now that the gate is known to be open most of the time,
+the temptation to call a lucky partial "the crown proof" is the one this wave has to refuse.
+
 
 ### Wave 2026-07-19 — W1 round 1 built + reviewed, grade A-
 
