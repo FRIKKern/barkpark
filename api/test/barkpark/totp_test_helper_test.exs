@@ -110,10 +110,26 @@ defmodule Barkpark.TotpTestHelperTest do
     @helper_source Path.join(@test_root, "support/totp_test_helper.ex")
 
     test "the raw TOTP generator appears nowhere under api/test/ except the helper" do
-      offenders =
+      scanned =
         @test_root
         |> Path.join("**/*.{ex,exs}")
         |> Path.wildcard()
+
+      # ANTI-VACUITY, mirroring the async-env-seam guard's own defence. Without
+      # this, a wrong @test_root (a moved file, a renamed directory) makes
+      # Path.wildcard/1 return [] and the ratchet passes having measured
+      # NOTHING. A guard that cannot fail is the disease, not the cure — so the
+      # scan must prove it actually walked the tree before its verdict counts.
+      assert length(scanned) > 100,
+             "the ratchet scanned only #{length(scanned)} files under #{@test_root} — " <>
+               "the root is wrong and this gate is passing vacuously"
+
+      assert @helper_source in scanned,
+             "the ratchet did not see the helper it allowlists (#{@helper_source}) — " <>
+               "the allowlist is stale and a real offender could be hiding behind it"
+
+      offenders =
+        scanned
         |> Enum.reject(&(&1 == @helper_source))
         |> Enum.filter(&String.contains?(File.read!(&1), @banned))
         |> Enum.map(&Path.relative_to(&1, @test_root))
@@ -134,6 +150,11 @@ defmodule Barkpark.TotpTestHelperTest do
 
              Need an off-period code (to probe the acceptance WINDOW)? Use
              `code_for_period_offset!/3`, not the raw generator.
+
+             Named a `support/__ratchet_probe_*.exs` file? That is inert debris
+             from the able-to-fail test below being killed mid-run (its `after`
+             block normally deletes it). Delete it — it is not a real offence,
+             and this gate reporting it as one would itself be a lying gate.
              """
     end
 
