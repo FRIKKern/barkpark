@@ -128,6 +128,39 @@
 .bp-inst--archived { color: var(--muted-text); }
 .bp-inst--decommissioned { color: var(--danger); }
 .bp-inst--adopted { color: var(--info); }
+/* coherence-fixture legend chips (coherenceFixtureToHtml) — the committed TUI
+   golden text painted in the SAME lifecycle vocabulary as .bp-inst--* above, so
+   the terminal surface and the console speak one palette. The role words follow
+   the .notice tone-suffix grammar (role word → role token, no new colours); the
+   hex cell is .token-chip-shaped and carries a leading swatch of the literal
+   #rrggbb the fixture names. --hex is declared here with a safe default and
+   OVERRIDDEN inline per cell by coherenceFixtureToHtml — the default is what
+   makes the chip legible if that inline style is ever dropped. */
+.bp-lc-info { color: var(--info); }
+.bp-lc-warn { color: var(--warn); }
+.bp-lc-ok { color: var(--ok); }
+.bp-lc-danger { color: var(--danger); }
+.bp-lc-hex {
+  --hex: currentColor;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  color: var(--muted-text);
+}
+.bp-lc-hex::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--hex);
+}
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] {
   --primary: hsl(151.96 71.81% 29.22%);
