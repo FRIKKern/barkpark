@@ -221,6 +221,35 @@ const VERIFY_SCHEMA = {
   },
 }
 
+// STRUCTURAL SELF-CHECK — runs on every wave, before a single agent is spent.
+//
+// `node --check` proves only that this file PARSES. It was green on a state
+// where a misplaced brace closed SURVEY_SCHEMA.properties early and silently
+// moved fix_candidates outside the schema: a valid program, a wrong contract,
+// and no gate anywhere could see it. The probes that caught it were throwaway,
+// so the same brace could return tomorrow against a green gate.
+//
+// This is the cheap permanent version. It is a THROW at module scope for the
+// same reason the fan-out floors are (D15): it is certain, it needs no runner,
+// and it fires before the wave costs anything. A schema whose `required` names
+// a key it does not define is a contract the host can never satisfy.
+for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA], ['STRATEGY_SCHEMA', STRATEGY_SCHEMA]]) {
+  for (const key of schema.required || []) {
+    if (!Object.prototype.hasOwnProperty.call(schema.properties || {}, key)) {
+      throw new Error(`${name} declares required key '${key}' but does not define it in properties — a brace or edit moved it out of the schema. Fix the schema; do not proceed.`)
+    }
+  }
+}
+// `rerun` is the whole point of the provenance seam: if an edit drops it, the
+// carrier is gone and every downstream grip check silently has nothing to read.
+for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA]]) {
+  const props = schema.properties?.facts?.items?.properties || {}
+  if (!props.rerun) throw new Error(`${name}.facts[].rerun is missing — the fact-level provenance carrier was dropped.`)
+  if ((schema.properties.facts.items.required || []).includes('rerun')) {
+    throw new Error(`${name}.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).`)
+  }
+}
+
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave'],

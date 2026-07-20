@@ -177,6 +177,23 @@ const SURVEY_SCHEMA = {
   },
 }
 
+// STRUCTURAL SELF-CHECK — mirrors the one in bp-epic-cycle.workflow.js, and for
+// the same reason: `node --check` proves this file PARSES, not that its schemas
+// are intact. A misplaced brace once moved a key out of a schema's properties
+// while every gate stayed green. This throws at module scope, before any agent
+// is spent, so the failure is legible and free.
+for (const key of SURVEY_SCHEMA.required || []) {
+  if (!Object.prototype.hasOwnProperty.call(SURVEY_SCHEMA.properties || {}, key)) {
+    throw new Error(`SURVEY_SCHEMA declares required key '${key}' but does not define it in properties — a brace or edit moved it out of the schema. Fix the schema; do not proceed.`)
+  }
+}
+if (!SURVEY_SCHEMA.properties?.facts?.items?.properties?.rerun) {
+  throw new Error('SURVEY_SCHEMA.facts[].rerun is missing — the fact-level provenance carrier was dropped, and the two cycles have drifted.')
+}
+if ((SURVEY_SCHEMA.properties.facts.items.required || []).includes('rerun')) {
+  throw new Error('SURVEY_SCHEMA.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).')
+}
+
 const DIGEST_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['synthesis', 'paper_updated', 'bundles', 'dropped'],
