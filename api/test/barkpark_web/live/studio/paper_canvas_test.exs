@@ -1476,7 +1476,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # announce opposite things.
       for bucket <- ~w(standard narrow phone) do
         control =
-          panel_toggle(render_sidebar(%{panel_open: true, user_opened: false, width_bucket: bucket}))
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: false, width_bucket: bucket})
+          )
 
         assert control =~ ~s(aria-expanded="false"),
                "#{bucket}: painted-closed panel must not announce itself expanded"
@@ -1494,9 +1496,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # visible — the announcement must follow the pixels back.
       for bucket <- ~w(wide standard narrow phone) do
         control =
-          panel_toggle(render_sidebar(%{panel_open: true, user_opened: true, width_bucket: bucket}))
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: true, width_bucket: bucket})
+          )
 
-        assert control =~ ~s(aria-expanded="true"), "#{bucket}: user-opened panel is genuinely open"
+        assert control =~ ~s(aria-expanded="true"),
+               "#{bucket}: user-opened panel is genuinely open"
+
         assert control =~ "Collapse document panel"
         assert chevron(control) == "chevron-down"
       end
@@ -1505,7 +1511,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "a server-CLOSED panel announces closed regardless of bucket (spd-b29f)" do
       for bucket <- ~w(wide standard narrow phone) do
         control = panel_toggle(render_sidebar(%{panel_open: false, width_bucket: bucket}))
-        assert control =~ ~s(aria-expanded="false"), "#{bucket}: collapsed panel is never expanded"
+
+        assert control =~ ~s(aria-expanded="false"),
+               "#{bucket}: collapsed panel is never expanded"
       end
     end
 
@@ -1577,7 +1585,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
             })
           )
 
-        assert (after_control =~ ~s(aria-expanded="true")) == not announced_open?,
+        assert after_control =~ ~s(aria-expanded="true") == not announced_open?,
                """
                THE CONTROL LIES ABOUT WHAT PRESSING IT DOES.
 
