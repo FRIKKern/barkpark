@@ -743,18 +743,48 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       end
     end
 
-    test "wide/standard are bit-identical to collapse?/3 for every combination" do
-      # The 9-transition bit-identity guarantee: at wide (and standard),
-      # display_state is EXACTLY `not collapse?/3` — so every mapped nav
-      # transition renders unchanged from today.
-      for num_panes <- 1..8, has_editor? <- [true, false], idx <- 0..(num_panes - 1) do
-        expected =
-          if PaneBuilder.collapse?(idx, num_panes, has_editor?), do: :strip, else: :full
+    test "wide/standard hold the deep-stack shape too (6-8 panes), as literals" do
+      # CONVERTED, not deleted (spd-w6-wide-geometry-lock, charter D94). What
+      # stood here derived its expectation from `collapse?/3` — the very
+      # function it claimed to guard — so when `collapse?/3` was regressed by
+      # deliberate fault injection (keep_full_nav_count 1 -> 2) both sides of
+      # the comparison moved together and this test stayed GREEN while the
+      # 40-cell literal table above went red with a readable diff. It could
+      # never fail from the only thing it purported to guard.
+      #
+      # Deleting it outright would have lost real coverage: the table above
+      # is exhaustive over num_panes 1..5, and this test reached 8. So the
+      # coverage is kept and the idiom is swapped — the deep-stack rows are
+      # spelled out as constants, exactly like the table above, and nothing
+      # here calls `collapse?/3`.
+      #
+      # The shape, stated in words so a diff is readable: with a document
+      # open the wide desk keeps ONE full nav pane (the last); with no
+      # document open it keeps TWO. Everything to their left is a 44px strip.
+      table = %{
+        {6, true} => [:strip, :strip, :strip, :strip, :strip, :full],
+        {7, true} => [:strip, :strip, :strip, :strip, :strip, :strip, :full],
+        {8, true} => [:strip, :strip, :strip, :strip, :strip, :strip, :strip, :full],
+        {6, false} => [:strip, :strip, :strip, :strip, :full, :full],
+        {7, false} => [:strip, :strip, :strip, :strip, :strip, :full, :full],
+        {8, false} => [:strip, :strip, :strip, :strip, :strip, :strip, :full, :full]
+      }
+
+      # Exhaustiveness guard — 3 depths x 2 editor states, and every row is
+      # as long as its own pane count.
+      assert map_size(table) == 6
+
+      for {{num_panes, has_editor?}, expected} <- table do
+        assert length(expected) == num_panes
 
         for bucket <- ["wide", "standard"] do
-          assert PaneBuilder.display_state(idx, num_panes, has_editor?, bucket) == expected,
-                 "bucket=#{bucket} idx=#{idx} num_panes=#{num_panes} " <>
-                   "has_editor=#{has_editor?} diverged from collapse?/3"
+          actual =
+            for idx <- 0..(num_panes - 1),
+                do: PaneBuilder.display_state(idx, num_panes, has_editor?, bucket)
+
+          assert actual == expected,
+                 "display_state mismatch: bucket=#{bucket} num_panes=#{num_panes} " <>
+                   "has_editor=#{has_editor?} — got #{inspect(actual)}, want #{inspect(expected)}"
         end
       end
     end
