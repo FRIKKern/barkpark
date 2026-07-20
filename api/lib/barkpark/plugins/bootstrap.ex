@@ -202,7 +202,7 @@ defmodule Barkpark.Plugins.Bootstrap do
 
     dataset = schema.dataset || "production"
 
-    if pulled_row(attrs["name"], dataset) do
+    if Tenancy.pulled_schema_row?(attrs["name"], dataset) do
       skip_pulled(plugin_name, attrs["name"], dataset)
     else
       do_upsert(plugin_name, attrs, dataset, scope)
@@ -265,37 +265,13 @@ defmodule Barkpark.Plugins.Bootstrap do
   # is threaded into the read, because the read already lands on the Default
   # slot; both would be dead weight. A blanket never-update stays rejected: it
   # would freeze legitimate plugin schema evolution on every un-pulled install.
-
-  defp pulled_row(name, dataset) when is_binary(name) do
-    case Content.get_schema(name, dataset) do
-      {:ok, %SchemaDefinition{} = existing} -> provenance_covered?(existing, dataset)
-      _ -> false
-    end
-  rescue
-    e ->
-      # Never let the guard's own read break the boot sweep — degrade to
-      # today's behaviour rather than skipping a legitimate registration.
-      Logger.warning(
-        "Plugins.Bootstrap: pull-provenance guard read failed for #{inspect(name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
-      )
-
-      false
-  end
-
-  defp pulled_row(_name, _dataset), do: false
-
-  defp provenance_covered?(%SchemaDefinition{workspace_id: nil}, _dataset), do: false
-
-  defp provenance_covered?(%SchemaDefinition{} = existing, dataset) do
-    # The row's own `dataset` STRING is the dataset SLUG the stamp is keyed by.
-    slug = existing.dataset || dataset
-
-    existing.workspace_id
-    |> Tenancy.get_workspace_by_id()
-    |> Tenancy.pull_provenance(slug)
-    |> map_size()
-    |> Kernel.>(0)
-  end
+  #
+  # THE PREDICATE ITSELF LIVES IN `Barkpark.Tenancy` (PDS-D125/D126) — it is
+  # shared with `Content.TagRegistry`, the OTHER boot-time schema writer, which
+  # asks the same question and answers it differently (it guards the update but
+  # still inserts when absent, because it must fail the boot closed on a missing
+  # core `tag`). One predicate, two policies; a second copy of the predicate is
+  # exactly the fork the canonical-impl doctrine exists to prevent.
 
   # THE SKIP IS STICKY, ON PURPOSE — and the operator needs the exact way out.
   # Any import stamps the target (a restore of your OWN backup counts as pulled
