@@ -55,8 +55,8 @@ Twelve criteria. Nine read `met=true`. **Exactly one evidence field names a run 
 
 > † **Criterion 10's text moved while this file was being written.** A re-read taken minutes after
 > the census showed 918 → 948 bytes: a concurrent wave-10 actor replaced "in the wave-9 transcript"
-> with "in the transcript of the climb that pays this criterion" (two edits, `INSERT 'transcript of
-> the '` and `REPLACE '-9 transcript' -> ' that pays this criterion'`; `updated_at`
+> with "in the transcript of the wave that pays this criterion" (one edit, `REPLACE 'the wave-9
+> transcript' -> 'the transcript of the wave that pays this criterion'`; `updated_at`
 > 12:07:22.864095Z → 17:06:39.455248Z). The change is correct and welcome — it de-hardcodes wave 9
 > — and **no `met` flag, no `evidence` field and no array length changed** (12 → 12, 9 met → 9 met).
 > It is recorded here because it is a live instance of the hazard the crown ledger's Standing note

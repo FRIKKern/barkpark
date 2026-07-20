@@ -174,8 +174,9 @@ unverified.** The fence's *content* is unaffected; only its authorship line is w
 **Criterion 10's stored text has also moved since the body above was written.** The "After (914
 characters)" quotation in [§ Criterion 10](#criterion-10--before-and-after-verbatim) is the wave-9
 state and is now stale: a concurrent wave-10 patch on 2026-07-20 at 17:06:39Z took it to 948 UTF-8
-bytes, replacing "in the wave-9 transcript" with "in the transcript of the climb that pays this
-criterion". That edit changed no `met` flag, no `evidence` field and no array length. It is left
+bytes, replacing "in the wave-9 transcript" with "in the transcript of the wave that pays this
+criterion" (verified against the live array at review time: 948 bytes, `wave-9 transcript` absent).
+That edit changed no `met` flag, no `evidence` field and no array length. It is left
 uncorrected above for the same reason as the rest of the body — it is an accurate record of the
 wave-9 write — but **do not copy criterion 10's text out of this file to pass as
 `--criterion-text`**; re-read it from the server immediately before any stamp.
