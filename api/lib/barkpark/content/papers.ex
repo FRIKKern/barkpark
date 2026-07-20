@@ -40,6 +40,7 @@ defmodule Barkpark.Content.Papers do
 
   alias Barkpark.Content.Papers.{BlockOps, Hollow}
   alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
+  alias Barkpark.Repo
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -108,11 +109,18 @@ defmodule Barkpark.Content.Papers do
       Hollow.hollow?(blocks) ->
         {:error, :semantic_empty}
 
-      conflicting_html_cache?(paper, blocks, envelope["body_html"], dataset) ->
-        {:error, :ambiguous_source}
-
       true ->
-        {:blocks, blocks}
+        case cache_provenance(paper, blocks, envelope["body_html"], dataset) do
+          :coherent ->
+            {:blocks, blocks}
+
+          {:stale, rendered} ->
+            refresh_html_cache(paper, blocks, rendered)
+            {:blocks, blocks}
+
+          :divergent ->
+            {:error, :ambiguous_source}
+        end
     end
   end
 
@@ -123,19 +131,127 @@ defmodule Barkpark.Content.Papers do
     end)
   end
 
-  # A mixed record is safe only when the alternate HTML is demonstrably the
-  # cache derived from the selected blocks. Never choose the richer branch:
-  # stale/conflicting HTML is an explicit provenance error.
-  defp conflicting_html_cache?(_paper, _blocks, html, _dataset)
+  # Classify a byte mismatch between the stored `body_html` cache and a fresh
+  # render of the selected blocks. A bare `rendered != html` cannot do this: it
+  # conflates two populations with OPPOSITE correct handling, and answering
+  # "ambiguous" to both is what made honest drift a hard 422.
+  #
+  #   :coherent        — no cache, or the cache IS this render. Serve blocks.
+  #   {:stale, html}   — the cache was rendered from THESE blocks by a renderer
+  #                      that is no longer ours (or its resolved externals have
+  #                      since moved). Blocks are canonical, so serve them and
+  #                      rewrite the derived cache. No 422.
+  #   :divergent       — the current renderer, fed these blocks, cannot produce
+  #                      the stored bytes, and nothing external can explain the
+  #                      gap. The cache carries content the blocks do not. This
+  #                      is the population the 422 was built for; it keeps it.
+  #
+  # Provenance comes from `content["body_html_sv"]` — a sha256 digest of the
+  # renderer's own source, stamped at every fresh block→HTML render. Compare it
+  # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
+  # question it can answer.
+  defp cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
-       do: false
+       do: :coherent
 
-  defp conflicting_html_cache?(paper, blocks, html, dataset) do
-    style = get_in(paper.content || %{}, ["style"])
+  defp cache_provenance(paper, blocks, html, dataset) do
+    content = paper.content || %{}
+    style = get_in(content, ["style"])
     scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
     rendered = Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
-    rendered != html
+
+    cond do
+      rendered == html ->
+        :coherent
+
+      # EXTERNAL REFERENT DRIFT — a third class the drift/divergence split does
+      # not name, and the rule above is UNSOUND without it. `paper_render_opts`
+      # injects ref/codelist resolver closures that run LIVE queries, and the
+      # resolved value reaches the emitted bytes. So renaming a REFERENCED
+      # document moves this render while the blocks, the cache, the stamp AND
+      # the renderer are all untouched — a byte gap with a current stamp that is
+      # emphatically NOT divergence. For a block list that resolves externals,
+      # the byte-compare cannot prove divergence AT ALL, with or without a
+      # stamp, so it must not be the thing that 422s. This narrows the
+      # detector's INPUT; every other document keeps the full safety property.
+      #
+      # Deliberately NOT fixed by freezing the resolved label into provenance:
+      # a frozen label makes "stamp matches" true while the correct rendering
+      # legitimately differs, so the reader would serve the OLD title behind a
+      # matching stamp — trading a loud false 422 for a silent wrong value.
+      resolver_dependent?(blocks) ->
+        {:stale, rendered}
+
+      true ->
+        case Map.get(content, "body_html_sv") do
+          sv when is_binary(sv) and sv != "" ->
+            if sv == Render.body_html_render_version(), do: :divergent, else: {:stale, rendered}
+
+          # No stamp: the legacy class. Drift and divergence are genuinely
+          # indistinguishable here, so hold today's behaviour and fail closed.
+          _ ->
+            :divergent
+        end
+    end
   end
+
+  # Does any block in the list resolve an EXTERNAL referent at render time?
+  # The guards mirror `Render.resolve_ref_title/2` and `resolve_code_label/2`
+  # exactly — same types, same non-empty binary `"value"` condition — so this
+  # predicate is true precisely when a resolver closure can move the bytes.
+  # Descends into nested block lists: a reference inside a column or callout
+  # resolves the same way one at the top level does.
+  defp resolver_dependent?(blocks) when is_list(blocks),
+    do: Enum.any?(blocks, &resolver_dependent?/1)
+
+  defp resolver_dependent?(%{"type" => type, "value" => value})
+       when type in ["field-reference", "codelist"] and is_binary(value) and value != "",
+       do: true
+
+  defp resolver_dependent?(block) when is_map(block),
+    do: block |> Map.values() |> Enum.any?(&resolver_dependent?/1)
+
+  defp resolver_dependent?(_), do: false
+
+  # Rewrite the derived HTML cache with the render we just proved canonical, so
+  # the next read takes the `:coherent` path instead of re-rendering.
+  #
+  # Two conditions, each load-bearing. The paper must be a persisted row (a
+  # bare in-memory %Document{} has no id — the pure unit seam must never touch
+  # the Repo). And the blocks we rendered from must be byte-identical to the
+  # STORED blocks: `blocks` arrives from the Envelope, i.e. post-redaction, and
+  # persisting a cache rendered from a redacted view would destroy content.
+  #
+  # Best-effort by construction: this runs inside a READ. A concurrent write, a
+  # stale rev, or no database at all must never turn a servable paper into an
+  # error, so every failure is swallowed and the blocks are served regardless.
+  defp refresh_html_cache(%Document{id: id} = paper, blocks, rendered) when not is_nil(id) do
+    content = paper.content || %{}
+
+    if Projection.read_blocks(content) == blocks do
+      new_content =
+        content
+        |> Map.put("body_html", rendered)
+        |> Map.put("body_html_sv", Render.body_html_render_version())
+
+      try do
+        paper
+        |> Document.changeset(%{"content" => new_content})
+        |> Ecto.Changeset.optimistic_lock(:rev, fn _ ->
+          :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+        end)
+        |> Repo.update()
+      rescue
+        _ -> :error
+      catch
+        _, _ -> :error
+      end
+    end
+
+    :ok
+  end
+
+  defp refresh_html_cache(_paper, _blocks, _rendered), do: :ok
 
   # Semantic validity mirrors the reader audit: hidden nodes and non-image
   # accessibility metadata are not authored visible content; visible text and
