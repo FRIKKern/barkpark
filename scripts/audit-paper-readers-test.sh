@@ -74,6 +74,13 @@ else
   else
     printf '%s' '<!doctype html><article id="paper-body"><p>reader</p></article>' >"$out"
   fi
+  # The GUI route answers non-200 while still serving a perfectly well-formed,
+  # meaningful body. This is the shape that actually happened in production:
+  # content checks alone say "looks fine", and only the status gate catches it.
+  if [[ "${BP_FIXTURE_GUI_422:-}" == "1" ]]; then
+    printf '422'
+    exit 0
+  fi
 fi
 printf '200'
 FAKE_CURL
@@ -173,6 +180,28 @@ jq -e '
   .ok == false and .failed == 2 and
   all(.failures[]; .email.status == 0 and .email.content.body_found == false)
 ' "$tmp/stalled-result.json" >/dev/null
+
+# HTTP 422 on the GUI route with an otherwise-perfect body. The audit's status
+# handling was proven real against incident history but had no checked-in test,
+# so a refactor could have deleted it silently. Note the audit defends this with
+# TWO redundant layers — the ok-gate requires gui_code == 200, AND the content
+# check only runs when the status is 200 (so gui_content stays all-false
+# otherwise). Both must be removed to turn this green; that redundancy is a
+# feature, not duplication to tidy away.
+if PATH="$tmp:$PATH" BP_FIXTURE_GUI_422=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/gui-422-result.json"; then
+  printf 'HTTP 422 on the GUI route unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .gui.status == 422 and
+    (.gui.content.body_found | not) and (.gui.content.meaningful | not)
+  )
+' "$tmp/gui-422-result.json" >/dev/null
 
 if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \
