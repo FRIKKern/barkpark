@@ -71,6 +71,21 @@ test("loopback curl does NOT derive L1 — it is a read of the local dev system"
   assert.notEqual(deriveLevel("curl -s http://0.0.0.0:4000/api/schemas"), "L1");
 });
 
+// REGRESSION: the original host extractor stopped at the first colon, so
+// http://[::1]:4000 yielded the host "[" — which is not loopback — and the
+// grammar promoted a local dev-server read to L1. A ceiling set too high is
+// precisely the level-skip this module exists to make impossible, so the IPv6
+// loopback form is pinned in both the bracketed-with-port and bare shapes.
+test("IPv6 loopback curl does NOT derive L1, bracketed and with a port", () => {
+  assert.equal(deriveLevel("curl -s http://[::1]:4000/api/schemas"), "L3");
+  assert.equal(deriveLevel("curl -s http://[::1]/api/schemas"), "L3");
+  assert.equal(deriveLevel("wget -qO- http://[::1]:4000/v1/capabilities"), "L3");
+});
+
+test("a bracketed NON-loopback IPv6 host still derives L1", () => {
+  assert.equal(deriveLevel("curl -s http://[2a01:4f9:c010:1234::1]/api/schemas"), "L1");
+});
+
 // --- L2 ----------------------------------------------------------------------
 
 test("git show against a remote ref derives L2", () => {

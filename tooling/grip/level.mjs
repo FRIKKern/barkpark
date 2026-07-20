@@ -42,10 +42,19 @@ export const LEVELS = Object.freeze({
 // Loopback hosts a curl can hit without leaving the laptop. A loopback curl is
 // a read of the LOCAL running dev system — a claim about the local checkout,
 // so it derives L3, never L1.
-const LOOPBACK_HOST = /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)$/i;
+const LOOPBACK_HOST = /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1)$/i;
 
 // scheme://host[:port] extractor — first URL-shaped token in the command.
-const URL_TOKEN = /\b[a-z][a-z0-9+.-]*:\/\/([^/\s:'"]+)/gi;
+// The host alternation takes a BRACKETED IPv6 literal first: a naive
+// [^/\s:'"]+ stops at the first colon and captures a bare "[" from
+// http://[::1]:4000, which fails the loopback test and FALSELY PROMOTES a
+// local dev-server read to L1 — this module's own failure mode. Brackets are
+// stripped by normalizeHost so ::1 meets LOOPBACK_HOST in one canonical form.
+const URL_TOKEN = /\b[a-z][a-z0-9+.-]*:\/\/(\[[0-9A-Fa-f:.]+\]|[^/\s:'"]+)/gi;
+
+function normalizeHost(host) {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+}
 
 // --- generated-artifact paths (L4) -------------------------------------------
 
@@ -114,7 +123,7 @@ function firstRemoteUrlHost(command) {
   URL_TOKEN.lastIndex = 0;
   let m;
   while ((m = URL_TOKEN.exec(command)) !== null) {
-    const host = m[1];
+    const host = normalizeHost(m[1]);
     if (!LOOPBACK_HOST.test(host)) return host;
   }
   return null;
