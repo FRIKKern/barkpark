@@ -1536,6 +1536,65 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ "bp-doc-sidebar is-open"
       assert html =~ ~s(data-test-id="sidebar-section-publish")
     end
+
+    # REVIEW FIX (spd-b29f review). The announcement lives in components.ex
+    # (`visually_open?`) and the ACTION lives in
+    # `Handlers.Paper.sidebar_toggle_panel/1` (`painted_closed?`). They are
+    # exact negations of one another today and nothing said so — the builder
+    # named this coupling as the most likely way the slice rots, and a comment
+    # is not a guard. The invariant is the one a reader can actually check with
+    # their eyes: a button that says "Expand" must EXPAND when it is pressed,
+    # and a button that says "Collapse" must COLLAPSE. Pinning that end to end
+    # catches a drift in EITHER file, from either side.
+    test "the control's announcement and its ACTION agree at every bucket (spd-b29f review)" do
+      for bucket <- ~w(wide standard narrow phone),
+          open? <- [true, false],
+          asked? <- [true, false] do
+        before_control =
+          panel_toggle(
+            render_sidebar(%{panel_open: open?, user_opened: asked?, width_bucket: bucket})
+          )
+
+        announced_open? = before_control =~ ~s(aria-expanded="true")
+
+        socket = %Phoenix.LiveView.Socket{
+          assigns: %{
+            __changed__: %{},
+            sidebar_open: open?,
+            sidebar_user_opened: asked?,
+            width_bucket: bucket
+          }
+        }
+
+        {:noreply, after_socket} = PaperHandler.sidebar_toggle_panel(socket)
+
+        after_control =
+          panel_toggle(
+            render_sidebar(%{
+              panel_open: after_socket.assigns.sidebar_open,
+              user_opened: after_socket.assigns.sidebar_user_opened,
+              width_bucket: bucket
+            })
+          )
+
+        assert (after_control =~ ~s(aria-expanded="true")) == not announced_open?,
+               """
+               THE CONTROL LIES ABOUT WHAT PRESSING IT DOES.
+
+               bucket=#{bucket} panel_open=#{open?} user_opened=#{asked?}:
+               the button announced #{if announced_open?, do: "OPEN", else: "CLOSED"},
+               and one press left it announcing the SAME thing.
+
+               `visually_open?` in components.ex and `painted_closed?` in
+               Handlers.Paper.sidebar_toggle_panel/1 are the same predicate
+               written twice, in two files, in opposite polarity. They have
+               drifted. Below `wide` an open-but-never-asked panel is PAINTED
+               closed, so a press must mean OPEN — not "toggle the assign" —
+               and the announcement must say CLOSED beforehand. Whichever of
+               the two moved, move the other with it.
+               """
+      end
+    end
   end
 
   describe "a sidebar edit never touches body blocks (doctrine Rule 4)" do
