@@ -221,14 +221,33 @@ defmodule Barkpark.Content.Papers.BlockOps do
     base_content = (existing && existing.content) || %{}
 
     # Stamp the render version ONLY when body_html was freshly rendered from
-    # blocks. A verbatim (attrs["body_html"]) or carried-over write has unknown
-    # provenance — leave any existing "body_html_sv" in the carried-over map
-    # untouched rather than mis-stamp it.
+    # blocks. The other two legs are NOT interchangeable, so they do not share
+    # an `else`:
+    #
+    #   verbatim  — the caller supplied opaque body_html that no renderer of
+    #     ours produced. A "body_html_sv" carried over from an earlier rendered
+    #     write now describes bytes it never rendered: a stamp that LIES. Delete
+    #     it. NEVER a sentinel value — a sentinel is by construction != the
+    #     current version, so any reader applying "stamp != digest => drift"
+    #     routes it into the OVERWRITE branch and discards the caller's HTML.
+    #     Absent is the legacy class readers already fail closed on.
+    #
+    #   carry-over — a metadata-only update rewrites the EXISTING body_html
+    #     byte-for-byte, so an existing stamp still describes exactly those
+    #     bytes and stays TRUE. Deleting here would demote a coherent paper into
+    #     the fail-closed unknown class and manufacture false 422s.
     content =
-      if is_list(blocks) do
-        put_body_html(base_content, body_html)
-      else
-        Map.put(base_content, "body_html", body_html)
+      cond do
+        is_list(blocks) ->
+          put_body_html(base_content, body_html)
+
+        is_binary(attrs["body_html"]) ->
+          base_content
+          |> Map.put("body_html", body_html)
+          |> Map.delete("body_html_sv")
+
+        true ->
+          Map.put(base_content, "body_html", body_html)
       end
       |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
       |> maybe_put_paper("style", style)
