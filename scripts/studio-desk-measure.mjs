@@ -235,6 +235,15 @@ import path from 'node:path';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const JSON_ONLY = process.argv.includes('--json');
+/** The round trip runs by default — it is the fidelity question this wave was
+ *  filed about — but it is a second pass over every width, so it is opt-OUT
+ *  rather than opt-in-and-forgotten. */
+const ROUND_TRIP = !process.argv.includes('--no-round-trip');
+/** Opt-IN, because it deliberately mutates the page into a state the desk does
+ *  not serve. Its row is tagged `positive_control: true` and is NEVER pushed
+ *  into `run.rows` — a synthetic row in the matrix would be a fabricated desk
+ *  fact, which is the one thing this instrument exists to make impossible. */
+const POSITIVE_CONTROL = process.argv.includes('--positive-control');
 
 /** Absolute path, with every symlink on it collapsed. `fs.realpathSync` throws
  *  on a path that does not exist, which is a legitimate state for `argv[1]`
@@ -299,8 +308,15 @@ function usage() {
 studio-desk-measure.mjs — THE INSTRUMENT (charter D81: no gate authority).
 
   Measures the DEPLOYED Studio desk in a real authenticated browser and prints a
-  matrix of 9 widths x 3 forced faces x 2 inspector states = 54 rows. 54 rows is
-  a COMPLETE run (D121); it is not a short one.
+  matrix of ${WIDTHS.length} widths x ${FACES.length} forced faces x the inspector states that
+  APPLY at each width. The row count is COMPUTED, never compiled in: a complete
+  run is ${expectedRowCount()} rows when every state is reachable, and the run states its own
+  expected count in the artifact and proves it hit it (D121's doctrine, without
+  D121's literal — which rotted the moment a third state existed).
+
+  INSPECTOR STATES
+${STATES.map((s) => `    ${s.id.padEnd(13)} ${s.has_reading_column ? 'has a reading column' : 'NO reading column — ch is NULL, verdicts render "?"'}
+                  applies at ${WIDTHS.filter((w) => s.applies_at(w)).join(', ')}px`).join('\n')}
 
 USAGE
   node scripts/studio-desk-measure.mjs [options]
@@ -313,10 +329,25 @@ OPTIONS
                       provenance) to <path>, creating parent directories.
                       Committed runs live in scripts/measurements/. Without
                       this the table exists only as terminal scrollback (D131).
+  --no-round-trip     Skip the round-trip pass (default -> open -> dismiss on
+                      the SAME page instance, asserting the reading column comes
+                      back bit-identical per width and face). It costs a second
+                      pass over every width; skip it when you only want the
+                      matrix.
+  --positive-control  Take one extra row with a synthetic scrim FORCED to
+                      render, so the non-vacuity guard is seen to FIRE in the
+                      same run. Without it, "no scrim because the desk was
+                      fixed" and "the guard never ran" produce an identical zero.
   -h, --help          This text.
 
 ENVIRONMENT
   BP_DESK_DOC         Env form of --doc.
+  BP_DESK_DESTINATION_CONTROL
+                      Selector for the control that summons the \`destination\`
+                      state, for driving a build where it exists before this
+                      file learns its name. Without it (and without any of the
+                      built-in candidates on the page) the destination state
+                      SKIPS with a named reason — it is never faked.
 
 NOTES
   A full authenticated sweep takes ~30-60s observed (D115) — NOT the ~10 minutes
@@ -359,8 +390,117 @@ const FACES = [
   { id: 'source-serif-4', override: "'Source Serif 4', serif", note: 'forced self-hosted Source Serif 4' },
 ];
 
-/** Asserted before any number is trusted. Impossibility #1. */
-const REQUIRED_SELECTORS = ['.bp-paper-surface', '.editor-panel', '.editor-body.bp-paper-body'];
+/** The READING COLUMN — the one element every ch figure in this file is derived
+ *  from. Named once, because a state is now allowed to declare that it does not
+ *  have one, and "the thing that is absent" must have a name to be absent. */
+const READING_COLUMN_SELECTOR = '.bp-paper-surface';
+
+/** The `wide` bucket's lower bound. The summoned destination is a sub-wide
+ *  shape by construction — at `wide` the inspector docks and nothing is
+ *  summoned — so this is also the width above which the destination state does
+ *  not apply. Read from the same number the desk's own bucket logic uses. */
+const WIDE_BUCKET_MIN_PX = 1280;
+
+/**
+ * THE STATE TABLE — the second axis, as data rather than as three hardcoded
+ * array literals scattered through the printer (D110, and this wave's D153).
+ *
+ * WHY THIS IS A TABLE AND NOT A LIST OF STRINGS. Three summary loops in
+ * `printTable` used to read `['default', 'user-opened']` verbatim. Feeding this
+ * instrument a third-state row proved what that costs: 55 rows went in,
+ * `destination` appeared ZERO times in the output, and NO error was raised
+ * anywhere. A state measured at real cost — an authenticated Chromium sweep,
+ * a provenance bracket, a human waiting — vanished from the human table without
+ * a word of complaint. That is D130's disease (a run that is silently absent
+ * rather than visibly rotted) in a new organ. The loops now derive their order
+ * FROM THE ROWS, so dropping a state is structurally impossible, and
+ * `assertEveryStateRendered()` is the tripwire that proves the derivation held.
+ *
+ * `required_selectors` IS PER-STATE, and that is the second half of the fix. It
+ * used to be a flat module const asserted for EVERY state before any
+ * measurement, with `die()` — a plain throw — as its only outcome. A legitimate
+ * state with no reading column therefore aborted the ENTIRE matrix, and because
+ * nothing before the provenance bracket writes to disk, a mid-sweep die is 0
+ * bytes of stdout, no artifact, and every already-collected row discarded
+ * (simulated: exit 1 after 6 good rows, nothing on disk). A state that declares
+ * `has_reading_column: false` is recorded `reading_column_present: false` with
+ * NULL ch — never 0, because 0 reads as catastrophic occlusion and is exactly
+ * the number a seal would turn on.
+ *
+ * `applies_at` makes the row count a COMPUTATION rather than a literal (D121).
+ */
+const STATES = [
+  {
+    id: 'default',
+    has_reading_column: true,
+    required_selectors: [READING_COLUMN_SELECTOR, '.editor-panel', '.editor-body.bp-paper-body'],
+    applies_at: () => true,
+    legend: '(as served — below `wide` spd-b29 paints the open panel as a 41px in-flow strip)',
+    note: 'the desk exactly as served: no clicks, no reload, descending (D80).',
+  },
+  {
+    id: 'user-opened',
+    has_reading_column: true,
+    required_selectors: [READING_COLUMN_SELECTOR, '.editor-panel', '.editor-body.bp-paper-body'],
+    applies_at: () => true,
+    legend: '(after a REAL click on the inspector toggle through the live socket — the state D108 measured)',
+    note: 'after a REAL click on [data-test-id="sidebar-toggle-panel"] through the live LiveView ' +
+          'socket. `data-user-opened` is SERVER-stamped, so a JS-set attribute would prove only ' +
+          'that the CSS works (D110).',
+  },
+  {
+    // ── THE THIRD STATE. Tier-3's summoned destination: the reader leaves the
+    //    reading column for a place that is ABOUT the document rather than the
+    //    document. It legitimately has no `.bp-paper-surface` on screen, which
+    //    is why `has_reading_column` had to become a per-state fact before this
+    //    state could exist at all.
+    //
+    //    Nothing that reaches it is deployed yet — the entry control ships in
+    //    `inspector-dismissal-and-return-grammar`. So this state SKIPS with a
+    //    named reason rather than failing, and the skip is recorded in the run
+    //    plan where a reader can see it, not swallowed.
+    id: 'destination',
+    has_reading_column: false,
+    // NOTHING is required. That is the whole point: asserting the reading
+    // column here would abort the sweep over a state that correctly has none.
+    required_selectors: [],
+    applies_at: (width) => width < WIDE_BUCKET_MIN_PX,
+    legend: '(the summoned destination — no reading column on screen BY DESIGN; ch is NULL, never 0)',
+    note: 'sub-wide only: at `wide` the inspector docks and nothing is summoned. Its ch figures are ' +
+          'NULL and its verdicts render "?", because asserting FAIL where no reading column exists ' +
+          'is what D127 Part 2 forbids.',
+  },
+];
+
+const STATE_IDS = STATES.map((s) => s.id);
+const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
+
+/** Which states apply at a given width, restricted to the ones this run is
+ *  actually attempting (a skipped state contributes no rows and must not
+ *  inflate the expected count). */
+function statesApplicableAt(width, stateIds = STATE_IDS) {
+  return STATES.filter((s) => stateIds.includes(s.id) && s.applies_at(width));
+}
+
+/** D121's doctrine survives; D121's NUMBER does not. The run states its own
+ *  expected count and proves it hit it, so a short run is arithmetic rather
+ *  than a remembered literal that rots the moment a state or a width is added. */
+export function expectedRowCount(stateIds = STATE_IDS) {
+  return WIDTHS.reduce((n, w) => n + statesApplicableAt(w, stateIds).length * FACES.length, 0);
+}
+
+function rowCountNote(stateIds = STATE_IDS) {
+  const perState = STATES.filter((s) => stateIds.includes(s.id)).map((s) => {
+    const widths = WIDTHS.filter((w) => s.applies_at(w));
+    return `${s.id}: ${widths.length} of ${WIDTHS.length} widths x ${FACES.length} faces = ` +
+           `${widths.length * FACES.length}`;
+  });
+  return `expected_row_count is COMPUTED as sum over widths of ` +
+         `(states applicable at that width) x ${FACES.length} faces — never a compiled-in literal. ` +
+         `This run: ${perState.join('; ')}. Total ${expectedRowCount(stateIds)}. ` +
+         `A state that skipped contributes nothing and is listed in states_skipped, so the expected ` +
+         `count always describes the run that actually happened (D121's doctrine, without its number).`;
+}
 
 const SSH = ['-i', path.join(os.homedir(), '.ssh/barkpark_indx'), '-o', 'ConnectTimeout=15',
              '-o', 'StrictHostKeyChecking=accept-new', 'root@157.180.90.121'];
@@ -1014,6 +1154,11 @@ async (faceOverride) => {
 
   return {
     fatal: false,
+    // TRUE here by construction: this function returned {fatal:true} above if
+    // the reading column was missing, so reaching this point means it is on
+    // screen. The no-reading-column states go through PAGE_MEASURE_CHROME and
+    // set this false with NULL ch — never 0.
+    reading_column_present: true,
     counts,
     font: {
       declared_stack: fontFamilyDeclared,
@@ -1137,6 +1282,171 @@ async (faceOverride) => {
     width_bucket_stamped: document.documentElement.getAttribute('data-width-bucket'),
     scrollbar_width_px: window.innerWidth - document.documentElement.clientWidth,
     viewport_px: window.innerWidth,
+  };
+}
+`;
+
+/**
+ * THE NO-READING-COLUMN MEASURE. For a state that legitimately has no
+ * `.bp-paper-surface` on screen — the summoned destination being the first one.
+ *
+ * It is a SEPARATE function, not a branch inside PAGE_MEASURE, and that is a
+ * deliberate trade. PAGE_MEASURE is ~600 lines of surface-derived arithmetic —
+ * the gutter read, the ch probe, the floor-bind experiment, five bisected
+ * scanlines, the scrim diff — every line of which needs the surface to exist.
+ * Threading a `has it or not` flag through all of that would put a null-guard on
+ * every one of those lines and give a future reader ~600 lines in which to
+ * misplace one. Here, the absence is the shape of the function.
+ *
+ * EVERY READING-COLUMN FIGURE IS NULL, NEVER 0. `content_px: 0` and
+ * `content_ch: 0` read as CATASTROPHIC OCCLUSION — the reader sees nothing —
+ * which is a devastating claim about the desk and would be a fabricated one.
+ * `null` says "there was nothing to measure here", the verdicts render `?`, and
+ * a census counts the row as UNMEASURABLE rather than as a failure (D127 Part 2
+ * forbids asserting FAIL where no reading column exists).
+ *
+ * What it DOES measure is real and worth having: the pane set, the strips, the
+ * crumbs, the inspector's own geometry, the bucket. Those answer "what did the
+ * reader get INSTEAD", which is the whole question a destination state exists
+ * to ask.
+ */
+export const PAGE_MEASURE_CHROME = /* js */ `
+() => {
+  const px = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const round = (n, d = 3) => (n === null || n === undefined ? null : Math.round(n * 10 ** d) / 10 ** d);
+
+  const surface = document.querySelector('${READING_COLUMN_SELECTOR}');
+  const panel   = document.querySelector('.editor-panel');
+
+  const counts = {
+    '${READING_COLUMN_SELECTOR}':  document.querySelectorAll('${READING_COLUMN_SELECTOR}').length,
+    '.editor-panel':              document.querySelectorAll('.editor-panel').length,
+    '.editor-body.bp-paper-body': document.querySelectorAll('.editor-body.bp-paper-body').length,
+  };
+
+  const allPanes = [...document.querySelectorAll('.pane-column')];
+  const visible = (e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+  const allStrips = [...document.querySelectorAll('.pane-column--collapsed')];
+  const crumbsHost = document.querySelector('.bp-desk-crumbs');
+
+  const sidebar = document.querySelector('.bp-doc-sidebar');
+  let inspector = { present: false };
+  if (sidebar) {
+    const iCs = getComputedStyle(sidebar);
+    const iR = sidebar.getBoundingClientRect();
+    inspector = {
+      present: true,
+      is_open_class: sidebar.classList.contains('is-open'),
+      user_opened_marker: sidebar.hasAttribute('data-user-opened'),
+      position: iCs.position,
+      display: iCs.display,
+      width_px: round(iR.width),
+      left_px: round(iR.left),
+      z_index: iCs.zIndex,
+      // With no reading column there is no surface to overlay. Reporting
+      // \`overlays_surface: false\` would read as "it stays out of the reader's
+      // way", which is a claim about a relationship that does not exist here.
+      overlays_surface: null,
+      overlap_over_surface_px: null,
+      overlap_over_content_box_px: null,
+    };
+  }
+
+  const withPreview = document.querySelector('.editor-with-preview');
+  const scrimCs = withPreview ? getComputedStyle(withPreview, '::after') : null;
+  const alphaOf = (bg) => {
+    const m = String(bg).match(/rgba?\\(([^)]+)\\)/);
+    if (!m) return null;
+    const parts = m[1].split(/[,/]/).map((s) => parseFloat(s.trim()));
+    return parts.length >= 4 && Number.isFinite(parts[3]) ? parts[3] : 1;
+  };
+
+  return {
+    fatal: false,
+    reading_column_present: false,
+    reading_column_selector: '${READING_COLUMN_SELECTOR}',
+    reading_column_absence_note:
+      'This state DECLARES no reading column, so its absence is the measurement, not a failure. ' +
+      'Every ch and px figure derived from the surface is NULL — never 0, which would read as ' +
+      'catastrophic occlusion and is a claim about the desk this row cannot support. The verdicts ' +
+      'render "?" (D127 Part 2: no FAIL where there is no reading column to fail).',
+    counts,
+    font: {
+      declared_stack: null, resolved_family: null,
+      resolution_method: 'no reading column on screen — no face to resolve',
+      font_size_px: null, stack_advance_20ch_px: null,
+      requested_primary: null, face_applied: null, face_available: [],
+      fell_back_to_generic_serif: false,
+    },
+    ch: {
+      probe_px_per_ch: null,
+      probe_method: 'not taken — the ch probe is inserted as a CHILD of ' +
+                    '${READING_COLUMN_SELECTOR}, which is not on screen in this state',
+      in_floor_px_per_ch: null, in_floor_method: 'not derived', in_floor_formula_assumed: null,
+      divergence_pct: null,
+    },
+    gutter: { padding_left_px: null, padding_right_px: null, total_px: null,
+              border_left_px: null, border_right_px: null,
+              method: 'not read — no surface to read padding from' },
+    panel_px: panel ? round(panel.getBoundingClientRect().width) : null,
+    surface_border_box_px: null,
+    surface_max_width_px: null,
+    content_px: null,
+    visible_content_px: null,
+    content_offscreen_px: null,
+    dimmed_content_px: null,
+    scrim_alpha: scrimCs ? alphaOf(scrimCs.backgroundColor) : null,
+    legacy_inspector_subtraction_px: null,
+    visible_vs_legacy_delta_px: null,
+    // Null, not an empty structure: an occlusion block with zeroed scanlines
+    // would be counted by the self-checks as a row where the hit-test ran.
+    occlusion: null,
+    measure_note:
+      'chrome-only measurement (PAGE_MEASURE_CHROME). The hit-test, the ch probe, the gutter read, ' +
+      'the floor-bind experiment and the scrim diff all require ' + '${READING_COLUMN_SELECTOR}' +
+      ' and were not run. What IS measured — panes, strips, crumbs, inspector geometry, bucket — ' +
+      'answers what the reader got INSTEAD of the column.',
+    criterion_ch: 55,
+    content_ch: null,
+    content_meets_55ch: null,
+    visible_ch: null,
+    visible_meets_55ch: null,
+    verdict_note:
+      'Both verdicts are NULL and render "?". They are not FAIL: there is no reading column here to ' +
+      'measure against 55ch, and asserting a failure against an absent element is the vacuous-pass ' +
+      'disease (D31/D39) with its sign flipped.',
+    floor: { min_inline_size_raw: null, min_inline_size_px: null, binds: null,
+             bind_test: 'not run — no surface to force min-inline-size on',
+             width_with_floor_px: null, width_without_floor_px: null },
+    overflow: { scroller: '.editor-body.bp-paper-body', scroll_width: null, client_width: null,
+                horizontal_scroll: null, overflow_px: null },
+    panes: {
+      pane_columns: allPanes.length,
+      pane_columns_visible: allPanes.filter(visible).length,
+      visible_pane_widths_px: allPanes.filter(visible).map((e) => round(e.getBoundingClientRect().width, 1)),
+      strips: allStrips.length,
+      strips_visible: allStrips.filter(visible).length,
+      strip_is_button: document.querySelectorAll('button.pane-column--collapsed').length,
+      strip_aria_expanded: allStrips.map((e) => e.getAttribute('aria-expanded')),
+    },
+    crumbs: {
+      host_present: !!crumbsHost,
+      visible: crumbsHost ? getComputedStyle(crumbsHost).display !== 'none' : false,
+      count: document.querySelectorAll('.bp-desk-crumb').length,
+    },
+    inspector,
+    scrim: withPreview
+      ? { host_present: true,
+          renders: scrimCs.content !== 'none' && scrimCs.content !== 'normal',
+          content: scrimCs.content, position: scrimCs.position,
+          background: scrimCs.backgroundColor, scrim_alpha: alphaOf(scrimCs.backgroundColor),
+          pointer_events: scrimCs.pointerEvents, z_index: scrimCs.zIndex,
+          covers_content_fully: null }
+      : { host_present: false, renders: false },
+    width_bucket_stamped: document.documentElement.getAttribute('data-width-bucket'),
+    scrollbar_width_px: window.innerWidth - document.documentElement.clientWidth,
+    viewport_px: window.innerWidth,
+    surface_present: !!surface,
   };
 }
 `;
@@ -1338,13 +1648,34 @@ async function drillToDocument(page, base, target) {
  * (D97): it says the harness never reached the state it names, and nothing
  * whatsoever about the desk's layout.
  */
-async function openInspectorByRealClick(page, { maxClicks = 3 } = {}) {
+// REVIEW FIX (wave 10). `fatal` decides whether an unreachable user-opened
+// state kills the run or is reported as a named skip, and the two callers want
+// OPPOSITE answers for the same reason D97 gives.
+//
+// The MATRIX sweep keeps `fatal: true`: a user-opened row it could not reach is
+// not a desk fact, and inventing one is the thing D97 forbids.
+//
+// The ROUND TRIP passes `fatal: false`, because there the old behaviour
+// reintroduced the exact defect this slice was filed to END. `runRoundTrip`
+// runs mid-sweep, and nothing writes to disk until the provenance bracket
+// closes — so one `die()` here discarded every row already collected and left
+// a ZERO-BYTE run, which D138 rules an INSTRUMENT FAILURE rather than a desk
+// fact. A missing toggle at one width must cost the round trip, never the
+// matrix. This makes the open leg symmetric with `dismissInspectorByRealClick`,
+// which already returned a named skip rather than throwing.
+async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
+  const unreachable = (reason) => {
+    if (fatal) die(reason);
+    return { reached: false, skip_reason: reason };
+  };
+
   const toggle = page.locator('[data-test-id="sidebar-toggle-panel"]').first();
   if (await toggle.count() === 0) {
-    die(`INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
-        `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
-        `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
-        `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
+    return unreachable(
+      `INSTRUMENT FAILURE — no [data-test-id="sidebar-toggle-panel"] control on the page, so the ` +
+      `user-opened state cannot be reached by a real click. This says NOTHING about the desk's ` +
+      `layout. (If that control has genuinely gone missing, the inspector is unreachable and THAT ` +
+      `is a desk finding — but it is spd-b29's finding to make, with a different instrument.)`);
   }
 
   const observe = () => page.evaluate(() => {
@@ -1391,11 +1722,359 @@ async function openInspectorByRealClick(page, { maxClicks = 3 } = {}) {
       };
     }
   }
-  die(`INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
-      `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
-      `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
-      `recorded as one (D97).\n\n  What it saw after each click:\n` +
-      clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+  return unreachable(
+    `INSTRUMENT FAILURE — ${maxClicks} real clicks on [data-test-id="sidebar-toggle-panel"] never ` +
+    `produced [data-user-opened] on .bp-doc-sidebar. The harness never reached the user-opened state, ` +
+    `so it has NO user-opened measurement to report — this is not a desk fact and must not be ` +
+    `recorded as one (D97).\n\n  What it saw after each click:\n` +
+    clicks.map((c) => `      click ${c.click}: ${JSON.stringify(c.after)}`).join('\n'));
+}
+
+// ── dismissal, the destination, and the round trip ───────────────────────────
+
+/**
+ * The controls that could DISMISS a user-opened inspector, in preference order.
+ *
+ * NOTHING PURPOSE-BUILT IS DEPLOYED YET. The dismissal grammar — an explicit
+ * close affordance, Escape, a scrim click — ships in
+ * `inspector-dismissal-and-return-grammar`. What IS deployed is the toggle
+ * itself, and re-clicking it is a genuine dismissal (the handler flips
+ * `sidebar_open`/`sidebar_user_opened` back off), so the round trip can run
+ * TODAY rather than skipping until round 2 lands. Which control was used is
+ * RECORDED on every round-trip result, because "returned bit-identical after a
+ * toggle re-click" and "returned bit-identical after pressing Escape" are
+ * different findings and the artifact must not blur them.
+ */
+const DISMISS_CONTROLS = [
+  { selector: '[data-test-id="sidebar-dismiss"]',      grammar: 'purpose-built dismiss control' },
+  { selector: '[data-test-id="sidebar-close-panel"]',  grammar: 'purpose-built close control' },
+  { selector: '[data-test-id="sidebar-toggle-panel"]', grammar: 'toggle re-click — the only dismissal deployed today' },
+];
+
+/** Candidates that would SUMMON the third state. None is deployed; the env
+ *  override exists so the round-2 build can drive this file without editing it. */
+const DESTINATION_CONTROLS = [
+  ...(process.env.BP_DESK_DESTINATION_CONTROL
+    ? [{ selector: process.env.BP_DESK_DESTINATION_CONTROL, grammar: 'BP_DESK_DESTINATION_CONTROL env override' }]
+    : []),
+  { selector: '[data-test-id="inspector-destination-open"]', grammar: 'purpose-built destination entry' },
+  { selector: '[data-test-id="sidebar-destination"]',        grammar: 'destination entry on the sidebar' },
+];
+
+/** The marker that proves the destination was actually ENTERED. Same discipline
+ *  as `data-user-opened` (D110): it must be SERVER-stamped, because a
+ *  JS-set attribute would prove only that the stylesheet works. */
+const DESTINATION_MARKER = '[data-inspector-destination]';
+
+async function firstPresent(page, candidates) {
+  for (const c of candidates) {
+    try {
+      if (await page.locator(c.selector).first().count() > 0) return c;
+    } catch { /* a malformed selector is "not present", not a crash */ }
+  }
+  return null;
+}
+
+/**
+ * Dismiss a user-opened inspector by a REAL click, until the SERVER drops
+ * `data-user-opened`. Returns `{ dismissed: false, skip_reason }` rather than
+ * throwing when no control is deployed — an absent affordance is a fact about
+ * the build under test, not an instrument failure, and killing the run over it
+ * would discard every row already collected.
+ */
+async function dismissInspectorByRealClick(page, { maxClicks = 3 } = {}) {
+  const control = await firstPresent(page, DISMISS_CONTROLS);
+  if (!control) {
+    return {
+      dismissed: false,
+      skip_reason:
+        'NO DISMISS CONTROL DEPLOYED. None of ' +
+        DISMISS_CONTROLS.map((c) => c.selector).join(', ') + ' is on the page, so there is no way ' +
+        'to leave the user-opened state by a real interaction. The dismissal grammar ships in ' +
+        'inspector-dismissal-and-return-grammar; this pass is SKIPPED by name rather than faked ' +
+        'with a reload (a reload builds a new socket and re-seeds sidebar_user_opened, which is a ' +
+        'DIFFERENT protocol, not a dismissal — D110).',
+      controls_tried: DISMISS_CONTROLS.map((c) => c.selector),
+    };
+  }
+
+  const marker = () => page.evaluate(() =>
+    !!document.querySelector('.bp-doc-sidebar[data-user-opened]'));
+  const clicks = [];
+  for (let i = 1; i <= maxClicks; i++) {
+    await page.locator(control.selector).first().click({ timeout: 10_000 });
+    await page.waitForTimeout(150);
+    await waitForDeskSettled(page);
+    const stillOpen = await marker();
+    clicks.push({ click: i, user_opened_after: stillOpen });
+    if (!stillOpen) {
+      return {
+        dismissed: true,
+        control: control.selector,
+        grammar: control.grammar,
+        clicks_needed: i,
+        click_log: clicks,
+        method: 'real click through the live LiveView socket until the SERVER dropped ' +
+                '[data-user-opened] — never a JS attribute removal, which would prove only that ' +
+                'the CSS reacts (D110).',
+      };
+    }
+  }
+  return {
+    dismissed: false,
+    control: control.selector,
+    grammar: control.grammar,
+    skip_reason:
+      `${maxClicks} real clicks on ${control.selector} never dropped [data-user-opened]. The ` +
+      `inspector could not be dismissed by interaction on this build, so the round trip has no ` +
+      `return leg to measure. This is a finding about the deployed dismissal grammar, reported ` +
+      `rather than made fatal — a fatal here would discard every row already collected.`,
+    click_log: clicks,
+  };
+}
+
+/**
+ * Enter the third state. Skips — by name, into the run plan — when nothing that
+ * reaches it is deployed, which is the state of the world today.
+ */
+async function enterDestinationState(page) {
+  const control = await firstPresent(page, DESTINATION_CONTROLS);
+  if (!control) {
+    return {
+      entered: false,
+      skip_reason:
+        'NO DESTINATION ENTRY CONTROL DEPLOYED. None of ' +
+        DESTINATION_CONTROLS.map((c) => c.selector).join(', ') + ' is on the page. The summoned ' +
+        'destination ships in inspector-dismissal-and-return-grammar; until then this state is ' +
+        'SKIPPED BY NAME and contributes zero rows, and expected_row_count is computed WITHOUT it ' +
+        'so a short run is never mistaken for a complete one. Set BP_DESK_DESTINATION_CONTROL to ' +
+        'drive a build where the control exists under a name this file has not learned yet.',
+      controls_tried: DESTINATION_CONTROLS.map((c) => c.selector),
+    };
+  }
+
+  await page.locator(control.selector).first().click({ timeout: 10_000 });
+  await page.waitForTimeout(150);
+  await waitForDeskSettled(page);
+  const marked = await page.evaluate((sel) => !!document.querySelector(sel), DESTINATION_MARKER);
+  if (!marked) {
+    return {
+      entered: false,
+      control: control.selector,
+      skip_reason:
+        `clicked ${control.selector} but no ${DESTINATION_MARKER} appeared. The marker must be ` +
+        `SERVER-stamped for the same reason data-user-opened is (D110) — a JS-set attribute would ` +
+        `prove only that the stylesheet works. Refusing to label rows "destination" when the ` +
+        `harness cannot show it reached that state.`,
+    };
+  }
+  return {
+    entered: true,
+    control: control.selector,
+    grammar: control.grammar,
+    marker: DESTINATION_MARKER,
+    method: 'real click through the live LiveView socket, confirmed by the SERVER-stamped ' +
+            DESTINATION_MARKER + ' marker (D110).',
+  };
+}
+
+/** The fields whose byte-identity IS the round trip's claim. Only reading-column
+ *  figures: pane widths legitimately differ when the panel is dismissed at some
+ *  widths, and folding those in would make the assertion fail for a reason that
+ *  has nothing to do with the reader's column. */
+const ROUND_TRIP_FIELDS = [
+  ['content_px',   (r) => r.content_px],
+  ['content_ch',   (r) => r.content_ch],
+  ['px_per_ch',    (r) => r.ch?.probe_px_per_ch ?? null],
+  ['visible_content_px', (r) => r.visible_content_px],
+  ['visible_ch',   (r) => r.visible_ch],
+  ['gutter_px',    (r) => r.gutter?.total_px ?? null],
+];
+
+/**
+ * THE ROUND TRIP (net-new this wave). `default -> open -> dismiss`, on the SAME
+ * PAGE INSTANCE, asserting the reading column comes back BIT-IDENTICAL per
+ * width and face.
+ *
+ * WHY THE SAME INSTANCE MATTERS, and why this could not be assembled out of the
+ * two sweeps that already exist. `default` is only ever measured by FRESH
+ * NAVIGATION in this file — the two state sweeps are separated by a `page.goto`.
+ * So today the instrument can say "a freshly-loaded desk reads 599px" and "an
+ * opened desk reads 380px", and it CANNOT say what a reader gets after opening
+ * the panel and closing it again. That is the question a dismissal grammar
+ * lives or dies on: a return that leaves the column even 1px off is a desk that
+ * quietly degrades every time the reader looks something up, and a reload would
+ * paper over it (a reload builds a new socket and re-seeds the assign — a
+ * different protocol, not an upgrade, D110).
+ *
+ * BASELINES AFTER THE FIRST WIDTH ARE THEMSELVES POST-DISMISS STATES, and that
+ * is deliberate rather than sloppy: the sweep descends without reloading, so
+ * each width's baseline is the desk as the previous round trip left it. Drift
+ * that ACCUMULATES across trips shows up as a widening delta instead of being
+ * reset away by a fresh load at every step.
+ */
+async function runRoundTrip(page, measureFace) {
+  const widths = [];
+  let cells = 0, identicalCells = 0;
+
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 });
+    await waitForDeskSettled(page);
+
+    const before = {};
+    for (const face of FACES) before[face.id] = await measureFace(face);
+
+    // Non-fatal here BY DESIGN — see the note on openInspectorByRealClick. A
+    // width whose toggle cannot be reached costs this pass and nothing else;
+    // the matrix rows already collected survive and still reach disk.
+    const opened = await openInspectorByRealClick(page, { fatal: false });
+    if (!opened.reached) {
+      return {
+        ran: false,
+        skipped_at_viewport_px: width,
+        skip_reason: opened.skip_reason,
+        open_attempt: opened,
+        note: 'SKIPPED BY NAME on the OPEN leg, never silently. There is no user-opened state to ' +
+              'return from, so there is no round trip to measure. The matrix and every other pass ' +
+              'in this run are unaffected, and the run still writes its artifact — a mid-sweep ' +
+              'abort here would have discarded every collected row and written ZERO bytes, which ' +
+              'D138 rules an INSTRUMENT FAILURE rather than a desk fact.',
+      };
+    }
+
+    const dismissed = await dismissInspectorByRealClick(page);
+    if (!dismissed.dismissed) {
+      return {
+        ran: false,
+        skipped_at_viewport_px: width,
+        skip_reason: dismissed.skip_reason,
+        dismiss_attempt: dismissed,
+        note: 'SKIPPED BY NAME, never silently. No return leg means no round trip to measure; the ' +
+              'matrix and every other pass in this run are unaffected.',
+      };
+    }
+    await waitForDeskSettled(page);
+
+    const faces = [];
+    for (const face of FACES) {
+      const after = await measureFace(face);
+      const diffs = [];
+      for (const [name, get] of ROUND_TRIP_FIELDS) {
+        const b = get(before[face.id]), a = get(after);
+        if (b !== a) diffs.push({ field: name, before: b, after: a });
+      }
+      cells += 1;
+      if (diffs.length === 0) identicalCells += 1;
+      faces.push({
+        face: face.id,
+        identical: diffs.length === 0,
+        diffs,
+        before: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(before[face.id])])),
+        after: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(after)])),
+      });
+    }
+
+    widths.push({
+      viewport_px: width,
+      open_clicks: opened.clicks_needed,
+      dismiss_clicks: dismissed.clicks_needed,
+      dismiss_control: dismissed.control,
+      dismiss_grammar: dismissed.grammar,
+      faces,
+    });
+  }
+
+  return {
+    ran: true,
+    protocol: 'default -> open -> dismiss, on the SAME page instance, no reload at any point',
+    dismiss_control: widths[0]?.dismiss_control ?? null,
+    dismiss_grammar: widths[0]?.dismiss_grammar ?? null,
+    compared_fields: ROUND_TRIP_FIELDS.map(([n]) => n),
+    cells,
+    identical_cells: identicalCells,
+    returns_bit_identical: cells > 0 && identicalCells === cells,
+    widths,
+    note:
+      'Bit-identical means EVERY compared field matched exactly — not "within tolerance". These are ' +
+      'the same rounded figures the matrix publishes, so a difference here is a difference a reader ' +
+      'would be handed. Baselines after the first width are themselves post-dismiss states (no ' +
+      'reload mid-pass), so accumulating drift widens rather than resetting.',
+  };
+}
+
+/**
+ * THE POSITIVE CONTROL — the affordance that makes the non-vacuity guard's zero
+ * READABLE (D153).
+ *
+ * The trap it exists for: after this wave's fix, the scrim stops rendering, so
+ * `guard_applies` goes to 0 and `summariseNonVacuity` stamps `vacuous: true`.
+ * That zero is the PREDICTED AND REQUIRED outcome of a fixed desk. But "no
+ * scrim because the desk was fixed" and "the injected selector drifted and the
+ * guard never fired" produce a numerically IDENTICAL zero, and one of those is
+ * excellent news while the other means every dimming figure in the run is a
+ * silent lie.
+ *
+ * So: inject a synthetic scrim that DOES render (and is pointer-events:none,
+ * exactly like the real one), take one row under it, and remove it. If the guard
+ * fires there, the machinery demonstrably works and a zero everywhere else is
+ * the desk. If it does NOT fire there, the injected selector has drifted and the
+ * zero is instrument rot — which is precisely the discrimination a bare zero
+ * cannot make.
+ *
+ * ITS ROW NEVER ENTERS `run.rows`. A synthetic row in the published matrix would
+ * be a fabricated desk fact, which is the one thing this instrument exists to
+ * make impossible. It lands in `run.positive_control` and nowhere else.
+ */
+const POSITIVE_CONTROL_RULE =
+  '.editor-with-preview::after { content: "" !important; position: absolute !important; ' +
+  'inset: 0 !important; background: rgba(0,0,0,0.55) !important; pointer-events: none !important; ' +
+  'z-index: 40 !important; }';
+
+async function runPositiveControl(page, measureFace) {
+  const host = await page.locator('.editor-with-preview').first().count();
+  if (host === 0) {
+    return {
+      ran: false,
+      skip_reason:
+        'no .editor-with-preview on the page to hang a control scrim on. That host selector is the ' +
+        'same one the real scrim rule is anchored to, so its absence is itself the finding: the ' +
+        'guard could not have fired in ANY row of this run, and a zero elsewhere is instrument ' +
+        'drift rather than a fixed desk.',
+    };
+  }
+
+  const handle = await page.addStyleTag({ content: POSITIVE_CONTROL_RULE });
+  let rec;
+  try {
+    rec = await measureFace(FACES[0]);
+  } finally {
+    await handle.evaluate((el) => el.remove());
+  }
+  await waitForDeskSettled(page);
+
+  const nv = rec.occlusion?.non_vacuity ?? null;
+  return {
+    ran: true,
+    injected_rule: POSITIVE_CONTROL_RULE,
+    face: FACES[0].id,
+    scrim_rendered: !!rec.scrim?.renders,
+    guard_applies: nv?.guard_applies ?? null,
+    guard_passed: nv?.guard_passed ?? null,
+    natural_occluded_px_by_line: nv?.natural_occluded_px_by_line ?? null,
+    forced_occluded_px_by_line: nv?.forced_occluded_px_by_line ?? null,
+    dimmed_content_px: rec.dimmed_content_px ?? null,
+    row_excluded_from_matrix: true,
+    verdict: nv?.guard_passed === true
+      ? 'THE GUARD FIRES. The injected pointer-events rule demonstrably moves the hit-test on a ' +
+        'scrim that renders, so a zero in the real rows means the desk rendered no scrim — not ' +
+        'that the machinery is broken.'
+      : 'THE GUARD DID NOT FIRE ON A SCRIM THAT DEMONSTRABLY RENDERS. The injected selector has ' +
+        'drifted out of sync with root.html.heex and every dimming figure in this run is unproven. ' +
+        'Do not read any zero in this run as good news.',
+    note:
+      'Synthetic by construction and NEVER pushed into run.rows. It answers one question only: is ' +
+      'the guard capable of firing at all in this run — which is what tells a zero apart from a lie.',
+  };
 }
 
 // ── spd-b29's two deferred criteria ──────────────────────────────────────────
@@ -1507,6 +2186,23 @@ async function runB29Probes(page, base, docPath) {
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ── PARSE THE IN-PAGE SOURCES FIRST, IN MILLISECONDS. Both measure functions
+  //    are template STRINGS, so `node --check` on this file says NOTHING about
+  //    them: a typo inside one is otherwise discoverable only after ssh, a
+  //    minted 60s ticket, a login and a drill — i.e. at the most expensive
+  //    possible moment, and (for the chrome measure) only on a build where the
+  //    third state is actually reachable, which today is none of them. This
+  //    costs nothing and moves that failure to the first millisecond, by name.
+  for (const [name, src] of [['PAGE_MEASURE', PAGE_MEASURE], ['PAGE_MEASURE_CHROME', PAGE_MEASURE_CHROME]]) {
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function(`return (${src})`);
+    } catch (e) {
+      die(`${name} does not parse: ${e.message}\n\n  It is a template string, so \`node --check\` ` +
+          `on this file cannot see it. Nothing was measured and nothing about the desk is implied.`);
+    }
+  }
+
   const { pw, resolvedFrom, version: pwVersion } = resolvePlaywright();
   const docTarget = resolveDocTarget();
   // PRE half of the bracket (D97). The POST half runs after the sweep and a
@@ -1540,7 +2236,11 @@ async function main() {
       'fresh-nav-per-row shortcut is a DIFFERENT protocol, not an upgrade. The one navigation between ' +
       'the states re-enters at 1440 from the raw band, which descending and reload agree on.',
     inspector_states_note:
-      'The second axis is `inspector_state` (D110). `default` = the desk as served. `user-opened` = ' +
+      'The second axis is `inspector_state` (D110), and it is now a TABLE (`state_plan`) rather than ' +
+      'a pair of string literals: each state declares its own required selectors, whether it has a ' +
+      'reading column at all, and the widths it applies at. `destination` is the third — the summoned ' +
+      'Tier-3 place, which legitimately has NO reading column and whose ch figures are therefore NULL ' +
+      'and whose verdicts render "?" (never 0, never FAIL). `default` = the desk as served. `user-opened` = ' +
       'after a REAL click on [data-test-id="sidebar-toggle-panel"] through the live LiveView socket — ' +
       'not a JS-set attribute, because `data-user-opened` is stamped by the SERVER from the ' +
       '`sidebar_user_opened` assign and a simulated attribute would prove only that the CSS works. ' +
@@ -1573,6 +2273,26 @@ async function main() {
       'read of the same two facts. `provenance_bracket.matched` false means the run FAILED — a ' +
       'published matrix always carries a matched bracket. Each row also carries its own ' +
       '`measured_at`, so a mid-sweep rotation can be located in time rather than inferred.',
+    // THE RUN PLAN. Which states this run intends to measure, which it skipped
+    // and WHY. A skipped state contributes no rows and is subtracted from
+    // expected_row_count, so "short because a state was unreachable" and
+    // "short because the sweep died" are never the same number.
+    state_plan: STATES.map((s) => ({
+      id: s.id,
+      has_reading_column: s.has_reading_column,
+      required_selectors: s.required_selectors,
+      applies_at_widths_px: WIDTHS.filter((w) => s.applies_at(w)),
+      note: s.note,
+    })),
+    states_measured: [],
+    states_skipped: [],
+    state_axis_note:
+      'Every state in `state_plan` that produced rows appears in `states_measured` AND in the human ' +
+      'table. The table derives its state order FROM THE ROWS rather than from a hardcoded pair, and ' +
+      'assertEveryStateRendered() is the tripwire on that derivation: a state present in rows but ' +
+      'absent from the printed output is a HARD FAILURE. It used to be a silent drop — a synthetic ' +
+      'third-state row went in and "destination" appeared zero times in the output with no error ' +
+      'raised anywhere, which is a measurement paid for and then thrown away.',
     warnings: [],
     rows: [],
   };
@@ -1597,27 +2317,67 @@ async function main() {
     run.measured_url = srv.base + docPath;
     run.measured_document = drill.slug;
 
+    /** One measurement against whatever is currently on screen, under one forced
+     *  face. Shared by the sweep, the round trip and the positive control, so
+     *  all three read the page through the SAME code path — a round trip that
+     *  measured differently from the matrix would be comparing two instruments. */
+    const measureFace = async (face) => page.evaluate(
+      ({ src, override }) => eval(`(${src})`)(override),
+      { src: PAGE_MEASURE, override: face.override },
+    );
+
     /** One (width x face) block against whatever is currently on screen. */
-    const sweepRow = async (width, state) => {
-      for (const sel of REQUIRED_SELECTORS) {
+    const sweepRow = async (width, stateId) => {
+      const state = stateById(stateId);
+      if (!state) die(`unknown inspector state "${stateId}" — not in the STATE table`);
+
+      // PER-STATE (this wave). A state that declares no reading column asserts
+      // NOTHING here: the flat module-level list used to assert the surface for
+      // every state, so a legitimately column-less state aborted the whole
+      // matrix — including the rows already collected, which are then lost
+      // because nothing writes before the provenance bracket closes.
+      for (const sel of state.required_selectors) {
         const n = await page.locator(sel).count();
         if (n === 0) {
-          die(`SELECTOR MATCHED ZERO ELEMENTS at viewport ${width}px, state "${state}": \`${sel}\`. ` +
+          die(`SELECTOR MATCHED ZERO ELEMENTS at viewport ${width}px, state "${stateId}": \`${sel}\`. ` +
               `Refusing to report a number derived from an element that is not there. ` +
-              `(Impossibility #1 — this is how D31 and D39 happened.)`);
+              `(Impossibility #1 — this is how D31 and D39 happened.) This state DECLARES it needs ` +
+              `this selector (has_reading_column: ${state.has_reading_column}); a state that does ` +
+              `not need it lists it nowhere and is recorded reading_column_present:false instead.`);
         }
       }
       const settle = await waitForDeskSettled(page);
       await page.evaluate(() => document.fonts.ready);
 
       for (const face of FACES) {
-        const rec = await page.evaluate(
-          ({ src, override }) => eval(`(${src})`)(override),
-          { src: PAGE_MEASURE, override: face.override },
-        );
+        const rec = state.has_reading_column
+          ? await measureFace(face)
+          : await page.evaluate((src) => eval(`(${src})`)(), PAGE_MEASURE_CHROME);
         if (rec.fatal) {
-          die(`a required element vanished mid-measure at viewport ${width}px, state "${state}", ` +
+          die(`a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
               `face ${face.id}: ${JSON.stringify(rec.counts)}`);
+        }
+        // A no-reading-column row has no ch, no face resolution, no hit-test and
+        // no scrim diff, so every check below it would be asserting against
+        // nulls. It is recorded as what it is and the row is closed here.
+        if (rec.reading_column_present === false) {
+          run.rows.push({
+            measured_at: new Date().toISOString(),
+            viewport_px: width,
+            inspector_state: stateId,
+            user_opened_overlay_asserted: null,
+            face: face.id,
+            face_forced_to: face.override,
+            face_note: 'recorded for matrix symmetry only — with no reading column on screen there ' +
+                       'is no face to force and no advance to measure. face_relevant: false.',
+            face_relevant: false,
+            served_sha: provenance.served_sha,
+            slot_active: provenance.slot_active,
+            sweep_direction: 'descending',
+            settle,
+            ...rec,
+          });
+          continue;
         }
         // Bare serif/ui-serif is a BANNED probe face (D49): it measures
         // narrower than both real faces and INFLATES ch, masking the very bug
@@ -1625,7 +2385,7 @@ async function main() {
         // every ch in that row is poison — refuse rather than publish it.
         if (face.override && rec.font.fell_back_to_generic_serif) {
           die(`face "${face.id}" (${face.override}) fell through to generic serif at viewport ` +
-              `${width}px, state "${state}". D49 BANS bare serif/ui-serif as a probe face — it ` +
+              `${width}px, state "${stateId}". D49 BANS bare serif/ui-serif as a probe face — it ` +
               `inflates ch and would hand the next verifier a free overturn. Availability: ` +
               JSON.stringify(rec.font.face_available));
         }
@@ -1638,7 +2398,7 @@ async function main() {
         const drift = rec.ch.divergence_pct;
         if (drift !== null && Math.abs(drift) > 2) {
           run.warnings.push(
-            `viewport ${width}px / ${state} / face "${face.id}": in-floor ch diverges from the ` +
+            `viewport ${width}px / ${stateId} / face "${face.id}": in-floor ch diverges from the ` +
             `probe by ${drift}% (assumed formula ${rec.ch.in_floor_formula_assumed}, resolved ` +
             `${rec.floor.min_inline_size_raw}). The floor's authored formula has probably changed — ` +
             `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
@@ -1646,7 +2406,7 @@ async function main() {
         }
         if (face.override && !rec.font.face_applied) {
           run.warnings.push(
-            `viewport ${width}px / ${state} / face "${face.id}": asked for ` +
+            `viewport ${width}px / ${stateId} / face "${face.id}": asked for ` +
             `${rec.font.requested_primary}, resolved ${rec.font.resolved_family} — ` +
             `this row's ch is NOT the named face.`);
         }
@@ -1659,7 +2419,7 @@ async function main() {
         //    caveat that makes that publishable.
         const nv = rec.occlusion?.non_vacuity;
         if (nv?.guard_applies && !nv.forced_sample_differs) {
-          die(`NON-VACUITY GUARD FAILED at viewport ${width}px, state "${state}", face ${face.id}. ` +
+          die(`NON-VACUITY GUARD FAILED at viewport ${width}px, state "${stateId}", face ${face.id}. ` +
               `The scrim RENDERS here (content ${rec.scrim.content}, background ${rec.scrim.background}) ` +
               `but forcing pointer-events:auto on it changed the hit-test by nothing: natural occluded ` +
               `${JSON.stringify(nv.natural_occluded_px_by_line)}px vs forced ` +
@@ -1675,7 +2435,7 @@ async function main() {
         //    HARNESS INVENTED, silently inherited by every row after it.
         const rst = rec.occlusion?.restore;
         if (rst && !rst.byte_identical) {
-          die(`RESTORE FAILED at viewport ${width}px, state "${state}", face ${face.id} — the page was ` +
+          die(`RESTORE FAILED at viewport ${width}px, state "${stateId}", face ${face.id} — the page was ` +
               `not returned to the state it was found in, so every row after this one would measure a ` +
               `page this harness invented.\n` +
               `  injected sheet removed: ${rst.sheet_removed}\n` +
@@ -1693,7 +2453,7 @@ async function main() {
         //    slice's fix landing — so it is reported loudly rather than made
         //    fatal, which would leave the harness unable to measure a fixed desk.
         let overlayAsserted = null;
-        if (state === 'user-opened' && rec.inspector.present) {
+        if (stateId === 'user-opened' && rec.inspector.present) {
           const subWide = rec.width_bucket_stamped !== 'wide';
           overlayAsserted = rec.inspector.position === 'absolute';
           if (subWide && !overlayAsserted) {
@@ -1715,11 +2475,12 @@ async function main() {
           // how the reader ARRIVED — which agreed in 54 of 54 cells across two
           // runs. It is now the inspector's state, which moves the answer by
           // 219px on the single interaction this epic is about.
-          inspector_state: state,
+          inspector_state: stateId,
           user_opened_overlay_asserted: overlayAsserted,
           face: face.id,
           face_forced_to: face.override,
           face_note: face.note,
+          face_relevant: true,
           served_sha: provenance.served_sha,
           slot_active: provenance.slot_active,
           sweep_direction: 'descending',
@@ -1739,6 +2500,7 @@ async function main() {
       await page.setViewportSize({ width, height: 900 });
       await sweepRow(width, 'default');
     }
+    run.states_measured.push('default');
 
     // ── STATE B — USER-OPENED. The state the epic was filed about: a reader who
     //    opens the panel to check metadata. Reached by a REAL click through the
@@ -1773,6 +2535,75 @@ async function main() {
             `axis was added to prevent. This says nothing about the desk's layout.`);
       }
       await sweepRow(width, 'user-opened');
+    }
+    run.states_measured.push('user-opened');
+
+    // ── STATE C — DESTINATION. The Tier-3 summoned destination: a place ABOUT
+    //    the document rather than the document, with NO reading column on
+    //    screen by design. Nothing that reaches it is deployed yet, so this
+    //    normally skips BY NAME — and the skip is recorded in the run plan and
+    //    subtracted from expected_row_count, so a short run can never be read
+    //    as a complete one.
+    //
+    //    Re-navigate first, for the same reason state B does: the sweep must
+    //    re-enter at the widest width from the raw band (D80).
+    await page.setViewportSize({ width: WIDTHS[0], height: 900 });
+    await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
+    await waitForDeskSettled(page);
+    const destination = await enterDestinationState(page);
+    run.destination_entry = destination;
+    if (destination.entered) {
+      run.states_measured.push('destination');
+      for (const width of WIDTHS.filter((w) => stateById('destination').applies_at(w))) {
+        await page.setViewportSize({ width, height: 900 });
+        const stillThere = await page.evaluate(
+          (sel) => !!document.querySelector(sel), DESTINATION_MARKER);
+        if (!stillThere) {
+          // Loud, but NOT fatal: every row collected so far is good, and killing
+          // the run here would discard the entire matrix over one state's
+          // marker — the all-or-nothing abort this wave exists to end.
+          run.warnings.push(
+            `the ${DESTINATION_MARKER} marker vanished at viewport ${width}px, so the destination ` +
+            `sweep STOPPED there rather than labelling default-state rows "destination". Rows ` +
+            `already collected are unaffected; expected_row_count will not match and says so.`);
+          break;
+        }
+        await sweepRow(width, 'destination');
+      }
+    } else {
+      run.states_skipped.push({ state: 'destination', reason: destination.skip_reason });
+    }
+
+    // ── THE ROUND TRIP. default -> open -> dismiss on the SAME page instance.
+    //    Fresh navigation first so the first baseline is a genuine as-served
+    //    default rather than whatever the destination attempt left behind.
+    if (ROUND_TRIP) {
+      await page.setViewportSize({ width: WIDTHS[0], height: 900 });
+      await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
+      await waitForDeskSettled(page);
+      run.round_trip = await runRoundTrip(page, measureFace);
+    } else {
+      run.round_trip = { ran: false, skip_reason: '--no-round-trip was passed' };
+    }
+
+    // ── THE POSITIVE CONTROL. Opt-in, synthetic, and never in run.rows.
+    if (POSITIVE_CONTROL) {
+      await page.setViewportSize({ width: 1024, height: 900 });
+      await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
+      await waitForDeskSettled(page);
+      run.positive_control = await runPositiveControl(page, measureFace);
+    } else {
+      run.positive_control = {
+        ran: false,
+        skip_reason:
+          '--positive-control was not passed. Without it, a non-vacuity guard that applies in ZERO ' +
+          'rows cannot be told apart from a guard that is broken: "no scrim because the desk was ' +
+          'fixed" and "the injected selector drifted" are the same zero. Pass it whenever you intend ' +
+          'to quote a zero as good news.',
+      };
     }
 
     // ── spd-b29's two deferred criteria. This is the only authenticated
@@ -1812,6 +2643,27 @@ async function main() {
   // table (one null where a number was expected, at the very end of an
   // authenticated run) must never destroy the data the run was for — so the
   // table is best-effort and says so on stderr if it fails.
+  // ── THE SILENT DROP DIES HERE, OUTSIDE THE TABLE'S TRY/CATCH. The printer's
+  //    own assertion is defence in depth, but it runs INSIDE a best-effort
+  //    catch that (correctly) refuses to let a formatting bug destroy the data
+  //    — which would have downgraded a dropped state back to a stderr note.
+  //    A state measured at the cost of an authenticated sweep and then not
+  //    shown is a HARD FAILURE, so it is asserted here where nothing catches it.
+  assertEveryStateRendered(run, new Set(orderedStates(run)));
+
+  // A short run is a caveat, not a death: every row already collected is good,
+  // and dying here would discard the whole matrix — the all-or-nothing abort
+  // this wave exists to end. It is stated loudly and carried into the artifact.
+  const expectedRows = expectedRowCount(run.states_measured);
+  if (run.rows.length !== expectedRows) {
+    run.warnings.push(
+      `ROW COUNT MISMATCH: collected ${run.rows.length}, expected ${expectedRows} — computed as ` +
+      `${WIDTHS.length} widths x ${FACES.length} faces x the states applicable at each width, for ` +
+      `the states this run actually measured (${run.states_measured.join(', ') || 'none'}). ` +
+      `Skipped states are excluded from the expectation, so this mismatch is NOT a skipped state; ` +
+      `something stopped early. ${rowCountNote(run.states_measured)}`);
+  }
+
   if (!JSON_ONLY) {
     try {
       printTable(run);
@@ -1854,11 +2706,33 @@ function writeRunArtifact(run, outPath) {
     instrument_realpath: realResolve(fileURLToPath(import.meta.url)),
     argv: process.argv.slice(1),
     row_count: run.rows.length,
-    expected_row_count: WIDTHS.length * FACES.length * 2,
-    row_count_note:
-      `${WIDTHS.length} widths x ${FACES.length} forced faces x 2 inspector states. ` +
-      `54 is a COMPLETE run (D121); 162 was a miscount that multiplied rows by the ` +
-      `three figures each row reports.`,
+    // COMPUTED, from the states this run actually attempted (D121's doctrine
+    // without D121's literal — which was `... * 2` and would have quietly
+    // under-counted the moment a third state existed).
+    expected_row_count: expectedRowCount(run.states_measured),
+    expected_row_count_if_no_state_skipped: expectedRowCount(),
+    row_count_matches_expected: run.rows.length === expectedRowCount(run.states_measured),
+    row_count_note: rowCountNote(run.states_measured),
+    states_measured: run.states_measured,
+    states_skipped: run.states_skipped,
+    states_in_rows: [...new Set(run.rows.map((r) => r.inspector_state))],
+    round_trip: run.round_trip
+      ? {
+          ran: run.round_trip.ran,
+          returns_bit_identical: run.round_trip.returns_bit_identical ?? null,
+          identical_cells: run.round_trip.identical_cells ?? null,
+          cells: run.round_trip.cells ?? null,
+          dismiss_control: run.round_trip.dismiss_control ?? null,
+          skip_reason: run.round_trip.skip_reason ?? null,
+        }
+      : null,
+    positive_control: run.positive_control
+      ? {
+          ran: run.positive_control.ran,
+          guard_passed: run.positive_control.guard_passed ?? null,
+          skip_reason: run.positive_control.skip_reason ?? null,
+        }
+      : null,
     served_sha: run.provenance?.served_sha ?? null,
     slot_active: run.provenance?.slot_active ?? null,
     provenance_pre_read_at: run.provenance?.read_at ?? null,
@@ -1892,26 +2766,143 @@ function writeRunArtifact(run, outPath) {
  *  0 is NOT a pass; it means no scrim rendered anywhere and the guard proved
  *  nothing, which is exactly the state that must never be mistaken for good
  *  news (D31/D39/D112). */
-function summariseNonVacuity(run) {
-  const applies = run.rows.filter((r) => r.occlusion?.non_vacuity?.guard_applies);
+export function summariseNonVacuity(run) {
+  // Only rows that actually ran the hit-test can have an opinion. A
+  // no-reading-column row has `occlusion: null` and must not sit in the
+  // denominator pretending to be a row where the guard could have fired.
+  const hitTested = run.rows.filter((r) => r.occlusion?.non_vacuity);
+  const applies = hitTested.filter((r) => r.occlusion.non_vacuity.guard_applies);
   const passed = applies.filter((r) => r.occlusion.non_vacuity.forced_sample_differs);
+
+  // ── THE TWO ZEROS. `applies_in_rows: 0` has two utterly different causes and
+  //    they are numerically identical, which is why the note has to say which:
+  //
+  //      A. THE DESK WAS FIXED. The scrim's HOST (.editor-with-preview) is on
+  //         screen and the CSS simply chose not to render the ::after. That is
+  //         this wave's PREDICTED AND REQUIRED outcome — the successor shape
+  //         stops covering the reader — and the zero is good news.
+  //      B. THE GUARD NEVER RAN. The host itself is missing, so the injected
+  //         rule matched nothing, the diff was structurally zero, and every
+  //         dimming figure in the run is unverified. That is instrument rot
+  //         wearing the same number.
+  //
+  //    A POSITIVE CONTROL settles it outright: a synthetic scrim that DOES
+  //    render, in the same run, with the guard seen to fire on it. Without one,
+  //    the host census below is the best available discrimination and is stated
+  //    as evidence rather than as proof.
+  const hostPresent = hitTested.filter((r) => r.scrim?.host_present).length;
+  const scrimRenders = hitTested.filter((r) => r.scrim?.renders).length;
+  const control = run.positive_control ?? null;
+  const controlFired = control?.ran === true && control.guard_passed === true;
+
+  let zeroCause = 'not-applicable — the guard applied in at least one row';
+  if (applies.length === 0) {
+    if (controlFired) {
+      zeroCause =
+        'DESK-FIXED (proven). The positive control forced a scrim to render in this same run and the ' +
+        'guard FIRED on it, so the machinery demonstrably works. Zero real rows therefore means the ' +
+        'deployed desk rendered no scrim — which is this wave\'s intended outcome, not a broken check.';
+    } else if (hostPresent === 0) {
+      zeroCause =
+        'GUARD-NEVER-RAN (instrument suspect). The scrim\'s host .editor-with-preview was absent in ' +
+        'EVERY hit-tested row, so the injected rule had nothing to attach to and the diff was zero ' +
+        'by construction rather than by observation. Do NOT read this zero as a fixed desk. Re-run ' +
+        'with --positive-control before quoting any dimming figure from it.';
+    } else {
+      zeroCause =
+        `DESK-FIXED (unproven). The host .editor-with-preview WAS present in ${hostPresent} of ` +
+        `${hitTested.length} hit-tested rows and the scrim rendered in none of them, which is what a ` +
+        `fixed desk looks like. But no positive control ran, so this run cannot rule out that the ` +
+        `injected selector has drifted and the guard is simply incapable of firing. Re-run with ` +
+        `--positive-control to convert this from plausible to proven.`;
+    }
+  }
+
   return {
     applies_in_rows: applies.length,
     passed_in_rows: passed.length,
+    hit_tested_rows: hitTested.length,
+    scrim_host_present_in_rows: hostPresent,
+    scrim_renders_in_rows: scrimRenders,
     vacuous: applies.length === 0,
+    zero_cause: zeroCause,
+    positive_control_ran: control?.ran ?? false,
+    positive_control_guard_passed: control?.guard_passed ?? null,
     note: applies.length === 0
-      ? 'No scrim rendered in any row, so the guard had nothing to prove. This is NOT a pass — ' +
-        'every dimming figure in this run is unverified by it.'
+      ? 'The guard applied in NO row, so it proved nothing on its own — that is NOT a pass. ' +
+        'zero_cause says which of the two zeros this is: a desk that stopped rendering a scrim, or ' +
+        'a guard that could not have fired. ' + zeroCause
       : 'Where the scrim renders, forcing its pointer-events moved the hit-test; the dimming ' +
         'figures in those rows are derived from a rule that actually matches the deployed CSS.',
   };
 }
 
-// ── human table ──────────────────────────────────────────────────────────────
+/** The order the human table walks its states: DERIVED FROM THE ROWS, with the
+ *  declared states first (so the familiar reading order holds) and anything
+ *  else appended rather than dropped. A state this file has never heard of —
+ *  a synthetic row, a state a future wave adds and forgets to register — still
+ *  prints. That is the whole fix: the printer can no longer have an opinion
+ *  about which states exist. */
+export function orderedStates(run) {
+  const seen = [...new Set(run.rows.map((r) => r.inspector_state))];
+  return [...STATE_IDS.filter((id) => seen.includes(id)), ...seen.filter((id) => !STATE_IDS.includes(id))];
+}
 
-function printTable(run) {
+/** THE TRIPWIRE. The derivation above makes a silent drop structurally
+ *  impossible; this proves the derivation held. A state present in `rows` and
+ *  absent from the printed output is a HARD FAILURE, because a row measured at
+ *  the cost of an authenticated Chromium sweep and then not shown is a
+ *  measurement paid for and thrown away — and it fails SILENTLY, which is the
+ *  one failure mode this instrument's whole contract forbids (D81/D130). */
+export function assertEveryStateRendered(run, rendered) {
+  const inRows = new Set(run.rows.map((r) => r.inspector_state));
+  const missing = [...inRows].filter((id) => !rendered.has(id));
+  if (missing.length) {
+    die(`SILENT STATE DROP — ${missing.length} inspector state(s) produced rows but were never ` +
+        `printed: ${missing.join(', ')}. Rows present: ` +
+        `${[...inRows].map((s) => `${s} (${run.rows.filter((r) => r.inspector_state === s).length})`).join(', ')}. ` +
+        `Rendered: ${[...rendered].join(', ') || 'none'}. This is the defect this wave was filed ` +
+        `about: three summary loops hardcoded ['default', 'user-opened'], so a third state vanished ` +
+        `from the human table with no error raised anywhere. A measurement that is paid for and then ` +
+        `discarded without complaint is worse than a crash.`);
+  }
+}
+
+// ── human table ──────────────────────────────────────────────────────────────
+//
+// `printTable`, `orderedStates`, `assertEveryStateRendered`, `summariseNonVacuity`
+// and `expectedRowCount` are EXPORTED, for exactly the reason `compareProvenance`
+// is: a check that has never been seen to fire is a check nobody can trust, and
+// a full authenticated sweep (~30-60s, deployed guerrilla, an admin token) is far
+// too heavy to be the only way to see one fire.
+//
+// This is not hypothetical hygiene. The silent drop this wave fixes was FOUND by
+// feeding a synthetic third-state row to the real printer and counting how many
+// times "destination" appeared in the output: zero, with no error raised. That
+// experiment is only possible because the printer can be called with a
+// hand-built run object. Keep these exported.
+
+export function printTable(run) {
   const L = (s = '') => process.stdout.write(s + '\n');
-  const yn = (b) => (b ? 'yes' : 'no');
+  // THREE-VALUED, not two. `yn(null)` printed "no", which for `floor?` reads as
+  // "the floor was measured and did not bind" when the truth is that no floor
+  // was measured at all.
+  const yn = (b) => (b === null || b === undefined ? '?' : b ? 'yes' : 'no');
+  // ── NULL VERDICTS RENDER '?', NEVER 'FAIL'. The RECORD has always written
+  //    `content_meets_55ch: contentCh === null ? null : ...`, and the printer
+  //    honoured null for the ch NUMBERS (it already rendered '?') but not for
+  //    the VERDICTS — `null ? 'MEET' : 'FAIL'` is FAIL. So a row with no
+  //    reading column printed '?' in its ch column and 'FAIL' in the verdict
+  //    column of the SAME ROW, which is both self-contradictory and, per D127
+  //    Part 2, forbidden: asserting a failure against a reading column that
+  //    does not exist is the vacuous-pass disease with its sign flipped.
+  const verdict = (v) => (v === null || v === undefined ? '?' : v ? 'MEET' : 'FAIL');
+  const num = (v, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '?');
+  // Every state this printer actually emitted. assertEveryStateRendered()
+  // compares it against the states present in run.rows.
+  const rendered = new Set();
+  const stateOrder = orderedStates(run);
+  const legendFor = (id) => stateById(id)?.legend ?? '(UNDECLARED STATE — not in this file\'s STATE table, printed anyway)';
 
   L('');
   L('  STUDIO DESK — LIVE MEASURE MATRIX');
@@ -1938,6 +2929,19 @@ function printTable(run) {
       `position ${run.user_opened_proof.after.position}, width ${run.user_opened_proof.after.width_px}px`);
   }
   L(`  platform      ${run.platform} — scrollbar ${run.rows[0]?.scrollbar_width_px ?? '?'}px (macOS overlay; D83)`);
+  // The row count as ARITHMETIC (D121's doctrine without its literal), stated
+  // before the matrix so a short run is obvious at the top rather than tallied
+  // out of the table by a reader who may not bother.
+  if (run.states_measured) {
+    const expected = expectedRowCount(run.states_measured);
+    L(`  states        measured: ${run.states_measured.join(', ') || 'none'}` +
+      (run.states_skipped?.length ? `; SKIPPED: ${run.states_skipped.map((s) => s.state).join(', ')}` : ''));
+    L(`  rows          ${run.rows.length} of ${expected} expected ` +
+      `(${WIDTHS.length} widths x ${FACES.length} faces x states applicable at each width — computed, ` +
+      `never a compiled-in literal)` +
+      (run.rows.length === expected ? ' — COMPLETE' : ' — SHORT, see the caveats below'));
+    for (const s of run.states_skipped ?? []) L(`  skipped       ${s.state}: ${s.reason}`);
+  }
   L('');
 
   const cols = [
@@ -1952,13 +2956,11 @@ function printTable(run) {
   const chOf = (r) => (r.content_ch ?? null);
   const RULE = '  ' + '-'.repeat(150);
 
-  for (const state of ['default', 'user-opened']) {
+  for (const state of stateOrder) {
     const rows = run.rows.filter((r) => r.inspector_state === state);
     if (!rows.length) continue;
-    L(`  INSPECTOR STATE: ${state.toUpperCase()}   ` +
-      (state === 'default'
-        ? '(as served — below `wide` spd-b29 paints the open panel as a 41px in-flow strip)'
-        : '(after a REAL click on the inspector toggle through the live socket — the state D108 measured)'));
+    rendered.add(state);
+    L(`  INSPECTOR STATE: ${state.toUpperCase()}   ${legendFor(state)}`);
     L('  ' + cols.map(([h, w]) => pad(h, w)).join(''));
     L(RULE);
     let lastVp = null;
@@ -1968,23 +2970,25 @@ function printTable(run) {
       const ch = chOf(r);
       L('  ' + [
         pad(r.viewport_px + (r.settle.settled ? '' : '*'), 9),
-        pad(r.face, 15),
+        pad(r.face + (r.face_relevant === false ? '~' : ''), 15),
         pad(r.width_bucket_stamped ?? '(none)', 9),
         pad('[' + r.panes.visible_pane_widths_px.join(',') + ']', 16),
-        pad(r.panel_px, 7),
-        pad(r.gutter.total_px, 7),
-        pad(r.content_px, 8),
-        pad(r.ch.probe_px_per_ch, 8),
-        pad(ch === null ? '?' : ch.toFixed(2), 7),
+        pad(r.panel_px ?? '?', 7),
+        pad(r.gutter.total_px ?? '?', 7),
+        pad(r.content_px ?? '?', 8),
+        pad(r.ch.probe_px_per_ch ?? '?', 8),
+        pad(num(ch), 7),
         pad(yn(r.floor.binds), 7),
         pad(yn(r.overflow.horizontal_scroll), 8),
         pad(r.panes.strips_visible, 6),
         pad(r.crumbs.visible ? r.crumbs.count : 0, 6),
-        pad(r.inspector.present ? (r.inspector.overlays_surface ? 'ovl' : 'dock') : 'n/a', 6),
-        pad(r.content_meets_55ch ? 'MEET' : 'FAIL', 6),
-        pad(r.visible_content_px, 8),
-        pad(r.visible_ch === null ? '?' : r.visible_ch.toFixed(2), 8),
-        pad(r.visible_meets_55ch ? 'MEET' : 'FAIL', 5),
+        pad(r.inspector.present
+          ? (r.inspector.overlays_surface === null ? 'n/c' : r.inspector.overlays_surface ? 'ovl' : 'dock')
+          : 'n/a', 6),
+        pad(verdict(r.content_meets_55ch), 6),
+        pad(r.visible_content_px ?? '?', 8),
+        pad(num(r.visible_ch), 8),
+        pad(verdict(r.visible_meets_55ch), 5),
         pad(r.scrim?.renders ? `${r.dimmed_content_px}@${r.scrim_alpha}` : '-', 8),
         pad(r.legacy_inspector_subtraction_px ?? '-', 8),
       ].join(''));
@@ -2018,26 +3022,51 @@ function printTable(run) {
   L('            comment on the docked case in PAGE_MEASURE — this is not a missing subtraction).');
   L('  Both ch figures divide THIS row\'s box by THIS row\'s probe span under THIS row\'s forced');
   L('  face. No figure anywhere divides one face\'s box by another face\'s advance (D83/D86).');
+  L('  ?       = NOT MEASURED, never zero and never FAIL. A state may declare it has NO reading');
+  L('            column (the summoned destination does); its ch figures are NULL and its verdicts');
+  L('            render ?. A 0 there would read as catastrophic occlusion and a FAIL would assert a');
+  L('            failure against an element that is not on screen — D127 Part 2 forbids both.');
+  L('  face~    = the face was forced for matrix symmetry only; with no reading column there is no');
+  L('            advance to measure, so the three face rows of such a state are identical by design.');
+  L('  insp n/c = the inspector is present but there is no reading column for it to dock beside or');
+  L('            overlay, so "does it overlay" has no answer here rather than the answer "no".');
   L('');
 
   // The visible census — the number this wave's seal ruling turns on, stated as
   // a count rather than left for a reader to tally out of 54 rows.
-  for (const state of ['default', 'user-opened']) {
+  for (const state of stateOrder) {
     const rows = run.rows.filter((r) => r.inspector_state === state);
     if (!rows.length) continue;
-    const meet = rows.filter((r) => r.visible_meets_55ch);
-    const lay = rows.filter((r) => r.content_meets_55ch).length;
-    L(`  VISIBLE VERDICT (${state}): ${meet.length} of ${rows.length} cells MEET >=55ch of VISIBLE measure ` +
-      `(the LAYOUT measure meets in ${lay}).`);
-    if (meet.length === 0) {
-      L('    None — at any width, in any face. Every cell in this state reads under the criterion.');
+    rendered.add(state);
+    // THREE buckets, not two. A cell with a NULL verdict is neither a MEET nor
+    // a FAIL — it is a cell where the question does not arise — and folding it
+    // into the fail count would manufacture exactly the FAIL that D127 Part 2
+    // forbids, in the census this wave's seal ruling reads.
+    const measurable = rows.filter((r) => r.visible_meets_55ch !== null && r.visible_meets_55ch !== undefined);
+    const unmeasurable = rows.length - measurable.length;
+    const meet = measurable.filter((r) => r.visible_meets_55ch);
+    const lay = rows.filter((r) => r.content_meets_55ch === true).length;
+    L(`  VISIBLE VERDICT (${state}): ${meet.length} of ${measurable.length} MEASURABLE cells MEET ` +
+      `>=55ch of VISIBLE measure (the LAYOUT measure meets in ${lay}).` +
+      (unmeasurable
+        ? ` ${unmeasurable} of ${rows.length} cells are NOT MEASURABLE — this state has no reading ` +
+          `column, so those are "?" and are counted as neither MEET nor FAIL.`
+        : ''));
+    if (measurable.length === 0) {
+      L('    No measurable cell in this state — there is no reading column here to measure. That is');
+      L('    the state\'s declared shape, not a failure, and it is NOT evidence either way about 55ch.');
+    } else if (meet.length === 0) {
+      L('    None — at any width, in any face. Every measurable cell in this state reads under the criterion.');
     } else {
       const byWidth = [...new Set(meet.map((r) => r.viewport_px))].sort((a, b) => b - a);
       for (const w of byWidth) {
         const at = meet.filter((r) => r.viewport_px === w);
-        L(`    viewport ${String(w).padStart(4)}px: ${at.map((r) => `${r.face} ${r.visible_ch.toFixed(2)}ch`).join(', ')}`);
+        L(`    viewport ${String(w).padStart(4)}px: ${at.map((r) => `${r.face} ${num(r.visible_ch)}ch`).join(', ')}`);
       }
-      const missWidths = [...new Set(rows.filter((r) => !r.visible_meets_55ch).map((r) => r.viewport_px))]
+      // `=== false`, not `!`: a null verdict is not a fail and must not be
+      // listed as one.
+      const missWidths = [...new Set(measurable.filter((r) => r.visible_meets_55ch === false)
+        .map((r) => r.viewport_px))]
         .sort((a, b) => b - a);
       L(`    FAIL at: ${missWidths.join(', ')}px (all faces unless listed above).`);
     }
@@ -2047,19 +3076,24 @@ function printTable(run) {
   // The epic's own criterion, answered with a number, honestly either way.
   L('  THE EPIC\'S HEADLINE CRITERION — >=55ch of CONTENT at viewport 900px:');
   L('');
-  for (const state of ['default', 'user-opened']) {
-    for (const r of run.rows.filter((x) => x.viewport_px === 900 && x.inspector_state === state)) {
-      const ch = chOf(r), vch = r.visible_ch;
-      L(`    ${pad(state, 11)} ${pad(r.face, 16)} content ${String(r.content_px).padEnd(7)}px = ` +
-        `${ch.toFixed(2).padStart(6)}ch  ${r.content_meets_55ch ? 'MEETS' : 'FAILS'}   ` +
-        `(visible ${String(r.visible_content_px).padEnd(6)}px = ${vch.toFixed(2)}ch ` +
-        `${r.visible_meets_55ch ? 'MEETS' : 'FAILS'})   ` +
-        `${r.ch.probe_px_per_ch}px/ch, ${r.font.resolved_family ?? 'UNRESOLVED'} @ ${r.font.font_size_px}px`);
+  const meets = (v) => (v === null || v === undefined ? 'NOT MEASURABLE' : v ? 'MEETS' : 'FAILS');
+  for (const state of stateOrder) {
+    const at900 = run.rows.filter((x) => x.viewport_px === 900 && x.inspector_state === state);
+    if (!at900.length) continue;
+    rendered.add(state);
+    for (const r of at900) {
+      L(`    ${pad(state, 13)} ${pad(r.face, 16)} content ${String(r.content_px ?? '?').padEnd(7)}px = ` +
+        `${num(chOf(r)).padStart(6)}ch  ${meets(r.content_meets_55ch)}   ` +
+        `(visible ${String(r.visible_content_px ?? '?').padEnd(6)}px = ${num(r.visible_ch)}ch ` +
+        `${meets(r.visible_meets_55ch)})   ` +
+        `${r.ch.probe_px_per_ch ?? '?'}px/ch, ${r.font.resolved_family ?? 'UNRESOLVED'} @ ` +
+        `${r.font.font_size_px ?? '?'}px`);
     }
     L('');
   }
-  L('  Nothing above is rounded toward the criterion. Where the two entry states disagree,');
-  L('  BOTH are printed — the desk genuinely has two answers and a matrix that hides one is spin.');
+  L('  Nothing above is rounded toward the criterion. Where states disagree, ALL are printed —');
+  L('  the desk genuinely has more than one answer and a matrix that hides one is spin. A state');
+  L('  with no reading column reads NOT MEASURABLE, which is a third answer, not a failing one.');
   L('');
 
   // The protected floor: where, if anywhere, does it actually do something?
@@ -2086,28 +3120,66 @@ function printTable(run) {
   //    guard firing is a metric nobody can audit — and for THIS metric a
   //    vacuous pass would falsify the seal, so the census is printed whether it
   //    is interesting or not (D31/D39/D112).
-  const scrimRows = run.rows.filter((r) => r.scrim?.renders);
-  const guarded = run.rows.filter((r) => r.occlusion?.non_vacuity?.guard_applies);
+  // DENOMINATOR = rows that actually ran the hit-test. A no-reading-column row
+  // has `occlusion: null` and never could have exercised the guard; counting it
+  // in the denominator would silently depress every ratio here and make a
+  // healthy run look like a degrading one.
+  const hitTested = run.rows.filter((r) => r.occlusion?.non_vacuity);
+  const scrimRows = hitTested.filter((r) => r.scrim?.renders);
+  const guarded = hitTested.filter((r) => r.occlusion.non_vacuity.guard_applies);
   const guardPassed = guarded.filter((r) => r.occlusion.non_vacuity.forced_sample_differs);
-  const restored = run.rows.filter((r) => r.occlusion?.restore?.byte_identical);
+  const restored = hitTested.filter((r) => r.occlusion?.restore?.byte_identical);
+  const nv = summariseNonVacuity(run);
+  const firstHit = hitTested[0];
   L('  OCCLUSION INSTRUMENT — SELF-CHECKS:');
-  L(`    scan resolution      ${run.rows[0]?.occlusion?.scan_columns ?? '?'} columns per scanline ` +
-    `(~${run.rows[0]?.occlusion?.scan_step_px ?? '?'}px step), edges bisected to ` +
-    `+/-${run.rows[0]?.occlusion?.bisect_tolerance_px ?? '?'}px. The step bounds DETECTION, the ` +
+  L(`    hit-tested rows      ${hitTested.length} of ${run.rows.length} ` +
+    `(${run.rows.length - hitTested.length} rows have no reading column, so no hit-test — they are ` +
+    `excluded from every ratio below rather than counted as failures)`);
+  L(`    scan resolution      ${firstHit?.occlusion?.scan_columns ?? '?'} columns per scanline ` +
+    `(~${firstHit?.occlusion?.scan_step_px ?? '?'}px step), edges bisected to ` +
+    `+/-${firstHit?.occlusion?.bisect_tolerance_px ?? '?'}px. The step bounds DETECTION, the ` +
     `tolerance bounds PRECISION.`);
-  L(`    scrim renders in     ${scrimRows.length} of ${run.rows.length} rows` +
-    (scrimRows.length ? ` (${[...new Set(scrimRows.map((r) => r.inspector_state))].join(', ')})` : ''));
+  L(`    scrim renders in     ${scrimRows.length} of ${hitTested.length} hit-tested rows` +
+    (scrimRows.length ? ` (${[...new Set(scrimRows.map((r) => r.inspector_state))].join(', ')})` : '') +
+    `; its host .editor-with-preview is present in ${nv.scrim_host_present_in_rows}`);
   L(`    NON-VACUITY GUARD    applies in ${guarded.length} rows, PASSED in ${guardPassed.length}` +
     (guarded.length === 0
-      ? ' — no scrim rendered anywhere in this run, so the guard had nothing to prove. That is NOT'
+      ? ' — it had nothing to prove in this run, which is NOT a pass.'
       : ' — the forced sample genuinely differed from the natural one.'));
   if (guarded.length === 0) {
-    L('                         a pass: it means this run never exercised the injected selector, so a');
-    L('                         drift in it would NOT have been caught here. Read dimmed_content_px in');
-    L('                         this run as unproven rather than as zero.');
+    // ── THE TWO ZEROS, TOLD APART. "No scrim because the desk was fixed" and
+    //    "the guard could not have fired" are the SAME number and opposite
+    //    news, so the census never prints the bare zero on its own.
+    L('    WHICH ZERO IS THIS?  ' + nv.zero_cause);
   }
-  L(`    RESTORE byte-ident.  ${restored.length} of ${run.rows.length} rows ` +
+  if (run.positive_control) {
+    const pc = run.positive_control;
+    L(`    POSITIVE CONTROL     ${pc.ran
+      ? `ran (synthetic scrim forced to render, face ${pc.face}) — guard ` +
+        `${pc.guard_passed === true ? 'FIRED' : 'DID NOT FIRE'}: ${pc.verdict}`
+      : `not run — ${pc.skip_reason}`}`);
+  }
+  L(`    RESTORE byte-ident.  ${restored.length} of ${hitTested.length} hit-tested rows ` +
     `(injected sheet removed, host and ::after computed styles identical before/after)`);
+  if (run.round_trip) {
+    const rt = run.round_trip;
+    L(`    ROUND TRIP           ${rt.ran
+      ? `${rt.identical_cells} of ${rt.cells} cells returned BIT-IDENTICAL after ` +
+        `default -> open -> dismiss on the same page instance via ${rt.dismiss_control} ` +
+        `(${rt.dismiss_grammar}) — ${rt.returns_bit_identical ? 'the column comes back exactly' : 'THE COLUMN DOES NOT COME BACK'}`
+      : `SKIPPED — ${rt.skip_reason}`}`);
+    if (rt.ran && !rt.returns_bit_identical) {
+      for (const w of rt.widths) {
+        for (const f of w.faces.filter((x) => !x.identical)) {
+          L(`      viewport ${String(w.viewport_px).padStart(4)}px ${f.face.padEnd(15)} ` +
+            f.diffs.map((d) => `${d.field} ${d.before} -> ${d.after}`).join(', '));
+        }
+      }
+      L('      A column that does not return is a desk that degrades every time the reader looks');
+      L('      something up. These are the SAME rounded figures the matrix publishes, so any');
+      L('      difference here is a difference a reader would be handed.');
+    }
+  }
 
   // ── HIT-TEST vs THE OLD ARITHMETIC, stated as a number. A divergence here is
   //    a finding and is printed whether or not anyone wants it to be.
@@ -2141,12 +3213,24 @@ function printTable(run) {
   L('');
 
   const unsettled = run.rows.filter((r) => !r.settle.settled).length;
-  if (unsettled || run.warnings.length) {
+  const expected = run.states_measured ? expectedRowCount(run.states_measured) : null;
+  const short = expected !== null && run.rows.length !== expected;
+  if (unsettled || short || run.warnings.length) {
     L('  CAVEATS ON THIS RUN:');
     if (unsettled) L(`    - ${unsettled}/${run.rows.length} rows never settled (marked * above) — those are moving targets.`);
+    if (short) {
+      L(`    - ROW COUNT MISMATCH: ${run.rows.length} rows collected, ${expected} expected from the ` +
+        `states this run measured. The expected count is COMPUTED (widths x faces x states applicable`);
+      L(`      at each width), so this is arithmetic, not a remembered literal — something stopped ` +
+        `early and the warnings above say what.`);
+    }
     for (const w of run.warnings) L(`    - ${w}`);
     L('');
   }
+
+  // Last line of the printer, deliberately: it proves the state derivation held
+  // for every loop above rather than only for the first one.
+  assertEveryStateRendered(run, rendered);
 }
 
 // Run only when INVOKED, so `compareProvenance` can be imported and exercised
