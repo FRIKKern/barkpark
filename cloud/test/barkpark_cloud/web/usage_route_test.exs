@@ -22,7 +22,11 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     * auth: 401 unauthenticated; team-scope fail-closed → the SAME 404 for
       wrong-team / nonexistent / malformed ids
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — this module swaps node-global env
+  # (`:barkpark_cloud, :usage_fanout_budget_ms`), which is ONE value for the whole
+  # node: while held, every concurrent async usage read runs on that budget.
+  # Ratchet: scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
   import Plug.Test
   import Plug.Conn
 

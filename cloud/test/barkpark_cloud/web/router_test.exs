@@ -4,7 +4,11 @@ defmodule BarkparkCloud.Web.RouterTest do
   run through `Router.call/2`, no live Bandit socket. Mirrors cloud-8/9's
   DataCase + Ecto sandbox setup.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — this module swaps node-global env
+  # (`:barkpark_cloud, :platform_admin_emails`), which is ONE value for the whole
+  # node: while held, every concurrent async test sees that operator allowlist.
+  # Ratchet: scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
   import Plug.Test
   import Plug.Conn
   import Ecto.Query, only: [from: 2]

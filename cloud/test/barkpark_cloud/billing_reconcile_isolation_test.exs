@@ -19,7 +19,11 @@ defmodule BarkparkCloud.BillingReconcileIsolationTest do
   OTHER barkpark to the real `BarkparkCloud.Registry` — so the surrounding
   rows transition for real, not a stub of the whole reconcile.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — the FailingRegistry below IS process-scoped (it delegates to
+  # the real Registry unless the CALLING process opts in), but the `Billing`
+  # config swap further down is not: that one is ONE value for the whole node.
+  # Ratchet: scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
   alias BarkparkCloud.Billing.Subscription

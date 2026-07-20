@@ -5,7 +5,13 @@ defmodule BarkparkCloud.OAuthTest do
   SAFE identity-linking precedence in `Accounts.get_or_create_user_from_oauth/1`.
   Everything runs through `BarkparkCloud.OAuthStub` — ZERO network calls.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — this module swaps node-global env (`:barkpark_cloud, OAuth`)
+  # to null github's client_secret. That is ONE value for the whole node, so
+  # while it is held `OAuth.enabled?(:github)` is false for EVERY concurrent
+  # test: forcing the interleave red router_oauth_test.exs's callback assertion
+  # AND made github vanish from GET /v1/auth/oauth/providers. Ratchet:
+  # scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.{Accounts, Billing, OAuth, OAuthStub}
   alias BarkparkCloud.Accounts.{ExternalIdentity, TeamMembership, User}
