@@ -65,6 +65,12 @@ const REVIEWER_MODEL = A.reviewer_model || 'opus'
 // neither have bp-epic-cycle's. They were proven under a node:vm harness that
 // reproduces the host evaluator, over n = 0, 1, floor-1, floor, floor+1. A harness
 // is not a wave; nothing here has been observed firing in the loop.
+// Count a fan-out array. A non-array truthy value (a model returning a bare
+// string where an array was declared) has a `.length` too — "abc".length is 3,
+// which SATISFIES a floor of 3 and then faults on the .map() two lines later
+// with an error naming neither the floor nor the cause. A floor whose whole job
+// is to fail informatively must not be the thing that fails obscurely.
+const fanout = (v) => (Array.isArray(v) ? v.length : -1)
 const DOMAIN_FLOOR = 3
 const PROBE_FLOOR = 10
 const BUNDLE_FLOOR = 3
@@ -443,8 +449,8 @@ ${TASKS_BLOCK}${LEAD_NOTES}`,
 )
 if (!planner) throw new Error('Plan phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 // Floor 1/4 — the partition. Fires before Recon spends a single domain lead.
-if ((planner.domains || []).length < DOMAIN_FLOOR) {
-  throw new Error(`Domain fan-out floor: the planner returned ${(planner.domains || []).length} domain(s), below the floor of ${DOMAIN_FLOOR}. The whole cycle is partitioned here — recon, survey, digest, cut and review all fan out per domain — so a short partition silently narrows every later phase at once, and the cycle still reports itself complete. Re-run Plan with a real ${DOMAIN_FLOOR}-way disjoint partition rather than proceeding.`)
+if (fanout(planner.domains) < DOMAIN_FLOOR) {
+  throw new Error(`Domain fan-out floor: the planner returned ${fanout(planner.domains)} domain(s), below the floor of ${DOMAIN_FLOOR}. The whole cycle is partitioned here — recon, survey, digest, cut and review all fan out per domain — so a short partition silently narrows every later phase at once, and the cycle still reports itself complete. Re-run Plan with a real ${DOMAIN_FLOOR}-way disjoint partition rather than proceeding.`)
 }
 const CYCLE_PAPER = planner.paper_id
 const EPIC_TASK = planner.epic_task_id
@@ -474,7 +480,7 @@ Design 10-20 survey probes for cheap Sonnet surveyors. Each probe is one scout: 
     ),
   async (recon, d) => {
     if (!recon) return null
-    const probes = (recon.survey || []).slice(0, 20)
+    const probes = Array.isArray(recon.survey) ? recon.survey.slice(0, 20) : []
     // Floor 2/4 — the real agent fan-out: one Sonnet scout per probe. Fires before
     // this domain's surveyors are spent. NOTE: pipeline() runs stages under
     // Promise.allSettled, so this throw is swallowed into a dropped domain rather
@@ -549,8 +555,8 @@ ${PAPER_BLOCK}${LEAD_NOTES}`,
 if (!digest) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 // Floor 3/4 — one bundle per domain, one Opus task-cutter per bundle. Fires before
 // Cut spends a cutter, and before the reduce below would fault on a missing array.
-if ((digest.bundles || []).length < BUNDLE_FLOOR) {
-  throw new Error(`Bundle fan-out floor: the digest returned ${(digest.bundles || []).length} bundle(s), below the floor of ${BUNDLE_FLOOR}. One bundle becomes one Opus task-cutter, so a dropped bundle is a domain that got surveyed and then silently cut nothing — the most expensive way to lose work in this cycle. Re-run Digest with one bundle per surveyed domain rather than proceeding.`)
+if (fanout(digest.bundles) < BUNDLE_FLOOR) {
+  throw new Error(`Bundle fan-out floor: the digest returned ${fanout(digest.bundles)} bundle(s), below the floor of ${BUNDLE_FLOOR}. One bundle becomes one Opus task-cutter, so a dropped bundle is a domain that got surveyed and then silently cut nothing — the most expensive way to lose work in this cycle. Re-run Digest with one bundle per surveyed domain rather than proceeding.`)
 }
 log(`Digest cut 3 bundles (${digest.bundles.reduce((n, b) => n + b.findings.length, 0)} vetted findings); dropped: ${digest.dropped.slice(0, 120)}`)
 
@@ -597,7 +603,7 @@ if (cuts.length < BUNDLE_FLOOR) {
   throw new Error(`Cutter survival floor: only ${cuts.length} of ${BUNDLE_FLOOR} task-cutters returned. parallel() swallows a died cutter into a null that is filtered away here, so the cycle would build one domain's fixes and report a full sweep. Check the parallel[] failure lines above, then resume the run rather than proceeding.`)
 }
 for (const c of cuts) {
-  const cutCount = (c.tasks || []).length
+  const cutCount = fanout(c.tasks)
   if (cutCount < CUT_TASK_FLOOR) {
     throw new Error(`Cut fan-out floor [${c.domain}]: this cutter filed ${cutCount} task(s), below the floor of ${CUT_TASK_FLOOR}. Every task is one builder, so a thin cut is a domain that was surveyed at full price and then fixed at none — and the cycle's own report would still read as a completed sweep of that domain. Re-run Cut for this domain against its bundle (${CUT_TASK_FLOOR}-20 tasks) rather than proceeding.`)
   }
