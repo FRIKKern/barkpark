@@ -698,7 +698,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             socket that never navigated renders exactly as before. --%>
       <% focus_pane_idx = Map.get(assigns, :focus_pane_idx) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
-        <% display = PaneBuilder.display_state(idx, num_panes, has_editor, @width_bucket) %>
+        <%!-- spd-b39/D151: the Tier-2 ladder's fifth input. `/5` is a pure
+              additive arity — with the inspector CLOSED it delegates to the
+              `/4` table VERBATIM in all 40 cells (pinned by the
+              "inspector CLOSED is /4 verbatim" equivalence suite, which is
+              what keeps D94(a)'s exhaustive table load-bearing after this
+              swap rather than merely still-passing). `@sidebar_user_opened`
+              is read as an assign, NOT `Map.get/3` with a default: it is
+              seeded in mount.ex beside `width_bucket`, so an absent key is a
+              wiring bug that must crash loudly instead of silently pinning
+              the desk to false. --%>
+        <% display =
+          PaneBuilder.display_state(
+            idx,
+            num_panes,
+            has_editor,
+            @width_bucket,
+            @sidebar_user_opened
+          ) %>
         <% collapsed = display == :strip %>
         <% doc_count = Enum.count(pane.items, &(&1.type == :doc)) %>
         <.pane_column
