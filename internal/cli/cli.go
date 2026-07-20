@@ -538,13 +538,41 @@ func Execute(args []string) int {
 
 	cmd, ok := tree.Lookup(noun, verb)
 	if !ok {
-		return usageErrf(out, func() {
-			if _, nounOK := lookupNoun(tree, noun); nounOK {
-				usageSuggestVerb(out, tree, noun, verb)
-			} else {
-				usageSuggestNouns(out, tree, noun)
+		// A REAL noun followed by something that is not one of its verbs used to
+		// report `unknown command "search" "PDS crown proof"` — which reads as
+		// "the noun `search` is unknown" and sent six independent agents in one
+		// wave off to grep instead of searching Barkpark. The manifest tree can
+		// tell the two cases apart, so it must: an unknown NOUN keeps its
+		// noun-typo suggestion; a known noun gets a message that says the noun is
+		// fine and names the exact fix.
+		//
+		// THE INFERENCE RULE (deliberately narrow — `soleReadVerb`):
+		//   FIRES only when ALL of these hold:
+		//     - the noun is real and declares EXACTLY ONE verb (no guessing which
+		//       of several the user meant — one obvious answer or nothing);
+		//     - that verb does not write (manifest `writes:false`) — a destructive
+		//       verb is NEVER inferred, only suggested;
+		//     - the typed token is not itself a near-typo of that verb (then it is
+		//       a mistyped verb, not an argument: `search quer x` still corrects);
+		//     - the token does not look like a flag (`-`/`--`).
+		//   When it fires, the token and everything after it are re-dispatched as
+		//   the verb's ARGUMENTS (`bp search "text"` → `bp search query "text"`),
+		//   with one stderr note so the rewrite is never silent.
+		//   DOES NOT FIRE for a multi-verb noun (`bp doc "text"`), for a writing
+		//   sole verb, or for an unknown noun — each of those falls through to the
+		//   precise error below, which names the corrected command when it can.
+		if n, nounOK := lookupNoun(tree, noun); nounOK {
+			if sole, inferable := soleReadVerb(n, verb); inferable {
+				out.errf("note: `%s` has one verb — running `barkpark %s %s`", noun, noun, sole.Verb)
+				return runCommand(out, g, ctx, m, *sole, append([]string{verb}, tail...))
 			}
-		}, "unknown command %q %q", noun, verb)
+			return usageErrf(out, func() {
+				usageSuggestVerb(out, tree, noun, verb)
+			}, "%s", noVerbMsg(n, noun, verb))
+		}
+		return usageErrf(out, func() {
+			usageSuggestNouns(out, tree, noun)
+		}, "unknown command %q", noun)
 	}
 
 	return runCommand(out, g, ctx, m, *cmd, tail)
