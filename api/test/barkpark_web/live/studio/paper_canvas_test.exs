@@ -1454,7 +1454,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     # lie survived a wave; these read the panel button's OWN attributes out of the
     # markup so a regression cannot hide behind a neighbour.
     defp panel_toggle(html) do
-      [head, tail] = String.split(html, ~s(data-test-id="sidebar-toggle-panel"), parts: 2)
+      # spd-b39: ONE control, TWO test ids. At Tier 3 (narrow/phone + user
+      # opened) it is the destination's dismissal and identifies itself as
+      # `sidebar-dismiss` so the deployed probe can find the exit by name;
+      # everywhere else it stays `sidebar-toggle-panel`. This helper is about
+      # the control's ANNOUNCEMENT, which both spellings must get right, so it
+      # locates whichever id this bucket rendered rather than pinning one.
+      marker =
+        if String.contains?(html, ~s(data-test-id="sidebar-dismiss")),
+          do: ~s(data-test-id="sidebar-dismiss"),
+          else: ~s(data-test-id="sidebar-toggle-panel")
+
+      [head, tail] = String.split(html, marker, parts: 2)
       # attributes sit BEFORE the test-id on the opening tag, the glyph after it
       (head |> String.split("<button") |> List.last()) <> String.slice(tail, 0, 300)
     end
@@ -1465,6 +1476,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       cond do
         control =~ ~s(d="m6 9 6 6 6-6") -> "chevron-down"
         control =~ ~s(d="m9 18 6-6-6-6") -> "chevron-right"
+        # spd-b39/D167 — the Tier-3 glyph. At narrow/phone with the panel
+        # summoned, the control is the ONLY exit from a full-screen
+        # destination, so it points the way the action goes.
+        control =~ ~s(d="m12 19-7-7 7-7") -> "arrow-left"
         true -> "no-chevron"
       end
     end
@@ -1493,7 +1508,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "an EXPLICIT user open announces itself OPEN at every bucket (spd-b29f)" do
       # data-user-opened makes the b29 rule stop matching, so the panel really is
-      # visible — the announcement must follow the pixels back.
+      # visible — the announcement must follow the pixels back. That half is
+      # bucket-INDEPENDENT and stays so.
       for bucket <- ~w(wide standard narrow phone) do
         control =
           panel_toggle(
@@ -1502,9 +1518,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
         assert control =~ ~s(aria-expanded="true"),
                "#{bucket}: user-opened panel is genuinely open"
+      end
+    end
 
-        assert control =~ "Collapse document panel"
+    # spd-b39/D167 — the LABEL and GLYPH, unlike the announcement above, are
+    # tier-dependent, and deliberately so. At wide and standard the panel is
+    # chrome beside the prose and the action collapses it downward. At narrow
+    # and phone a summoned panel IS the screen (wave-10 paints it `inset:0`
+    # over an opaque surface), so the same control is a way BACK — pointing it
+    # down would describe a motion the click does not perform.
+    test "the label and glyph follow the tier: collapse above, RETURN at Tier 3 (spd-b39)" do
+      for bucket <- ~w(wide standard) do
+        control =
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: true, width_bucket: bucket})
+          )
+
+        assert control =~ "Collapse document panel",
+               "#{bucket}: a docked panel collapses; it is not a destination to leave"
+
         assert chevron(control) == "chevron-down"
+      end
+
+      for bucket <- ~w(narrow phone) do
+        control =
+          panel_toggle(
+            render_sidebar(%{panel_open: true, user_opened: true, width_bucket: bucket})
+          )
+
+        assert chevron(control) == "arrow-left",
+               "#{bucket}: the exit from a full-screen destination must point back"
+
+        assert control =~ "Back to",
+               "#{bucket}: the control must name where pressing it goes"
+
+        refute control =~ "Collapse document panel",
+               "#{bucket}: 'Collapse' describes chrome, not a full-screen return"
       end
     end
 

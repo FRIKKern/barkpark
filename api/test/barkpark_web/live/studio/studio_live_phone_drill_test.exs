@@ -202,7 +202,12 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
   end
 
   describe "the desktop desk is untouched" do
-    test "no crumb markup at wide, standard or narrow", %{conn: conn} do
+    # spd-b39/D168 — `narrow` LEFT this list, deliberately. It was here because
+    # narrow still keeps its pane columns (or the 44px strip), so it had a way
+    # back without a trail. The wave-10 geometry broke that premise: at narrow a
+    # summoned inspector paints `inset:0` over everything, and the trail is the
+    # rendered way out of it. Wide and standard are unchanged and stay pinned.
+    test "no crumb markup at wide or standard", %{conn: conn} do
       {:ok, view, wide_html} = open_doc(conn)
 
       # NB: the literal must be the MARKUP (`class="bp-desk-crumb`), not the
@@ -213,10 +218,15 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
 
       refute has_element?(view, "nav.bp-desk-crumbs")
 
-      for bucket <- ~w(wide standard narrow) do
+      for bucket <- ~w(wide standard) do
         refute set_bucket(view, bucket) =~ ~s(class="bp-desk-crumb),
                "#{bucket} keeps its pane columns (or the 44px strip) and needs no trail"
       end
+
+      # And the other side of the move, so this test still measures a BOUNDARY
+      # rather than merely having had its inconvenient case deleted.
+      assert set_bucket(view, "narrow") =~ ~s(class="bp-desk-crumb),
+             "narrow must now carry the trail (D168) — a Tier-3 destination needs a rendered way out"
     end
 
     test "the trail appears and disappears with the bucket, round-trip clean", %{conn: conn} do
