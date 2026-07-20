@@ -1000,6 +1000,171 @@ prose that preceded it.
   one-line-class fix with a real test — an epic that measures its own honesty should not ship a
   research instruction that cannot be executed.
 
+- **PDS-D124 — THE SORT IS *BOTH*, AND THAT IS THE FINDING.** The wish called rung 6's red an
+  ENGINE defect; the crown transcript called it "a HARNESS BUG, not an ENGINE FAIL"; the filed task
+  agreed with the transcript; wave 8's Strategize agreed with neither. All were partly right and all
+  missed the same thing: the assertion IS vacuous at sha parity **and** there is a real engine gap.
+  Two different defects sharing one rung. Wave 8 does not choose between them — it fixes both.
+
+- **PDS-D125 — THE ENGINE GAP IS A SECOND, UNGUARDED BOOT-TIME WRITER: `TagRegistry`.** Proven live,
+  not reasoned: with a `pull_provenance` stamp PRESENT, a sentinel written into the `tag` row was
+  REVERTED in four of the eight guarded columns (`title`, `icon`, `visibility`, `fields`) while
+  `owner_scoped`, `cors_origins`, `desk_groups`, `list_preview` SURVIVED — because
+  `TagRegistry.schema_attrs/0` declares a five-key map and `Ecto.Changeset.cast/3` ignores absent
+  keys, whereas `Plugins.Bootstrap.upsert_one/3` builds attrs via `Map.from_struct` and therefore
+  carries all eight. Same stamp, same dataset, opposite outcomes: the difference is solely which
+  writer touches the row. `schema_bootstrap.ex:60` fires `TagRegistry.register!("production")` BEFORE
+  the try/rescue and before `register_all_schemas/0`; `tag_registry.ex` has no `Tenancy` alias at
+  all; `bootstrap_guard_test.exs` has ZERO tag coverage. The premise every prior wave reasoned from
+  — "Bootstrap is the only clobber path" — is simply false.
+
+- **PDS-D126 — THE FIX GUARDS THE UPDATE, NEVER THE INSERT.** A naive copy of Bootstrap's
+  `pulled_row` skip into `TagRegistry` would make core `tag` registration silently skippable on a
+  stamped workspace — trading a clobber bug for a boot-closed-guarantee bug, since PDS-D12 puts
+  TagRegistry outside the rescue precisely so a missing core `tag` schema can never boot a system
+  whose publish wall is dead. Guard the UPDATE-of-a-drifted-row path only; INSERT-when-absent stays
+  unconditional. That is the split `bootstrap.ex:207-211` already makes and that
+  `"INSERT-WHEN-ABSENT is unchanged inside a stamped workspace"` already pins.
+
+- **PDS-D127 — THE CENSUS IS 34 + `tag` + `metric` = 36, AND THE 36TH ROW IS `metric`.** Identified
+  by diffing guerrilla's live `/api/schemas` (36 names) against a pristine scratch boot (35): the
+  sole extra is `metric`, declared by no local plugin and therefore never visited by Bootstrap's
+  `Registry.all()` walk. Behaviour by class, measured on BOTH legs of a real reboot: the 34
+  plugin-declared rows SURVIVE stamped and REVERT cleared; `tag` REVERTS on both legs; `metric`
+  SURVIVES FOREVER on both. That is the two-row gap no prior wave could explain about `rows=36`
+  against 34 SKIP / 34 REGISTER.
+
+- **PDS-D128 — THE SENTINEL IS SCOPED TO THE 34, AND SCOPE IS THE FIX RATHER THAN A DETAIL OF IT.**
+  A table-wide sentinel — the natural reading of "write a sentinel into the eight guarded columns on
+  the pulled rows" — reds leg A on `tag` and hangs leg B red FOREVER on `metric`, and the transcript
+  would show a digest that moved with the stamp present, which reads exactly like "the guard failed."
+  The clause is `WHERE workspace_id = <the id stamp_before resolved> AND dataset = '$SOURCE_DS' AND
+  name NOT IN ('tag','metric')`, verified live to select exactly 34.
+
+- **PDS-D129 — THE EXCLUSION LIST IS HAND-MAINTAINED, SO IT MUST BE TRIPWIRED.** No column in
+  `schema_definitions` records which plugin declared a row (23 columns; none is a source marker;
+  `dataset_id IS NULL` is an artefact of hand-insertion, not a discriminator), so the roster cannot
+  be derived in SQL. The sentinel `UPDATE`'s `RETURNING` count MUST therefore be asserted equal to
+  the SKIP count in the target's own `server.log`. That single cross-check is what converts a future
+  guerrilla-only orphan, or a third core writer, from a silent vacuous green into a loud red. It is
+  load-bearing, not belt-and-braces.
+
+- **PDS-D130 — LEG B ASSERTS PER-COLUMN REVERSION, NOT WHOLE-DIGEST MOVEMENT.** The sharpest attack
+  on the sentinel was that it could MASK a partial clobber behind an aggregate that happened to move.
+  No partial-coverage path exists inside `bootstrap.ex` today — `schema_definition.ex:58-98` casts a
+  strict superset of the eight in one `Repo.update`, pinned by committed probe S7 — but the
+  per-column assertion costs nothing and is the only shape that stays honest if the cast list ever
+  narrows. Masking was never possible at that layer; it was possible one layer out, at TagRegistry,
+  which is why D125 lands first.
+
+- **PDS-D131 — THE SENTINEL WRITES A jsonb OBJECT, NEVER A jsonb ARRAY.** `fields` and `desk_groups`
+  are POSTGRES `jsonb[]` (`udt_name` `_jsonb`); Ecto's `{:array,:map}` is a different view of the
+  same column. `fields || '[{...}]'::jsonb` resolves as `array_append` and appends ONE element whose
+  value is a JSON ARRAY. The `UPDATE` succeeds silently (`UPDATE 35`, no error) and the break
+  surfaces only on the NEXT read, as an `ArgumentError` inside `Repo.all` → `/api/schemas` 500 →
+  `reboot_target` polls for 90 s → the rung ABORTS looking like an environment fault. Two-stage
+  silence, and the most deceptive failure available to this edit. Append a bare object, and
+  `coalesce` `fields` — the one nullable column of the eight. Proven in both directions on a scratch
+  target: prescribed form → HTTP 500; corrected form → HTTP 200, all 35 rows served, digest moved.
+
+- **PDS-D132 — `stamp_before` MUST CAPTURE THE WORKSPACE ID.** Today it reads
+  `... WHERE settings ? 'pull_provenance' LIMIT 1` with no `ORDER BY` and never selects the id, while
+  the guard-off `UPDATE` uses the same predicate with NO `LIMIT` — the read samples one arbitrary
+  stamped workspace, the write clears every one of them. Benign at exactly one stamped workspace
+  (verified: today there is one), but the sentinel cannot reuse a resolution that does not exist.
+  Capture `id … ORDER BY id LIMIT 1` and feed that id to BOTH writes, closing the asymmetry in the
+  same edit.
+
+- **PDS-D133 — THE STAMP CHECK HOISTS ABOVE `digest_before`.** `digest_before` is taken at `:2016`,
+  the stamp-validity check at `:2023`; sentinelling a slot that turns out to be unstamped would leave
+  a corrupted target behind. Order becomes: read stamp → validate stamp → write sentinel →
+  `digest_before`. `digest_before` then reflects the SENTINELLED state, which is what turns leg A
+  from "the columns did not change" (true even with the guard deleted) into "the guard PRESERVED a
+  drifted row across a reboot" — the hazard the guard actually exists for.
+
+- **PDS-D134 — THE THAW HONOURS THE FREEZE AND CARRIES THREE FAIL-DEMOS.** PDS-D100 licenses a filed
+  HARNESS BUG to be corrected in PREFLIGHT with the corrected assertion SHOWN still failing on the
+  pre-fix condition. Wave 8 pays that three times: (i) sentinel step disabled → the corrected rung
+  RED, proving the fix is load-bearing and not decoration; (ii) stamp cleared → leg A RED, proving
+  the corrected rung can still catch a broken engine (clearing the stamp IS disabling the guard —
+  there is no separate branch to invert, so no new flag ships); (iii) a planted lower-pid foreign
+  `beam.smp` matcher → the OLD selector picks it, the NEW one does not. The edit makes every rung
+  STRICTER; nothing anywhere is loosened.
+
+- **PDS-D135 — THE SAMPLER FIX RIDES THE SAME PREFLIGHT.** `pgrep -f beam.smp | head -1` (`:1382`)
+  can select a foreign low-pid process whose cmdline merely contains the literal, with a captured
+  ~342x RSS under-read. Criterion 9 demands the run's OWN measured peak, and wave 7 could only vouch
+  for it with a manual `head1 == oldest` bracket around the export. An instrument whose honesty
+  depends on a human side-check is not the instrument this epic claims to have built. Different
+  region of the same frozen file, one builder, one re-freeze.
+
+- **PDS-D136 — THE INSTRUMENT RE-FREEZES AT THE PREFLIGHT MERGE SHA.** The freeze until now is blob
+  `5a7978e03` / commit `1f15017bf` (#4686), byte-identical across waves 6 and 7 — established by
+  comparing blob OIDs, never by an empty `--stat` (an empty stat is also what a broken pathspec
+  prints). Wave 8's preflight merge supersedes it; the new blob OID is recorded in the wave log and
+  the harness is FROZEN again from attempt 1.
+
+- **PDS-D137 — RAISE `PDS_FULL_EXPORT_BUDGET` TO 2, DELIBERATELY AND ON THE RECORD.**
+  `/tmp/pds-full-export/attempts` reads `1` against a default budget of 1, and the parked 1.03 GB
+  bundle is STALE (`served_sha 15e057f83` = #4717 versus guerrilla's live `3f16c9f43`), so the
+  zero-attempt reuse path cannot fire. As configured, a re-climb ABORTS rungs 3/4 before measuring
+  anything and D122 forbids closing on that. The script's own `cond_c` message names the remedy
+  verbatim: "raise `PDS_FULL_EXPORT_BUDGET` deliberately or reuse `$FULL_TAR`". This is a DIFFERENT
+  knob from `PDS_FULL_EXPORT_MIN_MEM_MB`, which is never lowered — the standing law prohibits the
+  second, not the first. Do NOT reset the attempts file and do NOT repoint `PDS_FULL_EXPORT_DIR`:
+  both defeat the store's "one attempt, ever, per store" intent more quietly than the bump the code
+  itself prescribes.
+
+- **PDS-D138 — THE CROWN WAS FALSELY CLOSED BY THIS EPIC'S OWN LEAD, SEVEN SECONDS AFTER #4722
+  MERGED.** `pds-w1-crown-proof` carried `lifecycle_status: done`, `closed_by: oc-lead` at
+  `04:13:22Z`, with criteria 6 (rung-6 convergence) and 10 (PR merged) both `met:false` — while the
+  builder's own now-line on that same claim read "Task stays OPEN per D122 — rung 6 unmet." D122 was
+  violated because nothing could stop it: `close.ex:157-161` compares ONLY the epoch, never the
+  holder identity, and close never reads `acceptance_criteria` as a precondition. The task is
+  reopened and the incident is RECORDED rather than quietly repaired, because an epic that grades its
+  own honesty does not get to launder its own lapse.
+
+- **PDS-D139 — THE REOPEN RECIPE IS TWO STEPS, AND THE SECOND IS THE ONE THAT MATTERS.** Patching
+  `lifecycle_status=open` and republishing yields a task that READS open but is NOT claimable and
+  does NOT appear in `bp task ready` — `QueueGate.execution_class` (`queue_gate.ex:70`) returns
+  `foreign_claimed` on the surviving dead `claim.worker`, and `bp task release` refuses with
+  `not_in_progress:open`. The way out of that catch-22 is a same-worker re-claim (the sanctioned
+  lease renewal, `claim.ex:348-356`, epoch 11 → 12) followed by `release`, which nulls
+  `claim.worker`. Both steps are first-class verbs; no claim-block surgery. A worker following the
+  old one-step note verbatim sees "open", concludes success, and then cannot claim — with a
+  misleading `not_ready` as the only signal.
+
+- **PDS-D140 — CRITERION 10 WILL NEVER AUTO-STAMP.** `close.ex:344` auto-flips only criteria carrying
+  `merge_gate: true`; crown criterion 10's keys are exactly `[criterion, evidence, met]`. The LEAD
+  must stamp index 10 explicitly with `--criterion-text` verbatim, or the crown sits at 10/11 forever
+  waiting on an automation that cannot fire. Conversely, once all 11 read met the cmux Stop hook WILL
+  close the task without anyone typing it — so no criterion is stamped speculatively ahead of a green
+  rung.
+
+- **PDS-D141 — SOBELOW REDS ON MAIN ITSELF, IS ADVISORY, AND PDS BUILDERS INHERIT IT.** main's own
+  `.sobelow-skips` pins `router.ex:2505` while the code reports `:2530` — reproduced identically on
+  CI's pinned 1.18.1/OTP 27.0, which rules out toolchain fingerprint drift and leaves genuine
+  baseline staleness. `tenancy.ex` and `tenancy/workspace_bundle.ex` — PDS's own lane — already carry
+  line-shifted findings. Reconciliation is CI-only and human-reviewed by design
+  (`sobelow-baseline-reconcile.sh`: `never-auto-commit`). A PDS PR NEVER "fixes" this by editing
+  `.sobelow-skips`.
+
+- **PDS-D142 — WAVE-7 RESIDUE IS FULLY LANDED; THE PLANNED "LAND THE RESIDUE" SLICE DISSOLVED.**
+  #4722, #4723, #4724, #4725 and the charter amendment #4701 are all merged; `origin/main` is
+  `11a34dda6`. The wish's "three of four blocked on pr-task-gate" was true when written and false by
+  Decide — the gate is green on all four, having been unblocked by an ordinary re-claim. The general
+  lesson is the recurring one: verify merge state at Decide, never plan around a Strategize snapshot.
+
+- **PDS-D143 — `pds-w3-shares-fidelity` STAYS DEFERRED TO WAVE 9.** It cannot red step 2
+  mechanically — `shares` and `preview_token_jti` are raw E3 tables that never enter the
+  document-type census — but it falsifies the frozen harness's own printed shortfall banner
+  ("`tables/shares.copy` is 0 BYTES in the full bundle for exactly this reason"). Landing it before
+  or during the re-climb would leave the crown transcript narrating something no longer true. It is
+  admitted only after a green re-climb closes the crown.
+
+- **PDS-D144 — EVERY WAVE-8 BUILDER IS `opus`.** Fable 5 is spend-limited this session. Not a quality
+  judgment — a hard constraint carried from the wish (PDS-D38/D56).
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -1187,7 +1352,66 @@ FILED, NOT BUILT (the freeze forbids touching the instrument):
 HELD BEHIND THE TRANSCRIPT: `pds-w3-shares-fidelity` — it moves the census baseline (D45/D74).
 
 
+Wave 8 — pay the crown (DECIDED; 4 slices; ROUNDS ARE LAW; every builder `opus` per PDS-D144):
+
+- R1 `pds-w8-tagregistry-guard` (opus, M): ENGINE — `TagRegistry.register_attrs!/2` stops clobbering
+  a drifted row inside a pull-provenance-stamped slot; INSERT-when-absent stays unconditional
+  (PDS-D125/D126). Differential test: same stamp, `tag` row survives all eight, absent `tag` row is
+  still created.
+- R1 `pds-w8-rung6-sentinel` (opus, L): HARNESS PREFLIGHT — step 6 gets a sentinel scoped to the 34
+  Bootstrap-owned rows, per-column leg B, workspace-id capture, stamp-check hoist, plus the `pgrep`
+  sampler fix; three fail-demos (PDS-D128..D135). Re-freezes the instrument at the merge sha.
+- R1 `pds-w8-schema-row-census` (opus, S): the committed derivation of the 36-row taxonomy the
+  exclusion list rests on — 34 plugin + `tag` + `metric`, per-leg behaviour, and why no SQL
+  discriminator exists (PDS-D127/D129).
+- R2 `pds-w8-crown-reclimb` (opus, L; AFTER `pds-w8-tagregistry-guard` + `pds-w8-rung6-sentinel`
+  merge): one serial `--all`, fresh RUN_ID, `PDS_FULL_EXPORT_BUDGET=2`, the transcript deliverable,
+  and `pds-w1-crown-proof` closed ONLY if every rung passes with its controls FIRING (PDS-D122).
+
+
 ## Wave log
+
+### Wave 8 2026-07-20 — "Pay the Crown" — DECIDED, 3 R1 slices building (paper `pds-wave-8-2026-07-20`)
+
+The verify round settled the sort in a way nobody argued for, and it is the wave's whole shape.
+The wish said ENGINE defect. The crown transcript said "a HARNESS BUG, not an ENGINE FAIL." The
+filed task agreed with the transcript. Strategize agreed with neither. All three were partly right
+and all three missed the same thing: **rung 6's assertion is vacuous at sha parity AND there is a
+real engine gap, and they are different defects sharing one rung** (PDS-D124).
+
+The engine gap is a SECOND unguarded boot-time writer. `TagRegistry.register!/1` calls
+`Content.upsert_schema` directly, every boot, hardcoded to `"production"` — which is the harness's
+own default `SOURCE_DS` — with no provenance check of any kind. Measured, not argued: under a
+PRESENT stamp the `tag` row lost `title`/`icon`/`visibility`/`fields` and kept
+`owner_scoped`/`cors_origins`/`desk_groups`/`list_preview`, because TagRegistry declares a five-key
+map and Ecto's `cast/3` ignores absent keys. Under the identical stamp a Bootstrap-owned row
+survived all eight. Same stamp, same dataset, opposite outcomes (PDS-D125). Zero existing test
+coverage. The premise every prior wave reasoned from — one clobber path, one guard — was false.
+
+The census closed too. The 36th row is `metric`: present on guerrilla, declared by no local plugin,
+never walked by `Registry.all()`, and therefore never reverted on EITHER leg. So a table-wide
+sentinel would red leg A on `tag` and hang leg B red forever on `metric` — scope is the fix, not a
+detail of it (PDS-D127/D128). And the sentinel's own SQL had a trap the brief got wrong: `fields`
+and `desk_groups` are Postgres `jsonb[]`, so the prescribed `|| '[{...}]'::jsonb` appends an array
+INTO an array, the UPDATE succeeds silently, and the break surfaces one read later as a 500 that
+`reboot_target` reports as a 90-second environment abort (PDS-D131). Both forms were run; the
+corrected one keeps `/api/schemas` at 200 and moves the digest.
+
+Two blockers arrived that had nothing to do with rung 6. The export budget is already spent (1 of 1)
+AND the parked bundle is stale, so a re-climb fired as configured aborts 3/4 before measuring
+anything — remedied by the knob the script itself names, `PDS_FULL_EXPORT_BUDGET=2`, recorded here
+rather than typed quietly (PDS-D137). And `pds-w1-crown-proof` had been FALSELY CLOSED by this
+epic's own lead seven seconds after #4722 merged, with criteria 6 and 10 unmet, while the builder's
+own now-line said the task must stay open. `close.ex` compares only the epoch, never the holder, and
+never reads the criteria — D122 had zero mechanical enforcement (PDS-D138). The reopen needed a step
+the eleven-day-old note omits: the dead claim lease must be renewed and released, or the task reads
+open and still cannot be claimed (PDS-D139).
+
+The thaw is chartered and bounded: PREFLIGHT only, three pre-declared fail-demos, every rung made
+STRICTER, re-freeze at the merge sha (PDS-D134/D136). `pds-w3-shares-fidelity` stays deferred to
+wave 9 — it moves nothing the census asserts, but it falsifies a banner the transcript prints
+(PDS-D143).
+
 
 ### Wave 7 2026-07-20 — "The Swept Instrument" — DECIDED, 4 R1 slices building (paper `pds-wave-7-2026-07-20`)
 
