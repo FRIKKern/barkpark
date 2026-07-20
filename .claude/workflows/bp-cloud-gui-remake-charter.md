@@ -474,6 +474,56 @@ Next wave dispatch order (sequenced-rounds law): (1) merge round 1 — `gr-p5-op
 
 **Honest residue, stated numerically and not glossed: 21 of 56 done children remain sealed on evidence nobody read** — all in S5, the strongest-attribution stratum. Coverage 62.5%; observed material-failure rate on the audited 35 is 0/35 and the weakest cohort was 7/7 clean, which is the basis for calling the residue low-risk — but it is 21 children read by nobody, and the seal rests on that being visible rather than absent. Forwarding address: **`gr-p5r7-doneset-residue-21`** (published, open, under the epic). Zero mid-wave reopens, zero wave expansion.
 
+### Wave 2026-07-20 (seal r10) — clause (b) registered, all 60 live rows disposed by name; the terminal run is armed
+
+**Grade A. Two round-1 slices, both green, zero scope drift, no seventh instrument built.** Round 2
+(`gr-p5r5-successor-seal`, the terminal act) was deferred by design under the sequenced-rounds law and is
+now unblocked on both its dependencies.
+
+- **`gr-p5r8-register-defect-commits` — MERGED as `b47e1ecc1` (PR #5060).** The critical path is clear. The
+  diff is exactly three `commit:` lines, `null` → `'0261ace15'`, at `seal-predicate.mjs:86/92/98`; both files
+  with `commit:` lines stripped `diff` to exit 0, so every other byte of the frozen file is identical — no
+  clause body, threshold, SWEEP value (86/86, width 768, 12 accent scenarios), guard delegation or banner text
+  was touched. Re-verified at review on real `origin/main`: `git merge-base --is-ancestor 0261ace15 origin/main`
+  → **exit 0**, and `git log 0261ace15..origin/main -- cloud/priv/static/app.css` is **empty**, so no later
+  commit has moved the CSS the three defects were measured against. Clause (b) now prints three checkmarks and
+  the NO SEAL verdict rests on clause (a) **alone** — which is `gr-p5r5-successor-seal`'s to own.
+- **`gr-p5r10-census` — built, gate green, unmerged.** The disposition census (charter 938 → 1173 lines) plus
+  the successor's Band-5 amendment. Re-verified at review: roster **140 children `{done:80, open:60}`**,
+  unchanged from the builder's pre- and post-work reads, so nothing was closed or re-parented by this slice.
+  Coverage was re-run **against the census section alone**, not the whole charter — **LIVE 60 / UNCOVERED 0** —
+  so the green is not an artifact of an id appearing somewhere earlier in the file. All four cited SHAs are
+  merge SHAs on the squash chain (`3f16c9f43`, `24fae1b9f`, `0261ace15`, `7a5aff656`, each `--is-ancestor`
+  exit 0); zero branch SHAs. Band tallies reconcile exactly: 5 + 8 + 15 + 13 + 15 + 2 = 58, plus
+  `gr-p5r5-successor-seal` and the closed-and-live `gr-backlog-bp-search-verb-discoverability` = **60**, with
+  `gr-p5r9-seal-finishers-crit7-unstampable` counted once and double-listed by explicit disclosure. The
+  builder's own mid-run tally correction (Band 4 = 13, Band 5 = 15, not 14/14) is the correct one. The second
+  deliverable was verified against the **published** server copy: the `and the rest of the forwarded roster`
+  clause is gone, all 15 Band-5 rows are named, and `THERE IS NO "REST" … a row that arrives WITHOUT a line in
+  that census ARRIVED BY ACCIDENT: re-triage it … DO NOT ABSORB IT` is live on the successor.
+
+**The one real finding, and why it was filed OUTSIDE this epic.** `overflow-guard.mjs` declares
+`const die = async (msg, code = 1)` at line 227, and **all six** of its call sites are environmental refusals
+(no server; STALE SERVER ×2; Chrome never started; CDP bring-up; measurement broke) — not one is a measured
+overflow. Real findings exit 1 separately at the end of `main()`. So exit 1 means two mutually exclusive
+things, and `seal-predicate.mjs:176` reads only the status and prints *"the defect is still measurable at
+origin/main"*. A worktree squatting the guard's default port 4199 therefore produced three **false** clause-(b)
+defect claims that are indistinguishable from real ones. Filed as **`hg-overflow-guard-refusal-exits-1`** under
+the **honest-gates** epic (`auth-totp-tests-are-time-boundary-flaky`) — deliberately NOT here, because a row
+under `task-47bc4168392dec17` would have become a 59th orphan and un-greened clause (a) minutes before the
+terminal run. Confirmed after filing: roster still **140 `{done:80, open:60}`**, coverage still 60/60. The
+guard was honest; its caller was not. **The trap is contained operationally, not by code** — GR142-GR144 already
+mandate a free `OVERFLOW_GUARD_PORT` and a standalone warm run. Mutating the measurement apparatus between the
+freeze and the terminal run would fork the outcome, so nothing was changed.
+
+**Two silent false-NO-SEAL traps the terminal runner must defeat**, both of which produce a full banner
+indistinguishable from a real verdict: (1) a squatted guard port — set `OVERFLOW_GUARD_PORT` to a *verified-free*
+port; (2) a non-root cwd — emits `guard … is NOT COMMITTED` ×3, because clause (b) resolves the guard as
+`${REPO}/${d.guard}` and `REPO` defaults to `process.cwd()`.
+
+**Next: round 2, `gr-p5r5-successor-seal` — nothing else.** Merge the census PR, then run the terminal
+protocol once, atomically, and take whatever the predicate says. NO SEAL is pre-authorised and terminal.
+
 ---
 
 ## Wave 2026-07-20 (seal r4) — round 8: the seal predicate, frozen and inverted-then-repaired
