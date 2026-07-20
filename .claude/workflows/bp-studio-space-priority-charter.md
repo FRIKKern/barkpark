@@ -354,6 +354,51 @@ Backlog filed this wave: `spd-b30-instrument-coverage-one-document-one-path` ·
 
 - **D116 — THE LEDGER'S SHORT NUMBERS ARE AMBIGUOUS AND MAY NEVER BE USED TO DISPATCH.** Four collisions are live in the epic's children, every one of them `open`: **`spd-b18`** (`-btn-focus-visible-desk-wide` / `-census-built-paper-editor-css`), **`spd-b21`** (`-emit-motion-duration-tokens` / `-strip-focus-browser-proof`), **`spd-b30`** (`-instrument-coverage-one-document-one-path` / `-wide-bucket-ab-measured`), **`spd-b35`** (`-presence-dot-intercepts-action-bar` / a BARE-ID task about a dead CSP hash). A Decide or a lead skimming by short number misfiles work against the wrong task. **Ruling: every reference in this charter, in any brief, and in any dispatch is by FULL SLUG. And D98's fence residue is executed this wave rather than deferred a third time — `scaffy-backlog-blocks-editable-studio` keeps its correct `open` status but loses its orphaned FENCE NOTICE prose, and `sup-w5bk-beta-doc-editor-savestate` flips `blocked` → `open` and loses its notice too, closing `spd-b13u`.**
 
+## Wave-8 amendment (THE INSTRUMENT'S EVIDENCE wave, 2026-07-20) — D117–D135
+
+**These decisions were authored at wave-8 Decide and landed at wave-8 Review, and the gap between those
+two facts is the wave's sharpest finding (D135).** The wave Paper's Decide section states that
+"the ruling itself is written and COMMITTED to the charter as D117-D134". It was not. The charter at
+`origin/main` ended at **D116**, and a scan of every `origin/*` branch for a charter containing D120 or
+D134 returned zero hits — while the instrument **merged** citing D121/D130/D131 in code comments that
+resolved to nothing. Two builders discovered this by looking and correctly refused to build on it. The
+text below is transcribed from the wave Paper, which is the authoritative record of what Decide ruled;
+Review's role here is to make the citations resolve, not to re-decide them.
+
+- **D117, D118, D119 — PROMOTED FROM WAVE-7 REVIEW, AND STILL UNRESTATED.** Decided and sabotage-proven at wave-7 Review, narrated only in the seal paper, never written to the charter file — which topped at D116 and would have collided with a freshly minted D117. **Ruling: these numbers are RESERVED to the wave-7 Review findings and may not be reused. Their content is not restated here because the wave-8 Paper does not restate it, and inventing it would be exactly the fabrication this charter exists to prevent. The next wave that needs to cite D117-D119 must first transcribe them from the wave-7 seal paper into this file.** Note for the record that wave-8 dispatch briefs used "D119" for a *different* claim (the short-number allocator being the defect rather than the names); that usage is superseded here by D133, and any brief still citing D119 for the allocator is citing the wrong number.
+
+- **D120 — NO SEAL.** The seal condition fails on **both** clauses in the DEFAULT state, before the user-opened state is consulted — three cells fail, and two of the three were owned by no decision. The written ledger is NAMED as satisfiable and the seal on it is DECLINED, because D107 fixed the desktop rows before any table was seen precisely so the epic could not pick its own passing grade. **Ruling: NO SEAL, confirming D108 on the hardened instrument. Review re-ran the gate against `65541e2d4` == `origin/main` (slot BLUE queried over ssh, bracket MATCHED, non-vacuity guard 21 applies / 21 passed, 54 rows, 0 unsettled) and the three failing default cells are forced Georgia at 1280 (596px = 53.95ch), 1024 (599px = 54.22ch) and 700 (567px = 51.33ch), same-face probe advance 11.0469 px/ch at 18px, shipped horizontal overflow 0px at all three. Native and Source Serif 4 MEET >=55ch at all seven of D107's desktop widths. Every failing cell now has a named owner — 1280 and 1024 on `spd-b28-floor-binds-georgia-1280-overflow`, 700 on D106, 640 on D100 as superseded by D106. THE SHORTFALL ACCOUNTING IS CLOSED.** `spd-w6-visible-seal-ruling` remains the slice that must write this ruling as the epic's formal gate; what it inherits from here is a decided outcome and a bracketed main-sha run, not an open question.
+
+- **D121 — THE TABLE IS 54 ROWS, NOT 162.** 9 widths x 3 forced faces x 2 inspector states. The 162 figure multiplied the row count by the three figures each row reports. A ruling expecting 162 declares a correct run incomplete or invents a fourth axis. **Ruling: 54 rows is a COMPLETE run. This is pinned in the instrument's `--help` and in `artifact.row_count_note` so the correction travels with the data.**
+
+- **D122 — THE NON-VACUITY PRECONDITION PASSED 21/21, WITH EVERY NON-APPLYING ROW ACCOUNTED.** The alternative failure mode is a false seal manufactured by the instrument built to prevent one. **Ruling: `applies > 0` is the load-bearing half — `applies: 0` is vacuous, not a pass, and `artifact.non_vacuity_guard.vacuous` records it explicitly. Reproduced by Review in two further runs.**
+
+- **D123 — THE REPRODUCTION TEST PASSES AND THE ~200px DISPUTE IS CLOSED.** Two measurements of one quantity 200px apart is the tell that saved the last wave; a 1.2px refinement is not that. **Ruling: closed. Review adds that three independent runs — the builder's on `3be27f0fd`/green and two of Review's on `65541e2d4`/blue — agree on 0 of 216 compared values across `visible_content_px`, `content_px`, `legacy_inspector_subtraction_px` and `visible_ch`.**
+
+- **D124 — #4737 IS NOT COHERENCE-ONLY; IT COST 12px AT 1280 AND 9px AT 1024.** A geometry disclaimer in a commit message is a claim, and this epic measures claims. D93 predicted it verbatim and required a run that was never done. **Ruling: the disclaimer is struck; the cost is on the record.**
+
+- **D125 — BUT THE MEET IT REMOVED WAS MANUFACTURED BY A FLOOR BIND THAT OVERFLOWED THE COLUMN IT PROTECTED.** Both halves belong on the record, and the consequence is sharper than a regression: **no configuration on record makes 1280/Georgia both meet the bar and avoid a scrollbar.** **Ruling: the 1280/Georgia MEET that #4737 removed was never real reading width, and the pair D124+D125 must always be quoted together.**
+
+- **D126 — THE IN-FLOW CEILING, PER WIDTH AND PER FACE.** `ceiling = min(panel_px, surface cap 720) - gutter - 55 x probe px/ch`. At 1024: **90.0px native, 32.4px forced Georgia, 135.5px Source Serif 4**; at 700 forced Georgia **0.4px**. Because the 720px surface cap binds at every width at or above 1024, widening the viewport buys NO inspector room — the ceiling is **FLAT from 800 through 1440**. This is what converts the successor from a discovery wave into a closing one. **Ruling: docking is arithmetically dead at 1024; the question was never dock-or-overlay. CORRECTION, on the record rather than silently swapped — the "a 300px dock leaves ~42ch" figure in the Paper's ceiling section and in the wave-8 Decide narration is the PRE-gutter panel remainder (420px) and *exceeds* the overlay's 378.958px, so as written it refutes the sentence it supports. The correct comparable is the gutter-subtracted 340px = 34.00ch native, which is worse than the overlay by 38.958px on every face. The conclusion survives; the figure is STRUCK. Any brief still quoting 420px or ~42ch is quoting a struck number.**
+
+- **D127 — THE USER-OPENED STATE IS HANDED OVER AS A PRE-REGISTERED QUESTION, NOT RULED EXEMPT.** Exempting a mode after seeing an unfavourable table is D107's gerrymandering with extra steps. **Ruling: the successor MAY rule it exempt — after stating the rule before it looks.**
+
+- **D128 — THE SUCCESSOR IS `spd-b39-user-opened-inspector-shape-successor`, BY FULL SLUG.** It already exists; minting a new one forks the ledger. **Ruling: successor work is written ONTO `spd-b39`, which now carries the full user-opened table, the ceiling arithmetic, the pre-registered question and the corrected comparables — enough that a cold reader opening it alone can state the problem and the arithmetic.**
+
+- **D129 — THE MD3 COMPARABLE IS CORRECTED AND CONTENTFUL IS STRUCK.** D101 cited MD2's archived taxonomy and a pixel range MD3 does not state, and MD3's only third-pane endorsement is gated to **1600dp+**, above every width this epic tests. One clean citation beats three shaky ones. **Ruling: MD3 cited accurately (two-tier standard/modal, 600-1199dp, standard sheets shrink rather than overlay); Contentful STRUCK as unsourced; Sanity retained width-unconfirmed; Linear checked and inconclusive. D101's law holds — "the Kinsta bar" is a craft standard in this charter, never a layout citation.**
+
+- **D130 — THE INSTRUMENT HAD A SILENT NO-OP THAT INVERTED ITS OWN DOCTRINE.** The entrypoint guard compared a raw `path.resolve(process.argv[1])` against `fileURLToPath(import.meta.url)`. That is asymmetric: Node resolves ESM module URLs through realpath, while `argv[1]` arrives verbatim from the shell. macOS `/tmp` symlinks to `/private/tmp`, so `INVOKED_DIRECTLY` never fired and the process exited **0 with zero bytes on stdout AND stderr** — through `tee`, an empty file at exit 0, one careless `| tail` from being read as "no failures". **Ruling: both sides resolve through realpath; the fix is SYMMETRY, not a `/tmp` special case. Red-tested through a symlink: before exit 0 / 0 bytes, after exit 1 / 119 stderr bytes, failing by name. REVIEW ADDENDUM — the same slice reintroduced the same disease one level up: `const OUT_PATH = resolveOutPath()` ran at module scope ~80 lines ABOVE the `const die` it calls, so all three malformed-`--out` paths threw a raw `ReferenceError: Cannot access 'die' before initialization` instead of the named failure they compose, and none had been exercised because the red-test hit the `--doc=` path. Fixed at Review by resolving inside the entrypoint chain. Filed as `spd-b46-entrypoint-guard-untested`: two unexercised failure paths in one slice whose whole purpose is readable failure is a testing gap, not bad luck.**
+
+- **D131 — THE EPIC HAD NEVER COMMITTED A RUN ARTIFACT, AND THAT IS WHY EVERY WAVE RE-MEASURES.** A table that cannot be retrieved gets re-derived, wrongly, by whoever needs it next. #4736 added 859 lines and zero save-to-disk capability, so the wave-7 sweep survives only as prose in a closed task with `viewport 500 / user-opened` blank at byte level. **Ruling: `--out <path>` writes the complete run — every row plus a flattened `run.artifact` provenance header — and committed runs live in `scripts/measurements/`. The write happens AFTER the provenance bracket closes, so no unbracketed matrix can reach disk. The D131 blank is FILLED, not explained away: viewport 500 / user-opened carries `dimmed_content_px` 174.944 in all three faces at `scrim_alpha` 0.55, and `visible_content_px` is 174.944 too — equal because D111 is working, the scrim dims rather than hides.**
+
+- **D132 — EPIC CRITERION INDEX 2 (0-BASED) IS THE EMPTY ONE, AND D124/D125 ARE ITS MISSING EVIDENCE:** desktop >=1280 is NOT unchanged. **Ruling: the epic's own acceptance criterion 2 is answered by the D124/D125 pair, and must be stamped with both halves or not at all.**
+
+- **D133 — COLLISION FAMILIES, AND SLUG UNIQUENESS DOES NOT CATCH CONTENT DUPLICATES.** Decide counted nine; the sweep found **ten**, and the tenth (`spd-w8`, five members) was minted *by this wave's own slice allocation while the sweep was running* — the defect reproducing under observation, which is the strongest available evidence that the fault is the allocator and not the existing names. `spd-b27` and `spd-b37` are the same finding filed 93 minutes apart under non-colliding slugs, a class slug uniqueness structurally cannot catch. Renumbering would dangle references inside merged PR bodies, which are immutable. **Ruling: collisions are prevented at allocation time, never repaired by renaming; content duplicates are caught by reading, not by the id. Every reference in this charter, in any brief, and in any dispatch — and every ledger write, including re-parenting — is by FULL SLUG (`bp task get spd-b28` 404s). `spd-b40-ledger-short-number-collisions` carries the current census and the counting traps that inflate and hide the count.**
+
+- **D134 — THREE TICKETS, ONE MEASUREMENT, AND ONLY ONE NEEDS THE BACKFILL MECHANISM.** A done task's criteria are frozen: stamping returns `409 not_in_progress:done` and re-claiming returns `409 not_ready`, so the only backfill is `bp doc patch` + `bp doc publish` — which writes a draft overlay invisible to `bp task get` until published and **bypasses every guard**: no epoch fence, no criterion-text check, no lease. **Ruling: backfill by patch is permitted and MUST paste the full before/after array, because nothing in the system will catch a malformed `--set` that silently clobbers ten rows. Open tasks close by the normal claim-stamp-close path and may not use it.**
+
+- **D135 — A DISPATCH BRIEF IS NOT A CHARTER, AND A PAPER SAYING "COMMITTED" DOES NOT COMMIT ANYTHING.** Wave 8's Paper asserted that D117-D134 were "written and COMMITTED to the charter"; the charter ended at D116 and no branch carried them. Wave 8's briefs then cited those numbers as settled law, and the instrument merged citing D121/D130/D131 in code comments that resolved to nothing — so a cold agent following them hits exactly the confident-empty-grep this epic has been overturned by twice. Two builders caught it by looking: one held `spd-b30-georgia-1280-unbound-after-container-move` at 2/3 rather than close it on a decision that existed in no tree, which is the discipline the epic was overturned twice for lacking. Compounding it, the brief-level and Paper-level D-numbering **disagreed** — the briefs used D119 for the allocator, which the Paper had assigned to a wave-7 promotion and D133 to the allocator — so two artefacts in one wave cited different decisions under one number. **Ruling: a wave that authors D-numbers MUST land them in the charter FILE in the same wave that cites them, and a Paper's claim to have done so is a claim like any other — this epic verifies claims. Decide writes decisions; Review writes the log. A brief may quote a decision, never create one, and never renumber one. A citation to a D-number the charter does not define is a defect in the citing artefact.**
+
 ## Roadmap — THE SEAL wave (wave 7)
 
 Round 1 dispatches immediately — three slices, strictly disjoint file sets. Round 2 is the lead's
@@ -410,3 +455,55 @@ ships **green through 73 tests in five suites**, deliberately sabotaged and re-r
 
 The one outcome this wave refuses is a seal taken on the default state while one click away the reader
 sees 38ch. Paper: `studio-space-priority-desk-seal-2026-07-20`.
+
+### Wave 2026-07-20 — Wave 8 (THE INSTRUMENT'S EVIDENCE), Review. Grade B+.
+
+**The wave ruled, and then failed to land the ruling.** D120 — NO SEAL — was decided at wave-8 Decide,
+with its reasoning intact and its failing cells named. The wave Paper then stated that "the ruling itself
+is written and COMMITTED to the charter as D117-D134". It was not. The charter ended at **D116**, no
+`origin/*` branch carried D117-D134, and the instrument **merged** citing D121/D130/D131 in code comments
+that resolved to nothing. For the length of this wave the epic's ruling existed only inside a Paper that
+claimed to have written it down. That is the wave's defining defect, and it is the same false-"live"
+claim the wish warned about in a different register: a Paper asserting a write is a claim, and this epic
+verifies claims. Review transcribed D117-D135 into the charter from the Paper, which is the authoritative
+record of what Decide ruled; Review's job there was to make citations resolve, not to re-decide them.
+
+**Two builders caught it before Review did, and both refused to build on it.** One held
+`spd-b30-georgia-1280-unbound-after-container-move` at 2/3 precisely because its third criterion demands a
+charter DECISION that existed in no tree — "closing it would have been a false seal on a decision that
+does not exist". That is the discipline this epic was overturned twice for lacking, exercised
+unprompted. Compounding the fault, brief-level and Paper-level numbering **disagreed**: the briefs used
+D119 for the short-number allocator, which the Paper had assigned to a wave-7 promotion and D133 to the
+allocator. Two artefacts in one wave cited different decisions under one number (D135).
+
+**What landed in the tree.** One slice of four, `spd-w8-instrument-entrypoint-and-artifact`. The
+entrypoint guard now resolves both sides through realpath — symmetry, not a `/tmp` special case — closing
+a defect where the instrument could **exit 0 having written zero bytes to stdout AND stderr**, which
+through `tee` is an empty file at exit 0 and one careless `| tail` from reading as "no failures" (D130).
+`--out` writes the complete run with a flattened provenance header, `--help` exists for the first time,
+and the first run artifact in this epic's history is committed at `scripts/measurements/` (D131). The
+other three slices were ledger-only by design and produced zero repository change between them.
+
+**Review re-measured rather than accepted, and found one real bug.** The committed run was taken on
+`3be27f0fd`/green, one commit behind main — the builder flagged this himself and pointedly declined to
+claim it measured main. The box has since re-deployed, so Review re-ran the gate against **`65541e2d4` ==
+`origin/main`, slot BLUE queried over ssh, bracket MATCHED, guard 21 applies / 21 passed, 54 rows, 0
+unsettled**. Across three independent runs — the builder's plus two of Review's — **0 of 216 compared
+values differ**. The builder's own stated doubt is closed by measurement rather than by argument. The bug:
+`const OUT_PATH = resolveOutPath()` ran at module scope ~80 lines above the `const die` it calls, so all
+three malformed-`--out` paths threw a raw `ReferenceError` instead of the named failure they compose —
+D130's disease reintroduced by the fix for D130, inside the slice whose whole purpose is that the
+instrument must never fail unreadably. None had been exercised; the red-test hit the `--doc=` path
+instead. Fixed at Review; filed as `spd-b46-entrypoint-guard-untested`.
+
+**The table, measured against main.** Default state, D107's seven desktop widths: native and Source Serif
+4 MEET >=55ch at all seven; forced Georgia fails at exactly three — 1280 (53.95ch), 1024 (54.22ch), 700
+(51.33ch) — and every one now has a named owner (D120/D106/D100-as-superseded). User-opened: **0 of 21
+sub-wide cells meet**, 1024 collapsing to 378.958px = 37.90ch native. D108's NO SEAL is confirmed on the
+hardened instrument, on main, with the shortfall accounting **closed**.
+
+**Next wave: dispatch `spd-w6-visible-seal-ruling` and nothing else until it lands.** It is the epic's last
+gate and was never dispatched. It no longer has anything to discover — only to write D120 as the epic's
+formal ruling and hand `spd-b39` the successor charter. Its criteria 0, 1 and 7 are already satisfied by
+artefacts in the tree and on the ledger; a reviewer note on the task spells out which, so it inherits a
+bracketed main-sha run instead of re-deriving one. Paper: `studio-space-priority-desk-ruling-2026-07-20`.
