@@ -37,6 +37,15 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
     end
   end
 
+  # "The next version bump", modelled without assuming the version is a number.
+  # The stamp is a sha256 digest of the renderer's own source
+  # (pt-w1-renderer-source-digest), so a bump is simply a DIFFERENT digest —
+  # a content hash has no successor, and `current + 1` no longer type-checks.
+  # Hashing the current digest guarantees a distinct, correctly-shaped value.
+  defp bumped_version(current) do
+    :crypto.hash(:sha256, "bumped:" <> current) |> Base.encode16(case: :lower)
+  end
+
   defp seed_block_backed_paper!(slug) do
     blocks = [%{"id" => "b1", "type" => "paragraph", "text" => "Rendered from blocks."}]
 
@@ -85,7 +94,7 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
              Under the stamp-vs-digest reader rule this record classifies as \
              #{inspect(classify(content, Render.body_html_render_version()))} \
              today and as \
-             #{inspect(classify(content, Render.body_html_render_version() + 1))} \
+             #{inspect(classify(content, bumped_version(Render.body_html_render_version())))} \
              at the next version bump — i.e. the authored HTML is discarded \
              behind an HTTP 200. Clear the stamp with Map.delete/2 (never a \
              sentinel: a sentinel is != current by construction and routes \
@@ -113,7 +122,7 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
       current = Render.body_html_render_version()
 
       assert classify(paper.content, current) == :unknown_fail_closed
-      assert classify(paper.content, current + 1) == :unknown_fail_closed
+      assert classify(paper.content, bumped_version(current)) == :unknown_fail_closed
 
       # And the reader that exists TODAY still refuses to pick a source: the
       # persisted body_html is not the render of the persisted blocks.

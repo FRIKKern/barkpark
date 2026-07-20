@@ -2,8 +2,9 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
   @moduledoc """
   One-shot backfill: re-render the frozen `content["body_html"]` cache of every
   block-bearing document (papers, plus any doc carrying an embedded `body_html`)
-  whose cache was written by an OLDER renderer than the current
-  `Barkpark.PortableDoc.Render.body_html_render_version/0`.
+  whose cache was written by a DIFFERENT renderer than the current
+  `Barkpark.PortableDoc.Render.body_html_render_version/0` — a sha256 digest of
+  the renderer's own source, compared by identity (not order).
 
   `content["body_html"]` is rendered ONCE from `content["blocks"]` at write time
   and served verbatim by HTML-cache readers and the data API/SDK, while the
@@ -13,7 +14,7 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
   mutation could also change blocks while retaining a current render-version
   stamp, so the stamp alone is not sufficient authority. Each sweep renders the
   expected HTML from the stored blocks with the SAME `render_opts` the write
-  path uses, then rewrites when either the version lags or the cache bytes differ.
+  path uses, then rewrites when either the digest differs or the cache bytes do.
 
   Idempotent: a doc at the current stamp whose cache matches a fresh block
   render is left untouched, so a second run rewrites nothing. Docs with no
@@ -46,8 +47,8 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
   @doc """
   Sweep every document carrying both a `content["body_html"]` and a
   `content["blocks"]`, re-rendering the cache from blocks when its
-  `content["body_html_sv"]` stamp is absent/lags the current render version OR
-  the stored HTML differs from a fresh render of those blocks.
+  `content["body_html_sv"]` stamp is absent or differs from the current render
+  digest OR the stored HTML differs from a fresh render of those blocks.
   Returns a tally with scanned/rewritten/noop/conflict/error counts plus
   doc-identity details for every conflict/error. Extracted from `run/1` so tests
   can call it inside the DB sandbox without going through `Mix.Task`.
@@ -123,7 +124,12 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
 
       body_html = Render.render_blocks(blocks, render_opts)
 
-      if is_integer(sv) and sv >= current and cached == body_html do
+      # EQUALITY, never `>=`. The stamp is a sha256 digest of the renderer's
+      # source; a content hash has no total order, so "greater" says nothing
+      # about "newer" — an older renderer's digest is lexicographically greater
+      # than the current one roughly half the time, and an ordinal test would
+      # read that as up-to-date and skip the row forever.
+      if sv == current and cached == body_html do
         :noop
       else
         new_content =

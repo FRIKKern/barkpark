@@ -6,7 +6,10 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
     * a paper written through the block_ops path stamps `content["body_html_sv"]`
       with the current `Render.body_html_render_version/0`; and
     * `mix barkpark.rehydrate_body_html` re-renders and re-stamps a cache frozen
-      by an older renderer (absent/lagging stamp), idempotently.
+      by a different renderer (absent/foreign stamp), idempotently.
+
+  The stamp is a sha256 digest of the renderer's own source, so it is compared
+  by IDENTITY — the ordinal-trap test below is the guard on that.
   """
   use Barkpark.DataCase, async: true
 
@@ -223,6 +226,46 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
 
       assert after_second.rev == after_first.rev
       assert after_second.content["body_html_sv"] == Render.body_html_render_version()
+    end
+
+    test "a stamp from an older renderer is caught even when it sorts ABOVE the current one" do
+      # THE ORDINAL TRAP. The stamp is a sha256 digest of the renderer's source;
+      # it carries no total order, so an OLDER renderer's digest is lexicographically
+      # greater than the current one about half the time. The predecessor test
+      # `sv >= current` would read this row as up-to-date and skip it forever.
+      #
+      # The cache bytes are left MATCHING a fresh render on purpose: that removes
+      # the byte-compare from the picture, so the rewrite can only be attributed
+      # to the stamp comparison. Under `>=` this row is a no-op; under `==` it is
+      # rewritten and re-stamped.
+      doc = create_paper("rh-ordinal", [para("p1", "ordinally greater, chronologically older")])
+
+      older_but_greater = String.duplicate("f", 64)
+      current = Render.body_html_render_version()
+
+      assert older_but_greater > current,
+             "fixture must sort above the current digest for this test to mean anything"
+
+      {:ok, stale} =
+        doc
+        |> Document.changeset(%{
+          "content" => Map.put(doc.content, "body_html_sv", older_but_greater),
+          "rev" => "ordinal-rev"
+        })
+        |> Repo.update()
+
+      # Bytes already current — only the stamp is wrong.
+      assert stale.content["body_html"] ==
+               Render.render_blocks(
+                 stale.content["blocks"],
+                 Labels.paper_render_opts(@dataset, nil)
+               )
+
+      assert %{scanned: 1, rewritten: 1, noop: 0} = RehydrateBodyHtml.rehydrate()
+
+      refreshed = reload(stale)
+      assert refreshed.content["body_html_sv"] == current
+      assert refreshed.rev != stale.rev
     end
 
     test "a doc already at the current stamp is a no-op" do

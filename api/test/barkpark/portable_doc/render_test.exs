@@ -4,12 +4,68 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
   alias Barkpark.PortableDoc.Render
 
-  describe "body_html_render_version/0 — cache cutover" do
-    test "is 3 (Stage 2 wave 2: article roles/tones/chrome emit bp-* classes)" do
-      # Bumped 1→2 (bare prose) then 2→3 (roles/tones/chrome → classes) — old
-      # cached v1/v2 HTML (self-styled inline) stays renderable; the stamp lets
-      # `mix barkpark.rehydrate_body_html` detect and refresh the drift.
-      assert Render.body_html_render_version() == 3
+  describe "body_html_render_version/0 — source digest" do
+    test "is a sha256 hex digest, not a hand-typed literal" do
+      # It succeeded a hand-bumped integer (v1→v3) that went four renderer
+      # rounds without a bump. Derived from source, the stamp cannot lag.
+      version = Render.body_html_render_version()
+
+      assert is_binary(version)
+      assert String.match?(version, ~r/\A[0-9a-f]{64}\z/)
+    end
+
+    test "recomputing the digest from the covered files on disk reproduces it" do
+      # The independent recomputation below is what makes the next test's
+      # covered-set assertion load-bearing rather than decorative: if the
+      # module hashed a different set, or in a different order, these diverge.
+      recomputed =
+        [Render.render_source_names(), Render.render_source_files()]
+        |> Enum.zip_reduce(:crypto.hash_init(:sha256), fn [name, path], acc ->
+          :crypto.hash_update(acc, name <> "\0" <> File.read!(path))
+        end)
+        |> :crypto.hash_final()
+        |> Base.encode16(case: :lower)
+
+      assert recomputed == Render.body_html_render_version()
+    end
+
+    test "the covered set is exactly render.ex + slots.ex + every render/*.ex" do
+      # A newly added render/*.ex that nobody lists would fall silently outside
+      # the digest, and every paper it changed would go stale behind a matching
+      # stamp — the exact failure this digest exists to make unreachable. This
+      # assertion is the tripwire: adding a renderer file reds it here.
+      covered = Render.render_source_names()
+
+      assert covered == Enum.sort(covered), "the digest must hash in sorted order"
+
+      assert covered ==
+               Enum.sort(~w(
+                   render.ex slots.ex
+                   render/cards_email.ex render/components.ex render/compose.ex
+                   render/data_viz.ex render/figures.ex render/fleet_email.ex
+                   render/forms.ex render/inline.ex render/math.ex render/palettes.ex
+                   render/panels_email.ex render/status_vocab.ex render/stylesheet.ex
+                   render/tokens_gen.ex render/util.ex render/walk.ex
+                 ))
+
+      # …and the list must still match what is actually on disk.
+      render_dir = Path.join(__DIR__, "../../../lib/barkpark/portable_doc/render")
+      on_disk = render_dir |> Path.join("*.ex") |> Path.wildcard() |> Enum.map(&Path.basename/1)
+
+      assert on_disk != [], "expected to find the render/ source directory"
+
+      assert Enum.sort(on_disk) ==
+               covered
+               |> Enum.filter(&String.starts_with?(&1, "render/"))
+               |> Enum.map(&Path.basename/1)
+               |> Enum.sort()
+    end
+
+    test "every covered path exists and contributes bytes" do
+      for path <- Render.render_source_files() do
+        assert File.exists?(path), "covered file missing: #{path}"
+        assert File.read!(path) != "", "covered file is empty: #{path}"
+      end
     end
   end
 
