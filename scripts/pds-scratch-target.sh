@@ -144,7 +144,13 @@ canonicalize_path() {
     p="$(dirname -- "$p")"
   done
   [ ! -d "$p" ] || p="$(cd -P -- "$p" && pwd)"
-  printf '%s\n' "${p%/}$tail"
+  # `${p%/}` strips the trailing slash so "/a" + "/b" never becomes "/a//b" — but
+  # for the root itself that leaves the EMPTY string, and "" does not match the
+  # `case "$home" in /) die` interlock guarding the rm -rf below. Keep "/" as "/"
+  # so that guard still fires on the one input it exists to refuse.
+  local out="${p%/}$tail"
+  [ -n "$out" ] || out="/"
+  printf '%s\n' "$out"
 }
 
 new_scratch_home() {
