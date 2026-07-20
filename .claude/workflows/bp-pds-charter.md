@@ -1537,6 +1537,127 @@ question it was built to answer had been settled by evidence three hours earlier
   criterion 10's fence is prose, not a guard, and it fails open — the only thing between a cheap
   green and a repeat of D138's false close is this ordering.*
 
+### Wave 10 — THE SCARCITY PREMISE IS RETIRED AND THE PREDICATE IS SELF-CONTRADICTORY (2026-07-20, PDS-D190–D203)
+
+*Landed by the wave-10 REVIEW, not by a charter slice — wave 10 carried no charter-record builder, so
+its five committed artefacts cited D190–D193 and D196 twenty-one times into a charter whose decision
+log ended at D189. D190–D201 are the Decide phase's own twelve, transcribed from the wave Paper
+`pds-wave-10-2026-07-20` (block `w10dec22`) and expanded with the evidence each one rests on. D202 and
+D203 are new — findings the build round produced that the Decide phase could not have known.*
+
+- **PDS-D190 — THE WINDOW IS THE BOX'S MAJORITY STATE, NOT A LOTTERY.** 1001 ten-minute `sar -r`
+  samples across 2026-07-12..18, scored against D185's 2235.43 MiB demand: **791 clear (79.0%)**,
+  median 2527 MiB (292 MiB of margin), p25 still clears, longest clearing streak 1050 minutes, worst
+  FAIL streak 130 minutes. Every day cleared its majority; the worst cleared 60.8%. Evidence:
+  `scripts/pds-window-availability-2026-07-20.md` §1, re-derived live off guerrilla, not copied.
+  *Why: the six-point decay curve sampled one random phase per BEAM epoch. Nine waves built ever more
+  elaborate pouncing machinery for a state the box is in four days out of five.*
+
+- **PDS-D191 — PDS-D93 IS AMENDED, NOT REPEALED; CHECK-AND-GO, NEVER POUNCE, IS REAFFIRMED.** D93's
+  *empirical* half is superseded in the POSITIVE direction — 107 isolated deploys mean +298 MiB, 84%
+  positive, replicated across five isolation windows (n=87..9, +248..+426 MiB, 82–92% positive) — but
+  its *mechanical* half stands untouched and cond_d kills the pounce independently. The aggregate runs
+  the other way (deploy-dense days clear LESS); both are true, it is a Simpson's-paradox confound, and
+  "drive deploys up before firing" is REFUSED. Evidence: `pds-window-availability-2026-07-20.md` §3.
+
+- **PDS-D192 — NINE WAVES DIED ON BOOKKEEPING; THE PREFLIGHT IS THREE FREE LEGS.** (a) the worktree is
+  0 commits behind `origin/main` — step 0b hard-fails when the served sha is not an ancestor of HEAD,
+  and `fail()` only increments a counter, so a run fired in that state BURNS the export, greens rungs
+  3/4 and STILL exits `RESULT: FAIL`; (b) `git rev-parse HEAD:scripts/pds-pull-proof.sh` equals the
+  freeze blob `e219e97cc…` — **`git rev-parse`, never `shasum`** (D154); (c) the live served sha is an
+  ancestor of HEAD, read over ssh NOW. Implemented inline in `scripts/pds-window-sentinel.sh` per D157.
+  *Why: 0b fails and cond_c is exhausted right now, and neither costs a window to discover — the
+  preflight had simply never been run. Wave 10 ran it and it was clean on the first try.*
+
+- **PDS-D193 — THE FIRE PREDICATE HAS FOUR LEGS, AND THE THIRD IS NEW.** (i) `MemAvailable_MiB >= 2300`
+  where MiB is **kB/1024, never kB/1000** (the `/1000` slip inflates the reading 2.4% and would let a
+  draw ~56 MiB short read as clear); (ii) beam `VmSwap <= 100000 kB`; (iii) the `bp-site-build-*`
+  running-unit listing is EMPTY; (iv) exactly one of `barkpark-slot@{blue,green}` reads active. The
+  BEAM is sampled with `pgrep -o -x beam.smp`, **never `-f`** (D135). *Why: a single instantaneous read
+  of one metric could never see the site-build channel or the D115 paging artefact.* **See D202 — as
+  written, legs (i) and (ii) cannot both hold on this box.**
+
+- **PDS-D194 — WAVE 9'S RUN ID CAN NEVER PAY CRITERIA 3 AND 4, SO CRITERION 6 MUST BE RE-EARNED.**
+  Forced arithmetic: `pds-pull-proof.crown-transcript-w8.txt:322` and `:324` read ABORT
+  (`cond_b FAILED`, 1249 MB and 1224 MB against a 2200 MB floor), and both criteria demand a control
+  FIRING on the full bundle that run never took. Evidence:
+  `scripts/pds-crown-fence-arithmetic-2026-07-20.md` §2, quoting both lines verbatim.
+
+- **PDS-D195 — THE REFUSAL FLOOR IS BANKED WITH `--miss`, NOT A MET-FLIP ON CRITERION 11.** *Why: the
+  met-flip removes the last auto-close brake and would leave a crown that closes carrying a fence field
+  reading REFUSED.* Wave 10 honoured this: criteria 3 and 4 of `pds-w10-instrumented-climb` stand at
+  `met=false` with empty evidence, and criterion 11 of the crown was never touched.
+
+- **PDS-D196 — CRITERION 10'S WAVE-9-TRANSCRIPT CLAUSE IS A PREREQUISITE OF THE GREEN, AND THE APPEND
+  ESCAPE IS REFUSED.** The stored row demanded rungs 3 and 4 be GREEN "in the wave-9 transcript" — a
+  committed, self-declared APPEND-ONLY file recording both as ABORT forever. `pds-pull-proof.sh`
+  contains NO output redirection to any `.txt` (verified: zero matches), so transcripts are
+  hand-assembled per wave and a future green necessarily lands in a NEW file that cannot make a
+  sentence about the wave-9 file true. The one letter-of-the-law escape — appending a later run into
+  the wave-9 file — yields one transcript carrying TWO run ids for a reader to stitch, exactly the
+  mosaic criterion 11 forbids, and is **REFUSED**. The clause now reads "in the transcript of the wave
+  that pays this criterion"; nothing else in the row moved. *Why: the defect fails CLOSED, so it blocks
+  only the green — which is why nine waves never hit it, and why a green window would have been spent
+  for nothing.* Evidence: `scripts/pds-crown-ledger-w10-amendment.md`.
+
+- **PDS-D197 — CRITERION 11 IS THE LEAST DURABLE OBJECT IN THE EPIC.** *Why: its own designated durable
+  copy — `scripts/pds-crown-ledger-2026-07-20.md`, which declares "This file is the durable copy; the
+  server's copy is not" — described an ELEVEN-entry array, so repairing the crown from that record
+  deletes the fence silently: `bp doc patch` replaces the whole array, raises no error on a shortened
+  one, and the fence's own job is to block an auto-close, so its removal surfaces as the crown closing
+  MORE easily.* Fixed: that file's header now reads twelve and carries criterion 11's verbatim 1252-byte
+  text, byte-identical to the server read.
+
+- **PDS-D198 — RIVAL D (NARROW THE CONTROL BUNDLE) IS REFUSED ON TWO INDEPENDENT GROUNDS.** *Why: it is
+  a literal thaw of the frozen acquisition path, and `production` is a shared slug whose fail-closed
+  resolution drops the E3 tables.*
+
+- **PDS-D199 — THE ENGINE FIX IS THE NAMED SUCCESSOR, SIZED, AND IT NEEDS A FENCE EXCEPTION.** *Why: the
+  epic needs the verdict on the CURRENT engine before rewriting it, and the last leg edits a controller
+  outside the tenancy fence.*
+
+- **PDS-D200 — A MISSED WINDOW COSTS 20 SECONDS, NOT 90.** Measured warm with `api/_build` populated
+  (290 MB / 71 deps): teardown 8.068s, teardown+up cycle 20.240s, later `up` 9.830s, first `up` of a
+  session 32.742s where the extra ~20s is `mix deps.get` RESOLVING, not compiling. The old "~90s warm"
+  was wrong by ~4.5x in the direction that made re-arming look expensive. Cold is a different regime
+  entirely and exactly one thing decides which you are in: is `api/_build` empty (it is per-checkout,
+  so a fresh worktree is always cold). A pre-booted SPARE drives the miss cost to ~0 — two targets
+  provably coexist on disjoint HTTP and Postgres ports with the host dev server untouched, requiring
+  BOTH `BARKPARK_HOME` and `PDS_SCRATCH_POINTER` pinned because `up` writes the one global pointer
+  unconditionally. Evidence: `scripts/pds-scratch-target-cost-2026-07-20.md`.
+
+- **PDS-D201 — THE WAVE-7 CLOCK IS SETTLED AT BEAM UPTIME 197s TO 473s.** *Why: the harness measured and
+  printed it; every prior figure was inferred from CI timestamps whose lag varies by minutes.*
+
+- **PDS-D202 — D193's LEGS (i) AND (ii) ARE JOINTLY UNSATISFIABLE ON THIS BOX, AND THAT MAY NOT BE
+  RESOLVED BY LOOSENING.** 61 draws over 31 minutes: leg (i) 42/61, leg (iii) 39/61, leg (iv) 61/61,
+  legs i+iii+iv together 38/61 — and leg (ii) **1/61**, with **0 of 61 satisfying (i) and (ii) at
+  once**. Pearson r between `MemAvailable_MiB` and beam `VmSwap_kB` is **+0.677**, and a positive r
+  between those quantities IS an anti-correlation between the two legs' satisfaction. The mechanism,
+  which is the stronger evidence: on a 3820 MiB box at `swappiness=10` the headroom leg (i) reads is
+  LITERALLY PRODUCED by the kernel swapping the BEAM out — RSS fell 736196 → 310116 kB while VmSwap
+  rose 120120 → 511832 kB and MemAvailable climbed 2028 → 2719 MiB. VmSwap climbs monotonically from
+  BEAM start and resets only on a slot restart, so leg (ii) is satisfiable only in roughly the first 18
+  minutes after a restart — **precisely the interval D93/D190/D191 forbid entering.** The predicate's
+  one open window sits inside the one region the charter bans. Re-derivation is
+  `pds-w11-d193-leg-tension` (priority 0). **Raising `PDS_SENTINEL_SWAP_CEIL_KB` would green this in
+  four seconds and would be a lie**; the sentinel hard-refuses a softened predicate by code, and that
+  refusal is load-bearing, not decoration. *Caveat the finding states about itself: all 61 samples ride
+  ONE BEAM pid across uptime 17:59–48:36, so the monotone-climb claim is n=1 at the level that matters,
+  and the 164-build hour is an uncontrolled confound.* Evidence:
+  `scripts/pds-pull-proof.crown-transcript-w10.txt` §4.
+
+- **PDS-D203 — THE DEPLOY-DENSITY CORRELATIONS ARE CORRECTED TO r=−0.38 / r=−0.14.** The figures D190's
+  survey ratified — daily r=−0.59, hourly r=−0.21 — are themselves the 07/12 `journalctl --since
+  '8 days ago'` truncation artefact: that flag is relative to the invocation clock, so it cut 07/12 at
+  22:41 and saw **3 of the day's 31** slot restarts, turning the week's highest-clearing day (99.3%)
+  into an apparently deploy-free one — exactly the shape that manufactures the correlation. Recomputing
+  with the truncated count reproduces −0.59 / −0.21 **exactly**, which identifies the source rather
+  than merely suggesting it. **The sign survives, so D191's Simpson's reading and its refusal stand;
+  the magnitude does not. Quote the corrected pair.** Evidence:
+  `pds-window-availability-2026-07-20.md` §1b and §3b; open task
+  `pds-w10-correlation-truncation-correction`.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -1762,6 +1883,75 @@ rung 1's absent control, the stale `tag`-exclusion comment #4770 falsified, the 
 missing rung, and guerrilla's leftover SSR services that eat the memory cond_b gates.
 
 ## Wave log
+
+### Wave 10 2026-07-20 — "The Predicate Refused Itself" — R1 built + reviewed, grade A− (paper `pds-wave-10-2026-07-20`)
+
+**The crown's last rung is NOT paid, and the refusal is worth more than the payment would have
+been.** Five round-1 slices, all green, all file-disjoint. The wish said pay criterion 10 in the
+post-deploy memory window or refuse it again in writing. Wave 10 did neither of those things
+exactly — it refuted the post-deploy premise itself (D190/D191), replaced it with an instrumented
+check-and-go sentinel, fired that sentinel 61 times, and came back with a **measured proof that the
+fire predicate is self-contradictory** (D202). Zero exports fired; `/tmp/pds-full-export/attempts`
+reads 1 before and 1 after.
+
+`pds-w10-instrumented-climb` is the wave. `scripts/pds-window-sentinel.sh` (382 lines) polls one ssh
+round-trip per sample, carries the D192 preflight inline per D157 — which is why this wave *reached*
+the climb where waves 5, 6 and 8 all put it in round 2 and never got there — writes nothing on the
+remote, and logs every sample fire or stand-down. Preflight was clean on the first try; **preflight
+was never the blocker.** 61 draws: legs i+iii+iv together 38/61, leg (ii) **1/61**, all four **0/61**.
+The finding is D202: legs (i) and (ii) are two readings of the same axis with opposite signs, because
+on a 3820 MiB box the headroom leg (i) reads is produced by the kernel swapping the BEAM out. Leg
+(ii)'s only open window is the ~18 minutes after a slot restart — the exact interval D93/D190/D191
+forbid entering. The builder could have greened criterion 4 in four seconds by raising the swap
+ceiling and the sentinel refuses that by code so that nobody, including its author, can.
+
+`pds-w10-window-availability-record` is the artefact that makes the verdict permanent either way, and
+it **exceeded its brief in the one direction that mattered**: rather than transcribe the survey's
+headline figures it re-derived the whole week live off the box, reproduced all four headlines to the
+digit, then found that the ratified daily r=−0.59 / hourly r=−0.21 are *themselves* a `journalctl
+--since '8 days ago'` truncation artefact (D203) and corrected them to −0.38 / −0.14 — identifying
+the source by reproducing the published pair exactly from the truncated count. It also gave the
+site-build contention channel its first corroboration beyond its own two samples (2228 units,
+58.0% vs 85.1% clearing, and 41 sub-demand samples on a BEAM under 30 minutes old), which retires a
+class of "unexplained" cond_b misses as sibling-cgroup contention.
+
+`pds-w10-crit10-deadlock-reword` removed a deadlock nine waves never hit because it fails CLOSED and
+so blocks only the green (D196). `pds-w10-fence-arithmetic` pre-declared the attribution arithmetic
+before the climb so it could not be litigated after, and caught a **concurrent wave-10 actor patching
+criterion 10 mid-slice** — recording it as a live instance of the D165 unfenced-patch hazard instead
+of quietly reporting a clean diff. `pds-w10-scratch-target-truth` corrected a warm-path cost that was
+wrong by ~4.5x (~90s claimed, 9.8–32.7s measured) and narrowed the re-pull 500 to rung 6's clobbered
+state by running the clean experiment the blocker itself named as never-run.
+
+**What the review changed.** Three fixes. (1) A real defect in the sentinel: `check_predicate_integrity`
+compared the two predicate knobs with `[ -lt ]` but never validated they were integers, and
+`[ abc -lt 2300 ]` is a bash error that evaluates FALSE — so `PDS_SENTINEL_MEM_FLOOR_MIB=abc` passed
+the guard AND then disabled leg (i) at the same broken comparison in `take_sample`, making a 1200 MiB
+draw read FIRE. Proven by mutation. The one guard whose entire job is to stop a manufactured green
+could be disarmed by a typo; all four knobs are now integer-validated and `--max-samples 0` is
+refused because it would report a STAND-DOWN with zero draws taken. (2) Both new crown records quoted
+criterion 10's post-reword text as "the transcript of the **climb** that pays this criterion"; the
+live array reads "**wave**" — a file whose central warning is that `--criterion-text` compares
+byte-for-byte shipped a wrong copy. (3) The sign of r=+0.677 was clarified in the transcript, since
+the headline invites the opposite reading.
+
+**And the review landed the whole decision block into this charter**, because wave 10 carried no
+charter-record slice: its five artefacts cited D190–D193 and D196 twenty-one times into a log that
+ended at D189. D190–D201 are the Decide phase's own twelve, transcribed from the wave Paper's
+`w10dec22` block and expanded with the evidence each rests on — the review's first pass wrongly read
+D194–D200 as unallocated and would have shipped a D201 colliding with the Decide phase's wave-7-clock
+decision; reading the Paper before writing the charter is what caught it. The build round's two new
+findings are D202 (the leg tension) and D203 (the correlation correction).
+
+**What stalled.** Criterion 10 remains unpaid and criteria 3/4 of the climb task are honest
+`met=false` misses, not flips. `pds-w11-d193-leg-tension` (priority 0) carries the re-derivation, with
+an explicit ban on resolving it by loosening.
+
+**Next wave: re-derive the fire predicate before ever polling again.** The four candidate routes are
+on `pds-w11-d193-leg-tension`; the one most likely to overturn D193 is that **leg (ii) may never have
+been a sound proxy for export-time OOM risk at all** — leg (i) plus leg (iii) may already cover it,
+and legs i+iii+iv cleared 38 of 61 draws. Any replacement needs a dataset spanning at least one slot
+restart, because the monotone-VmSwap-climb claim rests on n=1 BEAM.
 
 ### Wave 9 2026-07-20 — "The Verdict Has a Rule" — R1 built + reviewed, grade A− (paper `pds-wave-9-verdict-2026-07-20`)
 
