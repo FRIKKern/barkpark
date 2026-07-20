@@ -1517,6 +1517,16 @@ question it was built to answer had been settled by evidence three hours earlier
   trap at full strength, and a cherry-pick that reads as a rescue would have cost this epic 33
   decisions and another epic its memory.*
 
+  > **Correction, 2026-07-20 (wave-9 review).** D188 named `400d389ae` as the landing vehicle when
+  > it was written; the Decide phase then committed the SUPERSET — `7d2cf5a82`, D145–**D189**, 461
+  > insertions, one file, pure additions — to the primary checkout's **local `main`**, where it sat
+  > unpushed and invisible to every gate (the diverged-local-main trap). `400d389ae` (D145–D177,
+  > 334 insertions) is now a strict SUBSET and is retired, not merged. The rescue was performed the
+  > chartered way: `7d2cf5a82` cherry-picked onto a branch based on `origin/main`, verified as a
+  > one-file pure-addition diff that touches no other epic's charter, and carried here. The
+  > poison-branch ruling on `pds-w9-charter` @`ea909fb2c` and `charter-residue-2026-07-20` stands
+  > unchanged — both remain unmerged. **Superseded by:** land the charter from `7d2cf5a82` only.
+
 - **PDS-D189 — CRITERIA 6 AND 10 MUST NEVER BOTH READ MET BEFORE THE LEAD INTENDS AN IRREVERSIBLE
   CLOSE.** `hookStopClose` (`cmux_hook.go:193-252`) closes on all-met with an ownership-not-identity
   re-claim; `close.ex:157-163` fences on epoch ALONE and the server imposes no criteria precondition
@@ -1752,6 +1762,62 @@ rung 1's absent control, the stale `tag`-exclusion comment #4770 falsified, the 
 missing rung, and guerrilla's leftover SSR services that eat the memory cond_b gates.
 
 ## Wave log
+
+### Wave 9 2026-07-20 — "The Verdict Has a Rule" — R1 built + reviewed, grade A− (paper `pds-wave-9-verdict-2026-07-20`)
+
+**The crown is resolved, and it is resolved in writing.** Four round-1 slices, all green, all
+disjoint. `pds-w9-crown-verdict-record` is the wave: one committed document
+(`scripts/pds-crown-verdict-2026-07-20.md`, 106 lines) that states criterion 6 **PAID** off
+`9e838499f` and criterion 10 **REFUSED** on cond_b, with the crown left OPEN at 10/11 per D122.
+Three waves of crown state that lived in claim now-lines and unpushed branches now lives in git.
+Every one of the four judgment traps the brief named was actually handled, not gestured at: leg B is
+quoted per-column with the `:789` banner flagged as an overclaim (31 of 34 rows natively private,
+visibility control rests on n=3, D181); the refusal states the NARROW claim and names the
+pass-the-gate-cannot-afford-the-export trap rather than the refutable "no window exists" (D183); the
+structural argument is given (3819 MB box, `beam.smp` ~1352 MB, demand 2235.43 MiB, 0-of-90 +
+0-of-36 + 0-of-7 with SwapFree draining 1294 → 750 MB); and the SSR lever is recorded REFUTED at
+21 MB against an 894 MB shortfall (D184). The three non-actions each carry the check that proves
+them.
+
+`pds-w9-export-arithmetic` corrected a unit-mixing slip in four verified places — a `/1000`-scaled
+baseline subtracted from a `/1024`-scaled peak — establishing **2,235.43 MiB** and a **35.43 MiB**
+shortfall (D185), and added §6b.1 to the derivation with all three candidate baselines tabulated so
+the ambiguity is shown to move magnitude and never sign. The freeze held and was proven POSITIVELY,
+not by line arithmetic: the region below the RAW RUN OUTPUT marker hashes byte-identical before and
+after (`e14967d5a…`), and `HEAD:scripts/pds-pull-proof.sh` is still `e219e97cc…` (D186).
+`pds-w9-tagregistry-ruling` discharged `pds-bl-tagregistry-guard-no-rung` at 0/4 with a written NO
+RUNG (D187), re-deriving rather than copying — it corrected the count to **12 tests, not 16**, and
+corrected "two implementations" to **one predicate with two faces** (`pulled_schema_row/2` plus its
+boolean wrapper), disposed of `metric` with a proof of ABSENCE, and honestly recorded that its own
+brief's "done 4/4" is **4 of 6**. `pds-w9-close-payload-guard` pinned the close payload key sets as
+a whitelist and was shown able to fail, with the mutation demonstrating that the existing hook tests
+do NOT notice — which is precisely the gap D189 leans on.
+
+**What the review changed.** One real defect: the arithmetic slice inserted 12 lines into the
+transcript preamble and then cited the raw region by its PRE-shift line numbers, so all three new
+citations in §6b.1 and the CORRECTION block pointed at unrelated text in the very file the same
+commit shifted (`:636→:648`, `:778→:790`, `:900→:912`). Fixed on
+`…the-export-cost-arithmetic-says-2235-43--1-r`. Everything else was already right.
+
+**What stalled, and it is the wave's one structural weakness: nothing that matters is on
+`origin/main`.** The verdict record's own evidence — the wave-8 transcript at `9e838499f`, which
+carries the fail-demos — sits on an unmerged branch, and the charter carrying D145–D189 sat as
+`7d2cf5a82` on the primary checkout's **local `main`**, unpushed and outside every gate. The Decide
+phase classed both as lead work rather than builder slices, which is defensible, but it left the
+wave's headline document citing a commit and forty-five decisions that a reader of `origin/main`
+could not resolve. The review rescued the charter the chartered way (see the D188 correction above)
+onto `…pds-w9-charter-and-wave-log-r`. The transcript still needs the lead: **merge
+`loop-epic/the-crown-gets-paid-or-gets-named-one-se-0` FIRST, and never squash it** — a squash
+re-writes `9e838499f` and silently breaks the verdict record's provenance line.
+
+**Next wave.** The crown's sole remaining gate is `pds-bl-source-box-too-small-for-full-export` — an
+infrastructure decision, not a code fix, and D184 forbids re-filing the refuted SSR lever as its
+unblocker. The honest engine successor is `pds-backlog-streamed-bundle-channel`: chunk the export so
+the demand stops being 2.25× the payload in one BEAM binary, at which point cond_b becomes
+satisfiable rather than structurally unreachable. Secondary: `pds-w9-stale-2231-in-papers` (sweep
+the retired figure out of Barkpark-side prose), and the Elixir-side counterpart to the close-payload
+guard — an assertion that `autostamp_merge_gate` is unreachable with an absent or empty `landed`,
+which the Go whitelist cannot pin.
 
 ### Wave 8 2026-07-20 — "Pay the Crown" — R1 built + reviewed, grade A (paper `pds-wave-8-2026-07-20`)
 
