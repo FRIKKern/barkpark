@@ -28,6 +28,15 @@ if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
 const WISH = A.wish
 const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
 const EPIC_TASK_ID = A.epic_task_id || null
+// Fan-out FLOORS. The caps below (survey 20, verify 15, wave 8) are upper bounds
+// only; nothing stopped a thinking phase from returning one assignment, or zero.
+// The ratified anti-goal — a wave must never spend FEWER agents to look decisive
+// — was prose, and prose does not run. These are THROWS, deliberately, not schema
+// minItems: wild-bulk-cycle declares minItems, but whether the host validator
+// enforces it is unproven and cannot be proven without running a wave. A throw
+// has no such doubt. A survey fan-out below 5 is a bug in the plan, not a plan.
+const SURVEY_FLOOR = 5
+const VERIFY_FLOOR = 3
 // Phase↔model doctrine (lead mandate 2026-07-10, rev 2): every THINKING phase
 // is ONE Fable agent (strategize, digest, decide, review). The broad survey is
 // Sonnet — cheap width. The verify fleet and the build fleet are MIXED: the
@@ -110,6 +119,27 @@ const COVERAGE_ITEMS = {
   },
 }
 
+// One fact carries its own derivation. `rerun` is the join key that proofs[]
+// never had: proofs[] is a PARALLEL array of {claim, command, output_excerpt},
+// and a proof.claim matches a fact.claim exactly 0.3% of the time — so a reader
+// can see a fact, see a command, and not know which produced which. Putting the
+// command ON the fact removes the guess. proofs[] stays as it is.
+const FACT_ITEMS = {
+  type: 'object', additionalProperties: false,
+  required: ['claim', 'evidence'],
+  properties: {
+    claim: { type: 'string' },
+    evidence: { type: 'string' },
+    rerun: {
+      type: 'string',
+      description: 'OPTIONAL. The ONE literal shell command that re-derives this fact from scratch — e.g. `git show origin/main:path/to/file | sed -n 40,60p`, `curl -s localhost:4000/api/schemas`, `grep -rn "needle" dir/`. This command, not your prose, decides the authority level the fact may be quoted at downstream. Leave it EMPTY rather than guessing: an empty rerun is an honest belief, a wrong one is a level-skip — exactly the failure this field exists to prevent.',
+    },
+  },
+}
+
+// Evidence has LEVELS, and the higher ones are cheap — say which one you used.
+const FACTS_DESCRIPTION = 'load-bearing facts you actually verified, never assumed. Evidence takes several forms, and the strongest are cheap: `git show origin/main:<path>` reads what is really on main (not your worktree, which may be ahead, behind, or dirty), and a curl against a running host reads what is really deployed — both are fast enough to be the default, not a luxury (measured here: `git show` 34-54ms; a localhost curl 96-172ms warm, ~925ms cold). A worktree file:line is a perfectly good form too, but it is a claim about YOUR checkout and nothing more — do not quote it as a claim about main or about prod. Whichever form you used, put the command that re-derives it in that fact\'s rerun field.'
+
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions'],
@@ -123,12 +153,8 @@ const SURVEY_SCHEMA = {
     },
     facts: {
       type: 'array',
-      description: 'load-bearing facts, each with file:line evidence — verified by reading, not assumed',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['claim', 'evidence'],
-        properties: { claim: { type: 'string' }, evidence: { type: 'string' } },
-      },
+      description: FACTS_DESCRIPTION,
+      items: FACT_ITEMS,
     },
     risks: { type: 'array', items: { type: 'string' } },
     open_questions: { type: 'array', items: { type: 'string' }, description: 'what you could NOT settle in the timebox — candidates for the verify round' },
@@ -174,12 +200,8 @@ const VERIFY_SCHEMA = {
     },
     facts: {
       type: 'array',
-      description: 'load-bearing facts, each with file:line evidence — verified by reading, not assumed',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['claim', 'evidence'],
-        properties: { claim: { type: 'string' }, evidence: { type: 'string' } },
-      },
+      description: FACTS_DESCRIPTION,
+      items: FACT_ITEMS,
     },
     proofs: {
       type: 'array',
@@ -197,6 +219,35 @@ const VERIFY_SCHEMA = {
     },
     risks: { type: 'array', items: { type: 'string' } },
   },
+}
+
+// STRUCTURAL SELF-CHECK — runs on every wave, before a single agent is spent.
+//
+// `node --check` proves only that this file PARSES. It was green on a state
+// where a misplaced brace closed SURVEY_SCHEMA.properties early and silently
+// moved fix_candidates outside the schema: a valid program, a wrong contract,
+// and no gate anywhere could see it. The probes that caught it were throwaway,
+// so the same brace could return tomorrow against a green gate.
+//
+// This is the cheap permanent version. It is a THROW at module scope for the
+// same reason the fan-out floors are (D15): it is certain, it needs no runner,
+// and it fires before the wave costs anything. A schema whose `required` names
+// a key it does not define is a contract the host can never satisfy.
+for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA], ['STRATEGY_SCHEMA', STRATEGY_SCHEMA]]) {
+  for (const key of schema.required || []) {
+    if (!Object.prototype.hasOwnProperty.call(schema.properties || {}, key)) {
+      throw new Error(`${name} declares required key '${key}' but does not define it in properties — a brace or edit moved it out of the schema. Fix the schema; do not proceed.`)
+    }
+  }
+}
+// `rerun` is the whole point of the provenance seam: if an edit drops it, the
+// carrier is gone and every downstream grip check silently has nothing to read.
+for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA]]) {
+  const props = schema.properties?.facts?.items?.properties || {}
+  if (!props.rerun) throw new Error(`${name}.facts[].rerun is missing — the fact-level provenance carrier was dropped.`)
+  if ((schema.properties.facts.items.required || []).includes('rerun')) {
+    throw new Error(`${name}.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).`)
+  }
 }
 
 const PLAN_SCHEMA = {
@@ -290,7 +341,7 @@ ${USER_WISH_BLOCK}
 
 ${CHARTER_EXISTS
     ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
-    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search\` for prior papers/tasks on this topic, then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess.`}
+    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search query "<terms>"\` for prior papers/tasks on this topic (the \`query\` sub-verb is REQUIRED; without it the command exits 2 and looks like "no prior art"), then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess.`}
 
 WORK THE PROBLEM PROPERLY, in whatever order serves you:
 - GROUND: read until further reading stops changing your mind — the charter/ledger/prior papers above, the real code of the surfaces involved, adjacent systems that constrain the design. Depth is your call; a clock is not.
@@ -308,6 +359,9 @@ ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
 )
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
+if (surveyAssignments.length < SURVEY_FLOOR) {
+  throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
+}
 const WAVE_PAPER = strategist.paper_id
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
@@ -326,7 +380,7 @@ ${strategist.direction}
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
 
-Search Barkpark FIRST (\`bp search "<terms>"\` — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs file:line evidence you actually read.
+Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
 COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.`,
       { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: SURVEY_MODEL }
@@ -370,6 +424,9 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
 )
 if (!aim) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 const verifyAssignments = (aim.verification || []).slice(0, 15)
+if (verifyAssignments.length < VERIFY_FLOOR) {
+  throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
+}
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'opus').length} opus, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
@@ -392,7 +449,7 @@ WHY IT MATTERS: ${q.why}
 ${q.verify_commands ? `MUST RUN (proof, not reading): ${q.verify_commands}
 Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive output lines in proofs[] — never paraphrase a pass. A failing command is a finding, not a failure of yours.` : 'Reading suffices for this assignment, but if you find a load-bearing claim that only a run can settle, run it and record the proof.'}
 
-Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} bp search for prior art. "The premise is wrong" remains a valid answer. Every fact needs file:line evidence; every proof needs real output.
+Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} \`bp search query "<terms>"\` for prior art (the \`query\` sub-verb is REQUIRED — without it the command exits 2 and the empty result is indistinguishable from genuine absence). "The premise is wrong" remains a valid answer. Every fact needs evidence you actually derived plus its \`rerun\` command; every proof needs real output.
 
 COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. Not-found is a finding. Unlisted = unchecked. The wave Paper (${WAVE_PAPER}) will carry your coverage; you do NOT write the Paper yourself.`,
       { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: q.model === 'opus' ? 'opus' : 'sonnet', ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }

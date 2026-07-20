@@ -130,6 +130,24 @@ const RECON_SCHEMA = {
   },
 }
 
+// Kept in lockstep with FACT_ITEMS / FACTS_DESCRIPTION in bp-epic-cycle.workflow.js
+// — the two cycles share this schema shape, so a change to one belongs in both.
+// `rerun` carries the command that re-derives the fact, ON the fact itself.
+const FACT_ITEMS = {
+  type: 'object', additionalProperties: false,
+  required: ['claim', 'evidence'],
+  properties: {
+    claim: { type: 'string' },
+    evidence: { type: 'string' },
+    rerun: {
+      type: 'string',
+      description: 'OPTIONAL. The ONE literal shell command that re-derives this fact from scratch — e.g. `git show origin/main:path/to/file | sed -n 40,60p`, `curl -s localhost:4000/api/schemas`, `grep -rn "needle" dir/`. This command, not your prose, decides the authority level the fact may be quoted at downstream. Leave it EMPTY rather than guessing: an empty rerun is an honest belief, a wrong one is a level-skip — exactly the failure this field exists to prevent.',
+    },
+  },
+}
+
+const FACTS_DESCRIPTION = 'load-bearing facts you actually verified, never assumed. Evidence takes several forms, and the strongest are cheap: `git show origin/main:<path>` reads what is really on main (not your worktree, which may be ahead, behind, or dirty), and a curl against a running host reads what is really deployed — both are fast enough to be the default, not a luxury (measured here: `git show` 34-54ms; a localhost curl 96-172ms warm, ~925ms cold). A worktree file:line is a perfectly good form too, but it is a claim about YOUR checkout and nothing more — do not quote it as a claim about main or about prod. Whichever form you used, put the command that re-derives it in that fact\'s rerun field.'
+
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['key', 'findings', 'coverage', 'facts', 'fix_candidates', 'open_questions'],
@@ -138,12 +156,8 @@ const SURVEY_SCHEMA = {
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
     coverage: { type: 'array', description: 'EVERY file/paper/task you checked. Not-found is evidence too; unlisted = unchecked', items: COVERAGE_ITEMS },
     facts: {
-      type: 'array', description: 'load-bearing facts, each with file:line evidence — verified by reading, not assumed',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['claim', 'evidence'],
-        properties: { claim: { type: 'string' }, evidence: { type: 'string' } },
-      },
+      type: 'array', description: FACTS_DESCRIPTION,
+      items: FACT_ITEMS,
     },
     fix_candidates: {
       type: 'array', description: 'concrete fixable defects/debt/polish you found — the raw ore the task-cutters mine',
@@ -161,6 +175,23 @@ const SURVEY_SCHEMA = {
     },
     open_questions: { type: 'array', items: { type: 'string' } },
   },
+}
+
+// STRUCTURAL SELF-CHECK — mirrors the one in bp-epic-cycle.workflow.js, and for
+// the same reason: `node --check` proves this file PARSES, not that its schemas
+// are intact. A misplaced brace once moved a key out of a schema's properties
+// while every gate stayed green. This throws at module scope, before any agent
+// is spent, so the failure is legible and free.
+for (const key of SURVEY_SCHEMA.required || []) {
+  if (!Object.prototype.hasOwnProperty.call(SURVEY_SCHEMA.properties || {}, key)) {
+    throw new Error(`SURVEY_SCHEMA declares required key '${key}' but does not define it in properties — a brace or edit moved it out of the schema. Fix the schema; do not proceed.`)
+  }
+}
+if (!SURVEY_SCHEMA.properties?.facts?.items?.properties?.rerun) {
+  throw new Error('SURVEY_SCHEMA.facts[].rerun is missing — the fact-level provenance carrier was dropped, and the two cycles have drifted.')
+}
+if ((SURVEY_SCHEMA.properties.facts.items.required || []).includes('rerun')) {
+  throw new Error('SURVEY_SCHEMA.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).')
 }
 
 const DIGEST_SCHEMA = {
@@ -423,7 +454,7 @@ DOMAIN HAZARDS (context, not targets): ${d.hazards}
 YOUR PROBE [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
 
-Search Barkpark FIRST (\`bp search "<terms>"\` — papers and tasks carry prior art the tree doesn't), then grep/read the repo. Every load-bearing fact needs file:line evidence you actually read. "The premise is wrong" is a valid answer.
+Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command. "The premise is wrong" is a valid answer.
 
 YOUR MAIN CARGO is fix_candidates[]: concrete, bounded, fixable defects — each with files, file:line evidence, a suggested fix, and severity (bug / debt / polish). A candidate a Sonnet builder could fix in one sitting is gold; a vague "this area smells" is noise. Note in the evidence when a candidate's files sit on a seam shared with another domain or prod — the harmonizer needs that.
 
