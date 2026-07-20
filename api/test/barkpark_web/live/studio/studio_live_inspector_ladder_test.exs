@@ -596,6 +596,244 @@ defmodule BarkparkWeb.Studio.StudioLiveInspectorLadderTest do
     end
   end
 
+  # ── spd-w12 — the keyboard exit, the focus round trip, and the trail ────────
+  #
+  # HONEST SCOPE, stated once for the whole block below. Everything here proves
+  # the SERVER handler and the RENDERED WIRING: that the hook element and its
+  # data contract render at Tier 3 and nowhere else, that the dismissal command
+  # carries a focus return, and that the trail reaches the ladder tier. It
+  # proves NOTHING about the key in a browser — ExUnit renders markup, models no
+  # capture phase, no `inert`, no `document.activeElement` and no listener
+  # ordering. The live browser proof of Escape belongs to
+  # `inspector-shape-bracketed-deployed-run`, by name (D166/D173).
+  #
+  # WHY THE BINDING NEEDS ITS OWN TEST (D181). An ungated binding ships SILENTLY
+  # GREEN: with the tier gate mutated to a bare `true` the behavioural suite is
+  # untroubled — Escape simply becomes a global open-the-inspector key at every
+  # bucket including wide — because a socket-driven round trip cannot see a
+  # binding it never reads. And `render_keydown` does not enforce `phx-key`
+  # either (a binding declared with `phx-key="Banana"` keeps a behavioural test
+  # green), so the key itself is only assertable as a RENDERED ATTRIBUTE.
+  # Hence: literal attribute assertions, in an inversion-sensitive quadruple
+  # (present at Tier 3; absent at narrow-dismissed, at standard and at wide).
+  describe "spd-w12 — the Escape binding is RENDERED, and gated to Tier 3" do
+    test "the hook and its full data contract render at Tier 3", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      html = summon(view, "narrow")
+
+      assert html =~ ~s(phx-hook="InspectorEscape"), """
+      no Escape hook at Tier 3. The keyboard exit does not exist: a keyboard \
+      reader enters a full-screen destination and has no key that leaves it.
+      """
+
+      assert html =~ ~s(id="bp-inspector-escape")
+
+      assert html =~ ~s(data-escape-key="Escape"), """
+      the key is not rendered. It can ONLY be pinned as an attribute — \
+      `render_keydown` does not enforce `phx-key`, so a behavioural round trip \
+      stays green with a binding declared on any key at all.
+      """
+
+      assert html =~ ~s(data-escape-event="sidebar-toggle-panel"), """
+      the Escape binding does not name the already-classified event. A new \
+      event here would cost a `caps.ex` entry and a `handle_event` head for a \
+      dismissal the sidebar button already performs.
+      """
+
+      assert html =~ ~s(data-escape-veto=".bp-paper-format"), """
+      the activeElement veto is missing or unscoped. The format bubble's link \
+      input handles Escape with preventDefault ONLY (format-bubble.js:115-118) \
+      and portals to document.body (:146), so its Escape reaches a bubble-phase \
+      window listener — typing a link URL and pressing Escape would throw the \
+      reader out of the inspector. The scope must be `.bp-paper-format` and \
+      never a bare `input`, which would veto Escape from every input on the desk.
+      """
+
+      assert html =~ ~s(data-escape-return="#bp-doc-sidebar-toggle"), """
+      the Escape path drops focus. Leaving by key must land where leaving by \
+      pointer lands.
+      """
+    end
+
+    test "the binding is ABSENT at narrow-dismissed, standard and wide", %{conn: conn} do
+      # (a) same bucket, only user_opened moved.
+      {:ok, view, _html} = open_paper(conn)
+      summon(view, "narrow")
+      off = dismiss(view)
+      refute off =~ "data-user-opened", "premise: the second click must dismiss"
+
+      refute off =~ ~s(phx-hook="InspectorEscape"), """
+      a dismissed inspector still binds Escape. There is no destination to \
+      leave, so the key would fire a summon-toggle out of nowhere.
+      """
+
+      # (b) same user_opened, only the bucket moved — the DOCKED ladder tier.
+      {:ok, view2, _} = open_paper(conn)
+      docked = summon(view2, "standard")
+      assert docked =~ "data-user-opened", "premise: one click at standard must summon"
+
+      refute docked =~ ~s(phx-hook="InspectorEscape"), """
+      Escape was bound on the DOCKED inspector. At standard the panel sits in \
+      flow beside prose the reader can still see and edit — there is no \
+      full-screen destination to escape from, and stealing Escape there takes \
+      it away from whatever the reader is actually typing into.
+      """
+
+      # (c) wide — the panel is seeded open, so the FIRST click closes it and it
+      # takes TWO to raise user_opened. Assert on the raised state.
+      {:ok, view3, _} = open_paper(conn)
+      bucket(view3, "wide")
+      toggle(view3)
+      wide = toggle(view3)
+      assert wide =~ "data-user-opened", "premise: two clicks at wide must summon"
+      refute wide =~ ~s(phx-hook="InspectorEscape")
+    end
+  end
+
+  describe "spd-w12 — focus moves IN and RETURNS (D163/D165)" do
+    test "the destination takes focus on open and the dismissals hand it back",
+         %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      html = summon(view, "narrow")
+
+      assert html =~ ~s(id="bp-doc-sidebar"), "the landmark has no id to focus"
+
+      assert sidebar_tag(html) =~ ~s(tabindex="-1"), """
+      the destination landmark is not programmatically focusable, so focus-in \
+      has nowhere to land.
+      """
+
+      assert html =~ ~s(phx-mounted=), """
+      nothing moves focus INTO the destination. The hook element renders only \
+      at Tier 3, so its mount IS the transition into the destination — that is \
+      where focus-in belongs.
+      """
+
+      # The dismissal command carries the focus return. JS commands render as
+      # a JSON-encoded array on the attribute, so assert on the encoded
+      # operation rather than on Elixir structs.
+      head = sidebar_head(html)
+
+      assert head =~ "focus", """
+      the Tier-3 dismissal drops focus on <body>. Focus RETURN has no precedent \
+      anywhere in api/lib — the one APG-cited focus-trapping primitive in this \
+      repo lives in cloud/priv/static/app.js and is OUT OF FENCE (D163) — so \
+      this wiring is the whole of it and an absent test is an absent feature.
+      """
+
+      assert head =~ "bp-doc-sidebar-toggle", "the focus return names no target"
+
+      assert html =~ ~s(data-test-id="desk-crumb-document"), "premise: the crumb dismisses"
+
+      crumb =
+        Regex.run(~r|<button[^>]*data-test-id="desk-crumb-document"[^>]*>|s, html)
+        |> case do
+          [tag] -> tag
+          _ -> ""
+        end
+
+      assert crumb =~ "focus" and crumb =~ "bp-doc-sidebar-toggle", """
+      the crumb dismissal drops focus. It is the path where focus genuinely \
+      TRAVELS — from the trail back to the control that owns the panel — so it \
+      is the one that must not be left to morphdom luck.
+      """
+    end
+
+    test "below Tier 3 the toggle keeps its plain event string", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      head = sidebar_head(bucket(view, "wide"))
+
+      assert head =~ ~s(phx-click="sidebar-toggle-panel"), """
+      the docked/collapsed toggle grew a JS command. Below Tier 3 there is no \
+      destination and nothing to return focus from — this attribute must stay \
+      byte-identical to what shipped.
+      """
+    end
+  end
+
+  describe "spd-w12 — the crumb trail reaches the ladder tier (D180)" do
+    test "standard with the ladder engaged gets the trail", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+
+      before_ladder = bucket(view, "standard")
+
+      refute before_ladder =~ ~s(data-test-id="desk-crumbs"), """
+      an untouched standard desk grew a trail. It still has its full nav rail, \
+      so the trail would be redundant chrome and the first render would move.
+      """
+
+      engaged = toggle(view)
+      assert engaged =~ "data-user-opened", "premise: one click at standard must summon"
+
+      assert engaged =~ ~s(data-test-id="desk-crumbs"), """
+      the ladder tier has no trail. With the ladder engaged the rail YIELDS to a \
+      44px strip, leaving exactly two affordances on the screen — so standard \
+      was the one bucket that hid the whole rail without offering the trail \
+      that replaces it.
+      """
+    end
+
+    test "the ladder tier's trail does NOT claim you left the document", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      engaged = summon(view, "standard")
+
+      refute engaged =~ ~s(data-test-id="desk-crumb-inspector"), """
+      the docked ladder tier grew an inspector leaf. At standard the panel sits \
+      in flow BESIDE prose the reader can still see — the document is still \
+      where you are, and the trail must not say otherwise.
+      """
+
+      refute engaged =~ ~s(data-test-id="desk-crumb-document"), """
+      the document crumb became a dismiss control on a DOCKED panel. It is the \
+      way back to prose you cannot see; at standard you can see it.
+      """
+    end
+
+    test "wide still has no trail at all", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      bucket(view, "wide")
+      toggle(view)
+      wide = toggle(view)
+      assert wide =~ "data-user-opened", "premise: two clicks at wide must summon"
+      refute wide =~ ~s(data-test-id="desk-crumbs")
+    end
+  end
+
+  describe "spd-w12 — the keyboard exit costs no new capability" do
+    test "no phx-keydown is added inside the destination subtree", %{conn: conn} do
+      {:ok, view, _html} = open_paper(conn)
+      html = summon(view, "narrow")
+
+      aside =
+        case String.split(html, ~s(<aside id="bp-doc-sidebar"), parts: 2) do
+          [_, tail] -> String.split(tail, "</aside>", parts: 2) |> hd()
+          _ -> ""
+        end
+
+      assert aside != "", "the destination aside did not render"
+
+      refute aside =~ "phx-keydown", """
+      a `phx-keydown` was added inside the destination. Standing law: a focused \
+      element carrying `phx-keydown` suppresses EVERY `phx-window-keydown` on \
+      the page — live_socket.js matches the RAW event target with no ancestor \
+      walk — so this one attribute would silently kill the desk's other window \
+      bindings with no error to show for it.
+      """
+    end
+
+    test "the tier predicate has exactly ONE definition", %{conn: _conn} do
+      code = source()
+
+      defs = Regex.scan(~r/^\s*defp inspector_destination\?\(/m, code)
+
+      assert length(defs) == 1, """
+      the tier predicate has #{length(defs)} definitions. It is read by the \
+      `inert` gate, the destination clothes, the Escape binding and the crumb \
+      leaf — four readers of a hand-copied enumeration is four places to drift.
+      """
+    end
+  end
+
   describe "the toggle stays a pure assign flip" do
     test "summoning does not rebuild the pane tree", %{conn: conn} do
       {:ok, view, _html} = open_paper(conn)
