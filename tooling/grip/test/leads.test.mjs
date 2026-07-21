@@ -86,23 +86,23 @@ function storeFingerprint(dir) {
 // ── 1. leads hand over METHOD, never a value ─────────────────────────────────
 
 test("a FORGED run file carrying `value` on every row cannot put that value on the screen", () => {
-  // Hand-written on disk, bypassing admitRecipe entirely — the write-path
-  // rejection (VALUE-STORED) is not what is under test here. What is under test
-  // is that the READ path is structurally incapable of surfacing it, because
-  // foldLedger's projection rebuilds each recipe from a NAMED ALLOWLIST of
-  // fields — the guarantee is the allowlist, never its length (it went from six
-  // fields to twelve when the fold began re-deriving its own key).
+  // Hand-written on disk, bypassing admitRecipe. Post tgw5 the READ path
+  // (foldLedger) re-admits what the write path admits, so these rows are now
+  // REJECTED at the fold (VALUE-STORED / UNKNOWN-FIELD) and never reach an
+  // entry — and leads is a filter over entries[], so it surfaces nothing. That
+  // is the FIRST of two layers: even if a value row reached entries[],
+  // foldLedger's twelve-field projection allowlist would still drop it (that
+  // second layer is pinned in ledger.test.mjs's projection-guarantee test).
   const dir = tempStore([
     { ...row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex"), value: 544 },
     { ...row("api/lib/y.ex", "wc:-l", "wc -l api/lib/y.ex"), observed_value: "42 modules", answer: "yes" },
   ]);
-  const result = selectLeads(foldLedger(dir), "api/lib");
-  assert.equal(result.rows.length, 2);
-  for (const r of result.rows) {
-    assert.ok(!Object.hasOwn(r, "value"), "no row may carry a value field");
-    assert.ok(!Object.hasOwn(r, "observed_value"));
-    assert.ok(!Object.hasOwn(r, "answer"));
-  }
+  const folded = foldLedger(dir);
+  assert.equal(folded.entries.length, 0, "forged rows are rejected at the fold, not folded with the value merely stripped");
+  assert.ok(folded.unreadable.some((u) => u.reason === "VALUE-STORED"), "the value carrier is named VALUE-STORED, into unreadable[]");
+
+  const result = selectLeads(folded, "api/lib");
+  assert.equal(result.rows.length, 0, "no entry means no lead — the forged value cannot reach the screen");
   const rendered = renderLeads(result);
   assert.ok(!rendered.includes("544"), "the forged value must not reach the human render");
   assert.ok(!rendered.includes("42 modules"));
