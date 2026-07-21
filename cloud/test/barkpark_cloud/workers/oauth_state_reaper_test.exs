@@ -25,7 +25,8 @@ defmodule BarkparkCloud.Workers.OAuthStateReaperTest do
     Repo.update_all(
       from(s in OAuth.State, where: s.id == ^row.id),
       set: [
-        expires_at: DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:microsecond)
+        expires_at:
+          DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:microsecond)
       ]
     )
 

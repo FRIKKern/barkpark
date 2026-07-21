@@ -250,7 +250,10 @@ defmodule BarkparkCloud.Web.RouterOAuthTest do
 
       Repo.update_all(
         from(s in OAuth.State, where: s.id == ^lapsed.id),
-        set: [expires_at: DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:microsecond)]
+        set: [
+          expires_at:
+            DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:microsecond)
+        ]
       )
 
       assert %{reaped: 1} = OAuth.reap_expired_states()
