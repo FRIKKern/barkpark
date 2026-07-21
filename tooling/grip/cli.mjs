@@ -21,9 +21,14 @@
 // green when its own fixtures rot.
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { adjudicate, adjudicateAll, VERDICTS, stands } from "./adjudicate.mjs";
 import { deriveLevel } from "./level.mjs";
 import { VERDICT } from "./rerun.mjs";
+// Used ONLY inside the isMain block below, and only against stderr (D78).
+import { emitProvenance } from "./provenance.mjs";
 
 const EXIT = { OK: 0, GUARD_FAILURE: 1, USAGE: 2, CONTROL_INVALID: 3 };
 
@@ -294,4 +299,28 @@ function main(argv) {
   return adjudicateFile(path, { execute });
 }
 
-process.exit(main(process.argv));
+// THE ENTRY GUARD, AND THE DEFECT IT CLOSES.
+//
+// This file used to end with a BARE `process.exit(main(process.argv))` at module
+// scope — the only runnable script in tooling/grip without a main-module test.
+// Proven live before the fix: `node -e "import('./tooling/grip/cli.mjs').then(…)"`
+// printed the HELP text and exited 2, so the importer's own `.then()`/`.catch()`
+// never ran. cli.mjs could be SPAWNED but never IMPORTED — anything that wanted
+// to reuse a function from here got a help screen and a dead process instead.
+//
+// The test is the `resolve()` form census.mjs uses, not the URL string-compare:
+// comparing `file://${process.argv[1]}` against `import.meta.url` differs for
+// any character the URL encodes (a space, a `#`), and the failure is SILENT —
+// the CLI becomes a no-op that exits 0 having adjudicated nothing, which reads
+// exactly like a clean run. That is this epic's own defect class.
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isMain) {
+  // FIRST ACT (D78) — before a single verdict is printed, say which tree is
+  // doing the adjudicating. STDERR only; stdout carries the verdicts.
+  emitProvenance();
+  process.exit(main(process.argv));
+}
+
+// Exported so this module is USABLE by an importer, which is the whole point of
+// the guard above. Importing must never adjudicate anything by itself.
+export { main, HELP, EXIT, selftest, adjudicateFile };
