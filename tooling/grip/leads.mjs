@@ -2,16 +2,20 @@
 // leads.mjs — the READ half of the grip layer: a case-insensitive substring
 // lookup that hands back RECIPES, never answers.
 //
-//   node tooling/grip/ledger.mjs leads <substring> [--json] [--census <report.json>] [--dir <ledger dir>]
+//   node tooling/grip/ledger.mjs leads <substring> [--cmd] [--json] [--census <report.json>] [--dir <ledger dir>]
 //
 // THE ANTI-GOAL IS STRUCTURAL, NOT A PROMISE (charter D66). This module cannot
 // hand back a value even from a forged store, and the reason is not discipline:
 // `RECIPE_FIELDS` carries no `value` key, and `foldLedger`'s projection rebuilds
-// every recipe from SIX NAMED FIELDS (rerun, derived_level, deps, observed_at,
-// run_id, file), so an unknown key is dropped before it ever reaches
-// `entries[]`. `selectLeads` is a FILTER over `entries[]` — it adds no field and
-// reads no file. A `value` hand-edited into a run file on disk therefore cannot
-// reach this screen, and the test proves that by forging one.
+// every recipe from a NAMED ALLOWLIST — so an unknown key is dropped before it
+// ever reaches `entries[]`. The guarantee is the allowlist, NOT its length: the
+// list grew from six fields to twelve when the fold began re-deriving its own
+// key (`stored_level`/`level_restated`/`level_fallback` and the quantity three),
+// and a guarantee stated by quoting a count is one a reader can check and find
+// false without being able to tell which half rotted. `selectLeads` is a FILTER
+// over `entries[]` — it adds no field and reads no file. A `value` hand-edited
+// into a run file on disk therefore cannot reach this screen, and the test
+// proves that by forging one.
 //
 // ── SHIPPED REDUCED, AND EACH CUT IS CARRIED BY A NUMBER (charter D43) ───────
 //
@@ -36,6 +40,16 @@
 //   message instead: "3 methods on this key — run all three and compare."
 //   The literal string RIVAL-METHOD never appears in leads output.
 //
+// ── THE SUBJECT IS THE DEFAULT HAYSTACK; THE COMMAND TEXT IS `--cmd` ─────────
+//
+// Measured, not assumed: with the command text in the haystack unconditionally,
+// `leads origin/main` returned 51 of the store's 62 recipes (82%) with ZERO
+// subject matches. A question is asked ABOUT a subject; the command text is the
+// answer's machinery, not its topic. `--cmd` restores the wider haystack, and
+// the count of what it would add (`cmd_only_recipes`) is stated on the empty
+// AND on the hit list — so this is a precision fix with its recall moved behind
+// a named, counted flag, never a silent recall cut. See `matchesQuery`.
+//
 // ── THE FILTER IS CASE-INSENSITIVE (charter D44) ─────────────────────────────
 //
 // Measured defect, not a style preference: the substring "completion" returned
@@ -55,12 +69,18 @@
 //
 // ── THE LEVEL IS RE-DERIVED AT RENDER TIME, NEVER READ FROM STORAGE ──────────
 //
-// `foldLedger` currently trusts the stored `derived_level` (open defect
-// tgw2-fold-reread-derived-level). A leads row printing that stored value would
-// inherit the bug into the instrument's headline column — this module's whole
-// thesis failing in its own output. `deriveLevel(rerun)` runs here, on the
-// command, every time; the stored value is carried alongside as
-// `stored_level` and a disagreement is stated out loud.
+// `deriveLevel(rerun)` runs HERE, on the command, every time. The stored value
+// is carried alongside as `stored_level` and a disagreement is stated out loud.
+//
+// This used to be leads' unilateral defence: `foldLedger` trusted the stored
+// `derived_level`, so a leads row printing it would have inherited that bug into
+// the instrument's headline column — this module's whole thesis failing in its
+// own output. `tgw6-fold-rederives-key` CLOSED `tgw2-fold-reread-derived-level`
+// at the seam: the fold now re-derives the level (and the quantity half of its
+// key) and hands the on-disk value over as `stored_level`. The render keeps
+// re-deriving anyway — belt and braces on the one column this module is judged
+// on, and the reason a future fold regression would be caught here rather than
+// silently rendered.
 //
 // HONEST SCOPE (charter D46): leads help THIS EPIC stop re-deriving its own
 // housekeeping facts. Repo-wide the mint degenerates (337 subjects, 268 of them
@@ -94,7 +114,7 @@ export const STRUCTURAL_MISSES = Object.freeze([
 // schema, and a reader who does not know that has to take the output on trust.
 export const NO_VALUE_FOOTER =
   "leads hand over METHOD, never a value: RECIPE_FIELDS has no `value` field and the fold rebuilds\n"
-  + "  every recipe from six NAMED fields, so even a forged run file cannot put an answer on this screen.";
+  + "  every recipe from a NAMED ALLOWLIST of fields, so even a forged run file cannot put an answer here.";
 
 // ── the census join ──────────────────────────────────────────────────────────
 
@@ -124,28 +144,61 @@ export function loadCensusIndex(path) {
 
 // ── the filter ───────────────────────────────────────────────────────────────
 
-// Case-insensitive substring over the rerun AND the subject. That is the whole
-// matching rule — no tokenising, no fuzz, no scoring. A rule a reader cannot
-// restate in one sentence cannot be trusted to have produced an honest empty.
-// The subject and the rerun are joined by NUL — the one byte a typed query
-// cannot contain — so a needle can never match ACROSS the boundary and invent a
-// hit out of a subject's tail plus a command's head. It is written as the
-// ESCAPE, never as a raw byte: a literal NUL makes git treat the file as binary
-// and stop diffing it, and a read path nobody can review is its own defect.
-export function matchesQuery(entry, recipe, needle) {
+// THE WHOLE MATCHING RULE, IN ONE SENTENCE (charter D44). Printed on every
+// render, so a reader never has to infer it from the results — a rule you
+// cannot restate cannot be trusted to have produced an honest empty.
+export const MATCH_RULE =
+  "a recipe matches when its SUBJECT contains the query as a case-insensitive substring — and, with --cmd, when its RERUN COMMAND does too";
+
+// Case-insensitive substring, no tokenising, no fuzz, no scoring — and by
+// DEFAULT over the SUBJECT ALONE.
+//
+// THE SUBJECT DEFAULT IS A MEASURED FIX, NOT A TASTE (charter D79/D80). The
+// haystack used to be subject + rerun unconditionally, and against the real
+// 62-recipe store that turned the filter into a dump: `leads origin/main`
+// returned 51 rows — 82% of the entire index — with ZERO subject matches,
+// because `origin/main` is a substring of half the commands in the store.
+// `leads "git show"` returned 42 and `leads /Volumes/SATECHI` returned 46 the
+// same way. That is charter D45's `cmd:<head>` dumping-ground failure
+// reappearing through the RERUN half of the haystack, which D45 never covered.
+// A question is asked ABOUT a subject; the command text is the answer's
+// machinery, not its topic.
+//
+// THE RECALL IS NOT CUT, IT IS MOVED BEHIND A FLAG AND COUNTED. `--cmd` opts
+// the command text back in and restores the previous behaviour exactly, and
+// `selectLeads` always counts how many recipes that flag WOULD add, so the
+// empty state states the NUMBER rather than merely existing (`cmd_only_recipes`
+// below). An exclusion nobody can count is indistinguishable from an empty
+// store — the same reasoning D45 already applies to hidden cmd: subjects.
+//
+// IN THE OPT-IN MODE THE NUL JOIN STAYS. The subject and the rerun are joined
+// by NUL — the one byte a typed query cannot contain — so a needle can never
+// match ACROSS the boundary and invent a hit out of a subject's tail plus a
+// command's head. It is written as the ESCAPE, never as a raw byte: a literal
+// NUL makes git treat the file as binary and stop diffing it (charter D67,
+// learned the hard way in census.mjs), and a read path nobody can review is its
+// own defect.
+export function matchesQuery(entry, recipe, needle, { cmd = false } = {}) {
   if (needle === "") return false;
+  const subject = String(entry?.subject ?? "").toLowerCase();
+  if (!cmd) return subject.includes(needle);
   const hay = `${String(entry?.subject ?? "")}\u0000${String(recipe?.rerun ?? "")}`.toLowerCase();
   return hay.includes(needle);
 }
 
 /**
- * selectLeads(folded, query, { census }) → the reduced result set.
+ * selectLeads(folded, query, { census, cmd }) → the reduced result set.
  *
  * A pure filter+projection over `folded.entries[]`. It reads no file, spawns
  * nothing, and executes no recipe: executing one would surface an ANSWER and
  * break the cheap-lookup contract this whole layer rests on.
+ *
+ * `cmd:true` widens the haystack to the rerun command (the `--cmd` flag). In
+ * EITHER mode the command-text match is evaluated for every recipe, because the
+ * count of what the wider mode would add is what keeps the narrow mode's empty
+ * honest — see `cmd_only_recipes`.
  */
-export function selectLeads(folded, query, { census = null } = {}) {
+export function selectLeads(folded, query, { census = null, cmd = false } = {}) {
   const entries = Array.isArray(folded?.entries) ? folded.entries : [];
   const needle = String(query ?? "").trim().toLowerCase();
 
@@ -163,6 +216,12 @@ export function selectLeads(folded, query, { census = null } = {}) {
 
   const rows = [];
   const matchedKeys = new Set();
+  // Recipes the `--cmd` haystack matches that the SUBJECT alone does not. The
+  // command-text match is a strict superset of the subject match (the subject is
+  // the head of the joined haystack), so this is exactly "what --cmd adds" — and
+  // it is computed in both modes, so the number is available to the render
+  // whether the flag is on or off.
+  let cmdOnlyRecipes = 0;
   for (const entry of indexed) {
     const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
     // "N methods on this key" is the row count for the WHOLE key, not for the
@@ -170,11 +229,22 @@ export function selectLeads(folded, query, { census = null } = {}) {
     // count that shrank with the query would be describing the query instead.
     const methodsOnKey = new Set(recipes.map((r) => String(r?.rerun ?? "").trim())).size;
     for (const recipe of recipes) {
-      if (!matchesQuery(entry, recipe, needle)) continue;
+      const onSubject = matchesQuery(entry, recipe, needle);
+      const onCommand = matchesQuery(entry, recipe, needle, { cmd: true });
+      if (onCommand && !onSubject) cmdOnlyRecipes += 1;
+      if (!(cmd ? onCommand : onSubject)) continue;
       matchedKeys.add(entry.key ?? `${entry.subject}\u0000${entry.quantity}`);
       const rerun = String(recipe?.rerun ?? "");
-      const stored = recipe?.derived_level ?? null;
-      // RE-DERIVED HERE, EVERY TIME. Never `recipe.derived_level`.
+      // THE ON-DISK LEVEL, and it moved one key over. `foldLedger` now
+      // re-derives `derived_level` itself (tgw6-fold-rederives-key, closing
+      // tgw2-fold-reread-derived-level) and carries the stored value as
+      // `stored_level` — the same shape this row has always rendered. Reading
+      // `recipe.derived_level` alone would now compare the re-derived value to
+      // itself and report `level_restated: false` forever, silently retiring
+      // the drift signal this whole section exists for. The `??` keeps a fold
+      // that predates that change working unchanged.
+      const stored = recipe?.stored_level ?? recipe?.derived_level ?? null;
+      // RE-DERIVED HERE, EVERY TIME. Never trusted from storage.
       const derived = deriveLevel(rerun);
       rows.push({
         subject: String(entry.subject ?? ""),
@@ -213,7 +283,17 @@ export function selectLeads(folded, query, { census = null } = {}) {
 
   return {
     query: String(query ?? "").trim(),
+    // Which haystack produced these rows, stated in the machine render too — a
+    // caller diffing two runs must be able to see that the RULE changed, not
+    // just that the counts did.
+    match_mode: cmd ? "subject+command" : "subject",
+    match_rule: MATCH_RULE,
     rows,
+    // What `--cmd` adds (in the wider mode: how many of these rows it added).
+    // Zero is as meaningful as any other number — it says the command text
+    // carries nothing extra either, which turns "no rows" into a full answer
+    // rather than a half one.
+    cmd_only_recipes: cmdOnlyRecipes,
     unreadable: unreadable.length,
     unreadable_detail: unreadable.map((u) => String(u?.message ?? u?.reason ?? "(unnamed)")),
     matched_subjects: matchedKeys.size,
@@ -244,7 +324,14 @@ export function renderLeads(result) {
   const o = (line = "") => out.push(line);
   const rule = "─".repeat(76);
 
-  o(`grip leads — recipes matching ${JSON.stringify(result.query)} (case-insensitive, over subject and rerun)`);
+  const wide = result.match_mode === "subject+command";
+  const cmdOnly = Number(result.cmd_only_recipes ?? 0);
+  const scope = wide ? "over the SUBJECT and the RERUN COMMAND (--cmd)" : "over the SUBJECT";
+  o(`grip leads — recipes matching ${JSON.stringify(result.query)} (case-insensitive, ${scope})`);
+  // The rule itself, verbatim, on every render (charter D44): a reader who has
+  // to infer the matching rule from the results cannot judge whether an empty
+  // was honest.
+  o(`  rule: ${result.match_rule ?? MATCH_RULE}`);
   o();
 
   // Stated FIRST, above both the hit list and the empty, because it changes what
@@ -260,13 +347,31 @@ export function renderLeads(result) {
 
   if (result.rows.length === 0) {
     o(`  HONEST EMPTY — no recipe matches. ${result.indexed_subjects} subjects (${result.indexed_recipes} recipes) are indexed,`);
+    const searched = wide ? "and none of their paths or commands contains that substring" : "and none of their SUBJECTS contains that substring";
     o(
       result.unreadable > 0
-        ? "  and none of their paths or commands contains that substring — but see the warning above:"
+        ? `  ${searched} — but see the warning above:`
           + "\n  this empty is NOT clean, because part of the store was never read."
-        : "  and none of their paths or commands contains that substring. This is an answer, not a blank.",
+        : `  ${searched}. This is an answer, not a blank.`,
     );
     o();
+
+    // THE EMPTY CARRIES THE NUMBER, WHICH IS WHAT MAKES THE SUBJECT DEFAULT A
+    // PRECISION FIX AND NOT A RECALL CUT. Both branches are STATEMENTS OF FACT,
+    // deliberately not advice: an empty that nudges the reader to widen and
+    // re-run until the count improves is teaching them to shop for a number,
+    // which is the exact failure this epic exists to abolish.
+    if (!wide) {
+      if (cmdOnly > 0) {
+        o(`  ${cmdOnly} indexed recipe(s) carry that substring in their RERUN COMMAND rather than in a subject.`);
+        o(`  \`--cmd\` widens the search to include them; they are matches on command text, not on this subject.`);
+      } else {
+        o("  No indexed recipe carries it in its RERUN COMMAND either, so `--cmd` returns 0 as well —");
+        o("  this empty is the whole store's answer, not one mode's.");
+      }
+      o();
+    }
+
     o("  Three misses here are STRUCTURAL — a bigger corpus does not close them:");
     for (const miss of STRUCTURAL_MISSES) o(`    · ${miss}`);
     o();
@@ -274,6 +379,15 @@ export function renderLeads(result) {
     o("  indexed at all — they are command-shape dumping grounds, not subjects.");
   } else {
     o(`  ${result.matched_subjects} of ${result.indexed_subjects} indexed subjects match · ${result.rows.length} recipes`);
+    // The same number the empty state carries, on the hit list too: a reader
+    // seeing 6 rows deserves to know whether 45 more are one flag away, and a
+    // reader who passed --cmd deserves to know how many of the rows they are
+    // reading are about the command rather than about the subject.
+    if (cmdOnly > 0) {
+      o(wide
+        ? `  ${cmdOnly} of these ${result.rows.length} recipes matched on RERUN COMMAND TEXT, not on the subject (--cmd is on).`
+        : `  ${cmdOnly} further recipe(s) carry it in RERUN COMMAND TEXT only — \`--cmd\` includes them, on command not subject.`);
+    }
     o(`  ${result.hidden_cmd_subjects} cmd:<head> subjects (${result.hidden_cmd_recipes} recipes) are excluded from the index (charter D45).`);
     o(rule);
     for (const row of result.rows) {
