@@ -15676,6 +15676,13 @@
       subCache = null;
       subLoaded = false;
       subError = false;
+      // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
+      // standing, a scoped tick racing the next sign-in could repaint the new
+      // account's Overview from the previous one's fleet/usage/fold. Cleared
+      // alongside subCache so the next paint is unambiguously a cold one.
+      overviewData.list = null;
+      overviewData.usage = null;
+      overviewData.onboarding = null;
       hide($("#app-shell"));
       show($("#auth-screen"));
       // A partial 2FA challenge is abandoned by any fresh logged-out render
