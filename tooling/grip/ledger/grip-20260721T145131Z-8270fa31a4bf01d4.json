@@ -1,0 +1,15 @@
+{
+  "run_id": "grip-20260721T145131Z",
+  "recipes": [
+    {
+      "subject": "scripts/pds-crown-launch.sh",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:scripts/pds-crown-launch.sh | grep -n 'MEM_FLOOR_MIB\\|MEM_FLOOR_LAW\\|tightens only'",
+      "derived_level": "L2",
+      "deps": [
+        "scripts/pds-crown-launch.sh"
+      ],
+      "observed_at": "2026-07-21T14:51:31Z"
+    }
+  ]
+}
