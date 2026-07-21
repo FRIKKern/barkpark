@@ -1003,13 +1003,16 @@ async function leadsCommand(rest) {
     return value ?? null;
   };
   const asJson = args.includes("--json");
+  // Widens the haystack from the SUBJECT to subject+rerun. A boolean flag, so
+  // it needs no takeFlag; the query filter below drops it with the others.
+  const withCmd = args.includes("--cmd");
   const censusPath = takeFlag("--census");
   const dirArg = takeFlag("--dir");
   const query = args.filter((a) => !a.startsWith("--")).join(" ").trim();
 
   if (query === "") {
-    process.stderr.write("ledger: leads needs a substring — node ledger.mjs leads <substring> [--json] [--census <report.json>] [--dir <ledger dir>]\n");
-    process.stderr.write("  it matches case-insensitively over the subject and the rerun command; that filter IS the feature\n");
+    process.stderr.write("ledger: leads needs a substring — node ledger.mjs leads <substring> [--cmd] [--json] [--census <report.json>] [--dir <ledger dir>]\n");
+    process.stderr.write("  it matches case-insensitively over the SUBJECT; add --cmd to search the rerun command too\n");
     return 2;
   }
 
@@ -1030,7 +1033,7 @@ async function leadsCommand(rest) {
   }
 
   const folded = foldLedger(dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR);
-  const result = selectLeads(folded, query, { census });
+  const result = selectLeads(folded, query, { census, cmd: withCmd });
   process.stdout.write(asJson ? `${JSON.stringify(result, null, 2)}\n` : renderLeads(result));
   // An honest empty is an ANSWER, not an error — exit 0. A nonzero here would
   // teach callers to treat "nobody has checked this yet" as a failure.
@@ -1052,8 +1055,8 @@ async function main(argv) {
     return folded.unreadable.length > 0 ? 1 : 0;
   }
   process.stderr.write("usage: node ledger.mjs [leads <substring> | prescreen <facts.json> | write <facts.json> [dir] | fold [dir] | --selftest]\n");
-  process.stderr.write("  leads      look up RECIPES by case-insensitive substring over subject and rerun — never an answer\n");
-  process.stderr.write("             [--json] [--census <census --json report>] [--dir <ledger dir>]\n");
+  process.stderr.write("  leads      look up RECIPES by case-insensitive substring over the SUBJECT — never an answer\n");
+  process.stderr.write("             [--cmd (search the rerun command too)] [--json] [--census <census --json report>] [--dir <ledger dir>]\n");
   process.stderr.write("  prescreen  rehearse a write: report the per-row screen verdict and store NOTHING\n");
   process.stderr.write("  write      mint {claim,evidence,rerun} facts into recipe rows and store one immutable run file\n");
   process.stderr.write("  fold       read every run file in the store back as one index\n");

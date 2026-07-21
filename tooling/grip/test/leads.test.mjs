@@ -42,7 +42,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  CMD_SUBJECT_PREFIX, NO_VALUE_FOOTER, STRUCTURAL_MISSES,
+  CMD_SUBJECT_PREFIX, MATCH_RULE, NO_VALUE_FOOTER, STRUCTURAL_MISSES,
   censusIndex, isCommandShapeSubject, matchesQuery, renderLeads, selectLeads,
 } from "../leads.mjs";
 import { foldLedger, DEFAULT_LEDGER_DIR } from "../ledger.mjs";
@@ -122,7 +122,7 @@ test("leads executes nothing — no spawn call appears in the module at all", ()
 
 // ── 2. the filter IS the feature, and it narrows ─────────────────────────────
 
-test("the rerun substring narrows a multi-row bucket — real numbers, before and after", () => {
+test("the rerun substring narrows a multi-row bucket UNDER --cmd — real numbers, before and after", () => {
   const bucket = [
     row("internal/cli", "go:test", "go test ./internal/cli/"),
     row("internal/cli", "go:vet", "go vet ./internal/cli/"),
@@ -132,16 +132,24 @@ test("the rerun substring narrows a multi-row bucket — real numbers, before an
     row("internal/cli", "wc:-l", "wc -l internal/cli/task_cmd.go"),
   ];
   const folded = foldLedger(tempStore(bucket));
+  const cmd = { cmd: true };
   const all = selectLeads(folded, "internal/cli");
-  const narrowed = selectLeads(folded, "grep");
-  assert.equal(all.rows.length, 6, "the unfiltered bucket");
+  const narrowed = selectLeads(folded, "grep", cmd);
+  assert.equal(all.rows.length, 6, "the unfiltered bucket — the SUBJECT matches all six, no flag needed");
   assert.equal(narrowed.rows.length, 2, "the same bucket narrowed by the rerun substring `grep`");
-  assert.equal(selectLeads(folded, "go vet").rows.length, 1, "narrower still");
+  assert.equal(selectLeads(folded, "go vet", cmd).rows.length, 1, "narrower still");
   // …and the substring is honestly DUMB: `go` matches every row here, because
-  // five of the six commands name a `.go` path. The filter is a substring over
-  // subject+rerun and nothing more; a reader who expects token matching would
-  // misread this count, so it is asserted rather than left to be discovered.
-  assert.equal(selectLeads(folded, "go").rows.length, 6);
+  // five of the six commands name a `.go` path. The filter is a substring and
+  // nothing more; a reader who expects token matching would misread this count,
+  // so it is asserted rather than left to be discovered.
+  assert.equal(selectLeads(folded, "go", cmd).rows.length, 6);
+
+  // AND THE SAME THREE QUERIES ANSWER 0 BY DEFAULT, because none of them is
+  // about the subject `internal/cli` — they are about the command text. That is
+  // the whole point of the mode split, asserted on the same corpus.
+  for (const q of ["grep", "go vet", "go"]) {
+    assert.equal(selectLeads(folded, q).rows.length, 0, `\`${q}\` is a command-text query, not a subject query`);
+  }
 });
 
 test("THE FILTER IS CASE-INSENSITIVE — the measured `completion` specimen, with a case-SENSITIVE mutant that must return 0", () => {
@@ -151,7 +159,10 @@ test("THE FILTER IS CASE-INSENSITIVE — the measured `completion` specimen, wit
   const specimen = "go test -run TestCompletionNounsCoverAllDispatchedBuiltins ./internal/cli/";
   const folded = foldLedger(tempStore([row("internal/cli", "go:test", specimen)]));
 
-  const shipped = selectLeads(folded, "completion");
+  // `completion` is a COMMAND-TEXT query (the subject is `internal/cli`), so it
+  // is asked under --cmd — the case-folding is what is under test here, not the
+  // haystack width.
+  const shipped = selectLeads(folded, "completion", { cmd: true });
   assert.equal(shipped.rows.length, 1, "the shipped filter folds case and finds it");
   assert.equal(shipped.rows[0].rerun, specimen);
 
@@ -159,18 +170,191 @@ test("THE FILTER IS CASE-INSENSITIVE — the measured `completion` specimen, wit
   const caseSensitive = folded.entries.flatMap((e) => e.recipes.filter((r) => `${e.subject} ${r.rerun}`.includes("completion")));
   assert.equal(caseSensitive.length, 0, "a case-sensitive implementation answers 0 — this is what the shipped filter must beat");
 
-  // …and the matcher itself, at the unit, in both directions.
-  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: specimen }, "completion"), true);
-  assert.equal(matchesQuery({ subject: "INTERNAL/CLI" }, { rerun: "" }, "internal/cli"), true);
-  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: specimen }, ""), false, "an empty needle matches nothing, never everything");
+  // …and the matcher itself, at the unit, in both directions and both modes.
+  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: specimen }, "completion", { cmd: true }), true);
+  assert.equal(matchesQuery({ subject: "INTERNAL/CLI" }, { rerun: "" }, "internal/cli"), true, "the SUBJECT folds case with no flag at all");
+  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: specimen }, "", { cmd: true }), false, "an empty needle matches nothing, never everything");
 });
 
-test("a needle cannot match ACROSS the subject/rerun boundary and invent a hit", () => {
+// ── 2b. THE SUBJECT IS THE DEFAULT HAYSTACK; --cmd IS THE OPT-IN ─────────────
+//
+// The measured defect this section exists for: the haystack used to be
+// subject+rerun unconditionally, so `leads origin/main` returned 51 of the real
+// store's 62 recipes (82%) with ZERO subject matches — D45's `cmd:<head>`
+// dumping ground reappearing through the RERUN half of the haystack.
+
+test("matchesQuery matches the SUBJECT ALONE by default — the command text is not searched without --cmd", () => {
+  const entry = { subject: "tooling/grip/leads.mjs" };
+  const recipe = { rerun: "git show origin/main:tooling/grip/leads.mjs | wc -l" };
+
+  // The subject half: identical in both modes.
+  assert.equal(matchesQuery(entry, recipe, "tooling/grip"), true);
+  assert.equal(matchesQuery(entry, recipe, "tooling/grip", { cmd: true }), true);
+
+  // The command half: ONLY under --cmd. This one assertion is the whole slice.
+  assert.equal(matchesQuery(entry, recipe, "origin/main"), false, "the command text is NOT the subject");
+  assert.equal(matchesQuery(entry, recipe, "origin/main", { cmd: true }), true, "…and --cmd puts it back");
+
+  // A missing options object, an empty one and an explicit false are the same
+  // mode — the default must not depend on how the caller spelled it.
+  for (const opts of [undefined, {}, { cmd: false }]) {
+    assert.equal(matchesQuery(entry, recipe, "origin/main", opts), false);
+  }
+});
+
+test("THE MEASURED SPECIMEN — `origin/main` returns ZERO by default, and --cmd returns every one of them", () => {
+  // Four recipes shaped exactly like the real store's: repo paths as subjects,
+  // `origin/main` living only in the command text.
+  const folded = foldLedger(tempStore([
+    row("tooling/grip/leads.mjs", "wc:-l", "git show origin/main:tooling/grip/leads.mjs | wc -l"),
+    row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
+    row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
+    row("js/packages/core", "ls-tree", "git ls-tree origin/main js/packages/core"),
+  ]));
+
+  // FAIL-FIRST: the OLD concatenated haystack, re-implemented here, over the
+  // same corpus. It returns all four — that is the behaviour being fixed, and
+  // without this half the assertion below would pass against a filter that
+  // simply found nothing.
+  const oldHaystack = folded.entries.flatMap((e) => e.recipes.filter(
+    (r) => `${e.subject}${r.rerun}`.toLowerCase().includes("origin/main"),
+  ));
+  assert.equal(oldHaystack.length, 4, "precondition: the concatenated haystack returns the whole corpus");
+
+  const shipped = selectLeads(folded, "origin/main");
+  assert.equal(shipped.rows.length, 0, "the shipped default returns ZERO — none of these subjects is origin/main");
+  assert.equal(shipped.match_mode, "subject");
+  assert.equal(shipped.cmd_only_recipes, 4, "…and it knows exactly how many it did not return");
+
+  const wide = selectLeads(folded, "origin/main", { cmd: true });
+  assert.equal(wide.rows.length, 4, "--cmd restores the previous behaviour");
+  assert.equal(wide.match_mode, "subject+command");
+  assert.deepEqual(
+    wide.rows.map((r) => r.rerun).sort(),
+    oldHaystack.map((r) => r.rerun).sort(),
+    "--cmd returns EXACTLY the old concatenated-haystack result, row for row",
+  );
+});
+
+test("THE HONEST EMPTY CARRIES THE NUMBER — how many --cmd would return, and the flag's name", () => {
+  const folded = foldLedger(tempStore([
+    row("tooling/grip/leads.mjs", "wc:-l", "git show origin/main:tooling/grip/leads.mjs | wc -l"),
+    row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
+    row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
+  ]));
+  const rendered = renderLeads(selectLeads(folded, "origin/main"));
+
+  assert.ok(rendered.includes("HONEST EMPTY"), "still an ANSWER, not a blank");
+  assert.ok(
+    rendered.includes("3 indexed recipe(s) carry that substring in their RERUN COMMAND rather than in a subject."),
+    rendered,
+  );
+  assert.ok(rendered.includes("`--cmd` widens the search"), "the flag is NAMED, not hinted at");
+  // The count is what makes this a precision fix rather than a recall cut: an
+  // exclusion nobody can count is indistinguishable from an empty store.
+  assert.match(rendered, /^  \d+ indexed recipe\(s\) carry that substring/m, "a NUMBER, never a vague quantifier");
+  for (const vague of ["some indexed recipe", "several recipes", "a number of recipes"]) {
+    assert.ok(!rendered.includes(vague), `must not hedge the count: ${vague}`);
+  }
+});
+
+test("the honest empty says `--cmd` returns 0 TOO when it would — an empty for the whole store, not for one mode", () => {
+  const folded = foldLedger(tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]));
+  const result = selectLeads(folded, "no-such-needle-anywhere");
+  assert.equal(result.cmd_only_recipes, 0);
+  const rendered = renderLeads(result);
+  assert.ok(rendered.includes("No indexed recipe carries it in its RERUN COMMAND either, so `--cmd` returns 0 as well"), rendered);
+  assert.ok(rendered.includes("this empty is the whole store's answer, not one mode's"));
+});
+
+test("the empty state is a STATEMENT, never an exhortation to widen and re-run until the number improves", () => {
+  const folded = foldLedger(tempStore([
+    row("tooling/grip/leads.mjs", "wc:-l", "git show origin/main:tooling/grip/leads.mjs | wc -l"),
+  ]));
+  const rendered = renderLeads(selectLeads(folded, "origin/main"));
+  // Shopping for a bigger number is the exact failure this epic exists to
+  // abolish, so the empty may state what --cmd WOULD return and must not
+  // suggest going and getting it.
+  for (const nudge of [
+    /try again/i, /keep trying/i, /you (may|might|should|could) want/i,
+    /consider (adding|widening|using)/i, /did you mean/i, /no results\?/i,
+    /re-?run (this|the|your) (search|query|lookup) with/i, /broaden/i, /instead, use/i,
+  ]) {
+    assert.ok(!nudge.test(rendered), `the empty must not nudge: ${nudge}`);
+  }
+});
+
+test("THE MATCHING RULE IS PRINTED VERBATIM ON EVERY RENDER (charter D44) — hits and empty alike", () => {
+  // One sentence. A reader who has to infer the rule from the results cannot
+  // judge whether an empty was honest.
+  assert.equal(MATCH_RULE.split(". ").length, 1, "the rule is ONE sentence");
+  assert.ok(MATCH_RULE.includes("SUBJECT") && MATCH_RULE.includes("--cmd") && MATCH_RULE.includes("RERUN COMMAND"));
+
+  const folded = foldLedger(tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]));
+  assert.ok(renderLeads(selectLeads(folded, "api")).includes(MATCH_RULE), "on a hit");
+  assert.ok(renderLeads(selectLeads(folded, "zzz")).includes(MATCH_RULE), "and on the empty");
+  // The header states which haystack actually ran, so two runs are diffable.
+  assert.match(renderLeads(selectLeads(folded, "api")), /case-insensitive, over the SUBJECT\)/);
+  assert.match(renderLeads(selectLeads(folded, "api", { cmd: true })), /over the SUBJECT and the RERUN COMMAND \(--cmd\)/);
+});
+
+test("the hit list states how many rows came from command text, in BOTH modes", () => {
+  const folded = foldLedger(tempStore([
+    row("tooling/grip/leads.mjs", "wc:-l", "wc -l tooling/grip/leads.mjs"),
+    row("api/lib/x.ex", "wc:-l", "git show origin/main:api/lib/x.ex | wc -l"),
+  ]));
+  // Default mode, one subject hit: the OTHER row is one flag away, and the
+  // reader is told so with a number rather than left to wonder.
+  const narrow = renderLeads(selectLeads(folded, "grip"));
+  assert.ok(narrow.includes("tooling/grip/leads.mjs"), narrow);
+  const wideResult = selectLeads(folded, "origin/main", { cmd: true });
+  assert.equal(wideResult.rows.length, 1);
+  assert.ok(
+    renderLeads(wideResult).includes("1 of these 1 recipes matched on RERUN COMMAND TEXT, not on the subject (--cmd is on)"),
+    renderLeads(wideResult),
+  );
+});
+
+test("KNOWN LIMIT, MEASURED — the mode split does NOT fix SUBJECT-side substring noise", () => {
+  // Honest scope, pinned so nobody later reads the mode split as a general
+  // precision fix. On the real 62-recipe store `leads js` returned 30 rows
+  // before this change and returns the SAME 30 after (cmd_only_recipes = 0),
+  // because every one of those 30 matched on the subject already: `.mjs` ends
+  // in "js" and `package.json` contains it via ".json". That noise is a
+  // property of substring matching over paths, not of the haystack width, and
+  // closing it needs a separate ratified decision (filed as
+  // tgw6-leads-subject-segment-noise).
+  const folded = foldLedger(tempStore([
+    row("js/packages/core/package.json", "wc:-l", "wc -l js/packages/core/package.json"),
+    row("tooling/grip/leads.mjs", "wc:-l", "wc -l tooling/grip/leads.mjs"),
+    row("web/package.json", "wc:-l", "wc -l web/package.json"),
+  ]));
+  const result = selectLeads(folded, "js");
+  assert.equal(result.rows.length, 3, "all three still match — .mjs and package.json both contain `js`");
+  assert.equal(result.cmd_only_recipes, 0, "and NONE of it came from the command text, so --cmd is not the lever");
+  assert.equal(
+    result.rows.filter((r) => r.subject.startsWith("js/")).length, 1,
+    "only one of the three is actually under js/ — the measured imprecision that SURVIVES this slice",
+  );
+});
+
+test("under --cmd a needle cannot match ACROSS the subject/rerun boundary and invent a hit", () => {
   // Joined by NUL, the one byte a typed query cannot carry. Without a separator
   // that cannot be typed, "internal/cliwc" would match `internal/cli` + `wc -l …`
-  // — a hit assembled out of two strings that never touched.
-  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: "wc -l internal/cli/x.go" }, "internal/cliwc"), false);
-  assert.equal(matchesQuery({ subject: "internal/cli" }, { rerun: "wc -l internal/cli/x.go" }, "internal/cli"), true);
+  // — a hit assembled out of two strings that never touched. The join survives
+  // the mode split: it is the OPT-IN mode's haystack, and its reasoning is
+  // unchanged.
+  const entry = { subject: "internal/cli" };
+  const recipe = { rerun: "wc -l internal/cli/x.go" };
+  assert.equal(matchesQuery(entry, recipe, "internal/cliwc", { cmd: true }), false);
+  assert.equal(matchesQuery(entry, recipe, "internal/cli", { cmd: true }), true);
+});
+
+test("the NUL separator is written as the ESCAPE, never as a raw byte (charter D67)", () => {
+  // A literal NUL makes git treat the source as binary and stop diffing it, and
+  // a read path nobody can review is its own defect. Asserted on the bytes.
+  assert.ok(!LEADS_SRC.includes(String.fromCharCode(0)), "leads.mjs must contain no raw NUL byte");
+  assert.ok(LEADS_SRC.includes("\\u0000"), "…and the join must still be spelled with the escape");
 });
 
 // ── 3. observed_at: three states, no band ────────────────────────────────────
@@ -266,7 +450,8 @@ test("the methods count describes the KEY, not the filtered slice", () => {
   // A query that matches only ONE of the two rows still reports 2 methods:
   // the message is "this key has two cheap checks", and a count that shrank
   // with the query would be describing the query instead.
-  const result = selectLeads(foldLedger(dir), "/abs/");
+  // `/abs/` lives only in one of the two COMMANDS, so it is asked under --cmd.
+  const result = selectLeads(foldLedger(dir), "/abs/", { cmd: true });
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].methods_on_key, 2);
 });
@@ -322,7 +507,9 @@ test("a deliberately STALE stored derived_level is contradicted, not printed", (
   // (tgw2-fold-reread-derived-level). leads must not inherit that.
   const rerun = "curl -s https://api.barkpark.cloud/api/schemas";
   const dir = tempStore([row("cmd-free/subject.mjs", "curl:-s", rerun, { derived_level: "L3" })]);
-  const result = selectLeads(foldLedger(dir), "curl");
+  // `curl` is a command-text query against this subject, so --cmd is how it is
+  // reached — the re-derivation under test is unaffected by the haystack width.
+  const result = selectLeads(foldLedger(dir), "curl", { cmd: true });
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].stored_level, "L3", "the stored value is carried, so the disagreement is visible");
   assert.notEqual(result.rows[0].derived_level, "L3", "…and it is NOT what gets rendered as the level");
@@ -405,7 +592,10 @@ test("`leads` with no substring is a DIAGNOSIS naming the fix, not an empty resu
   const res = runCli(["leads"]);
   assert.equal(res.status, 2);
   assert.match(res.stdout, /leads needs a substring/);
-  assert.match(res.stdout, /case-insensitively over the subject and the rerun/);
+  // The usage names the DEFAULT haystack and the flag that widens it, so a
+  // caller never has to discover the mode split from a surprising row count.
+  assert.match(res.stdout, /case-insensitively over the SUBJECT; add --cmd to search the rerun command too/);
+  assert.match(res.stdout, /\[--cmd\]/);
 });
 
 test("both new verbs are on the dispatch chain, and the usage string names them", () => {
@@ -426,6 +616,36 @@ test("`leads --json` is the machine render of exactly what the human render show
   assert.equal(parsed.rows.length, 1);
   assert.equal(parsed.rows[0].rerun, "wc -l api/lib/x.ex");
   assert.ok(!Object.hasOwn(parsed.rows[0], "value"));
+});
+
+test("`--cmd` reaches the CLI, and `leads --json` STILL parses with JSON.parse(stdout) in both modes", () => {
+  // The regression that bites: --json must stay a lone JSON document on stdout.
+  // The new fields are additive, and the flag must not leak into the query.
+  const dir = tempStore([
+    row("tooling/grip/leads.mjs", "wc:-l", "wc -l tooling/grip/leads.mjs"),
+    row("api/lib/x.ex", "wc:-l", "git show origin/main:api/lib/x.ex | wc -l"),
+  ]);
+
+  const narrow = runCli(["leads", "origin/main", "--json", "--dir", dir]);
+  assert.equal(narrow.status, 0, "an honest empty is still exit 0");
+  const narrowParsed = JSON.parse(narrow.stdout);
+  assert.equal(narrowParsed.query, "origin/main", "--cmd must not leak into the query string");
+  assert.equal(narrowParsed.rows.length, 0);
+  assert.equal(narrowParsed.match_mode, "subject");
+  assert.equal(narrowParsed.cmd_only_recipes, 1);
+
+  const wide = runCli(["leads", "origin/main", "--cmd", "--json", "--dir", dir]);
+  assert.equal(wide.status, 0);
+  const wideParsed = JSON.parse(wide.stdout);
+  assert.equal(wideParsed.query, "origin/main", "the flag is stripped from the query, not joined into it");
+  assert.equal(wideParsed.match_mode, "subject+command");
+  assert.equal(wideParsed.rows.length, 1);
+  assert.equal(wideParsed.rows[0].rerun, "git show origin/main:api/lib/x.ex | wc -l");
+  assert.ok(!Object.hasOwn(wideParsed.rows[0], "value"), "no value, in either mode");
+
+  // Flag ORDER must not matter — `--cmd` before or after the query.
+  const flipped = JSON.parse(runCli(["leads", "--cmd", "origin/main", "--json", "--dir", dir]).stdout);
+  assert.deepEqual(flipped.rows.map((r) => r.rerun), wideParsed.rows.map((r) => r.rerun));
 });
 
 test("an honest empty exits 0 — `nobody has checked this yet` is an answer, not a failure", () => {
