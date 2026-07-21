@@ -224,6 +224,183 @@ bolted on afterward, which is worth nothing.
   builder-authored simulation, never in the loop. "The throw is the only enforcement that genuinely
   fires" is an intent, not an observation, until a wave observes one.*
 
+- **D29 — The census may NEVER gate on `classifySafety`. It gets its own fail-closed screen, and
+  the screen is an ALLOWLIST first.** Three layers, in order: (a) a HOST BOUND refusing any command
+  naming `ssh`/`scp`/`rsync`, `157.180.90.121`, `178.105.92.191`, `guerrilla`, `barkpark.cloud` or
+  `root@`; (b) an allowlist of command heads and sub-verbs that fails CLOSED on an unknown head;
+  (c) the `WRITE_SHAPES` gaps patched as SECOND-layer defence, never as the gate. Measured reach:
+  the allowlist admits **194 of 651 = 29.8%** of the frozen corpus, and that is the census's honest
+  reach — a decay statistic over it may never be reported as covering "651 commands". Two judgement
+  calls are ruled here rather than left to a builder: `git fetch` is REFUSED (it mutates `.git`
+  refs in a checkout three live cycles share) and all 12 `npx` commands are REFUSED (npx installs
+  and executes an arbitrary package). *Why: `classifySafety` marks 26 of 31 synthetic
+  outage-capable commands SAFE — including `reboot`, `mix ecto.drop`, `kill -9`, `pkill`,
+  `cp <anything> <repo path>` and `curl -o /opt/barkpark/deploy/site-deploy.sh` — and `runRerun`
+  gates on it and then calls `spawnSync("/bin/sh", ["-c", cmd])`, so every false-safe is an
+  execution. A patch was written, measured and made able to fail (22/22 danger refused, 0/7
+  over-refusals, 0/12 cry-wolf, 0/18 existing `mustAllow` broken) — and it took FOUR correction
+  rounds against the corpus, oscillating between false-safe and false-refusal each time, with the
+  full corpus in hand and a harness running. `rerun.mjs:75` and `:121-131` already say it: "a
+  denylist of mutating APIs cannot be complete… the verdict it supports is 'no write shape
+  detected', never 'this command cannot write'." A second verifier, screening the corpus from the
+  opposite direction to run the decay census, independently had to write the same second denylist
+  and rejected 5 systemctl and 5 deploy-script commands `classifySafety` green-lit. Two
+  investigations, opposite directions, same hole.*
+
+- **D30 — The "cheap high-value" `L3_HEADS` head-token fix is CUT AS WORDED and REPLACED.** Adding
+  `bp`, `gh` and `cd` to `L3_HEADS` was the Digest's cheapest recommendation; verification refuted
+  it three independent ways and it may not ship in that form. What ships instead, in one slice:
+  (a) the curl/wget/URL-sniff L1 check is UN-GATED from head-only matching so it fires anywhere in
+  a compound; (b) a wrapper-strip path handles `cd X && …`, `for … do …` and env-assignment
+  prefixes so the head token is found PAST the wrapper — adding no head to `L3_HEADS`; (c) `bp` and
+  non-`api` `gh` route to **L2**, the level `gh api` already holds, because they are remote-API
+  reads; (d) a PARSEABILITY FLOOR: a `rerun` string that is not a syntactically valid command
+  cannot derive above L6. *Why: (1) `bp` reads `https://guerrilla.barkpark.cloud` and `gh` reads
+  `api.github.com` — both live remote reads — so filing them at L3 "local checkout" is a two-level
+  SKIP, this charter's own line 50 disease wearing the doctrine's uniform, and it would mislabel
+  volatile remote state as checkout-stable, corrupting the decay axis. (2) `deriveLevel`'s L1
+  curl/wget check is head-gated while `SSH_READ` is not, so adding `cd` makes
+  `cd /opt/barkpark && curl https://guerrilla.barkpark.cloud/health` derive **L3** — it was L6,
+  safe-by-demotion — a proven authority inflation on a command that provably reaches production,
+  with ZERO tests covering any compound `&&` shape. (3) 13.3% of the frozen corpus's `rerun`
+  strings are PROSE, not commands (`python3 confusion matrix (15 per PREDICTED class…)`,
+  `grep/read <path> around lines 200-219`), and `deriveLevel` grades 33 of those 58 at L2/L3
+  because it inspects a head token and never asks whether the string parses — so the head-token fix
+  shipped ALONE would move prose INTO L3 and make the grammar's central promise weaker, not
+  stronger. The parseability floor errs by DEMOTION, which D3 already establishes as the safe
+  direction.*
+
+- **D31 — `observed_at` gets a caller-supplied `now` bound, and the CLI sources `now` from the
+  SHELL, never from agent-supplied JSON.** `admitRecipe(input, { now })` compares ISO strings and
+  rejects a future `observed_at`; omitting `now` admits, so no existing caller breaks. The WRITE
+  verb bakes `date -u +%Y-%m-%dT%H:%M:%SZ` into itself. `observed_at` MUST be Z-only at the write
+  seam, with a named rejection for an offset form. *Why: a forged row — two commands never run,
+  dated 2031 and 2087 — was ADMITTED, written to disk and folded back as authoritative, one at
+  **L1** and one at **L2**, and the L2 one does not even execute (`fatal: path
+  'tooling/grip/ledger/recipes.json' does not exist in 'origin/main'`). Every rejection class that
+  fires is a SHAPE class; zero honesty classes exist. Typing an ssh-shaped string mints L1 for
+  free. Of the three doors offered — prompt discipline, a `Date.now` bound, or nothing — the
+  `Date.now` bound reds TWO tests, and the second red is the finding: a fixture hardcoded
+  `2026-07-21T09:00:00Z` sits 8 hours in the future, so a clock in the module converts a
+  deterministic suite into a wall-clock-dependent one, invisibly. The caller-supplied bound passes
+  37/37, keeps the module clock-free, and rejects the forgery. Z-only is required because lexical
+  ISO comparison is correct only for same-offset instants, and normalising offsets needs
+  `Date.parse`, which re-trips the clock-free grep the fourth door exists to avoid.*
+
+- **D32 — `subject` is MINTED from the `rerun` command's first normalised repo path token, with a
+  `cmd:<head-token>` fallback; `quantity` is minted from the command's verb phrase. Neither is ever
+  free-typed or derived from claim prose.** *Why: over this wave's own 104 real survey facts, a
+  claim-derived subject produces **104 distinct keys out of 104** — a provably injective key, a
+  `detectConflicts` that can never fire and a leads index in which nothing is ever a lead. Path-token
+  minting gives 67% coverage, 22 distinct subjects, and **8 subjects shared by 2+ facts covering 56
+  of 104** — a working index (`bp-epic-cycle.workflow.js` ×23, `ledger.mjs` ×14). `findRefs`/
+  `classifyRef` are the WRONG tool and were measured as such: `REF_CANDIDATE` requires a literal
+  `:digits` suffix and scores 0 of 104 on both claims and reruns. The fallback is what keeps the
+  verb from ever reporting 100% REJECTED.*
+
+- **D33 — The ledger fold's flag is RENAMED to `RIVAL-METHOD`. The adjudicator's `CONFLICT` stays
+  library-only (D25 stands), and `tgw2-ledger-adjudicator-vocab`'s premise is FALSE.** *Why: a 2×2
+  probe ran all four cells. `foldLedger` fires on ≥2 distinct rerun COMMAND STRINGS and has no
+  value field to compare, so it fired CONFLICT on `wc -l /abs/path` vs `wc -l rel/path` — both
+  verified to output `544`. `detectConflicts` fires on ≥2 distinct claim VALUES and never reads
+  rerun, so it correctly returned 0 conflicts on that same pair and 2 on a genuine `544` vs `999`
+  disagreement, which `foldLedger` is structurally incapable of seeing. The shapes are not
+  identical by construction — they detect OPPOSITE things — so re-pointing the ledger's constant at
+  `VERDICTS.CONFLICT` would import a name for a different concept, making one canonical string
+  definitionally shared by two incompatible meanings. Under D32's path-grain key, `RIVAL-METHOD`
+  will fire on those 8 corroboration groups on day one: that is the PRODUCT — "multiple checks
+  exist, re-run and compare" — not a defect, and it must be documented as expected before the read
+  path ships, or the first honest multi-recipe entry discredits the flag permanently.*
+
+- **D34 — The surface fence is PATHS, never a directory.** `tooling/grip/**`,
+  `.claude/workflows/bp-truth-grip-charter.md`, `.claude/workflows/bp-epic-cycle.workflow.js`.
+  Nothing else, and specifically no other charter under `.claude/workflows/`. *Why: that directory
+  holds 80+ files including three actively-running epics' charters, and the hazard is live, not
+  theoretical — open PR #5106 and an unpushed local commit both append to
+  `bp-cloud-gui-remake-charter.md` at the same anchor line 1331, so whoever pushes second eats a
+  conflict. A fence stated as a bare directory reads as permission to edit those.*
+
+- **D35 — The Verify carve-out and Decide's commit ship in ONE slice, the carve-out is granted ONLY
+  in the shared-checkout branch, and the stranded-file case is ruled: THE LOSS IS ACCEPTED.**
+  A verify assignment that sets `needs_worktree` may not write ledger rows, and Digest's prompt
+  says so. If Decide crashes or cuts zero slices, uncommitted rows are lost; no sweep is built, and
+  a code comment states that this is a decision. *Why: amending "no repo edits" without extending
+  Decide's explicit-path commit strands rows in a checkout other sessions share — Decide's prompt
+  today commits exactly one file, the charter, "by explicit path only — never `git add -A`", and
+  names no other path. There are TWO stranding paths, not the one the plan assumed: a
+  `needs_worktree` verifier writes into its own throwaway worktree, which Decide never sees no
+  matter how its commit is amended — so the carve-out must be scoped to the branch that shares
+  Decide's checkout, or the ruling looks complete while staying silently lossy. No sweep is built
+  because a sweep in a contended checkout is more dangerous than the loss, and a recipe is cheap to
+  re-derive by construction — that is the entire point of the store. Silence here would have been
+  the defect; this is the ruling.*
+
+- **D36 — The wave's headline is THREE numbers, and the Digest's four are RETIRED.** Published:
+  **100% PRESENT / 93.1% EXECUTABLE / 86.3% ANSWERING**, over **104** facts. Fill rate may never be
+  published alone — it is the weakest of the three. *Why: the Digest reported 95 facts, 14.7%
+  nominal L6, 13-of-14 bp-or-gh, and "exactly one genuine L6 ≈1.1%". Re-extracted programmatically
+  from the 18 raw surveyor transcripts, every one of those four is wrong: **104** facts (the digest
+  lost 9), nominal L6 **19/104 = 18.3%**, bp-or-gh **14/19 = 73.7%**, and TRUE L6 **0/104 = 0.0%**
+  — there is not one unclassifiable command in the corpus. The cause is the finding: the digest
+  levelled a hand-normalised PARAPHRASE of its own corpus. 27 of its 95 strings appear nowhere in
+  the survey output, real paths were replaced with a literal `x` placeholder, and `cd <path> &&`
+  prefixes were STRIPPED — which is exactly the wrapper `headToken` cannot see past, so the
+  normalisation silently converted L6 rows into L3 rows. The digest measured its own typing. The
+  predeclared prediction of ~85% L6 is REFUTED, and it was predeclared in a form that could not be
+  retrofitted, which is the discipline working. The honest name stays long: "fill rate under the
+  wave-2-shipped, already-rerun-tutored prompt" — four live instruction sites push on rerun and
+  this wave added zero, so it is a clean read of the shipped prompt but NOT evidence about organic
+  agent behaviour.*
+
+- **D37 — D21's entropy statistic is RETIRED and may not be quoted again; D21's DECISION stands.**
+  The figures struck: entropy 1.118 of 2.322 bits, `L1+L2 = 1.8%`, buckets `{L1:8, L2:27, L3:1047,
+  L6:820}` summing to 1902. *Why: it is not re-derivable from anything committed. The extraction
+  script that produced it is absent from `tooling/grip/` and from that path's entire history, and
+  it cannot be reproduced by the shipped grammar because `deriveLevel` reads a `rerun` field alone
+  while the 1,902-entry `evidence` array has no command field at all — applying the real
+  `deriveLevel` to what those rows actually carry returns L6 for 1902 of 1902. That is an L6 claim
+  by this epic's own grammar, sitting inside the epic's own trial-cutting rationale, and it gets
+  the same treatment D23 gave the retired 676/24% figure. The QUALITATIVE finding survives — L1+L2
+  near-zero, L3/L6 dominant — confirmed independently by two methods. The wave-2 corpus census
+  (L1 33 / L2 31 / L3 336 / L6 252 over the 652 `proofs`) is a DIFFERENT corpus and remains valid;
+  any census verb must name which corpus it read.*
+
+- **D38 — The census verb must classify SILENCE-AS-ANSWER explicitly, and the answer-DRIFT rate is
+  UNMEASURED and may not be quoted.** *Why: 7 of 104 facts have empty output as their CORRECT
+  answer — 4 `rc=0`-with-no-stdout byte-identity proofs and 3 `grep`-`rc=1` absence proofs — so a
+  naive `rc==0 && stdout` predicate scores all 7 as decayed and INVERTS three of them, on a clean
+  corpus. The decay axis was insurance and it paid: over 406 screened commands, **59.4% still
+  answer, 22.4% have genuinely decayed** (a FLOOR — the 245 excluded commands are systematically
+  more decay-prone), and **13.3% were never executable commands at all**. The single most valuable
+  specimen is an absence claim that has gone false: `git ls-tree -r origin/main | grep -i
+  "internal/scaffy"` recorded "(empty output — no matches)" and today returns 58 files — a
+  value-storing index would have got that wrong where a recipe-storing index gets it right, which
+  is the strongest empirical argument for D26 anyone has produced. The drift rate is a different
+  matter: the 154 mismatches measured are truncation-bound, not drift, because only the first 200
+  chars of stdout were captured. It is a BOUND, not a rate, and it is filed as backlog rather than
+  quoted.*
+
+- **D39 — The write seam gets a safety gate BY INJECTION.** `admitRecipe` takes an optional `screen`
+  predicate and rejects a command the census screen would refuse to run, under a named class. The
+  ledger imports nothing from the screen module; the CLI wires them together. *Why: `admitRecipe`
+  never calls any safety check, so `systemctl stop bp-crux-parent` and `rm -rf
+  /opt/barkpark/releases` are both ADMITTED as recipes today — and a recipe is precisely a thing
+  this epic exists to make agents re-run cheaply and often. The danger is not only that the census
+  re-executes historical commands; it is that the store will happily persist an outage-capable one
+  for someone else to re-run later. Injection rather than import keeps the two slices' files
+  disjoint so they build in the same round.*
+
+- **D40 — Merge is proven by CONTENT on `origin/main`, never by commit ancestry, and the ten
+  done-but-open slices are closed on that basis.** *Why: all 7 distinct branch-tip SHAs cited by
+  those tasks return `is-ancestor exit=1` against `origin/main` — squash-merge erased ancestry for
+  every one — while each slice's characteristic exports are present verbatim on main. An
+  ancestry check would have produced 10 false negatives; a content check produced 10 true
+  positives. The urgency is not hygiene: all 10 currently surface in `bp task ready --all` with
+  claims expired since 2026-07-20T13-16Z, so `bp task next` would hand a builder already-shipped
+  work today. Note also that the verification recipe circulated for this check was itself broken —
+  it read a `tasks`/`documents` key where the API returns `docs`, and omitted `--all` against a
+  905-row pool, so run verbatim it printed an empty list and read as good news. A vacuous green.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -259,7 +436,37 @@ untouched; the recipe ledger simply never joins that store.
 | 7 | `tgw2-acceptance-suite` — fail-before / pass-after / never-cry-wolf, every verdict class proven able to fail | 2 | large | tooling/grip |
 | 8 | `tgw2-verify-writes-back` — the narrow verify-writes / Decide-commits carve-out (D27) | 2 | medium | .claude/workflows |
 
-Later waves, in the ratified order: **wave 3** survey-reads-leads; **wave 4+** the server-side
+### Wave 3 — the CLI is the seam. Parent task `truth-grip-epic`. Paper `source-of-truth-grip-wave-3-2026-07-21`.
+
+**The realisation that reframes the epic.** D19 permanently forbids the workflow JS from reading a
+file, importing a module, running a command or reading a clock. Wave 2 correctly wired the only
+thing the orchestrator CAN do — a grammar-free demote. But the orchestrator was never the right
+consumer. Every phase of this loop dispatches an AGENT WITH A SHELL, and that premise was re-run at
+Digest rather than assumed: D19's vm-sandbox scopes to the `.workflow.js` file, not to dispatched
+agents; Verify's default dispatch carries no isolation key and runs in the shared checkout exactly
+as Decide does; a probe write under `tooling/grip/ledger/` succeeded. Wave 1 shipped a substrate
+nothing called; wave 2 made the one caller D19 permanently cripples call it; wave 3 hands it to the
+caller that can actually do the work.
+
+**Conceded openly:** everything the builders produce goes live NEXT wave, not this one. The
+phase-agent choreography rehearsed inside this wave is a REHEARSAL and the debrief must label it as
+one.
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw3-census-screen` — the fail-closed allowlist screen, its own module, three layers (D29) | 1 | large | tooling/grip |
+| 2 | `tgw3-level-compound-fix` — un-gate the remote checks, strip wrappers, bp/gh → L2, parseability floor (D30) | 1 | large | tooling/grip |
+| 3 | `tgw3-ledger-honesty` — the injected `now` bound, Z-only, injected safety screen, `RIVAL-METHOD` (D31/D33/D39) | 1 | medium | tooling/grip |
+| 4 | `tgw3-prompt-seam` — the Verify carve-out + Decide's ledger commit + the stranded-file ruling (D35) | 1 | medium | .claude/workflows |
+| 5 | `tgw3-write-verb` — the WRITE CLI + the subject/quantity minting transformer (D32) | 2 | large | tooling/grip |
+| 6 | `tgw3-census-verb` — the decay census, silence-as-answer, its honest 29.8% reach (D38) | 2 | large | tooling/grip |
+| 7 | `tgw3-leads-verb` — the read path, one command, one screen, staleness called out, no answer ever shown | 3 | medium | tooling/grip |
+
+Rounds 2 and 3 do NOT dispatch this run. `tgw3-write-verb` waits on 1 and 3 (it wires the screen
+into the write seam and routes the renamed fold); `tgw3-census-verb` waits on 1; `tgw3-leads-verb`
+waits on 5, because both edit `ledger.mjs`'s CLI routing.
+
+Later waves, in the ratified order: **wave 4+** the server-side
 `type:fact` backend, whose grammar must live in an Elixir `before_publish` hook because schema-v2's
 cross-field `validations:` slot is parsed but inert.
 
