@@ -837,6 +837,111 @@ Felix doctrine violation). A 6-assignment RUN-verify fleet collapsed all three t
   `api/lib/barkpark/tenancy/**` or the W6 search read-path. The W7-fenced `tenancy_delete_workspace_test.exs`
   is proven NOT the leaker (zero `DeployRunner`/`node_command` refs) and stays off-limits regardless.
 
+## Wave 13 Decisions (2026-07-21) — THE SEAL WAVE: delta-audit or prove-clean
+
+Wave Paper: **`felix-pristine-wave-13-2026-07-21`** (guerrilla, style=article). The 12 founding
+domains + Part XI + waves 4–12 are closed, and **Wave 12's CSP + SAML-SLO-nonce slice (PR #3545,
+`4c4051308`) is MERGED and LIVE on origin/main** — the epic's `wave_status` was STALE. Main is GREEN
+on the authoritative Test (Elixir 1.18.1 / OTP 27.0) gate. So the finish-set is tiny; the RISK is a
+**seal by assertion**: **222 in-fence files under `api/lib/barkpark` changed on origin/main since the
+2026-07-10 founding cutoff and were NEVER swept by felix** (epic_fleet/cycle_fleet — 17 brand-new
+files, new content/tasks/search logic, new Oban workers, new plugin capability code). Wave 13 runs a
+WIDE fresh audit over that delta under the named scar-classes, then dispatches only the HONEST yield.
+13 survey scouts + a 6-assignment RUN-verify fleet (telemetry query counts, a live ArgumentError
+stacktrace, `sobelow`/`mix test` output) proved the delta is largely already-swept-or-clean and yielded
+**6 improvement-only code slices + 1 finish doc slice** — the count the survey honestly produced, NOT a
+forced 8. The epic seals either way: the delta got a REAL look.
+
+- **D77 — Wave 13 = the SEAL wave via delta-audit; the seal rests on a look, not an assertion.** Why:
+  the RUN-verify pattern held (~2 baked premises overturned per wave) — the delta was real, not a fig
+  leaf. The improvement-only doctrine forbids manufacturing vacuous-green churn to hit a quota, so the
+  8-slice budget is a CEILING the survey FILLS with real findings; it filled to 6+1. Both rivals lose:
+  a literal 8-slice fresh audit re-sweeps closed ground or builds the watch-items doctrine refused 5×;
+  a 1–2-slice minimal finish seals by assertion over 222 un-audited files. The finish-set runs in
+  parallel so the epic closes regardless of yield.
+- **D78 — SIX round-1 code slices, all file-disjoint, all opus (Fable spend-capped), each
+  mutation-proven fail-before.** (1) **pulse dashboard_live mount-gate** — the #2402 connected?-mount
+  scar's unswept remainder (f27623fdf swept 5 LiveViews, MISSED pulse + github plugin LVs);
+  load_rows/load_vitals/safe_storage run on the discarded dead render. NOT wave-12-deferred (the wave-12
+  paper has 0 mentions). (2) **github ops_live mount-gate** — same scar, Health.snapshot's 5 probes
+  unconditional. (3) **board_live field-visibility seal** — load_peek→fetch_peek_doc raw `Repo.one`
+  hand-picks task-content fields, 0 Envelope calls, ungated mount; LATENT fail-open (no task field
+  declares visibility TODAY) → fail-closed hardening routing each peek field through
+  `Envelope.field_readable?` (mirror `tasks/query.ex` measure_field_readable?); fail-before CONSTRUCTS a
+  private task-schema fixture. (4) **content/expand.ex N+1** — MEASURED (N=1→4, 6→19, 16→49;
+  documents==N, schema==2N+1), MUTATION-proven (stub→0); batch via existing
+  `Content.get_documents_by_ids/3` + memoize ref_schema like `load_schemas/3`; live on delta-touched
+  `query_controller` ?expand=; refutes d06's 'no per-row loops'. (5) **indx/persistence.ex corrupt-skip**
+  — `load_all/0` RAISES `ArgumentError` (`:maps.from_list([nil,…])`) on any corrupt `.term`, contradicting
+  its own 'skipped (logged)' moduledoc; RUN-proven; aborts `Recovery.recover` for EVERY scope that boot.
+  (6) **tasks/claim_fence.ex UUID guard** — `verify/2` interpolates raw `task_id` into a `:binary_id` PK
+  after only `is_binary`, raising `Ecto.Query.CastError` in violation of its `{:ok}|{:error}` @spec; a
+  reproducible UNIT red today (no live integration trigger — callers pass UUID-typed ids), a small
+  defense-in-depth that makes the named contract-violation impossible.
+- **D79 — Ruled NOT ripe (recorded, NOT built — no reproducible red-before; improvement-only refuses
+  each).** `staleness_live.load_books` unbounded `Repo.all` (DOCUMENTED deliberate flat-posture console;
+  bounding fails closed) and `tasks/board.ex.load_task_docs` unbounded (consumer already #2402-gated,
+  defensive-only) → backlog `task-felix-w13-bounded-read-watch`. `cycle_fleet reconcile/1` per-row
+  get_result (cold bounded admin path, redundant re-query, no 500) → `task-felix-w13-cyclefleet-reconcile-nplus1`.
+  `bulldocs/event.ex` missing `foreign_key_constraint` (ids DB-resolved, no raw-input path reachable) →
+  `task-felix-w13-bulldocs-event-fk-constraint`. Merged migration `20260719010000` (correlated-subquery
+  content backfill + DDL in one txn — the 25-min-outage landmine class) is ALREADY MERGED → no in-fence
+  fix; growth watch `task-felix-w13-cyclecorrection-migration-growth-watch`.
+- **D80 — New ground proven CLEAN with evidence (the seal rests here, not on assertion).** epic_fleet/
+  cycle_fleet (17 new files): every raw-input `:binary_id` query is `Ecto.UUID.cast`/`nullable_uuid`-guarded;
+  hot paths batch via single LEFT JOIN; `plugins/capabilities.ex` + `tasks/schema.ex` are DB-free (0
+  `Repo.`); zero Envelope surface. schema-v2 clean (`"source"` is the documented permissive v1-leaf
+  catch-all; no new field type; no JSON schema in the delta adds private/readable_by). changeset/FK-abort
+  discipline holds across all delta transaction sites (Repo.rollback everywhere a changeset writes).
+  The error-emitter fork set (16 barkpark_web files still hand-rolling `%{error:{code,message}}`) is
+  **out of fence** — console-hardening's lane; the stale query_controller/legacy_controller pair named in
+  memory is already unified via FallbackController.
+- **D81 — Finish-set (parallel with the build slices; closes the epic).** (a) CSP crit-4
+  (`task-0fc9d55c4725ab92`, 3/4): the literal `mix sobelow --skip --exit Low green` is STRUCTURALLY
+  UNSATISFIABLE — ~137 pre-existing unrelated Low findings (D41 baseline drift) keep exit=1 forever with
+  0 Config.CSP. **Re-worded (this wave) to content-proof: PR #3545 merged-ancestor + 0 Config.CSP findings
+  + Elixir Test green**; LEAD closes on that, not the exit code. (b) `task-felix-sobelow-gate-blocking-eval`:
+  STAY-ADVISORY verdict (D75 flip precondition baseline→0 still at 137) — recorded via doc slice
+  `task-felix-w13-sobelow-stay-advisory-verdict` (docs/ops/merge-gates.md). (c) The 5 vacuous-green
+  watch-items (sweep-worker-unique, pusher-timeout, auth-genserver-async, runtime-env-integer,
+  suite-seed) + 2 fenced (studio-chat-onexit, tenancy-media-cdn-onexit) hold their D57/D63/D65/D75
+  verdicts unchanged on origin/main → REVIEW/lead retires them won't-build citing each verdict verbatim
+  (tenancy-media fence inferentially lifted: no open tenancy PR, cloud-build children unclaimed — retire
+  with note). (d) `gr-blk-studio-presence-perf-flake` was MIS-PARENTED under felix — **re-parented this
+  wave to gui-remake (`task-47bc4168392dec17`)** via `bp task move`; it is a Studio presence-perf flake,
+  not a felix finding.
+- **D82 — Guardrails (unchanged from D76): all builders opus (Fable spend-capped — MODEL CONSTRAINT is
+  hard), branch from ORIGIN/main (local checkout diverges), isolated worktrees, `CC=/usr/bin/clang`, `.ex`
+  PRs WAIT for the Elixir Test gate.** FENCE this thread: `api/lib/barkpark` (CMS core) + `api/test` ONLY
+  — strictly OFF `api/lib/barkpark_web/live/studio` (console-hardening), `tooling/grip/` (truth-grip),
+  `scripts/pds-*` + `tenancy/workspace_bundle` (PDS crown), `cloud/`, and the standing chat-tui /
+  structure fences. The 6 code slices are file-disjoint (pulse dashboard / github ops_live / tasks
+  board_live / content expand / indx persistence / tasks claim_fence, each with its own test) + the doc
+  slice (docs/ops/merge-gates.md) → all 7 dispatch in parallel, round 1.
+
+### Wave 13 roadmap (7 slices, round 1, parallel — disjoint files)
+
+1. **[P2] pulse dashboard mount-gate** — `task-felix-w13-pulse-dashboard-mount-gate` — opus. Files:
+   `api/lib/barkpark/plugins/pulse/web/dashboard_live.ex` + its test. Gate:
+   `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/pulse/dashboard_live_test.exs`.
+2. **[P2] github ops_live mount-gate** — `task-felix-w13-github-opslive-mount-gate` — opus. Files:
+   `api/lib/barkpark/plugins/github/web/ops_live.ex` + its test. Gate: `mix test .../github/web/ops_live_test.exs`.
+3. **[P1] board_live field-visibility seal** — `task-felix-w13-boardlive-envelope-fieldvis-seal` — opus.
+   Files: `api/lib/barkpark/plugins/tasks/web/board_live.ex` + its test. Gate: `mix test .../tasks/web/board_live_test.exs`.
+4. **[P1] content/expand.ex N+1 batch** — `task-felix-w13-expand-nplus1-batch` — opus. Files:
+   `api/lib/barkpark/content/expand.ex` + `api/test/barkpark/content/expand_test.exs`. Gate: `mix test .../content/expand_test.exs`.
+5. **[P1] indx persistence corrupt-skip** — `task-felix-w13-indx-persistence-corrupt-skip` — opus. Files:
+   `api/lib/barkpark/plugins/indx/persistence.ex` + its test. Gate: `mix test .../indx/persistence_test.exs`.
+6. **[P3] claim_fence UUID guard** — `task-felix-w13-claimfence-uuid-guard` — opus. Files:
+   `api/lib/barkpark/tasks/claim_fence.ex` + NEW `api/test/barkpark/tasks/claim_fence_test.exs`. Gate: `mix test .../tasks/claim_fence_test.exs`.
+7. **[P2, doc] sobelow stay-advisory verdict** — `task-felix-w13-sobelow-stay-advisory-verdict` — opus.
+   Files: `docs/ops/merge-gates.md`. Gate: `grep -i 'stay advisory' docs/ops/merge-gates.md` + `bash scripts/check-doc-budgets.sh`.
+
+Backlog on the ledger after this wave (all published children of the epic): `task-felix-w13-bounded-read-watch`,
+`task-felix-w13-cyclefleet-reconcile-nplus1`, `task-felix-w13-bulldocs-event-fk-constraint`,
+`task-felix-w13-cyclecorrection-migration-growth-watch`. Finish-set handled outside build slices: CSP
+crit-4 re-worded (lead closes), gr-blk re-parented out, 7 watch/fenced items to retire at review.
+
 ## Wave 12 Decisions (2026-07-16) — EMPTY THE NAMED-FAILURE BACKLOG, HONESTLY
 
 Wave Paper: **`felix-pristine-wave-12-2026-07-16`** (guerrilla, style=article). Wave 11 LANDED: the
@@ -1019,6 +1124,23 @@ build: pulse keep-serial, N=2000 measurement, + 4 ledger restamps.
   **Next wave (14 / seal):** merge #5468–#5474 (Elixir-gated), close the 7 merge-gate criteria, execute
   the D81 retirements, then the epic is one honest step from a seal — the delta-audit found no un-fixed
   ripe named-failure beyond these 7 (new fleet/capabilities/schema ground proven clean, D80).
+
+- **Wave 13 — 2026-07-21 — DECIDED (building).** Ratified D77–D82. The SEAL wave. Reconciled the stale
+  `wave_status`: CSP #3545 is MERGED/LIVE on origin/main. A wide delta-audit (13 surveys + 6 RUN-verifiers)
+  of the 222 never-felix-swept in-fence files yielded **7 round-1 slices, all opus, all file-disjoint,
+  parallel**: pulse dashboard mount-gate (`task-felix-w13-pulse-dashboard-mount-gate`), github ops_live
+  mount-gate (`task-felix-w13-github-opslive-mount-gate`), board_live field-visibility seal
+  (`task-felix-w13-boardlive-envelope-fieldvis-seal`), content/expand.ex N+1 batch
+  (`task-felix-w13-expand-nplus1-batch`), indx persistence corrupt-skip
+  (`task-felix-w13-indx-persistence-corrupt-skip`), claim_fence UUID guard
+  (`task-felix-w13-claimfence-uuid-guard`), sobelow stay-advisory doc verdict
+  (`task-felix-w13-sobelow-stay-advisory-verdict`) — each with a mutation-proven fail-before, gate
+  `CC=/usr/bin/clang mix test <file>`. New ground (epic_fleet/cycle_fleet/capabilities/tasks-schema)
+  proven CLEAN with evidence (D80). Backlog seeded: bounded-read-watch, cyclefleet-reconcile-nplus1,
+  bulldocs-event-fk-constraint, cyclecorrection-migration-growth-watch. Finish-set: CSP crit-4 re-worded
+  to content-proof (lead closes); `gr-blk-studio-presence-perf-flake` re-parented OUT to gui-remake; 7
+  vacuous-green/fenced watch-items to retire at review. Fable spend-capped — ALL builders opus. Grade:
+  pending build+review.
 
 - **Wave 12 — 2026-07-16 — DECIDED (building).** Ratified D68–D76. TWO opus build slices under
   `task-96a908af98698118`, both linked to `felix-pristine-wave-12-2026-07-16`, file-disjoint (parallel):

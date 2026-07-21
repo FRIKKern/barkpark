@@ -1,0 +1,25 @@
+{
+  "run_id": "grip-20260721T141933Z",
+  "recipes": [
+    {
+      "subject": "api/lib/barkpark/plugins/indx/persistence.ex",
+      "quantity": "grep:-n",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n ':error -> nil\\|into: %{}' api/lib/barkpark/plugins/indx/persistence.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/plugins/indx/persistence.ex"
+      ],
+      "observed_at": "2026-07-21T14:19:33Z"
+    },
+    {
+      "subject": "api/test/barkpark/plugins/indx/persistence_test.exs",
+      "quantity": "grep:-n",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'load_all\\|corrupt' api/test/barkpark/plugins/indx/persistence_test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/test/barkpark/plugins/indx/persistence_test.exs"
+      ],
+      "observed_at": "2026-07-21T14:19:33Z"
+    }
+  ]
+}
