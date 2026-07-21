@@ -65,3 +65,48 @@ jobs:
       # the token ramps, and the cloudChrome bridge have landed and it exits 0.
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
+
+  # ── cssom-parity — the only check here that PARSES the artifact ──────────────
+  # Every other CSS gate in this repo asks a question about the FILE: it regexes
+  # app.css, or scans its comment nesting, or reads `--x:` declarations out of
+  # three token blocks. None of them builds a CSSOM. That is exactly how #4592
+  # stayed green for five waves — a lost `/*` opener turned a prose paragraph
+  # into CSS, error recovery discarded tokens through the next `{…}` block, and
+  # `.modal-root` (a shared modal primitive, 15+ call sites) never reached the
+  # browser. Every modal in the console rendered unpositioned under a fixed
+  # scrim, in production, while three green gates certified it.
+  #
+  # SEPARATE JOB, NOT A FOURTH STEP ABOVE (epic decision D17). console-unit pins
+  # node-version: 20; this instrument speaks CDP over a bare global WebSocket,
+  # stable-by-default only from Node 22, so a fourth step would inherit 20 and
+  # fail. Bumping console-unit to 22 instead would silently change the runtime
+  # under the 415-test __app.test.mjs harness AND __css_check.mjs — a risk-bearing
+  # edit to two working gates to buy nothing. A separate job also earns its own
+  # name in branch protection and runs its ~26s in parallel.
+  #
+  # It inherits the `on:` path filters above verbatim — they are workflow-level,
+  # and the header note about keeping every read path in both filters applies to
+  # this job too (it reads cloud/priv/static/app.css).
+  cssom-parity:
+    name: CSSOM parity (authored CSS vs browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No setup-chrome action (D18). ubuntu-latest already ships Google Chrome
+      # (measured: 150.0.7871.114, executable at all four of findChrome()'s Linux
+      # candidate paths, full parity run 5.9s). findChrome() honours CHROME first
+      # but does NOT read the runner's own CHROME_BIN, so pin it explicitly:
+      # a future runner image dropping the binary then exits 2 as a GUARD naming
+      # the missing path, instead of silently falling through to a different
+      # browser. Both sides go through one normalise(), so a floating Chrome
+      # version can only cost sensitivity, never manufacture a false miss.
+      - name: CSSOM parity gate
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: node cloud/priv/static/__preview__/cssom-parity.mjs

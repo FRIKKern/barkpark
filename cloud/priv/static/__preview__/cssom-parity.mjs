@@ -94,13 +94,39 @@
 //    CHROME=/path/to/chrome  node cssom-parity.mjs
 //
 //  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
-//  MISS, or the run could not be completed · 2 = GUARD (no Chrome, no stylesheet)
-//  refused before anything is spawned.
+//  MISS or a breached count floor — a fact about the CSS · 2 = GUARD (no Chrome,
+//  no stylesheet, wrong Node) — a fact about the ENVIRONMENT, refused before
+//  anything is spawned. The 1/2 split is load-bearing, see D19 below.
 //
-//  UNWIRED FROM CI ON PURPOSE (GR93(b)) — same shape as modal-oracle.mjs. It
-//  never gates the epic seal. Wiring it is the successor epic's first task, and
-//  it should be wired only once it has survived a wave of real use, because a
-//  gate promoted before it is trusted is a gate that gets disabled.
+//  WIRED INTO CI (cch-w1-cssom-ci-wiring, epic decisions D17-D20). It runs as its
+//  OWN job in .github/workflows/console-harness.yml — deliberately not a fourth
+//  step of `console-unit`, which pins node-version: 20 and would fail here (D17).
+//  It had been unwired on purpose (GR93(b)): a gate promoted before it is trusted
+//  is a gate that gets disabled. It has now survived a wave of real use.
+//
+//  NOTE THE LIMIT, HONESTLY: main is NOT branch-protected, so a red here reds the
+//  PR page but does not BLOCK the merge until a human registers this check by name
+//  in branch-protection settings. That registration is a human gate, not something
+//  this file or that workflow can claim.
+//
+//  D19 — AN ENVIRONMENT FAILURE MUST EXIT 2, NOT 1. This instrument speaks CDP over
+//  a bare global `WebSocket`, stable-by-default only from Node 22. Under Node 20 it
+//  used to reach `Cdp.connect` — AFTER Chrome had already launched and answered
+//  /json/version — throw `WebSocket is not defined`, and exit **1**: the code this
+//  file reserves for "the CSS is broken". A misconfigured runner therefore reds a PR
+//  with a message that reads like a stylesheet defect, and leaks the launched Chrome
+//  through the error path. The preflight below refuses on the GUARD path instead,
+//  before anything is spawned. For an epic whose frame is "the console stops lying",
+//  a gate that misreports its own environment failure as a content failure is
+//  self-defeating.
+//
+//  D20 — THE COUNT FLOOR closes a measured blind spot in the mutation proof below.
+//  The proof only ever exercised the DE-OPENED direction (a `/*` removed). Going the
+//  other way — INSERTING a stray `/*` before `.modal-root` — passed with MISSES 0:
+//  the brace-tracking parser and Chrome both swallow the commented-out region
+//  symmetrically (measured 1201 heads → 1188 on BOTH sides), so the diff stays empty
+//  while 13 rules silently leave the stylesheet. Equality alone cannot see a
+//  symmetric loss; only an absolute floor can. See MIN_AUTHORED_HEADS.
 //
 //  ZERO DEPENDENCIES — Node 22 native fetch + native WebSocket speak CDP
 //  directly, matching __preview__'s doctrine. It reads the file from disk rather
@@ -133,6 +159,29 @@ const PARSE_CAP = 20000;
 const BROWSER_CLOSE_CAP = 2000;
 const TERM_POLL_CAP = 3000;
 const KILL_POLL_CAP = 2000;
+
+// ── D20: the count floor — a RATCHET, and deliberately a tight one ────────────
+// `heads == CSSOM rules` is a SYMMETRIC assertion, so it cannot see a loss that
+// hits both sides equally — which is exactly what commenting out a region does.
+// This is the only absolute in the file, and it exists to make that one blind
+// spot visible.
+//
+// WHY NO SLACK. The tempting version is `baseline - 20` so ordinary churn never
+// trips it. But any margin M re-opens the identical hole for every swallow of
+// M rules or fewer — the same defect, merely quieter, which is the worse of the
+// two failure modes. So the floor sits ON the measured count.
+//
+// THIS MEANS DELETING CSS REDS THE GATE, AND THAT IS THE INTENDED COST. Adding
+// rules never trips it (the check is `>=`). Removing them is rare, and when it
+// is deliberate the fix is this one line, lowered in the same reviewed commit as
+// the deletion. A red here is never "the gate is broken" — it is "the stylesheet
+// shrank; say whether you meant it."
+//
+// Measured 2026-07-21 on app.css @ sha256 bdd604164450…: 1201 authored heads,
+// 1201 CSSOM rules, 1170/1170 flattened, MISSES 0 (Chrome 150.0.7871.129,
+// node v22.22.0). The GR100 census read 1189; #4733 then gave six shipped class
+// families their CSS. Do not "restore" an older number from a comment upstream.
+const MIN_AUTHORED_HEADS = 1201;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -356,6 +405,23 @@ class Cdp {
 // ── 5. the run ───────────────────────────────────────────────────────────────
 
 async function main() {
+  // D19 — ENVIRONMENT PREFLIGHT, on the GUARD path (exit 2), before anything is
+  // spawned. Capability-tested rather than version-parsed: what this instrument
+  // actually needs is the global, and a `process.version` regex would both lie
+  // about a backported build and go stale. Refusing HERE (rather than letting
+  // Cdp.connect throw) is also what stops a Node-20 run from leaking the Chrome
+  // it had already launched.
+  if (typeof WebSocket === "undefined") {
+    process.stderr.write(
+      `!! GUARD (exit 2): no global WebSocket in this Node build (running ${process.version}).\n` +
+        `   This instrument speaks CDP over a native WebSocket, stable-by-default from Node 22.\n` +
+        `   THIS IS AN ENVIRONMENT FAILURE, NOT A STYLESHEET DEFECT — app.css was never read,\n` +
+        `   no parity claim is being made about it either way. Do not go looking for a CSS bug.\n` +
+        `   Fix the runtime: node-version: 22 in the workflow, or nvm use 22 locally.\n`,
+    );
+    process.exit(2);
+  }
+
   const cssPath = path.resolve(process.env.CSS || DEFAULT_CSS);
   if (!fs.existsSync(cssPath)) {
     process.stderr.write(`!! GUARD (exit 2): no stylesheet at ${cssPath}\n`);
@@ -481,8 +547,22 @@ async function main() {
     cssom = collected;
   } catch (err) {
     await teardown();
-    process.stderr.write(`\n!! PARITY ERROR: ${err && err.message ? err.message : err}\n   teardown ${teardownMs}ms\n`);
-    process.exit(1);
+    // D19, second line of defence. A ReferenceError escaping this block is a
+    // missing global — an environment fact, never a CSS fact — so it exits on the
+    // GUARD path like the preflight above. The preflight already catches the one
+    // known case (WebSocket); this keeps a FUTURE missing global from being
+    // reported to a reviewer as a stylesheet defect.
+    const envFailure = err instanceof ReferenceError;
+    const detail = err && err.message ? err.message : err;
+    process.stderr.write(
+      envFailure
+        ? `\n!! GUARD (exit 2): ENVIRONMENT — ${detail}\n` +
+            `   A required global is missing from this runtime. No parity claim was made about\n` +
+            `   the stylesheet. Fix the environment (Node 22+), not the CSS.\n` +
+            `   teardown ${teardownMs}ms\n`
+        : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
+    );
+    process.exit(envFailure ? 2 : 1);
   }
 
   await teardown();
@@ -494,8 +574,10 @@ async function main() {
   for (const [key, where] of authored) if (!cssomSet.has(key)) misses.push({ key, ...where });
 
   const wall = Date.now() - t0;
+  const floorBreach = heads.length < MIN_AUTHORED_HEADS;
+
   process.stdout.write(
-    `   authored rule heads   ${heads.length}\n` +
+    `   authored rule heads   ${heads.length} (floor ${MIN_AUTHORED_HEADS}${floorBreach ? " ← BREACHED" : ""})\n` +
       `   CSSOM style rules     ${cssom.rules.length}\n` +
       `   flattened selectors   ${authored.size} authored / ${cssomSet.size} CSSOM\n` +
       `   MISSES                ${misses.length}\n`,
@@ -516,12 +598,42 @@ async function main() {
     );
   }
 
-  if (misses.length === 0) {
+  // D20 — the count floor. FATAL, and checked independently of `misses`, because
+  // the whole point is the case where MISSES is 0 and the stylesheet is still
+  // missing rules. It is reported BEFORE the miss list: under a stray-`/*` insert
+  // this is the ONLY signal, and under a real swallow it is the more legible one.
+  if (floorBreach) {
+    const lost = MIN_AUTHORED_HEADS - heads.length;
+    process.stderr.write(
+      `\n!! COUNT FLOOR BREACHED: ${heads.length} authored rule heads, floor is ${MIN_AUTHORED_HEADS} (${lost} missing).\n\n` +
+        `   MISSES above may well be 0 and that 0 IS NOT A PASS. The authored-vs-CSSOM diff is\n` +
+        `   symmetric, so a region commented out by a stray \`/*\` opener vanishes from BOTH sides\n` +
+        `   at once and the diff stays empty while the rules leave the stylesheet. This floor is\n` +
+        `   the only assertion in this file that can see that.\n\n` +
+        `   TWO CAUSES, AND YOU MUST SAY WHICH:\n` +
+        `     1. A stray \`/*\` opener commented out a live region — a real defect, of the same\n` +
+        `        family as #4592. Find it: \`node cloud/priv/static/__css_check.mjs\` (E10), or\n` +
+        `        diff the comment openers against \`git show origin/main:cloud/priv/static/app.css\`.\n` +
+        `     2. You deliberately deleted ${lost} rule head(s). Then lower MIN_AUTHORED_HEADS to\n` +
+        `        ${heads.length} in cssom-parity.mjs, IN THE SAME COMMIT as the deletion, so the\n` +
+        `        ratchet stays honest and the next reader sees the count was reviewed.\n`,
+    );
+  }
+
+  if (misses.length === 0 && !floorBreach) {
     process.stdout.write(
       `\nPARITY PASS — every authored selector reached the CSSOM · ` +
         `${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
     );
     process.exit(0);
+  }
+
+  if (misses.length === 0) {
+    process.stderr.write(
+      `\nPARITY FAIL — count floor breached with 0 misses · ${(wall / 1000).toFixed(1)}s wall · ` +
+        `teardown ${teardownMs}ms\n`,
+    );
+    process.exit(1);
   }
 
   // Report GROUPED BY AUTHORED HEAD. One orphan-comment swallow fragments into
