@@ -2265,7 +2265,7 @@ const ROUND_TRIP_FIELDS = [
  */
 async function runRoundTrip(page, measureFace, run) {
   const widths = [];
-  let cells = 0, identicalCells = 0;
+  let cells = 0, identicalCells = 0, cellsWithdrawn = 0;
 
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
@@ -2322,6 +2322,20 @@ async function runRoundTrip(page, measureFace, run) {
       run, `round-trip post-dismiss at viewport ${width}px`,
       bucketPrecondition(width, stampAfter.real_inner_width, stampAfter.width_bucket_stamped));
 
+    // D171/D185 REACHES THE CELLS, NOT JUST THE WARNING. A width whose stamp
+    // disagreed with the raw band — on either leg — compared two readings that
+    // may describe DIFFERENT TIERS, so its cells are no evidence about
+    // round-trip fidelity. Counting them would let `returns_bit_identical` (the
+    // headline this wave exists to establish) be computed partly over a
+    // comparison of two different desks, which is the exact defect class the
+    // sweep's verdict withdrawal already refuses. Withdrawn cells report
+    // `identical: null` — never FALSE, the column may well have come back; we
+    // simply did not measure it at the tier we name — and they are counted
+    // separately so the withdrawal is visible rather than a quietly shrinking
+    // denominator.
+    const widthPreconditionOk =
+      preBefore.bucket_precondition_ok && preAfter.bucket_precondition_ok;
+
     const faces = [];
     for (const face of FACES) {
       const after = await measureFace(face);
@@ -2330,12 +2344,28 @@ async function runRoundTrip(page, measureFace, run) {
         const b = get(before[face.id]), a = get(after);
         if (b !== a) diffs.push({ field: name, before: b, after: a });
       }
-      cells += 1;
-      if (diffs.length === 0) identicalCells += 1;
+      if (widthPreconditionOk) {
+        cells += 1;
+        if (diffs.length === 0) identicalCells += 1;
+      } else {
+        cellsWithdrawn += 1;
+      }
       faces.push({
         face: face.id,
-        identical: diffs.length === 0,
+        identical: widthPreconditionOk ? diffs.length === 0 : null,
         diffs,
+        ...(widthPreconditionOk ? {} : {
+          withdrawn_for_bucket_precondition: {
+            expected_raw_band: preBefore.expected_raw_band,
+            width_bucket_stamped: preBefore.width_bucket_stamped,
+            recomputable_identical: diffs.length === 0,
+            reason:
+              'BUCKET PRECONDITION FAILED on this width, so this cell is not counted toward ' +
+              'cells/identical_cells. The raw before/after figures are intact and the ' +
+              'recomputed answer is preserved above, but the two legs may describe different ' +
+              'tiers, which makes them no evidence about round-trip fidelity (D171/D185).',
+          },
+        }),
         before: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(before[face.id])])),
         after: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(after)])),
       });
@@ -2384,7 +2414,17 @@ async function runRoundTrip(page, measureFace, run) {
     compared_fields: ROUND_TRIP_FIELDS.map(([n]) => n),
     cells,
     identical_cells: identicalCells,
-    returns_bit_identical: cells > 0 && identicalCells === cells,
+    // COVERAGE IS PART OF THE CLAIM. `returns_bit_identical` gates the terminal
+    // run, so it may never read true off a PARTIAL sweep: withdrawing a width
+    // silently would shrink the denominator until the survivors all agreed and
+    // the headline read true over a fraction of the desk. That is D184's
+    // disease in a different organ — a thing that did not happen, certified as
+    // a pass. Full coverage or the claim is not made. (`cells > 0` already
+    // refuses the all-withdrawn case, where the denominator reaches zero.)
+    cells_withdrawn_for_bucket_precondition: cellsWithdrawn,
+    widths_withdrawn_for_bucket_precondition:
+      widths.filter((w) => !w.bucket_precondition_ok).map((w) => w.viewport_px),
+    returns_bit_identical: cells > 0 && identicalCells === cells && cellsWithdrawn === 0,
     widths,
     note:
       'Bit-identical means EVERY compared field matched exactly — not "within tolerance". These are ' +
@@ -3183,6 +3223,8 @@ function writeRunArtifact(run, outPath) {
           returns_bit_identical: run.round_trip.returns_bit_identical ?? null,
           identical_cells: run.round_trip.identical_cells ?? null,
           cells: run.round_trip.cells ?? null,
+          cells_withdrawn_for_bucket_precondition:
+            run.round_trip.cells_withdrawn_for_bucket_precondition ?? null,
           dismiss_controls_used: run.round_trip.dismiss_controls_used ?? null,
           skip_reason: run.round_trip.skip_reason ?? null,
         }
@@ -3640,15 +3682,31 @@ export function printTable(run) {
     `(injected sheet removed, host and ::after computed styles identical before/after)`);
   if (run.round_trip) {
     const rt = run.round_trip;
+    // The verdict line must never read as a contradiction. With cells withdrawn
+    // you can have `identical === cells` AND `returns_bit_identical false` — the
+    // survivors all came back, but the sweep did not cover the desk. "THE COLUMN
+    // DOES NOT COME BACK" would be a FALSE accusation there: nothing drifted, we
+    // just did not measure everything. Three outcomes, three sentences.
+    const rtVerdict = rt.returns_bit_identical
+      ? 'the column comes back exactly'
+      : (rt.cells_withdrawn_for_bucket_precondition ?? 0) > 0 && rt.identical_cells === rt.cells
+        ? 'NO CLAIM — every measured cell came back, but the sweep is INCOMPLETE (see withdrawals below)'
+        : 'THE COLUMN DOES NOT COME BACK';
     L(`    ROUND TRIP           ${rt.ran
       ? `${rt.identical_cells} of ${rt.cells} cells returned BIT-IDENTICAL after ` +
-        `default -> open -> dismiss on the same page instance — ` +
-        `${rt.returns_bit_identical ? 'the column comes back exactly' : 'THE COLUMN DOES NOT COME BACK'}`
+        `default -> open -> dismiss on the same page instance — ${rtVerdict}`
       : `SKIPPED — ${rt.skip_reason}`}`);
     // D183: the grammar is printed BY WIDTH. One line per control actually used,
     // naming the widths it dismissed — never widths[0] speaking for the sweep.
     for (const u of rt.dismiss_controls_used ?? []) {
       L(`      dismissed via ${u.control} (${u.grammar}) at ${u.widths_px.join(', ')}px`);
+    }
+    // D171/D185: withdrawn cells are announced, never just missing from a total.
+    if (rt.ran && (rt.cells_withdrawn_for_bucket_precondition ?? 0) > 0) {
+      L(`      ${rt.cells_withdrawn_for_bucket_precondition} cell(s) WITHDRAWN at ` +
+        `${(rt.widths_withdrawn_for_bucket_precondition ?? []).join(', ')}px — the bucket ` +
+        `precondition failed there, so those legs may compare different tiers and are no ` +
+        `evidence either way. The fidelity claim is NOT made on a partial sweep.`);
     }
     if (rt.ran && !rt.returns_bit_identical) {
       for (const w of rt.widths) {
