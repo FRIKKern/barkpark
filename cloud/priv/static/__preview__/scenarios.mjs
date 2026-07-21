@@ -2783,6 +2783,26 @@ export function route(name, method, path, state) {
     }
     return { status: 200, body: { revoked: others.length } };
   }
+  // cch-w3 × cch-w2 (CROSS-SLICE). The live stream now opens in two steps: the
+  // SPA POSTs here for a single-use 60s ticket, THEN constructs an EventSource
+  // on it. Without this handler the mint falls through to the benign `/v1/` 200
+  // {} at the bottom of route() — which is `ok` but carries no `ticket`, so
+  // app.js reads the mint as FAILED, calls markEventsErrored() and raises a
+  // "Live updates interrupted" toast on EVERY scenario boot.
+  //
+  // That was invisible until this wave: the toast only became observable once
+  // the click oracle gave the shim a real innerHTML + isConnected, and it then
+  // broke `account-modal-2fa-badcode`, whose whole assertion is that a field
+  // error fires NO toast. Two individually-correct slices jointly producing a
+  // defect — the same shape the HEAD fence documents about Plug.Head.
+  //
+  // The ticket value is inert: the sandbox's EventSource is a stub that never
+  // opens, errors or delivers, so the stream stays silent and deterministic and
+  // the chip sits on its initial state. Modelled, not suppressed — an absent
+  // fixture would still be a lie about what the console does at boot.
+  if (p === "/v1/auth/sse-ticket" && method === "POST") {
+    return { status: 200, body: { ticket: "preview-sse-ticket", expires_in: 60 } };
+  }
   // gr-p5-account-2fa: the five password-free two-factor routes. Overridable per
   // scenario (d.twoFactorConfirm) so the 422 invalid_otp / not_enrolled arms are
   // reachable without a backend. The secret is a well-known RFC 4648 test vector.
