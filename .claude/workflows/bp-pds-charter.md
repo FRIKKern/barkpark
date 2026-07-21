@@ -1136,10 +1136,12 @@ prose that preceded it.
 
 - **PDS-D140 — CRITERION 10 WILL NEVER AUTO-STAMP.** `close.ex:344` auto-flips only criteria carrying
   `merge_gate: true`; crown criterion 10's keys are exactly `[criterion, evidence, met]`. The LEAD
-  must stamp index 10 explicitly with `--criterion-text` verbatim, or the crown sits at 10/11 forever
-  waiting on an automation that cannot fire. Conversely, once all 11 read met the cmux Stop hook WILL
+  must stamp index 10 explicitly with `--criterion-text` verbatim, or the crown sits at 11/12 forever
+  waiting on an automation that cannot fire. Conversely, once all 12 read met the cmux Stop hook WILL
   close the task without anyone typing it — so no criterion is stamped speculatively ahead of a green
-  rung.
+  rung. **ARITHMETIC CORRECTED IN WAVE 15 (was "10/11" and "all 11"): the crown carries TWELVE
+  criteria, indices 0–11** — census-confirmed `{met: 9, total: 12}` with 6, 10 and 11 unmet. A lead
+  reconciling the finish line against the original wording mis-counts by one.
 
 - **PDS-D141 — SOBELOW REDS ON MAIN ITSELF, IS ADVISORY, AND PDS BUILDERS INHERIT IT.** main's own
   `.sobelow-skips` pins `router.ex:2505` while the code reports `:2530` — reproduced identically on
@@ -3270,3 +3272,210 @@ first (`--plan`, `--only 0a,0b,7`, a scratch boot + `--only 0c`, a `bp` verb che
 MemAvailable read, a parked-bundle `.meta` check) — it costs zero export budget and decides whether
 the climb dispatches at all. `pds-w3-shares-fidelity` STAYS HELD behind the transcript: it moves the
 census baseline (PDS-D45).
+
+### Wave 15 — FIRE WHAT WAVE 14 BUILT, AND EXPECT THE REFUSAL (decided 2026-07-21, PDS-D250–PDS-D256, paper `pds-wave-15-2026-07-21`)
+
+The wave arrived as DERIVE-THEN-ARM. The ground fact is that `pds-w14-crown-fire` and
+`pds-w14-crown-collect-stamp` are both `open`, `claim:null`, 0/N met: **wave 14's rounds 2 and 3 were
+filed and never dispatched. Nobody ever pulled the trigger.** Verification then did something the
+direction did not plan for — it went and measured the thing the whole wave is gated on, and the
+answer was worse than any prior wave's estimate.
+
+- **PDS-D250 — THE FLOOR IS NOT CLEARING, AND D245's 76.2% IS SUPERSEDED. A COMMITTED STAND-DOWN
+  DATASET IS THIS WAVE'S FIRST-CLASS WIN.** D245 read 32/42 = 76.2% off a PARTIAL file (159 of 360
+  samples, no DONE sentinel) still inside a beam-RSS warm-up, and said so. Wave 15 took the completed
+  measurement D245 never had: a **gapless 1200-sample, 1 Hz, 1249-second (20.8 min) window** on
+  guerrilla yielded **862 build-idle draws and ZERO clearing 2200** — idle MemAvailable min/mean/max
+  **1343.77 / 1865.40 / 1948.13 MiB**, a hard ceiling **251.87 MiB below the floor at every single
+  sample**, longest contiguous clearing run **0 s** (there is no clearing draw to start one). Four
+  further independent live reads the same morning: **1857.92, 1707.36, 1897, 1903 MiB**, all
+  build-idle, all short. The recomputed full-dataset OLS (**slope −1.013, r −0.982, n=214**) confirms
+  D246's mechanism but the live points sit **280–520 MiB BELOW what either model predicts** — the
+  curve does not extrapolate out of its own window. **RULING: the expected outcome of this wave's arm
+  is a STAND-DOWN, and a committed refusal dataset IS the deliverable, not a consolation prize.**
+  Three consequences, each binding: **(a)** the draw budget goes UP — `MAX_DRAWS=2160` at
+  `INTERVAL=10` (a six-hour window, vs. the one-hour default), because standing down costs nothing
+  and a longer refusal is a RICHER dataset; **(b) the floor NEVER moves** — not by a flag, not by a
+  numerator, not "just for this run" (D232); **(c)** the fire slice's success condition is *the child
+  is armed and the turn ended*, never *the climb fired*. **This does not weaken the plan, because
+  D245's other half stands untouched: cond_b is a GATE, NOT A WATCHDOG.** MemAvailable is read ONCE
+  before the export and never re-read (D218), so a closing window **cannot fail the harness** — and
+  the failed-precondition `return 1` sits ABOVE the spend increment, so **a closed gate costs ZERO
+  attempts and arming is free.** Also newly measured and binding on the window: **leg B closes
+  independently of memory** — a probe caught `bp-site-build-*` running while memory read 1365 MiB,
+  six minutes after the same box read 1881 MiB with zero build units. The draw budget must span at
+  least one full site-build cycle, and a stand-down dataset that does not break out **per-leg**
+  refusal counts repeats an ambiguity no prior wave's data can resolve.
+
+- **PDS-D251 — RUNG 4 FIRES FULL-STRENGTH OR NOT AT ALL, AND THE FIX IS TWO ENV LINES, NOT A SCRIPT.**
+  The single highest-value finding of the wave, and exactly the "silent misfire in the handoff" the
+  direction's second attack predicted. The original crown brief's **W5-E amendment (PDS-D79/D80/D102)
+  requires `PDS_CONTROL_PG` EXPORTED and `PDS_AMMO_FILE` UNSET**, and **nobody carried it into the
+  detached-launcher era**: `grep -nE 'CONTROL_PG|AMMO'` over `pds-crown-launch.sh` returns NOTHING,
+  `pds-climb-preflight.sh` and `pds-crown-stamp.sh` likewise, and neither appears in
+  `pds-w14-crown-fire`'s eight criteria. The degradation is silent by construction —
+  `pds-pull-proof.sh:1730` gates the control on `[ -n "${PDS_CONTROL_PG:-}" ]` and the else-branch at
+  `:1743` prints **`instrument control: NOT RUN`** at INFO level with **no `return`**, so step 4
+  reaches a terminal PASS anyway. The practice died with the operator: `crown-transcript.txt:758` and
+  `-w8.txt:705` both carry `instrument control: PASSED`; the w10 transcript carries neither string.
+  **RULING: this is NOT a launcher defect and needs NO code change, because the fork is already
+  transparent** — proven by execution, `PDS_CONTROL_PG` and `PDS_AMMO_FILE` set in the ARMING shell
+  arrived **verbatim** at the harness across `fork → setsid → execvp → bash -lc → exec bash child.sh`
+  (the launcher exports its own five vars and **scrubs nothing**). The remedy is two lines in the same
+  shell as `arm`: `export PDS_CONTROL_PG=postgres` and `unset PDS_AMMO_FILE`. **`PDS_CONTROL_PG` is a
+  maintenance conninfo for a LOCAL Postgres the scan CREATEs and DROPs a throwaway database in — it
+  points at NO Barkpark database, and aiming it at guerrilla is a category error** (`pds-secret-scan.sh:297`
+  defaults it to the bare `postgres`; PDS-D31 RAM LAW: it spends ZERO guerrilla export). Verified on
+  this host today: `pg_isready` green, PostgreSQL 17.9, `pds-secret-scan.sh control --pg postgres`
+  → **exit 0** with all three legs (fires on the bundle, fires on the target DB, clean on the
+  deny-shaped bundle) and `psql -l | grep -c pds_secret_scan_ctl` → **0** after, no residue.
+  **THE PRICE IS NAMED AND ACCEPTED: exporting `PDS_CONTROL_PG` converts a silent INFO line into a
+  HARD-FAIL LEG.** If the laptop's Homebrew Postgres dies or the machine sleeps during a six-hour
+  poll, rung 4 does not degrade — it FAILS with *"every clean result above is therefore
+  uninterpretable"*, after an attempt is spent. **The trade is correct — an asterisk is FOREVER, a
+  failed rung can be re-armed for free** — and it is paid for with a precondition, not a hope: prove
+  `pg_isready` AND a control rehearsal exit 0 **in the arming breath** (zero guerrilla export, zero
+  attempts), and keep the host awake. The mirror hazard is live and this wave's own plan creates it:
+  a **STALE or PARTIAL** ammo file is precisely the quiet vacuous shape D102 names (the absurd poison
+  `bp-export-v1` REDDENS at exit 1 — D80's "three greens" was wrong), and Move 3 rehearses on
+  fixtures before the arm. `unset PDS_AMMO_FILE` in the same shell, immediately before `arm`.
+  Note the anchors have DRIFTED: W5-E cites L1648/L1591–1594; current origin/main is **:1730** and
+  **:1659–1662**. Carry the current numbers or none.
+
+- **PDS-D252 — THE COLLECTOR'S STAND-DOWN CARVE-OUT FALSE-POSITIVES ON A REAL CRASH, AND IT IS FIXED
+  IN CODE, NOT LEFT TO A TIRED READER.** `pds-crown-launch.sh:573` greps **UNANCHORED**
+  `grep -c 'STAND-DOWN'` — but the child's own per-draw line (`:355`) prints
+  `verdict=STAND-DOWN:mem<floor` on **every** non-qualifying draw. Proven by fixture, with the
+  boundary located exactly: a crash whose FIRE landed on **draw 1** (zero refused draws) classifies
+  correctly; **ONE** refused draw ahead of the FIRE flips it, and a transcript that FIRED, ran the
+  harness and died mid-rung then prints *"STAND-DOWN, not a crash. The poll loop exhausted its draws
+  and the harness was NEVER INVOKED… A closed gate costs ZERO export attempts; re-arming is free"* —
+  on a run where the harness WAS invoked and an attempt WAS spent. Given **0/862 clearance (D250)**, a
+  draw-1 fire is the improbable case, so **this misreport is the DEFAULT for any real mid-rung
+  crash.** It also **INVERTS** the risk the ledger braced for: the worry was a spurious harness-bug
+  task filed against a legitimate stand-down; the live behaviour is worse — the lead is told a genuine
+  crash was free and **re-arms, burning a second real attempt against a budget of 5 while believing it
+  free.** **RULING: anchor the grep.** Two clean discriminators already exist in the bytes:
+  the stamp line `^\[…\] STAND-DOWN — ` (1 on a true stand-down, 0 on a crash) and the FIRE stamp
+  `^\[…\] FIRE — draw ` / `harness returned rc=` (0 / 1 respectively). This is a **one-line
+  correctness fix to a merged file inside the `scripts/pds-*` fence — it is NOT a new script and the
+  ZERO-NEW-SCRIPTS law does not reach it**; the selftest gains a `crash-after-standdown` fixture so
+  the defect can never re-enter silently. `pds-bl-w14-standdown-token-ruling` is **RE-SCOPED**: its
+  premise *"the launcher mitigates this — collect greps for STAND-DOWN and names which of the two it
+  is"* is **REFUTED by fixture**, and the belt-and-braces hand-grep stays in the collect brief anyway,
+  because the lead must never depend on the collector's prose alone.
+
+- **PDS-D253 — THE PASSENGER RIDES UNRATIFIED, AND IT STANDS DOWN WITH THE CLIMB.** The direction's
+  one new idea was to let `pds-idle-sampler.sh` ride the crown's own unscoped export so PDS-D211's
+  owed derivation falls out at zero marginal attempts. **The arithmetic is right and the NAME is not
+  available.** Mechanically the sampler's delta is byte-identical to the licensed quantity —
+  max-across-set peak minus a strictly-pre-window one-shot `ps -o rss=`, kB/1024, `pgrep -o -x` per
+  D135. But **D237 charters it as a paired idle CONTROL** ("BUILD THE LOCK-FREE… SO A PAIRED IDLE
+  CONTROL CAN RIDE BESIDE A LIVE CLIMB"), the instrument says so in its own voice — *"This is a
+  CONTROL, not a demand… never subtract it from one"* — and **no decision anywhere licenses reading
+  it as the D211/D222 demand figure** (693 search hits, zero prior art naming it one). Worse, D237's
+  own role for it is **unattainable concurrently**: a window taken during a ~2.2 GiB export is not
+  idle, so ridden beside a live climb it is **neither a valid control nor a licensed demand**, and
+  D216 ("THE PAIRED IDLE CONTROL IS A PREREQUISITE… NOT A NICE-TO-HAVE") is unsatisfied because a
+  control cannot be taken at the same time — that would be a second demand read. **RULING: run it,
+  publish it as an UNRATIFIED OBSERVATION, and let a later wave promote it.** The committed record
+  must carry the relabelling **adjacent to the number, never in a Paper the grep never reaches**,
+  because the instrument's own labels are false in this context: the banner says
+  `IDLE CONTROL WINDOW (… ZERO requests issued)` (`:309`), the machine line hardcodes
+  `acquisition=none` (`:441`), and **every payload field is named `idle_*`** — a later wave grepping
+  `idle_delta_mib` across this epic gets a demand figure back and reads it as drift. **That is the
+  retraction, pre-loaded.** Three promotion conditions to record now and check later: `beam_slots`
+  MUST be 1 and `beam_primary_pid` MUST be the exporting slot (the delta subtracts a PRIMARY-only
+  baseline from a MAX-ACROSS-SET peak — on a blue/green box those are different processes; **dormant
+  today, one deploy from live**); `idle_window_s` MUST be reconciled against the transcript's own
+  `t1−t0` (the **130 s default is a WAVE-7 figure for the RETIRED in-memory engine**, and three
+  unreconciled durations exist — 130 / ~150 / 193 s — while `pds-bl-w13-export-duration-unmeasured`
+  is open at 0/5); and D221's 1048.16 MiB threshold applies to the **MemAvailable RANGE leg only**,
+  never the RSS delta (D220b). **And the passenger is CONTINGENT: per D250 the climb probably never
+  fires, in which case there is no export to ride and the sampler output is DISCARDED and the
+  derivation returns to backlog. D237 verbatim — IT MUST NEVER GATE OR DELAY THE FIRE.** Not ready,
+  not understood, or refusing → the climb fires without it. The floor does not move on this number:
+  per D222 a floor is `measured demand delta + 798.81 MiB`, and this delta is not yet a measured
+  demand.
+
+- **PDS-D254 — THE FIRE RECORD IS THE HANDOFF, AND IT CARRIES WHAT `ps -p` CANNOT PROVE.**
+  Five waves died before firing; this wave's NEW risk is dying AFTER, so the fire slice COMMITS a
+  record naming pid, transcript path, RUN_TAG, budget, deployed sha and armed-at time — so **ANY**
+  later actor, not only the one who armed it, can collect. Three fields are added because
+  verification found gaps `ps -p` cannot close. **(a) `MAX_DRAWS` and `INTERVAL` actually in force**,
+  with the resulting wall-clock window — the launcher prints both at arm and the auto-written `meta`
+  file does NOT carry them, and per D250 the honest outcome is a stand-down the collector must be
+  able to size. **(b) A PROCESS-IDENTITY FINGERPRINT — `ps -p <pid> -o comm=,lstart=` recorded at arm
+  time.** `pid_live()` is `ps -p` and **nothing else**: no comm check, no start-time check, no
+  cross-reference to anything the arm recorded, and the same unguarded call gates BOTH collect's
+  STILL-RUNNING branch (`:512`) and arm's own stacking guard (`:427`). This host's pid space was
+  observed **wrapping inside this very investigation** (top pid 96696, then fresh forks landing at
+  81972–82479 ~15–20 min later) against a collect cadence deliberately measured in HOURS — so a
+  recycled pid makes both call sites agree a dead climb is alive, collect says *"do NOT re-arm"*, and
+  arm refuses too. **The escape hatch exists but is undiscoverable by the obedient**: `arm --force` is
+  named only in the die message of the very action collect told the lead not to take. The fingerprint
+  turns an unfalsifiable STILL-RUNNING into a two-command check. **(c) W5-E state** —
+  `pds_control_pg_exported: yes|no` and `pds_ammo_file_state: unset|<path>` — recorded, never
+  silently accepted as "no" (D251). Two hard rules on the record's contents: **NEVER dump `env`** —
+  the child's real environment carries `BARKPARK_TOKEN=bp_admin_…` and `HETZNER_API_TOKEN=…`, and any
+  "environment provenance" instinct leaks two live credentials into the repo; an allowlist of NAMED
+  vars only (the launcher's own transcript prints exactly seven and is credential-safe as-is). And
+  **arm from a stable path** — the child inherits the arming shell's cwd, and behaviour is untested if
+  that directory is deleted while the child lives.
+
+- **PDS-D255 — THE COMMITTED TRANSCRIPT IS OPERATOR-AUTHORED, AND THE `RAW RUN OUTPUT` MARKER IS
+  CONDITIONAL.** The bare `transcript.log` is **unattributable on the likely outcome**:
+  `grep -c run_id transcript.log` = **0** — the child stamps `run_tag=` only, the run id lives in
+  `$STATE_DIR/<tag>/meta` under `/tmp` and is never committed, and on a FIRE the harness's banner
+  (`:485`) and SUMMARY (`:2448`) self-attribute while **on a STAND-DOWN there is no banner, no
+  SUMMARY, and therefore NO run identifier anywhere in the committed bytes.** Crown criterion 11 and
+  PDS-D233 both key on a run id. Two things are called `run_id` and they DIFFER (`meta` says
+  `20260721T065504Z-92007`; the harness's `RUN_ID` is the 8-hex `run_tag`, because `fire_detached`
+  does `export PDS_RUN_ID="$run_tag"`) — **the citable one is the run_tag**, and the preamble must say
+  so. **RULING: a preamble ALWAYS; the `RAW RUN OUTPUT` marker ONLY when harness bytes exist.** That
+  string is emitted by the harness **zero** times — it is a hand-typed operator convention present in
+  w7 (×2) and w8 (×1) and **absent from w10, which is the epic's STAND-DOWN precedent** (its §7 is
+  "THE SENTINEL LOG IN FULL — 61 DRAWS"). On a stand-down the marker would name a section that does
+  not exist. Size argues the same way: a 2160-draw stand-down is **~322 KB of DRAW lines** (149 B
+  each, measured) — a dataset, not a scrap, and a dataset with no header is exactly the "did someone
+  truncate this" doubt. The file is `scripts/pds-pull-proof.crown-transcript-w15.txt`. **One hazard
+  the charter already paid for: wave 9's arithmetic slice inserted 12 lines into a preamble and then
+  cited the raw region by its PRE-shift line numbers — three citations landed on unrelated text.
+  Write the preamble FIRST and freeze it, or cite by grep anchor, never by line number.**
+  Consequence for the ledger: `pds-w14-crown-collect-stamp`'s criteria 2 and 3 (which mandate the
+  marker, unedited harness bytes, and matching banner/SUMMARY run-ids) are **STRUCTURALLY
+  UNSATISFIABLE on a stand-down** and are amended to branch on the collect state.
+
+- **PDS-D256 — THE CROWN IS UNCLAIMED, AND THE FIRST STAMP HARD-FAILS ON A REASON NOBODY DOCUMENTED.**
+  `pds-w1-crown-proof` reads `execution_class: executable | lifecycle: open | claim.worker: None`
+  (epoch 15, released `2026-07-20T04:47:25Z` by `reopen-prober`). Proven on a scratch task: stamping
+  an unclaimed/open task is rejected **`bp: not_in_progress:open`** — and that reason string appears
+  **nowhere** in `pds-crown-stamp.sh`, `pds-crown-stamp-recipe.md`, or `pds-w14-crown-collect-stamp`.
+  The script's rejection block names only `fenced_off`/stale epoch ("THE LIKELY ONE") and
+  `criteria_mismatch`, so a tired lead reads *"re-read the CURRENT epoch and pass that"*, runs the
+  printed one-liner against an unclaimed task, gets `15`, re-stamps, fails identically, **and chases
+  epochs forever** — the exact "dying AFTER the shot" failure Move 3 exists to prevent. **RULING:
+  `bp task claim pds-w1-crown-proof <worker>` FIRST, then read the epoch from THAT claim.** No D139
+  catch-22 applies (`claim.worker` is already null, `execution_class` is `executable`). The lead must
+  also be told that **claiming is what re-arms the cmux Stop-hook auto-close** D140 describes: once
+  the twelfth criterion flips, the hook closes the task with nobody typing it. Adjacent findings that
+  ride with it: the stamp path is otherwise SOUND (fetch-to-file proven against a backtick-bearing
+  criterion, stale-epoch rejected LOUDLY at bp exit 6 / script exit 2 with nothing written, read-back
+  CONFIRMED); `pds-bl-stamp-silent-noop` **did not reproduce in 20 stamps across two race regimes** —
+  6 exit-0 stamps all flipped `met`, 4 failures were all loud `fenced_off`, zero silent no-ops — so
+  it is belt-and-braces, **not** grounds to close that backlog row and **never** grounds to bypass the
+  script's mandatory read-back; and **one load-bearing case remains UNTESTED — re-stamping an ALREADY
+  `met:true` criterion with new evidence**, which criterion 0 requires (its stored evidence is
+  stale-in-substance). If that silently no-ops, the transcript's attribution is broken. One cheap
+  scratch probe answers it, and it belongs BEFORE the fire.
+
+**WAVE 15 PLAN.** Round 1 builds three in-fence corrections and one rehearsal, all dependency-free:
+**(1)** anchor the collector's STAND-DOWN discriminator + a `crash-after-standdown` selftest fixture
+(D252); **(2)** route BOTH runbooks to `arm|collect` and delete the refuted "~87% of the time" line
+(`pds-crown-runbook.md:118`) — the launcher landed in ONE 958-line commit with **zero** documentation
+and `grep -rln pds-crown-launch .` returns exactly one file, itself; **(3)** fold `not_in_progress`,
+the met→met re-stamp measurement and stray-control-DB cleanup into `pds-crown-stamp-recipe.md`
+(D256). Round 2 is `pds-w14-crown-fire` — **AFTER the collector fix merges**, so the transcript and
+the collector that reads it agree. Round 3 is `pds-w14-crown-collect-stamp`, LEAD-ONLY, after the
+fire lands. **The charter debt this wave inherited is ALREADY CLOSED**: PR #5247 is MERGED and
+D242–D249 are on origin/main — no slice is filed for it.
