@@ -83,6 +83,10 @@ import { fileURLToPath } from "node:url";
 
 import { screenCommand } from "./screen.mjs";
 import { deriveLevel, looksLikeProse } from "./level.mjs";
+// THE READER ONLY. `foldLedger` is a pure read over the ledger's run files; no
+// writer crosses this boundary, and the census's proof of that is a byte
+// comparison of the directory across a real run, not this comment.
+import { foldLedger } from "./ledger.mjs";
 // The constant only — importing runRerun would put a second, differently-gated
 // execution path inside the census.
 import { SYNC_TIMEOUT_MS } from "./rerun.mjs";
@@ -133,31 +137,83 @@ const GIT_LISTER = new Set([
 ]);
 
 /**
+ * Split a command into its pipeline segments, quote-masked.
+ *
+ * Extracted so FAMILY (which reads the TAIL, because `sh -c 'a | b'` exits with
+ * b's status) and NETWORK REACH (which must read EVERY segment, because
+ * `bp task ls | grep foo` touches the network in the head and exits with grep's
+ * status) can share one splitter instead of hand-copying it — this epic's own
+ * defect class.
+ */
+export function pipelineSegments(command) {
+  const raw = String(command ?? "").trim();
+  if (!raw) return [];
+
+  // Quote-masked split so a pipe inside a quoted argument is not a segment
+  // boundary. screen.mjs has already refused anything with `;`, `&&` or a
+  // subshell, so the tail of a pipeline is the whole story here.
+  // D67 — THE MASK FILLER IS WRITTEN AS `\0`, NEVER AS A RAW 0x00 BYTE.
+  // A literal NUL byte lived here (offset 8398) and made file(1) call this
+  // source "binary data", so every grep wrapper that skips binaries returned
+  // ZERO LINES AND EXIT 1 where /usr/bin/grep counted 7 hits for the screen
+  // call. An agent grepping census internals got a clean empty result
+  // indistinguishable from genuine absence — one verifier concluded from it
+  // that the census never screens at all, the exact opposite of the truth.
+  // This epic's own disease, inside this epic's own instrument. The escape is
+  // byte-identical at runtime; this comment deliberately does not spell the
+  // screened function's name, so the census's own hit count stays the 7 the
+  // defect report quotes.
+  const masked = raw.replace(/'[^']*'|"[^"]*"/g, (m) => "\0".repeat(m.length));
+  const bounds = [];
+  for (let i = 0; i < masked.length; i += 1) if (masked[i] === "|" && masked[i + 1] !== "|") bounds.push(i);
+  const segments = [];
+  let from = 0;
+  for (const b of bounds) {
+    segments.push(raw.slice(from, b));
+    from = b + 1;
+  }
+  segments.push(raw.slice(from));
+  return segments.map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * The tokens of one segment with any env-var prefix stripped.
+ *
+ * ENV-VAR PREFIXES ARE NOT THE HEAD. `CC=clang go vet ./...` is a go vet, and
+ * reading `CC=clang` as the head drops it into UNKNOWN — where its clean rc 0
+ * with no output becomes an AMBIGUOUS-SILENCE instead of the PASS it is. This
+ * is not hypothetical: 5 of the 6 admitted `go vet` rows in the frozen corpus
+ * carry a `CC=` prefix (the cc-alias gotcha), so without this the census
+ * discards the canonical green on every specimen it actually has.
+ */
+export function segmentTokens(segment) {
+  const tokens = String(segment ?? "").trim().split(/\s+/).filter(Boolean);
+  while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens.shift();
+  return tokens;
+}
+
+/** The head of a segment, path-stripped: `/usr/bin/grep -n x` → `grep`. */
+export function segmentHead(segment) {
+  const tokens = segmentTokens(segment);
+  return tokens.length ? tokens[0].replace(/^.*\//, "") : "";
+}
+
+/** The head of the command that produced the exit code — the LAST segment's. */
+export function commandHead(command) {
+  const segments = pipelineSegments(command);
+  return segments.length ? segmentHead(segments[segments.length - 1]) : "";
+}
+
+/**
  * The family of a command, read off the LAST pipeline segment.
  *
  * `sh -c 'a | b'` exits with b's status (no pipefail), so the tool that
  * produced the exit code being classified is the tail, not the head.
  */
 export function classifyFamily(command) {
-  const raw = String(command ?? "").trim();
-  if (!raw) return FAMILY.UNKNOWN;
-
-  // Quote-masked split so a pipe inside a quoted argument is not a segment
-  // boundary. screen.mjs has already refused anything with `;`, `&&` or a
-  // subshell, so the tail of a pipeline is the whole story here.
-  const masked = raw.replace(/'[^']*'|"[^"]*"/g, (m) => " ".repeat(m.length));
-  const bounds = [];
-  for (let i = 0; i < masked.length; i += 1) if (masked[i] === "|" && masked[i + 1] !== "|") bounds.push(i);
-  const tail = bounds.length ? raw.slice(bounds[bounds.length - 1] + 1) : raw;
-
-  // ENV-VAR PREFIXES ARE NOT THE HEAD. `CC=clang go vet ./...` is a go vet, and
-  // reading `CC=clang` as the head drops it into UNKNOWN — where its clean rc 0
-  // with no output becomes an AMBIGUOUS-SILENCE instead of the PASS it is. This
-  // is not hypothetical: 5 of the 6 admitted `go vet` rows in the frozen corpus
-  // carry a `CC=` prefix (the cc-alias gotcha), so without this the census
-  // discards the canonical green on every specimen it actually has.
-  const tokens = tail.trim().split(/\s+/).filter(Boolean);
-  while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens.shift();
+  const segments = pipelineSegments(command);
+  if (!segments.length) return FAMILY.UNKNOWN;
+  const tokens = segmentTokens(segments[segments.length - 1]);
   if (!tokens.length) return FAMILY.UNKNOWN;
   const head = tokens[0].replace(/^.*\//, "");
 
@@ -241,7 +297,76 @@ const ENV_FAULT = [
     OUTCOME.REF_GONE, "the ref is unavailable here — an unfetched worktree, not a gone path"],
   [/could not read from remote|permission denied \(publickey\)|host key verification failed|network is unreachable|could not resolve host/i,
     OUTCOME.SPAWN_ERROR, "the network or a credential failed — nothing was measured"],
+  // ── D68 — THE CENSUS WAS NOT HERMETIC ────────────────────────────────────
+  //
+  // 38 of 240 admitted rows reach a live service (bp, gh, curl). Every one of
+  // those tools is a QUERY-LISTER head, and QUERY-LISTER's failure branch is
+  // RAN-AND-FAILED, which is in the DECAYED set — so ONE guerrilla or GitHub
+  // hiccup flipped up to 36 rows to DECAYED against a published 14.6%. That is
+  // a single-cause spike wearing the costume of 36 independent decay events:
+  // an outage forging a decay wave, which is the precise fabrication this
+  // module's rc-128 handling already refuses for git.
+  //
+  // The captured strings the three regexes above did NOT match:
+  //   bp → "dial tcp 127.0.0.1:1: connect: connection refused"
+  //   bp → "lookup api.example.invalid: no such host"
+  //   gh → "error connecting to api.github.com"
+  //
+  // THE FIX IS DELIBERATELY NARROW. Every alternative below names a TRANSPORT
+  // failure — a socket that never carried a request. A tool that connected and
+  // answered "no" (gh's 404, bp's not_found, a non-2xx body) matches none of
+  // them and stays RAN-AND-FAILED. Widening this into "the environment did it"
+  // would launder real decay, which is worse than the bug it fixes.
+  [/connect: connection refused|connection refused|no such host|error connecting to|dial tcp .*: (connect|lookup)|couldn'?t connect to server|failed to connect to|connection reset by peer|no route to host|temporary failure in name resolution|name or service not known|i\/o timeout|tls handshake timeout/i,
+    OUTCOME.SPAWN_ERROR, "the transport failed before the service answered — this row measures the network on this host, not the ledger"],
 ];
+
+// ── THE RESIDUAL NO REGEX CAN REACH ──────────────────────────────────────────
+//
+// `curl -s` is 27 of the corpus's 34 curl commands, and -s SUPPRESSES curl's
+// own "Failed to connect" text: stderr comes back EMPTY with exit 7. There is
+// no string for a pattern to match, so this one is keyed BY EXIT CODE.
+//
+//   6 → could not resolve host
+//   7 → could not connect to host
+//
+// Both are transport faults by curl's own documented contract. Everything else
+// curl can exit with is left alone: 22 (--fail on an HTTP >=400) is the SERVICE
+// ANSWERING, and scoring that as an environment fault would delete exactly the
+// decay signal the census exists to find.
+const CURL_TRANSPORT_EXITS = new Map([
+  [6, "curl could not resolve the host (exit 6) — DNS on this host, not the recipe"],
+  [7, "curl could not connect (exit 7) — the socket never opened, so nothing about the recipe was measured"],
+]);
+
+/**
+ * Tools whose success depends on a live service somewhere off this checkout.
+ *
+ * Read over EVERY pipeline segment, not just the tail: `bp task ls | grep foo`
+ * exits with grep's status but still reached the network, and a run that hides
+ * that dependency is claiming a hermeticity it does not have.
+ */
+const NETWORK_HEADS = new Set(["bp", "gh", "curl", "wget", "ssh", "scp", "rsync", "http", "httpie"]);
+/** git sub-verbs that talk to a remote. The rest of git is local. */
+const GIT_NETWORK_VERBS = new Set(["ls-remote", "fetch", "pull", "push", "clone"]);
+
+/**
+ * Which live service this command reaches, or null when it stays on this box.
+ * Names the TOOL rather than a boolean so the render can say bp=21, gh=15.
+ */
+export function networkTool(command) {
+  for (const segment of pipelineSegments(command)) {
+    const tokens = segmentTokens(segment);
+    if (!tokens.length) continue;
+    const head = tokens[0].replace(/^.*\//, "");
+    if (NETWORK_HEADS.has(head)) return head;
+    if (head === "git") {
+      const verb = tokens.slice(1).find((t) => !t.startsWith("-"));
+      if (GIT_NETWORK_VERBS.has(verb)) return `git ${verb}`;
+    }
+  }
+  return null;
+}
 
 // A path that is genuinely gone. Distinguished from the env faults above by
 // naming a PATH rather than a ref or a repository.
@@ -280,6 +405,13 @@ export function classifyOutcome(command, run) {
   if (rc === null || rc === undefined) return row(OUTCOME.SPAWN_ERROR, "no exit status — nothing was measured");
   if (rc === 127) return row(OUTCOME.PATH_GONE, "command not found — the tool the recipe depends on is gone");
   if (rc === 126) return row(OUTCOME.SPAWN_ERROR, "found but not executable — a permission fault on this host");
+
+  // BY EXIT CODE, NOT BY STDERR — `curl -s` leaves stderr empty, so no pattern
+  // can reach this row. Checked before the stderr faults precisely because
+  // there is nothing there to check.
+  if (commandHead(command) === "curl" && CURL_TRANSPORT_EXITS.has(rc)) {
+    return row(OUTCOME.SPAWN_ERROR, CURL_TRANSPORT_EXITS.get(rc));
+  }
 
   const fault = envFault(err);
   // An env fault only overrides on a NONZERO exit; a warning on stderr beside a
@@ -461,6 +593,27 @@ export function censusRun(commands, opts = {}) {
   return summarise(rows, { corpusName, includeTestRunners: !!opts.includeTestRunners });
 }
 
+/**
+ * How much of this run left the box, split by tool.
+ *
+ * Counted over EXECUTED rows only — a refused or prose row reached nothing.
+ * This is the census's hermeticity bound, and it is printed rather than
+ * assumed: the decay rate of a run with network reach describes THIS HOST AT
+ * THIS TIME, and quoting it as a property of the ledger is the level-skip.
+ */
+export function networkReach(rows) {
+  const byTool = {};
+  let reaching = 0;
+  for (const r of rows) {
+    if (!r.executed) continue;
+    const tool = networkTool(r.command);
+    if (!tool) continue;
+    reaching += 1;
+    byTool[tool] = (byTool[tool] || 0) + 1;
+  }
+  return { executedReaching: reaching, byTool };
+}
+
 /** Which runner each excluded row is, so the exclusion is auditable rather than a bare count. */
 function testRunnerHeads(rows) {
   const by = {};
@@ -510,6 +663,9 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
       // census reports what it counted and lets the discrepancy be visible —
       // quoting the smaller inherited number would be the level-skip.
       testRunnerHeads: testRunnerHeads(rows),
+      // HERMETICITY, named. Every row counted here depends on a service this
+      // census does not control.
+      network: networkReach(rows),
     },
     // DECISIVE — executed rows that said something about the LEDGER rather than
     // about this host.
@@ -578,6 +734,25 @@ export function renderHuman(report) {
   L.push(`  refused by screen   ${reach.refused}`);
   L.push(`  not a command       ${reach.notACommand}  (${(reach.admitted ? (reach.notACommand / reach.admitted) * 100 : 0).toFixed(1)}% of the screened set — English or an unparseable annotation, a finding about the corpus)`);
   L.push(`  executed            ${reach.executed}`);
+  L.push("");
+
+  // HERMETICITY — printed on every run, including the runs where it is zero,
+  // because "this run touched nothing off the box" is itself the finding.
+  const net = reach.network ?? { executedReaching: 0, byTool: {} };
+  const netSplit = Object.entries(net.byTool).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(", ");
+  L.push("NETWORK REACH — how much of this run was NOT hermetic");
+  L.push(`  executed rows reaching a live service  ${net.executedReaching} of ${reach.executed}${netSplit ? `  (${netSplit})` : ""}`);
+  if (net.executedReaching === 0) {
+    L.push("  This run touched nothing off this checkout, so no service outage could have");
+    L.push("  contributed to the rates below.");
+  } else {
+    L.push("  Those rows depend on services this census does not control. Every rate below");
+    L.push("  therefore describes THIS HOST AT THIS TIME and is NOT a stable property of the");
+    L.push("  corpus: re-run it during an outage and the same recipes read differently.");
+    L.push("  Transport failures (connection refused, no such host, curl exit 6/7) are");
+    L.push("  classified SPAWN-ERROR and leave BOTH rates — an outage must not publish");
+    L.push("  itself as decay. A service that connected and answered 'no' still counts.");
+  }
   L.push("");
   L.push(`  Every rate below describes THESE ${decisive.admissible} decisive rows.`);
   L.push(`  It is not a statement about all ${reach.distinct} commands in this corpus:`);
@@ -675,17 +850,150 @@ export function loadCorpusCommands(path = CORPUS_PATH) {
   return (corpus.proofs ?? []).map((p) => p?.command).filter((c) => typeof c === "string" && c.trim());
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE LEDGER AS A CORPUS — `--ledger`
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The frozen fixture is a QUARRY: 1,902 historical strings harvested from
+// everywhere, most of which nobody ever promised were re-derivable. The ledger
+// is the PRODUCT: rows that passed admitRecipe's gate at write time. Censusing
+// the product rather than the quarry is the only way the decay number describes
+// what this epic actually ships.
+//
+// Nothing here writes. `foldLedger` is a pure read over the run files, and the
+// census's no-mutation proof is a byte comparison of the directory across a
+// real run, not a promise in a comment.
+
+export const LEDGER_DIR = fileURLToPath(new URL("./ledger/", import.meta.url));
+export const LEDGER_CORPUS_NAME = "the durable recipe ledger (tooling/grip/ledger/, entries[].recipes[].rerun)";
+
+/**
+ * Fold the ledger and flatten it to the flat string[] the engine takes.
+ *
+ * DEDUPED TO ONE RECIPE PER (subject, quantity) BY DEFAULT, because a key's
+ * rival recipes re-derive THE SAME QUANTITY and running all of them buys
+ * repetition rather than coverage. Measured on a 400-row store: 17,343ms over
+ * every recipe against 5,043ms one-per-key — ~3.4x the wall clock for a 37%
+ * larger set.
+ *
+ * BUT THE RIVALS ARE NOT SILENTLY DISCARDED. `summarise`'s report has no field
+ * for `rival_methods` or `unreadable`, so flattening to a bare string[] would
+ * drop both without a trace — a census whose input quietly shrank and never
+ * said so. The counts ride back on the returned envelope and are printed above
+ * the census proper.
+ */
+export function loadLedgerRecipes(dir = LEDGER_DIR, { allRivals = false } = {}) {
+  const folded = foldLedger(dir);
+  const commands = [];
+  let skippedRivals = 0;
+  for (const entry of folded.entries) {
+    const distinct = [...new Set(entry.recipes.map((r) => String(r?.rerun ?? "").trim()).filter(Boolean))];
+    if (allRivals) commands.push(...distinct);
+    else {
+      commands.push(...distinct.slice(0, 1));
+      skippedRivals += Math.max(0, distinct.length - 1);
+    }
+  }
+  return {
+    dir,
+    allRivals,
+    commands,
+    skippedRivals,
+    stats: folded.stats,
+    rivalMethods: folded.rival_methods,
+    unreadable: folded.unreadable,
+  };
+}
+
+/**
+ * The pre-census block — the fold's own facts, before a single recipe runs.
+ *
+ * These four numbers exist NOWHERE in the census report. An operator who reads
+ * only the census sees a rate over N commands and cannot tell whether rows were
+ * unreadable or rivals were skipped to get there.
+ */
+export function renderLedgerPreamble(source) {
+  const s = source.stats;
+  const L = [];
+  L.push("LEDGER — the store this census is pointed at, before anything ran");
+  L.push(`  directory        ${source.dir}`);
+  L.push(`  run files        ${s.runs}`);
+  L.push(`  rows folded      ${s.rows}`);
+  L.push(`  subjects         ${s.subjects}   one (subject, quantity) key each`);
+  L.push(`  rival methods    ${s.rival_methods}   keys carrying more than one distinct recipe`);
+  L.push(`  unreadable       ${s.unreadable}   rows or files the fold could not use — NOT counted as decay`);
+  L.push(`  recipes censused ${source.commands.length}${source.allRivals
+    ? "   --all-rivals: every distinct recipe, including rivals"
+    : `   one per key by default; ${source.skippedRivals} rival recipe(s) NOT run (add --all-rivals)`}`);
+  if (s.unreadable > 0) {
+    L.push("");
+    L.push("  UNREADABLE ROWS ARE A FINDING ABOUT THE STORE, NOT ABOUT DECAY. They never");
+    L.push("  entered the census, so they are in neither rate below:");
+    for (const u of source.unreadable.slice(0, 10)) L.push(`    ${u.message ?? `${u.reason} ${u.file ?? ""}`}`);
+    if (source.unreadable.length > 10) L.push(`    …and ${source.unreadable.length - 10} more`);
+  }
+  if (s.rival_methods > 0 && !source.allRivals) {
+    L.push("");
+    L.push("  RIVAL METHODS ARE A FEATURE OF THE ROW, NOT A DEFECT. Each flagged key has");
+    L.push("  more than one independent way to re-derive the same quantity. This run used");
+    L.push("  ONE per key for wall-clock reasons and did not compare their answers:");
+    for (const f of source.rivalMethods.slice(0, 5)) L.push(`    ${f.rivals.length} recipes for ${JSON.stringify(f.quantity)} of ${JSON.stringify(f.subject)}`);
+    if (source.rivalMethods.length > 5) L.push(`    …and ${source.rivalMethods.length - 5} more`);
+  }
+  L.push("");
+  return L.join("\n");
+}
+
 const HELP = `census.mjs — re-execute stored recipes and report whether they still ANSWER.
 
-  node tooling/grip/census.mjs [--json] [--limit N] [--include-test-runners]
+  node tooling/grip/census.mjs [--ledger] [--json] [--limit N]
+                              [--include-test-runners] [--all-rivals]
 
+  --ledger                 census the DURABLE LEDGER (tooling/grip/ledger/)
+                           instead of the frozen evidence fixture. The fixture
+                           is a quarry of historical strings; the ledger is what
+                           this epic actually ships.
+  --all-rivals             with --ledger, run every distinct recipe per key
+                           instead of one (~3.4x the wall clock, no new coverage
+                           — the rivals re-derive the same quantity)
   --json                   machine render
   --limit N                bound the run while iterating
   --include-test-runners   also run go test / mix test (off by default: they
                            execute repo code the screen never examined)
 
+Unknown flags are REJECTED with exit 2. A flag silently ignored is the same
+defect class as a bound that silently unbounds itself.
+
 Safety: every command is screened by tooling/grip/screen.mjs before any spawn.
-The census never writes to tooling/grip/ledger/.`;
+The census only ever READS tooling/grip/ledger/.`;
+
+// A FLAG SILENTLY IGNORED IS A REQUEST SILENTLY DENIED. `--totally-bogus-flag`
+// used to exit 0 having run the default census, which reads to an operator (and
+// to a gate) exactly like the flag worked — the same class as the `--limit NaN`
+// defect that turned a bounded run into a 651-command one. Named rejection,
+// exit 2, and the valid set is printed.
+export const KNOWN_FLAGS = Object.freeze([
+  "--help", "-h", "--json", "--limit", "--include-test-runners", "--ledger", "--all-rivals",
+]);
+
+/**
+ * @returns {{ok:true}|{ok:false, reason:string}}
+ */
+export function validateArgv(argv) {
+  const known = new Set(KNOWN_FLAGS);
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === "--limit") { i += 1; continue; } // its value is checked separately
+    if (known.has(token)) continue;
+    return {
+      ok: false,
+      reason: token.startsWith("-")
+        ? `unknown flag ${JSON.stringify(token)} — valid flags are ${KNOWN_FLAGS.join(" ")}`
+        : `unexpected argument ${JSON.stringify(token)} — this CLI takes flags only, and ignoring it would look exactly like honouring it`,
+    };
+  }
+  return { ok: true };
+}
 
 // Same main-module test the rest of tooling/grip uses. String-comparing
 // `file://${argv[1]}` against import.meta.url is NOT equivalent: any character
@@ -704,6 +1012,11 @@ if (isMain) {
   // the isFinite test and run the ENTIRE 651-command corpus — the operator
   // asked for a bounded run and got an unbounded one with no signal. Named
   // rejection, nonzero exit.
+  const valid = validateArgv(argv);
+  if (!valid.ok) {
+    process.stderr.write(`census: ${valid.reason}\n`);
+    process.exit(2);
+  }
   const limitAt = argv.indexOf("--limit");
   let limit = Infinity;
   if (limitAt >= 0) {
@@ -713,12 +1026,41 @@ if (isMain) {
       process.exit(2);
     }
   }
-  const commands = loadCorpusCommands().slice(0, Number.isFinite(limit) ? limit : undefined);
+
+  const useLedger = argv.includes("--ledger");
+  if (!useLedger && argv.includes("--all-rivals")) {
+    process.stderr.write("census: --all-rivals only means something with --ledger — the fixture has no (subject, quantity) keys to have rivals over\n");
+    process.exit(2);
+  }
+
+  const ledgerSource = useLedger ? loadLedgerRecipes(LEDGER_DIR, { allRivals: argv.includes("--all-rivals") }) : null;
+  const all = useLedger ? ledgerSource.commands : loadCorpusCommands();
+  const commands = all.slice(0, Number.isFinite(limit) ? limit : undefined);
+
+  // THE CALL SHAPE. `censusRun` is SYNCHRONOUS and calls `summarise` itself —
+  // it hands back the finished report. Re-summarising its return throws
+  // "rows.filter is not a function", which cost a verifier a crash.
   const report = censusRun(commands, {
-    corpusName: CORPUS_NAME,
+    corpusName: useLedger ? `${LEDGER_CORPUS_NAME} at ${ledgerSource.dir}` : CORPUS_NAME,
     includeTestRunners: argv.includes("--include-test-runners"),
     onProgress: (i, n) => { if (i % 25 === 0 || i === n) process.stderr.write(`\r  screening/running ${i}/${n}   `); },
   });
   process.stderr.write("\r" + " ".repeat(40) + "\r");
-  console.log(argv.includes("--json") ? JSON.stringify(toJson(report), null, 2) : renderHuman(report));
+
+  if (argv.includes("--json")) {
+    const json = toJson(report);
+    if (useLedger) {
+      json.ledger = {
+        dir: ledgerSource.dir,
+        all_rivals: ledgerSource.allRivals,
+        recipes_censused: ledgerSource.commands.length,
+        skipped_rival_recipes: ledgerSource.skippedRivals,
+        ...ledgerSource.stats,
+      };
+    }
+    console.log(JSON.stringify(json, null, 2));
+  } else {
+    if (useLedger) console.log(renderLedgerPreamble(ledgerSource));
+    console.log(renderHuman(report));
+  }
 }
