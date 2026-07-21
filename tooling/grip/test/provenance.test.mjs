@@ -51,7 +51,11 @@ import {
 } from "../provenance.mjs";
 
 const GRIP = dirname(dirname(fileURLToPath(import.meta.url)));
-const REPO_ROOT = dirname(dirname(GRIP));
+// REALPATH'd deliberately. `git rev-parse --show-toplevel` returns the resolved
+// path, while this one is derived from `import.meta.url`; a checkout reached
+// through a symlink makes the two differ and reds the banner assertions below
+// with a failure shaped exactly like a real regression.
+const REPO_ROOT = realpathSync(dirname(dirname(GRIP)));
 
 /** A temp dir that is emphatically NOT inside any git repository. */
 function withNonRepo(fn) {
@@ -136,6 +140,28 @@ test("a cwd that does not exist at all is still a verdict, not a throw", () => {
   assert.equal(p.in_repo, false);
   assert.equal(p.differs_from_origin, null);
   assert.ok(provenanceLine(p).startsWith(PROVENANCE_PREFIX));
+});
+
+test("a missing DIRECTORY is not blamed on a missing GIT — ENOENT is ambiguous and is disambiguated", () => {
+  // Node raises the identical `{ code: "ENOENT", path: "git" }` for a missing
+  // binary and a missing cwd. Reporting "git is not on PATH" to someone whose
+  // worktree was pruned is a confidently wrong diagnosis, which is the one
+  // failure mode a provenance banner cannot have.
+  const gone = join(realpathSync(tmpdir()), "grip-prov-pruned-worktree-4b21e");
+  const p = treeProvenance({ cwd: gone });
+  assert.equal(p.state, PROVENANCE_STATE.NO_SUCH_CWD);
+  assert.notEqual(p.state, PROVENANCE_STATE.GIT_UNAVAILABLE);
+  assert.match(p.reason, /does not exist/);
+  const line = provenanceLine(p);
+  assert.match(line, /NO SUCH DIRECTORY/);
+  assert.equal(/GIT UNAVAILABLE/.test(line), false, "git must not be accused of a filesystem fault");
+  assert.equal(line.includes("\n"), false);
+
+  // …and git is still named where git really is the fault: a real directory
+  // that is not a repository must NOT be reported as a missing directory.
+  withNonRepo((dir) => {
+    assert.equal(treeProvenance({ cwd: dir }).state, PROVENANCE_STATE.NOT_A_REPO);
+  });
 });
 
 test("provenanceLine survives being handed nothing", () => {

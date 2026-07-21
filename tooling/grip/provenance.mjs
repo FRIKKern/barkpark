@@ -48,6 +48,7 @@
 // reporting on, or a stale tree can break its own staleness warning.
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,6 +87,7 @@ export const PROVENANCE_STATE = Object.freeze({
   NO_ORIGIN_MAIN: "no-origin-main",
   NO_COMMITS: "no-commits",
   NOT_A_REPO: "not-a-repo",
+  NO_SUCH_CWD: "no-such-cwd",
   GIT_UNAVAILABLE: "git-unavailable",
 });
 
@@ -161,12 +163,26 @@ export function treeProvenance({ cwd = process.cwd() } = {}) {
   // name the wrong tree in exactly the situation this module was built for.
   const root = git(["rev-parse", "--show-toplevel"], cwd);
   if (!root.ok) {
+    // ENOENT is AMBIGUOUS and must not be reported as if it were not. Node
+    // raises the identical `{ code: "ENOENT", path: "git" }` whether the BINARY
+    // is missing or the CWD is missing, so blaming git for a directory that was
+    // deleted is a confidently wrong diagnosis — this epic's own disease in the
+    // module that exists to cure it. The directory is checked before git is
+    // accused.
+    const missingCwd = root.unavailable && !existsSync(cwd);
+    const state = missingCwd
+      ? PROVENANCE_STATE.NO_SUCH_CWD
+      : root.unavailable
+        ? PROVENANCE_STATE.GIT_UNAVAILABLE
+        : PROVENANCE_STATE.NOT_A_REPO;
     return {
       ...base,
-      state: root.unavailable ? PROVENANCE_STATE.GIT_UNAVAILABLE : PROVENANCE_STATE.NOT_A_REPO,
-      reason: root.unavailable
-        ? "git is not on PATH — grip cannot say which tree it is answering from"
-        : `not a git repository (or git refused): ${root.reason}`,
+      state,
+      reason: {
+        [PROVENANCE_STATE.NO_SUCH_CWD]: `the directory ${cwd} does not exist — grip cannot say which tree it is answering from`,
+        [PROVENANCE_STATE.GIT_UNAVAILABLE]: "git is not on PATH — grip cannot say which tree it is answering from",
+        [PROVENANCE_STATE.NOT_A_REPO]: `not a git repository (or git refused): ${root.reason}`,
+      }[state],
     };
   }
 
@@ -218,7 +234,10 @@ export function provenanceLine(p) {
   if (!p || typeof p !== "object") return `${PROVENANCE_PREFIX} unknown — no provenance was measured`;
 
   if (!p.in_repo) {
-    const what = p.state === PROVENANCE_STATE.GIT_UNAVAILABLE ? "GIT UNAVAILABLE" : "NOT A GIT REPOSITORY";
+    const what = {
+      [PROVENANCE_STATE.GIT_UNAVAILABLE]: "GIT UNAVAILABLE",
+      [PROVENANCE_STATE.NO_SUCH_CWD]: "NO SUCH DIRECTORY",
+    }[p.state] ?? "NOT A GIT REPOSITORY";
     return `${PROVENANCE_PREFIX} ${what} at ${p.cwd} — grip cannot say which tree it is answering from`;
   }
 
