@@ -90,8 +90,19 @@ import { foldLedger } from "./ledger.mjs";
 // The constant only — importing runRerun would put a second, differently-gated
 // execution path inside the census.
 import { SYNC_TIMEOUT_MS } from "./rerun.mjs";
-// Used ONLY inside the isMain block below, and only against stderr (D78).
-import { emitProvenance } from "./provenance.mjs";
+// WHICH TREE EACH ANSWER IS ABOUT. Pure, read-time grammar — no fs, no spawn,
+// no clock. `classifyBinding` labels one recipe; `classifyAll` folds a corpus
+// into a class distribution. A census that reports OUTCOME alone is blind to a
+// recipe that still ANSWERS from the wrong tree (D73): the same tree-sensitive
+// recipe, run from two cwds, scores an identical healthy ANSWERED both times.
+// The binding class is the field that finally distinguishes them.
+import { classifyBinding, classifyAll, BINDING_CLASSES, PORTABLE_SCOPES } from "./binding.mjs";
+// `emitProvenance` runs on stderr as the isMain block's first act (D78).
+// `treeProvenance` + `provenanceLine` are ALSO folded into the human render on
+// stdout so the census STATES which tree it ran in beside its answers — a
+// "9 recipes still answer" line means nothing until the reader knows whose tree
+// those 9 were about.
+import { emitProvenance, treeProvenance, provenanceLine } from "./provenance.mjs";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIMEOUT — generous on purpose
@@ -301,8 +312,11 @@ const ENV_FAULT = [
     OUTCOME.SPAWN_ERROR, "the network or a credential failed — nothing was measured"],
   // ── D68 — THE CENSUS WAS NOT HERMETIC ────────────────────────────────────
   //
-  // 38 of 240 admitted rows reach a live service (bp, gh, curl). Every one of
-  // those tools is a QUERY-LISTER head, and QUERY-LISTER's failure branch is
+  // 38 of the admitted rows reach a live service (bp, gh, curl). (That 38 was
+  // counted against the pre-D63 reach of 240; tgw5-screen-hardening widened the
+  // screen to 254/651, so 240 is a historical denominator — do not re-quote it
+  // as the live admitted count.) Every one of those tools is a QUERY-LISTER
+  // head, and QUERY-LISTER's failure branch is
   // RAN-AND-FAILED, which is in the DECAYED set — so ONE guerrilla or GitHub
   // hiccup flipped up to 36 rows to DECAYED against a published 14.6%. That is
   // a single-cause spike wearing the costume of 36 independent decay events:
@@ -534,7 +548,14 @@ function shell(cmd, { cwd = REPO_ROOT, timeoutMs = CENSUS_TIMEOUT_MS } = {}) {
  */
 export function censusOne(command, { exec = shell, timeoutMs = CENSUS_TIMEOUT_MS, includeTestRunners = false } = {}) {
   const cmd = String(command ?? "").trim();
-  const base = { command: cmd, level: deriveLevel(cmd) };
+  // EVERY row carries its binding class, refused and prose rows included — the
+  // class is a function of the command string alone (binding.mjs is pure), so it
+  // is known before a single spawn and survives even when the row never runs.
+  // This is what lets a still-ANSWERING row also say WHICH TREE it answered
+  // about: `git ls-tree HEAD …` is per-worktree ("this worktree"), a SHA-pinned
+  // `git show <oid>:…` is content-addressed ("any clone"). The outcome field
+  // cannot tell those apart; the binding class is the whole point of this slice.
+  const base = { command: cmd, level: deriveLevel(cmd), binding: classifyBinding(cmd) };
 
   // (a) THE SCREEN. Before anything is spawned, and its own reason is carried
   // through verbatim rather than restated — a paraphrased refusal reason is a
@@ -592,7 +613,14 @@ export function censusRun(commands, opts = {}) {
     rows.push(censusOne(cmd, opts));
     if (onProgress) onProgress(i + 1, distinct.length);
   }
-  return summarise(rows, { corpusName, includeTestRunners: !!opts.includeTestRunners });
+  // `provenance` is measured by the CALLER (the CLI) and threaded through, never
+  // measured here: summarise stays a pure fold, and treeProvenance's git spawn
+  // stays out of the code path every classifier test exercises.
+  return summarise(rows, {
+    corpusName,
+    includeTestRunners: !!opts.includeTestRunners,
+    provenance: opts.provenance ?? null,
+  });
 }
 
 /**
@@ -628,7 +656,7 @@ function testRunnerHeads(rows) {
   return by;
 }
 
-export function summarise(rows, { corpusName = "(unnamed command set)", includeTestRunners = false } = {}) {
+export function summarise(rows, { corpusName = "(unnamed command set)", includeTestRunners = false, provenance = null } = {}) {
   const count = (pred) => rows.filter(pred).length;
   const screened = rows.filter((r) => r.screened);
   const executed = rows.filter((r) => r.executed);
@@ -646,9 +674,18 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
   const pct = (n, d) => (d ? (n / d) * 100 : 0);
   const decayPct = pct(decayed.length, admissible.length);
 
+  // BINDING — which tree each measured answer is about, folded over the WHOLE
+  // corpus (classifyAll reads each row's command string; it never touches the
+  // outcome). This is the distribution the census was blind to: a corpus can be
+  // 100% STILL-ANSWERING and still be answering from a tree that is not the
+  // reader's. Computed from the command alone so synthetic test rows that carry
+  // no `.binding` field classify identically to real ones.
+  const binding = classifyAll(rows);
+
   return {
     corpusName,
     includeTestRunners,
+    provenance,
     timeoutMs: CENSUS_TIMEOUT_MS,
     total: rows.length,
     // REACH — the census's honest bound, printed, never hidden.
@@ -660,10 +697,12 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
       executed: executed.length,
       notACommand: count((r) => r.outcome === OUTCOME.NOT_A_COMMAND),
       testRunnersSkipped: count((r) => r.outcome === OUTCOME.SKIPPED_TEST_RUNNER),
-      // COUNTED, not asserted. An earlier brief put this at 5 of 240; measuring
-      // it over the same corpus gives 58 (15 `go test`, 43 `mix test`). The
-      // census reports what it counted and lets the discrepancy be visible —
-      // quoting the smaller inherited number would be the level-skip.
+      // COUNTED, not asserted. An earlier brief put this at 5 (against the
+      // pre-D63 admitted reach of 240, since widened to 254 by
+      // tgw5-screen-hardening — that 240 is historical, not the live count);
+      // measuring it over the same corpus gives 58 (15 `go test`, 43 `mix
+      // test`). The census reports what it counted and lets the discrepancy be
+      // visible — quoting the smaller inherited number would be the level-skip.
       testRunnerHeads: testRunnerHeads(rows),
       // HERMETICITY, named. Every row counted here depends on a service this
       // census does not control.
@@ -693,6 +732,7 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
     byOutcome,
     byFamily,
     byLevel,
+    binding,
     rows,
   };
 }
@@ -721,6 +761,11 @@ export function renderHuman(report) {
       ? `CENSUS — no admissible rows: nothing was measured, and no rate is reported.`
       : `CENSUS — ${decisive.answeringPct.toFixed(1)}% of ${decisive.admissible} decisive recipes STILL ANSWER; ${decisive.decayPct.toFixed(1)}% decayed.`,
   );
+  // WHICH TREE THE CENSUS ITSELF RAN IN. Supplied by the caller so this render
+  // stays pure; the same fact goes to stderr via emitProvenance at CLI start,
+  // and here to stdout so a saved render carries it too. A rate over N recipes
+  // is meaningless until the reader knows whose tree produced it.
+  if (report.provenance) L.push(provenanceLine(report.provenance));
   L.push("");
   L.push(`corpus          ${report.corpusName}`);
   L.push(`timeout         ${report.timeoutMs}ms (${TIMEOUT_FLOOR_MULTIPLE}x rerun's ${SYNC_TIMEOUT_MS}ms — slowness is never scored as decay)`);
@@ -756,6 +801,40 @@ export function renderHuman(report) {
     L.push("  itself as decay. A service that connected and answered 'no' still counts.");
   }
   L.push("");
+
+  // BINDING CLASS — the distribution this census was built blind to. Sourced
+  // from binding.mjs, folded over the whole corpus. It answers a question the
+  // outcome column cannot: not "did it answer" but "which TREE did it answer
+  // about". A run can be 100% STILL-ANSWERING and every one of those answers be
+  // about a tree that is not the reader's.
+  const b = report.binding;
+  if (b && b.total > 0) {
+    L.push("BINDING CLASS — which tree each answer is about (from binding.mjs, most portable first)");
+    for (const cls of BINDING_CLASSES) {
+      const n = b.by_class[cls] ?? 0;
+      L.push(`  ${String(n).padStart(4)}  ${cls.padEnd(20)}${PORTABLE_SCOPES[cls]}`);
+    }
+    if (b.unclassified > 0) {
+      L.push(`  ${String(b.unclassified).padStart(4)}  ${"(unclassified)".padEnd(20)}prose or no command — there is no tree to name`);
+    }
+    L.push("");
+    const anyClone = b.by_class["content-addressed"] ?? 0;
+    const notYours = b.classified - anyClone;
+    L.push(`  ${notYours} of ${b.classified} classified recipes answer about a tree that is NOT NECESSARILY`);
+    L.push("  yours — only a content-addressed (SHA-pinned) read resolves identically in any");
+    L.push("  clone. `git ls-tree HEAD …` answers about THIS worktree; `origin/main:…` about");
+    L.push("  any worktree of THIS clone; a bare relative read about THIS cwd. Same healthy");
+    L.push("  ANSWERED outcome, different trees — the binding class is the field that says so.");
+    L.push("");
+    // THE ONE GUARD THAT LOOKS LIKE COVERAGE AND IS NOT. Do not let a reader
+    // credit WRONG-CWD with catching this class.
+    L.push("  WRONG-CWD does NOT cover this class. It fires ONLY outside a git repository");
+    L.push("  entirely (stderr 'not a git repository'), so it never fires inside any worktree");
+    L.push("  of any clone — which is every tree this census ever runs in. A wrong-TREE answer");
+    L.push("  is a clean ANSWERED, not a WRONG-CWD; the binding class is the only signal here.");
+    L.push("");
+  }
+
   L.push(`  Every rate below describes THESE ${decisive.admissible} decisive rows.`);
   L.push(`  It is not a statement about all ${reach.distinct} commands in this corpus:`);
   L.push(`  ${report.corpusName}`);
@@ -826,14 +905,37 @@ export function toJson(report) {
     by_outcome: Object.fromEntries(report.byOutcome),
     by_family: Object.fromEntries(report.byFamily),
     by_level: Object.fromEntries(report.byLevel),
+    // WHICH TREE THE ANSWERS ARE ABOUT — the machine mirror of the render's
+    // binding-class section. `provenance` names the tree the census RAN in;
+    // `binding` names the tree each recipe's answer is ABOUT.
+    provenance: report.provenance
+      ? {
+          tree: report.provenance.root ?? null,
+          head: report.provenance.head_short ?? null,
+          differs_from_origin_main: report.provenance.differs_from_origin ?? null,
+          dirty: report.provenance.dirty ?? null,
+        }
+      : null,
+    binding: report.binding
+      ? {
+          by_class: report.binding.by_class,
+          by_portable_scope: report.binding.by_portable_scope,
+          classified: report.binding.classified,
+          unclassified: report.binding.unclassified,
+          default_rule_share: report.binding.default_rule.share,
+        }
+      : null,
     caveats: [
       "Every rate describes the admitted subset only and may not be restated as covering the whole command set.",
       "STILL-ANSWERING is not STILL-CORRECT — answer drift is unmeasured and out of scope for this wave.",
       "Inadmissible rows (environment faults, ambiguous silences) are excluded from both rates.",
       "The census writes nothing: no row here was stored in tooling/grip/ledger/.",
+      "A recipe's binding class names WHICH TREE its answer is about; only content-addressed reads answer identically in any clone, and WRONG-CWD does not cover the wrong-tree class (it fires only outside a git repo entirely).",
     ],
     rows: report.rows.map((r) => ({
       command: r.command, family: r.family, outcome: r.outcome, level: r.level,
+      binding_class: r.binding?.binding_class ?? null,
+      portable_scope: r.binding?.portable_scope ?? null,
       answering: r.answering, decayed: r.decayed, admissible: r.admissible,
       exit: r.exit ?? null, ms: r.ms ?? null, bytes: r.bytes ?? null, why: r.why,
     })),
@@ -1070,6 +1172,11 @@ if (isMain) {
   const report = censusRun(commands, {
     corpusName: useLedger ? `${LEDGER_CORPUS_NAME} at ${ledgerSource.dir}` : CORPUS_NAME,
     includeTestRunners: argv.includes("--include-test-runners"),
+    // WHICH TREE THIS CENSUS RAN IN. REPO_ROOT is where census.mjs lives on disk
+    // AND the default cwd shell() hands every recipe (D73's seam), so its
+    // provenance is exactly the tree the answers are bound to. Measured here,
+    // in the CLI, so summarise stays a pure fold with no git spawn.
+    provenance: treeProvenance({ cwd: REPO_ROOT }),
     onProgress: (i, n) => { if (i % 25 === 0 || i === n) process.stderr.write(`\r  screening/running ${i}/${n}   `); },
   });
   process.stderr.write("\r" + " ".repeat(40) + "\r");

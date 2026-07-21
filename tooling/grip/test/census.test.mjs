@@ -44,6 +44,7 @@ import {
 } from "../census.mjs";
 import { screenCommand, DANGER_SET } from "../screen.mjs";
 import { SYNC_TIMEOUT_MS } from "../rerun.mjs";
+import { classifyBinding } from "../binding.mjs";
 
 const CENSUS_MJS = fileURLToPath(new URL("../census.mjs", import.meta.url));
 const LEDGER_DIR = fileURLToPath(new URL("../ledger/", import.meta.url));
@@ -899,4 +900,155 @@ test("CONTROL: a clean store's preamble does NOT print the unreadable block", ()
   const text = renderLedgerPreamble(loadLedgerRecipes(dir));
   assert.match(text, /unreadable       0/);
   assert.doesNotMatch(text, /NOT ABOUT DECAY/, "a clean store must not cry wolf");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. D73 — WHICH TREE EACH ANSWER IS ABOUT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The census asks whether a recipe still ANSWERS. A tree-sensitive recipe keeps
+// answering — from the wrong tree — so it scores a clean ANSWERED while being
+// wrong, and the epic's own rot detector was blind to this class. Every row now
+// carries its binding class (from binding.mjs); the render reports the class
+// distribution and states which tree the census itself ran in.
+
+test("D73 FAIL-BEFORE/PASS-AFTER: a tree-sensitive recipe run in two cwds was blind by OUTCOME, now DISTINGUISHED by binding class", () => {
+  // The demonstrated blindness: `git ls-tree HEAD …` returns 1 line in the
+  // primary checkout and 4 in a fresh worktree — cwd the ONLY variable — yet the
+  // census scored an identical healthy ANSWERED from both. Two execution
+  // environments, one modelled by each spy.
+  const recipe = "git ls-tree HEAD --name-only tooling/grip/ledger/";
+  const primaryTree = () => run(0, "README.md\n");
+  const freshWorktree = () => run(0, "README.md\na.json\nb.json\nc.json\n");
+  const a = censusOne(recipe, { exec: primaryTree });
+  const b = censusOne(recipe, { exec: freshWorktree });
+
+  // BEFORE — the OUTCOME column alone. Identical, healthy, indistinguishable:
+  // both ANSWERED, both answering, neither decayed. This IS the blindness.
+  assert.equal(a.outcome, OUTCOME.ANSWERED);
+  assert.equal(b.outcome, OUTCOME.ANSWERED);
+  assert.equal(a.answering, true);
+  assert.equal(b.answering, true);
+  assert.equal(a.outcome, b.outcome, "the outcome field cannot tell the two trees apart");
+
+  // AFTER — every row now carries its binding class, and it names the tree the
+  // answer is about: THIS worktree, not necessarily the reader's.
+  assert.equal(a.binding.binding_class, "per-worktree");
+  assert.equal(a.binding.portable_scope, "this worktree");
+  assert.equal(b.binding.binding_class, "per-worktree");
+  assert.equal(b.binding.portable_scope, "this worktree");
+
+  // And the class DISCRIMINATES where the outcome could not: a SHA-pinned read
+  // is content-addressed ("any clone"), same healthy ANSWERED, a different tree
+  // story. That gap is the whole point of this slice.
+  const portable = censusOne("git show 1a2b3c4d:tooling/grip/census.mjs", { exec: () => run(0, "…bytes…") });
+  assert.equal(portable.outcome, OUTCOME.ANSWERED, "same healthy outcome");
+  assert.equal(portable.binding.binding_class, "content-addressed");
+  assert.equal(portable.binding.portable_scope, "any clone");
+  assert.notEqual(
+    portable.binding.portable_scope, a.binding.portable_scope,
+    "the binding class distinguishes what the outcome field could not",
+  );
+});
+
+test("D73: a REFUSED row still carries its binding class — the class is known before any spawn", () => {
+  const exec = spyExec();
+  const row = censusOne("systemctl stop bp-crux-parent", { exec });
+  assert.equal(row.outcome, OUTCOME.REFUSED);
+  assert.equal(exec.calls.length, 0);
+  assert.ok(row.binding, "the binding class is a function of the command string, not of execution");
+  assert.equal(typeof row.binding.binding_class, "string");
+});
+
+test("D73: the render reports the BINDING-CLASS distribution, sourced from binding.mjs", () => {
+  const mk = (command, level, r) => ({
+    command, screened: true, executed: true, level,
+    binding: classifyBinding(command), ...classifyOutcome(command, r),
+  });
+  const rows = [
+    mk("git show 1a2b3c4d:tooling/grip/census.mjs", "L2", run(0, "bytes")),          // content-addressed
+    mk("git show origin/main:tooling/grip/screen.mjs", "L2", run(0, "bytes")),        // shared-ref
+    mk("git ls-tree HEAD --name-only tooling/grip/ledger/", "L3", run(0, "README.md\n")), // per-worktree
+    mk("grep -c foo tooling/grip/census.mjs", "L3", run(0, "3")),                     // cwd-bound
+  ];
+  const report = summarise(rows, { corpusName: "binding-demo" });
+  // The distribution is carried on the report, folded over the whole corpus.
+  assert.equal(report.binding.by_class["content-addressed"], 1);
+  assert.equal(report.binding.by_class["shared-ref"], 1);
+  assert.equal(report.binding.by_class["per-worktree"], 1);
+  assert.equal(report.binding.by_class["cwd-bound"], 1);
+
+  const text = renderHuman(report);
+  assert.match(text, /BINDING CLASS/);
+  assert.match(text, /content-addressed\s+any clone/);
+  assert.match(text, /per-worktree\s+this worktree/);
+  assert.match(text, /cwd-bound\s+this cwd/);
+  // The sharpened honesty line: some answered about a tree that is not the
+  // reader's — but STILL-ANSWERING is never restated as STILL-CORRECT.
+  assert.match(text, /NOT NECESSARILY/);
+  assert.match(text, /STILL ANSWERING IS NOT STILL CORRECT/);
+});
+
+test("D73: the render documents that WRONG-CWD does NOT cover the wrong-tree class", () => {
+  const rows = [{
+    command: "git ls-tree HEAD --name-only tooling/grip/ledger/", screened: true, executed: true, level: "L3",
+    binding: classifyBinding("git ls-tree HEAD --name-only tooling/grip/ledger/"),
+    ...classifyOutcome("git ls-tree HEAD --name-only tooling/grip/ledger/", run(0, "README.md\n")),
+  }];
+  const text = renderHuman(summarise(rows, { corpusName: "wrong-cwd-demo" }));
+  // WRONG-CWD is cited as a NON-guard here: it fires only outside a git repo
+  // entirely, never in any worktree — so it is not coverage for this class.
+  assert.match(text, /WRONG-CWD does NOT cover this class/);
+  assert.match(text, /only outside a git repository/i);
+  assert.match(text, /never fires inside any worktree/i);
+});
+
+test("D73: the render STATES which tree the census ran in when provenance is supplied", () => {
+  // A fake provenance object, shaped exactly as treeProvenance returns, so the
+  // render is exercised without a git spawn.
+  const fakeProv = {
+    cwd: "/x/tree", state: "measured", reason: null, in_repo: true,
+    root: "/x/tree", head: "abc1234def", head_short: "abc1234",
+    origin_main: "def5678", origin_main_short: "def5678",
+    differs_from_origin: false, dirty: false, dirty_files: 0,
+  };
+  const rows = [{
+    command: "grep -c x f.js", screened: true, executed: true, level: "L3",
+    binding: classifyBinding("grep -c x f.js"), ...classifyOutcome("grep -c x f.js", run(0, "3")),
+  }];
+  const withProv = renderHuman(summarise(rows, { corpusName: "tree-demo", provenance: fakeProv }));
+  assert.match(withProv, /\[grip-provenance\]/, "the render must state which tree it ran in");
+  assert.match(withProv, /tree \/x\/tree/);
+
+  // CONTROL: with no provenance the render simply omits the line — it never
+  // fabricates a tree it was not told about, and the banner stays line one.
+  const noProv = renderHuman(summarise(rows, { corpusName: "tree-demo" }));
+  assert.doesNotMatch(noProv, /\[grip-provenance\]/);
+  assert.match(noProv.split("\n")[0], /^CENSUS — /);
+});
+
+test("D73: --json carries the binding distribution and each row's binding class", () => {
+  const rows = [
+    { command: "git show 1a2b3c4d:x.mjs", screened: true, executed: true, level: "L2", binding: classifyBinding("git show 1a2b3c4d:x.mjs"), ...classifyOutcome("git show 1a2b3c4d:x.mjs", run(0, "bytes")) },
+    { command: "git ls-tree HEAD tooling/", screened: true, executed: true, level: "L3", binding: classifyBinding("git ls-tree HEAD tooling/"), ...classifyOutcome("git ls-tree HEAD tooling/", run(0, "a\n")) },
+  ];
+  const j = toJson(summarise(rows, { corpusName: "json-binding" }));
+  assert.equal(j.binding.by_class["content-addressed"], 1);
+  assert.equal(j.binding.by_class["per-worktree"], 1);
+  assert.ok(j.rows.every((r) => "binding_class" in r && "portable_scope" in r));
+  const shaRow = j.rows.find((r) => r.command.includes("1a2b3c4d"));
+  assert.equal(shaRow.binding_class, "content-addressed");
+  assert.equal(shaRow.portable_scope, "any clone");
+  // The caveat names the WRONG-CWD gap in the machine render too.
+  assert.ok(j.caveats.some((c) => /WRONG-CWD does not cover the wrong-tree class/i.test(c)));
+});
+
+test("CONTROL: `--ledger` stdout carries the provenance tree line and the binding-class distribution", () => {
+  // The real CLI, end to end. emitProvenance writes the banner to STDERR; the
+  // render writes the tree line and the binding section to STDOUT.
+  const r = spawnSync(process.execPath, [CENSUS_MJS, "--ledger"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `census --ledger exited ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /\[grip-provenance\]/, "the render must state which tree it ran in");
+  assert.match(r.stdout, /BINDING CLASS/, "the render must report the binding-class distribution");
+  assert.match(r.stdout, /WRONG-CWD does NOT cover this class/, "the WRONG-CWD non-coverage note must ship in the render");
 });
