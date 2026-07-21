@@ -822,3 +822,41 @@ test("no consumer reads the fold's OLD field names — the rename left nothing d
   // first honest multi-recipe entry — which under D32's path-grain key is day one.
   assert.match(folded.rival_methods[0].message, /FEATURE of the row, not a defect report/);
 });
+
+test("the injected-screen contract MEETS screen.mjs's real return shape", () => {
+  // A CROSS-SLICE test, deliberately. `screen` is injected so the two modules
+  // stay decoupled (D39) — but decoupled is not the same as compatible, and
+  // nothing else in either suite ever puts them in a room together. Built in
+  // the same round with disjoint file sets, both correct alone, they did not
+  // meet: screen.mjs returns `{ ok, reason }` and this module read only
+  // `message`, so every refusal discarded the screen's diagnosis and printed
+  // "the injected screen refused it" — a shrug, in the exact place screen.mjs
+  // authors a per-head explanation so the log would NOT be a shrug.
+  //
+  // Uses a faithful STAND-IN rather than importing screen.mjs, because the
+  // ledger must keep importing nothing but level.mjs. The stand-in's shape is
+  // the contract; if screen.mjs's shape ever moves, the wiring slice's own
+  // tests are what must catch it.
+  const screenLike = (cmd) => (/^(cat|grep|git|wc|ls)\b/.test(cmd)
+    ? { ok: true, reason: "admitted: allowlisted head" }
+    : { ok: false, reason: `not allowlisted: ${cmd.split(" ")[0]} is refused` });
+
+  const row = (rerun) => ({ subject: "s", quantity: "q", rerun, observed_at: "2026-07-20T00:00:00Z" });
+
+  const refused = admitRecipe(row("systemctl stop bp-crux-parent"), { screen: screenLike });
+  assert.equal(refused.ok, false);
+  const r = refused.rejections.find((x) => x.reason === "REFUSED-COMMAND");
+  assert.ok(r, "an {ok:false} verdict must refuse under REFUSED-COMMAND");
+  assert.match(r.message, /not allowlisted: systemctl is refused/,
+    "the screen's OWN reason must survive into the rejection — discarding it turns a diagnosis into a shrug");
+  assert.ok(!r.message.includes("the injected screen refused it"),
+    "the generic fallback must not fire when the screen supplied a reason");
+
+  // `message` still works, so a screen written to the older shape is unbroken.
+  const viaMessage = admitRecipe(row("rm -rf /"), { screen: () => ({ ok: false, message: "destructive verb" }) });
+  assert.match(viaMessage.rejections.find((x) => x.reason === "REFUSED-COMMAND").message, /destructive verb/);
+
+  // And `{ok:true, reason}` — the ADMIT shape screen.mjs actually returns, which
+  // carries a reason string on the success side too — must still admit.
+  assert.equal(admitRecipe(row("cat README.md"), { screen: screenLike }).ok, true);
+});

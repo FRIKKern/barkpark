@@ -388,9 +388,24 @@ export function admitRecipe(input = {}, options = {}) {
     } else {
       const allowed = verdict === true || (verdict !== null && typeof verdict === "object" && verdict.ok === true);
       if (!allowed) {
+        // `reason` IS READ, and that is a cross-slice fix, not a nicety.
+        // screen.mjs — the module the CLI will actually inject next round —
+        // returns `{ ok, reason }`, while this contract originally read only
+        // `message`. Both slices were correct in isolation and their contract
+        // silently did not meet: every refusal printed the generic fallback and
+        // THREW AWAY the screen's diagnosis, which is the whole reason
+        // REFUSED_HEADS carries a per-head explanation ("so the refusal log
+        // reads as a diagnosis rather than a shrug"). Verified by wiring the
+        // real screenCommand in: `systemctl stop bp-crux-parent` reported "the
+        // injected screen refused it" instead of naming the sub-verb rule.
+        // Both keys are accepted so neither module has to know the other's.
         const why = typeof verdict === "string"
           ? verdict
-          : (verdict !== null && typeof verdict === "object" && typeof verdict.message === "string" ? verdict.message : "the injected screen refused it");
+          : (verdict !== null && typeof verdict === "object"
+            ? (typeof verdict.reason === "string" ? verdict.reason
+              : typeof verdict.message === "string" ? verdict.message
+                : "the injected screen refused it")
+            : "the injected screen refused it");
         rejections.push(reject(
           "REFUSED-COMMAND",
           `${JSON.stringify(rerun.trim())} was refused by the injected safety screen — ${why}. A ledger row is a standing invitation to re-run this command cheaply and often, so a command that can take something down must never become one.`,
