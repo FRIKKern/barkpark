@@ -112,6 +112,21 @@ jobs:
           shellcheck -S error scripts/connectors/w29-egress-allowlist-proof.sh
           bash scripts/connectors/w29-egress-allowlist-proof.sh
 
+      # The Wave-30 shim error-sanitize proof (D213): the shim's stderr tail is
+      # broadcast VERBATIM to every viewer's ChatLive, and three call sites fold
+      # the local vercel child's raw stderr (res.err) into a thrown Error.message
+      # (create / npm-install fallback / version probe) — the version-probe path
+      # also log()s it. W30 routes all four through ONE sanitizeErr() belt at
+      # message construction. The proof drives the REAL shim against a fake vercel
+      # that prints a secret-shaped string to stderr and asserts the planted
+      # env-assignment / bearer / base64 markers do NOT survive into the shim's
+      # stderr while the failing-verb diagnostic does. Same fake-vercel technique;
+      # no real Vercel, no real secret.
+      - name: Shim error-sanitize proof (W30, D213)
+        run: |
+          shellcheck -S error scripts/connectors/w30-shim-sanitize-proof.sh
+          bash scripts/connectors/w30-shim-sanitize-proof.sh
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest

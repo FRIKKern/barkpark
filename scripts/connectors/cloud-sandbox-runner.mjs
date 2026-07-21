@@ -196,6 +196,37 @@ function log(msg) {
   process.stderr.write(`[cloud-sandbox-runner] ${msg}\n`);
 }
 
+// ── Error-message sanitizer (W30, D213) ─────────────────────────────────────────
+//
+// The shim's stderr tail (last ~8KB/20 lines) is broadcast VERBATIM to every
+// connected viewer's ChatLive (claude_chat.ex:1267/1668-1689 → recorder.ex:585-594
+// → chat_live.ex:4512, a String.trim passthrough into a visible system message).
+// Three call sites fold the LOCAL vercel child's raw stderr (`res.err`) into a
+// thrown Error.message — sandbox create, the npm-install fallback, and the claude
+// version probe — and the version-probe path ALSO `log()`s that same message on the
+// non-strict WARNING branch. Today none carries credential material, but the path is
+// one refactor from leaking (D213 forbids folding response/config/credential bytes
+// into Error.message). This belt sanitizes at MESSAGE CONSTRUCTION so BOTH the throw
+// and the log() path are covered: it redacts env-assignment / bearer-token /
+// base64-blob shapes and bounds the length. Fail-safe by construction — a non-string
+// coerces to "", and any regex miss is still bounded by the length clamp, so the belt
+// never WIDENS what reaches the wire, only narrows it. The diagnostic that matters
+// (the vercel exit code) always survives; only secret-shaped payload is stripped.
+const SANITIZED_ERR_MAX = 300;
+function sanitizeErr(raw) {
+  let s = typeof raw === "string" ? raw : raw == null ? "" : String(raw);
+  s = s
+    // Bearer tokens: `Authorization: Bearer <v>` / `bearer <v>` — redact the value.
+    .replace(/\b(bearer)\s+\S+/gi, "$1 [redacted]")
+    // Env-assignment: FOO_BAR=<v> (an UPPERCASE env-style key) — redact the value.
+    .replace(/\b([A-Z][A-Z0-9_]{2,})=\S+/g, "$1=[redacted]")
+    // Long base64 / opaque token blobs (sk-… keys, JWT segments, raw base64).
+    .replace(/[A-Za-z0-9_\-+/]{24,}={0,2}/g, "[redacted]");
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length > SANITIZED_ERR_MAX) s = s.slice(0, SANITIZED_ERR_MAX) + "…[truncated]";
+  return s;
+}
+
 // ── argv parse: ────────────────────────────────────────────────────────────────
 //   `--workspace <id> [--mcp-config-b64 <b64>] [--sandbox-id <id>] [--keep-sandbox] -- <claude args...>`
 //
@@ -689,7 +720,7 @@ async function assertClaudeVersion(id) {
     // Could not run the probe at all — loud, but not a version verdict: warn and let
     // the turn proceed (a probe failure is not itself proof of drift). STRICT still
     // fails closed, since an unverifiable version is as unsafe as a wrong one.
-    const msg = `claude-version-probe-failed: could not run 'claude --version' in-sandbox (code ${res.code}: ${res.err.trim()}) — cannot confirm the pinned ${PINNED_CLAUDE_VERSION}`;
+    const msg = `claude-version-probe-failed: could not run 'claude --version' in-sandbox (code ${res.code}: ${sanitizeErr(res.err)}) — cannot confirm the pinned ${PINNED_CLAUDE_VERSION}`;
     if (VERSION_STRICT) throw new Error(msg);
     log(`WARNING: ${msg}`);
     return;
@@ -757,7 +788,7 @@ async function createSandbox(workspace, egressHosts = []) {
   log(`creating sandbox (scope=${SCOPE}, snapshot=${SNAPSHOT || "none/fallback"}) …`);
   const res = await run(VERCEL_BIN, sbArgs(createArgs), { capture: true });
   if (res.code !== 0) {
-    throw new Error(`vercel sandbox create failed (code ${res.code}): ${res.err.trim()}`);
+    throw new Error(`vercel sandbox create failed (code ${res.code}): ${sanitizeErr(res.err)}`);
   }
   const id = res.out.trim().split(/\s+/).pop();
   if (!id) throw new Error(`vercel sandbox create returned no sandbox id`);
@@ -778,7 +809,7 @@ async function createSandbox(workspace, egressHosts = []) {
       { capture: true },
     );
     if (npm.code !== 0) {
-      throw new Error(`in-sandbox claude install failed (code ${npm.code}): ${npm.err.trim()}`);
+      throw new Error(`in-sandbox claude install failed (code ${npm.code}): ${sanitizeErr(npm.err)}`);
     }
   }
   // Convergence point (D176/D180): whether claude arrived via the snapshot or the
