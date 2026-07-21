@@ -1,0 +1,135 @@
+{
+  "run_id": "grip-20260721T054846Z",
+  "recipes": [
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -n 'ledger.mjs\\|tooling/grip/ledger'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'needs_worktree' /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/.claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": "internal/cli/tasks_next_cmd.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt && git show origin/main:internal/cli/tasks_next_cmd.go | grep -c '^func '",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/tasks_next_cmd.go"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": "internal/pdrender/testdata",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt && git ls-tree -r origin/main --name-only -- internal/pdrender/testdata | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "internal/pdrender/testdata"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": "tooling/intentions",
+      "quantity": "git:log",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt && git log origin/main --since=2026-07-18 --oneline -- tooling/intentions | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/intentions"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": "scripts/pds",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt && git ls-tree -r origin/main --name-only -- scripts | grep -c '^scripts/pds'",
+      "derived_level": "L3",
+      "deps": [
+        "scripts/pds"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-truth-grip-charter.md",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'D36' /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/.claude/workflows/bp-truth-grip-charter.md",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-truth-grip-charter.md"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -n rerun",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/wild-bulk-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.claude/workflows/wild-bulk-cycle.workflow.js | grep -n rerun",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/wild-bulk-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:log",
+      "rerun": "git log --oneline -5 origin/main -- .claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/skills",
+      "quantity": "git:ls-tree",
+      "rerun": "git ls-tree -r --name-only origin/main -- .claude/skills",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/skills"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -n 'bp search'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -n 'wave_status\\|wave_paper'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:48:46Z"
+    }
+  ]
+}
