@@ -2212,6 +2212,120 @@ waves: ZERO. This wave's success condition is THE TRANSCRIPT EXISTS, not that th
   WARM while `api/_build/prod` had never been compiled. **Pre-warm `MIX_ENV=prod` before the timed window
   opens.**
 
+### Wave 14 — DETACH THE CLIMB FROM THE TURN (decided 2026-07-21, PDS-D242–PDS-D249, paper `pds-wave-14-2026-07-21`)
+
+The wave arrived as DETACH + DERIVE. Verification killed the DERIVE half by running the instrument,
+and killed the DETACH half's literal incantation by running it. What survives is sharper than what
+was planned: **the wall was never the floor. The wall was the TURN.**
+
+- **PDS-D242 — R0 IS MOOT. THE FORK REPAIR ALREADY LANDED.** PRs #5228–#5232 are ALL MERGED
+  (04:19:01Z–04:24:44Z), every `PDS-D217`–`D241` is present on origin/main (65 `PDS-D2` hits, each
+  D-number ≥1), and `#5131`/`#5133`/`#5097`/`#5161` are confirmed ancestors of the tip. **NOTHING
+  REMAINS TO LAND FOR PDS; no R0 slice is filed.** What survives is different: the PRIMARY checkout
+  carries THREE still-stranded charter commits for OTHER epics (studio `b3dac3e8e`, gui-remake
+  `1ccf6206a`, truth-grip `a96aacce6`) with no landing PRs, so **a blanket `reset --hard` there
+  destroys them** — while the PDS commit `de42c2af0` is provably byte-redundant (0 deletions against
+  origin/main's current file; a strict subsequence). D225/D241 stand unchanged: **fire from a FRESH
+  origin/main worktree.** The one residue is a ledger stamp, not work: `pds-w13-charter-lands` reads
+  5/6 with only "PR merged" unmet — the LEAD closes it, nobody rebuilds it.
+
+- **PDS-D243 — `setsid` DOES NOT EXIST ON THIS HOST, AND `nohup … & disown` IS NOT KILLPG-IMMUNE.**
+  The wave's own direction said "setsid/nohup"; run verbatim it fires NOTHING (`which setsid` → not
+  found, exit 1; macOS 15.5). Proven by execution, not inference: `nohup … </dev/null >log 2>&1 &
+  disown` survives a turn ending AND survives `kill -HUP -<pgid>`, but **DIES to `kill -TERM
+  -<pgid>` and `kill -KILL -<pgid>`** — it keeps the LAUNCHER's pgid and never becomes a session
+  leader (`STAT SN`, no `s`). The **only structurally immune form is `python3` `os.fork()` +
+  `os.setsid()` + `os.execvp()`**: own pgid, own session (`STAT Ss`), `ppid=1`, and it SURVIVED the
+  exact killpg that killed the nohup child. `os.closerange(3,64)` is not decoration — without it the
+  child holds the harness's pipe write-end open and the launching tool call appears to hang, defeating
+  "returns immediately" even when detachment is correct (`pds-scratch-target.sh:342` documents this
+  hazard in-repo). **The knowledge was one grep away in a SIBLING charter for four waves**
+  (`bp-search-template-charter.md` D36: "macOS is bash 3.2 with no `setsid`/`systemd-run`").
+
+- **PDS-D244 — THE DERIVATION REFUSES ITSELF, AND THE RUNG IT NAMES IS NEW.** `#5131` was RUN
+  end-to-end for the FIRST TIME EVER (closing a survey absence), scoped, against the deployed
+  streaming engine. Its output: **export delta = 687904 − 695632 = −7728 kB = −7.55 MiB — NEGATIVE**
+  — against a paired idle control drifting **+110.22 MiB**, ~15× its magnitude in the opposite
+  direction. **A negative, drift-dominated delta yields no floor.** The instrument says so itself,
+  unprompted, in its own COMPARABILITY block. The only derivable form is UNSCOPED, which fires a real
+  ~2.2 GiB full export that the ledger **provably cannot see** (zero `FULL_ATTEMPTS_FILE` references
+  in the instrument; a real `curl` at `:471`). **RULING: "derive the floor at zero attempt cost" IS
+  NOT AN AVAILABLE OPTION. The floor stays at the unmodified 2200; R1 is REFUSED with the number
+  attached, having spent ZERO attempts (3 before, 3 after, mtime unchanged).** This is the fifth
+  consecutive wave's refusal and the FIRST to name this rung: not the gate, not the budget, not the
+  regime — **the instrument's scoped output is empty.**
+  Note what this does NOT rest on: **D221 does not void it.** The control's in-window MemAvailable
+  range measured **117.61 MiB ≪ 1048.16**. Both D232's "1664.01 MiB" and this wave's strategize
+  "1423.39–1830.73" are ranges of LEVELS ACROSS samples, **not one window's internal range, which is
+  the only quantity D221 tests** (D221's own basis: 3 × 130 s windows at 1 Hz). D232's arithmetic
+  objection stands; its D221 objection was itself a unit-class error.
+
+- **PDS-D245 — cond_b IS A GATE, NOT A WATCHDOG, SO DETACH-ONLY IS PAYABLE AT 76.2%.** MemAvailable
+  is read **ONCE**, at `pds-pull-proof.sh:1301`, via a single `ssh_src` inside the precondition block,
+  and is **never re-read during the export**; D218 already established there is no abort-during-export
+  mechanism. Therefore "the longest contiguous build-idle run is ~90 s against a ~150 s export" is a
+  **SAFETY** argument about OOM risk, **not a GATE argument** — a qualifying draw fires and the export
+  runs to completion regardless of a later dip. Steady-state build-idle clears 2200 in **32/42 =
+  76.2%** of draws (mean 2239.25 MiB), against 97.2% inside the post-restart transient. An agent turn
+  afforded 2–3 draws; **a detached hour at 10 s affords ~360.** 76.2% over 360 draws is not a wall.
+  The absorption clause fires as written: **the derivation is DEMOTED to backlog and the wave fires
+  detached at the untouched floor** — which is exactly PDS-D232's ruling, finally executed.
+
+- **PDS-D246 — NO FIFTH PREDICATE LEG. BEAM WARMTH IS RECORDED, NEVER GATED.** Idle MemAvailable is a
+  near-deterministic function of `beam.smp` RSS (**r = −0.986**, slope **−1.178 MiB per MiB**, n=87),
+  which reconciles every "contradictory" live read as one warm-up curve rather than two regimes —
+  extrapolating to the strategize-era RSS (1157.3 MiB) predicts ~1617 MiB, inside its reported range.
+  Consequence: a long-running detached poller structurally **PREFERS post-restart transients**,
+  exactly the draws D93/D190/D191 forbid. **The fix is NOT a warmth leg** — D193's four-leg predicate
+  already went **0/61** precisely by ANDing one more condition, and this epic does not get to
+  re-learn that. The launcher **RECORDS** beam RSS and slot uptime beside every draw so the fired
+  draw is auditable after the fact, and the review rules on it. Observation, not gating. The
+  "18-minute" transient in D93/D190/D191 is **too short for this confound** — the governing variable
+  is RSS convergence, not a wall clock.
+
+- **PDS-D247 — ONLY A `^RESULT:` LINE IS A FINISHED SIGNAL, AND THE LAUNCHER APPENDS ITS OWN EXIT
+  SENTINEL.** Proven decisively: a SIGKILLed transcript was **byte-identical** to a still-running one.
+  The harness runs under `set -euo pipefail` (`:85`) and emits `RESULT:` only from `summary()`
+  (`:2462`–`:2487`), so a mid-rung abort terminates with **NO `RESULT:` line** — under a three-state
+  grammar indistinguishable from an OOM-kill, and those are **different diagnoses** (a harness bug vs.
+  the memory wall that is this epic's whole subject). The launcher-appended `EXIT: <code>` sentinel
+  splits them, and redundantly carries the verdict (harness exits 0=PASS, 1=FAIL, 2=BLOCKED). **SIX
+  states:** NO-TRANSCRIPT · CRASHED (sentinel, no RESULT) · FINISHED · FINISHED-nosent (every
+  pre-w14 artifact, so the fallback is REQUIRED not optional) · STILL-RUNNING · KILLED. Liveness is
+  `ps -p <recorded pid>`, **never `pgrep`** (PDS-D135; wave 13 burned exactly this). Two traps:
+  `grep -c` **exits 1 on zero matches**, so every grep needs `|| true` under `set -e`; and
+  `ps -p 999999` is a **VACUOUS** test — `kern.maxproc` is 4000, so it fails argument validation
+  ("process id too large") rather than the not-found path. Also settled: **ANSI is a non-issue** —
+  0 escape bytes from the harness, `bp`, `gh`, `mix` under redirection, and all three committed
+  transcripts are already clean. **No ANSI mitigation is to be filed.**
+
+- **PDS-D248 — A SIGKILL STRANDS THE EXPORT LOCK, AND NOTHING RECOVERS IT.** `FULL_LOCK`
+  (`/tmp/pds-full-export/lock`) is a `mkdir` lock released **only** by `cleanup` via `trap cleanup
+  EXIT` (`:193`), and **SIGKILL bypasses traps**. So the exact failure this wave braces for — an
+  OOM-kill of a detached climb — permanently strands the lock, and since preflight takes it
+  **unconditionally**, every subsequent run *including the retry* blocks. **The collector MUST check
+  the lock whenever it returns KILLED and report it by name.** Related and unfixed: `#5131` takes the
+  same lock unconditionally in preflight, **before** `FULL_ACQ` is evaluated, so a scoped run dodges
+  the floor gate but **not the mutex** — any measure and any climb are strictly mutually exclusive.
+
+- **PDS-D249 — THE BUDGET MUST BE READ, COMPUTED, EXPORTED AND EXEC'D IN ONE SHELL.**
+  `FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"` (`:130`) resolves **once at process start**, and a
+  child inherits its environment at fork/exec **only**. Proven by execution: exporting and launching
+  in the SAME shell → the child read **5**; exporting in one tool call and launching in a later one →
+  the child read **1**, the silent default, and cond_c then fails hours later with nothing visible at
+  launch time. `attempts` reads **3** today, so D224's formula gives **budget = 5** — **re-read
+  IMMEDIATELY before the fire, never a literal carried from this charter.** The store is HOST-LOCAL
+  (D156); resetting `attempts` and repointing `PDS_FULL_EXPORT_DIR` remain FORBIDDEN (D223/D240), and
+  the parked tar needs **no deletion for a first fire** — its stale `served_sha` (`15e057f83`) already
+  routes the harness past reuse into a fresh export whose `curl -o` overwrites it in place.
+
+**THE WAVE, three rungs, expensive move LAST.** R1 `pds-w14-detached-launcher` (round 1) commits the
+arm+collect plumbing. R2 `pds-w14-crown-fire` (round 2) arms it and returns in under a minute. R3
+`pds-w14-crown-collect-stamp` (round 3) collects, commits the transcript, and stamps — LEAD only,
+never a builder alongside the rung it just ran. `pds-w14-peak-ledger-honesty` (round 1) rides beside
+them, fixing the accounting blindness D244 exposed. **BUILD NO EIGHTH INSTRUMENT** — the launcher is
+plumbing and measures nothing; the one thing this wave adds to the tree is a way to *leave*.
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
