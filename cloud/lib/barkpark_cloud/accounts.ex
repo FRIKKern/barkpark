@@ -2078,6 +2078,43 @@ defmodule BarkparkCloud.Accounts do
 
   def consume_sse_ticket(_), do: nil
 
+  @doc """
+  Delete every `"sse"` ticket row that is BURNED (`revoked_at` stamped) or past
+  its `expires_at`. Hygiene only — returns `%{reaped: count}`; the
+  `BarkparkCloud.Workers.SseTicketReaper` Oban worker calls this per minute.
+
+  Correctness never depends on this running: `consume_sse_ticket/1` already
+  filters `is_nil(revoked_at)` and `expires_at > now`, so a burned or lapsed
+  ticket is unredeemable the instant either becomes true. What this stops is the
+  ACCRETION. The mint is a bare `Repo.insert` per call and is deliberately
+  NON-SUPERSEDING (see `create_sse_ticket/1`), and the burn is a soft
+  `revoked_at` stamp rather than a DELETE — so before this helper existed, a
+  console tab's reconnect loop left one permanent row per connect, forever.
+
+  STRICTLY `context == "sse"`. `user_tokens` is polymorphic and every other
+  context (`session`, `pat`, `confirm`, `change_email`, `2fa_pending`, `reset`,
+  `device`) has its OWN lifecycle owner — a revoked `session` row, for one, is
+  the tombstone the active-sessions UI renders. Widening this `where` by even one
+  context would delete other people's evidence, so it is pinned by test.
+
+  A row with a NULL `expires_at` and no `revoked_at` survives: SQL's
+  `NULL <= now` is NULL, and `false OR NULL` is NULL, so it never matches. That
+  is the correct outcome — such a row is still live.
+  """
+  @spec reap_sse_tickets() :: %{reaped: non_neg_integer()}
+  def reap_sse_tickets do
+    now = lifecycle_now()
+
+    {count, _} =
+      from(t in UserToken,
+        where: t.context == "sse",
+        where: not is_nil(t.revoked_at) or t.expires_at <= ^now
+      )
+      |> Repo.delete_all()
+
+    %{reaped: count}
+  end
+
   ## Onboarding
 
   @doc """
