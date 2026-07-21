@@ -204,6 +204,7 @@ cmd_census() {
   need_python
 
   local tmp; tmp=$(scratch_dir)
+  local census_saw_unknown=0
   task_json "$task_id" "$tmp/task.json"
 
   say "criterion census — $task_id"
@@ -231,7 +232,7 @@ print("%s %d %d %d" % ("yes" if c.get("met") else "no", len(t), t.count(chr(96))
 PY
 )
     spent=$(dry_run_target_bytes "$task_id" "$i" "census" "0" "$tmp/c.txt" "") || spent=""
-    if [ -n "$spent" ]; then budget=$(( TARGET_LIMIT - spent )); else budget="?"; fi
+    if [ -n "$spent" ]; then budget=$(( TARGET_LIMIT - spent )); else budget="?"; census_saw_unknown=1; fi
     # shellcheck disable=SC2086
     set -- $meta
     local hazard="quoted-string safe"
@@ -240,6 +241,16 @@ PY
     printf '%3s  %-5s  %6s  %5s  %5s  %8s  %s\n' "$i" "$1" "$2" "$3" "$4" "$budget" "$hazard"
   done
   say ""
+  # A `?` budget is a PROBE FAILURE, not a property of the criterion. Observed in
+  # review: criterion 7 printed `?` on one census and 9746 on the next two, same
+  # tree, same server — a transient on the dry-run request. Without this legend a
+  # lead reading `?` mid-climb has to guess whether the row is dangerous.
+  if [ "$census_saw_unknown" = 1 ]; then
+    say "One or more budgets read '?': the dry-run probe for that row FAILED — it is not a"
+    say "statement that the row has no budget. It is usually transient; re-run the census."
+    say "Do NOT stamp against a '?' budget. Get a number first."
+    say ""
+  fi
   say "Every row above is stamped the SAME way: fetch to file, stamp by \$(cat file)."
   say "There is no 'this one looks fine' row. That judgement is what PDS-D226 forbids."
 }
