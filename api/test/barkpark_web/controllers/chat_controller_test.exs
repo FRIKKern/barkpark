@@ -519,7 +519,14 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert entry["agent_state"] == "working"
 
       assert {:ok, at, 0} = DateTime.from_iso8601(entry["agent_state_at"])
-      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [:eq, :gt]
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
+
+      # the wave-12 read-tracking stamp is retired (herd — no read receipts)
+      refute Map.has_key?(entry, "last_visited_at")
     end
 
     # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────
@@ -677,6 +684,31 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=-1") |> json_response(400)
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=abc") |> json_response(400)
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=1.5") |> json_response(400)
+    end
+
+    # ── herd show-widen (herd charter D65h) ──────────────────────────────────
+
+    test "carries agent_state/agent_state_at — a single-session poller needs no sidebar (D65h)",
+         %{admin: a1, sid: sid} do
+      # a fresh session wears the column default honestly
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      assert body["agent_state"] == "idle"
+      assert Map.has_key?(body, "agent_state_at")
+
+      # MUTATION-PROVEN: a persisted flip changes the SHOW read, timestamp too
+      now = DateTime.utc_now()
+      StudioChat.set_agent_state(sid, "working", now)
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      assert body["agent_state"] == "working"
+      assert {:ok, at, 0} = DateTime.from_iso8601(body["agent_state_at"])
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
+
+      # the wave-12 read-tracking stamp is retired (herd — no read receipts)
+      refute Map.has_key?(body, "last_visited_at")
     end
   end
 

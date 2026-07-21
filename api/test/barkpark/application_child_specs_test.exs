@@ -54,7 +54,6 @@ defmodule Barkpark.ApplicationChildSpecsTest do
     refute Barkpark.Plugins.Indx.Auth in ks
     refute Barkpark.Plugins.Indx.Monitor in ks
     refute Barkpark.Plugins.Indx.Recovery in ks
-    refute Barkpark.StudioChat.Notifier in ks
     refute Barkpark.Plugins.Sheets.Session.ReplayRing in ks
   end
 

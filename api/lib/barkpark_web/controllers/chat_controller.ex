@@ -1072,8 +1072,12 @@ defmodule BarkparkWeb.ChatController do
       total_cost_usd: s.total_cost_usd,
       last_context_tokens: s.last_context_tokens,
       context_window: s.context_window,
+      # Herd (charter D65h): the show read carries the agent_state pair too —
+      # a single-session poller must not need the sidebar list to know the
+      # pill state.
+      agent_state: s.agent_state,
+      agent_state_at: s.agent_state_at,
       last_active_at: s.last_active_at,
-      last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at,
@@ -1110,7 +1114,6 @@ defmodule BarkparkWeb.ChatController do
       agent_state: s.agent_state,
       agent_state_at: s.agent_state_at,
       last_active_at: s.last_active_at,
-      last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
