@@ -857,11 +857,13 @@ export function mintRunId(utcInstant) {
   return `grip-${String(utcInstant ?? "").trim().replace(/[-:]/g, "")}`;
 }
 
-async function writeCommand(rest) {
-  const [factsPath, dirArg] = rest;
+// ONE loader for both facts-taking verbs. `prescreen` exists to tell a writer
+// what `write` will do, so a second loader that disagreed on what a facts file
+// IS would make the rehearsal answer a different question than the run.
+function loadFacts(factsPath, usage) {
   if (!factsPath) {
-    process.stderr.write("ledger: write needs a facts file — node ledger.mjs write <facts.json> [dir]\n");
-    return 2;
+    process.stderr.write(`ledger: ${usage}\n`);
+    return { ok: false, code: 2 };
   }
   const resolved = resolve(factsPath);
   let parsed;
@@ -869,14 +871,22 @@ async function writeCommand(rest) {
     parsed = JSON.parse(readFileSync(resolved, "utf8"));
   } catch (err) {
     process.stderr.write(`ledger: ${resolved} is not readable JSON — ${err?.message ?? String(err)}\n`);
-    return 2;
+    return { ok: false, code: 2 };
   }
   // Both shapes, matching cli.mjs's loader exactly — a bare array or {facts}.
   const facts = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.facts) ? parsed.facts : null;
   if (facts === null) {
     process.stderr.write(`ledger: ${resolved} must be a JSON array of facts, or an object with a "facts" array\n`);
-    return 2;
+    return { ok: false, code: 2 };
   }
+  return { ok: true, facts, resolved };
+}
+
+async function writeCommand(rest) {
+  const [factsPath, dirArg] = rest;
+  const loaded = loadFacts(factsPath, "write needs a facts file — node ledger.mjs write <facts.json> [dir]");
+  if (!loaded.ok) return loaded.code;
+  const facts = loaded.facts;
 
   const now = shellNow();
   const { mintAll } = await import("./mint.mjs");
@@ -917,10 +927,122 @@ async function writeCommand(rest) {
   return 0;
 }
 
+// ── the prescreen verb ───────────────────────────────────────────────────────
+
+// WHY THIS EXISTS (charter D64). `write` is ALL-OR-NOTHING, and that is correct
+// — a run file holding only the rows that happened to pass IS the silent-strip
+// defect at file granularity. But correct is not the same as learnable: nine
+// refusals discarded all 22 rows, exit 1, nothing written, and there was no
+// cheap way to find out first. `prescreen` is the rehearsal. It reports a
+// per-row verdict and WRITES NOTHING — no run file, no directory, no mkdir.
+//
+// THE VERDICT KEY IS `.ok`, NOT `.safe`. screenCommand returns
+// `{ ok, reason }`. A verifier read `.safe`, got `undefined`, scored 0 of 40
+// rows refused — and the carried reason string still read "admitted", so the
+// mistake rendered as its own opposite: a screen reporting total refusal while
+// explaining that everything was admitted. test/leads.test.mjs pins the shape.
+async function prescreenCommand(rest) {
+  const [factsPath] = rest;
+  const loaded = loadFacts(factsPath, "prescreen needs a facts file — node ledger.mjs prescreen <facts.json>");
+  if (!loaded.ok) return loaded.code;
+
+  const { mintAll } = await import("./mint.mjs");
+  const { screenCommand } = await import("./screen.mjs");
+
+  // The clock is read for the same reason `write` reads it — so the rehearsal
+  // mints exactly what the run would mint. Nothing is stored either way.
+  const now = shellNow();
+  const { recipes, skipped, yield: mintYield } = mintAll(loaded.facts, { observed_at: now });
+
+  const verdicts = recipes.map((recipe, index) => {
+    const screened = screenCommand(recipe.rerun);
+    // `.ok` — see the note above. Never `.safe`.
+    return { index, subject: recipe.subject, rerun: recipe.rerun, ok: screened.ok === true, reason: screened.reason };
+  });
+  const refused = verdicts.filter((v) => !v.ok);
+
+  process.stdout.write(`ledger prescreen — ${loaded.resolved}\n`);
+  process.stdout.write("  WRITES NOTHING: this is a rehearsal of `write`, not a partial write (charter D64)\n\n");
+  process.stdout.write(`  facts read       ${mintYield.facts}\n`);
+  process.stdout.write(`  mintable         ${mintYield.rerun_bearing}\n`);
+  process.stdout.write(`  screen admits    ${verdicts.length - refused.length}\n`);
+  process.stdout.write(`  screen refuses   ${refused.length}\n`);
+  for (const s of skipped) process.stdout.write(`  unmintable[${s.index}]   ${s.reason} — this row never reaches the screen\n`);
+
+  if (verdicts.length > 0) {
+    process.stdout.write("\n");
+    for (const v of verdicts) {
+      process.stdout.write(`  ${v.ok ? "ADMIT " : "REFUSE"} [${v.index}] ${v.subject}\n`);
+      process.stdout.write(`         $ ${v.rerun}\n`);
+      process.stdout.write(`         ${v.reason}\n`);
+    }
+  }
+
+  if (mintYield.rerun_bearing === 0) {
+    process.stdout.write("\n  nothing mintable — no fact carried a rerun command, so `write` would refuse this file outright\n");
+    return 1;
+  }
+  if (refused.length > 0) {
+    process.stdout.write(`\n  \`write\` WOULD REFUSE THIS FILE and store nothing: ${refused.length} of ${verdicts.length} rows are refused,\n`);
+    process.stdout.write("  and the write is all-or-nothing on purpose. Fix or drop those rows, then re-run prescreen.\n");
+    return 1;
+  }
+  process.stdout.write(`\n  all ${verdicts.length} rows pass the screen — \`write\` would store one run file. Nothing was stored by this run.\n`);
+  return 0;
+}
+
+// ── the leads verb ───────────────────────────────────────────────────────────
+
+async function leadsCommand(rest) {
+  const args = [...rest];
+  const takeFlag = (name) => {
+    const i = args.indexOf(name);
+    if (i < 0) return null;
+    const value = args[i + 1];
+    args.splice(i, value === undefined ? 1 : 2);
+    return value ?? null;
+  };
+  const asJson = args.includes("--json");
+  const censusPath = takeFlag("--census");
+  const dirArg = takeFlag("--dir");
+  const query = args.filter((a) => !a.startsWith("--")).join(" ").trim();
+
+  if (query === "") {
+    process.stderr.write("ledger: leads needs a substring — node ledger.mjs leads <substring> [--json] [--census <report.json>] [--dir <ledger dir>]\n");
+    process.stderr.write("  it matches case-insensitively over the subject and the rerun command; that filter IS the feature\n");
+    return 2;
+  }
+
+  const { selectLeads, renderLeads, loadCensusIndex } = await import("./leads.mjs");
+
+  let census = null;
+  if (censusPath !== null) {
+    if (!censusPath) {
+      process.stderr.write("ledger: --census needs a path to a `census --json` report\n");
+      return 2;
+    }
+    try {
+      census = loadCensusIndex(resolve(censusPath));
+    } catch (err) {
+      process.stderr.write(`ledger: ${resolve(censusPath)} is not a readable census --json report — ${err?.message ?? String(err)}\n`);
+      return 2;
+    }
+  }
+
+  const folded = foldLedger(dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR);
+  const result = selectLeads(folded, query, { census });
+  process.stdout.write(asJson ? `${JSON.stringify(result, null, 2)}\n` : renderLeads(result));
+  // An honest empty is an ANSWER, not an error — exit 0. A nonzero here would
+  // teach callers to treat "nobody has checked this yet" as a failure.
+  return 0;
+}
+
 async function main(argv) {
   const [cmd = "fold", ...rest] = argv;
   if (cmd === "--selftest" || cmd === "selftest") return selftest();
   if (cmd === "write") return writeCommand(rest);
+  if (cmd === "prescreen") return prescreenCommand(rest);
+  if (cmd === "leads") return leadsCommand(rest);
   if (cmd === "fold") {
     const dir = rest[0] ? resolve(rest[0]) : DEFAULT_LEDGER_DIR;
     const folded = foldLedger(dir);
@@ -929,9 +1051,12 @@ async function main(argv) {
     // legitimately stored. Exit 0 and let the caller read `rival_methods`.
     return folded.unreadable.length > 0 ? 1 : 0;
   }
-  process.stderr.write("usage: node ledger.mjs [write <facts.json> [dir] | fold [dir] | --selftest]\n");
-  process.stderr.write("  write  mint {claim,evidence,rerun} facts into recipe rows and store one immutable run file\n");
-  process.stderr.write("  fold   read every run file in the store back as one index\n");
+  process.stderr.write("usage: node ledger.mjs [leads <substring> | prescreen <facts.json> | write <facts.json> [dir] | fold [dir] | --selftest]\n");
+  process.stderr.write("  leads      look up RECIPES by case-insensitive substring over subject and rerun — never an answer\n");
+  process.stderr.write("             [--json] [--census <census --json report>] [--dir <ledger dir>]\n");
+  process.stderr.write("  prescreen  rehearse a write: report the per-row screen verdict and store NOTHING\n");
+  process.stderr.write("  write      mint {claim,evidence,rerun} facts into recipe rows and store one immutable run file\n");
+  process.stderr.write("  fold       read every run file in the store back as one index\n");
   return 2;
 }
 
