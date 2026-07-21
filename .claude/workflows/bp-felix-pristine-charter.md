@@ -965,6 +965,61 @@ build: pulse keep-serial, N=2000 measurement, + 4 ledger restamps.
 
 ## Wave log
 
+- **Wave 13 — 2026-07-21 — REVIEWED (A−, per `felix-pristine-wave-13-2026-07-21`).** The SEAL wave
+  delta-audit. The epic seal rests on the already-merged CSP PR #3545 (ancestor of origin/main, 0
+  Config.CSP findings); Wave 13 gave the 222 in-fence files that changed since the 2026-07-10 founding
+  cutoff a real look and shipped what it found — **6 code + 1 doc slice, all opus, all round-1 parallel,
+  all reviewed correct with ZERO code fixes needed.** Ratified D77–D82. Slices + final branches (all
+  pushed, PRs #5468–#5474, lead merges):
+  (1) **pulse dashboard mount-gate** (`task-felix-w13-pulse-dashboard-mount-gate`, PR #5468,
+  `loop-epic/gate-pulse-dashboard-live-mount-behind-c-0`) — load_rows/load_vitals/safe_storage gated
+  behind `connected?/1`, dead render paints a loading skeleton; the #2402 scar's unswept pulse remainder.
+  (2) **github ops_live mount-gate** (`task-felix-w13-github-opslive-mount-gate`, PR #5469,
+  `loop-epic/github-ops-live-stop-running-health-snap-1`) — Health.snapshot/0 (5+ RTT) gated behind
+  `connected?/1`, DB-free blank_health + skeleton on the dead render; the #2402 scar's github remainder.
+  (3) **board_live field-visibility seal** (`task-felix-w13-boardlive-envelope-fieldvis-seal`, PR #5470,
+  `loop-epic/seal-the-board-live-task-peek-field-visi-2`) — the raw-Repo.one peek's hand-picked fields
+  now gate through `Envelope.field_readable?` as an anonymous fail-closed caller (latent fail-OPEN
+  hardening; no task field declares visibility today). Sibling list-card/gantt bypass filed as backlog
+  `task-felix-w13-boardsnapshot-fieldvis-seal`.
+  (4) **expand ?expand= N+1 batch** (`task-felix-w13-expand-nplus1-batch`, PR #5471,
+  `loop-epic/kill-the-expand-n-1-in-content-expand-ex-3`) — per-ref resolve (2N+1) → one
+  `get_documents_by_ids/3` per ref_type + memoized schema, query count constant in N; query-scope
+  caller_context normalized to nil for non-CallerContext sentinels (fail-closed). CAVEAT: owner-scoped
+  ref-type expansion under a sentinel/grant caller is fail-closed stricter and untested (over-redacts,
+  never leaks) — lead note on the PR.
+  (5) **indx persistence corrupt-skip** (`task-felix-w13-indx-persistence-corrupt-skip`, PR #5472,
+  `loop-epic/make-indx-persistence-load-all-skip-corr-4`) — load_all/0 filter-generator drops the
+  `:error` branch before `:maps.from_list`, so one corrupt .term file no longer crashes P4b recovery for
+  every scope (honors the moduledoc contract).
+  (6) **claim_fence UUID guard** (`task-felix-w13-claimfence-uuid-guard`, PR #5473,
+  `loop-epic/guard-claimfence-verify-against-non-uuid-5`) — `Ecto.UUID.cast` before the :binary_id PK
+  query; a non-UUID collapses to `{:error,:task_not_found}` instead of raising CastError (honors the
+  `{:ok}|{:error}` @spec). Defense-in-depth (both live callers pass validated ids).
+  (7) **sobelow STAY-ADVISORY verdict** (`task-felix-w13-sobelow-stay-advisory-verdict`, PR #5474,
+  `loop-epic/record-the-sobelow-gate-flip-decision-st-6`) — docs-only; records that D75's blocking-flip
+  precondition is unmet (137 baselined entries, 0 Config.CSP). Reviewer re-ran the gate GREEN
+  (`grep 'stay advisory'` matches, `check-doc-budgets.sh` exits 0).
+  **Ledger audit:** all 7 tasks honest — each non-merge criterion met with evidence, the MERGE-GATE
+  criterion [3] correctly left met=false for the lead, all linked to the wave paper and parented to the
+  epic. NO ledger lies; no fixes needed.
+  **Gate re-run status (honest):** the reviewer worktree has no Elixir toolchain/`_build` and cross-worktree
+  borrow-build is documented-broken; under the hard Fable spend constraint no 802-file recompile was run.
+  The doc slice's gate was re-run green. The 6 Elixir gates rest on rigorous adversarial static review +
+  the builders' recorded mutation-proofs + the **authoritative CI Elixir Test gate that runs on every PR**
+  (charter D82). The load-bearing tests were spot-checked and genuinely pin the claimed behavior (the
+  expand probe asserts flat query counts across N=1/6/16 with resolution correctness; the board_live seal
+  asserts private peek sections drop).
+  **Merge-gated criteria the lead closes on merge:** criterion [3] on all 7 slice tasks (PR merged +
+  Elixir Test green — docs slice merges on its own doc gate).
+  **OUTSTANDING from D81 (NOT executed this review — needs the lead):** the "7 watch/fenced items retire
+  at review" retirement did not surface an authoritative task-id list to the reviewer; the CSP crit-4
+  reword is lead-owned; `gr-blk-studio-presence-perf-flake` reparent-out belongs to the gui-remake epic
+  (off this fence). Next wave / lead should execute these with the named D57/D63/D65/D75 evidence.
+  **Next wave (14 / seal):** merge #5468–#5474 (Elixir-gated), close the 7 merge-gate criteria, execute
+  the D81 retirements, then the epic is one honest step from a seal — the delta-audit found no un-fixed
+  ripe named-failure beyond these 7 (new fleet/capabilities/schema ground proven clean, D80).
+
 - **Wave 12 — 2026-07-16 — DECIDED (building).** Ratified D68–D76. TWO opus build slices under
   `task-96a908af98698118`, both linked to `felix-pristine-wave-12-2026-07-16`, file-disjoint (parallel):
   (1) Sobelow tailored per-surface CSP + SAML SLO nonce (`task-0fc9d55c4725ab92`, P1) — the direction's
