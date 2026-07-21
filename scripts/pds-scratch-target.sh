@@ -28,26 +28,72 @@
 # tree's api/uploads, or anything on a remote. bin/barkpark and bin/barkpark-pg
 # are used AS-IS and are never modified.
 #
-# COST — there are TWO regimes and only ONE thing decides which you are in: is
-# api/_build EMPTY? (_build is per-checkout and is never shared, so a fresh
-# worktree is always cold.) Tell them apart before budgeting:
+# COST — there are THREE regimes, and the one-line discriminator most readers
+# reach for is COARSE enough to put you in the wrong one. Read this before you
+# budget a timed window (PDS-D241).
+#
+# The coarse test — what this header used to call the only switch:
 #
 #   [ -n "$(ls -A api/_build 2>/dev/null)" ] && echo warm || echo COLD
 #
-#   COLD (empty api/_build): TWO full compiles — ensure_secrets runs MIX_ENV=dev,
-#     the server boots MIX_ENV=prod. >10 minutes is realistic.
-#   WARM (populated api/_build — measured at 290 MB across 71 deps):
+# It answers "has ANY MIX_ENV ever compiled in this checkout?", so it flips to
+# WARM the moment api/_build/dev or api/_build/test exists. But `up` boots the
+# server under MIX_ENV=prod, so the thing that actually decides your cost is
+# whether api/_build/prod exists. `ls -A api/_build` reports WARM on a worktree
+# that has never compiled prod, and that worktree pays a full prod compile.
+# The honest discriminator:
+#
+#   [ -d api/_build/prod ] && echo warm || echo COLD-PROD
+#
+#   COLD (api/_build absent or empty): TWO full compiles — ensure_secrets runs
+#     MIX_ENV=dev, the server boots MIX_ENV=prod. >10 minutes is realistic.
+#     (Inherited figure, never re-measured.)
+#   COLD-PROD (dev and/or test present, api/_build/prod ABSENT — exactly the
+#     case `ls -A api/_build` mislabels as WARM): ONE full MIX_ENV=prod compile.
+#     Measured 2026-07-21 on a worktree whose dev+test _build already existed
+#     from sibling activity while prod did not:
+#       up --verify   2:35.72 — 155.72s wall, 134.47s user + 30.44s system,
+#                     105% CPU
+#     Boot, verify (all isolation controls incl. the negative control) and
+#     teardown all PASSED — the instrument is HEALTHY, it just costs 4.75x the
+#     WARM first-`up` figure below. It is CPU-bound compilation: NOT I/O and NOT
+#     dependency resolution (`mix deps.get` returned in 0.228s, every dep
+#     Unchanged).
+#   WARM (api/_build/prod present — _build measured at 290 MB across 71 deps):
 #     first `up` of a session   32.742s  (~20s of that is `mix deps.get`
 #                                        RESOLVING deps, not compiling)
 #     later `up` in the session  9.830s  (deps already resolved)
 #     teardown                   8.068s
 #     teardown + up (one cycle) 20.240s
 #
+# PRE-WARM BEFORE ANY TIMED WINDOW OPENS. On a worktree that has not compiled
+# prod, pay that compile off the clock:
+#
+#   cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile   # or a throwaway cycle
+#
+# CC=/usr/bin/clang IS NOT OPTIONAL HERE. `cc` resolves to the Claude CLI
+# wrapper, not a C compiler, and argon2_elixir dies with "unknown option '-g'".
+# Without the override the pre-warm does not run slow, it FAILS — and the
+# throwaway-cycle alternative hits the same trap, because it runs the same
+# compile. Live-proven by the wave-13 crown-climb run, which hit exactly this.
+#
+# Then the run inside the window pays the ~9.8–20.2s WARM cycle instead of
+# another ~156s cold-prod compile on the critical path. That same run measured
+# `up --verify` at ~10s wall once pre-warmed.
+#
 # Every WARM figure above was measured on a real host on 2026-07-20 with
-# api/_build populated. The old "~90s warm" in this header was wrong by ~4.5x
-# and made re-arming a target look far more expensive than it is. Full record,
-# incl. how to hold a pre-booted SPARE target (drives the miss cost to ~0):
-# scripts/pds-scratch-target-cost-2026-07-20.md.
+# api/_build populated; the COLD-PROD figure on 2026-07-21. The old "~90s warm"
+# in this header was wrong by ~4.5x and made re-arming a target look far more
+# expensive than it is; the "empty api/_build" trigger that replaced it was too
+# coarse in the other direction and made a ~156s prod compile look like a 33s
+# boot. Full record, incl. how to hold a pre-booted SPARE target (drives the
+# miss cost to ~0): scripts/pds-scratch-target-cost-2026-07-20.md.
+#
+# NAMED RESIDUE: the runtime preflight warning in `cmd_up` (search
+# "api/_build is empty") still branches on the coarse `ls -A api/_build` test,
+# so it stays SILENT in the COLD-PROD case. Deliberately not fixed here — this
+# slice is docs-and-comments only (PDS-D241) and changing that branch would
+# change a verb's output. Filed as a follow-up task.
 
 set -euo pipefail
 

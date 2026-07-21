@@ -33,6 +33,11 @@ The warm number was wrong by roughly 4.5x. Measured warm:
 **Every row above is WARM-PATH.** They were produced with `api/_build` populated at 290 MB across
 71 deps. Do not quote any of them for a fresh worktree.
 
+> **Amended 2026-07-21 — see §5.** The four rows above stand; they were correct for the regime they
+> were measured in. What §1 got wrong is the *switch*: the `ls -A api/_build` test below is coarse,
+> and a worktree it labels WARM can still pay a full ~156s `MIX_ENV=prod` compile. §5 has the
+> measurement and the pre-warm fix.
+
 The ~20s gap between the session's first `up` (32.7s) and every later one (9.8s) is **`mix deps.get`
 doing full resolution, not compilation** — the script fetches deps itself before booting (TRAP 1,
 `pds-scratch-target.sh`), and on the first invocation of a session that resolution is a real cost.
@@ -164,6 +169,101 @@ off the critical path while the next attempt is already running.
 
 ---
 
+## 5. Amendment, 2026-07-21 — the switch in §1 is too coarse, and it costs 156 seconds
+
+**Measured 2026-07-21, wave 13 (PDS epic). Cites PDS-D241.** The §1 measurements above are not
+withdrawn — they were correct for the regime they were taken in. The *discriminator* §1 names is
+what was wrong, and it was wrong on the crown climb's critical path.
+
+### What was measured
+
+`scripts/pds-scratch-target.sh up --verify`, on a worktree that the §1 test calls WARM:
+
+| operation | measured | `api/_build` state |
+|---|---|---|
+| `up --verify` | **2:35.72** — 155.72s wall, 134.47s user + 30.44s system, 105% CPU | `dev` + `test` present, **`prod` ABSENT** |
+
+That is **4.75x** the 32.742s "first `up` of a session" figure §1 documents, and 4.75x what
+`scripts/pds-scratch-target.sh:40` told the reader to budget.
+
+**The instrument itself is healthy.** Boot PASSED, `verify` PASSED with every isolation control
+including the negative control, and `teardown` PASSED with both ports released and zero orphan
+postgres. Nothing is broken. Only the cost record lied.
+
+### Root cause — a prod compile hiding behind a WARM label
+
+The discriminator in §1 is:
+
+```bash
+[ -n "$(ls -A api/_build 2>/dev/null)" ] && echo warm || echo COLD
+```
+
+It answers *"has any MIX_ENV ever compiled in this checkout?"* — not *"is the env `up` actually
+boots already built?"*. `up` boots the server under `MIX_ENV=prod`.
+
+In the measured worktree, `api/_build/dev` (mtime 03:37) and `api/_build/test` (03:13) already
+existed from sibling activity, while `api/_build/prod` did **not** — it was created at 05:03 by the
+run itself. So `ls -A api/_build` was non-empty, the reader was told WARM, and the run paid a full
+`MIX_ENV=prod` compile anyway.
+
+It is **CPU-bound compilation**, not I/O and not dependency resolution: 105% CPU sustained, and
+`mix deps.get` completed in **0.228s** with every dep reported `Unchanged`. The ~20s `deps.get`
+resolution cost that §1 identifies for the session's first warm `up` is a *different* cost and was
+not what was paid here.
+
+### The corrected regime table
+
+| regime | trigger | cost |
+|---|---|---|
+| COLD | `api/_build` absent or empty | two full compiles (dev + prod), `>10 min` — inherited, still never re-measured |
+| **COLD-PROD** | `api/_build/prod` **absent** while `dev`/`test` exist — *the case §1's test mislabels as WARM* | one full prod compile, **155.72s** measured |
+| WARM | `api/_build/prod` present | 32.742s / 9.830s / 8.068s / 20.240s per §1 |
+
+The honest one-liner:
+
+```bash
+[ -d api/_build/prod ] && echo warm || echo COLD-PROD
+```
+
+### The fix a climb can act on: pre-warm before the timed window opens
+
+```bash
+cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile   # or: one throwaway up/teardown cycle
+```
+
+**`CC=/usr/bin/clang` is not optional on this host, and omitting it is why a first attempt fails.**
+Added 2026-07-21 by review, from the wave-13 crown-climb run that executed this recipe for real: on
+a cold tree `mix deps.get` + compile **died** because `cc` resolves to the Claude CLI wrapper, not
+to a C compiler — `argon2_elixir` fails to build with `error: unknown option '-g'`. Re-run with
+`CC=/usr/bin/clang` and dev+prod compile clean. Without the override the operator does not get a
+slow pre-warm, they get a **failed** one, and the throwaway-cycle alternative inherits the same trap
+because it runs the same compile.
+
+**The recipe is now live-proven, and the payoff is larger than this section estimated.** After
+pre-warming, that same run measured `up --verify` at **~10s wall** — against the 155.72s COLD-PROD
+figure above. Pre-warming is the single highest-leverage step in the climb runbook.
+
+Do this **before** starting any timed window. The run inside the window then pays the ~9.8–20.2s
+warm cycle from §1 instead of a second ~156s prod compile on the critical path. This also composes
+with the spare-target recipe in §4 — a pinned spare is warm by construction, because booting it is
+itself the throwaway cycle.
+
+### What this amendment changes and leaves alone
+
+- **Changed:** `scripts/pds-scratch-target.sh`'s header cost block now documents three regimes,
+  names `api/_build/prod` absent as the real trigger, states the COLD-PROD figure, and carries the
+  pre-warm instruction. Comments only — no verb's behaviour changed, `bash -n` passes.
+- **Left alone:** every 2026-07-20 measurement in §1–§4. They were right for their regime and are
+  still the numbers to quote once `api/_build/prod` exists.
+- **Known residue, not fixed here:** the runtime preflight warning inside `cmd_up` (grep
+  `api/_build is empty`) branches on the same coarse test, so it stays silent in the COLD-PROD case.
+  Touching it would change a verb's output, which this docs-only slice may not do. Filed as a
+  follow-up task.
+- **Line numbers shifted.** The header edit moved everything below it down. §4's note already says
+  it: grep the string, not the number.
+
+---
+
 ## What this record does and does not claim
 
 - It **does** claim the four warm timings, each labelled with the `api/_build` state that produced
@@ -173,3 +273,7 @@ off the critical path while the next attempt is already running.
 - It **does not** claim the mode contradiction is resolved. It is recorded with both citations and a
   structural hypothesis (`:233` is a mode-agnostic `after`-block mask). Resolving it needs a thaw.
 - It **does not** claim a cold-path measurement. `>10 minutes` is inherited, not re-measured.
+- **Amended 2026-07-21 (§5):** it also claims one COLD-PROD measurement — `up --verify` at 155.72s
+  wall on a worktree with `api/_build/prod` absent but `dev`/`test` present. The `>10 minutes` fully
+  cold figure remains inherited. The §1 discriminator is superseded by `[ -d api/_build/prod ]`;
+  the §1 *timings* are not.
