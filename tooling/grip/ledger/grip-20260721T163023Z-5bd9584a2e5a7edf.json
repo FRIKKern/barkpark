@@ -1,0 +1,39 @@
+{
+  "run_id": "grip-20260721T163023Z",
+  "recipes": [
+    {
+      "subject": "cmd:ps",
+      "quantity": "ps:-p",
+      "rerun": "ps -p 83700 -o pid,ppid,etime,command",
+      "derived_level": "L6",
+      "deps": [],
+      "observed_at": "2026-07-21T16:30:23Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-nE",
+      "rerun": "grep -nE '^EXIT:|^RESULT:' /tmp/pds-crown-launch/c7528814/transcript.log",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T16:30:23Z"
+    },
+    {
+      "subject": "pds-crown-launch.sh",
+      "quantity": "ps:-eww",
+      "rerun": "ps -eww -o pid,ppid,etime,command | grep -F pds-crown-launch.sh",
+      "derived_level": "L3",
+      "deps": [
+        "pds-crown-launch.sh"
+      ],
+      "observed_at": "2026-07-21T16:30:23Z"
+    },
+    {
+      "subject": "cmd:ps",
+      "quantity": "ps:aux",
+      "rerun": "ps aux | grep -E 'pds-crown-launch|MemAvailable|bfs.*pds' | grep -v grep",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T16:30:23Z"
+    }
+  ]
+}

@@ -3718,3 +3718,121 @@ byte-identical check fails unless every one is re-stamped) with the ONE wave-18 
 with the merge SHA recorded**, **11 LAST and ALONE** (disarms the cmux Stop-hook false-close). If any
 rung refused: stamp NOTHING, record the refusal in the paper, file the successor. **ZERO NEW SCRIPTS**
 and the frozen harness blob is untouched.
+
+---
+
+## WAVE 19 — ARM CLEAN, FIRE ONCE (2026-07-21)
+
+Wave 18 armed a re-fire and it FIRED, ran the full ladder, and FAILED honestly at rung 0b/8: the lead
+was merging PRs during the ~90 s climb, so guerrilla's deployed sha kept advancing AHEAD of the fixed
+fire worktree, voiding the deploy-provenance ancestry check. Not an engine defect — a moving source.
+The lead has now **FROZEN all merges**. Everything is aligned at L1 (re-measured at decide time):
+scratch c7528814 ALIVE (`curl 37576` → 200), guerrilla `34b9b25d` an ANCESTOR of frozen origin/main
+`58862f62`, memory window open (thin), `attempts`=4. The honest outcome this wave is a FIRED climb.
+
+- **PDS-D268 — ARM CLEAN, FIRE ONCE; ZERO NEW SCRIPTS.** Reuse the LIVE c7528814 scratch (do NOT
+  re-boot unless `curl 37576` ≠ 200 proves it dead), cut a FRESH persistent worktree at current
+  origin/main, arm the detached climb, return. One round-1 arm slice + one round-2 LEAD-only seal.
+  Rivals rejected on measured grounds: (B) harden `cmd_arm` first delays the seal against the finish
+  mandate and forecloses nothing (the class-fix `pds-bl-launcher-assert-scratch-env` lands AFTER the
+  crown); (C) boot a fresh scratch pays a ~188 s cold boot whose memory contention competes with the
+  export and abandons the alignment — and its ONLY advantage (schema coherence) is dissolved by D271.
+  Everything aligned NOW ⇒ every hour of hardening/rebooting is an hour the merge-freeze holds the
+  whole repo hostage and the window can close. A fired climb is minutes from a high-regime draw.
+
+- **PDS-D269 — THE STATE-DIR TRANSCRIPT COLLISION: ARCHIVE THE STALE RUN DIR BEFORE ARMING.** THE ONE
+  hazard no prior PDS-D covered (5 surveyors + a deep verify converged). Reusing
+  `PDS_RUN_ID=pdsw18-crown` reuses `run_tag=c7528814`, which reuses BOTH `BARKPARK_HOME` (intended)
+  AND the launcher's own STATE_DIR run dir `/tmp/pds-crown-launch/c7528814/` (unintended). That dir
+  ALREADY holds wave-18's COMPLETE FAILED transcript (554 lines, terminal `RESULT: FAIL` / `EXIT: 1`).
+  `fire_detached` opens `transcript.log` with `os.O_APPEND` (NEVER truncates), and `classify()` /
+  `collect` grep the WHOLE file for `^EXIT:` / `^RESULT:` — so `collect` reads FINISHED off the stale
+  wave-18 lines while wave-19 is mid-climb, and the seal can scrape wave-18's FAIL. That is exactly
+  the criterion-11 single-run fence violation. **RULING:** before arming, ARCHIVE the whole run dir
+  aside — `mv /tmp/pds-crown-launch/c7528814 /tmp/pds-crown-launch/c7528814.wave18-<UTC>`. This yields
+  a clean transcript at the same path, PRESERVES `BARKPARK_HOME=/tmp/pds-w14.c7528814` (derived purely
+  from `run_tag`, code-DISJOINT from STATE_DIR) and `PDS_SCRATCH_POINTER`, AND keeps the anti-stack
+  guard FUNCTIONAL. Prefer archive-in-place over a `PDS_LAUNCH_STATE_DIR` override: the override BLINDS
+  the anti-stack guard (a fresh STATE_DIR cannot see a prior live climb), which matters given live
+  concurrent survey-fleet activity on the box. wave-18 child pid 83700 is DEAD (`ps -p` gone) so no
+  live-stack today, but archive-in-place is the safe default. Durable class-fix (run-scoped fresh
+  transcript on re-arm) is BACKLOG `pds-bl-launcher-statedir-fresh-transcript`, not built this wave.
+
+- **PDS-D270 — 0b's TREE COMES FROM `$0`, NOT PDS_SCRATCH_TREE: INVOKE BY PATH.** Correction to any
+  "re-point PDS_SCRATCH_TREE" framing. rung 0b's `worktree_sha` = `git -C "$REPO_ROOT" rev-parse HEAD`
+  where `REPO_ROOT` derives purely from `$0` (`pds-pull-proof.sh:88-89`). `PDS_SCRATCH_TREE` (stale at
+  `barkpark-w18-fire` in `scratch.env`) is INERT for 0b — it only feeds the target reboot machinery.
+  So there is NO env fix and NO re-point: the ONLY lever is invoking `scripts/pds-crown-launch.sh`
+  **BY PATH from inside the fresh worktree** so `$0`'s dir → `REPO_ROOT` → the fresh HEAD. Wave-18's 0b
+  failure was `DEPLOYED_SHA` (live SSH) advancing past the fixed fire worktree as merges moved
+  guerrilla — the freeze fixes that root cause directly, zero code/env change.
+
+- **PDS-D271 — THE COPY HAZARD DISSOLVES BY MIGRATIONS-SUBTREE IDENTITY, NOT ANCESTRY.** Correction:
+  "guerrilla `34b9b25d` is an ancestor of the scratch's origin sha `6782db5d`" is FALSE — they are
+  UNMERGED SIBLINGS (`6782db5d` lives only on `origin/pds/w18-fire`, never merged to main;
+  `merge-base --is-ancestor` fails both directions). PDS-D32's COPY-fails-on-CHECK/enum-widening
+  hazard nonetheless does NOT bite: `git diff --stat 6782db5d 34b9b25d -- api/priv/repo/migrations` is
+  EMPTY and both shas `ls-tree` to the identical 182 migration files. rung-1's COPY of guerrilla data
+  is safe because the `migrations/` subtree is BYTE-IDENTICAL between the scratch's origin sha and
+  guerrilla's deployed sha, **regardless of branch topology**. Cite migrations-subtree-identity, not
+  ancestry.
+
+- **PDS-D272 — PDS_LAUNCH_HARNESS STAYS UNSET; THE BY-PATH DEFAULT IS CORRECT (reaffirms D259).**
+  Correction: do NOT `export PDS_LAUNCH_HARNESS` — setting it is the D259 failure mode (wave-15's
+  silent vacuous pass). `HARNESS="${PDS_LAUNCH_HARNESS:-$SCRIPT_DIR/pds-pull-proof.sh}"`; invoking the
+  launcher by path from the fresh worktree makes the DEFAULT resolve to that worktree's own frozen
+  `pds-pull-proof.sh` (blob `e219e97c…`). `child.sh` line 7 = `HARNESS=…` is the proof; the arm UNSETS
+  `PDS_LAUNCH_HARNESS` explicitly alongside `PDS_AMMO_FILE PDS_FULL_EXPORT_MIN_MEM_MB
+  PDS_LAUNCH_MEM_FLOOR_MIB`, and SETS only `PDS_CONTROL_PG=postgres` + `PDS_RUN_ID=pdsw18-crown`.
+
+- **PDS-D273 — NO PGDATA RESET; THE FRESH FULL PULL OVERWRITES ALL WAVE-18 RESIDUE.** The scratch DB
+  is dirty (wave-18 dev-profile merge pull + 34 clobbered guarded rows + empty `pull_provenance`), but
+  `up` does not reset pgdata (`mkdir -p` on the existing home; only teardown `rm -rf`) and this wave
+  reuses the live target without `up` anyway. rung-1's fresh full-profile `--merge` pull overwrites
+  every residue class: `merge_upsert` (ON CONFLICT PK DO UPDATE) converges docs + restores the 8
+  guarded columns; `stamp_provenance` re-writes a fresh non-empty `pull_provenance` AFTER import.
+  rung-2 asserts bundle⊆target (robust to residue extras); rung-6 sentinels/measures against wave-19's
+  OWN fresh pull, never the stale empty stamp. No wipe step needed.
+
+- **PDS-D274 — BUDGET spent+2=6 IS WIRED INTO THE FORKED SHELL; DO NOT SET PDS_FULL_EXPORT_DIR.**
+  `fire_detached` reads `spent` from `/tmp/pds-full-export/attempts` (=4) and
+  `export PDS_FULL_EXPORT_BUDGET=$((spent+2))` INLINE, one shell, before the `os.fork()`/`execvp` (no
+  env dict → child inherits it); its selftest seeds attempts=7 and asserts the child reads 9, failing
+  loud on the silent default of 1. `cond_c` reads the identical `FULL_ATTEMPTS_FILE` default
+  (`/tmp/pds-full-export/attempts`) and `FULL_BUDGET` from that same var. The launcher never sets
+  `PDS_FULL_EXPORT_DIR`; the arm must NOT export it either (it would break the launcher↔harness
+  attempts-file identity). Re-read `attempts` at fire time (D224), never a literal. Parked bundle stale
+  (served_sha `8eeaf688` ≠ guerrilla `34b9b25d`) → provenance gate refuses reuse → a fresh export is
+  attempt **5 of 6**.
+
+- **PDS-D275 — THE FREEZE IS VERBAL; RE-RUN 0b IN THE SAME BREATH AS THE ARM.** 0b holds at decide
+  time (guerrilla `34b9b25d` an ancestor of origin/main `58862f62`, re-measured this turn). But the
+  freeze is a coordination convention, NOT a machine gate — 6 open+mergeable `api/**|cloud/**` PRs
+  (#5482, #5480, #5479, #5478, #5473, #5472; NONE with auto-merge) could reproduce the wave-18 deploy
+  storm if merged. **RULING:** the arm slice re-runs
+  `git merge-base --is-ancestor <guerrilla-HEAD> <fresh-worktree-HEAD>` in the same breath as the arm
+  and fires ONLY if it exits 0; else HONEST ABORT (do not arm, zero attempts). The detached climb's own
+  rung 0b re-checks live at fire time, so a mid-window merge still fails honestly rather than
+  fabricating. Memory window is thinner than the strategize headline (~2200–2270 measured, not
+  ~2380–2420): outcome-C (FIRE-then-`cond_b`-refusal, zero attempts, window spent) is real but
+  non-blocking — the detached child waits up to 6 h for a high-regime draw. Never lower the 2200 floor.
+
+**WAVE 19 PLAN.** One round-1 slice; one round-2 LEAD-only seal (returned as a deferral, NOT built this
+run). **Round 1 — `pds-w19-crown-fire` — THE ARM** (`scripts/pds-w19-fire-record.md`, builder: fable):
+confirm scratch alive (`curl 37576` = 200; boot only if dead); **ARCHIVE the stale state dir** (D269);
+cut a FRESH **persistent** worktree at current origin/main (must OUTLIVE the turn for the detached
+child); pay `deps.get` + both compiles off the clock; re-cat `attempts` and re-ssh guerrilla HEAD and
+re-run the 0b `merge-base --is-ancestor` in the SAME breath as the arm (D275) — abort honestly if it
+fails; `unset PDS_LAUNCH_HARNESS PDS_AMMO_FILE PDS_FULL_EXPORT_MIN_MEM_MB PDS_LAUNCH_MEM_FLOOR_MIB`,
+`export PDS_CONTROL_PG=postgres PDS_RUN_ID=pdsw18-crown`; invoke the launcher BY PATH from the fresh
+worktree (D270/D272) `--prewarm-now --max-draws 2160 --interval 10` DETACHED; prove `child.sh` line 7 =
+the fire worktree's `pds-pull-proof.sh` (D259); confirm the child ONCE with `ps -p`; record run_id +
+run_tag + pid + transcript path + scratch home + budget + floor in the fire record; push; open the PR;
+END THE TURN — **no polling**. **Round 2 (deferred, LEAD dispatches after the CLIMB completes) —
+`pds-w19-crown-collect-and-seal`**: LEAD-ONLY, never the agent that fired. Collect via six named states
+(`ps -p` never `pgrep`), D248 stranded-lock recovery, the D261 bundle cross-check (`file` / `tar -tf` /
+manifest `profile == full`) BEFORE any stamp, criterion text fetched to a file and passed by
+`"$(cat f)"`, evidence terse. Re-stamp **ALL of 0–9** (the currently-met rows carry NO shared run_id)
+with the ONE wave-19 run_id, **10 on merge with the merge SHA recorded**, **11 LAST and ALONE**. If any
+rung refused: stamp NOTHING, record the named refusal in the paper, sort each red HARNESS-BUG vs
+ENGINE-FAIL and file the successor (never fix mid-proof). **ZERO NEW SCRIPTS**; frozen blob untouched.
