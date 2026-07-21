@@ -369,8 +369,9 @@ defmodule BarkparkWeb.ChatController do
 
   On connect: an `event: snapshot` frame carries the current scoped fleet
   (`StudioChat.fleet_snapshot/1` — seam 1), tagged `id: <epoch>:<seq>`; then live
-  `event: state` flips (`id: <epoch>:<seq>`, replayable) and id-less
-  `event: heartbeat` liveness ticks (unreplayable — never a ring slot or seq).
+  `event: state` flips (`id: <epoch>:<seq>`, replayable) plus id-less
+  `event: heartbeat` liveness ticks and `event: title` title updates (charter
+  D69h — both unreplayable, never a ring slot or seq).
   `Last-Event-ID` is the opaque `epoch:seq` cursor: an in-ring cursor replays
   EXACTLY the missed flips; a wrong epoch or out-of-ring cursor degrades to a
   fresh scoped snapshot. `: keepalive` every 30s; the D5/D24 never-shed law holds
@@ -427,8 +428,8 @@ defmodule BarkparkWeb.ChatController do
   end
 
   @doc false
-  # The live fleet receive loop. Seam 2 (live flip) + heartbeat both scope-filter
-  # through `StudioChat.scope_match?/2`; flips already covered by the connect
+  # The live fleet receive loop. Seam 2 (live flip) + heartbeat + title all
+  # scope-filter through `StudioChat.scope_match?/2`; flips already covered by the connect
   # payload (`seq <= boundary`) are dropped. NEVER shed-and-close (D5/D24).
   def fleet_stream_loop(conn, scope, epoch, boundary) do
     receive do
@@ -442,6 +443,13 @@ defmodule BarkparkWeb.ChatController do
       {:fleet_heartbeat, sid, ts, owner_ws} ->
         if StudioChat.scope_match?(owner_ws, scope) do
           fleet_chunk_or_stop(conn, fleet_heartbeat_frame(sid, ts), scope, epoch, boundary)
+        else
+          fleet_stream_loop(conn, scope, epoch, boundary)
+        end
+
+      {:fleet_title, sid, title, owner_ws} ->
+        if StudioChat.scope_match?(owner_ws, scope) do
+          fleet_chunk_or_stop(conn, fleet_title_frame(sid, title), scope, epoch, boundary)
         else
           fleet_stream_loop(conn, scope, epoch, boundary)
         end
@@ -486,6 +494,16 @@ defmodule BarkparkWeb.ChatController do
   # the session id + the liveness stamp, never state or content.
   def fleet_heartbeat_frame(sid, ts) do
     "event: heartbeat\ndata: #{Jason.encode!(%{session_id: sid, ts: ts})}\n\n"
+  end
+
+  @doc false
+  # A title update (charter D69h): id-less and seq-less — UNREPLAYABLE,
+  # heartbeat-shaped. The async AI title lands once per session; a reconnecting
+  # client gets the fresh title from its next snapshot query for free, so the
+  # frame never claims a ring slot or a cursor position. Carries only the
+  # session id + the title, never state, content, or the owner stamp.
+  def fleet_title_frame(sid, title) do
+    "event: title\ndata: #{Jason.encode!(%{session_id: sid, title: title})}\n\n"
   end
 
   defp fleet_session_json(%{session_id: sid, agent_state: agent_state, ts: ts, title: title}) do

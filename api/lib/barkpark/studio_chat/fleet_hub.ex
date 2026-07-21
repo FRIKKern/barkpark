@@ -21,6 +21,11 @@ defmodule Barkpark.StudioChat.FleetHub do
       liveness tick — id-less, seq-less, NEVER ringed (charter D45h): it proves
       a long tool call is not a dead BEAM without pretending to be a replayable
       state change.
+    * `{:chat_title, sid, title}` → a `{:fleet_title, sid, title, owner_ws}`
+      title update (charter D69h) — id-less, seq-less, NEVER ringed, exactly
+      like a heartbeat: the async AI title lands once per session and a
+      reconnecting client gets the fresh title from its next snapshot for free,
+      so pretending it is a replayable state change would buy nothing.
     * `{:chat_workflow, …}` → EXPLICITLY ignored (D44h): the workflow rail rides
       the per-session wire, never the fleet wire.
 
@@ -120,12 +125,21 @@ defmodule Barkpark.StudioChat.FleetHub do
       {:noreply, %{state | owners: owners}}
     else
       seq = state.seq + 1
-      entry = %{seq: seq, session_id: sid, agent_state: mapped, ts: DateTime.utc_now(), owner_ws: owner_ws}
+
+      entry = %{
+        seq: seq,
+        session_id: sid,
+        agent_state: mapped,
+        ts: DateTime.utc_now(),
+        owner_ws: owner_ws
+      }
+
       ring = Enum.take([entry | state.ring], @ring_cap)
 
       Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_flip, entry})
 
-      {:noreply, %{state | seq: seq, ring: ring, states: Map.put(state.states, sid, mapped), owners: owners}}
+      {:noreply,
+       %{state | seq: seq, ring: ring, states: Map.put(state.states, sid, mapped), owners: owners}}
     end
   end
 
@@ -135,6 +149,17 @@ defmodule Barkpark.StudioChat.FleetHub do
     # own); an unseen session fails closed for every workspace scope.
     owner_ws = Map.get(state.owners, sid)
     Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_heartbeat, sid, ts, owner_ws})
+    {:noreply, state}
+  end
+
+  def handle_info({:chat_title, sid, title}, state) when is_binary(title) do
+    # A title update (D69h): id-less, seq-less, NEVER ringed — heartbeat-shaped,
+    # not a state change. A bare {:chat_title} carries no owner of its own, so
+    # it is scoped by the session's last-seen owner (the same fail-closed
+    # fallback heartbeats use); a session whose activity FleetHub never saw
+    # fails closed for every workspace scope.
+    owner_ws = Map.get(state.owners, sid)
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_title, sid, title, owner_ws})
     {:noreply, state}
   end
 
