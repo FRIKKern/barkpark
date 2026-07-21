@@ -67,7 +67,8 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   # re-encoded from the row's `payload_snapshot`. Unlike chat_blocked, the
   # snapshot is the RAW decoded payload map `Dispatcher.deliver_audit/2` stored
   # (`Jason.decode!(body)`), NOT a `%{"body" => body}` wrapper — so the whole
-  # map is re-encoded, byte-equivalent to the original signed body. MUST precede
+  # map is re-encoded (semantically equivalent; the attempt loop re-signs
+  # whatever body it is handed, so exact byte order is irrelevant). MUST precede
   # the catch-all clause: its `Repo.get(MutationEvent, nil)` RAISES on the NULL
   # event_id, and `StuckDeliverySweeper.sweep/1`'s reduce is unguarded, so one
   # audit row would abort recovery for the whole cron batch.
