@@ -349,7 +349,7 @@ const REVIEW_SCHEMA = {
       description: 'one entry per built slice you reviewed',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['title', 'task_id', 'final_branch', 'fixes', 'gate_passed', 'verdict'],
+        required: ['title', 'task_id', 'final_branch', 'fixes', 'gate_passed', 'verdict', 'pushed'],
         properties: {
           title: { type: 'string' },
           task_id: { type: 'string' },
@@ -357,6 +357,8 @@ const REVIEW_SCHEMA = {
           fixes: { type: 'string', description: 'what you fixed in place, or "none"' },
           gate_passed: { type: 'boolean', description: 'the slice gate re-run green on the final branch' },
           verdict: { type: 'string', description: 'honest quality verdict vs the Kinsta/Vercel bar + anything the lead must know before merging' },
+          pushed: { type: 'boolean', description: 'final_branch was pushed to origin (step 11). FALSE means this slice exists only on a local branch in a shared checkout other cycles reset — i.e. the wave did not deliver it. If false, the verbatim push/PR error belongs in verdict.' },
+          pr: { type: 'string', description: 'PR URL or number opened for final_branch, or "" if pushed is false' },
         },
       },
     },
@@ -670,6 +672,9 @@ Then, once, for the wave:
 8. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it.
 9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed.
 10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, paper ${WAVE_PAPER}") and re-publish; set heartbeat_stamped accordingly. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
+11. **PUSH EVERY FINAL BRANCH AND OPEN ITS PR. THE WAVE IS NOT DONE UNTIL YOU DO.** This is step 11 because SIX consecutive waves ended with built, reviewed, gate-passing work sitting on local-only branches in a SHARED multi-session checkout that other cycles reset — roughly 20 slices that existed only because a human went looking for them. A branch you do not push is work this wave did not do. For each green slice, from your worktree:
+   \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
+   The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails. Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}`,
