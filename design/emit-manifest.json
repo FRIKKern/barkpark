@@ -1,0 +1,24 @@
+{
+  "$comment": "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact over the GENERATED REGION ONLY (the marker interior for css/html surfaces, the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace a region whose digest does not match, because those bytes were never emitted and replacing them destroys hand-written work (see commit 1d928b3bf). Rewritten by `node design/emit.mjs --write`; re-bless the tree with --adopt.",
+  "regions": {
+    "api/assets/paper-editor/src/styles.css": "8a551d68d24390487e76d8b6571d9dd4103c468694642e33a28d4ceb9656af16",
+    "api/assets/paper-surface/paper-surface.css": "3b9b3e4d736b4a9af0641f5093891feee9956ee369779be5a101a8af4563c760",
+    "api/lib/barkpark/portable_doc/render/tokens_gen.ex": "e68b8595f70acfca8ad4ce51ab91a42c3e1d0e9ecb93a045533f547a3b6bfc23",
+    "api/lib/barkpark_web/controllers/error_html.ex": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
+    "api/lib/barkpark_web/controllers/session_html.ex": "e1d3efae4186f38624928dae2a0ef78b588169a97cc4b271e829949a513a2461",
+    "api/lib/barkpark_web/controllers/status_controller.ex": "64ed2df4c3c3bb389c37ea147d0a02042787e568a15d1440484fc2fe9331c6f2",
+    "api/lib/barkpark_web/layouts/bulldocs.html.heex": "1895e3e406ad3f05a648c33e40d32ca8e2d7257a3ded72ee19f0b965d7985c64",
+    "api/lib/barkpark_web/layouts/root.html.heex": "aec81cd6318fed7c253ea3d71592c1aec11c9dc220d119b69e6039f62525260f",
+    "api/lib/barkpark_web/layouts/sheets.html.heex": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
+    "api/lib/barkpark_web/studio/tokens_gen.ex": "c52d441794d91f5a04be0d64e3cf1a7a4beb6b2d78136982f6c5f16fded4ef6b",
+    "cloud/priv/static/app.css": "35692a047f3f51680ad933c9960153d83cb6618d75d9be13bb01c9e6ce656023",
+    "cloud/priv/static/app.js": "51bedecd9f9fe16523d18b510564d07d7ca605feedcdef0c12d8fdfc8ed4d09f",
+    "cloud/priv/static/styleguide.html": "09c39abf2838df0d33ea6e8a50e2d9d801686b315d95832c4af48e2bb2f66094",
+    "internal/pdrender/tokens_gen.go": "a43355a3619909d5c5a21f5a3d3e1b3f9969a3a405cabcbfad81af55d3f7f5a6",
+    "internal/semrole/chrome_gen.go": "14ace64cf0f750035ae5bdfc0e57257597ecd871a000554220e4bc6c5eecaa11",
+    "internal/semrole/tokens_gen.go": "02383b1905bd745255a9a56c1984761328a098f328bbebe7fbea3af11ffb6133",
+    "internal/taskboard/tokens_gen.go": "65f28d7e63f6de0fe7297065240f105bbe1ee515856e61d7f066fe19cbb6f7b6",
+    "web/app/globals.css": "035a1f9a178e8a511dcb0d113b84c1720157c75e44b2b6af102e6654457cf9ba",
+    "web/lib/tokens.gen.ts": "66a0ed2b6c9a12ef4233fd7208c5ef7f9fad9d1a4597c30e42fa66eef3e466d8"
+  }
+}
