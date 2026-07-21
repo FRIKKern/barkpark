@@ -17011,11 +17011,13 @@
       // slip in behind four passing equality assertions, and renderLivenessChip
       // takes an override so the terminal state's DOM contract — data-state,
       // label, announced sentence — is assertable from node at all (the stream
-      // signals it reads are otherwise private closure state).
+      // signals it reads are otherwise private closure state). Note that
+      // renderLivenessChip + ensureLivenessChip are already exported a few lines
+      // BELOW (the pre-existing OC6 pair) — re-listing them here would be a
+      // duplicate key in this object literal, silently last-wins.
       liveDotStates: LIVE_DOT_STATES,
       LIVE_CHIP_COPY: LIVE_CHIP_COPY, LIVE_CHIP_ARIA: LIVE_CHIP_ARIA,
       liveChipCopy: liveChipCopy, liveChipAria: liveChipAria,
-      renderLivenessChip: renderLivenessChip, ensureLivenessChip: ensureLivenessChip,
       // Capped reopen ladder for the SSE remint loop, plus the loop itself. The
       // reconnect is the SPA's job now (the browser's native retry replays a
       // spent ticket), so the recovery loop is driven end-to-end in node against
