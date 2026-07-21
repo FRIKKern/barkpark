@@ -227,6 +227,14 @@ config :barkpark_cloud, Oban,
        # tombstone. Expiry is enforced in-band by verify_state/consume_state —
        # pure hygiene, so it rides :maintenance beside its twin above.
        {"* * * * *", BarkparkCloud.Workers.OAuthStateReaper},
+       # cch-w3: the third of the same sweep, for burned/expired `"sse"` stream
+       # tickets. The mint inserts one user_tokens row per call and the burn is a
+       # soft `revoked_at` stamp, never a DELETE, so a console tab's reconnect
+       # loop accreted a row per connect forever. A mint THROTTLE was rejected —
+       # the mint is non-superseding on purpose (two-tab eviction storm), so a
+       # per-user limit would 429 a legitimate second tab. Pure hygiene, so it
+       # rides :maintenance beside its twins above.
+       {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
