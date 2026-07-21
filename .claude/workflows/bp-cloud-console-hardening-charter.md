@@ -181,6 +181,16 @@ fake it, or file work that depends on it being lit. Same disposition for the QR 
 | D60 | **THE CHARTER ITSELF WAS INVISIBLE — D25-D40 never reached `origin/main`. Fixed by this commit** | Every wave-3 verifier independently reported `.claude/workflows/bp-cloud-console-hardening-charter.md` **DOES NOT EXIST**, and one concluded "every downstream reference to that path is unresolvable." The truth is worse and more instructive: the file **is** on `origin/main` — but only the **D1-D24** version (`#5289`). D25-D40 live solely in local commit `ac1fb3beb`, which `git merge-base --is-ancestor … origin/main` reports **NOT an ancestor**. The primary checkout's local `main` was **46 commits behind origin** and sitting on a *different* epic's uncommitted charter commit, so `ls` there answered for a tree nobody builds from. This is the epic's own predicate turned on its own memory: the ledger said the charter existed; `origin/main` said it stopped at D24. **A charter commit that is not PUSHED is invisible to every builder.** From now on the Decide charter commit is branched from `origin/main`, pushed, and PR'd — never committed to the shared local `main`. |
 | D61 | **Retire `cch-w2-pr-task-gate-backtick-trailer` as a duplicate of `cch-bl-pr-task-gate-backtick-regex`** | Same defect, same file, same prescribed fix, filed 12 minutes apart by authors who did not find each other. Keep the earlier row — it is grounded in a measured CI failure with a citation (PR #5290 backtick-wrapped id RED vs #5307 unwrapped GREEN, run 29804094521). Port the later row's stronger criterion ("the test case is shown to FAIL against the pre-fix script before passing after it") onto the survivor before closing the duplicate. The bug reproduces exactly against the real regex (`.github/workflows/pr-task-gate.yml:142`): the plain trailer matches, `Task: \`slug\`` produces **NO MATCH**. |
 | D62 | **Gate commands must be dry-run from a worktree cut off `origin/main`, never from the primary checkout** | Wave 3 nearly filed a false gate on this. `node cloud/priv/static/__css_check.mjs` **FAILS** in the primary checkout (`E10 app.css:1034 orphan '*/'` + an E2 miss) and **passes clean (0 errors)** in a worktree at `origin/main` — because that checkout is 46 commits behind and carries another session's state. Same class as D60. Every gate in this charter's wave plan was dry-run in an `origin/main` worktree: `__app.test.mjs` 640/640, `smoke.mjs` 86/86, `__css_check` 0 errors, `scripts/pr-task-gate.test.sh` 20/20, and both targeted `mix test` forms green. |
+| D63 | **Wave 5 pays D41 across the epic's documented-but-unenforced boundaries, and every payment DOUBLES as a close** | The theme is D41, so the sweep is the spine; the wave-5 unlocking insight is that *every filed boundary in this epic is also a backlog row*, so paying D41 where a row is filed makes hardening and shrinking the SAME motion. Each Movement-1 slice = boundary comment + a machine check keyed to its type + a mutation-proof it can fail, and closes its own backlog row on merge. Finishing beats eleganza this wave (wave 4 died at Digest carrying too much); the reflexive-registry capstone is FILED, not built (D68). |
+| D64 | **`#5434` was never stranded — it is MERGED, and Movement 0 is a provenance-honesty STAMP, not a build** | Confirmed by content: `a7b5284c4` is an ancestor of `origin/main`, `side_effecting_get?(["v1","events"]), do: true` at `router.ex:546`, plus `router_head_fence_census_test.exs` + `router_sse_ticket_head_burn_test.exs` both on main. It never blocked anything: `main` has **no branch protection** (`gh api …/branches/main/protection` → 404), and `pr-task-gate` is advisory. The red gate was real (the PR trailer cites a phantom slug `cch-bl-sse-ticket-head-burn`, 404 in the ledger) but toothless. The real row is `cch-bl-head-denylist-tripwire` (#5376) — already flipped `done` mid-session by `steward-land` but its final MERGE-GATED criterion is evidence-empty. Movement 0: stamp that criterion with `a7b5284c4`, evidence-close `cch-bl-get-census-rederive` (subsumed, per that row's own instruction), and **cancel `task-2200bea3796a4e84`** as a duplicate stub (filed 3h after the real row, 0/4, unclaimed). |
+| D65 | **`cssom-floor-decays`: the ratchet is an EXACT-MATCH committed sidecar (equality, not floor); NOT git-derived, NOT relative-tolerance** | `MIN_AUTHORED_HEADS = 1201` (`cssom-parity.mjs:184`) is a static absolute floor; a stray `/*` swallowing 50 rules at 1300 heads "sails over 1201 with MISSES 0, PARITY PASS" because `heads == CSSOM rules` is symmetric. Design (a) git-derived floor breaks the file's own `ZERO DEPENDENCIES / runnable-in-a-worktree` law; (c) relative-tolerance is impossible (CI keeps no cross-run state). The feasible zero-dep ratchet is (b) as **exact equality**: a committed sidecar count, and the gate asserts `authoredHeads() == sidecar` (not `>=`), so every legitimate CSS change must touch the sidecar in the same commit and any swallow reds. Mutation-proof PERMANENT (not the one-time reverted D20 proof): a committed fixture whose head count sits above the current baseline, with a swallow shown to red against that new baseline. |
+| D66 | **`state-rule-per-declaration-gate`: the fix is ~18 lines appended to the ALREADY-WIRED `__app.test.mjs`, NOT a new browser cssom-parity CI job** | Proven by run: deleting only `app.css:3470` (the `.live-chip[data-state="stale"] .live-dot` background) reds NOTHING today — the existing fence at `__app.test.mjs:4713` substring-matches the bare `.live-chip[data-state="stale"]` prefix, which survives on the sibling `.live-chip-label` line. A per-declaration probe (for each `hooks.liveDotStates` state, slice the `.live-dot {…}` block and assert it contains `background:`) reds on that exact deletion and greens otherwise (3-phase mutation-proven). `cssom-parity.mjs` is browser-backed and UNWIRED (0 workflow refs); routing the fix through it needs net-new Chrome CI — rejected for the zero-dep in-harness probe. |
+| D67 | **`source-citation-line-drift`: BAN THE SHAPE, do not build a verifier; scope to `cloud/priv/static/*.{js,mjs}`, host in `__css_check.mjs`** | Every live `<file>.(js\|ex):<line>` citation in these files is WRONG right now (all 4 distinct claims point at unrelated code after a +39 sibling shift), so ban-the-shape (`bp-honest-gates` D5, "ban the SHAPE, do not enumerate") is strictly stronger than a per-citation verifier. The re-anchor convention already exists informally — cite the enclosing function name (`applyTheme`, `mountUsageTab`), optionally + a regrep — formalize it as the ban condition. Host the check in `__css_check.mjs` (in-fence, already CI-wired via `console-harness.yml`) rather than `docs-anchors-check.sh` (out of fence, and its `--include`/`doc-gates.yml` paths omit `.js/.mjs` anyway). The cross-language `router.ex`-side citations are a FILED follow-up (`cch-bl-citation-drift-cross-language`), not this slice. Fix the live drifts while there (`7cde45b0f` is a clean cherry-pick for the `__css_check.mjs` occurrence). |
+| D68 | **The reflexive `@boundary`-marker registry capstone is DEFERRED to a FILED round-2 row — it is the scope that killed wave 4 at Digest** | `docs-anchors-check.sh` §8 (`@canonical capability:` slug-uniqueness + public-entry-point-within-6-lines) is a real, CI-wired mirror; the capstone reuses §8a's grep and adds a NEW invariant — a `test:<path>#<name>` field that RESOLVES (`[ -e ]` + `grep -qF`). Greenfield (0 `@boundary` markers today). Two must-design corrections: §8's `--include` and `doc-gates.yml` paths omit `.mjs/.js` where THIS epic's boundaries concentrate (a naive copy silently never fires), and static grep proves PAIRING-exists, never mutation-kill (necessary-not-sufficient — say so, do not oversell). Filed as `cch-bl-boundary-marker-registry`, round 2, template `#5434`. A wave that SHIPS per-boundary payments + a filed capstone beats a wave that DIES carrying an unbuilt one. |
+| D69 | **Three "D41-violation" candidates are ALREADY ENFORCED/LANDED — they are triage-CLOSES, not builds** | `cch-bl-css-check-states-boundary` (#5438): the D49 "IF #5438's E2 comment is unenforced prose" conditional is **FALSE** — the comment is paired to `__app.test.mjs:4713` (paint-rule loop) + `:4360` (closed-enum), mutation-proven (delete `app.css:3470-3471` → #313 reds "no paint rule for stale"). Evidence-close on `069c6e986`. `cch-bl-replace-upsert-tripwire`: the test `"replace against a non-existent id is 404 and creates NOTHING"` landed via #5435 (`a893c3821`); reverting the `mutations.ex` with-chain guard flips it 404→200 (upsert). Evidence-close, do not rebuild. `cch-bl-get-census-rederive`: subsumed by #5434 (D64). Dispatching any of the three as a build burns an opus slice on shipped work. |
+| D70 | **`close-fence-epoch-only` + `task-birth-attribution` stay BACKLOG; `claim-overwrite-fence` ships (in-fence via the `mutations.ex` dispensation)** | `cch-bl-close-fence-epoch-only` targets `api/lib/barkpark/tasks/close.ex` (`check_fencing/2` compares epoch only, never `worker_id`) — that path is `barkpark` CORE, out of this epic's fence (`cloud/` + `web/live/`) and inside felix-pristine's active surface; do not touch it this wave. `cch-w3-task-birth-attribution` is an explicit design task (three undecided attribution shapes) — not a mechanical D41 payment. `cch-w3-claim-overwrite-fence` pays D52's residue at the `ensure_claim_not_dropped/4` "A REPLACED claim is out of scope" boundary — `mutations.ex` + `mutate_controller_test.exs` are the standing wave-2 dispensation, so it is in-fence and ships. |
+| D71 | **The smoke-shim boundary is TRIPLE-FILED — keep the combined row, cancel the two splits, DEFER the build** | `cch-bl-smoke-shim-fidelity` (both defects) + `cch-bl-shim-models-no-detachment` + `cch-bl-shim-dispatches-to-disabled` (filed 9s apart) cover ONE fix-pair in one file (`smoke.mjs`). Cancel the two narrow splits as duplicates; keep the combined row. Defer its build off this wave — it collides with `source-citation-line-drift`'s `smoke.mjs` comment re-anchor (D67) and needs the detachment-vs-declare-the-gap design call. |
+| D72 | **Movement-2 seal verdict: NOT YET SEALABLE — and that is a pre-authorized, honest outcome** | This epic has **no seal predicate of its own** — the only `seal-predicate.mjs` hardcodes `EPIC = 'task-47bc4168392dec17'`, the SEALED predecessor, with no retarget flag. 121 children = 113 open / 7 done / 1 cancelled; 69 `gr-*` (banded by the six-band census in the epic description) + 50 `cch-*` (entirely UNBANDED) + 2 misc. The shortest sealable path: (a) Movement 0 closes ~15 landed slices + their `gr-*` twins with SHAs, (b) Movement 2 censuses+bands the 50 `cch-*`, (c) a NAMED successor forwards genuine live residue (mirroring GUI-Remake→this epic). Filing that successor + retargeting the predicate is NEXT wave, not this one. Do not chase a false green by widening scope (the wave-4 death pattern); NO SEAL is acceptable and non-negotiable. |
 
 ## Roadmap
 
@@ -294,11 +304,78 @@ counted directly), of which 1 is already `done`, 1 (`gr-blk-emit-marker-fence`) 
 main, and 2 are permanent human gates → **~18 genuinely unknown**. The `~42` and the "38 of the
 epic's 69 rows" arithmetic behind it were borrowed from the *predecessor* epic's GR112 audit
 (`Counter({'open': 69, …})` under `task-47bc4168392dec17`) and mislabelled as this epic's — this
-epic has **91** children (85 open / 6 done). Do not size a slice against the old figure.
+epic has **91** children (85 open / 6 done). Do not size a slice against the old figure. **Wave-5
+correction:** the epic now carries **121** children (113 open / 7 done / 1 cancelled) — 69 `gr-*` +
+50 `cch-*` + 2 misc; the 50 `cch-*` are UNBANDED and Movement 2 censuses them.
+
+### Wave 5 — pay D41 across the boundaries; every payment is a close
+
+Builder model is **`opus` for EVERY slice** — Fable 5 is spend-limited this cycle (hard constraint).
+
+**Movement 0 (LEAD, mechanical — the finishing bulk, not builder budget).** `#5434` is MERGED (D64),
+`main` has no branch protection, so there is nothing to "unblock." Stamp `cch-bl-head-denylist-tripwire`'s
+final MERGE-GATED criterion with `a7b5284c4`; evidence-close `cch-bl-get-census-rederive` (subsumed);
+**cancel `task-2200bea3796a4e84`** (duplicate stub). Then evidence-close the ~15 landed-but-unstamped
+`cch-*` slices — each SHA-proven ancestor of `origin/main`, sole open criterion the boilerplate
+MERGE-GATED text — and pair-close their `gr-*` census twins. Cite MERGE SHAs, never branch SHAs
+(D-standing-law-1); for `#5435/#5436/#5437` the task-note branch SHA is NOT the merge SHA (use
+`a893c3821 / 0ed73651f / a601fae3e`); `cssom-ci-wiring` merged as `#5307 / c43d75d60`, NOT `#5290`
+(closed unmerged). Claims are lapsed — re-claim (`bp task next`) if a CAS close 409s. Three are
+triage-closes not builds (D69): `css-check-states-boundary` (`069c6e986`), `replace-upsert-tripwire`
+(`a893c3821`), `get-census-rederive` (`#5434`).
+
+**Movement 1 (the wave's content) — 5 round-1 opus slices, DISJOINT files, dispatched in parallel.**
+
+| Slice | Task | Round | Size | Surface | Model |
+|---|---|---|---|---|---|
+| cssom floor stops decaying — exact-match sidecar ratchet (D65) | `cch-bl-cssom-floor-decays` | 1 | medium | `cssom-parity.mjs` + sidecar | opus |
+| per-declaration paint fence — the sibling-line miss (D66) | `cch-bl-state-rule-per-declaration-gate` | 1 | small | `__app.test.mjs` | opus |
+| ban the line-number citation shape + re-anchor the live drifts (D67) | `cch-bl-source-citation-line-drift` | 1 | medium | `__css_check.mjs` + `app.js` + `smoke.mjs` | opus |
+| the emit `--write` fence gets a standing regression test (reflexive D40) | `cch-w1-emit-fence-regression-test` | 1 | small | `design/emit.mjs` + new test + `doc-gates.yml` | opus |
+| the claim survives a REPLACED claim too — pay D52's residue (D70) | `cch-w3-claim-overwrite-fence` | 1 | medium | `mutations.ex` + `mutate_controller_test.exs` | opus |
+
+All five are file-disjoint (verified path-by-path). Every check is mutation-proven able to fail
+(remove clause → red → restore) BEFORE merge — this repo ships vacuous greens.
+
+**Narrow dispensation granted this wave** (do not widen): `.github/workflows/doc-gates.yml` for the
+emit-fence regression test's CI wiring (the `design/emit.mjs`+`check.mjs` dispensation already covers
+the fence itself; a new `design/emit-fence.test.mjs` rides it).
+
+**Movement 2 (triage to seal — Paper spine, no build slice).** Census+band the 50 `cch-*` rows in the
+wave-5 Paper; state the honest seal arithmetic (D72): NOT YET SEALABLE, and the shortest sealable
+count. The `d34-wrapper-list-correction` charter edit is folded here, not dispatched.
+
+**Deferred, FILED as backlog (not built this wave):** the reflexive `@boundary`-marker registry
+capstone (`cch-bl-boundary-marker-registry`, round 2, template `#5434` — D68); the smoke-shim
+fidelity build (`cch-bl-smoke-shim-fidelity`, its two splits CANCELLED — D71); the epoch-only close
+fence (`cch-bl-close-fence-epoch-only`, out of fence — D70); `task-birth-attribution` (design task);
+`cch-bl-lifecycle-token-reaper`; the cross-language citation-drift follow-up
+(`cch-bl-citation-drift-cross-language`).
 
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
+
+### 2026-07-21 — wave 5 DECIDE (build in flight)
+
+Wave 4 died at Digest (spend limit) carrying too much — the full D41 sweep PLUS the reflexive-registry
+capstone PLUS triage. Wave 5 re-weights toward FINISHING: the D41 sweep is the spine, but every
+payment doubles as a close (D63), the capstone is FILED not carried (D68), and the wave opens on the
+one concrete blocker wave 4 never faced — which evaporated on contact: **`#5434` was never stranded,
+it is MERGED** (`a7b5284c4` on main, clause at `router.ex:546`), and `main` has no branch protection,
+so Movement 0 is a provenance stamp, not a build (D64). Verification refuted three "build" candidates
+as already-enforced triage-closes (D69 — the D49 "IF #5438's comment is unenforced prose" conditional
+is FALSE, its comment IS paired to mutation-proven tests) and moved two "reflexive" candidates
+off-fence/off-mechanical to backlog (D70). Five round-1 opus slices filed, all file-disjoint, each a
+boundary + a machine check keyed to its type + a mutation-proof it can fail: the cssom exact-match
+sidecar ratchet (D65), the per-declaration paint fence that catches the sibling-line miss the current
+substring fence sails over (D66), the ban-the-shape citation-drift gate (D67 — every live citation is
+wrong TODAY), the standing emit-fence regression test (reflexive D40 gap), and the REPLACED-claim
+fence paying D52's residue (D70). Movement 2's honest verdict: **NOT YET SEALABLE** (D72) — no seal
+predicate exists for this epic, 50 `cch-*` rows are unbanded, and a named successor must be filed next
+wave to forward genuine residue. Model constraint: `opus` on every slice (Fable 5 spend-limited).
+Paper: `cloud-console-hardening-wave-5-2026-07-21`.
+
 
 ### 2026-07-21 — wave 5 REVIEW (five boundaries paid, grade A-)
 
@@ -331,8 +408,6 @@ opened mid-flight — the Reviewer created `cloud-console-hardening-wave-5-2026-
 debrief. Epic **NOT yet sealable** (~110 open children). Next wave: land these five, then triage the
 remaining LIVE claim/reality divergences (HEAD-burns-a-live-ticket, the `172.18.0.1` session-IP lie,
 the rate-limiter single-user lie) over further instrument hardening; pick up `cch-bl-citation-drift-cross-language`.
-Paper: `cloud-console-hardening-wave-5-2026-07-21`.
-
 ### 2026-07-21 — wave 3 DECIDE (build in flight)
 
 **The charter itself was the wave's first finding (D60).** Every verifier reported this file missing;
