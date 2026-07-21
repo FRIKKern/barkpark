@@ -48,6 +48,19 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Per-user undo/redo stack depth (M4, bound at the grill).
   @undo_depth 100
 
+  # Cap on DISTINCT `"user"` keys across the undo/redo maps — the depth cap
+  # above bounds each stack, this bounds HOW MANY stacks. `"user"` is
+  # client-supplied and unauthenticated on the :ingest tier (identity rides
+  # the op — see `OpsController`), so without this bound N distinct user
+  # strings grow `map_size(state.undo)` to N: unbounded per-session
+  # GenServer memory an anonymous client controls. Mirrors the `ReplayRing`
+  # bounded cache (@cap + evict-on-write): a push by a NEW user beyond the
+  # cap evicts the least-recently-touched user's undo AND redo stacks
+  # together (see `touch_undo_user/2`). 64 is generous for legitimate
+  # same-sheet collaboration; an evicted user merely loses undo history —
+  # the same lossy degradation as depth overflow — nothing else.
+  @undo_user_cap 64
+
   # Per-cell payload ceiling — mirrors Excel's 32,767-character cell limit, so
   # the fence doubles as interchange-faithful parity. Measured in BYTES, not
   # codepoints: the bytes-vs-chars divergence for multibyte text is deliberate
@@ -294,7 +307,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # loss-free. An already-sorted range (identity permutation) is a true no-op
   # — no rev bump, no undo entry, no broadcast (the move_tab from==to
   # precedent).
-  def apply_one(%{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys} = op, state) do
+  def apply_one(
+        %{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys} = op,
+        state
+      ) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, rect} <- validate_sort_range(range),
          old_tab = Sheets.get_tab(state.content, tab_idx),
@@ -400,7 +416,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         # rename captures a lossless multi-tab inverse), and the delete_tab
         # structure delta already drives a client refetch.
         state =
-          commit_cross_tab_content(state, state.content, delete_cross_tab_refs(state.content, deleted_name))
+          commit_cross_tab_content(
+            state,
+            state.content,
+            delete_cross_tab_refs(state.content, deleted_name)
+          )
 
         # Every stack index AFTER the deleted slot slides down by one —
         # the mirror of duplicate_tab's insert shift. Entries pinned to the
@@ -699,9 +719,47 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   defp push_stack(state, key, user, entry) do
+    state = touch_undo_user(state, user)
     stacks = Map.fetch!(state, key)
     stack = Enum.take([entry | Map.get(stacks, user, [])], @undo_depth)
     Map.put(state, key, Map.put(stacks, user, stack))
+  end
+
+  # Recency spine for the @undo_user_cap bound: `state.undo_users` is an MRU
+  # list (most-recently-touched first), created lazily on first push so the
+  # key never needs to pre-exist in the state map. Every push counts as a
+  # touch — own-op record, batch record, and the undo/redo cross-push in
+  # `apply_history/3` — so an actively undoing user can never be the LRU
+  # victim (a pure pop is not a touch, but a popped entry always re-pushes
+  # its counter-inverse onto the opposite stack in the same call). Eviction
+  # drops the stale users from the MRU list AND both stack maps; the
+  # invariant is that every undo/redo map key appears in `undo_users`, which
+  # is what bounds `map_size/1` of either map to @undo_user_cap. O(cap)
+  # list work per push — negligible next to the entry building above.
+  defp touch_undo_user(state, user) do
+    mru = Map.get(state, :undo_users, [])
+
+    cond do
+      List.first(mru) == user ->
+        state
+
+      user in mru ->
+        Map.put(state, :undo_users, [user | List.delete(mru, user)])
+
+      length(mru) < @undo_user_cap ->
+        Map.put(state, :undo_users, [user | mru])
+
+      true ->
+        {keep, evict} = Enum.split(mru, @undo_user_cap - 1)
+
+        evict
+        |> Enum.reduce(state, fn stale, st ->
+          st
+          |> Map.update!(:undo, &Map.delete(&1, stale))
+          |> Map.update!(:redo, &Map.delete(&1, stale))
+        end)
+        |> Map.put(:undo_users, [user | keep])
+    end
   end
 
   defp put_stack(state, key, user, stack) do
