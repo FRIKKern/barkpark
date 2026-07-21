@@ -5664,8 +5664,9 @@
   // isu-w6: confirm-then-trigger an app-level rollback, cloning the isu-w5 update
   // trio 1:1. The control plane relays to the instance's POST /v1/admin/rollback,
   // which flips Caddy's upstream to the previous blue/green slot. Distinct from the
-  // D7/D25 SITE-deployment "Roll back to this" promote (app.js:5139-5175) — that's
-  // per-site deployment history; this is per-INSTANCE slot flip.
+  // D7/D25 SITE-deployment "Roll back to this" promote (promoteActionFor /
+  // promoteConfirmCopy) — that's per-site deployment history; this is
+  // per-INSTANCE slot flip.
   function confirmRollbackInstance(bp) {
     var opts = rollbackConfirmOpts(bp);
     opts.onConfirm = function (ctl) { rollbackInstance(bp, ctl); };
@@ -9374,7 +9375,7 @@
   // THIS flips the whole site back to its previous release in place — SYNCHRONOUS,
   // no rebuild, no stage events, no new Deployment row. The 200 carries the settled
   // state directly; we NEVER poll (the async 202+poll of the INSTANCE rollback,
-  // rollbackInstance app.js:~3237, is the named regression trap).
+  // rollbackInstance(), is the named regression trap).
 
   // Human label for a deployment's PROVENANCE — the trigger, and ONLY the
   // trigger (GR27/GR28: a deployment row carries no actor; never a named

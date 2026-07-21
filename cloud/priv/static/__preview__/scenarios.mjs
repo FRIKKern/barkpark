@@ -2770,7 +2770,8 @@ export function route(name, method, path, state) {
   // N counts the OTHER sessions, never the acting one — router.ex keeps the
   // caller alive via `except: Auth.bearer_token(conn)`. This is the ONE
   // destructive route in the console whose toast interpolates a SERVER value
-  // ((r.data.revoked || 0) at app.js:1005), so without this handler the
+  // ((r.data.revoked || 0) in the "Signed out other devices" revoke-all toast),
+  // so without this handler the
   // generic 200 {} made the console announce "0 session(s) revoked." after
   // revoking real ones. The live route is honest; the harness was not.
   if (p === "/v1/account/sessions" && method === "DELETE") {
