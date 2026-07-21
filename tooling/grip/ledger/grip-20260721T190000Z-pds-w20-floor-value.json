@@ -1,0 +1,43 @@
+{
+  "id": "pds-w20-floor-value",
+  "kind": "re-derivation-recipe",
+  "topic": "PDS export memory FLOOR value + honest unit basis (verifier v1-derivation-number)",
+  "authored_by": "spill-janitor (wave-20 verifier)",
+  "authored_utc": "2026-07-21T19:00:00Z",
+  "one_line": "FLOOR = measured_demand_DELTA + margin = 98.16 + 798.81 = 896.97 ~= 897 MiB. NOT 1276 (that puts the ABSOLUTE peak 477 in D222's delta slot = the double-count D222(i) forbids).",
+  "recommended_floor_mib": 897,
+  "precise_floor_mib": 896.97,
+  "demand_slot": {
+    "value_mib": 98.16,
+    "class": "BEAM RSS peak-minus-baseline DELTA",
+    "recipe": "(rss_peak_kb - rss_baseline_kb)/1024 = (488564 - 388044)/1024",
+    "source": "frozen harness rung-3 1Hz ps sampler during the REAL wave-16 full export, run 1b515ee5, parked full-default.tar.meta",
+    "same_class_as": "retired in-memory engine canonical 2235.43 MiB = (2483304-194228)/1024",
+    "charter_blessing": "PDS-D267 (charter:3690-3693) calls this +98 MiB 'apples-to-apples with the RETIRED in-memory engine's 2235.43 MiB via the same 1 Hz ps sampler'"
+  },
+  "margin_slot": {
+    "value_mib": 798.81,
+    "basis": "PDS-D222(ii): MAX observed max-drawdown across 3 windows (570.44/756.35/798.81); a LOWER bound per D114 (1Hz, n=3, build-contention OFF) -> safe direction"
+  },
+  "rejected_candidates": {
+    "477.11_abs_peak": "488564/1024. FORBIDDEN in the demand slot: it includes the 388044 kB resident baseline that MemAvailable ALREADY excludes -> adding it = the DOUBLE-COUNT PDS-D222(i) explicitly names ('adding the baseline back would DOUBLE-COUNT and over-set the gate'). Old engine's own abs peak (2425.10) was likewise rejected. FLOOR would be 1275.92.",
+    "19.71_wire_byte": "worst single COPY-chunk WIRE-BYTE figure (D217) from a 0/4 census task. PDS-D232 rejects 19.71+798.81 as unit-mixed arithmetic, not a licensed BEAM-RSS derivation.",
+    "647_memavail_drawdown": "wave-16 fire 2578->1931 MemAvailable swing. This is a MARGIN-class DRAWDOWN, not an RSS demand; it belongs in the same family as the 798.81 margin and is ALREADY absorbed by it (647 < 798.81). Putting it in the demand slot is a third unit error."
+  },
+  "safety_under_build_contention": {
+    "verdict": "SAFE and conservative",
+    "reasoning": [
+      "Even the ABSOLUTE resident peak (477 MiB) fits inside the LOWEST MemAvailable ever observed (1343.77 MiB, D250) with ~866 MiB spare, and inside the worst-ever build-storm reading (1571.52 MiB, D230) with ~1094 MiB spare -- ZERO dmesg OOM in any wave.",
+      "D227 build depression is ~461 MiB (idle 2466 -> busy 2005); the 798.81 margin is 1.7x that and covers the real wave-16 fire drawdown (647).",
+      "897 sits BELOW the regime's own idle MemAvailable min (1343.77), so cond_b passes at essentially every draw -> the fire happens IN-REGIME (the wave's goal) while the number stays a genuine demand+margin computation, not a fossil wall.",
+      "D211 floor-law satisfied: floor 897 >> deployed-engine measured demand 98.16."
+    ]
+  },
+  "caveats_for_decide": [
+    "The 98.16 delta's baseline (388044 kB) is the harness's OWN strictly-pre-window rung-3 baseline, NOT a separate PDS-D104 paired idle control that D211 names. It is a within-process peak-minus-baseline (arguably cleaner than a paired cross-process subtraction), but it is not the formal D104 shape. State this in the record.",
+    "The fire's D253 ride-along sampler produces a DIFFERENT number (idle_delta_mib) than the harness rung-3 98.16, and per D253 it rides UNRATIFIED (concurrent = neither valid control nor licensed demand). So the fire's ride-along does NOT ratify the 98.16 floor basis; 98.16 stands on the harness rung-3 evidence + D267, independent of the ride-along. Closing pds-bl-ratify-or-discard-ridealong-demand is a SEPARATE question about the sampler number, not this floor value.",
+    "D232/D244 must be SUPERSEDED in the charter before arming below 2200, and per direction-correction (d) D242-D264 live only on unmerged PRs #5332/#5366/#5402 -- land those first."
+  ],
+  "exact_unit_sentence": "The demand figure is 98.16 MiB -- the BEAM RSS peak-minus-baseline DELTA, (488564 kB - 388044 kB)/1024, measured by the frozen harness's rung-3 1 Hz ps sampler during the wave-16 full export (run 1b515ee5), the same peak-minus-baseline delta class as the retired in-memory engine's canonical 2235.43 MiB, (2483304-194228)/1024. It is NOT the 477.11 MiB absolute RSS peak (488564/1024), which includes the 388044 kB resident baseline that MemAvailable already excludes and would double-count per PDS-D222(i); NOT the 19.71 MiB wire-byte COPY-chunk figure PDS-D232 rejects as unit-mixed; and NOT the ~647 MiB MemAvailable drawdown, which is a margin-class quantity already absorbed by the 798.81 MiB margin. FLOOR = measured_demand_delta + margin = 98.16 + 798.81 = 896.97, rounded up to 897 MiB.",
+  "rerun": "git show origin/main:.claude/workflows/bp-pds-charter.md | sed -n '1943,1960p;2097,2106p;3690,3695p' && python3 -c 'print((488564-388044)/1024, (488564-388044)/1024+798.81, 488564/1024+798.81)'"
+}
