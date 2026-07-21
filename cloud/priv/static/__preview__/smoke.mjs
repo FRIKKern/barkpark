@@ -473,13 +473,21 @@ const EXPECTATIONS = {
   //   4. the list SHRINKS 4→3                     — proves the server acted (stateful fixture, D39)
   //   5. sign-out-everywhere toasts the SERVER's count — the one text-observable false green
   //
+  // cch-w2-revoke-ux-honesty AMENDED THIS SCENARIO IN PLACE (never forked it —
+  // a parallel scenario would have left this one permanently red once the
+  // confirm gate landed). Four assertions were added:
+  //   6. the clicked row goes disabled + relabels — the pending state, read as STATE
+  //   7. a per-row success TOAST mounts           — the leg used to succeed in silence
+  //   8. sign-out-everywhere's DELETE is 0 after the trigger, 1 after #cm-confirm
+  //   9. #modal-body carries the account screen again after the sheet closes
+  //
   // COVERAGE BOUNDARY (D40 — an enforcement mechanism states its own limits).
   // Of the 8 unfixtured destructive DELETEs this slice is scoped to, exactly
-  // ONE — /v1/account/sessions (app.js:1005) — interpolates a server value into
+  // ONE — /v1/account/sessions (app.js:1021) — interpolates a server value into
   // its toast, so it is the only one where a missing fixture is visible AS TEXT
   // ("0 session(s) revoked."). This oracle covers it by TEXT. The per-row
-  // sibling (:1079) is covered by WIRE + STATE (it toasts nothing on success).
-  // The remaining six — /v1/auth/logout (:1027), /v1/github/installation
+  // sibling (:1112) is covered by WIRE + STATE + its own success toast.
+  // The remaining six — /v1/auth/logout (:1050), /v1/github/installation
   // (:2295), /v1/barkparks/:id (:5430, :5474), the webhook DELETE (:7381) and
   // /v1/sites/:id/github (:9991) — toast client-side CONSTANTS ("Instance
   // removed", "Webhook deleted"), so a generic 200 produces a message that is
@@ -487,8 +495,27 @@ const EXPECTATIONS = {
   // is not "prod says 0", it is "nothing here would catch a regression". They
   // are NOT covered by this scenario; they are click-reachable now that the
   // shim works, and that is follow-on work, filed — not silently implied.
+  //
+  // WHAT THIS SHIM CANNOT PROVE — TWO LIMITS THAT MANUFACTURE WRONG VERDICTS
+  // HERE, both learned the hard way (D55, D56). State them before writing a new
+  // assertion in this scenario:
+  //   • IT DOES NOT MODEL DETACHMENT. Every #id lives in ONE FLAT registry and
+  //     reports isConnected: true forever. In the real DOM #sessions-box is a
+  //     DESCENDANT of #modal-body, so openModal's `bodyEl.innerHTML = html`
+  //     (app.js) DESTROYS it and closeModal() empties what remains — yet here
+  //     the node survives, keeps its rows, and answers every question about
+  //     them. Measured: a sign-out-everywhere onConfirm that never re-renders
+  //     leaves ALL 87 GREEN while #modal-body is "" and the operator, in a
+  //     browser, sees an empty dialog. ⇒ ANY assertion about what exists after
+  //     a modal swap must anchor on #modal-body's innerHTML, the node the
+  //     browser actually replaces — never on the descendant's own registry entry.
+  //   • IT DELIVERS CLICKS TO DISABLED ELEMENTS. dispatchEvent has no `disabled`
+  //     guard, so a correctly-disabled button still returns 1 from click() and
+  //     runs its handler. ⇒ NEVER prove a pending/disabled state with a second
+  //     click (it reports a working guard as broken, and doubles the DELETE
+  //     count); read `disabled` and `textContent` directly, as §2b does.
   "account-modal-revoke": {
-    what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke fires the right DELETE and shrinks the list, sign-out-everywhere reports the SERVER's count",
+    what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke pends + toasts + shrinks the list, and sign-out-everywhere waits for its danger-tier confirm before reporting the SERVER's count",
     async check(reg, hooks, ctx) {
       // ─ 1. the modal opens by CLICK, exactly as a user opens it ─────────────
       const acct = reg.get("acct-btn");
@@ -497,7 +524,7 @@ const EXPECTATIONS = {
       await ctx.settle();
 
       // The session list rendered through the REAL loadSessions, which is only
-      // possible because the shim now answers isConnected (app.js:1072).
+      // possible because the shim now answers isConnected (app.js:1095).
       const box = reg.get("sessions-box");
       const rendered = box.innerHTML || "";
       assert.ok(rendered.includes("session-row"),
@@ -521,10 +548,32 @@ const EXPECTATIONS = {
       assert.equal(fired, 1,
         "the per-row Revoke dispatched " + fired + " click handlers — the button is DEAD. " +
         "Every source string can still be present and correct; nothing is bound to \"click\".");
+
+      // ─ 2b. cch-w2-revoke-ux-honesty: the PENDING state, read DIRECTLY ──────
+      // The handler disables the button and swaps its label BEFORE api() is
+      // called, so both are observable synchronously — before the settle that
+      // repaints the list out from under this node.
+      //
+      // ASSERTED BY STATE, NEVER BY A SECOND CLICK (D56). The shim's
+      // dispatchEvent has no `disabled` guard, so `revokes[0].click()` on a
+      // CORRECTLY disabled button still returns 1 and would red the DELETE-count
+      // assertion below. A double-click test here reports a working guard as
+      // broken; only reading `disabled`/`textContent` tells the truth.
+      assert.equal(revokes[0].disabled, true,
+        "the clicked Revoke must go disabled while its DELETE is in flight — an enabled button " +
+        "during an unacknowledged destructive request invites the double-revoke");
+      assert.equal(revokes[0].textContent, "Revoking…",
+        "the label must confess the in-flight state, got " + JSON.stringify(revokes[0].textContent));
+
       await ctx.settle();
 
       assert.equal(ctx.countCalls("DELETE", "/v1/account/sessions/" + victim), 1,
         "the click must issue exactly one DELETE for that row's id");
+      // The per-row leg used to succeed in SILENCE: the row simply vanished on
+      // the re-render, which is indistinguishable from a render glitch.
+      const rowToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(rowToast.includes("Device signed out"),
+        "a successful per-row revoke must SAY SO — no success toast mounted; got: " + rowToast);
       // D39: this line is the reason the fixture is stateful. Against a static
       // fixture the re-render returns a byte-identical list, so this assertion
       // would hold whether or not the DELETE ever reached the server — a false
@@ -535,16 +584,63 @@ const EXPECTATIONS = {
       assert.ok(!after.includes('data-id="' + victim + '"'), "the revoked row's id must not come back");
       assert.equal(ctx.countCalls("GET", "/v1/account/sessions"), 2, "the success arm refetches the list");
 
-      // ─ 5. SIGN OUT EVERYWHERE: the one text-observable false green ─────────
+      // ─ 5. SIGN OUT EVERYWHERE: gated, then the text-observable false green ─
       const all = reg.get("sessions-revoke-all");
       assert.equal(all.click(), 1, "the Sign-out-everywhere button must be wired for \"click\"");
+
+      // ─ 5a. cch-w2-revoke-ux-honesty: THE TRIGGER ONLY OPENS THE SHEET ─────
+      // The blast-radius button must NOT fire on the first click. This is the
+      // assertion that catches a gate someone removes "to simplify" later: with
+      // no confirmModal the DELETE is already on the wire right here.
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/sessions"), 0,
+        "sign-out-everywhere fired its DELETE on the FIRST click — the confirm gate is gone, " +
+        "and an irreversible-feeling action just happened with no way to say no");
+      // Proven by what #modal-body actually CONTAINS — reg.get() alone would
+      // answer a freshly-minted empty stub for any id and prove nothing.
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('id="cm-confirm"'),
+        "the confirm sheet did not mount into #modal-body; got: " + sheet.slice(0, 200));
+      assert.ok(sheet.includes("Sign out everywhere else?"),
+        "the sheet must name what it is about to do, in the title");
+      assert.ok(sheet.includes("btn-danger"),
+        "GR41: a grave-but-reversible action wears the danger tier's weight");
+
+      // D54: the confirm click goes BETWEEN the trigger and the settle. The
+      // tier is `danger`, NOT `destroy` — a destroy sheet would additionally
+      // need #cm-typed's value set plus an "input" event before #cm-confirm
+      // arms, and (measured) an un-armed #cm-confirm STILL returns 1 from
+      // click(), so the harness's `fired == 1` idiom cannot detect the disarm.
+      const cmConfirm = reg.get("cm-confirm");
+      assert.ok(cmConfirm, "#cm-confirm was never touched — openConfirmModal did not wire the sheet");
+      assert.equal(cmConfirm.click(), 1, "the sheet's Confirm must be wired for \"click\"");
       await ctx.settle();
       assert.equal(ctx.countCalls("DELETE", "/v1/account/sessions"), 1, "one sign-out-everywhere DELETE on the wire");
+
+      // ─ 5b. THE HARNESS'S OWN FALSE GREEN, CLOSED (D55) ────────────────────
+      // In a real browser #sessions-box lives INSIDE #modal-body, so mounting
+      // the confirm sheet destroyed it and closeModal() emptied what was left;
+      // a post-success `loadSessions()` would bail at `if (!box) return` and
+      // the operator would be left with no account modal at all. This shim
+      // cannot see that: its #id registry is FLAT and every node reports
+      // isConnected: true, so #sessions-box is immortal here and every
+      // assertion below about it passes with #modal-body sitting at "".
+      // Anchor on the node the browser actually replaces. MUTATION-KILLED BOTH
+      // WAYS: green with onConfirm's openAccountModal() re-render, red
+      // (modal-body === "") without it — while the #sessions-box assertions
+      // below stay green in both and discriminate nothing.
+      const reborn = reg.get("modal-body").innerHTML || "";
+      assert.ok(reborn.includes('id="sessions-box"'),
+        "#modal-body no longer contains the account modal — the confirm sheet replaced it and " +
+        "nothing re-rendered, so in a real browser the operator is left staring at an empty dialog. " +
+        "onConfirm must call openAccountModal() after ctl.succeed(). #modal-body is: " +
+        JSON.stringify(reborn.slice(0, 120)));
+      assert.ok(reborn.includes('id="modal-logout"') && reborn.includes(">Your account<"),
+        "the re-render must be the WHOLE account screen, not a fragment");
 
       const toasts = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(toasts.includes("Signed out other devices"), "the success toast must actually mount");
       // Two sessions remained revokable after the per-row revoke, so the SERVER
-      // says 2. app.js:1005 renders `(r.data.revoked || 0)` — with no DELETE
+      // says 2. app.js:1021 renders `((r.data && r.data.revoked) || 0)` — with no DELETE
       // fixture the generic `/v1/` 200 {} answers `{}`, `revoked` is undefined,
       // and the console cheerfully announces a revoke of nothing.
       assert.ok(!toasts.includes("0 session(s) revoked"),
