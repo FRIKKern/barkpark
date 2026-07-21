@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 #
-# pds-climb-preflight.sh — the four preconditions of the CROWN CLIMB, PROVEN
+# pds-climb-preflight.sh — the five preconditions of the CROWN CLIMB, PROVEN
 # at run time instead of remembered.
 #
 # Wave 12 fires ONE unsplit `scripts/pds-pull-proof.sh --all`. Three of its
-# preconditions have been mis-remembered in prose across several waves, and the
+# preconditions have been mis-remembered in prose across several waves, the
 # fourth (a quiet deploy window) cannot be remembered at all — it is only ever
-# true for the minute you measure it. This script measures all four and prints
-# ONE verdict line per check, then a single closing verdict.
+# true for the minute you measure it — and the fifth (a warm api/ tree) was
+# invisible to every card in the repo until it killed a live arm. This script
+# measures all five and prints ONE verdict line per check, then a single
+# closing verdict.
 #
 # IT IS READ-ONLY, BY CONSTRUCTION:
 #   · it NEVER fires an export (no /export call is made, at all)
@@ -19,7 +21,7 @@
 # measured MINIMUM deploy gap is 9 SECONDS), so re-run it immediately before you
 # fire and never reuse an older reading.
 #
-# THE FOUR CHECKS
+# THE FIVE CHECKS
 #   1 WORKTREE (PDS-D225)   HEAD == origin/main, tree clean, harness blob frozen
 #                           at e219e97… — verified with `git rev-parse`, NEVER
 #                           shasum (PDS-D154: shasum reads b9eb6e3a… on the same
@@ -34,6 +36,14 @@
 #                           deployed sha, WARNING when they MATCH.
 #   4 FIRE WINDOW           no deploy.yml run in_progress or queued, plus every
 #                           open PR touching deploy.yml's push paths.
+#   5 PRE-WARM (PDS-D258)   api/deps non-empty and api/_build present. Both are
+#                           GITIGNORED, so a worktree cut fresh at origin/main —
+#                           exactly the worktree check 1 demands — has NEITHER,
+#                           and `arm` with the default pre-warm prints the full
+#                           ARMED banner, returns 0, and the detached child dies
+#                           on `** (Mix) Can't continue due to errors on
+#                           dependencies` for ZERO draws. Nothing else in the
+#                           repo can see this.
 #
 # USAGE
 #   scripts/pds-climb-preflight.sh            report, exit 0 (the default)
@@ -89,7 +99,7 @@ INSTANCE_PATHS='^(api|internal|deploy|connectors)/'
 STRICT=0
 case "${1:-}" in
   --strict) STRICT=1 ;;
-  -h|--help|help) sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|help) sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "") ;;
   *) printf 'usage: %s [--strict|--help]\n' "$SELF" >&2; exit 3 ;;
 esac
@@ -338,6 +348,67 @@ EOF
   verdict 4 "FIRE WINDOW" "$state" "$detail"
 }
 
+# ── check 5 — PRE-WARM (PDS-D258) ────────────────────────────────────────────
+
+check_prewarm_ready() {
+  head_check 5 "PRE-WARM — can this worktree compile at all? (PDS-D258)"
+
+  local api_dir deps_dir build_dir deps_n deps_state prod_state dev_state state detail
+  # Resolved from the SCRIPT's OWN location, the way the launcher resolves its
+  # API_DIR — never from cwd. A preflight invoked by absolute path from some
+  # other directory must judge the tree it LIVES in, because that is the tree
+  # `arm` will compile.
+  api_dir="$REPO_ROOT/api"
+  deps_dir="$api_dir/deps"
+  build_dir="$api_dir/_build"
+
+  # STAT ONLY, like every other read in this script. No mix, no compile, no
+  # fetch, nothing written anywhere, and $FULL_DIR is not touched at all. The
+  # entry count matters because a half-finished `mix deps.get` leaves an EMPTY
+  # deps/ behind, and an empty deps/ is cold, not warm.
+  # `find -L`, not bare `find`: deps/ is very often a SYMLINK to a warm tree's
+  # deps, and bare find does not descend one — it reports 0 entries and this
+  # check would call a genuinely warm worktree cold. Measured while building
+  # this check, which is the only reason it reads -L.
+  deps_n=0
+  [ -d "$deps_dir" ] && deps_n="$(find -L "$deps_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
+  deps_state="ABSENT"
+  [ -d "$deps_dir" ] && deps_state="present, $deps_n entr$([ "$deps_n" = 1 ] && echo y || echo ies)"
+  prod_state="ABSENT"; [ -d "$build_dir/prod" ] && prod_state="present"
+  dev_state="ABSENT";  [ -d "$build_dir/dev" ]  && dev_state="present"
+
+  info "api tree ................. $api_dir"
+  info "api/deps ................. $deps_state"
+  info "api/_build/prod .......... $prod_state   ← what the D241 pre-warm compiles"
+  info "api/_build/dev ........... $dev_state   ← what pds-scratch-target.sh up compiles"
+  info "both are GITIGNORED ...... a worktree cut fresh at origin/main has NEITHER,"
+  info "                           and check 1 demands exactly such a worktree."
+  info "the launcher's pre-warm .. runs \`CC=/usr/bin/clang MIX_ENV=prod mix compile\`"
+  info "                           (pds-crown-launch.sh:258 detached, :443 synchronous)."
+  info "                           It NEVER runs \`mix deps.get\` — in either form."
+  info "the flag that matters .... arm --prewarm-now compiles in the ARMING shell and"
+  info "                           dies loudly at :441-444 on failure. The DEFAULT"
+  info "                           pre-warm compiles inside the DETACHED child, where"
+  info "                           a failure is invisible until \`collect\`."
+
+  state=GO
+  detail="api/deps holds $deps_n entr$([ "$deps_n" = 1 ] && echo y || echo ies) and both _build envs are present — the pre-warm has something to compile against. Arm with --prewarm-now anyway (PDS-D258): it moves any surviving compile failure into the arming shell, where you can see it."
+  if [ ! -d "$api_dir" ]; then
+    state=NO-GO
+    detail="there is no $api_dir — this is not a Barkpark checkout, so nothing here can be pre-warmed or climbed from."
+  elif [ ! -d "$deps_dir" ] || [ "$deps_n" -eq 0 ]; then
+    state=NO-GO
+    detail="COLD WORKTREE (PDS-D258): api/deps is ${deps_state}. \`arm\` will print the full ARMED banner and return 0, and the detached child will then die on \`** (Mix) Can't continue due to errors on dependencies\` -> \`prewarm: FAILED rc=1 — NOT firing\` -> EXIT 1, for ZERO draws — a dead climb you do not discover until \`collect\`. Pay the warm-up in THIS worktree first, then arm with --prewarm-now: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  elif [ ! -d "$build_dir/prod" ]; then
+    state=NO-GO
+    detail="COLD WORKTREE (PDS-D258): api/deps is warm but api/_build/prod is ABSENT, so the pre-warm is a full cold prod compile (~155 s) — paid inside the climb's own window under the default form, and its failure is invisible there until \`collect\`. Pay it here first, then arm with --prewarm-now: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  elif [ ! -d "$build_dir/dev" ]; then
+    state=WARN
+    detail="api/deps and api/_build/prod are warm, but api/_build/dev is ABSENT. The pre-warm only ever compiles MIX_ENV=prod, so this one is not caught by --prewarm-now: \`pds-scratch-target.sh up --verify\` pays it instead, as a >10-minute cold dev compile. Pay it before you arm: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  fi
+  verdict 5 "PRE-WARM" "$state" "$detail"
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 say ""
@@ -355,6 +426,10 @@ check_worktree
 check_budget
 check_parked_bundle
 check_fire_window
+# Last, and cheap: check 5 is four `test -d`s, so it cannot stale check 4's
+# window reading. It is also the only check that judges the ARMING shell rather
+# than the source plane.
+check_prewarm_ready
 
 printf '\n'
 rule
