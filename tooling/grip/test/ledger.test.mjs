@@ -854,12 +854,33 @@ test("THE WRITE PATH IS UNTOUCHED: admitRecipe still REQUIRES a stored quantity,
   assert.deepEqual(Object.keys(admitRecipe(goodRow()).recipe).sort(), [...RECIPE_FIELDS].sort());
 });
 
-test("the static mint.mjs import creates no cycle — mint.mjs imports NOTHING", () => {
+test("the static mint.mjs import creates no cycle — mint imports ONLY the binding rule, and that chain is acyclic (tgw6)", () => {
   // Checked, not assumed: the brief said "verify before relying on it", and a
   // cycle here would be a load-order bug that only shows up in one entry order.
-  const mintSrc = readFileSync(fileURLToPath(new URL("../mint.mjs", import.meta.url)), "utf8");
-  const imports = mintSrc.split("\n").filter((l) => /^\s*import\b/.test(l) || /\brequire\s*\(/.test(l));
-  assert.deepEqual(imports, [], `mint.mjs must import nothing, or the ledger's dependency story is a lie: ${imports.join(" | ")}`);
+  //
+  // tgw6 gave mint.mjs a single dependency on purpose: it IMPORTS the
+  // caller-tree binding rule from binding.mjs rather than restating a second
+  // copy of it (the hand-copied-grammar defect this epic exists to abolish). So
+  // the invariant here is no longer "mint imports nothing" — it is "no import
+  // CYCLE": mint -> binding -> level bottoms out with no path back into the
+  // ledger chain.
+  const importsOf = (rel) => {
+    const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    return src.split("\n").filter((l) => /^\s*import\b/.test(l) || /\brequire\s*\(/.test(l));
+  };
+  assert.deepEqual(
+    importsOf("../mint.mjs"),
+    ['import { classifyBinding } from "./binding.mjs";'],
+    "mint.mjs imports exactly the binding rule — not zero (it must not restate the rule), and not more (the ledger's dependency story stays legible)",
+  );
+  for (const mod of ["../binding.mjs", "../level.mjs"]) {
+    for (const line of importsOf(mod)) {
+      assert.ok(
+        !/["']\.\/(mint|ledger)\.mjs["']/.test(line),
+        `${mod} must not import back into the ledger chain, or mint's static import is a cycle: ${line}`,
+      );
+    }
+  }
   const ledgerSrc = readFileSync(LEDGER_SRC, "utf8");
   assert.match(ledgerSrc, /^import \{ quantityPhrase \} from "\.\/mint\.mjs";$/m,
     "the ledger imports the mint STATICALLY — a dynamic import would make the key derivation an optional extra that can silently not happen");
