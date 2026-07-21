@@ -395,3 +395,94 @@ The paired idle control lands at `/tmp/pds-idle-sampler-w16.out` (log
 `/tmp/pds-idle-sampler-w16.log`) when its 21600 s window closes at ≈`15:55:44Z`. Per
 PDS-D114 a 1 Hz sampler reports a LOWER bound — a transient between ticks is invisible —
 which for a control is the conservative direction.
+
+---
+
+## 12. THE OUTCOME, READ (reviewer's addendum — 2026-07-21, wave-16 review)
+
+Appended by the wave-16 reviewer, not by the agent that armed. Everything above §12 stands
+as written; this section only resolves the one thing §11 left open. **The record's outcome
+claim in §5 — "outcome (a), fired and climbing" — was true at arm time and is now
+superseded: the run reached a TERMINAL state three minutes after the arm, and it is neither
+(a), (b) nor (c).**
+
+```
+$ ./scripts/pds-crown-launch.sh collect 1b515ee5
+STATE: FINISHED   draws 1   lines 311
+  Sentinel AND ^RESULT: — the harness ran to its own summary().
+
+  5 PASS · 6 ABORT (blocked, named) · 0 FAIL
+  RESULT: BLOCKED
+  [2026-07-21T09:58:12Z] harness returned rc=2 after 1 draw(s)
+  EXIT: 2
+```
+
+`ps -p 60879` reports no such process. The six-hour window did not run: the child fired on
+draw 1 at `09:55:13Z`, ran ONE unsplit `--all`, and exited on its rc at `09:58:12Z`.
+
+### What passed, what aborted
+
+| rung | verdict | why |
+|---|---|---|
+| 0a, 0b | PASS | deployed sha `8eeaf688f…`, ancestry OK |
+| 0c | ABORT | `env:scratch-target-not-booted` |
+| 1, 2 | ABORT | `env:scratch-target-not-booted` |
+| 3 | **PASS** | the type deny cascades at ROW grain — 0 ticket rows in dev, 1 in full |
+| 4 | ABORT | `waits on step:1` |
+| 5, 6 | ABORT | `env:scratch-target-not-booted` |
+| 7, 8 | PASS | merge import refused 403; sha unmoved 123 s → 302 s uptime |
+
+**Rungs 1, 2, 5 and 6 are the crown.** All four aborted on one cause:
+`/tmp/pds-w14.1b515ee5/scratch.env` was absent because nothing ever booted a target there.
+
+### This is a FOURTH outcome, and it is structural
+
+`pds-crown-launch.sh:197` exports `BARKPARK_HOME="/tmp/pds-w14.$run_tag"` unconditionally
+(PDS-D233) — no `${…:-}` default — from a run tag generated *inside* `arm`. But
+`pds-crown-runbook.md` §2(a) requires `pds-scratch-target.sh up --verify` to have booted a
+target **in that same root**, and the root does not exist until `arm` has returned, by which
+time the child can already have fired. **No armed climb can ever have a target.** PDS-D262
+named three outcomes; this is a fourth it did not anticipate:
+
+**(d) FIRE, harness runs to a BLOCKED partial, one attempt SPENT.** Not a refusal (the
+export was taken), not a crash (the harness summarised itself), and not free.
+
+Filed as `pds-w16-launcher-scratch-home-trap`. The climb runbook now carries it under
+*The armed climb has NO TARGET*.
+
+### The export was real, and it is parked
+
+The attempt was not wasted. The D261 cross-check, run before anything was stamped:
+
+```
+$ file -b /tmp/pds-full-export/full-default.tar
+POSIX tar archive
+$ tar -tf … | head -3          manifest.json · tables/secrets.copy · tables/github_sync_conflicts.copy
+$ tar -xOf … manifest.json     "grain": "workspace",  "profile": "full",  "format": "bp-export-v1"
+```
+
+Not a proxy error page. `.meta`: `served_sha 8eeaf688f…`, `1405095424 bytes`, `151 s`,
+`attempt 4 of 5`, `rss_peak_kb 488564` against `rss_baseline_kb 388044`.
+
+**That RSS delta is ~98 MiB for a 1.4 GB export**, and it retires the last of the scarcity
+premise on its own terms: PDS-D185's 2235.43 MiB demand was the RETIRED in-memory engine's,
+and the deployed spill engine has now been measured end-to-end on the live box. The
+`35.43 MiB` shortfall §4 recorded as an accepted risk was never a risk at all.
+
+The bundle carries the currently-deployed sha, so **the next `--all` reuses it for ZERO
+attempts** (`pds-pull-proof.sh:1268-1283`) — which is exactly what the retry-reuse WARN in
+preflight check 3 is telling you, and for a crown retry it is the cheap path, not the trap.
+
+### What §6 asked for, answered
+
+§6 asked a reviewer to rule on `slot_uptime=02:03`. **The ruling is deferred, not granted or
+refused, because this transcript cannot support the crown claim either way** — rungs 1/2/5/6
+never ran. `pds-w16-cond-d-warmth-coupling` stays open for the wave that fires a climb which
+can actually reach them. The finding in §6 is correct and it is now joined by a larger one:
+obeying PDS-D78 aims the climb at a transient, and obeying PDS-D233 aims it at no target.
+
+### Ledger
+
+Criteria 0–9 remain stamped as the builder left them; nothing here retracts one. Criterion
+12 stays merge-gated for the lead. `pds-w14-crown-collect-stamp` (round 2) inherits this
+section as its input: **the crown is NOT stampable off run `1b515ee5`.**
