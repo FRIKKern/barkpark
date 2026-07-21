@@ -33,6 +33,7 @@ import {
   screenCommand, screenSegment, screenAll,
   hostBoundReason, maskQuotedSpans, metacharacterReason, splitSegments, tokenize,
   writeShapeReason, runNamedSets,
+  doubleQuoteExpansionReason, envAssignmentReason, screenSedScript,
   ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND,
   DANGER_SET, REGRESSION_SET, NEVER_CRY_WOLF_SET,
 } from "../screen.mjs";
@@ -128,13 +129,34 @@ test("the host bound is checked BEFORE the allowlist — it beats an unknown hea
   assert.match(screenCommand("grep -rn 'x' guerrilla-notes.md").reason, /^host bound:/);
 });
 
-test("the host bound scans RAW — a hostname inside quotes is still refused (accepted over-refusal)", () => {
-  // This is the one layer that gets no cleverness: its failure mode reaches
-  // another machine. The cost is a handful of admissible reads.
-  const r = screenCommand(`grep -n "guerrilla" README.md`);
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /^host bound:/);
+// WAVE 5 REVERSED THIS TEST, AND THE REVERSAL IS THE FINDING.
+//
+// It used to assert that a hostname inside quotes is still refused, priced as
+// "a handful of admissible reads" for a layer that "gets no cleverness". Wave 5
+// measured the bill instead of estimating it: the wave reads ops docs, and the
+// most quotable line in every one of them contains `ssh`, so
+// `grep -c "ssh" docs/ops/PROD_OPS.md` was refused as REMOTE EXECUTION. A
+// pattern was being read as a target, and a screen that refuses the honest reads
+// its own operators need gets ROUTED AROUND rather than tightened (charter D63).
+//
+// The host bound now runs on the MASKED string. What makes that sound is the
+// ordering, not optimism: `doubleQuoteExpansionReason` refuses any double-quoted
+// span sh would expand BEFORE anything trusts a blanked span, so a masked span
+// provably cannot become a command. `hostBoundReason` itself is unchanged — only
+// what it is handed.
+test("the host bound scans the MASKED string — a quoted hostname is DATA, an unquoted one is SYNTAX", () => {
+  assert.equal(screenCommand(`grep -n "guerrilla" README.md`).ok, true, "a grep PATTERN is not a target");
+  assert.equal(screenCommand(`grep -n 'ssh' docs/ops/PROD_OPS.md`).ok, true);
+
+  // The direction that matters is untouched: a host that appears as SYNTAX is
+  // still refused, and still beats every other layer to the verdict.
+  for (const cmd of ["ssh root@157.180.90.121 uptime", "scp x root@host:/tmp/x", "curl -s https://guerrilla.barkpark.cloud/api/schemas"]) {
+    assert.match(screenCommand(cmd).reason, /^host bound:/, `MUST REFUSE as a host violation: ${cmd}`);
+  }
+
+  // `hostBoundReason` is unchanged — it is the INPUT that moved one step later.
   assert.equal(hostBoundReason(`echo "ssh is mentioned here"`), "names ssh (remote execution)");
+  assert.equal(hostBoundReason(maskQuotedSpans(`echo "ssh is mentioned here"`)), null);
 });
 
 // ── 3. LAYER (b) — METACHARACTERS AND THE ALLOWLIST ──────────────────────────
@@ -260,8 +282,19 @@ test("every interpreter head is REFUSED, which is what makes quote-masking safe 
     const r = screenCommand(c);
     assert.equal(r.ok, false, `must refuse interpreter/wrapper: ${c} → ${r.reason}`);
   }
-  for (const head of ["sh", "bash", "node", "python3", "perl", "ruby", "awk", "sed", "xargs", "eval", "npx", "psql", "su", "sudo", "watch", "timeout"]) {
+  for (const head of ["sh", "bash", "node", "python3", "perl", "ruby", "awk", "xargs", "eval", "npx", "psql", "su", "sudo", "watch", "timeout"]) {
     assert.equal(ALLOWED_HEADS.has(head), false, `${head} must NOT be allowlisted`);
+  }
+  // `sed` LEFT this list in wave 5 and is now allowlisted — the one head on it
+  // that was judged by reputation rather than by capability. It is the ONLY
+  // exception, and it is not one: sed cannot execute a string at all except
+  // through the `e` command and the `s///e` flag, and BOTH are refused by
+  // `screenSedScript`, along with `-i`, `w` and `s///w`. The claim this suite
+  // makes about the others — "no head that executes a string is on the
+  // allowlist" — therefore still holds verbatim.
+  assert.equal(ALLOWED_HEADS.has("sed"), true, "sed is judged on its SCRIPT (see the wave-5 block)");
+  for (const c of ["sed '1e reboot' f", "sed 's/x/y/e' f", "sed -i 's/x/y/' f", "sed -f /tmp/evil.sed f"]) {
+    assert.equal(screenCommand(c).ok, false, `sed's executing/writing forms must still refuse: ${c}`);
   }
 });
 
@@ -441,13 +474,33 @@ test("the admission rate over the frozen corpus is MEASURED and PRINTED", () => 
   assert.ok(r.rate < 0.6, `admission rate ${(r.rate * 100).toFixed(1)}% is too high for a fail-closed screen over untrusted input`);
 });
 
-test("no corpus command is admitted while naming a bounded host — the layer (a) sweep", () => {
+test("no corpus command is admitted while naming a bounded host AS SYNTAX — the layer (a) sweep", () => {
+  // The sweep now runs over the MASKED command, matching the layer it audits.
+  // Sweeping the RAW string would re-assert the very over-refusal wave 5
+  // removed, and it caught exactly one row when the fix landed:
+  //
+  //   gh run view 29112942807 --log | grep -iE 'healthy|guerrilla|157\.180|89\.167'
+  //
+  // — a `gh run view` piped into a grep whose PATTERN happens to name a host and
+  // two prod IPs. Nothing in it reaches any machine; the hostnames are the thing
+  // being searched FOR. That row is the +1 half of this wave's widening, and a
+  // raw sweep would call the fix a leak.
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
   const leaked = corpus.proofs
     .map((p) => p?.command)
     .filter((c) => typeof c === "string" && screenCommand(c).ok)
-    .filter((c) => HOST_BOUND.some(([re]) => re.test(c)));
-  assert.deepEqual(leaked, [], "a command naming a bounded host was admitted");
+    .filter((c) => {
+      const masked = maskQuotedSpans(c);
+      return masked !== null && HOST_BOUND.some(([re]) => re.test(masked));
+    });
+  assert.deepEqual(leaked, [], "a command naming a bounded host OUTSIDE quotes was admitted");
+
+  // The complement, asserted rather than assumed: every corpus row that names a
+  // host outside quotes is still refused.
+  const rawNamers = corpus.proofs
+    .map((p) => p?.command)
+    .filter((c) => typeof c === "string" && HOST_BOUND.some(([re]) => re.test(c)));
+  assert.ok(rawNamers.length > 0, "the corpus must contain host-naming rows for this sweep to mean anything");
 });
 
 test("screenAll dedupes and never crashes on a hostile row", () => {
@@ -563,17 +616,66 @@ test("the cluster expander does not turn honest curl reads into false refusals",
   }
 });
 
-test("the fixes cost the census no reach — the admission rate is unchanged", () => {
-  // The whole point of the cluster expander and the gh noun allowlist is that
-  // they close holes WITHOUT narrowing the census. Measured over the same 651
-  // frozen commands the module's own --census reports on: 240 admitted, before
-  // and after. A reach collapse here would mean a fix bought safety with
-  // cry-wolf, which the module's error-direction argument does not license.
+// THE REACH IS RE-MEASURED, NOT RE-FROZEN.
+//
+// Waves 2-4 asserted "the fixes cost the census no reach: 240, before and
+// after" — a fair claim while every fix was a TIGHTENING of a shape the corpus
+// did not contain. Wave 5 ships tightenings AND widenings together on purpose
+// (charter D63: a screen that only ever tightens gets routed around), so the
+// number MUST move, and a test that demands it not move would be a test that
+// forbids the wave.
+//
+// So the pin stays — a silent change to this module's own reach is still the
+// finding — but it is stated as a DELTA with its membership accounted for,
+// which is what makes it a measurement rather than a magic number.
+const WAVE4_REACH = 240; // the shipped baseline this wave moved
+const WAVE5_REACH = 254; // +16 admitted, -2 refused; every one named below
+
+test("census reach is RE-MEASURED and its delta is accounted for, member by member", () => {
   const corpus = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/evidence-corpus.json", import.meta.url)), "utf8"));
   const commands = corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim());
   const r = screenAll(commands);
   assert.equal(r.total, 651);
-  assert.equal(r.admitted, 240, "the review's flag-spelling fixes must not change what the census reaches");
+
+  console.log(
+    `\nCENSUS REACH, wave 4 -> wave 5 over the same ${r.total} frozen commands:\n` +
+      `  ${WAVE4_REACH} -> ${r.admitted}  (${r.admitted > WAVE4_REACH ? "+" : ""}${r.admitted - WAVE4_REACH})\n` +
+      `  WIDENINGS  +16  read-only \`sed\` (15 line-citation rows) and the host bound moved AFTER quote masking (1 row\n` +
+      `                  whose grep PATTERN names guerrilla and two prod IPs)\n` +
+      `  TIGHTENINGS  -2  both environment-assignment prefixes, both correctly refused (asserted individually below)`,
+  );
+
+  assert.equal(r.admitted, WAVE5_REACH, "the screen's admission over the frozen corpus — re-derive and re-state, never re-baseline silently");
+  assert.ok(r.admitted > WAVE4_REACH, "wave 5's widenings must RAISE reach, not merely hold it");
+});
+
+test("every corpus row the tightenings newly REFUSE is named and justified", () => {
+  // Criterion: no command the frozen corpus actually contains may be newly
+  // refused WITHOUT being named. Exactly two are, and both are the env-prefix
+  // fix doing precisely its job — so they are asserted by hand here rather than
+  // absorbed into the count above.
+  //
+  // The second is the sharper proof. `claude` is in REFUSED_HEADS by name
+  // ("claude spawns an agent that can do anything this process can"), and
+  // `CLAUDE_BIN=<path to claude>` walked that refused head straight back in
+  // through the environment, under an allowlisted `mix test`. The env-strip was
+  // not merely a theoretical primitive: the corpus contains a live instance of
+  // it.
+  const newlyRefused = [
+    [
+      'CC=/usr/bin/clang MIX_TEST_PARTITION=felixv3 PATH="$FB:$PATH" mix test test/barkpark/sites/deploy_runner_test.exs:583',
+      "PATH=",
+    ],
+    [
+      'cd api && CLAUDE_BIN="/Applications/cmux.app/Contents/Resources/bin/claude" CC=clang mix test --only real_binary test/barkpark_web/studio/claude_chat_real_binary_test.exs',
+      "CLAUDE_BIN=",
+    ],
+  ];
+  for (const [cmd, why] of newlyRefused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.ok(r.reason.includes(why), `the refusal must name ${why} — got: ${r.reason}`);
+  }
 });
 
 // ── 10. THE ARBITRARY FILE-OVERWRITE PRIMITIVE (wave 4) ──────────────────────
@@ -592,7 +694,7 @@ test("the fixes cost the census no reach — the admission rate is unchanged", (
 // blind to it because DANGER_SET was written from the same head list that had
 // the gap.
 //
-// HONEST BOUND: it was LATENT, not live. 0 of the 240 admitted corpus rows use
+// HONEST BOUND: it was LATENT, not live. 0 of the admitted corpus rows use
 // these shapes. It matters because harvest.mjs regenerates the corpus from
 // arbitrary other agents' transcripts.
 
@@ -730,9 +832,22 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
   const csAdmits = DANGER_SET.filter((c) => classifySafety(c).safe);
   const screenAdmits = DANGER_SET.filter((c) => screenCommand(c).ok);
   assert.deepEqual(screenAdmits, [], "the screen must admit NONE of the DANGER SET");
-  assert.equal(
-    csAdmits.length, DANGER_SET.length,
-    `classifySafety must admit ALL of the DANGER SET — if this fails, rerun.mjs has been fixed and this comparison must be re-stated. It admitted ${csAdmits.length}/${DANGER_SET.length}.`,
+  // THIS ASSERTION USED TO SAY "ALL", AND WAVE 5 CAUGHT IT DOING THE THING THIS
+  // TEST EXISTS TO PREVENT — one comment above, it warns that "growing
+  // DANGER_SET ... cannot make the claim stale", while asserting an ABSOLUTE
+  // over a set every wave grows, about a module this suite does not own. Wave 5
+  // added 24 shapes and the absolute went red on two of them.
+  //
+  // The two are named rather than counted: rerun.mjs's own WRITE_SHAPES carries
+  // `sed -i` by name, so those two rows are the ONE place its denylist and this
+  // screen agree. Naming them is strictly more informative than "51 of 53" and
+  // cannot go stale when the set grows again.
+  const CS_CATCHES = DANGER_SET.filter((c) => /^sed -i/.test(c));
+  assert.ok(CS_CATCHES.length >= 2, "the sed -i rows are the ones rerun.mjs's denylist happens to carry");
+  assert.deepEqual(
+    DANGER_SET.filter((c) => !classifySafety(c).safe).sort(), CS_CATCHES.sort(),
+    `classifySafety must admit every DANGER SET shape EXCEPT the \`sed -i\` rows its own WRITE_SHAPES names. ` +
+      `If this fails, rerun.mjs has genuinely tightened and this comparison must be RE-STATED, not re-baselined.`,
   );
 
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
@@ -747,10 +862,11 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
   );
 
   assert.equal(commands.length, 651);
-  // THE SCREEN'S OWN NUMBER IS PINNED. 240 is this module's reach, this module
-  // is what this suite owns, and a silent change to it is the finding — every
-  // wave-4 slice re-derived it and it held at exactly 240.
-  assert.equal(screenCorpus, 240, "the screen's admission over the frozen corpus");
+  // THE SCREEN'S OWN NUMBER IS PINNED — this module is what this suite owns, and
+  // a silent change to its reach is the finding. Wave 5 moved it DELIBERATELY,
+  // 240 -> 254, and the move is accounted for member-by-member in the two
+  // "census reach" tests above rather than re-baselined here.
+  assert.equal(screenCorpus, WAVE5_REACH, "the screen's admission over the frozen corpus");
 
   // classifySafety's NUMBER IS NOT PINNED, AND THAT IS THE POINT — found by
   // merging this wave's five branches into one tree, where each slice was green
@@ -785,4 +901,312 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
       `${path} re-introduces the retired "${retired}" statistic — it is unrecoverable and may not be quoted again`,
     );
   }
+});
+
+// ── 12. WAVE 5: TWO UPSTREAM RCE PRIMITIVES, FOUR WRITE-FLAG HOLES, AND THE
+//        TWO FALSE REFUSALS THAT WERE GETTING THE SCREEN ROUTED AROUND ───────
+//
+// Waves 2-4 all tightened HEAD RULES. Both primitives closed here sit OUTSIDE
+// that layer — one ABOVE it (quote masking, which every layer below trusts) and
+// one BELOW it (the environment prefix, stripped before any head was consulted)
+// — which is exactly why four waves of head-rule tightening never reached
+// either. Both were live-proven to EXECUTE, the first through `censusOne`
+// itself.
+//
+// The widenings ship in the SAME slice on purpose (charter D63). A screen that
+// only ever tightens is one its own operators route around, and this suite
+// asserts both directions on every one of them.
+
+// ── (A) DOUBLE-QUOTED COMMAND SUBSTITUTION ───────────────────────────────────
+
+test("double-quoted command substitution EXECUTES in sh and is REFUSED", () => {
+  // FAIL-BEFORE, run against origin/main:
+  //   censusOne('grep -n "$(id > /tmp/DQ_MARK)" .')
+  //     -> {"screened":true,"executed":true,"exit":2,...}
+  //   /tmp/DQ_MARK existed afterwards, 358 bytes, carrying live `id` output
+  //     (uid=501(pelle) gid=20(staff) ...)
+  // Every layer below the mask saw `grep -n QQQQ .` — an ordinary read.
+  for (const cmd of [
+    'grep -n "$(id > /tmp/DQ_MARK)" .',
+    'grep -n "`id > /tmp/DQ_MARK`" .',
+    'ls "$(whoami)"',
+    'cat "prefix $(id) suffix"',
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /DOUBLE-quoted span/, `the reason must NAME the double-quoted span — got: ${r.reason}`);
+  }
+});
+
+test("CONTROL: single-quoted $( ) and backticks stay ADMITTED — they are genuinely inert", () => {
+  // A fix that blanket-refuses quoting would be the wrong fix: it buys this hole
+  // with most of the census's reach, and quoted patterns are the most ordinary
+  // read shape there is.
+  for (const cmd of [
+    "grep -n '$(id)' .",
+    "grep -n 'x`y`z' .",
+    "grep -rn '$(cat /etc/passwd)' docs/",
+    'grep -n "func handle" internal/cli/root.go',
+    'grep -n "\\$(id)" .', // backslash-escaped inside double quotes: sh does NOT expand it
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("doubleQuoteExpansionReason is tested directly, both directions", () => {
+  assert.equal(doubleQuoteExpansionReason('a "$(b)" c') !== null, true);
+  assert.equal(doubleQuoteExpansionReason('a "`b`" c') !== null, true);
+  assert.equal(doubleQuoteExpansionReason("a '$(b)' c"), null);
+  assert.equal(doubleQuoteExpansionReason('a "\\$(b)" c'), null, "an escaped $ inside double quotes does not expand");
+  assert.equal(doubleQuoteExpansionReason('a "$HOME" c'), null, "a parameter expansion is DATA, not a command that ran");
+});
+
+// ── (B) THE ENVIRONMENT-ASSIGNMENT PREFIX ────────────────────────────────────
+
+test("environment-assignment prefixes are SCREENED, not stripped and discarded", () => {
+  // FAIL-BEFORE: all of these were ADMITTED on origin/main, and the first four
+  // were live-proven to execute attacker-controlled code — the assignment was
+  // matched, stripped, and never looked at again, BELOW every head rule.
+  for (const cmd of [
+    "GIT_EXTERNAL_DIFF=./evil.sh git diff HEAD~1",
+    "GIT_PAGER=./evil.sh git log -1",
+    "PAGER=./evil.sh gh pr view 1",
+    "NODE_OPTIONS=--require=./evil.cjs node --test ok.test.mjs",
+    "GIT_SSH_COMMAND=./evil.sh git log -1",
+    "PATH=/tmp/evil:$PATH git log -1",
+    "LD_PRELOAD=./evil.so git log -1",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE: ${cmd}`);
+  }
+  // CC names a program cgo genuinely executes, so its VALUE is bounded too.
+  assert.equal(screenCommand("CC=./evil.sh go test ./...").ok, false, "CC must not name a relative script");
+});
+
+test("CONTROL: the benign environment prefixes the corpus actually uses stay ADMITTED", () => {
+  for (const cmd of [
+    "MIX_ENV=test mix test",
+    "CC=/usr/bin/clang go vet ./...",
+    "CC=clang go vet ./internal/cli/...",
+    "CC=/usr/bin/clang MIX_ENV=test mix test --seed 111",
+    "MIX_TEST_PARTITION=w22v1 CC=clang mix test test/barkpark/secrets_castgap_probe_test.exs",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+  // HONEST BOUND, stated rather than hidden: `CC=clang go build ./...` is named
+  // in this slice's brief as a control, and it is REFUSED — but not by this fix.
+  // `go build` has never been on goRule's read-only sub-verb list (it compiles,
+  // and with cgo it invokes CC), and it was already refused on origin/main for
+  // that reason. The env fix neither caused nor changed that.
+  const build = screenCommand("CC=clang go build ./...");
+  assert.equal(build.ok, false);
+  assert.match(build.reason, /go sub-verb "build"/, "refused by the go rule, NOT by the environment allowlist");
+});
+
+test("envAssignmentReason is tested directly, both directions", () => {
+  assert.equal(envAssignmentReason("MIX_ENV", "test"), null);
+  assert.equal(envAssignmentReason("CC", "clang"), null);
+  assert.equal(envAssignmentReason("CC", "/usr/bin/clang"), null);
+  assert.notEqual(envAssignmentReason("CC", "./evil.sh"), null);
+  assert.notEqual(envAssignmentReason("PATH", "/tmp/evil"), null);
+  assert.notEqual(envAssignmentReason("GIT_PAGER", "less"), null);
+  assert.notEqual(envAssignmentReason("MIX_ENV", "$(id)"), null, "a value that expands cannot be bounded");
+});
+
+// ── (C) FOUR WRITE-FLAG HOLES — heads that HAD a rule which MISSED a flag ────
+
+test("git --output writes a file, in BOTH spellings", () => {
+  for (const cmd of ["git log --output=/tmp/evil.txt", "git log --output /tmp/evil.txt", "git diff --output=/tmp/e HEAD~1"]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /--output/);
+  }
+  assert.equal(screenCommand("git log --oneline -5").ok, true);
+});
+
+test("npm's writing sub-verbs are refused; its reading ones stay admitted", () => {
+  // npm was a bare verbRule reading only the TOP-LEVEL verb, so every sub-verb
+  // under `config` and `version` was admitted by a rule that never looked.
+  for (const cmd of [
+    "npm config set registry http://evil",
+    "npm config delete registry",
+    "npm version patch",
+    "npm version major",
+    "npm install",
+    "npm run build",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE: ${cmd}`);
+  }
+  for (const cmd of ["npm version", "npm config get registry", "npm config list", "npm view astro version", "npm ls --depth 0"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("mix test's coverage flags write to disk and are refused", () => {
+  for (const cmd of ["mix test --cover", "mix test --export-coverage=x", "MIX_ENV=test mix test --cover"]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE: ${cmd}`);
+  }
+  for (const cmd of ["mix test test/barkpark/sites/deploy_runner_test.exs:583", "mix test --seed 111", "mix test --trace"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("go's write and profiling flags are matched by NAME, not by exact token", () => {
+  // `hasFlag(argv, "-o", "-exec")` was an EXACT-TOKEN match, which is why
+  // `go test -c -o /tmp/evil` was ALREADY refused (the bare `-o` is present)
+  // while `go test -c` alone and every `-flag=value` sailed through. Live-proven
+  // on the admitted side: `-c -o` produced a 4.1MB binary, `-coverprofile=`
+  // produced a real file.
+  for (const cmd of [
+    "go test -c",
+    "go test -c ./internal/cli/",
+    "go test -o /tmp/evil ./...",
+    "go test -exec /tmp/evil ./...",
+    "go test -coverprofile=/tmp/evil.out ./...",
+    "go test -coverprofile /tmp/evil.out ./...",
+    "go test -cpuprofile=/tmp/evil.out ./...",
+    "go test -memprofile=/tmp/evil.out ./...",
+    "go test -blockprofile=/tmp/e ./...",
+    "go test -mutexprofile=/tmp/e ./...",
+    "go test -trace=/tmp/e ./...",
+    "go test -outputdir=/tmp ./...",
+    "go env -w GOFLAGS=-mod=mod",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE: ${cmd}`);
+  }
+  // NAME equality, not prefix matching — this is what keeps `-cover` (a stdout
+  // summary) distinct from `-c` (a binary on disk) and `-coverprofile` (a file).
+  for (const cmd of [
+    "go test ./...",
+    "go test -cover ./...",
+    "go test -count=1 -v ./internal/cli/...",
+    "go test ./internal/cli/... -run TestFoo -v",
+    "go vet ./...",
+    "go env GOPATH",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("hostname with a positional SETS the hostname and is refused", () => {
+  assert.equal(screenCommand("hostname evil-name").ok, false);
+  assert.equal(screenCommand("hostname").ok, true);
+  assert.equal(screenCommand("hostname -f").ok, true);
+});
+
+// ── (D1) FALSE REFUSAL: A PATTERN IS NOT A TARGET ────────────────────────────
+
+test("the host bound runs AFTER quote masking, so a quoted hostname is DATA", () => {
+  // FAIL-BEFORE: refused as `host bound: names ssh (remote execution)`. This
+  // wave reads ops docs, whose most quotable lines all contain `ssh`.
+  for (const cmd of [
+    'cd /x && grep -c "ssh" docs/ops/PROD_OPS.md',
+    "grep -rn 'rsync' docs/ops/",
+    'grep -n "guerrilla" docs/ops/PROD_OPS.md',
+    'rg "barkpark.cloud" docs/',
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("the host bound still REFUSES a host that appears as SYNTAX, not data", () => {
+  for (const cmd of [
+    "ssh root@host uptime",
+    "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 uptime",
+    "scp /tmp/x root@host:/tmp/x",
+    "rsync -a ./ host:/opt/barkpark/",
+    "curl -s https://guerrilla.barkpark.cloud/api/schemas",
+    "git log --oneline 157.180.90.121",
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+  }
+});
+
+test("MUTATION PROOF: reverting the host bound to the RAW string re-breaks the honest read", () => {
+  // The re-ordering is the fix, so the proof must be that the OLD order fails.
+  // `hostBoundReason` itself is unchanged; what changed is WHAT IT IS GIVEN.
+  const honest = 'cd /x && grep -c "ssh" docs/ops/PROD_OPS.md';
+  assert.notEqual(hostBoundReason(honest), null, "on the RAW string the pattern is misread as a target — the defect");
+  assert.equal(hostBoundReason(maskQuotedSpans(honest)), null, "on the MASKED string it is data — the fix");
+  // And the direction that matters is untouched by the re-ordering.
+  const real = "ssh root@157.180.90.121 uptime";
+  assert.notEqual(hostBoundReason(maskQuotedSpans(real)), null, "an unquoted ssh is still syntax, still refused");
+});
+
+// ── (D2) FALSE REFUSAL: sed IS JUDGED ON ITS SCRIPT, NOT ITS HEAD ────────────
+
+test("read-only sed is ADMITTED — the largest refusal class in real foreign output", () => {
+  // 7 of 9 refusals over this wave's own survey facts were `sed -n 'N,Mp'`
+  // line citations. The rerun harness's own schema description gives
+  // `git show origin/main:path | sed -n 40,60p` as its FIRST worked example, so
+  // the instrument was refusing the idiom it instructs producers to emit.
+  for (const cmd of [
+    "sed -n '40,60p' docs/ops/PROD_OPS.md",
+    "git show origin/main:a.md | sed -n '40,60p'",
+    "sed -n '18p' docs/cards/studio.md",
+    "sed -n '82p;98p;130p' api/test/x_test.exs",
+    "sed -n '/type ChatWorkflowSummary struct/,/^}/p' internal/apiclient/chat.go",
+    "sed -n '$p' notes.md",
+    "sed '5q' notes.md",
+    "sed '1d' notes.md",
+    "sed 's/foo/bar/g' notes.md",
+    "sed -e '1,5p' -e '9q' notes.md",
+    "sed -E 's/[0-9]+/N/g' notes.md",
+    "cat notes.md | sed -n '1,10p' | head -3",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("every sed WRITE form is still REFUSED — by the parser, not by the head", () => {
+  for (const [cmd, needle] of [
+    ["sed -i 's/a/b/' api/lib/barkpark/application.ex", /-i EDITS/],
+    ["sed -i.bak 's/a/b/' notes.md", /-i EDITS/],
+    ["sed -n 'w /opt/barkpark/deploy/site-deploy.sh' notes.md", /`w`/],
+    ["sed 's/x/y/w /opt/barkpark/deploy/site-deploy.sh' notes.md", /s\/\/\/w WRITES/],
+    ["sed 's/x/y/e' notes.md", /s\/\/\/e EXECUTES/],
+    ["sed -e 'w /tmp/evil' -n notes.md", /`w`/],
+    ["sed -f /tmp/evil.sed notes.md", /-f runs a script FILE/],
+    ["sed '1e id' notes.md", /`e`/],
+    ["sed '1r /etc/passwd' notes.md", /`r`/],
+    ["sed --in-place 's/a/b/' notes.md", /-i EDITS/],
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, needle, `wrong reason for ${cmd}: ${r.reason}`);
+  }
+});
+
+test("screenSedScript fails CLOSED on anything it cannot parse", () => {
+  // The bound is stated in the module and asserted here: an unmodelled construct
+  // is REFUSED, never ignored. Several of these are harmless; they are refused
+  // because the parser does not model them.
+  for (const script of ["1~3p", "1,+3p", "/a/{p;p}", "y/abc/xyz/", "b end", ":top", "a\\text", "/unterminated"]) {
+    assert.notEqual(screenSedScript(script), null, `MUST REFUSE unparsed script: ${script}`);
+  }
+  // And the read forms it does model stay clean.
+  for (const script of ["40,60p", "18p", "$p", "5q", "1d", "s/a/b/g", "s|a|b|", "/x/,/y/p", "82p;98p;130p", "s/a\\/b/c/"]) {
+    assert.equal(screenSedScript(script), null, `MUST ADMIT script: ${script} — ${screenSedScript(script)}`);
+  }
+  // A `;` inside a regex address is NOT a clause separator — the reason this is
+  // a scanner rather than a split-on-";" regex.
+  assert.equal(screenSedScript("/a;b/p"), null);
+  assert.notEqual(screenSedScript("s;a;b;w /tmp/evil"), null, "a user-chosen delimiter must not hide the w flag");
+});
+
+test("the wave-5 shapes are carried by the SHIPPED named sets, not only by this file", () => {
+  // A named set only measures the spellings it contains — the standing lesson
+  // from the clustered `curl -so` miss. So every wave-5 shape lives in
+  // DANGER_SET / NEVER_CRY_WOLF_SET, where `--selftest` exercises it.
+  const danger = DANGER_SET.join("\n");
+  for (const needle of ['"$(id', "GIT_EXTERNAL_DIFF=", "PAGER=", "NODE_OPTIONS=", "PATH=", "--output", "npm config set", "npm version patch", "--cover", "go test -c", "hostname evil-name", "sed -i"]) {
+    assert.ok(danger.includes(needle), `DANGER_SET must carry the ${needle} shape`);
+  }
+  const wolf = NEVER_CRY_WOLF_SET.join("\n");
+  for (const needle of ["sed -n", '"ssh"', "'$(id)'", "npm version", "-cover", "hostname"]) {
+    assert.ok(wolf.includes(needle), `NEVER_CRY_WOLF_SET must carry the ${needle} shape`);
+  }
+  const { falsePermissions, falseRefusals } = runNamedSets();
+  assert.deepEqual(falsePermissions, [], "a false PERMISSION is an execution");
+  assert.deepEqual(falseRefusals, [], "a false REFUSAL is how the screen gets routed around");
 });
