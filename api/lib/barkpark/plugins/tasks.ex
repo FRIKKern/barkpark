@@ -423,6 +423,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
+      {:post, "/tasks/:doc_id/stage", BarkparkWeb.TasksController, :stage, auth: :token_root},
       # Barkpark Projects — the native task BOARD (read-only :ops LiveView),
       # mounted at /admin/projects (the :ops bucket). /admin (not /studio) so
       # the desk-link scoper leaves the path intact — see desk_items/1 and the
@@ -903,6 +904,55 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.stage",
+        noun: "task",
+        verb: "stage",
+        summary:
+          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the transition-legality table (considering⇄researching; considering|researching→open; open→considering; same→same). Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. Kills go through `bp task close` (→ cancelled), claims through `bp task claim` (→ in_progress); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to stage."
+          },
+          %{
+            name: "state",
+            required: true,
+            type: "string",
+            summary: "Target lifecycle state: considering | researching | open."
+          }
+        ],
+        flags: [
+          %{
+            name: "object",
+            type: "string",
+            summary:
+              "What the thought is ABOUT: research | build. Written into content.engagement on a →considering/researching stage (defaults to research); ignored on →open. An invalid value 400s."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary:
+              "Free-text note stamped into content.engagement.note on a thought-target stage."
+          },
+          %{
+            name: "worker",
+            type: "string",
+            summary:
+              "The agent/worker owning the thought, stamped into content.engagement.holder."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,

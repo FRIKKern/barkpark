@@ -21,6 +21,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
+    * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
 
   ## Shape contract
 
@@ -557,6 +558,71 @@ defmodule BarkparkWeb.TasksController do
       ])
     else
       _ -> base
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/stage ───────────────────────────────────────
+  # The sanctioned lifecycle-transition verb for the thought/backlog states
+  # (charter D8): `bp task stage <id> <state> [--object …] [--note …]`. Body:
+  #   { "worker_id": "cycle-42", "state": "researching",
+  #     "object": "research", "note": "surveying candidate" }
+  # `state` is the target (considering | researching | open — kills go through
+  # close, claims through claim). `Tasks.stage/3` enforces the shared
+  # Transitions legality table, writes/clears content.engagement, and emits
+  # task.staged. An illegal transition (e.g. → done) is a 422 naming from/to
+  # and the sanctioned verb — never a silent no-op. Mirrors close/2's shape
+  # (find_task_by_doc_id → primitive → minimal receipt) MINUS the epoch fence
+  # (thought is not contended work).
+  def stage(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, state} <- Params.fetch_string(params, "state"),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        []
+        |> Params.put_opt(:object, params["object"])
+        |> Params.put_opt(:holder, params["worker"] || params["worker_id"])
+        |> Params.put_opt(:note, params["note"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.stage(task.id, state, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+
+        {:error, {:illegal_transition, from, to}} ->
+          # A refused transition (bad target OR an illegal table pair) is a 422
+          # naming both ends and the sanctioned verb — the guard TEACHES.
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "illegal_transition",
+            from: from,
+            to: to,
+            message:
+              "cannot stage #{from} → #{to}: stage moves only between " <>
+                "considering|researching|open — use `bp task close` (→ cancelled) " <>
+                "or `bp task claim` (→ in_progress); `done` is reached only via close"
+          })
+
+        {:error, {:invalid_object, object}} ->
+          bad_request(
+            conn,
+            "object must be \"research\" or \"build\", got #{inspect(object)}"
+          )
+
+        {:error, :not_found} ->
+          not_found(conn, "task not found")
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :missing, field} ->
+        bad_request(conn, "#{field} is required")
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
     end
   end
 
