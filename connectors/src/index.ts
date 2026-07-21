@@ -28,7 +28,11 @@ import type {
   InstallsLookup,
 } from "./connector/types.js";
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
-import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
+import {
+  createDiscordConnector,
+  DISCORD_PROVIDER,
+  extendDiscordInteractionWebhook,
+} from "./connectors/discord.js";
 import { createGithubConnector, GITHUB_PROVIDER } from "./connectors/github.js";
 import { createLinearConnector, LINEAR_PROVIDER } from "./connectors/linear.js";
 import {
@@ -299,10 +303,10 @@ export interface MountedInstall {
 
 /**
  * Build one Chat for one install, with the core loop wired to every inbound
- * shape the SDK routes (DM, new mention, follow-up in a subscribed thread, and
- * slash-command interaction).
+ * shape the SDK routes (DM, new mention, follow-up in a subscribed thread,
+ * slash-command interaction, component action, and modal submit).
  *
- * The handlers are four thin wrappers around the SAME dispatchInbound call —
+ * The handlers are six thin wrappers around the SAME dispatchInbound call —
  * so a channel's routing quirks never leak into the core loop.
  */
 export function mountInstall(
@@ -425,6 +429,64 @@ export function mountInstall(
       event.raw,
     );
   });
+
+  // Component actions (W30) — the FIFTH wrapper. A button click / select choice
+  // on a bridge-posted card is acked by the vendor (Discord: type-6 deferred
+  // update) and reaches a handler ONLY if one is registered — the ack is NOT
+  // proof of handling, so without this wrapper every component interaction was
+  // acked-then-dropped. Funnel text is the D232 idiom transposed: the actionId
+  // is always non-empty (vendors guard custom_id before dispatch), so dispatch
+  // can never drop the event as empty input; the value rides along only when it
+  // says something the actionId doesn't (Discord defaults value := actionId for
+  // plain buttons — repeating it would just stutter).
+  chat.onAction(async (event) => {
+    const thread = event.thread;
+    if (!thread) {
+      // View-based actions (e.g. a home-tab button) have no thread and thus no
+      // reply surface for a turn — an honest skip beats a turn that cannot post.
+      console.warn(
+        `[bridge] action ${event.actionId} on ${connector.id} has no thread — skipped`,
+      );
+      return;
+    }
+    const detail = event.value && event.value !== event.actionId ? event.value : "";
+    await handle(
+      event.threadId,
+      `${event.actionId} ${detail}`.trim(),
+      (out) => thread.post(out),
+      event.raw,
+    );
+  });
+
+  // Modal submits (W30) — the SIXTH wrapper. The reply targets the channel the
+  // modal was opened FROM (restored from the modal context stored at openModal
+  // time); on Discord the intercept in extendDiscordInteractionWebhook runs this
+  // dispatch inside the vendor's ALS store, so the post lands as the submit
+  // interaction's own response. Values are serialized as JSON — deterministic,
+  // and the turn sees exactly what the user typed, keyed by input id.
+  chat.onModalSubmit(async (event) => {
+    const target = event.relatedChannel ?? event.relatedThread;
+    if (!target) {
+      console.warn(
+        `[bridge] modal submit ${event.callbackId} on ${connector.id} has no ` +
+          "related channel (foreign or expired modal context) — skipped",
+      );
+      return;
+    }
+    await handle(
+      target.id,
+      `${event.callbackId} ${JSON.stringify(event.values)}`.trim(),
+      (out) => target.post(out),
+      event.raw,
+    );
+  });
+
+  // Discord's missing MODAL_SUBMIT branch (W30): wrap chat.webhooks.discord in
+  // place — a verified type-5 would otherwise fall through the vendor dispatch
+  // switch to 400 AFTER registration, so registering onModalSubmit above is
+  // necessary but NOT sufficient. No-op for every other provider (guarded on
+  // the discord webhook key).
+  extendDiscordInteractionWebhook(chat, adapter);
 
   return { connector, install, chat, adapter };
 }

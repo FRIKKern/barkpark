@@ -25,9 +25,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
-import { Chat } from "chat";
+import { Chat, type ModalElement, type SlashCommandEvent } from "chat";
 import { createDiscordAdapter } from "@chat-adapter/discord";
 import { createMemoryState } from "@chat-adapter/state-memory";
+
+import {
+  decodeDiscordModalCustomId,
+  extendDiscordInteractionWebhook,
+} from "../src/connectors/discord.js";
 
 const APP_ID = "111111111111111111";
 
@@ -82,7 +87,7 @@ interface Harness {
   // handleGatewayInteraction is a PROTECTED method — legal at runtime (JS) but
   // tsc rejects an external call, so the cast lives here too.
   gateway: (fixture: unknown) => Promise<void>;
-  captured: { method: string; url: string }[];
+  captured: { method: string; url: string; body?: string }[];
   entered: string[];
   completed: string[];
   events: { command: string; text: string; channelId: string | undefined }[];
@@ -92,23 +97,54 @@ interface Harness {
   // no-option command (event.text-only wiring would push "" and be dropped).
   dispatched: string[];
   setGate: (p: Promise<void>) => void;
+  // W30 component/modal recorders — the harness mirrors mountInstall's 5th/6th
+  // wrappers, while the type-5 intercept itself is the REAL src seam
+  // (extendDiscordInteractionWebhook, applied below).
+  actions: { actionId: string; value: string | undefined; threadId: string }[];
+  actionDispatched: string[];
+  modals: {
+    callbackId: string;
+    values: Record<string, string>;
+    relatedChannelId: string | undefined;
+  }[];
+  modalDispatched: string[];
+  // Per-test slash-handler hook (e.g. call event.openModal); default no-op.
+  setSlashHook: (fn: (event: SlashCommandEvent) => Promise<void>) => void;
 }
 
 let harness: Harness;
 
-function makeHarness(): Harness {
-  const captured: { method: string; url: string }[] = [];
+function makeHarness(opts: { withInteractionHandlers?: boolean } = {}): Harness {
+  const withInteractionHandlers = opts.withInteractionHandlers ?? true;
+  const captured: { method: string; url: string; body?: string }[] = [];
   const entered: string[] = [];
   const completed: string[] = [];
   const events: { command: string; text: string; channelId: string | undefined }[] =
     [];
   const dispatched: string[] = [];
+  const actions: {
+    actionId: string;
+    value: string | undefined;
+    threadId: string;
+  }[] = [];
+  const actionDispatched: string[] = [];
+  const modals: {
+    callbackId: string;
+    values: Record<string, string>;
+    relatedChannelId: string | undefined;
+  }[] = [];
+  const modalDispatched: string[] = [];
   let gate: Promise<void> = Promise.resolve();
+  let slashHook: ((event: SlashCommandEvent) => Promise<void>) | undefined;
 
   // LAW 4: stub the GLOBAL fetch — the interaction follow-up uses a bare global
   // fetch + hardcoded DISCORD_API_BASE, so options.fetch would silently miss it.
   vi.stubGlobal("fetch", async (url: unknown, init: RequestInit = {}) => {
-    captured.push({ method: (init.method ?? "GET") as string, url: String(url) });
+    captured.push({
+      method: (init.method ?? "GET") as string,
+      url: String(url),
+      ...(typeof init.body === "string" ? { body: init.body } : {}),
+    });
     return new Response(JSON.stringify({ id: "resp-msg-id" }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -138,10 +174,45 @@ function makeHarness(): Harness {
     // event.text === "" — only the command-prefixed form survives dispatch.
     dispatched.push(`${event.command} ${event.text}`.trim());
     entered.push(event.command);
+    if (slashHook) await slashHook(event);
     await gate;
     await event.channel.post(`handled ${event.command}`);
     completed.push(event.command);
   });
+
+  if (withInteractionHandlers) {
+    // W30 5th wrapper mirror: component actions. Same funnel transform as
+    // mountInstall — actionId always non-empty, value only when it adds info.
+    chat.onAction(async (event) => {
+      actions.push({
+        actionId: event.actionId,
+        value: event.value,
+        threadId: event.threadId,
+      });
+      const detail =
+        event.value && event.value !== event.actionId ? event.value : "";
+      actionDispatched.push(`${event.actionId} ${detail}`.trim());
+      await event.thread?.post(`acted ${event.actionId}`);
+    });
+
+    // W30 6th wrapper mirror: modal submits reply via the RELATED channel.
+    chat.onModalSubmit(async (event) => {
+      modals.push({
+        callbackId: event.callbackId,
+        values: event.values,
+        relatedChannelId: event.relatedChannel?.id,
+      });
+      modalDispatched.push(
+        `${event.callbackId} ${JSON.stringify(event.values)}`.trim(),
+      );
+      await event.relatedChannel?.post(`modal ${event.callbackId}`);
+    });
+  }
+
+  // THE REAL SRC SEAM under test (not a mirror): the type-5 MODAL_SUBMIT
+  // intercept + onOpenModal injection, wrapping chat.webhooks.discord in place
+  // exactly as mountInstall does.
+  extendDiscordInteractionWebhook(chat, adapter);
 
   return {
     chat,
@@ -163,6 +234,11 @@ function makeHarness(): Harness {
     events,
     dispatched,
     setGate: (p) => (gate = p),
+    actions,
+    actionDispatched,
+    modals,
+    modalDispatched,
+    setSlashHook: (fn) => (slashHook = fn),
   };
 }
 
@@ -387,5 +463,283 @@ describe("Discord slash commands — Ed25519 webhook + onSlashCommand funnel", (
         c.url.includes(`/webhooks/${APP_ID}/${token}/messages/@original`),
     );
     expect(patch, JSON.stringify(harness.captured)).toBeTruthy();
+  });
+});
+
+describe("Discord component + modal interactions — W30 (stop acked-then-dropped)", () => {
+  function componentBody(customId: string, extra: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      type: 3,
+      id: "30",
+      application_id: APP_ID,
+      token: "interaction-token-component",
+      channel_id: "chan-1",
+      guild_id: "guild-1",
+      message: { id: "msg-77" },
+      data: { custom_id: customId, component_type: 2 },
+      member: { user: { id: "user-5", username: "dana", global_name: "Dana" } },
+      ...extra,
+    });
+  }
+
+  it("(f) CONTROL: with ZERO registered handlers a signed MESSAGE_COMPONENT is still acked type-6 — the ack is NOT proof of handling", async () => {
+    // A second, handler-less harness — the pre-W30 bridge state. Its fetch stub
+    // supersedes the default harness's (unstubAllGlobals clears both).
+    const bare = makeHarness({ withInteractionHandlers: false });
+    try {
+      const bg: Promise<unknown>[] = [];
+      const res = await bare.webhook(
+        makeRequest(componentBody("approve"), { signed: true }),
+        { waitUntil: (p) => bg.push(p) },
+      );
+      await Promise.allSettled(bg);
+
+      expect(res.status).toBe(200);
+      expect(((await res.clone().json()) as { type: number }).type).toBe(6);
+      // Verified, acked … and dropped. THIS is the defect the wrappers close.
+      expect(bare.actions).toHaveLength(0);
+    } finally {
+      await bare.chat.shutdown().catch(() => {});
+    }
+  });
+
+  it("(g) signed MESSAGE_COMPONENT → sync 200 {type:6} AND the registered onAction handler FIRES (invocation asserted, not the ack)", async () => {
+    const bg: Promise<unknown>[] = [];
+    const res = await harness.webhook(
+      makeRequest(componentBody("approve"), { signed: true }),
+      { waitUntil: (p) => bg.push(p) },
+    );
+
+    // The vendor acks synchronously with a type-6 deferred update.
+    expect(res.status).toBe(200);
+    expect(((await res.clone().json()) as { type: number }).type).toBe(6);
+
+    await Promise.allSettled(bg);
+    await waitFor(() => harness.actions.length === 1);
+
+    // VENDOR TRUTHS: a plain button's value defaults to its actionId, and the
+    // threadId is the NAMESPACED "discord:{guild}:{chan}" id.
+    expect(harness.actions[0]).toEqual({
+      actionId: "approve",
+      value: "approve",
+      threadId: "discord:guild-1:chan-1",
+    });
+    // The funnel is NON-EMPTY (never dropped_empty_input) and does not stutter
+    // the defaulted value.
+    expect(harness.actionDispatched).toEqual(["approve"]);
+    expect(harness.entered).toHaveLength(0); // no slash handler involved
+  });
+
+  it("(g2) a select value rides the funnel when it differs from the actionId", async () => {
+    const bg: Promise<unknown>[] = [];
+    await harness.webhook(
+      makeRequest(
+        componentBody("pick-env", {
+          data: {
+            custom_id: "pick-env",
+            component_type: 3,
+            values: ["staging"],
+          },
+        }),
+        { signed: true },
+      ),
+      { waitUntil: (p) => bg.push(p) },
+    );
+    await Promise.allSettled(bg);
+    await waitFor(() => harness.actions.length === 1);
+
+    expect(harness.actions[0]).toMatchObject({
+      actionId: "pick-env",
+      value: "staging",
+    });
+    expect(harness.actionDispatched).toEqual(["pick-env staging"]);
+  });
+
+  it("(h) modal round-trip: openModal from a slash handler → type-9 callback POST; signed MODAL_SUBMIT → routed to onModalSubmit with its fields; reply PATCHes the SUBMIT's own token", async () => {
+    // STEP 1 — a slash handler opens a modal.
+    let openResult: { viewId: string } | undefined;
+    harness.setSlashHook(async (event) => {
+      const modal: ModalElement = {
+        type: "modal",
+        callbackId: "feedback-modal",
+        title: "Feedback",
+        children: [{ type: "text_input", id: "note", label: "Your note" }],
+      };
+      openResult = await event.openModal(modal);
+    });
+
+    const commandToken = "interaction-token-open";
+    const bg: Promise<unknown>[] = [];
+    const commandRes = await harness.webhook(
+      makeRequest(
+        JSON.stringify({
+          type: 2,
+          id: "31",
+          application_id: APP_ID,
+          token: commandToken,
+          channel_id: "chan-1",
+          guild_id: "guild-1",
+          data: { id: "cmd-feedback", name: "feedback", type: 1 },
+          member: {
+            user: { id: "user-6", username: "erik", global_name: "Erik" },
+          },
+        }),
+        { signed: true },
+      ),
+      { waitUntil: (p) => bg.push(p) },
+    );
+    expect(commandRes.status).toBe(200);
+    await Promise.allSettled(bg);
+    await waitFor(() => harness.completed.length === 1);
+
+    // The openModal seam POSTed a REAL type-9 modal to the interaction
+    // callback endpoint (offline the stub answers 200; live, the vendor's
+    // auto-ack wins the race and Discord would answer 40060 — see the W30
+    // seam note in discord.ts).
+    const modalPost = harness.captured.find(
+      (c) =>
+        c.method === "POST" &&
+        c.url.includes(`/interactions/31/${commandToken}/callback`),
+    );
+    expect(modalPost, JSON.stringify(harness.captured)).toBeTruthy();
+    const posted = JSON.parse(modalPost?.body ?? "{}") as {
+      type: number;
+      data: { custom_id: string; title: string; components: unknown[] };
+    };
+    expect(posted.type).toBe(9);
+    expect(posted.data.title).toBe("Feedback");
+    expect(posted.data.components).toHaveLength(1);
+    expect(openResult).toEqual({ viewId: posted.data.custom_id });
+
+    // The custom_id round-trips callbackId + contextId (the stored modal
+    // context that will restore relatedChannel on submit).
+    const decoded = decodeDiscordModalCustomId(posted.data.custom_id);
+    expect(decoded.callbackId).toBe("feedback-modal");
+    expect(decoded.contextId).toBeTruthy();
+
+    // STEP 2 — the user submits: a NEW signed type-5 interaction carrying the
+    // modal's custom_id and the filled fields. Pre-W30 this answered 400.
+    const submitToken = "interaction-token-submit";
+    const bg2: Promise<unknown>[] = [];
+    const submitRes = await harness.webhook(
+      makeRequest(
+        JSON.stringify({
+          type: 5,
+          id: "32",
+          application_id: APP_ID,
+          token: submitToken,
+          channel_id: "chan-1",
+          guild_id: "guild-1",
+          data: {
+            custom_id: posted.data.custom_id,
+            components: [
+              {
+                type: 1,
+                components: [{ type: 4, custom_id: "note", value: "love it" }],
+              },
+            ],
+          },
+          member: {
+            user: { id: "user-6", username: "erik", global_name: "Erik" },
+          },
+        }),
+        { signed: true },
+      ),
+      { waitUntil: (p) => bg2.push(p) },
+    );
+
+    // Deferred ack, no more 400.
+    expect(submitRes.status).toBe(200);
+    expect(((await submitRes.clone().json()) as { type: number }).type).toBe(5);
+
+    await Promise.allSettled(bg2);
+    await waitFor(() => harness.modals.length === 1);
+
+    // Routed WITH its fields, and the stored context restored the channel the
+    // modal was opened from.
+    expect(harness.modals[0]).toEqual({
+      callbackId: "feedback-modal",
+      values: { note: "love it" },
+      relatedChannelId: "discord:guild-1:chan-1",
+    });
+    expect(harness.modalDispatched).toEqual([
+      `feedback-modal ${JSON.stringify({ note: "love it" })}`,
+    ]);
+
+    // The handler's relatedChannel.post ran inside the ALS store the intercept
+    // set up, so the reply PATCHes the SUBMIT interaction's OWN token — the
+    // deferred ack never dangles as "did not respond".
+    const patch = harness.captured.find(
+      (c) =>
+        c.method === "PATCH" &&
+        c.url.includes(`/webhooks/${APP_ID}/${submitToken}/messages/@original`),
+    );
+    expect(patch, JSON.stringify(harness.captured)).toBeTruthy();
+  });
+
+  it("(i) forged/unsigned MODAL_SUBMIT → 401, the intercept NEVER dispatches (Ed25519 stays in front)", async () => {
+    const body = JSON.stringify({
+      type: 5,
+      id: "33",
+      application_id: APP_ID,
+      token: "tok-forged",
+      channel_id: "chan-1",
+      guild_id: "guild-1",
+      data: {
+        custom_id: "feedback-modal",
+        components: [
+          { type: 1, components: [{ type: 4, custom_id: "note", value: "x" }] },
+        ],
+      },
+      member: { user: { id: "u", username: "u" } },
+    });
+
+    const forged = await harness.webhook(makeRequest(body, { signed: false }), {
+      waitUntil: () => {},
+    });
+    expect(forged.status).toBe(401);
+
+    const unsigned = await harness.webhook(
+      makeRequest(body, { signed: false, headers: false }),
+      { waitUntil: () => {} },
+    );
+    expect(unsigned.status).toBe(401);
+
+    expect(harness.modals).toHaveLength(0);
+    expect(harness.captured).toHaveLength(0);
+  });
+
+  it("(j) a signed MODAL_SUBMIT with a FOREIGN custom_id still routes (whole id becomes the callbackId, no restored context)", async () => {
+    const bg: Promise<unknown>[] = [];
+    const res = await harness.webhook(
+      makeRequest(
+        JSON.stringify({
+          type: 5,
+          id: "34",
+          application_id: APP_ID,
+          token: "tok-foreign",
+          channel_id: "chan-2",
+          guild_id: "guild-1",
+          data: {
+            custom_id: "legacy-modal",
+            components: [
+              { type: 1, components: [{ type: 4, custom_id: "a", value: "b" }] },
+            ],
+          },
+          member: { user: { id: "user-7", username: "fay" } },
+        }),
+        { signed: true },
+      ),
+      { waitUntil: (p) => bg.push(p) },
+    );
+    expect(res.status).toBe(200);
+    await Promise.allSettled(bg);
+    await waitFor(() => harness.modals.length === 1);
+
+    expect(harness.modals[0]).toEqual({
+      callbackId: "legacy-modal",
+      values: { a: "b" },
+      relatedChannelId: undefined, // no stored context — honest degradation
+    });
   });
 });

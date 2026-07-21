@@ -1,5 +1,5 @@
 import { createDiscordAdapter, type DiscordAdapter } from "@chat-adapter/discord";
-import type { Adapter } from "chat";
+import type { Adapter, Author, ModalElement, WebhookOptions } from "chat";
 
 import type {
   ConnectValidation,
@@ -67,8 +67,11 @@ import {
  * socket. The vendor `DiscordAdapter.handleWebhook` already ships the ENTIRE
  * interaction protocol — raw-body Ed25519 verify, PING→PONG, the synchronous
  * type-5 deferred ack, and `waitUntil`-backgrounded dispatch — so the bridge adds
- * ZERO protocol code; the wiring is the handler registration in
- * {@link mountInstall} (`chat.onSlashCommand`). `keySource: "path"` because
+ * ZERO protocol code for slash commands and components; the wiring is the handler
+ * registration in {@link mountInstall} (`chat.onSlashCommand`, `chat.onAction`,
+ * `chat.onModalSubmit`). The ONE protocol gap the vendor has — MODAL_SUBMIT
+ * (type 5) falls through its dispatch switch to 400 — is closed by
+ * {@link extendDiscordInteractionWebhook} (W30). `keySource: "path"` because
  * Discord is BYO-bot (D41): each install has its OWN `publicKey`, so the body
  * must not choose the key that verifies the body. See
  * `connectors/docs/discord-byo-bot.md`.
@@ -406,5 +409,421 @@ export function createDiscordConnector(
       sessions.delete(adapter);
       await session.stop();
     },
+  };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * COMPONENT + MODAL INTERACTIONS (charter W30) — the missing type-5 branch.
+ *
+ * The vendor `DiscordAdapter.handleWebhook` dispatch switch handles PING (1),
+ * MESSAGE_COMPONENT (3, acked type-6 → `chat.processAction`) and
+ * APPLICATION_COMMAND (2, acked type-5 → `chat.processSlashCommand`) — and then
+ * falls through to 400 "Unknown interaction type" for everything else
+ * (`@chat-adapter/discord/dist/index.js:907`). MODAL_SUBMIT (5) has NO branch,
+ * so a modal submit is Ed25519-VERIFIED and then answered 400: registering
+ * `chat.onModalSubmit` alone can never fix modals. This seam wraps
+ * `chat.webhooks.discord` IN PLACE (the mount index re-reads that property per
+ * request, so the wrap serves both the webhook-server path and the tests) and
+ * adds exactly two things:
+ *
+ *   1. a MODAL_SUBMIT intercept AFTER the vendor answered — a 400 for a
+ *      parseable type-5 body means the signature ALREADY VERIFIED (a bad
+ *      signature returns 401 before the dispatch switch runs), so the intercept
+ *      never handles an unverified payload and adds ZERO crypto of its own;
+ *   2. an `onOpenModal` seam (the `WebhookOptions` hook Teams uses) so
+ *      `event.openModal(...)` from a slash/action handler produces the real
+ *      Discord type-9 modal callback POST instead of the vendor's silent
+ *      "does not support modals" warning.
+ *
+ * HONEST CEILING, named: Discord accepts a modal ONLY as an interaction's FIRST
+ * response, and the vendor auto-acks every interaction (type-5/type-6)
+ * synchronously before dispatch runs. So live, the type-9 callback POST loses
+ * the race to the ack and Discord answers 40060 "already acknowledged" — the
+ * seam surfaces that as a warn + `undefined` (the SDK's "modals unavailable"
+ * contract), never a silent success. Making the modal BE the HTTP response
+ * requires holding the vendor ack, an ack-timing redesign filed as
+ * `connectors-discord-modal-open-response` — NOT fake-proven here. The
+ * submit-side routing below is transport-real either way: a user-submitted
+ * modal arrives as its OWN signed interaction and round-trips fully.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Discord interaction type 5 — MODAL_SUBMIT. */
+const INTERACTION_MODAL_SUBMIT = 5;
+/** Discord interaction CALLBACK type 5 — DeferredChannelMessageWithSource. */
+const INTERACTION_CALLBACK_DEFERRED_MESSAGE = 5;
+/** Discord interaction CALLBACK type 9 — respond with a MODAL. */
+const INTERACTION_CALLBACK_MODAL = 9;
+
+/** The slice of a Discord interaction payload the modal seam reads. */
+interface DiscordInboundInteraction {
+  type?: number;
+  id?: string;
+  token?: string;
+  channel_id?: string;
+  guild_id?: string;
+  channel?: { type?: number; parent_id?: string };
+  member?: { user?: DiscordInteractionUser };
+  user?: DiscordInteractionUser;
+  data?: { custom_id?: string; components?: unknown[] };
+}
+
+interface DiscordInteractionUser {
+  id?: string;
+  username?: string;
+  global_name?: string;
+  bot?: boolean;
+}
+
+/**
+ * The minimum Chat shape the seam needs, declared structurally (the same idiom
+ * as `http/mounts.ts`) so this module never couples to the `Chat` generic. A
+ * real `Chat` satisfies it: `webhooks` is the per-adapter handler map and
+ * `processModalSubmit` is the SDK's modal dispatch entry point.
+ */
+export interface DiscordInteractionChat {
+  webhooks: Record<
+    string,
+    ((request: Request, options?: WebhookOptions) => Promise<Response>) | undefined
+  >;
+  processModalSubmit(
+    event: {
+      adapter: Adapter;
+      callbackId: string;
+      raw: unknown;
+      user: Author;
+      values: Record<string, string>;
+      viewId: string;
+    },
+    contextId?: string,
+    options?: WebhookOptions,
+  ): Promise<unknown>;
+}
+
+/**
+ * Encode the modal `custom_id` the bridge round-trips through Discord.
+ *
+ * JSON-encoded rather than joined on a separator — the `http/mounts.ts`
+ * construction, for the same reason: no delimiter to collide on. Discord caps
+ * `custom_id` at 100 chars; the contextId is a 36-char UUID, so callbackIds up
+ * to ~55 chars fit. An oversized one is refused by Discord at open time and
+ * surfaced by the `onOpenModal` warn — never silently truncated.
+ */
+export function encodeDiscordModalCustomId(
+  callbackId: string,
+  contextId: string,
+): string {
+  return JSON.stringify([callbackId, contextId]);
+}
+
+/**
+ * Decode a modal `custom_id`. A foreign shape (a modal this bridge did not
+ * open, or a pre-W30 hand-rolled one) degrades honestly: the WHOLE custom_id
+ * becomes the callbackId and there is no contextId — the submit still routes,
+ * it just has no stored relatedChannel to reply through.
+ */
+export function decodeDiscordModalCustomId(customId: string): {
+  callbackId: string;
+  contextId?: string;
+} {
+  try {
+    const parsed: unknown = JSON.parse(customId);
+    if (
+      Array.isArray(parsed) &&
+      typeof parsed[0] === "string" &&
+      typeof parsed[1] === "string"
+    ) {
+      return { callbackId: parsed[0], contextId: parsed[1] };
+    }
+  } catch {
+    // Not our encoding — fall through to the honest fallback.
+  }
+  return { callbackId: customId };
+}
+
+/**
+ * Convert the SDK's `ModalElement` into Discord modal components.
+ *
+ * Discord modals accept ONLY text inputs (type 4 in type-1 action rows); every
+ * other SDK modal child (select, radio, fields) has no Discord counterpart and
+ * is skipped with a warn — a partial modal beats a silent 400 from Discord.
+ */
+function discordModalPayload(
+  modal: ModalElement,
+  customId: string,
+): Record<string, unknown> {
+  const rows: unknown[] = [];
+  for (const child of modal.children) {
+    if (child.type !== "text_input") {
+      console.warn(
+        `[discord] modal "${modal.callbackId}": dropping "${child.type}" child — ` +
+          "Discord modals support text inputs only",
+      );
+      continue;
+    }
+    rows.push({
+      type: 1,
+      components: [
+        {
+          type: 4,
+          custom_id: child.id,
+          label: child.label,
+          style: child.multiline ? 2 : 1,
+          required: !child.optional,
+          ...(child.placeholder ? { placeholder: child.placeholder } : {}),
+          ...(child.initialValue ? { value: child.initialValue } : {}),
+          ...(child.maxLength ? { max_length: child.maxLength } : {}),
+        },
+      ],
+    });
+  }
+  return { custom_id: customId, title: modal.title, components: rows };
+}
+
+/**
+ * Flatten a MODAL_SUBMIT payload's component tree into `{inputId: value}`.
+ * Walks nested `components` arrays (type-1 action rows today, the newer label
+ * wrappers tomorrow) and collects every leaf carrying `custom_id` + `value`.
+ */
+function modalSubmitValues(
+  interaction: DiscordInboundInteraction,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  const walk = (nodes: unknown[]): void => {
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      const rec = node as Record<string, unknown>;
+      if (typeof rec.custom_id === "string" && typeof rec.value === "string") {
+        values[rec.custom_id] = rec.value;
+      }
+      if (Array.isArray(rec.components)) walk(rec.components);
+      if (rec.component && typeof rec.component === "object") {
+        walk([rec.component]);
+      }
+    }
+  };
+  const rows = interaction.data?.components;
+  if (Array.isArray(rows)) walk(rows);
+  return values;
+}
+
+/**
+ * The vendor's namespaced thread id for the channel a modal submit came from —
+ * `encodeThreadId` (PUBLIC on `DiscordAdapter`) with the exact thread-channel
+ * handling `handleComponentInteraction` uses, so the ALS reply route and any
+ * stored relatedChannel agree on the id byte-for-byte.
+ */
+function namespacedChannelId(
+  adapter: DiscordAdapter,
+  interaction: DiscordInboundInteraction,
+): string | undefined {
+  const interactionChannelId = interaction.channel_id;
+  if (typeof interactionChannelId !== "string" || interactionChannelId === "") {
+    return undefined;
+  }
+  const guildId =
+    typeof interaction.guild_id === "string" && interaction.guild_id !== ""
+      ? interaction.guild_id
+      : "@me";
+  const channel = interaction.channel;
+  const isThread = channel?.type === 11 || channel?.type === 12;
+  const parentChannelId =
+    isThread && typeof channel?.parent_id === "string"
+      ? channel.parent_id
+      : interactionChannelId;
+  return isThread
+    ? adapter.encodeThreadId({
+        guildId,
+        channelId: parentChannelId,
+        threadId: interactionChannelId,
+      })
+    : adapter.encodeThreadId({ guildId, channelId: interactionChannelId });
+}
+
+/**
+ * Route one VERIFIED MODAL_SUBMIT into `chat.processModalSubmit`, mirroring the
+ * vendor's own dispatch pattern byte-for-byte in shape:
+ *
+ *   - the dispatch task rides `options.waitUntil` and the type-5 deferred ack
+ *     returns synchronously (webhook-server rule 2, D230);
+ *   - dispatch runs INSIDE `adapter.requestContext.run({slashCommand: …})` —
+ *     the SAME AsyncLocalStorage store `handleApplicationCommandInteraction`
+ *     uses — so a handler replying via the related channel PATCHes
+ *     `/webhooks/{appId}/{token}/messages/@original` on the SUBMIT's own token
+ *     and the deferred ack never dangles as "did not respond". The store is
+ *     `protected` on the vendor class (runtime-real, tsc-hidden), so the ONE
+ *     cast lives here with this note; pinned to @chat-adapter/discord@4.34.0.
+ *
+ * Returns undefined (caller keeps the vendor 400) when the payload lacks the
+ * pieces routing needs — custom_id and a user.
+ */
+function dispatchDiscordModalSubmit(
+  chat: DiscordInteractionChat,
+  adapter: DiscordAdapter,
+  interaction: DiscordInboundInteraction,
+  options: WebhookOptions | undefined,
+): Response | undefined {
+  const customId = interaction.data?.custom_id;
+  const user = interaction.member?.user ?? interaction.user;
+  if (
+    typeof customId !== "string" ||
+    customId === "" ||
+    typeof user?.id !== "string" ||
+    typeof user.username !== "string" ||
+    typeof interaction.token !== "string"
+  ) {
+    return undefined;
+  }
+
+  const { callbackId, contextId } = decodeDiscordModalCustomId(customId);
+  const event = {
+    adapter: adapter as Adapter,
+    callbackId,
+    raw: interaction,
+    user: {
+      userId: user.id,
+      userName: user.username,
+      fullName: user.global_name || user.username,
+      isBot: user.bot ?? false,
+      isMe: false,
+    },
+    values: modalSubmitValues(interaction),
+    viewId: customId,
+  };
+
+  const channelId = namespacedChannelId(adapter, interaction);
+  const requestContext = (
+    adapter as unknown as {
+      requestContext: { run<T>(store: unknown, fn: () => T): T };
+    }
+  ).requestContext;
+  const interactionToken = interaction.token;
+
+  const task = channelId
+    ? requestContext.run(
+        {
+          slashCommand: {
+            channelId,
+            interactionToken,
+            initialResponseSent: false,
+          },
+        },
+        () => chat.processModalSubmit(event, contextId, options),
+      )
+    : chat.processModalSubmit(event, contextId, options);
+
+  const tracked = task.catch((err) => {
+    console.error(`[discord] modal submit "${callbackId}" dispatch failed:`, err);
+  });
+  options?.waitUntil?.(tracked);
+
+  return Response.json({ type: INTERACTION_CALLBACK_DEFERRED_MESSAGE });
+}
+
+/**
+ * Inject the `onOpenModal` seam so `event.openModal(...)` works on Discord.
+ * A caller-supplied hook wins; without an interaction id + token there is no
+ * callback endpoint to POST to, so the options pass through untouched.
+ */
+function withDiscordOpenModal(
+  options: WebhookOptions | undefined,
+  interaction: DiscordInboundInteraction | undefined,
+): WebhookOptions | undefined {
+  if (
+    options?.onOpenModal ||
+    typeof interaction?.id !== "string" ||
+    typeof interaction.token !== "string"
+  ) {
+    return options;
+  }
+  const { id, token } = interaction;
+  return {
+    ...options,
+    onOpenModal: async (modal, contextId) => {
+      const customId = encodeDiscordModalCustomId(modal.callbackId, contextId);
+      // Bare GLOBAL fetch + hardcoded DISCORD_API_BASE — deliberately the
+      // vendor's own idiom (D229 law d), so offline tests stub ONE seam.
+      const res = await fetch(
+        `${DISCORD_API_BASE}/interactions/${id}/${token}/callback`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: INTERACTION_CALLBACK_MODAL,
+            data: discordModalPayload(modal, customId),
+          }),
+        },
+      );
+      if (!res.ok) {
+        console.warn(
+          `[discord] modal "${modal.callbackId}" open refused (HTTP ${res.status}) — ` +
+            "Discord accepts a modal only as an interaction's FIRST response and " +
+            "the vendor adapter auto-acks before dispatch (see the W30 seam note); " +
+            "the modal was NOT shown",
+        );
+        return undefined;
+      }
+      return { viewId: customId };
+    },
+  };
+}
+
+/**
+ * Wrap `chat.webhooks.discord` in place with the component/modal seam.
+ *
+ * Call once per mounted install, right after the `Chat` is constructed. A Chat
+ * with no `discord` webhook (every other provider) is a NO-OP, so the caller
+ * stays provider-generic. The wrapper:
+ *
+ *   - forwards the vendor a byte-identical request (Ed25519 signs the RAW body,
+ *     so the bytes are read once and re-sent verbatim);
+ *   - injects the `onOpenModal` seam ({@link withDiscordOpenModal});
+ *   - intercepts the vendor's 400 for a VERIFIED type-5 MODAL_SUBMIT and routes
+ *     it ({@link dispatchDiscordModalSubmit}); every other response — 200 acks,
+ *     401 bad signature, 400 bad JSON — passes through untouched.
+ */
+export function extendDiscordInteractionWebhook(
+  chat: DiscordInteractionChat,
+  adapter: Adapter,
+): void {
+  const vendor = chat.webhooks[DISCORD_PROVIDER];
+  if (!vendor) return;
+  const discord = adapter as DiscordAdapter;
+
+  chat.webhooks[DISCORD_PROVIDER] = async (request, options) => {
+    // No body to sign or parse — hand straight through (the route is POST-only,
+    // but a wrapper must never turn a stray GET into a hang on .arrayBuffer()).
+    if (request.method === "GET" || request.method === "HEAD") {
+      return vendor(request, options);
+    }
+
+    const bytes = await request.arrayBuffer();
+    const forwarded = new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: bytes,
+    });
+
+    let interaction: DiscordInboundInteraction | undefined;
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        interaction = parsed as DiscordInboundInteraction;
+      }
+    } catch {
+      // Unparseable body: the vendor answers 400 "Invalid JSON" — pass through.
+    }
+
+    const extended = withDiscordOpenModal(options, interaction);
+    const response = await vendor(forwarded, extended);
+
+    if (response.status !== 400 || interaction?.type !== INTERACTION_MODAL_SUBMIT) {
+      return response;
+    }
+    // A 400 for a parseable type-5 body is the vendor's "Unknown interaction
+    // type" fall-through — REACHED ONLY AFTER Ed25519 verify passed (a bad
+    // signature short-circuits to 401 before the dispatch switch).
+    return (
+      dispatchDiscordModalSubmit(chat, discord, interaction, extended) ?? response
+    );
   };
 }
