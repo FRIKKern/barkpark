@@ -1,0 +1,37 @@
+{
+  "run_id": "grip-20260721T150000Z-v2-tickets-idor-fixshape",
+  "recipes": [
+    {
+      "subject": "api/test/barkpark/plugins/tickets/keys_test.exs",
+      "quantity": "test:green",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang mix test test/barkpark/plugins/tickets/keys_test.exs 2>&1 | tail -3",
+      "derived_level": "L1",
+      "deps": [
+        "api/test/barkpark/plugins/tickets/keys_test.exs",
+        "api/lib/barkpark/plugins/tickets/keys.ex"
+      ],
+      "observed_at": "2026-07-21T15:00:00Z"
+    },
+    {
+      "subject": "Keys mutation callers (rotate/pause/unpause/revoke)",
+      "quantity": "grep:callers",
+      "rerun": "grep -rn 'Keys\\.rotate\\|Keys\\.pause\\|Keys\\.unpause\\|Keys\\.revoke' /Volumes/SATECHI/github/barkpark/api/lib /Volumes/SATECHI/github/barkpark/internal /Volumes/SATECHI/github/barkpark/scripts 2>/dev/null",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/plugins/tickets/inbox_live.ex",
+        "api/lib/barkpark_web/controllers/ticket_keys_controller.ex"
+      ],
+      "observed_at": "2026-07-21T15:00:00Z"
+    },
+    {
+      "subject": "api/lib/barkpark/plugins/tickets/keys.ex get_ticket_key/1 workspace-blind",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/plugins/tickets/keys.ex | sed -n '200,212p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/plugins/tickets/keys.ex"
+      ],
+      "observed_at": "2026-07-21T15:00:00Z"
+    }
+  ]
+}
