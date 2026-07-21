@@ -98,5 +98,50 @@ defmodule BarkparkCloud.Web.RouterHeadAndFaviconTest do
     end
   end
 
+  # cch-w2 — the other side of the same coin. HEAD-mirrors-GET is honest only for
+  # routes that READ; on a GET that MUTATES it hands the side effect to every
+  # unfurler on the internet. The fence (`refuse_head_on_side_effecting_gets`,
+  # placed BEFORE `plug(Plug.Head)` because `Plug.Head.call/2` destroys HEAD-ness
+  # and stashes nothing) refuses those. These cases are DB-free: the plug halts
+  # before `:match`, so nothing here reaches the Repo. The behavioural proofs
+  # (no token minted, no `oauth_states` row written, nonce not burned) live in
+  # `router_oauth_test.exs`, which has a sandbox.
+  describe "HEAD is fenced off the side-effecting GETs" do
+    test "the two OAuth legs answer 405 + `allow: GET`, never a redirect" do
+      for path <- ["/v1/auth/oauth/github", "/v1/auth/oauth/github/callback"] do
+        head = request(:head, path)
+
+        assert head.status == 405, "HEAD #{path} must be refused"
+        assert get_resp_header(head, "allow") == ["GET"], "#{path} must say which method works"
+        # 405, not 404 (D12) — the path exists; only the method is refused. And
+        # no location header, which is where the live session token used to ride.
+        assert get_resp_header(head, "location") == []
+      end
+    end
+
+    test "the fence is narrow — every other GET still gets its honest HEAD twin" do
+      # Mutation tripwire from the other direction: a guard that over-matched
+      # (a `String.starts_with?` prefix, or a missing `providers` exclusion)
+      # would red here rather than silently 405ing healthy reads.
+      for path <- @shell_paths ++ ["/favicon.ico", "/v1/auth/oauth/providers"] do
+        head = request(:head, path)
+
+        assert head.status == request(:get, path).status, "HEAD #{path} must still mirror its GET"
+        assert get_resp_header(head, "allow") == []
+      end
+    end
+
+    test "HEAD on a POST-only side-effecting route 404s and has no side effect" do
+      # Pins the invariant from the other side: `Plug.Head` only ever gives a
+      # HEAD access to routes declared as GET, so a POST-only mutator is
+      # unreachable by a probe — it falls to the catch-all like any unknown path.
+      # If this ever 200s or 302s, the rewrite has leaked past its declared verb.
+      head = request(:head, "/v1/auth/verify-email")
+
+      assert head.status == 404
+      assert head.resp_body == ""
+    end
+  end
+
   defp get_resp_header(conn, key), do: Plug.Conn.get_resp_header(conn, key)
 end
