@@ -87,6 +87,13 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { deriveLevel, checkCeiling, LEVELS } from "./level.mjs";
+// THE FOLD RE-DERIVES ITS OWN KEY, so it needs the minter's grammar. Static,
+// and it creates NO cycle: mint.mjs imports nothing at all (verified — the file
+// has zero `import` lines), which is exactly why it can be depended on from the
+// durable half without moving this module's "depends on level.mjs and nothing
+// else" property into a lie. Read the fold's header for WHY the key is
+// re-derived rather than trusted.
+import { quantityPhrase } from "./mint.mjs";
 
 // ── the row ──────────────────────────────────────────────────────────────────
 
@@ -194,9 +201,12 @@ function reject(reason, message, extra = {}) {
 //     also what keeps the SUITE deterministic — a clock in this module would
 //     silently make every fixture's verdict depend on what time CI ran.
 //   - `screen` is injected rather than imported so that this module keeps its
-//     "no dependency but level.mjs" property, and so the safety vocabulary can
-//     evolve without the durable store moving. Nothing here imports
-//     `screen.mjs`; the CLI is what wires the two together.
+//     "depends only on PURE grammar modules" property, and so the safety
+//     vocabulary can evolve without the durable store moving. Nothing here
+//     imports `screen.mjs`; the CLI is what wires the two together. (The
+//     property is "level.mjs and mint.mjs, both of which import nothing, read
+//     no clock and touch no filesystem" — screen.mjs is a POLICY module whose
+//     vocabulary is meant to move, which is the whole reason it is injected.)
 //
 // THE OPT-IN IS CLOSED AT THE CLI, NOT HERE. `tgw3-write-verb` bakes `date -u`
 // into the write path so every real write passes a `now`, and wires the screen
@@ -446,6 +456,92 @@ export function recipeKey(recipe) {
   return `${part(recipe?.subject)}\u0000${part(recipe?.quantity)}`;
 }
 
+// ── the key is RE-DERIVED, never read from storage ───────────────────────────
+//
+// THE MEASURED DEFECT. `quantity` is minted from the rerun command by
+// mint.mjs's `quantityPhrase`, and that grammar MOVED: before its defect 8 was
+// fixed, `git show P | wc -l` and `git show P | grep -c x` both minted
+// `git:show`. 57 of the 62 committed rows (91.9%) still carry a quantity the
+// merged mint no longer produces — and because a row on disk is IMMUTABLE by
+// construction (wx/O_EXCL, no update verb, no delete verb, and an appended
+// correction becomes a RIVAL rather than a supersession), not one of those
+// bytes can be corrected in place.
+//
+// Folding on the stored value therefore made the shipping product lie: the
+// fold announced 4 RIVAL-METHOD keys, and `census --ledger` printed "9 recipes
+// for git:show of .claude/workflows/bp-epic-cycle.workflow.js" — nine
+// unrelated questions rendered as nine rival ways to answer ONE. `leads
+// tasks_next_cmd` handed an agent a LINE COUNT and a MATCH COUNT under "run
+// both and compare".
+//
+// THE FIX IS THE LAW THIS EPIC ALREADY LIVES BY, ONE LAYER UP. leads.mjs
+// re-derives the LEVEL from the command at render time and never trusts
+// `recipe.derived_level`; this does the same for the KEY. Nothing on disk
+// moves, no field is added to any row, `admitRecipe` still REQUIRES a stored
+// quantity — the stored value simply stops being the key and becomes a DRIFT
+// SIGNAL (`stored_quantity` + `quantity_restated`, the exact pair leads uses
+// for `stored_level` / `level_restated`).
+//
+// THE FALLBACK IS MARKED, NEVER SILENT. If `quantityPhrase` cannot mint from a
+// row's command the stored value is used — and the row carries
+// `quantity_fallback` naming why, with `stats.quantity_fallbacks` counting it.
+// A silent fallback is the silent-strip defect (research-coverage's `record()`
+// dropping unknown fields, half of D10's trap) wearing a different hat: the
+// fold would key on one thing while its output implied the other, with no
+// signal anywhere.
+//
+// This does NOT narrow RIVAL-METHOD out of existence — it narrows it to REAL
+// rivals. Two genuinely distinct commands that mint the SAME quantity
+// (`wc -l F` and `cat F | wc -l` — mint.mjs's own stated control) still collide
+// and still flag; the tests below hold that control, because a fix that made
+// the flag unfireable would have broken it rather than fixed it.
+
+// restateQuantity(row) → { quantity, stored_quantity, quantity_restated, quantity_fallback }
+//
+// `quantity` is what the fold KEYS ON. `quantity_fallback` is null on a normal
+// row and a reason string when the re-derivation could not answer.
+export function restateQuantity(row) {
+  const stored = typeof row?.quantity === "string" ? row.quantity.trim() : "";
+  let minted = null;
+  let fallback = null;
+  try {
+    const phrase = quantityPhrase(row?.rerun);
+    if (typeof phrase === "string" && phrase.trim() !== "") minted = phrase.trim();
+    else fallback = `the mint could not derive a quantity from this command (quantityPhrase returned ${JSON.stringify(phrase)}) — the STORED quantity is the key for this row instead`;
+  } catch (err) {
+    fallback = `the mint THREW on this command (${err?.message ?? String(err)}) — the STORED quantity is the key for this row instead`;
+  }
+  if (minted === null) {
+    return { quantity: stored, stored_quantity: stored, quantity_restated: false, quantity_fallback: fallback };
+  }
+  return { quantity: minted, stored_quantity: stored, quantity_restated: stored !== minted, quantity_fallback: null };
+}
+
+// restateLevel(row) → { derived_level, stored_level, level_restated, level_fallback }
+//
+// CLOSES `tgw2-fold-reread-derived-level`. The fold trusted the stored
+// `derived_level`, which is a claim made by whichever version of level.mjs was
+// loaded on the day of the write — the same staleness class as the quantity,
+// one field over. leads.mjs already refused to inherit it and re-derived at
+// RENDER time; the fold now does it once at the SEAM, so every consumer gets
+// the re-derived value and the stored one survives as `stored_level`.
+export function restateLevel(row) {
+  const stored = row?.derived_level ?? null;
+  let derived = null;
+  let fallback = null;
+  try {
+    const level = deriveLevel(row?.rerun);
+    if (typeof level === "string" && level.trim() !== "") derived = level.trim();
+    else fallback = `deriveLevel returned ${JSON.stringify(level)} for this command — the STORED level is being reported instead`;
+  } catch (err) {
+    fallback = `deriveLevel THREW on this command (${err?.message ?? String(err)}) — the STORED level is being reported instead`;
+  }
+  if (derived === null) {
+    return { derived_level: stored, stored_level: stored, level_restated: false, level_fallback: fallback };
+  }
+  return { derived_level: derived, stored_level: stored, level_restated: stored !== null && stored !== derived, level_fallback: null };
+}
+
 // Is this on-disk row usable by the fold?
 //
 // THE WRITE PATH IS NOT THE READ PATH. admitRecipe gates everything this module
@@ -594,6 +690,14 @@ export function readLedgerRuns(dir = DEFAULT_LEDGER_DIR) {
 // it. Nothing is superseded, nothing is deduplicated away, and write order is
 // never consulted — there is no write order to consult.
 //
+// THE QUANTITY HALF OF THAT KEY IS RE-DERIVED FROM THE COMMAND, NOT READ FROM
+// THE ROW, and so is `derived_level`. Both stored values ride along as
+// `stored_quantity` / `stored_level` with a `*_restated` flag, and a
+// re-derivation that cannot answer falls back to the stored value under a
+// NAMED `*_fallback` marker. See "the key is RE-DERIVED" above for the measured
+// defect this closes — 57 of 62 committed rows carry a quantity the merged mint
+// no longer produces, and the store is immutable by construction.
+//
 // RIVAL-METHOD is two or more DISTINCT `rerun` commands over one key: two ways
 // to re-derive the same property, both kept and both flagged. READ IT AS THE
 // PRODUCT — "this key has more than one cheap check; re-run them and compare
@@ -613,6 +717,13 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
 
   const byKey = new Map();
   let rowCount = 0;
+  // Drift counters. They are STATS, not warnings: a restated key is the fold
+  // working, and a FALLBACK is the one number a reader must be able to see
+  // without reading every row.
+  let restatedQuantities = 0;
+  let quantityFallbacks = 0;
+  let restatedLevels = 0;
+  let levelFallbacks = 0;
 
   for (const run of runs) {
     run.recipes.forEach((row, index) => {
@@ -629,18 +740,45 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
         return;
       }
       rowCount += 1;
-      const key = recipeKey(row);
+      // RE-DERIVED, EVERY TIME, FROM THE COMMAND. Never `row.quantity` and
+      // never `row.derived_level` — see the restate helpers above for the
+      // measured reason.
+      const quantity = restateQuantity(row);
+      const level = restateLevel(row);
+      if (quantity.quantity_restated) restatedQuantities += 1;
+      if (quantity.quantity_fallback !== null) quantityFallbacks += 1;
+      if (level.level_restated) restatedLevels += 1;
+      if (level.level_fallback !== null) levelFallbacks += 1;
+
+      const key = recipeKey({ subject: row?.subject, quantity: quantity.quantity });
       if (!byKey.has(key)) {
         byKey.set(key, {
           key,
           subject: (row?.subject ?? "").trim(),
-          quantity: (row?.quantity ?? "").trim(),
+          quantity: quantity.quantity,
+          stored_quantities: [],
+          quantity_restated: false,
           recipes: [],
         });
       }
-      byKey.get(key).recipes.push({
+      const entry = byKey.get(key);
+      // The stored values that landed on this key, deduped. Two rows whose
+      // stored quantities DIFFER can legitimately share a re-derived key (that
+      // is the merge direction of the same drift), so the entry keeps the whole
+      // set rather than the first one it saw.
+      if (!entry.stored_quantities.includes(quantity.stored_quantity)) {
+        entry.stored_quantities.push(quantity.stored_quantity);
+      }
+      if (quantity.quantity_restated) entry.quantity_restated = true;
+      entry.recipes.push({
         rerun: row?.rerun ?? null,
-        derived_level: row?.derived_level ?? null,
+        derived_level: level.derived_level,
+        stored_level: level.stored_level,
+        level_restated: level.level_restated,
+        level_fallback: level.level_fallback,
+        stored_quantity: quantity.stored_quantity,
+        quantity_restated: quantity.quantity_restated,
+        quantity_fallback: quantity.quantity_fallback,
         deps: Array.isArray(row?.deps) ? row.deps : [],
         observed_at: row?.observed_at ?? null,
         run_id: run.run_id,
@@ -700,6 +838,16 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
       subjects: entries.length,
       rival_methods: rivalMethods.length,
       unreadable: unreadable.length,
+      // Rows whose STORED key/level disagrees with what the command mints
+      // today. Not a defect count — the store is immutable and the grammar
+      // moves, so this is the drift the re-derivation exists to absorb.
+      quantity_restated: restatedQuantities,
+      level_restated: restatedLevels,
+      // Rows where the re-derivation could NOT answer and the stored value was
+      // used instead. THIS one is worth reading: it is the only way the fold
+      // can be keying on a stale value, and it is never silent.
+      quantity_fallbacks: quantityFallbacks,
+      level_fallbacks: levelFallbacks,
     },
   };
 }
@@ -786,13 +934,46 @@ function selftest() {
       return !badNow.ok && badNow.rejections.some((r) => r.reason === "BAD-OPTION" && r.option === "now")
         && !badScreen.ok && badScreen.rejections.some((r) => r.reason === "BAD-OPTION" && r.option === "screen");
     }],
-    ["the fold flags two rival methods over one key as RIVAL-METHOD", () => {
+    ["the fold flags two GENUINELY rival methods over one key as RIVAL-METHOD", () => {
+      // Both commands mint `wc:-l` — mint.mjs's own stated control for "two
+      // different methods, one property". The key is re-derived, so this is a
+      // real collision and not two rows agreeing on a stale stored string.
       const runs = [
-        { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "cat a", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-        { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat b", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
+        { file: "a.json", run_id: "a", recipes: [{ subject: "api/x.ex", quantity: "line count", rerun: "wc -l api/x.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+        { file: "b.json", run_id: "b", recipes: [{ subject: "api/x.ex", quantity: "line count", rerun: "cat api/x.ex | wc -l", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
       ];
       const folded = foldLedger(runs);
       return folded.rival_methods.length === 1 && folded.rival_methods[0].reason === "RIVAL-METHOD";
+    }],
+    ["…and two rows that only SHARE A STORED QUANTITY are no longer rivals — the key is re-derived", () => {
+      // The shipped defect, in miniature: both rows were written when the mint
+      // produced `git:show` for everything, so on disk they are one key. A line
+      // count is not a rival method of a match count, and the fold must no
+      // longer say it is.
+      const runs = [
+        { file: "a.json", run_id: "a", recipes: [{ subject: "internal/cli/tasks_next_cmd.go", quantity: "git:show", rerun: "git show origin/main:internal/cli/tasks_next_cmd.go | wc -l", derived_level: "L2", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+        { file: "b.json", run_id: "b", recipes: [{ subject: "internal/cli/tasks_next_cmd.go", quantity: "git:show", rerun: "git show origin/main:internal/cli/tasks_next_cmd.go | grep -c 'needs_worktree'", derived_level: "L2", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
+      ];
+      const folded = foldLedger(runs);
+      return folded.rival_methods.length === 0 && folded.entries.length === 2
+        && folded.stats.quantity_restated === 2 && folded.stats.quantity_fallbacks === 0;
+    }],
+    ["a row whose command mints NO quantity falls back to the stored one and is MARKED, never silently", () => {
+      const folded = foldLedger([
+        { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "hand-written quantity", rerun: "&&", derived_level: "L6", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+      ]);
+      const recipe = folded.entries[0]?.recipes?.[0];
+      return folded.entries[0]?.quantity === "hand-written quantity"
+        && folded.stats.quantity_fallbacks === 1
+        && typeof recipe?.quantity_fallback === "string"
+        && recipe.quantity_fallback.includes("STORED quantity");
+    }],
+    ["the fold re-derives derived_level too — a stale stored level is restated, not trusted", () => {
+      const folded = foldLedger([
+        { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+      ]);
+      const recipe = folded.entries[0]?.recipes?.[0];
+      return recipe?.stored_level === "L3" && recipe?.derived_level === "L1" && recipe?.level_restated === true;
     }],
     ["a rotten on-disk row is reported, and does not take the fold down with it", () => {
       const folded = foldLedger([

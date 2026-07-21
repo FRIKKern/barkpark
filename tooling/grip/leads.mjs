@@ -173,8 +173,16 @@ export function selectLeads(folded, query, { census = null } = {}) {
       if (!matchesQuery(entry, recipe, needle)) continue;
       matchedKeys.add(entry.key ?? `${entry.subject}\u0000${entry.quantity}`);
       const rerun = String(recipe?.rerun ?? "");
-      const stored = recipe?.derived_level ?? null;
-      // RE-DERIVED HERE, EVERY TIME. Never `recipe.derived_level`.
+      // THE ON-DISK LEVEL, and it moved one key over. `foldLedger` now
+      // re-derives `derived_level` itself (tgw6-fold-rederives-key, closing
+      // tgw2-fold-reread-derived-level) and carries the stored value as
+      // `stored_level` — the same shape this row has always rendered. Reading
+      // `recipe.derived_level` alone would now compare the re-derived value to
+      // itself and report `level_restated: false` forever, silently retiring
+      // the drift signal this whole section exists for. The `??` keeps a fold
+      // that predates that change working unchanged.
+      const stored = recipe?.stored_level ?? recipe?.derived_level ?? null;
+      // RE-DERIVED HERE, EVERY TIME. Never trusted from storage.
       const derived = deriveLevel(rerun);
       rows.push({
         subject: String(entry.subject ?? ""),

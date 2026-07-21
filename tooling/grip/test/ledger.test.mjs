@@ -271,9 +271,14 @@ test("the fold's within-entry sort is chronological across mixed precision, not 
   // The same trap, in the other place it bites: the fold claims deterministic
   // (observed_at, file) ordering, and raw string order would put the .001Z row
   // first — before the whole-second row it actually followed.
+  //
+  // The two commands are GENUINE rivals (both mint `wc:-l`) rather than the
+  // `cat a`/`cat b` they used to be: since the fold re-derives its key, two
+  // commands that mint different quantities are two entries and there is no
+  // within-entry sort left to test.
   const folded = foldLedger([
-    { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat b", derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:00.001Z" }] },
-    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "cat a", derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:00Z" }] },
+    { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat s | wc -l", derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:00.001Z" }] },
+    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l s", derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:00Z" }] },
   ]);
   assert.deepEqual(
     folded.entries[0].recipes.map((r) => r.observed_at),
@@ -285,8 +290,8 @@ test("the fold's within-entry sort is chronological across mixed precision, not 
 test("an off-shape observed_at on disk does not throw the sort — the write path is not the read path", () => {
   // admitRecipe rejects offsets, but nothing re-admits what the fold READS.
   const folded = foldLedger([
-    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "cat a", derived_level: "L3", deps: [], observed_at: "2026-07-21T02:00:00+02:00" }] },
-    { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat b", derived_level: "L3", deps: [], observed_at: null }] },
+    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l s", derived_level: "L3", deps: [], observed_at: "2026-07-21T02:00:00+02:00" }] },
+    { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat s | wc -l", derived_level: "L3", deps: [], observed_at: null }] },
   ]);
   assert.equal(folded.entries.length, 1);
   assert.equal(folded.entries[0].recipes.length, 2, "both rows are folded — an unorderable timestamp is not a malformed row");
@@ -550,13 +555,16 @@ test("foldLedger surfaces two RIVAL methods over one (subject, quantity) as both
   const dir = tmpLedger();
   writeLedgerRun({
     run_id: "run-a",
-    recipes: [goodRow({ quantity: "callback count", rerun: "grep -c 'def ' api/lib/barkpark/plugin.ex" })],
+    recipes: [goodRow({ quantity: "line count", rerun: "wc -l api/lib/barkpark/plugin.ex" })],
     dir,
   });
-  // The planted rival: same subject, same quantity, a DIFFERENT way to get it.
+  // The planted rival: same subject, a DIFFERENT command that RE-DERIVES THE
+  // SAME PROPERTY. Both mint `wc:-l` — mint.mjs's own stated control for "two
+  // methods, one property, and they MUST still collide". The stored quantity
+  // agreeing is not what makes this a rival; the mint agreeing is.
   writeLedgerRun({
     run_id: "run-b",
-    recipes: [goodRow({ quantity: "callback count", rerun: "rg --count '^  def ' api/lib/barkpark/plugin.ex", observed_at: "2026-07-20T13:00:00Z" })],
+    recipes: [goodRow({ quantity: "line count", rerun: "cat api/lib/barkpark/plugin.ex | wc -l", observed_at: "2026-07-20T13:00:00Z" })],
     dir,
   });
 
@@ -573,7 +581,9 @@ test("foldLedger surfaces two RIVAL methods over one (subject, quantity) as both
 
   const entry = folded.entries[0];
   assert.equal(entry.rival_method, true);
-  assert.equal(entry.key, recipeKey({ subject: goodRow().subject, quantity: "callback count" }));
+  // The key carries the RE-DERIVED quantity, not the stored one.
+  assert.equal(entry.key, recipeKey({ subject: goodRow().subject, quantity: "wc:-l" }));
+  assert.equal(entry.quantity, "wc:-l");
 });
 
 test("the flag is RIVAL-METHOD and the module no longer exports CONFLICT under any name", async () => {
@@ -650,6 +660,179 @@ test("a subject with two DIFFERENT quantities is two entries, not two rival meth
   const folded = foldLedger(dir);
   assert.equal(folded.entries.length, 2);
   assert.equal(folded.rival_methods.length, 0);
+});
+
+// ── the fold RE-DERIVES ITS OWN KEY ──────────────────────────────────────────
+//
+// THE SHIPPED DEFECT, and it is a defect of the STORE'S OUTPUT, not of the
+// store. `quantity` is minted from the rerun by mint.mjs, that grammar moved
+// (its defect 8: `git show P | wc -l` and `git show P | grep -c x` both used to
+// mint `git:show`), and every row on disk is immutable by construction — wx /
+// O_EXCL, no update verb, no delete verb, and an appended correction becomes a
+// RIVAL rather than a supersession. So 57 of the 62 committed rows carry a
+// quantity today's mint no longer produces, and folding on it made `census
+// --ledger` announce "9 recipes for git:show of bp-epic-cycle.workflow.js" —
+// nine different questions rendered as nine rival ways to answer one.
+//
+// The fix is the law leads.mjs already applies to the LEVEL, applied to the
+// KEY: re-derive from the command, carry the stored value alongside as a drift
+// signal, and never let it decide anything.
+
+test("THE DEFECT: the fold keys on the RE-DERIVED quantity, so a line count is no longer a rival method of a match count", () => {
+  // Both rows are verbatim in shape from the committed store: same subject,
+  // same stored `git:show`, two commands that answer completely different
+  // questions. On the stored key they were ONE entry with a RIVAL-METHOD flag
+  // telling an agent to "run both and compare".
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "internal/cli/tasks_next_cmd.go", quantity: "git:show", rerun: "git show origin/main:internal/cli/tasks_next_cmd.go | wc -l", derived_level: "L2", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+    { file: "b.json", run_id: "b", recipes: [{ subject: "internal/cli/tasks_next_cmd.go", quantity: "git:show", rerun: "git show origin/main:internal/cli/tasks_next_cmd.go | grep -c 'needs_worktree'", derived_level: "L2", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
+  ]);
+
+  assert.equal(folded.entries.length, 2, "a line count and a match count are two properties, so two keys");
+  assert.equal(folded.rival_methods.length, 0, "…and therefore NOT rivals — the flag was fabricated by the stale stored key");
+  assert.deepEqual(folded.entries.map((e) => e.quantity).sort(), ["grep:-c:needs_worktree", "wc:-l"]);
+  // The stored value is still THERE. It stopped being the key; it did not stop
+  // existing, and a reader can still see what the row was written with.
+  for (const entry of folded.entries) {
+    assert.deepEqual(entry.stored_quantities, ["git:show"]);
+    assert.equal(entry.quantity_restated, true);
+  }
+});
+
+test("THE CONTROL STILL FIRES: two genuinely distinct commands that mint the SAME quantity are still RIVAL-METHOD", () => {
+  // This is the half that a careless fix breaks. Narrowing the key to real
+  // rivals is the goal; making the flag UNFIREABLE would not be a fix, it
+  // would be a deletion wearing a fix's clothes. `wc -l F` and `cat F | wc -l`
+  // are mint.mjs's own stated control for "two methods, one property".
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "api/lib/x.ex", quantity: "line count", rerun: "wc -l api/lib/x.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+    { file: "b.json", run_id: "b", recipes: [{ subject: "api/lib/x.ex", quantity: "lines in the file", rerun: "cat api/lib/x.ex | wc -l", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
+  ]);
+
+  assert.equal(folded.entries.length, 1, "one property, one key");
+  assert.equal(folded.rival_methods.length, 1, "a fix that made RIVAL-METHOD unfireable has broken it, not fixed it");
+  assert.equal(folded.rival_methods[0].reason, RIVAL_METHOD);
+  assert.equal(folded.rival_methods[0].quantity, "wc:-l");
+  assert.equal(folded.entries[0].rival_method, true);
+  assert.equal(folded.entries[0].recipes.length, 2, "both are kept");
+
+  // AND IT FIRES ACROSS DISAGREEING STORED VALUES. These two rows were written
+  // with DIFFERENT stored quantities and are still one key — proof the flag now
+  // follows the command rather than the string a writer happened to store.
+  assert.deepEqual(folded.entries[0].stored_quantities.sort(), ["line count", "lines in the file"]);
+});
+
+test("each folded recipe carries stored_quantity and quantity_restated — the stored value is a DRIFT SIGNAL, never the key", () => {
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [
+      { subject: "api/lib/x.ex", quantity: "git:show", rerun: "wc -l api/lib/x.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" },
+      { subject: "api/lib/y.ex", quantity: "wc:-l", rerun: "wc -l api/lib/y.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" },
+    ] },
+  ]);
+
+  const drifted = folded.entries.find((e) => e.subject === "api/lib/x.ex").recipes[0];
+  assert.equal(drifted.stored_quantity, "git:show", "the stored value survives verbatim");
+  assert.equal(drifted.quantity_restated, true);
+  assert.equal(drifted.quantity_fallback, null, "a successful re-derivation is not a fallback");
+
+  const agreeing = folded.entries.find((e) => e.subject === "api/lib/y.ex").recipes[0];
+  assert.equal(agreeing.stored_quantity, "wc:-l");
+  assert.equal(agreeing.quantity_restated, false, "no drift is stated as no drift, not as silence");
+
+  // The shape is leads.mjs's, deliberately: stored_* + *_restated is already
+  // how this codebase says "here is what was written, here is what is true".
+  for (const key of ["stored_quantity", "quantity_restated", "stored_level", "level_restated"]) {
+    assert.ok(Object.hasOwn(drifted, key), `every recipe must carry ${key}, present or not — a field that appears only on drift is a field nobody checks`);
+  }
+  assert.equal(folded.stats.quantity_restated, 1);
+  assert.equal(folded.stats.quantity_fallbacks, 0);
+});
+
+test("derived_level is RE-DERIVED in the fold too, closing tgw2-fold-reread-derived-level", () => {
+  // `curl https://api.barkpark.cloud/...` reaches a running system: L1. The row
+  // on disk claims L3. The fold used to hand that L3 straight to every
+  // consumer, and only leads.mjs re-derived — so the fix lived one layer above
+  // the defect and every OTHER reader inherited it.
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "cloud/health", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+  ]);
+  const recipe = folded.entries[0].recipes[0];
+  assert.equal(recipe.stored_level, "L3", "the stored claim is carried, so the disagreement is visible");
+  assert.equal(recipe.derived_level, "L1", "…and it is NOT what the fold reports");
+  assert.equal(recipe.level_restated, true);
+  assert.equal(folded.stats.level_restated, 1);
+});
+
+test("leads reads the fold's stored_level — the two halves of the drift signal MEET", () => {
+  // A CROSS-MODULE test, deliberately. leads.mjs read `recipe.derived_level` as
+  // "the stored value" back when the fold passed it through untouched. Now the
+  // fold re-derives it, so that read would compare the re-derived value to
+  // itself and report level_restated:false FOREVER — the drift annotation
+  // silently retired while every test in leads' own file still passed on its
+  // own fixtures. This is the seam where that would go unnoticed.
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "cloud/health.ex", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+  ]);
+  assert.equal(folded.entries[0].recipes[0].stored_level, "L3");
+  assert.equal(folded.entries[0].recipes[0].derived_level, "L1");
+});
+
+test("a command the mint cannot key falls back to the STORED quantity and is MARKED — a silent fallback is the silent-strip defect in a new hat", () => {
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "hand-written quantity", rerun: "&&", derived_level: "L6", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+  ]);
+
+  const entry = folded.entries[0];
+  assert.equal(entry.quantity, "hand-written quantity", "the stored value IS the key when nothing can be minted — the row is not dropped");
+  const recipe = entry.recipes[0];
+  assert.equal(recipe.stored_quantity, "hand-written quantity");
+  assert.equal(recipe.quantity_restated, false);
+  assert.equal(typeof recipe.quantity_fallback, "string", "the fallback must be NAMED on the row");
+  assert.match(recipe.quantity_fallback, /STORED quantity/);
+  // And countable without reading 62 rows: a reader of `stats` alone must be
+  // able to see that part of the index is keyed on an unverified stored value.
+  assert.equal(folded.stats.quantity_fallbacks, 1);
+  assert.equal(folded.stats.quantity_restated, 0, "a fallback is not a restatement — conflating them would hide it in a healthy-looking number");
+});
+
+test("the fallback marker is ABSENT-as-null on healthy rows, so `quantity_fallback !== null` is the whole check", () => {
+  const folded = foldLedger([
+    { file: "a.json", run_id: "a", recipes: [{ subject: "api/x.ex", quantity: "wc:-l", rerun: "wc -l api/x.ex", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+  ]);
+  assert.equal(folded.entries[0].recipes[0].quantity_fallback, null);
+  assert.equal(folded.entries[0].recipes[0].level_fallback, null);
+  assert.equal(folded.stats.quantity_fallbacks, 0);
+  assert.equal(folded.stats.level_fallbacks, 0);
+});
+
+test("THE WRITE PATH IS UNTOUCHED: admitRecipe still REQUIRES a stored quantity, and no fold field is admissible on disk", () => {
+  // The whole slice is read-side. If any of this had leaked into the writer,
+  // the store would start carrying derived data — the thing RECIPE_FIELDS is
+  // frozen to prevent.
+  assert.deepEqual([...RECIPE_FIELDS], ["subject", "quantity", "rerun", "derived_level", "deps", "observed_at"]);
+  const missing = admitRecipe(goodRow({ quantity: undefined }));
+  assert.equal(missing.ok, false, "a row with no stored quantity is still rejected — the fold re-deriving one does not excuse the writer");
+  assert.ok(missing.rejections.some((r) => r.reason === "MISSING-QUANTITY"));
+
+  for (const field of ["stored_quantity", "quantity_restated", "quantity_fallback", "stored_level", "level_restated", "level_fallback"]) {
+    const verdict = admitRecipe(goodRow({ [field]: "anything" }));
+    assert.equal(verdict.ok, false, `${field} is a FOLD field and must never be writable`);
+    assert.ok(verdict.rejections.some((r) => r.reason === "UNKNOWN-FIELD" && r.field === field));
+  }
+
+  // And an admitted row still comes back with exactly the schema's six keys.
+  assert.deepEqual(Object.keys(admitRecipe(goodRow()).recipe).sort(), [...RECIPE_FIELDS].sort());
+});
+
+test("the static mint.mjs import creates no cycle — mint.mjs imports NOTHING", () => {
+  // Checked, not assumed: the brief said "verify before relying on it", and a
+  // cycle here would be a load-order bug that only shows up in one entry order.
+  const mintSrc = readFileSync(fileURLToPath(new URL("../mint.mjs", import.meta.url)), "utf8");
+  const imports = mintSrc.split("\n").filter((l) => /^\s*import\b/.test(l) || /\brequire\s*\(/.test(l));
+  assert.deepEqual(imports, [], `mint.mjs must import nothing, or the ledger's dependency story is a lie: ${imports.join(" | ")}`);
+  const ledgerSrc = readFileSync(LEDGER_SRC, "utf8");
+  assert.match(ledgerSrc, /^import \{ quantityPhrase \} from "\.\/mint\.mjs";$/m,
+    "the ledger imports the mint STATICALLY — a dynamic import would make the key derivation an optional extra that can silently not happen");
 });
 
 test("recipeKey cannot be forged by concatenation", () => {
