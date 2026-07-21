@@ -20,12 +20,20 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     * `verify/1`   — resolve a raw key: live → `{:ok, row}`, paused →
                      `{:error, :paused}`, everything else (missing / revoked /
                      expired / wrong-kind) → `{:error, :unauthorized}`.
-    * `rotate/1`   — new secret on the SAME row (identity + ticket history
+    * `rotate/2`   — new secret on the SAME row (identity + ticket history
                      preserved); the old secret dies instantly.
-    * `pause/1`    — mute (→ 403 "key paused"), reversible.
-    * `unpause/1`  — clear the mute.
-    * `revoke/1`   — permanent kill (indistinguishable from missing = 401).
+    * `pause/2`    — mute (→ 403 "key paused"), reversible.
+    * `unpause/2`  — clear the mute.
+    * `revoke/2`   — permanent kill (indistinguishable from missing = 401).
     * `list/1`     — the operator's keys for a workspace, newest first.
+
+  Every by-id mutation (`rotate`/`pause`/`unpause`/`revoke`) is scoped by the
+  caller's `workspace_id`: a key belonging to another workspace is simply NOT
+  FOUND, so an operator can never reach across the tenant boundary (the
+  cross-tenant IDOR this module was hardened against). The scope is FAIL-CLOSED
+  — a nil workspace matches only the (rare) un-bound keys, never every tenant's
+  — deliberately unlike `list/1`, whose nil widens to all keys for the
+  operator's own listing (a read, not a destructive act).
 
   Permissions are the opaque `["ticket"]` — it satisfies no global read/write/
   admin tier, so even if the fail-closed WHERE clause were bypassed the key
@@ -137,10 +145,13 @@ defmodule Barkpark.Plugins.Tickets.Keys do
   name, and (in a sibling slice) ticket history all survive — only the secret
   changes. The OLD secret dies the instant this commits (the hash no longer
   matches). Returns `{:ok, %{key: row, raw: new_raw}}` or `{:error, :not_found}`.
+
+  Scoped by `ws_id` — a key in another workspace resolves to `{:error,
+  :not_found}` (fail-closed: `nil` matches only un-bound keys).
   """
-  @spec rotate(binary()) :: key_result()
-  def rotate(id) do
-    case get_ticket_key(id) do
+  @spec rotate(binary(), binary() | nil) :: key_result()
+  def rotate(id, ws_id) do
+    case get_ticket_key(id, ws_id) do
       nil ->
         {:error, :not_found}
 
@@ -156,20 +167,27 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     end
   end
 
-  @doc "Mute a ticket key — `verify/1` then returns `{:error, :paused}` (403)."
-  @spec pause(binary()) :: {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def pause(id), do: stamp(id, paused_at: now())
+  @doc """
+  Mute a ticket key — `verify/1` then returns `{:error, :paused}` (403). Scoped
+  by `ws_id` (a key in another workspace is `{:error, :not_found}`).
+  """
+  @spec pause(binary(), binary() | nil) ::
+          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def pause(id, ws_id), do: stamp(id, ws_id, paused_at: now())
 
-  @doc "Un-mute a paused key — `verify/1` returns `{:ok, row}` again."
-  @spec unpause(binary()) :: {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def unpause(id), do: stamp(id, paused_at: nil)
+  @doc "Un-mute a paused key — `verify/1` returns `{:ok, row}` again. Scoped by `ws_id`."
+  @spec unpause(binary(), binary() | nil) ::
+          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def unpause(id, ws_id), do: stamp(id, ws_id, paused_at: nil)
 
   @doc """
   Permanently revoke a ticket key (stamp `revoked_at`). After this `verify/1`
   returns `{:error, :unauthorized}` — indistinguishable from a missing key.
+  Scoped by `ws_id` (a key in another workspace is `{:error, :not_found}`).
   """
-  @spec revoke(binary()) :: {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def revoke(id), do: stamp(id, revoked_at: now())
+  @spec revoke(binary(), binary() | nil) ::
+          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def revoke(id, ws_id), do: stamp(id, ws_id, revoked_at: now())
 
   @doc """
   List the ticket keys, newest first. `workspace` may be a `%Workspace{}`
@@ -195,9 +213,12 @@ defmodule Barkpark.Plugins.Tickets.Keys do
   defp generate_raw,
     do: @prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
-  # Kind-fenced fetch by id, guarding the :binary_id UUID cast (a non-UUID id
-  # would raise Ecto.CastError → 500; a malformed id identifies no row → nil).
-  defp get_ticket_key(id) when is_binary(id) do
+  # Kind-fenced, WORKSPACE-scoped fetch by id, guarding the :binary_id UUID cast
+  # (a non-UUID id would raise Ecto.CastError → 500; a malformed id identifies no
+  # row → nil). The workspace predicate is the cross-tenant IDOR fence: a key in
+  # another workspace is invisible here, so every by-id mutation is confined to
+  # the caller's own tenant.
+  defp get_ticket_key(id, ws_id) when is_binary(id) do
     case Repo.uuid_or_nil(id) do
       nil ->
         nil
@@ -205,14 +226,26 @@ defmodule Barkpark.Plugins.Tickets.Keys do
       uuid ->
         ApiToken
         |> where([t], t.id == ^uuid and t.kind == @kind)
+        |> scope_workspace(ws_id)
         |> Repo.one()
     end
   end
 
-  defp get_ticket_key(_), do: nil
+  defp get_ticket_key(_, _), do: nil
 
-  defp stamp(id, changes) do
-    case get_ticket_key(id) do
+  # FAIL-CLOSED workspace scope for by-id mutations: a bound caller sees only its
+  # workspace's keys; a nil-scoped caller sees only the (rare) un-bound keys —
+  # NEVER every tenant's. This deliberately does NOT mirror `list/1`'s nil →
+  # unfiltered widening: a nil-scoped operator kill-switching every tenant's key
+  # is the exact fail-OPEN this fence exists to prevent.
+  defp scope_workspace(query, ws_id) when is_binary(ws_id),
+    do: where(query, [t], t.workspace_id == ^ws_id)
+
+  defp scope_workspace(query, nil),
+    do: where(query, [t], is_nil(t.workspace_id))
+
+  defp stamp(id, ws_id, changes) do
+    case get_ticket_key(id, ws_id) do
       nil -> {:error, :not_found}
       %ApiToken{} = row -> row |> Ecto.Changeset.change(changes) |> Repo.update()
     end
