@@ -125,6 +125,39 @@ Elixir security gates, path-triggered on `api/**`:
 Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
 tooling that never ships in the release.
 
+## Platform checks (not ours — GitHub App checks)
+
+Two checks on every PR are posted by an external GitHub App, not by any
+workflow in `.github/`. They are not in the roster above because we do not
+run them, cannot run them locally, and cannot fix them in a PR.
+
+11. **`Vercel – barkpark` / `Vercel – demo`** — deployment checks from the
+    Vercel GitHub App (projects `guerrilla/barkpark` and `guerrilla/demo`).
+    **Advisory** — and advisory here means *ignored*, not *tolerated*: there
+    is no `continue-on-error` to set, because these are not our jobs. The
+    classification rests on measurement, not on preference. Both report
+    `fail` on **every** open and recently-merged PR repo-wide, including PRs
+    that touch neither `cloud/` nor the console nor any front-end file (of
+    the six most recently merged PRs, all six carry both failures and five
+    change zero `cloud/` files), and PR #4732 merged carrying both. A check
+    that is red identically on PRs with disjoint diffs is not reading the
+    diff — the breakage is platform-side integration, not a defect in PR
+    code. **The root cause is NOT diagnosed.** The check surfaces
+    `Deployment has failed — npx vercel inspect dpl_<id> --logs`; nobody has
+    run that and read the build log, so "platform-side" is an inference from
+    the failure *pattern*, not a diagnosis. Until someone does, treat these
+    two as carrying no information about the PR under review — and do not
+    cite this entry as evidence that Vercel is *healthy*. Diagnosis is owned
+    by **`gr-blk-vercel-checks-ungoverned`**; when it lands, this entry gets
+    replaced by a real classification (fix it, or turn the integration off —
+    a permanently-red check trains reviewers to ignore red).
+
+    *Provenance (this entry is being established, not restated):* before it,
+    `grep -in vercel docs/ops/merge-gates.md` returned nothing. Merges past
+    these checks had been justified as "the repo's standing advisory
+    classification" while no such classification existed anywhere in the
+    repo. This paragraph is that correction; the rule starts here.
+
 ### Making `pr-task-gate` binding (required-by-name)
 
 The gate ships **advisory** — a red check does not yet block a merge, because
