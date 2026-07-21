@@ -3479,3 +3479,159 @@ the met→met re-stamp measurement and stray-control-DB cleanup into `pds-crown-
 the collector that reads it agree. Round 3 is `pds-w14-crown-collect-stamp`, LEAD-ONLY, after the
 fire lands. **The charter debt this wave inherited is ALREADY CLOSED**: PR #5247 is MERGED and
 D242–D249 are on origin/main — no slice is filed for it.
+
+### Wave 16 — DISPATCH THE FIRE (decided 2026-07-21, PDS-D257–PDS-D264, paper `pds-wave-16-2026-07-21`)
+
+**WHAT LANDED FIRST.** Wave 15's four slices all merged between 09:21Z and 09:26Z on 2026-07-21:
+#5381 (collector anchor), #5382 (both runbooks routed), #5383 (stamp recipe), #5366 (charter
+D250–D256). `origin/main` now carries the anchored discriminator (`sd_stamp`/`fire_stamp`/`pw_stamp`
+at `pds-crown-launch.sh:597-599`), `selftest` reports **40 ok · 0 FAIL**, and D250–D256 are readable
+by any cold agent. The fire task's literal precondition — "AFTER `pds-w15-collect-anchor-fix` MERGES.
+Do not start before it is on origin/main" — is therefore **SATISFIED, not overridden**. No written
+override is needed and none is granted; the level-skip the digest warned about is moot.
+
+- **PDS-D257 — THE 2400 TIGHTENING IS REFUTED BY MEASUREMENT. ARM AT THE UNTOUCHED 2200.** The
+  direction's signature move was to tighten the LAUNCHER's own gate to `PDS_LAUNCH_MEM_FLOOR_MIB=2400`
+  to cover D185's 2235.43 MiB demand. Four independent datasets kill it: **0 of 780** gapless 1 Hz
+  samples clear 2400 (max **2276.42 MiB**, 123.58 MiB short), **0 of 31** paired live draws (max
+  2267.71), **0 of 42** in D245's own steady-state slice (max **2395** — five MiB short of the floor),
+  **0 of 1200** in D250. Zero clearances across >2000 samples in four regimes. On the D246 line
+  (`MemAvailable ≈ 2973 − 1.178 × beam_RSS`, reproduced live to ±36 MiB over a 230 MiB RSS span) a
+  2400 floor requires **beam RSS ≤ 486 MiB**, which on this box occurs only in the first ~15–20 minutes
+  after a beam restart — precisely the post-restart transient **D93 REFUTES AND FORBIDS** and that D246
+  warns the poller already structurally prefers. Setting 2400 would convert that preference into a
+  requirement, so over `MAX_DRAWS=2160` the launcher could only ever fire on a forbidden draw. And the
+  safety it was meant to buy does not exist: 2235.43 MiB is the **RETIRED in-memory engine's** demand,
+  while D230/D217 put the deployed spill engine's worst single COPY chunk at **19.71 MiB** — 0.9% of
+  the floor. The 08:13Z read that motivated the tightening (MemAvailable 2435, RSS 451.9) was not a
+  second regime; it lies ON the D246 line (2435 + 1.178×451.9 = 2967.4) and was this line caught eight
+  minutes after the 08:04:40Z restart that followed the api/** merge 515f14fdd. `sar` shows monotone
+  decay 2679 (08:10) → 2410 (08:20) → 2280 (08:30) → 2161 (09:20); the 2400 window closed at roughly
+  **08:22–08:28Z**, an hour before Decide. At 09:29Z the live read was **2007.7 MiB** — below even
+  2200, with beam RSS 826.3 MiB on a 1h24m slot. **RULING:** leave `PDS_LAUNCH_MEM_FLOOR_MIB` UNSET.
+  The launcher's own 2200 default governs, `PDS_FULL_EXPORT_MIN_MEM_MB` stays unset, and the
+  transcript carries no asterisk (D232/D244/D245/D250(b): the floor never moves, "not by a flag, not
+  by a numerator, not just for this run"). The 35.43 MiB pre-spill shortfall is **RECORDED in the fire
+  record as an accepted risk**, not silently dropped and not hedged with a floor that cannot fire.
+
+- **PDS-D258 — A FRESH WORKTREE CANNOT ARM. THE PRE-WARM IS PAID BEFORE THE ARM, NEVER INSIDE THE
+  WINDOW.** Two independent verifiers live-proved the same kill: `arm` from a `git worktree add
+  origin/main` with the DEFAULT pre-warm prints the full `ARMED — the climb now outlives this turn`
+  banner and returns 0 in under a second, while the child dies seconds later on `** (Mix) Can't
+  continue due to errors on dependencies` → `prewarm: FAILED rc=1 — NOT firing` → `EXIT: 1`, **ZERO
+  draws taken**. A fresh worktree has neither `api/deps` nor `api/_build` (both gitignored). This is
+  exactly the fire task's own mandated shape, and it would have spent the six-hour window on nothing,
+  discovered only at collect. Nothing warns: `grep -nE 'deps\.get|prewarm|_build|mix '` over
+  `pds-climb-preflight.sh` and BOTH crown runbooks returns **zero** matches in all three files. Nor can
+  it be dodged by firing from the one deps-warm checkout — `spill-janitor-wt` sits on
+  `fix/spill-engine-test-raciness` @ `ac1fb3beb` and `git merge-base --is-ancestor 515f14fdd
+  ac1fb3beb` FAILS, so rung 0b (`pds-pull-proof.sh:660`) would abort. A fresh origin/main worktree is
+  at exact sha parity with the deployed box and passes. **RULING:** the fire worktree runs `mix
+  deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile` to completion
+  BEFORE arming, and then arms with **`--prewarm-now`** — which compiles synchronously in the arming
+  shell and `die`s rather than arming (`pds-crown-launch.sh:441-444`), converting a silent
+  window-killer into a loud arm-time refusal. The default pre-warm is FORBIDDEN for a fresh worktree.
+
+- **PDS-D259 — SETTING `PDS_LAUNCH_HARNESS` IS THE FAILURE MODE; OMITTING IT IS CORRECT.** Wave 15's
+  vacuous `rc=0` is fully explained and it is not a script bug. `pds-crown-launch.sh:109` reads
+  `HARNESS="${PDS_LAUNCH_HARNESS:-$SCRIPT_DIR/pds-pull-proof.sh}"` with `SCRIPT_DIR` derived from `$0`
+  via `cd -P`, so from ANY fresh worktree the default IS the real harness — proven by a rehearsal arm
+  whose `child.sh` line 7 read `HARNESS=/private/tmp/pdsw16-rehearse/scripts/pds-pull-proof.sh`.
+  `git grep PDS_LAUNCH_HARNESS origin/main` returns exactly ONE hit, line 109's own default; no shell
+  rc file mentions it. The two surviving wave-15 forensics both carry line 7 `HARNESS=/tmp/
+  pds-probe-harness.sh` beside `API_DIR=/private/tmp/pds-v1-wt/api`, a since-deleted rehearsal
+  worktree — **a leaked interactive `export`, never persisted anywhere.** **RULING:** `unset
+  PDS_LAUNCH_HARNESS` in the arming shell, assert `traps_set=0` before arming, and prove the result
+  after: `sed -n '7p' child.sh | grep -qxF "HARNESS=<fire-worktree>/scripts/pds-pull-proof.sh"`. That
+  one grep is the check that would have caught wave 15 inside its own turn instead of a wave later.
+
+- **PDS-D260 — THE FORK IS TRANSPARENT, SO THE TWO W5-E ENV LINES ARE SUFFICIENT AND THE AMMO HAZARD
+  IS THE STALE FILE, NOT THE EMPTY ONE.** Proven by execution against the real origin/main launcher: a
+  stub harness's own env dump, written by the detached child, listed `PDS_CONTROL_PG=postgres` and
+  `PDS_AMMO_FILE=/tmp/pdsw16-fake-ammo` alongside all five launcher-exported vars. The launcher forks
+  via `os.execvp` (not `execve`), inheriting the whole environ with no allowlist; `bash -lc` profile
+  sourcing strips no `PDS_*`. Neither variable appears anywhere in `pds-crown-launch.sh` or
+  `pds-climb-preflight.sh` — nothing enforces or scrubs either. D251's prescription therefore needs no
+  launcher change. **Correction to the survey's severity claim:** an EMPTY leaked ammo file fails
+  LOUDLY (`pds-secret-scan.sh:265` dies "a scan with no ammo is not a scan", exit 2 → `fail 4`), and
+  wrong-but-nonempty ammo is caught by the (c) positive control at `:1802` — but only AFTER an export
+  is spent. The genuinely silent shape is a STALE ammo file whose values still live in the full bundle:
+  dev CLEAN, target CLEAN, full FIRES, **three greens proving nothing about the current webhook secret
+  set** — D102's exact shape. **RULING:** `export PDS_CONTROL_PG=postgres` and `unset PDS_AMMO_FILE` in
+  the SAME shell as the arm, and assert the transcript carries the SSH-provenance line ("N webhook
+  secret(s) pulled read-only from the source DB this run"), never merely the absence of a complaint.
+
+- **PDS-D261 — `full_meta_ok` PASSES BY DEFAULT ON A NON-TAR BODY. THE FROZEN HARNESS IS NOT EDITED
+  BEFORE THE SHOT; COLLECT CROSS-CHECKS INSTEAD.** The harness's only structural check on a downloaded
+  bundle is permissive: `manifest_field()` (`:819-829`) returns EMPTY on extract failure *by design*,
+  and `full_meta_ok` (`:1232-1240`) treats empty as the legacy-engine ACCEPT branch. Live-executed: a
+  3041-byte HTML document placed at `$FULL_TAR` yields `manifest_field profile = []` and **`full_meta_ok
+  rc=0` — ACCEPTED as a valid full bundle.** A Caddy 502 page, an auth-redirect body or a download
+  truncated past 1 KiB all pass; `acquire_full_bundle` then returns 0, writes a `.meta` stamping the
+  body with the run's pinned sha, and rungs 3/4 consume it as the differential control. **The transcript
+  would read GREEN off a proxy error page** — and a six-hour climb against a memory-pressured live API
+  is exactly where a 200-with-error-body is realistic. The check discriminates the tidy fake
+  (`profile: dev` → correctly refused) and misses the messy one. **RULING:** the frozen blob
+  `e219e97ccf7f33797c86a2b84d998d599b6bda31` is NOT edited before the shot — the climb must run against
+  the instrument the criteria cite, and a mid-wave harness edit is the recession five waves died of.
+  Instead **COLLECT gains a mandatory pre-stamp cross-check**: `file -b "$FULL_TAR"`, `tar -tf
+  "$FULL_TAR" | head`, and the manifest's own `profile` field. **No criterion is stamped until that
+  reads as a POSIX tar carrying `"profile": "full"`.** The defect is filed (`task-71ac606545fd2260`,
+  priority 2) and fixed in a later wave, never mid-proof (standing law: every red sorts HARNESS BUG or
+  ENGINE FAIL, both FILED, neither fixed mid-proof).
+
+- **PDS-D262 — THE LAUNCHER IS ONE-SHOT, SO A MARGINAL FIRE THE HARNESS THEN REFUSES IS A THIRD
+  OUTCOME.** On a FIRE verdict `pds-crown-launch.sh:362-366` runs `"$HARNESS" --all; rc=$?; sentinel
+  "$rc"; exit "$rc"` — no re-arm, no loop continue. The harness then re-reads MemAvailable ONCE for
+  `cond_b` (`pds-pull-proof.sh:1359-1361`), seconds to tens of seconds after the launcher's own probe,
+  and the paired series shows consecutive 20-second draws swinging up to **~100 MiB** (2205.9 → 2163.6
+  → 2225.9 → 2124.4). So a fire at ~2201 is roughly a coin flip to be refused immediately. That
+  refusal costs **ZERO attempts** (the `return 1` at `:1363` sits above the spend at `:1365-1371`) but
+  **burns the entire six-hour window**, because the launcher exits on the harness rc regardless. No
+  prior decision named this. **RULING:** the fire record states THREE possible outcomes, not two —
+  (a) FIRE and climb, (b) draws-exhausted STAND-DOWN, (c) FIRE then an immediate `cond_b` refusal at
+  zero attempt cost with the window spent. All three are honest; only "never armed" is not. Do NOT
+  add a re-arm loop — a self-re-arming rig is a NEW MECHANISM in a wave whose premise is that no new
+  mechanism is needed.
+
+- **PDS-D263 — THE PASSENGER RIDES ON THE PROVEN DETACH FORM, WITH THE FULL WINDOW, AND STILL NEVER
+  GATES.** `pds-idle-sampler.sh` was live-proven to take no mutex, issue zero HTTP requests, write
+  nothing on guerrilla, and survive `& disown` past a turn end (reparented to ppid 1) — and it ran
+  CLEAN this morning at exit 0, 780/780 samples both legs, `idle_drift_sign=ok`,
+  `threshold_applied=none`. But two hazards are now measured. **(a)** `& disown` is precisely the form
+  D243 already proved DIES to `kill -TERM -<pgid>` — a closing tmux pane reaps it — so the sampler is
+  launched with the SAME `python3` fork+setsid+execvp form `cmd_arm` uses (an already-merged, audited
+  technique; no new script). **(b)** On any early termination the `trap cleanup EXIT INT TERM` `rm
+  -rf`s `WORK_DIR` **before** the script's own peak logic reads it, so a killed run with 34 real
+  samples self-reported "**ZERO samples … almost certainly lost its ssh session**" — the failure is
+  total, not partial, and its own diagnostic misleads. **(c)** The `--window` default of 130 s is
+  calibrated to the RETIRED engine and would truncate beside a six-hour climb; pass `--window 21600`
+  (2160 × 10) explicitly. **RULING UNCHANGED FROM D237/D253:** the sampler is launched AFTER the arm
+  returns and MUST NOT GATE OR DELAY THE FIRE. Not ready, not understood, or refusing → the climb
+  fires without it and the record says `sampler_launched: no`. `sampler_launched: yes` is never
+  load-bearing for the crown.
+
+- **PDS-D264 — THE FIRE RECORD IS `scripts/pds-w15-fire-record.md`; THE CRITERIA ARE THE GATE.** The
+  fire task contradicted itself in three places: `content.files` and the legacy `brief.blocks`
+  definition-of-done both said `pds-w14-fire-record.md`, while `acceptance_criteria[7]` and the
+  description (both amended 2026-07-21T07:21:57Z) said `pds-w15-fire-record.md`. **RULING:** the
+  criteria are the gate and the filename is NOT renumbered mid-flight — `content.files` is patched to
+  `scripts/pds-w15-fire-record.md` and the contradiction is closed rather than adjudicated twice.
+  Renaming to a wave-16 form would force a criterion-text edit for a purely cosmetic gain, and every
+  criterion-text edit is a new `criteria_mismatch` surface (D226).
+
+**WAVE 16 PLAN.** Round 1 is two dependency-free slices. **(1) `pds-w14-crown-fire` — THE SHOT**
+(scripts/pds-w15-fire-record.md): claim the already-perfected task, cut a FRESH worktree at
+origin/main, pay `deps.get` + both compiles, re-verify the five preconditions in the same breath as
+the arm, `unset PDS_LAUNCH_HARNESS PDS_AMMO_FILE PDS_FULL_EXPORT_MIN_MEM_MB PDS_LAUNCH_MEM_FLOOR_MIB`,
+`export PDS_CONTROL_PG=postgres`, arm `--prewarm-now --max-draws 2160 --interval 10`, prove `child.sh`
+line 7, confirm the child ONCE with `ps -p`, launch the passenger, commit the record, push, open the
+PR, END THE TURN. No polling. **(2) `pds-w16-cold-worktree-trap`** (scripts/pds-climb-preflight.sh +
+both crown runbooks): teach the preflight to REFUSE a cold tree and route both runbooks through
+`deps.get` + `--prewarm-now`, proven by mutation in a genuinely cold worktree — file-disjoint from the
+shot, which touches no `.sh` at all (its criterion 11 demands an empty `git diff --stat`). Round 2 is
+`pds-w14-crown-collect-stamp`, **LEAD-ONLY, never the agent that fired**, dispatched after the fire
+merges: six named states, `ps -p` never `pgrep`, D248 stranded-lock recovery, the D261 bundle
+cross-check BEFORE any stamp, criterion text fetched to a file and passed by `"$(cat f)"`, evidence
+terse against the ~9–11 KB request-line ceiling, 0–9 from the one transcript, 10 on merge, 11 LAST
+and ALONE. **ZERO NEW SCRIPTS** and the frozen harness blob is untouched.
