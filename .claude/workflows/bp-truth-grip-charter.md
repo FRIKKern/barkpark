@@ -775,6 +775,196 @@ bolted on afterward, which is worth nothing.
   reader is identical to lying, which is the point. From now on the wave-log entry is written AFTER
   the filing sweep, and the Paper's wave plan names every task id it filed.*
 
+- **D73 — BINDING is keyed on REF IDENTITY, never on path shape, and there are FIVE classes, not
+  three.** *Why: the p1 task's count reproduces exactly (46 of 62 rows, 74.2%, re-derived four times
+  independently) but its MECHANISM does not. Classifying all 62 rows by which ref the command
+  actually reads gives 51 shared-ref (44 of them absolute), 1 per-worktree HEAD, 10 working-tree (2
+  absolute). A screen that refuses absolute checkout paths would REFUSE 44 rows that answer
+  identically from any tree and ADMIT the 9 whose answer is decided by cwd — an anti-signal on its
+  own corpus, headlined as a 74% fix. Proven at L1, not argued: `git show origin/main:<path>`
+  returns byte-identical output from the primary checkout, this worktree, and a fresh `/tmp`
+  worktree (`internal/cli/tasks_next_cmd.go` → 314 lines in all three), because `refs/remotes/*`
+  lives only in the shared `.git` and is absent from `.git/worktrees/<name>/`; `git worktree add
+  --detach` still shares; `extensions.worktreeConfig` is UNSET so a per-worktree remote override is
+  unreachable; there are no submodules. Meanwhile `git ls-tree HEAD --name-only tooling/grip/ledger/`
+  returns 1 file in the primary and 4 in a fresh worktree, and `grep -c needs_worktree` on a
+  relative path returns 5 vs 6 — the two rows a path-shape screen would wave through. The five
+  classes, each with a real specimen in the corpus or the backfill source: **content-addressed**
+  (SHA-pinned `git show <sha>:` — re-runs in any clone on any box, the MOST portable form and the
+  one a 3-way split inverts into "tree-bound"), **shared-ref** (`origin/…`, `upstream/…`,
+  `refs/remotes/…`), **per-worktree** (`HEAD`, bare `git log`, and the index-bound family
+  `ls-files` / `status` / `diff`, whose index lives at `.git/worktrees/<name>/index`),
+  **cwd-bound** (a bare `grep`/`wc` on a relative path), and **foreign-tree-pinned** (an absolute
+  path into a named checkout — answers about THAT tree from anywhere, which is why the 2 rows
+  pinning the EPHEMERAL `spill-janitor-wt` are worse than the 44 pinning the primary checkout, not
+  better).*
+
+- **D74 — the classifier is READ-TIME. It is NOT a stored field and NOT a screen on the write
+  seam.** *Why: three mechanics, each measured, close all the other doors. (a) `RECIPE_FIELDS` is
+  frozen to six keys and unknown keys are REJECTED, not stripped — `admitRecipe({…, binding_class})`
+  returns `UNKNOWN-FIELD: "binding_class" is not a ledger row field`, so a stored class is a
+  deliberate schema amendment, never a migration. (b) The store is structurally immutable: the only
+  write uses `wx`/O_EXCL (raw overwrite fails `EEXIST … errno -17`), there is no update or delete
+  verb, and `foldLedger` never supersedes — an appended correction for an existing key becomes a
+  RIVAL-METHOD and renders the wrong row as a CO-EQUAL peer, proven live: `leads internal/cli` over
+  a store carrying a stale row, its correction, and a deliberately tampered third printed all three
+  under "(3 methods on this key — run all 3 and compare)" with no marking. Appending a fix makes the
+  defect MORE prominent, not less. (c) A refusal on the write seam inherits D64: a batch of 4 rows
+  with ONE refused wrote ZERO files (`ok:false`, `rejections: UNKNOWN-FIELD`, 0 files on disk;
+  codified as test "ALL-OR-NOTHING: one refused row in a batch of two writes NOTHING"). That is the
+  worst possible place for a discriminator which is itself under debate. Therefore p1 criterion 3
+  ("migrate or grandfather the 46") is satisfied the only way it structurally can be: a read-time
+  classifier over the existing rows — which IS the census.mjs pattern, and which grandfathers by
+  LABELLING rather than by editing history. The p1 task's own SUGGESTED SHAPE text ("a screen/lint at
+  mint time that refuses a rerun containing an absolute checkout path") is OVERRIDDEN, on evidence
+  the lead did not have. The one place a rewrite is legitimate is mint-time, in memory, BEFORE
+  `admitRecipe` — proven to round-trip untouched — and only where the classifier proves the answer
+  invariant.*
+
+- **D75 — "shared-ref" means shared among WORKTREES of one `.git`. It does NOT extend to a clone,
+  and every CI checkout is a clone.** *Why: a clone's `refs/remotes/origin/*` mirrors the SOURCE's
+  `refs/heads/*`, never the source's own `refs/remotes/*` — so a clone silently inherits the
+  source's staleness. Measured: source `refs/heads/main` = `a96aacce6`, source
+  `refs/remotes/origin/main` = `515f14fdd`, clone `refs/remotes/origin/main` = `a96aacce6`, 41
+  commits apart, 69 files differing including every grip source. The same shared-ref recipe then
+  answers `level.mjs` = 339 lines in the clone and 615 in the primary — both exit 0. `--depth 1`
+  changes nothing (a real `file://` shallow clone landed on the identical stale SHA); a single-ref CI
+  checkout has no `origin/main` at all and exits 128. So shared-ref is "re-run in any worktree of
+  THIS clone", and the render must say that rather than "re-run anywhere".*
+
+- **D76 — 79% of stored rows PIPE, so the failure the p1 task called loud is SILENT, and exit
+  masking is a first-class classifier output.** *Why: 49 of 62 rows end in `| wc -l` or `| grep -c`,
+  and a pipeline reports the LAST command's status. Proven: `git show origin/main:x 2>/dev/null | wc
+  -l` prints `0` and exits `0` while git itself exited 128. A plausible numeric zero is
+  indistinguishable from a real answer of zero. This corrects the direction that opened this wave in
+  its favour: the 44 `cd <abs> && git show origin/main:<path>` rows are not merely portability debt
+  with a loud failure elsewhere — outside this clone they fail quietly with a fabricated quantity.
+  The classifier therefore reports `exit_masked` alongside the class, and a shared-ref row that pipes
+  is not "safe", it is "safe HERE, silently wrong THERE".*
+
+- **D77 — the mint-era split is ruled: the FOLD RE-DERIVES the quantity from the rerun. Nothing is
+  rewritten, nothing is discarded, no rule is amended.** *Why: 57 of 62 stored rows (91.9%) carry a
+  quantity the merged mint no longer produces — reproduced independently three times — and the
+  consequence ships today: `census --ledger` prints "9 recipes for `git:show` of
+  `.claude/workflows/bp-epic-cycle.workflow.js`" and "4 recipes … of `internal/cli/tasks_next_cmd.go`",
+  word-for-word what `tgw5-mint-key-era-split` quotes, and `leads tasks_next_cmd` instructs an agent
+  to run a LINE COUNT and a MATCH COUNT "and compare". Re-minting was executed end to end against an
+  `origin/main` archive: **0 of 4 rival groups survive**, 48 keys → 62, and a structured
+  field-by-field comparison plus a raw line diff prove ONLY `quantity` changes (114 changed lines =
+  57 rows × 2, zero non-quantity content), with a byte-identical failing-test set before and after.
+  So the data half is settled and lossless. The MECHANISM is not: that proof used a direct file
+  rewrite, which `ledger/README.md`'s "written once, never modified" forbids and which no verb
+  exposes. The resolution is the law this epic already lives by one layer up — **`leads` re-derives
+  the LEVEL from the command at render time and never trusts storage** — extended to the key itself.
+  `foldLedger` keys on `quantityPhrase(rerun)`, keeps the stored value only as `stored_quantity` +
+  `quantity_restated` drift signal, and re-derives `derived_level` the same way (closing
+  `tgw2-fold-reread-derived-level` in the same seam). The 62 files keep their bytes; the fabricated
+  rivals stop rendering; `tgw5-corpus-backfill` gains a store keyed by one grammar. Options (a)
+  discard, (b) bound the split as permanent, and (c) carry a mint-era field are all REFUSED: the
+  first loses 62 rows of genuine foreign work, the second bakes a known fabrication into the
+  product, and the third is a schema amendment bought to avoid a re-derivation this codebase already
+  performs elsewhere for free.*
+
+- **D78 — every grip verb declares WHICH TREE it is answering from, on STDERR.** *Why: this is the
+  only item on the wave's list with a recorded incident. Running `leads ledger` from a worktree
+  printed the pre-`leads` usage string because it executed the WORKTREE's stale `ledger.mjs`; the
+  lead read a shipped feature as unshipped, while verifying this very wave. The adjudicator is
+  un-adjudicated: grip applies "a local checkout is an L3 claim that can run 200 commits stale and
+  lie silently" to every fact it judges and to nothing about itself. Placement is measured, not
+  reasoned: an unconditional STDOUT banner breaks `leads --json` AND `fold` (both
+  `JSON.parse(stdout)`, both failing `Unexpected token 'g', "[grip-prove"… is not valid JSON` — and
+  `fold` emits BARE JSON with no flag gating it, so stdout corrupts the tool's only always-machine
+  verb). The same banner on STDERR is green across all 460 tests: no harness merges the streams on a
+  successful run and no test asserts stderr is empty. Embedding it in the JSON is also green but
+  costs four separate edits (`write`/`prescreen` have no `--json` to embed into and `fold` has no
+  wrapper object to add a key to) — four places to silently miss a verb, for the same guarantee.
+  STDERR is the ruling; `leads --json` additionally carries it as a `provenance` object because a
+  machine consumer cannot read a banner. It states the tree root, HEAD, whether HEAD differs from
+  `origin/main`, and whether the working tree is dirty — the exact four facts whose absence cost the
+  false negative — and it says "as of last fetch", because it performs none.*
+
+- **D79 — P5 is SETTLED. `leads` SHIPS, and the honest finding is not the cut criterion but the
+  PRECISION.** *Why: P5 ran for the first time in this epic's life, twice, under two independently
+  derived term lists: 50.0% honest-empty at subsystem granularity (the grain D59 ratified) and
+  65.0% at file-path granularity — the second reproducing D59's headline exactly. Both are below
+  the >70% cut, so `leads` is not cut and the question is closed; no builder spends a slice
+  re-running it, and no prompt anywhere gains a rerun exhortation. Published whichever way it fell,
+  per D21's precedent. Two corrections ride along. (a) D59's three decisive readings do NOT
+  reproduce on the shipping store: `mix test` → 0 rows (claimed 35), `api/lib` → 0 (claimed 26),
+  `internal/cli` → 11/8 subjects (claimed 12). Two of three are zero. Those readings are RETIRED
+  into the D23/D37/D52 class and may not be quoted again. (b) P5's own original wording is not on
+  `origin/main` — the charter cites it by number five times and never states it — so every SHIP/CUT
+  statement in this epic is against D59's paraphrase, and that is now written down rather than
+  implied. The measurement that actually answers D46 is precision, and it is **29.2%**: 92 of 130
+  returned rows are not about the queried subsystem, because `matchesQuery` hays `subject + "\0" +
+  rerun`, i.e. the full command text. `leads origin/main` returns 51 of 62 rows with ZERO subject
+  matches — a pure dump, D45's `cmd:<head>` dumping-ground failure reappearing through the half D45
+  never covered. Against a repo-wide grep `leads` wins 10 of 10 non-empty terms; against the SCOPED
+  grep an agent types once it knows the subsystem, 8 of 10 with one outright loss; correct for
+  precision and it is 3 of 20. `leads` beats grep in a narrow, precise, in-band slice — exactly
+  D46's stated intra-epic scope and no wider — and that is the claim the charter carries from now
+  on.*
+
+- **D80 — `leads` matches on the SUBJECT by default; the command text is opt-in.** *Why: the direct
+  consequence of D79's 29.2%, and the fix is one predicate rather than a ranking. Two of the ten
+  non-empty terms are pure noise and both were counted as wins: `leads js` returns 30 rows of which
+  5 are under `js/` (`package.json` matches "js" via "json"; `.workflow.js` contributes 11 via its
+  extension) and `leads test` returns 9 rows of which 0 are on-subsystem. Subject-default is not a
+  recall cut, because the empty state stays honest and gains a number: when the subject index has
+  nothing but the command text does, `leads` says so and names the flag rather than printing
+  nothing. This closes `tgw5-leads-short-needle-false-positives` with a measurement instead of a
+  heuristic, and it keeps D44's rule that the matching rule must be restatable in one sentence.*
+
+- **D81 — the HOLD on `tgw5-corpus-backfill` STANDS, and for a stronger reason than volume.** *Why:
+  the backfill's source corpus is the MIRROR of the store it would write into. The 652 committed
+  proofs classify 87.1% working-tree / 11.7% shared-ref, against the store's 82% shared-ref / 18%
+  tree-sensitive — so a classifier validated on the 62 rows is validated against the inverse of the
+  distribution 4x volume would mint, and the naive grammar's 2.0% error rate on that corpus is
+  else-branch absorption, not discrimination (a trivial always-working-tree classifier errs 12.7%,
+  and 568 of 652 correct answers arrive via the else branch). Five of the seven resisting forms have
+  ZERO instances in the current store — `git status`, `git diff`, bare `git log`, SHA-pinned reads,
+  `stash`/`rev-parse HEAD` — so a grammar gated on the 62 rows cannot fail there and would ship
+  green. Backfill dispatches after the classifier AND the fold re-derivation are on `origin/main`,
+  and its own gate is the 652-proof corpus, never the 62-row store.*
+
+- **D82 — the wave gate is `cd <worktree-root> && node --test tooling/grip/test/*.test.mjs`,
+  expecting 460 tests / 459 pass / 0 fail / 1 skipped, and the `cd` is load-bearing.** *Why: the
+  suite has never been run green from a proper tree in this epic's life — the two survey readings
+  (369/382 and 414/424) are both STALE FILE SETS, and 424 = 460 − `leads.test.mjs`(30) −
+  `wiring.test.mjs`(6) exactly. From a fresh worktree at `origin/main` it is 460/459/0/1, identical
+  at `6a5baa247` and at `515f14fdd`, stable across three consecutive runs, with per-file totals
+  summing to 460 (no order dependence, so a builder may gate on its own file alone). The single skip
+  is `rerun.test.mjs:789`, gated `{ skip: process.env.GRIP_LIVE !== "1" }` — a green baseline is
+  `# fail 0 # skipped 1`, NEVER `# skipped 0`, and a builder reporting 460/460 has changed
+  something. Three facts every slice must carry. (a) The suite is CWD-DEPENDENT: run from outside a
+  git repo it fails 3 tests in `rerun.test.mjs` with `128 !== 0` and `'UNAVAILABLE' !== 'FAILED'` —
+  assertion-shaped errors that mimic a real regression. (b) The directory form `node --test
+  tooling/grip/test/` fails spuriously with `ERR_TEST_FAILURE`; the glob is the invocation. (c) NO
+  CI WORKFLOW RUNS THIS SUITE — `grep -rl grip .github/workflows/` returns nothing, and the four
+  workflows containing `node --test` each run a different suite. The gate is manual and local, so a
+  builder's QUOTED output is the only evidence there is; and because `screenCommand` refuses every
+  `node` command per D62, no slice can store its gate proof as a grip recipe — it goes in the task's
+  evidence field as quoted output.*
+
+- **D83 — builders branch from `origin/main`. The primary checkout is not a base, and the wave-5
+  log is landed retroactively rather than re-authored.** *Why: `/Volumes/SATECHI/github/barkpark` is
+  41 behind / 4 ahead, its `tooling/grip` is 15 files and ~3968 lines behind, `leads.test.mjs` does
+  not exist there, and it carries an 18-file STAGED grip diff that matches no commit: 17 of the 18
+  files are byte-identical to the stranded branch `truth-grip/wave5-decide`, and the 18th
+  (`census.mjs`, 757 lines against main's 1066) is abandoned `tgw4-census-run-is-not-hermetic` WIP
+  still containing the literal NUL byte that D67 proves was already fixed. A builder gating there
+  gates a hand-assembled tree. The charter itself reproduces the wave's own thesis three ways
+  simultaneously — 1266 lines on `origin/main`, 1018 in one worktree, 617 in the primary — and two
+  surveyors independently called their own copy "this worktree". A worktree created FRESH from
+  `origin/main` gets the right charter and the right file set; nothing else does. Separately, the
+  wave-5 review commit `170f01420` is proven stranded by CONTENT, not merely by ancestry: its diff
+  parent blob is byte-identical to `origin/main`'s current charter blob, it lives only on
+  `truth-grip/wave5-review` (mirrored on `review/union-final` and `review/union-probe`), and no PR
+  was ever opened for it — while its 119 lines of graded narrative are the only record of how wave
+  5 actually shipped. Its CODE is fully landed (`git diff origin/main..truth-grip/wave5-review --
+  tooling/grip` excluding tests returns ZERO files), so this is docs-only stranding. It is appended
+  verbatim below, marked as landed retroactively, rather than rewritten from memory.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -911,6 +1101,59 @@ mention-promotion still derives a false L1 from a grep of an ops doc (D65). And 
 rests on a 5-point margin at 62 rows, with 5 of 7 non-empty queries returning a SINGLE row — a
 one-row lead is not measurably better than a grep, so P5 is re-measured after round 2 at the larger
 row count before it is called settled.
+
+### Wave 6 — bind the answer to the tree. Parent task `truth-grip-epic`. Paper `source-of-truth-grip-wave-6-2026-07-21`.
+
+The direction that opened this wave was "bind the answer to the tree — close the defect CLASS, not
+the instance". Verification kept the direction and re-grounded three of its four premises. The
+count in the p1 task reproduces exactly and its mechanism does not (D73); the fix cannot be a
+migration or a write-seam screen because the store is structurally immutable and the write is
+all-or-nothing (D74); the failure the task called loud is silent, because 79% of the rows pipe
+(D76); and the mint-era ruling the lead escalated is settled by re-deriving the key rather than by
+touching a byte (D77).
+
+**One shape, four instances, one seam.** Nothing in grip binds an artifact to the tree or era it
+was produced against, so a consumer cannot tell whether it is looking at the right one. Rows do not
+record their binding; the CLI does not record which tree it is; the fold does not record which era
+keyed it; and the rot detector scores a tree-sensitive row HEALTHY while it answers differently in
+two trees — demonstrated, at last, rather than argued: `censusOne("git ls-tree HEAD --name-only
+tooling/grip/ledger/")` returns `ANSWERED · answering=true · decayed=false` from BOTH the primary
+checkout and a fresh worktree, with 1 line in one and 4 in the other. The census's only
+tree-awareness classifier, `WRONG_CWD`, keys on stderr `/not a git repository/i` and therefore
+CANNOT fire inside any worktree of any clone — it is a null guard against exactly this class.
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw6-binding-classifier` — the five binding classes, keyed on ref identity, with `exit_masked` | 1 | large | tooling/grip |
+| 2 | `tgw6-self-provenance` — every grip verb declares its own tree, on stderr; `cli.mjs` gets its entry guard | 1 | medium | tooling/grip |
+| 3 | `tgw6-fold-rederives-key` — the fold keys on `quantityPhrase(rerun)`; stored quantity and level become drift signals | 1 | medium | tooling/grip |
+| 4 | `tgw6-leads-subject-first` — `leads` matches the SUBJECT by default; the command text is opt-in and counted | 1 | medium | tooling/grip |
+| 5 | `tgw6-leads-declares-binding` — every returned recipe states its binding class; `--json` carries provenance | 2 | medium | tooling/grip |
+| 6 | `tgw6-mint-binds-to-caller` — mint strips a `cd <root> &&` prefix ONLY where the classifier proves the answer invariant | 2 | medium | tooling/grip |
+| 7 | `tgw6-census-binding-report` — `census --ledger` reports the binding-class distribution and stops scoring tree-sensitive rows as healthy | 2 | medium | tooling/grip |
+
+Round 2 does NOT dispatch this run. Slices 5, 6 and 7 all import `binding.mjs`, which slice 1
+creates; 5 additionally edits `leads.mjs` (slice 4) and `ledger.mjs` (slice 3); 7 additionally
+edits `census.mjs` (slice 2). Every round-2 brief opens with its `AFTER <task_id> merges` line, per
+the sequenced-rounds law that has now gone 7-for-7 across two epics.
+
+**The one thing this wave is for.** After round 1, an agent in any worktree types `node
+tooling/grip/ledger.mjs leads internal/cli` and the first thing it learns is WHICH TREE the answer
+is about and whether that tree differs from `origin/main` — so the lead's false negative becomes
+structurally impossible rather than merely unlikely — and the store it reads stops printing a line
+count beside a match count as rival methods of one property. After round 2, every returned recipe
+declares whether it re-runs in any clone, in any worktree of this clone, only in YOUR tree, only in
+YOUR cwd, or only against one named checkout with a recorded reason.
+
+**What this wave will NOT have proven, stated in advance.** The classifier is gated on the 62-row
+store, where it cannot fail (D81) — five of the seven resisting forms have zero instances there, so
+its acceptance test is the 652-proof corpus, and its grammar is un-stress-tested until
+`tgw5-corpus-backfill` runs. The suite has no CI (D82), so every green here is a local green that
+nothing on the merge path re-derives. `census --ledger` still measures STILL-ANSWERING, never
+STILL-CORRECT; slice 7 narrows that to "still answering, and here is which tree it answered about",
+which is strictly less than correctness. And `git blame` appears zero times in either corpus, so
+its per-worktree classification is reasoned from git semantics rather than measured — the one row
+in D73's table without corpus evidence.
 
 ## Wave log
 
@@ -1264,3 +1507,128 @@ it: run a real survey report through `ledger.mjs write` and re-derive the mint
 yield from something nobody hand-authored. Backlog filed this review:
 `tgw4-absence-veto-stops-at-the-rerun-seam` and
 `tgw4-census-run-is-not-hermetic`.
+
+> **Landed retroactively by wave 6 (D83).** The entry below was written, graded and
+> reviewed on 2026-07-21 as commit `170f01420`, then stranded: it lives only on
+> `truth-grip/wave5-review`, no PR was ever opened for it, and its diff parent blob is
+> byte-identical to the charter blob it never reached. Its CODE landed; only the record of
+> how did not. It is reproduced verbatim rather than rewritten from memory.
+
+### Wave 2026-07-21 (3) — round 1, the ledger becomes readable. Grade A.
+
+Paper: `source-of-truth-grip-wave-5-2026-07-21`. Six round-1 slices built and
+reviewed; `tgw5-corpus-backfill` and `tgw5-fold-hardening` deferred by design
+(sequenced-rounds law), not stalled. All six carry `builder_model: opus`, filed
+that way by Decide rather than patched on in review — the wave-4 lesson held.
+
+**ROSTER DRIFT, named per D72.** The roadmap table above lists slices 2 and 5 as
+`tgw5-leads-verb` and `tgw5-probehttp-argv`. The real, claimed, stamped task ids
+are **`tgw3-leads-verb`** and **`tgw4-bl-probehttp-shell-injection`** — both
+correctly kept their original ids rather than being re-filed. The charter names
+should be read as titles, not ids.
+
+**THE VERB EXISTS AND IT READS WELL.** `node tooling/grip/ledger.mjs leads
+<substring>` returns recipes over the 62-row store: `internal/cli` → 8 of 48
+indexed subjects, 11 recipes, each with a level RE-DERIVED from the command at
+render time. The no-value guarantee is structural, not promissory, and a forged
+run file carrying `value: 544` is proven unable to put 544 on the screen.
+
+**Landed** (final branches carry a reviewer `-r` commit where one was needed):
+
+| Slice | Branch | What |
+|---|---|---|
+| `tgw5-screen-hardening` | `…close-two-upstream-rce-primitives-and-fo-0-r` | Two upstream RCE primitives closed — double-quoted `$()` (live-proven to execute through `censusOne` itself) and the env-assignment strip — plus four write-flag holes and two false refusals. `sed` LEFT `REFUSED_HEADS` and is judged on its SCRIPT by a real scanner. Reach 240→254/651, accounted for member-by-member. 58 tests. |
+| `tgw3-leads-verb` | `…ship-grip-leads-substring-filtered-recip-1-r` | `leads.mjs` + the `prescreen` rehearsal verb. Shipped REDUCED exactly as D43–D46 rule: no band, no rank, no RIVAL-METHOD flag, each cut asserted on rendered output. 30 tests. |
+| `tgw5-mint-fixes` | `…stop-the-mint-discarding-go-and-top-leve-2-r` | Go package globs, top-level directories, and the quantity re-keyed from the FLAG to the PROPERTY. Corpus path-token yield 48.8%→54.1%, collision groups 58→45. The RIVAL-METHOD control fires through `foldLedger`, so the signal was narrowed rather than erased. |
+| `tgw5-census-ledger` | `…point-the-census-at-the-ledger-make-it-v-3-r` | `census --ledger`, the D67 NUL byte, the D68 hermeticity fix, and `validateArgv`. 58 tests. |
+| `tgw4-bl-probehttp-shell-injection` | `…close-the-probehttp-fact-derived-url-inj-4` | `probeHttp` spawns curl with an argument vector. Re-derived live in review: the payload leaves no marker and curl exits 3. **No reviewer commit needed — correct as shipped.** |
+| `tgw5-write-path-docs` | `…document-the-write-path-where-a-writer-a-5-r` | The nine discovery steps answered beside the write target; D62 and D67 written down honestly. |
+
+**THE UNION WAS GREEN ON THE FIRST TRY.** Wave 4's headline lesson was that a
+wave whose slices are individually green has not been reviewed until they are
+merged into one tree and gated together. Done first this time, including the
+`truth-grip/wave5-decide` charter commit and its 62 rows: seven branches merge
+clean, **460 tests / 459 pass / 0 fail across three consecutive runs**, selftest
+16/16, fold exit 0, `census --ledger` and `--limit 40` exit 0, acceptance exit 0.
+No co-scoped-merge defect this wave.
+
+**What the review found and fixed.** The epic's own failure modes kept appearing
+inside the tooling built to prevent them, for a fifth wave:
+
+1. **Three README claims that go FALSE the moment this wave merges.** The docs
+   slice branched from a base where its siblings were unmerged, so it correctly
+   stated that `prescreen` does not exist, that
+   `NODE_OPTIONS=--require=… mix test` is admitted, and that `census.mjs`
+   contains a NUL byte. All three are false on the merged tree. A doc is an L5
+   claim about L2 and this one would have shipped stale on day zero. Rewritten
+   against the merged tree with real output pasted, and the NUL section kept in
+   PAST tense because the METHOD RULING outlives the fix — repairing the file
+   does not retroactively make a negative measured through a blind wrapper have
+   happened.
+2. **`leads` rendered a partially-unreadable store as a smaller clean one.** The
+   builder named this as the sharpest thing it would fix next and did not fix
+   it. `foldLedger` reports unusable run files in `unreadable[]` and the fold
+   CLI exits 1 on it, but `selectLeads` read only `entries[]` — so rows that
+   were never READ rendered as rows that do not EXIST, and the empty state
+   printed "This is an answer, not a blank" over a store half of which was never
+   opened. That is D6's disease at the read layer. Surfaced above both render
+   paths, named file by file, honesty claim withdrawn when it applies.
+3. **A false refusal inside the fix for false refusals.** `envAssignmentReason`
+   tested the raw span, so `CC="/usr/bin/clang"` was refused while its unquoted
+   twin was admitted. Quotes are now stripped for the shape test only — the
+   expansion test still reads the raw span, so `CC="$FOO"` stays refused.
+4. **The census's unreadable branch was dead code nobody had run.** The builder
+   said so. It is the branch that stops a partially-read store publishing itself
+   as a clean smaller one — the highest-cost branch in the module — so it is now
+   fired against a synthesised rotten store, with a clean-store control.
+5. **The eight new mint subjects nobody eyeballed.** Enumerated: 42
+   single-segment subjects, six of them new. Three are the repo's real top-level
+   names; three (`lib`, `src`, `sizer`) are RELATIVE and conflate directories.
+   No behaviour change — the conflation is the correct trade — but it is now a
+   stated and tested property rather than something the first ambiguous lead
+   teaches somebody.
+
+**THE ONE THING THE LEAD MUST DECIDE BEFORE ROUND 2.** Re-derived on the merged
+tree: **57 of the 62 committed rows carry a `quantity` the merged mint would no
+longer produce.** The mint fix is on `origin/main`-to-be; the STORE still
+carries the fabrication it was built to kill — `census --ledger` prints "9
+recipes for `git:show` of `bp-epic-cycle.workflow.js`", and `leads internal/cli`
+shows a line count beside a match count as rival methods of one property, which
+is D60 verbatim. `tgw5-corpus-backfill` mints under the NEW grammar, so running
+it over this store splits the index by ERA rather than by method and leaves the
+old half fabricating rivals among itself forever. The tension is real in both
+directions: `ledger/README.md` declares run files immutable, so rewriting keys
+breaks a ratified rule and discarding them loses 62 rows of genuine foreign
+work. Filed as **`tgw5-mint-key-era-split`** (priority 1, published) because it
+is a charter decision, not a patch.
+
+**Ledger audit.** The most honest ledger of the five waves. All six built slices
+left `lifecycle: in_progress` with the merge-gated criterion open for the lead,
+every other criterion stamped with real evidence as the work happened, and both
+round-2 tasks untouched at `open`. Two fixes. (a) `tgw5-write-path-docs`
+criterion 1 was an honest `--miss` ("documented together with the prescreen
+escape") that the REVIEW made true; stamped with evidence naming the review
+commit and the reason the builder's miss was correct at the time. (b)
+`tgw5-prescreen-verb` — filed by the docs builder for a verb `tgw3-leads-verb`
+was shipping in the same wave — closed by CONTENT per D71 before it reached the
+ready pool. No task outside this wave was touched. Seven backlog tasks filed by
+builders were verified present and published.
+
+**What this wave did NOT prove.** The store is 62 rows, not the ~250 round 2
+targets, so P5 remains un-re-adjudicated and `leads` is still a verb whose
+value rests on a corpus that has not arrived — the leads builder measured 77.8%
+honest-empty at subsystem granularity over the 9 rows it had and reported it
+rather than flattering it. The `sed` script scanner is genuinely new attack
+surface, hand-written, fail-closed on everything it does not model, and it is
+the part of this wave a future reviewer should read adversarially rather than
+trust the green. Unquoted parameter expansion (`grep -n $PATTERN .`) is still
+admitted. And `census --ledger` measures STILL-ANSWERING, never STILL-CORRECT —
+the render says so, but 100% answering over 47 rows will be misread as health.
+
+**What the next wave inherits.** Merge round 1 as ONE unit — the six `-r`
+branches plus `truth-grip/wave5-decide`, whose charter the branches assume and
+whose 62 rows the gates read. Then rule on `tgw5-mint-key-era-split`, because it
+is upstream of the store backfill writes into. Then `tgw5-corpus-backfill`
+(after screen + mint + census are on `origin/main`, proven BY CONTENT per D40)
+and `tgw5-fold-hardening` (after leads). Round 2 is where this epic's central
+claim finally gets tested at a row count where an honest empty is informative.
