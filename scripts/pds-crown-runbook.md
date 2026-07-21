@@ -42,6 +42,19 @@ There is no seventh state — if you are about to write one down, you are guessi
 `KILLED`, `collect` also reports the stranded export lock; that lock is the one a later
 actor must **not** `rmdir` blindly (PDS-D31 — two concurrent full exports OOM the box).
 
+`CRASHED` is the state that decides whether re-arming is free, so it is sub-diagnosed
+from anchored stamps in the transcript's own bytes rather than a substring (PDS-D252):
+
+| stamp present | what it means | cost |
+|---|---|---|
+| `FIRE — draw N` | the harness RAN | an export attempt **was spent** — re-arming is **not** free |
+| terminal `STAND-DOWN — ` | draws exhausted, never invoked | zero attempts — re-arming is free |
+| `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 | zero attempts — free, but fix the compile first |
+| none of the three | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
+
+A per-draw line carries `verdict=STAND-DOWN:mem<floor` on *every* refusal; that is a draw,
+not the verdict, and it is why the unanchored substring could call a spent attempt free.
+
 ### (i) The two env lines that must be in the SAME shell as `arm` (PDS-D251)
 
 ```sh
@@ -66,11 +79,16 @@ all**, and aiming it at guerrilla is a category error rather than a shortcut —
 spends zero guerrilla export by construction.
 
 **The named price:** exporting it converts a silent INFO line into a **hard-fail leg**. A
-control that does not behave as a control takes rung 4 down with it. So prove the local
-server answers *before* arming, not after:
+control that does not behave as a control takes rung 4 down with it. So prove it *before*
+arming, not after — and prove the right thing. `pg_isready` says only that something
+answers; the control does `CREATE DATABASE "pds_secret_scan_ctl_<pid>"`
+(`pds-secret-scan.sh:327`) and needs the privilege to do it. A live-but-unprivileged
+Postgres passes `pg_isready` and hard-fails rung 4 hours later. Run the control itself,
+which is the exact leg rung 4 will run and spends zero guerrilla export by construction:
 
 ```sh
-pg_isready       # must be green in the same shell, before `arm`
+pg_isready                                       # necessary, not sufficient
+scripts/pds-secret-scan.sh control --pg postgres  # THE proof — must exit 0
 ```
 
 ### (ii) What clearance actually looks like (PDS-D250)
