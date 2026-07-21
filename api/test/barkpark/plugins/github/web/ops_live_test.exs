@@ -17,6 +17,16 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
 
   @admin_token "github-ops-admin-test-token"
 
+  # Ecto's per-query telemetry event; `metadata.source` is the queried table.
+  @repo_query_event [:barkpark, :repo, :query]
+
+  # The `oban_jobs` table is read exactly ONCE per `Health.snapshot/0` (its
+  # `queue_snapshot` reads the `github_mirror` queue depth) and nothing else on
+  # this admin-gated mount touches it — Oban runs `testing: :manual` in the test
+  # env, so there is no background staging poll. That makes an `oban_jobs` read
+  # the unique, once-per-snapshot signature of a Health probe: counting it proves
+  # the disconnected mount runs 0 snapshots and the connected mount runs exactly 1.
+
   setup do
     {:ok, _} =
       Auth.create_token(@admin_token, "github ops admin", "production", [
@@ -169,6 +179,44 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
     end
   end
 
+  # The #2402 connected?-mount-gate scar: `mount/3` ran `Health.snapshot/0`
+  # (5+ DB round-trips) UNCONDITIONALLY, so the DISCARDED disconnected render
+  # fired every probe and then the connected mount re-fired them — 2× per open.
+  # It is now gated behind `connected?/1`. These two tests count the `oban_jobs`
+  # read — the unique once-per-`Health.snapshot` signature — to prove 2× → 1×.
+  describe "disconnected mount elides the Health.snapshot probes" do
+    test "the disconnected (dead) render runs ZERO health probes and paints a loading skeleton",
+         %{conn: conn} do
+      {conn, health_reads} = count_health_queries(fn -> get(conn, "/admin/github") end)
+
+      body = html_response(conn, 200)
+      # The dead render shows the loading skeleton, NOT the projected health board.
+      assert body =~ ~s(data-role="github-ops-loading")
+      assert body =~ "Loading sync health"
+      refute body =~ ~s(data-role="github-queue")
+
+      # Health.snapshot's queue_snapshot never ran on the discarded mount.
+      assert health_reads == 0,
+             "the disconnected mount must issue zero Health.snapshot (oban_jobs) queries, " <>
+               "got #{health_reads}"
+    end
+
+    test "the connected mount runs Health.snapshot exactly once (2x -> 1x)", %{conn: conn} do
+      # `live/2` does the disconnected render THEN connects. The disconnected leg
+      # now contributes 0 health probes (the fix), so the ONE oban_jobs read across
+      # the whole flow proves the snapshot runs a single time — on connect.
+      {{:ok, _view, html}, health_reads} =
+        count_health_queries(fn -> live(conn, "/admin/github") end)
+
+      # Behavior parity: the connected view paints the real health panels.
+      assert html =~ ~s(data-role="github-queue")
+      assert html =~ "github_mirror"
+
+      assert health_reads == 1,
+             "Health.snapshot must run exactly once (on connect), got #{health_reads} oban_jobs queries"
+    end
+  end
+
   describe "db-reachability indicator + lag/pending caption" do
     test "renders the db-status indicator (reachable under the live test Repo)", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/admin/github")
@@ -187,6 +235,33 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
       assert html =~ ~s(data-role="github-lag-caption")
       assert html =~ "mutation_events"
       assert html =~ "task subset"
+    end
+  end
+
+  # Count Repo queries that touch the `oban_jobs` table within `fun` — the unique
+  # once-per-`Health.snapshot/0` signature (`queue_snapshot`). No pid filter: the
+  # connected mount runs in a spawned LiveView process, so the counter must see
+  # queries from ANY process during the block (safe — this module is async:
+  # false, so nothing else runs concurrently, and Oban is `testing: :manual`).
+  defp count_health_queries(fun) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    handler_id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      @repo_query_event,
+      fn _event, _measurements, %{source: source}, _config ->
+        if source == "oban_jobs", do: Agent.update(counter, &(&1 + 1))
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, Agent.get(counter, & &1)}
+    after
+      :telemetry.detach(handler_id)
+      Agent.stop(counter)
     end
   end
 end
