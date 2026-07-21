@@ -3836,3 +3836,111 @@ manifest `profile == full`) BEFORE any stamp, criterion text fetched to a file a
 with the ONE wave-19 run_id, **10 on merge with the merge SHA recorded**, **11 LAST and ALONE**. If any
 rung refused: stamp NOTHING, record the named refusal in the paper, sort each red HARNESS-BUG vs
 ENGINE-FAIL and file the successor (never fix mid-proof). **ZERO NEW SCRIPTS**; frozen blob untouched.
+
+### Wave 20 — DERIVE THE REAL FLOOR, THEN FIRE
+
+- **PDS-D276 — THE FLOOR IS DERIVED AT 897 MiB; D232 AND D244 ARE SUPERSEDED ON THEIR NUMERIC RULINGS.**
+  Wave 19 measured the wall directly: over 618 draws (run `c7528814`, 16:56–18:44Z) `MemAvailable`
+  ranged **1796–2012 MiB, cleared 2200 in 0 of 618**. The box's regime does not reach the fossil floor;
+  a climb gated at 2200 never fires here. The 2200 default is the RETIRED in-RAM engine's scarcity
+  figure; the DEPLOYED engine is the streaming spill engine (#5083, `Ecto.Adapters.SQL.stream` at the
+  Postgrex 500-row default, chunk-bounded RAM), an ancestor of live guerrilla `34b9b25d`.
+  **THE NUMBER:** `FLOOR = measured_demand_delta + margin = 98.16 + 798.81 = 896.97 → 897 MiB`.
+  **THE UNIT, STATED HONESTLY (this is the crux D232/D244 lacked):** the demand term `98.16 MiB` is the
+  **BEAM RSS peak-minus-baseline DELTA**, `(488564 kB − 388044 kB)/1024`, measured by the frozen
+  harness's own rung-3 1 Hz `ps` sampler during wave-16's real 1.4 GB full export (run `1b515ee5`) — the
+  **same peak-minus-baseline delta class** as the retired engine's canonical `2235.43 = (2483304−194228)/
+  1024`, and the exact quantity **PDS-D267 itself names** ("+98 MiB incremental — apples-to-apples … via
+  the same 1 Hz `ps` sampler"). It is **NOT** the `477.11 MiB` absolute RSS peak (`488564/1024`), which
+  adds back the `388044 kB` resident baseline that `MemAvailable` **already excludes** — using it re-commits
+  the exact double-count **PDS-D222(i)** forbids verbatim ("adding the baseline back would DOUBLE-COUNT and
+  over-set the gate"); that is why the strategize "~1276" (`477 + margin`) is REJECTED here. It is **NOT**
+  the `19.71 MiB` wire-byte COPY-chunk figure D232 correctly refused as unit-mixed. It is **NOT** the
+  ~647 MiB wave-16 `MemAvailable` drawdown, a margin-class quantity already absorbed by the 798.81 margin.
+  **What D232/D244 keep:** D232's unit-discipline principle (never mix a wire-byte figure into an RSS-delta
+  slot) and D222's delta convention are UNTOUCHED — 897 obeys both. **What is superseded:** D232's "fire at
+  2200, the derivation is not payable" and D244's "the floor stays at the unmodified 2200, PDS_FULL_EXPORT_
+  MIN_MEM_MB left UNSET" — both rested on evidence they lacked (D232 had only D217's wire-byte figure; D244
+  had only a SCOPED, drift-dominated, −7.55 MiB non-signal). Wave-16's UNSCOPED real export is the licensed
+  demand figure neither had. **D211 floor-law holds:** `897 ≫ 98.16` (the deployed engine's measured
+  demand), so the floor never sits below real demand. **SAFETY:** 897 sits BELOW the box's lowest observed
+  idle `MemAvailable` (1343.77, D250), so `cond_b` passes at essentially every draw (the intent — fire
+  in-regime); the real protection is the trivially-small true demand (~98 MiB RSS delta) + the 798.81
+  margin (MAX of three drawdowns, > the 461 MiB build depression of D227 and the 647 wave-16 fire
+  drawdown), with **zero dmesg OOM** ever recorded (worst-ever build storm 1571.52 MiB, D230). **ONE
+  HONESTY CAVEAT recorded, not glossed:** the 388044 baseline is the harness's own strictly-pre-window
+  rung-3 baseline, a *within-process* peak-minus-baseline — cleaner than a cross-process paired subtraction
+  (no blue/green baseline mismatch) but NOT the formal D104 paired idle control D211's wording names; the
+  floor's safety rests on `floor ≫ peak`, not on a perfect control. Derivation record committed to
+  `scripts/pds-w20-floor-derivation.md` + ledger row `grip-…-pds-w20-floor-value.json`.
+
+- **PDS-D277 — THE LAUNCHER HAS THREE FLOOR KNOBS, NOT TWO; ALL THREE MOVE TO 897, AND THE ARM RECORDS
+  THEM.** Lowering only `MEM_FLOOR_LAW` (`:125`) and exporting `PDS_FULL_EXPORT_MIN_MEM_MB` is **INERT**:
+  the value that actually gates the detached child's FIRE-vs-STAND-DOWN poll predicate (`:348`) is
+  `MEM_FLOOR_MIB`, set at `:124` to `${PDS_LAUNCH_MEM_FLOOR_MIB:-2200}`. With `MEM_FLOOR_LAW` lowered but
+  `MEM_FLOOR_MIB` still 2200, the arm guard (`:411-414`) passes silently and the child polls forever at
+  2200 — wave-19's 0/618 reproduced under a green edit. **RULING — a surgical edit to
+  `scripts/pds-crown-launch.sh` (a wave-14-built, NON-frozen script; the frozen harness blob
+  `e219e97c` stays untouched — this extends D211's derive-only/frozen-blob-untouched spirit to the second
+  instrument, which did not exist when D211 was ruled):** (1) `:125` `MEM_FLOOR_LAW=2200 → 897` (removes
+  the arm-refusal guard); (2) `:124` default `…:-2200 → …:-897` (BAKES the poll predicate to 897 in
+  source, so the fire does not depend on an operator remembering `PDS_LAUNCH_MEM_FLOOR_MIB` — dodges the
+  forgotten-export silent-revert hazard); (3) inside `fire_detached`'s D249 contiguous env-export block,
+  `export PDS_FULL_EXPORT_MIN_MEM_MB=897` (reverses D244's UNSET so the harness's own `cond_b` gate (b)
+  matches). **AND close the two recording bugs in the same edit** (`pds-bl-w16-arm-never-records-its-own-
+  floor` + `pds-bl-floor-env-silent-revert`): `run_dir/meta` and the arm summary record BOTH effective
+  knobs distinctly — `mem_floor_mib=897` (gate A, poll predicate) AND `full_export_min_mem_mb=897` (gate
+  B) — never the hardcoded D244 string; and the selftest gains a MUTATION-PROVABLE assertion (arm with a
+  tightened floor, assert it appears in both summary and meta). The five stale D244 citations
+  (header `:27-28`, comment `:189`, child stamp `:248`, banner `:477`, selftest assertion `:809`) all
+  update to the new ruling; the banner `:477` is the SAME line `pds-bl-w16-arm-never-records-its-own-floor`
+  targets, so both fixes land together to avoid a line-clobber. Selftest MUST pass (`bash
+  scripts/pds-crown-launch.sh selftest` exit 0) as the slice gate.
+
+- **PDS-D278 — THE RIDE-ALONG IS DISCARDED, NOT RATIFIED; THE HARNESS RUNG-3 RSS IS THE LICENSED DEMAND
+  AND THE FIRE SELF-CONFIRMS IT.** The strategize framing — "the ride-along sampler measures the
+  authoritative peak … that peak RATIFIES the floor" — CONFLATES two instruments. The `98.16/477` figure
+  is the FROZEN HARNESS rung-3 RSS (`pds-pull-proof.sh`'s own instrumentation of the real export), a
+  LICENSED demand instrument (D267). The ratify task's subject is a DIFFERENT instrument,
+  `pds-idle-sampler.sh` — "the PAIRED IDLE CONTROL, ALONE (PDS-D237)", `acquisition=none`, every field
+  `idle_*` — which in wave 16 ran only a rehearsal (780/780, `threshold_applied=none`, no MiB demand) and
+  has NEVER ridden a real export. A CONCURRENT ride can never license the demand: 3 of D253's 4
+  substantive conditions are structurally unsatisfiable — `idle_window_s=21600` (6 h, D263) cannot
+  reconcile against a ~150 s export t1−t0; D221's 1048.16 MiB range void auto-trips on a box that swings
+  900+ MiB in minutes plus the export's own ~477 drawdown; and the paired idle CONTROL cannot be taken
+  at the same time as the demand read (D216 prerequisite unsatisfiable concurrently). **RULING: DROP the
+  passenger this wave (as waves 18/19 did). CLOSE `pds-bl-ratify-or-discard-ridealong-demand` as
+  DISCARDED** — a numbered ruling that the concurrent ridealong can never be the licensed demand, and that
+  the licensed demand/floor is instead ratified by the harness rung-3 RSS (D267, same instrument as the
+  2235.43). **The fire self-confirms via the SAME instrument:** the frozen harness's own rung-3 1 Hz
+  sampler runs during THIS fire's full export and produces a fresh peak-minus-baseline delta. Named-failure
+  condition (built-in, a WIN when it fires): if that delta **exceeds `floor − margin = 98.19 MiB`** (i.e.
+  this fire's real demand exceeds the 98.16 basis the floor was derived from), it is a NAMED failure —
+  filed, floor re-derived upward, re-armed at zero attempt cost. Wave-16's evidence makes a FIRED, GREEN
+  climb the expected outcome.
+
+**WAVE 20 PLAN.** One round-1 build slice; one round-2 arm (deferred, LEAD dispatches after slice 1
+merges); one round-2 LEAD-only seal. **Round 1 — `pds-w20-launcher-floor-arm` — THE EDIT + DERIVATION
+RECORD** (`scripts/pds-crown-launch.sh`, `scripts/pds-w20-floor-derivation.md`; builder: opus, the
+subtle-correctness slice): apply D277's three-knob edit to 897, the meta/summary recording, the
+mutation-provable selftest assertion, and all five stale-D244-citation updates; write the derivation
+record carrying D276's exact unit sentence; gate `bash scripts/pds-crown-launch.sh selftest` exits 0.
+**Round 2 (deferred; AFTER slice 1 merges) — `pds-w20-crown-fire` — THE ARM** (`scripts/pds-w20-fire-
+record.md`; builder: fable): from the fresh persistent worktree pulled to the merged launcher, confirm
+scratch `c7528814` alive (`curl 37576` = 200); **ARCHIVE the stale wave-19 run dir** `mv
+/tmp/pds-crown-launch/c7528814 …/c7528814.wave19-<UTC>` (D269, archive NOT `PDS_LAUNCH_STATE_DIR`
+override — the override blinds the anti-stack guard on a 90+-worktree box); pay `deps.get` + both
+compiles off the clock (`CC=/usr/bin/clang`); re-cat `attempts` (budget = spent+2) and re-run the 0b
+`merge-base --is-ancestor <guerrilla-HEAD> <worktree-HEAD>` in the SAME breath as the arm (D275) — abort
+honestly if it fails; `unset PDS_LAUNCH_HARNESS PDS_AMMO_FILE` (leave the FLOOR knobs to the baked
+source defaults), `export PDS_CONTROL_PG=postgres PDS_RUN_ID=pdsw18-crown`; invoke the launcher BY PATH
+`--prewarm-now --max-draws 2160 --interval 10` DETACHED; **NO passenger** (D278); prove `child.sh` line 7
+= the fire worktree's `pds-pull-proof.sh` (D259) and that meta records `mem_floor_mib=897`; confirm the
+child ONCE with `ps -p`; record run_id/run_tag/pid/floor/budget/transcript in the fire record; push; open
+the PR; END THE TURN — **no polling**. **Round 2 (deferred, LEAD dispatches after the CLIMB completes) —
+`pds-w20-crown-collect-and-seal`**: LEAD-ONLY. Collect via six named states (`ps -p` never `pgrep`), D248
+stranded-lock recovery, the D261 bundle cross-check BEFORE any stamp; confirm the harness rung-3 RSS
+delta ≤ 98.19 (D278 self-confirm); criterion text fetched to a file and passed by `"$(cat f)"`. Re-stamp
+ALL of 0–9 with the ONE wave-20 run_id, **10 on merge with the merge SHA recorded**, **11 LAST and
+ALONE**. Any refusal: stamp NOTHING, record the named refusal, sort HARNESS-BUG vs ENGINE-FAIL, file the
+successor. **ZERO NEW SCRIPTS; scripts/pds-* ONLY; frozen blob untouched.**
