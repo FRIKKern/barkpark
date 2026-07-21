@@ -29,6 +29,38 @@
 //   4. GREP ANCHORS AND QUOTES. `'^tooling/grip/harvest.mjs'` mints a key that
 //      can never collide with the clean one — a silent index-splitter.
 //
+// FOUR MORE, measured on the frozen 652-proof corpus in wave 5 and fixed here:
+//   5. THE TRAVERSAL GUARD WAS UNTESTED. `t.includes("..")` had no test in
+//      either direction, and defect 6 relaxes exactly that line. An untested
+//      guard is indistinguishable from a deleted one, so it is pinned first.
+//   6. THE GO PACKAGE WILDCARD. `./internal/cli/...` minted NOTHING: stripRoots
+//      leaves `internal/cli/...` and the traversal guard fires on the ELLIPSIS.
+//      Go was the worst family in the corpus at 24.2% path-token yield (8/33),
+//      and 25 of its 33 commands carry the glob. level.mjs already special-cases
+//      this exact idiom as "a Go package wildcard, NOT an elision"; pathToken
+//      never learned it. Stripping a TRAILING `/...` lifts go to 90.9%.
+//   7. TOP-LEVEL DIRECTORIES MINTED NOTHING. `api/`, `js/`, `web/`, `docs/`,
+//      `deploy/`, `scaffy/` are single-segment and extensionless, so they failed
+//      the separatorless check and fell back to `cmd:<head>` — which D45
+//      EXCLUDES from leads. The repo's own subsystem names, precisely the coarse
+//      terms an agent types, could never be subjects. The fix is NOT to accept
+//      bare words (`test`, `install` are verbs, and the mint holds no repo
+//      listing to tell them apart) but to accept the ones that WORE a path
+//      marker: a trailing `/`, a `./` prefix, or a `/...` package glob.
+//   8. THE QUANTITY MINTED THE FLAG, NOT THE PROPERTY. `grep -c 'needs_worktree'`
+//      and `grep -c 'isolation'` both minted `grep:-c`, so the fold announced
+//      that two recipes "re-derive the same quantity" when they answer different
+//      questions — a FABRICATED RIVAL-METHOD. Worse, `git show P | wc -l` and
+//      `git show P | grep -c x` both minted `git:show`, flagging a line count as
+//      a rival of a match count. Over the corpus, 58 keys absorbed 261 rows
+//      (40%). Two facts about a property fix it: it is produced by the LAST
+//      measuring stage of a pipeline (the earlier stages only supply bytes), and
+//      a match count is a count OF a pattern, so the pattern belongs in the key.
+//      NOT a licence to make every quantity unique: a unique quantity kills
+//      RIVAL-METHOD (D32/D33) exactly as a prose-derived subject would, and the
+//      test file carries a CONTROL — `wc -l F` and `cat F | wc -l` are different
+//      methods for one property and MUST still collide.
+//
 // Nothing in the repo already does this. record.mjs/level.mjs's findRefs and
 // classifyRef need a literal `.ext:digits` suffix and score 0 on bare rerun
 // commands; doc-truth's matchPath inspects only the FIRST whitespace token,
@@ -92,6 +124,18 @@ function stripRoots(token) {
   return token.replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
 }
 
+// A Go package wildcard SUFFIX (defect 6). Anchored at the end and requiring a
+// separator, so `./internal/cli/...` yields a directory while a bare `./...`
+// yields nothing to extract and stays null.
+const GO_PKG_SUFFIX = /\/\.\.\.$/;
+
+// The marks that make a single-segment token a DIRECTORY rather than a bare
+// word (defect 7): a trailing slash, a leading `./`, or a package glob. Read
+// off the token BEFORE stripRoots, which erases all three.
+function wearsPathMarker(t) {
+  return t.endsWith("/") || /^\.\//.test(t) || GO_PKG_SUFFIX.test(t);
+}
+
 /**
  * The repo path this token names, or null if it does not name one.
  * Exported so the defects can be tested one at a time.
@@ -109,12 +153,22 @@ export function pathToken(rawToken) {
     if (REF_SEGMENTS.has(head.split("/")[0]) && tail !== "") t = tail;
   }
 
+  const marked = wearsPathMarker(t);                          // defect 7
+
   t = stripRoots(t);
+  // defect 6 — a Go package wildcard is a DIRECTORY, not a traversal. Stripped
+  // AFTER the roots (so `<repo>/internal/cli/...` normalises to the same key)
+  // and BEFORE the `..` guard (which is what was rejecting it). Suffix-only: an
+  // ellipsis anywhere else in the path is still refused below.
+  t = t.replace(GO_PKG_SUFFIX, "");
   if (t === "") return null;                                  // defect 1
   if (REF_SEGMENTS.has(t.split("/")[0])) return null;         // defect 2
   if (t.includes("..") || t.includes("~") || t.includes("*")) return null;
   if (!PATH_SHAPED.test(t)) return null;
-  if (!t.includes("/") && !FILE_EXT.test(t)) return null;
+  // defect 7 — a separatorless token is a path when it carries a real file
+  // extension OR when it WORE a directory marker. A bare word carries neither
+  // and stays null: the mint has no repo listing and must not guess.
+  if (!t.includes("/") && !FILE_EXT.test(t) && !marked) return null;
   return t;
 }
 
@@ -140,26 +194,180 @@ function headAt(toks) {
   return { head: "", index: -1 };
 }
 
+// Commands that RESHAPE bytes without deriving a property (defect 8). When one
+// of these ends a pipeline the measurement happened upstream, so the stage scan
+// walks back past it — unless it is the whole command, where `head -20 f` IS
+// what the operator asked for.
+const FORMATTERS = new Set(["head", "tail", "cat", "less", "more", "tee", "column", "sort", "tr", "xargs", "pbcopy", "fold", "cut", "rev", "nl"]);
+
+// Tools whose answer is a count/list OF A PATTERN, so the pattern is half the
+// property (defect 8).
+const MATCHERS = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack"]);
+
+// Long spellings of grep flags that name the same property as the short one. A
+// key that splits on spelling alone splits one rival into two (defect 8).
+const MATCHER_FLAG_ALIASES = new Map([
+  ["--count", "-c"],
+  ["--line-number", "-n"],
+  ["--files-with-matches", "-l"],
+  ["--files-without-match", "-L"],
+  ["--recursive", "-r"],
+  ["--ignore-case", "-i"],
+  ["--invert-match", "-v"],
+  ["--word-regexp", "-w"],
+  ["--only-matching", "-o"],
+  ["--fixed-strings", "-F"],
+  ["--extended-regexp", "-E"],
+]);
+
+// Matcher flags that consume the NEXT token as a value, so that token is not
+// the pattern. `-e`/`--regexp` are the exception: their value IS the pattern.
+const MATCHER_VALUE_FLAGS = new Set(["-A", "-B", "-C", "-m", "-f", "-d", "-t", "-g", "--after-context", "--before-context", "--context", "--max-count", "--file", "--include", "--exclude", "--exclude-dir", "--type", "--glob", "--devices"]);
+const MATCHER_PATTERN_FLAGS = new Set(["-e", "--regexp"]);
+
 /**
- * The command's normalised verb phrase: head plus the first sub-verb or flag.
+ * Split a command on PIPE boundaries only, respecting quotes and escapes, and
+ * never splitting on `||` — a `|` inside `grep -c 'a|b'` is an alternation and
+ * a `||` is a logical operator, neither of them a stage boundary.
+ */
+function pipelineStages(rerun) {
+  const s = String(rerun ?? "");
+  const out = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (quote) {
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\") { cur += ch + (s[i + 1] ?? ""); i += 1; continue; }
+    if (ch === "'" || ch === '"' || ch === "`") { quote = ch; cur += ch; continue; }
+    if (ch === "|") {
+      if (s[i + 1] === "|") { cur += "||"; i += 1; continue; }
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** Whitespace tokens with quoting respected — a quoted pattern stays ONE token. */
+function shellSplit(str) {
+  const s = String(str ?? "");
+  const out = [];
+  let cur = "";
+  let quote = null;
+  let started = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") { quote = ch; started = true; continue; }
+    if (ch === "\\") { cur += s[i + 1] ?? ""; i += 1; started = true; continue; }
+    if (/\s/.test(ch)) {
+      if (started || cur !== "") out.push(cur);
+      cur = "";
+      started = false;
+      continue;
+    }
+    cur += ch;
+    started = true;
+  }
+  if (started || cur !== "") out.push(cur);
+  return out;
+}
+
+/**
+ * The pipeline stage that produces the NUMBER — the last one that is not a pure
+ * formatter. `git show P | wc -l` measures with `wc`, not with `git show`.
+ */
+function measuringStage(rerun) {
+  const stages = pipelineStages(rerun);
+  for (let i = stages.length - 1; i >= 0; i -= 1) {
+    const stage = stages[i].trim();
+    if (stage === "") continue;
+    const { head } = headAt(tokens(stage));
+    if (head === "") continue;
+    if (i > 0 && FORMATTERS.has(head)) continue;
+    return stage;
+  }
+  return String(rerun ?? "").trim();
+}
+
+// The pattern a matcher is counting, normalised: quotes already removed by
+// shellSplit, whitespace collapsed, and bounded so one long regex cannot become
+// the whole key. Anchors are KEPT — unlike the subject (defect 4), `^import`
+// and `import` are different questions.
+function matcherPattern(stage) {
+  // Re-headed in ARGV space: a quoted pattern is one shellSplit token but
+  // several whitespace tokens, so the two index spaces cannot be shared.
+  const args = shellSplit(stage);
+  const { index: headIndex } = headAt(args);
+  if (headIndex < 0) return null;
+  for (let i = headIndex + 1; i < args.length; i += 1) {
+    const a = args[i];
+    if (MATCHER_PATTERN_FLAGS.has(a)) {
+      const p = args[i + 1];
+      return p === undefined ? null : normalisePattern(p);
+    }
+    if (a.startsWith("--") && a.includes("=")) continue;
+    if (MATCHER_VALUE_FLAGS.has(a)) { i += 1; continue; }
+    if (a.startsWith("-") && a !== "-") continue;
+    return normalisePattern(a);
+  }
+  return null;
+}
+
+function normalisePattern(raw) {
+  const p = String(raw).trim().replace(/\s+/g, " ");
+  if (p === "") return null;
+  return p.length > 40 ? p.slice(0, 40) : p;
+}
+
+/**
+ * The property the command derives: the measuring stage's verb phrase — head
+ * plus the first sub-verb or flag — and, for a matcher, the pattern it counts.
  * `git ls-tree …` → `git:ls-tree`; `wc -l file` → `wc:-l`;
- * `node tooling/grip/ledger.mjs --selftest` → `node:--selftest`.
+ * `node tooling/grip/ledger.mjs --selftest` → `node:--selftest`;
+ * `grep -c 'isolation' f` → `grep:-c:isolation`.
  *
- * Coarse and COLLIDABLE is correct here. quantity is the second half of the
- * conflict key, and minting it from claim prose makes the whole key injective
- * again — the exact failure D32 rejects for subject.
+ * Coarse and COLLIDABLE is still correct here — a quantity unique per command
+ * kills RIVAL-METHOD exactly as a prose-derived subject would (D32/D33). What
+ * changed is only that it collides on the PROPERTY rather than on the flag.
  */
 export function quantityPhrase(rerun) {
-  const toks = tokens(rerun);
+  const stage = measuringStage(rerun);
+  const toks = tokens(stage);
   const { head, index } = headAt(toks);
   if (head === "") return "";
+
+  const isMatcher = MATCHERS.has(head);
+  let phrase = head;
   for (let i = index + 1; i < toks.length; i += 1) {
     const t = unwrap(toks[i]);
     if (OPERATORS.has(t)) break;
-    if (t.startsWith("--") || /^-[A-Za-z]/.test(t)) return `${head}:${t.split("=")[0]}`;
-    if (/^[a-z][a-z0-9-]*$/.test(t)) return `${head}:${t}`;
+    if (t.startsWith("--") || /^-[A-Za-z]/.test(t)) {
+      const flag = t.split("=")[0];
+      phrase = `${head}:${isMatcher ? MATCHER_FLAG_ALIASES.get(flag) ?? flag : flag}`;
+      break;
+    }
+    // A matcher's first bare argument is its PATTERN, never a sub-verb — it is
+    // appended below and must not also be read as the verb phrase.
+    if (isMatcher) break;
+    if (/^[a-z][a-z0-9-]*$/.test(t)) { phrase = `${head}:${t}`; break; }
   }
-  return head;
+
+  if (!isMatcher) return phrase;
+  const pattern = matcherPattern(stage);
+  return pattern === null ? phrase : `${phrase}:${pattern}`;
 }
 
 /**
