@@ -89,7 +89,9 @@ test("a FORGED run file carrying `value` on every row cannot put that value on t
   // Hand-written on disk, bypassing admitRecipe entirely — the write-path
   // rejection (VALUE-STORED) is not what is under test here. What is under test
   // is that the READ path is structurally incapable of surfacing it, because
-  // foldLedger's projection rebuilds each recipe from six NAMED fields.
+  // foldLedger's projection rebuilds each recipe from a NAMED ALLOWLIST of
+  // fields — the guarantee is the allowlist, never its length (it went from six
+  // fields to twelve when the fold began re-deriving its own key).
   const dir = tempStore([
     { ...row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex"), value: 544 },
     { ...row("api/lib/y.ex", "wc:-l", "wc -l api/lib/y.ex"), observed_value: "42 modules", answer: "yes" },

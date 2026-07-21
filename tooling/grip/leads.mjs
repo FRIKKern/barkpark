@@ -7,11 +7,15 @@
 // THE ANTI-GOAL IS STRUCTURAL, NOT A PROMISE (charter D66). This module cannot
 // hand back a value even from a forged store, and the reason is not discipline:
 // `RECIPE_FIELDS` carries no `value` key, and `foldLedger`'s projection rebuilds
-// every recipe from SIX NAMED FIELDS (rerun, derived_level, deps, observed_at,
-// run_id, file), so an unknown key is dropped before it ever reaches
-// `entries[]`. `selectLeads` is a FILTER over `entries[]` — it adds no field and
-// reads no file. A `value` hand-edited into a run file on disk therefore cannot
-// reach this screen, and the test proves that by forging one.
+// every recipe from a NAMED ALLOWLIST — so an unknown key is dropped before it
+// ever reaches `entries[]`. The guarantee is the allowlist, NOT its length: the
+// list grew from six fields to twelve when the fold began re-deriving its own
+// key (`stored_level`/`level_restated`/`level_fallback` and the quantity three),
+// and a guarantee stated by quoting a count is one a reader can check and find
+// false without being able to tell which half rotted. `selectLeads` is a FILTER
+// over `entries[]` — it adds no field and reads no file. A `value` hand-edited
+// into a run file on disk therefore cannot reach this screen, and the test
+// proves that by forging one.
 //
 // ── SHIPPED REDUCED, AND EACH CUT IS CARRIED BY A NUMBER (charter D43) ───────
 //
@@ -65,12 +69,18 @@
 //
 // ── THE LEVEL IS RE-DERIVED AT RENDER TIME, NEVER READ FROM STORAGE ──────────
 //
-// `foldLedger` currently trusts the stored `derived_level` (open defect
-// tgw2-fold-reread-derived-level). A leads row printing that stored value would
-// inherit the bug into the instrument's headline column — this module's whole
-// thesis failing in its own output. `deriveLevel(rerun)` runs here, on the
-// command, every time; the stored value is carried alongside as
-// `stored_level` and a disagreement is stated out loud.
+// `deriveLevel(rerun)` runs HERE, on the command, every time. The stored value
+// is carried alongside as `stored_level` and a disagreement is stated out loud.
+//
+// This used to be leads' unilateral defence: `foldLedger` trusted the stored
+// `derived_level`, so a leads row printing it would have inherited that bug into
+// the instrument's headline column — this module's whole thesis failing in its
+// own output. `tgw6-fold-rederives-key` CLOSED `tgw2-fold-reread-derived-level`
+// at the seam: the fold now re-derives the level (and the quantity half of its
+// key) and hands the on-disk value over as `stored_level`. The render keeps
+// re-deriving anyway — belt and braces on the one column this module is judged
+// on, and the reason a future fold regression would be caught here rather than
+// silently rendered.
 //
 // HONEST SCOPE (charter D46): leads help THIS EPIC stop re-deriving its own
 // housekeeping facts. Repo-wide the mint degenerates (337 subjects, 268 of them
@@ -104,7 +114,7 @@ export const STRUCTURAL_MISSES = Object.freeze([
 // schema, and a reader who does not know that has to take the output on trust.
 export const NO_VALUE_FOOTER =
   "leads hand over METHOD, never a value: RECIPE_FIELDS has no `value` field and the fold rebuilds\n"
-  + "  every recipe from six NAMED fields, so even a forged run file cannot put an answer on this screen.";
+  + "  every recipe from a NAMED ALLOWLIST of fields, so even a forged run file cannot put an answer here.";
 
 // ── the census join ──────────────────────────────────────────────────────────
 
