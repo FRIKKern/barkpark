@@ -1688,3 +1688,214 @@ One slice. One opus builder. One claim. `gr-p5r12-terminal-act` — execute the 
 predicate LAST and ONCE from a pristine worktree, and append the terminal-artifact section under a heading carrying the marker string the gate looks for. **Exit 0 and exit 1 are
 equally acceptable endings; the deliverable is a `VERDICT:` line and a roster-delta table a cold reader can
 act on. There is no round 13.**
+
+---
+
+## THE TERMINAL ARTIFACT — round 12, the act executed and the verdict taken
+
+The Cloud GUI Remake attempted to seal seven times. Round 11 wrote the runbook and ran nothing. Round 12 ran
+it. This section is the whole ending: the two mechanical acts, the one predicate run, and what the green does
+and does not mean. **No eighth instrument was built.** `seal-predicate.mjs` and `overflow-guard.mjs` are
+byte-identical to `origin/main` at the end of this run, no `KNOWN_DEFECT` was added, no threshold was moved,
+no `--ledger` or `--guard-cmd` was passed, and the only file changed by this commit is this charter.
+
+### Where it ran, and why that decided the verdict
+
+`seal-predicate.mjs:61` is `const REPO = arg('--repo') || process.cwd()`, and the overflow guard serves
+`cloud/priv/static` **from disk**. Clause (b) therefore measures whatever tree you `cd` into, while printing
+the sentence *"the defect is still measurable at origin/main"* — a claim it has not earned. This run was made
+from a worktree cut at charter commit `d06f78eba`, never from the primary checkout.
+
+Pre-flight, all four outputs:
+
+```
+git status --porcelain                              -> (empty)
+wc -l < .claude/workflows/bp-cloud-gui-remake-charter.md  -> 1690
+test -f cloud/priv/static/__preview__/seal-predicate.mjs  -> EXISTS
+test -f cloud/priv/static/__preview__/overflow-guard.mjs  -> EXISTS
+git diff --exit-code origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs  -> exit 0
+git diff --exit-code origin/main -- cloud/priv/static/__preview__/overflow-guard.mjs  -> exit 0
+git diff --stat HEAD origin/main -- cloud/priv/static/app.css cloud/priv/static/__preview__/  -> (empty)
+```
+
+The `test -f` lines are not decoration. `cloud/priv/static/preview/` (no underscores) does not exist, and
+`git diff --exit-code` returns **0** on a pathspec matching nothing — a vacuous green at the one gate that
+exists to catch a tampered instrument. Existence is proven before the freeze check is believed.
+
+### The port guard
+
+`OVERFLOW_GUARD_PORT=47311`, proven free by an explicit `if … then exit 9; fi` guard and re-verified in the
+second before spawning:
+
+```
+PORT 47311 VERIFIED FREE at 2026-07-21T03:29:11Z      (standalone guard warm-up: exit 0, stderr 0 bytes)
+PORT 47311 RE-VERIFIED FREE at 2026-07-21T03:29:26Z   (predicate spawn)
+```
+
+The `&&/||` shape was not used. It was observed printing `EXIT=0` with zero stdout having started no process —
+a fabricated verdict wearing the signature of a GR133 crash.
+
+### The two mechanical acts
+
+**One close.** `gr-backlog-bp-search-verb-discoverability` — declared closed by the round-10 census on merge
+SHA `3f16c9f43`, but the ledger action was never executed. It read open 0/3, unclaimed, still under the epic.
+Claimed and closed **done 3/3** on the first attempt; the pre-authorised close→forward fallback did **not**
+fire, so there is no substitution to disclose. Criterion strings were extracted programmatically from
+`bp task get -o json` (criterion [0] carries a literal U+2014 em dash; a retyped hyphen burns an attempt).
+`git merge-base --is-ancestor 3f16c9f43 origin/main` exits 0.
+
+Criterion 1's evidence is freshly captured CLI output, and it **corrects** what the task predicted. There is
+no unknown-SUBcommand error state: because `search` has exactly one verb, `soleReadVerb`
+(`internal/cli/cli.go:549,565`) absorbs the unknown token as a search *term*.
+
+```
+$ bp search zzznotasub          # unknown SUBcommand
+note: `search` has one verb — running `barkpark search query`
+{"correctedTo":null,"count":0,"documents":[], … "query":"zzznotasub" …}
+
+$ bp zzznotacommand             # unknown COMMAND
+{"error":{"code":"usage","message":"unknown command \"zzznotacommand\""},"ok":false}
+```
+
+The two are distinct in **kind**, not merely in wording — which is a stronger result than the criterion asked
+for. Criterion 2's doctrine anchor is `origin/main:.claude/agents/felix.md:61`, which cites
+`bp search <concept>` **without** the word `query`: `3f16c9f43` made a pre-existing doctrine sentence true.
+
+**Fifty-eight moves.** One to `task-96a908af98698118`, fifty-seven in census band order to
+`cloud-console-hardening-epic`, and `gr-p5r5-successor-seal` **last** — its children rode along, and no move
+line was written for them. `cloud-console-billing-live-gate` was never named; its parent stays
+`cloud-console-goal`. Every move was paced ≥1.1 s and its response checked. Throttling was detected by `bp`
+**exit code 7** only, never by grepping output for `429` (that substring occurs in ordinary 200 payloads).
+**Zero exit-7 retries occurred.** One non-zero return is disclosed honestly: the first attempt at
+`gr-bl-peer-ip-container` returned **rc=2**, `bp: piped stdin is unused and task move does not accept --file` —
+a client-side harness fault from a `while read` loop feeding stdin, not a server refusal and not a throttle.
+It wrote nothing; the loop was re-run with `</dev/null` and the move succeeded.
+
+Before the predicate ran, the roster was re-read via `filter[parent_id]`: **81 children, `{"done":81}`,
+zero live rows.** The successor's BEFORE count was read live immediately before the first write — **10**, not
+the 7 measured at Verify — and after the moves it read **68**. The binding invariant held: `after − before == 58`.
+
+### The run
+
+Once. Last. `--successor cloud-console-hardening-epic`, no `--ledger`, no `--guard-cmd`.
+
+**exit code: `0`**  ·  **stderr: 0 bytes**  ·  ISO stamp copied from the predicate's own `read at` line:
+**`2026-07-21T03:29:26.196Z`**  ·  roster count from the banner: **81 children `{"done":81}`**
+
+Verbatim stdout:
+
+```
+=== SEAL PREDICATE — Cloud GUI Remake phase 5 ===
+read at 2026-07-21T03:29:26.196Z  (live ledger)
+epic task-47bc4168392dec17   successor: cloud-console-hardening-epic
+roster: 81 children  {"done":81}
+
+CLAUSE (a) forwarding — live rows 0
+  forwarded under successor : 0
+  permanent human gate      : 0  [-]
+  UNNAMED RESIDUE (orphans) : 0
+
+BUCKET (c) permanent human gates
+  ✓ cloud-console-billing-live-gate  status=open parent=cloud-console-goal in-epic-roster=false
+  ✓ gr-ops-platform-admin-emails  status=open parent=cloud-console-hardening-epic in-epic-roster=false
+  ✓ gr-backlog-qr-live-scan-proof  status=open parent=cloud-console-hardening-epic in-epic-roster=false
+
+CLAUSE (b) known user-facing defects — 3 registered
+  ✓ GR108-tablet-topbar-overflow
+  ✓ GR109-attention-row-dead-rule
+  ✓ GR115-bpconsole-dead-rule
+
+VERDICT: SEAL
+
+SCOPE — what this green does and does NOT claim, read at 2026-07-21T03:29:26.196Z:
+  Sealed 81 children: 81 evidence-closed, 0 forwarded by name
+  to cloud-console-hardening-epic, and 3 permanent human gate(s) disclosed by hardcoded name.
+  Zero unnamed residue. Zero known user-facing defect, each re-measured in a browser.
+
+  NOT asserted by this green:
+   1. Defect coverage is bounded by what was REGISTERED. Clause (b) certifies the word
+      KNOWN over 3 hand-registered defects. A defect nobody looked for is invisible to it.
+   2. The overflow sweep covered 86/86 scenarios x 2 themes at 768px (default accent),
+      plus 12/86 scenarios x 5 accents. NOT swept: 74 of 86 scenarios under the four non-default accents; widths other than 768 outside the 721-1440 band measured on the two past-due screens only.
+   3. 21 clean-CAS children are sealed on evidence nobody read. 0 of 39 checked failed,
+      which bounds the true material-failure rate at ~8% upper 95% — so up to ~2 of the 21
+      may carry one. They are enumerated BY NAME in the charter, not described as a subtraction.
+   4. The crown is DARK. The operator console shipped fully built and unreachable;
+      gr-ops-platform-admin-emails is a human act. "Seal" here means CODE seal, never
+      "this feature is live for any human".
+```
+
+### VERDICT: SEAL — and what that word is worth
+
+`VERDICT: SEAL`, exit code 0, stderr 0 bytes. This is a **CODE seal**. It is not a claim that any human can
+use the operator console, and it is not a claim that the done-set is clean. Both of those are addressed by
+name below, because the banner cannot address them at all.
+
+### The roster delta
+
+The banner reads *"Sealed 81 children: 81 evidence-closed, **0 forwarded by name**"*. Read alone, that
+sentence says nothing was forwarded — which is exactly backwards. The banner's `fwd` counter only counts
+forwarded rows **still in the epic roster**, so a *perfect* triage drives it to zero. The roster delta is the
+only place the 58 forwards are visible:
+
+| roster | before | after | delta |
+| --- | --- | --- | --- |
+| epic `task-47bc4168392dec17` | 140 children / **60 live** | 81 children / **0 live** | −59 children, −60 live |
+| successor `cloud-console-hardening-epic` | 10 | **68** | **+58** (57 banded + the self-orphaned seal) |
+| `task-96a908af98698118` | 46 | **47** | +1 |
+| `gr-backlog-bp-search-verb-discoverability` | open 0/3, under the epic | **done 3/3**, under the epic | closed, not forwarded |
+
+The epic loses 59 children while losing 60 live rows because one of the 60 was *closed in place* rather than
+moved. Clause (a) printed **58 orphans, not 60**: the predicate buckets the two permanent human gates before
+the orphan count. Bucket (c) shows `gr-ops-platform-admin-emails` and `gr-backlog-qr-live-scan-proof` with
+`in-epic-roster=false`, flipped from `true` by the moves. That flip is **informational, not a regression** —
+`resolved` only requires the doc to exist.
+
+**`gr-blk-studio-presence-perf-flake` left the epic without arriving at the successor.** It went to
+`task-96a908af98698118`, its real home per the census. The predicate reads only
+`(_id, lifecycle_status, parent_id)`, so it is **invisible in both places**: the epic-side roster is empty and
+the successor-side count never includes it. Its only trace is the census line and this table. A cold reader
+looking for it in either the seal banner or the successor's 68 will not find it.
+
+### The crown is dark — a mechanism, not an observation
+
+> The crown is DARK, structurally. `cloud/docker-compose.yml:67` bare-lists `PLATFORM_ADMIN_EMAILS` as a
+> **valueless passthrough**; `cloud/.env.example:51` ships it empty; `cloud/config/runtime.exs:314` defaults it
+> to `""` → `[]`. The only value source is `/opt/barkpark/cloud/.env`, which is **not tracked by git — so no
+> commit can set it.** `Notifications.platform_admin_emails/0` additionally drops any address without a
+> registered user. `Auth.require_platform_operator/2` runs `require_user` **first**, so an anonymous probe gets
+> **401** and every authenticated user gets **403** — the console is dark for everyone, not selectively lit.
+> This is a MECHANISM read from source; no live body was observed. **"Seal" here means CODE seal only.**
+
+That paragraph is GR168's correction, used deliberately in place of GR157's caveat 4, whose clause "zero
+deploy scripts reference it" is falsified on main by `cloud/docker-compose.yml:67` — a line this same charter
+records as DONE at GR68.
+
+### One named false-done — a FLOOR, not a ceiling
+
+`gr-blk-shootsh-scen-suggester` is a known false-done in the sealed 81. Its sole evidence is unpushed branch
+commit `8a1545bd7` (`--is-ancestor` exits 1, `git branch -r --contains` is empty), and `origin/main`'s
+`shoot.sh` has zero occurrences of the described near-match ladder. **It is not reopened here** — reopening
+would create a live orphan and turn a real green into a clerical NO SEAL.
+
+**"One named false-done" is a FLOOR, not a ceiling.** No full 80-row done-set audit was ever completed. The
+only prior audit covered **35/56**, and it predates the discovery of this row. `gr-bl-doneset-merge-sha-reaudit`
+is **OPEN**, and it says to treat the done-set as **UNCHECKED**. The correct reading of clause (a) is
+"81 rows carry a close record", never "81 rows were verified".
+
+### The four SCOPE caveats
+
+They printed, because the run exited 0 — they are in the verbatim stdout above, and they are the honest
+boundary of this green. In short: coverage is bounded by what was **registered** (3 hand-registered defects);
+the overflow sweep covered 86/86 scenarios × 2 themes at 768px plus 12/86 under 5 accents, leaving 74 of 86
+unswept under the four non-default accents and **widths other than 768 outside the 721–1440 band measured on
+the two past-due screens only**; 21 clean-CAS children are sealed on evidence nobody read, bounding the true
+material-failure rate at ~8% upper 95%; and the crown is dark.
+
+### Instrument freeze, re-checked at the end of the run
+
+```
+git diff --exit-code origin/main -- cloud/priv/static/__preview__/   -> exit 0   (files proven present)
+```
+
+The epic ends here. There is no round 13.
