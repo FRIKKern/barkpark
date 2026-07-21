@@ -512,3 +512,39 @@ test("the frozen corpus loads and the census's reach over it is a real bound, no
   assert.ok(screened > 0 && screened < commands.length,
     "the screen admitting everything or nothing would make the reach statistic meaningless");
 });
+
+// ── the underpowered floor (added in review) ─────────────────────────────────
+//
+// FOUND BY RUNNING THE SHIPPED CLI: `node census.mjs --limit 12` admits 3
+// decisive rows, measures 0.0% decay, and printed
+// "CONSISTENT — measured 0.0% is below the 22.4% floor". A bounded iteration
+// run was wearing a full census's authority. Zero-admissible already had a NULL
+// STATE; too-few-to-say did not, and an underpowered pass IS a vacuous green.
+//
+// The control pair matters: the first test proves the floor refuses to speak,
+// the second proves it is not simply mute — cross the floor and a real verdict
+// comes back.
+
+const answeringRows = (n) =>
+  Array.from({ length: n }, (_, i) => ({
+    command: `grep -c x file${i}.mjs`, screened: true, executed: true, level: "L3",
+    family: "MATCHER", outcome: "PRESENT", why: "matched",
+    answering: true, decayed: false, admissible: true,
+  }));
+
+test("a handful of decisive rows is UNDERPOWERED — the prediction is not adjudicated on n=3", () => {
+  const report = summarise(answeringRows(3), { corpusName: "a bounded iteration run" });
+  assert.equal(report.decisive.admissible, 3);
+  assert.match(report.prediction.verdict, /UNDERPOWERED/);
+  assert.doesNotMatch(report.prediction.verdict, /^CONSISTENT|^CONTRARY/);
+  // The measured number is still reported — refusing to adjudicate is not
+  // refusing to show the reader what was seen.
+  assert.match(report.prediction.verdict, /0\.0%/);
+});
+
+test("above the floor the prediction IS adjudicated — the floor is a bound, not a mute button", () => {
+  const report = summarise(answeringRows(40), { corpusName: "a full run" });
+  assert.equal(report.decisive.admissible, 40);
+  assert.match(report.prediction.verdict, /CONSISTENT/);
+  assert.doesNotMatch(report.prediction.verdict, /UNDERPOWERED/);
+});

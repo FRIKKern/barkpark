@@ -78,6 +78,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { screenCommand } from "./screen.mjs";
@@ -432,6 +433,14 @@ const PREDICTION = Object.freeze({
   text: "decay materially below wave 3's 22.4% floor on fresh rows",
   floorPct: 22.4,
   note: "Predeclared before this run. A null or contrary result is a real result and is reported as one.",
+  // A RATE OVER A HANDFUL OF ROWS IS NOT A RESULT. Found in review: `--limit 12`
+  // admits 3 decisive rows, measures 0.0% decay and printed "CONSISTENT — below
+  // the 22.4% floor", which is a bounded iteration run wearing a full census's
+  // authority. Zero admissible was already handled; too-few-to-say was not, and
+  // an underpowered pass is exactly the vacuous green this epic exists to
+  // retire. The floor is deliberately blunt — it is a refusal to speak, not an
+  // estimate of power.
+  minAdmissible: 30,
 });
 
 /**
@@ -517,6 +526,8 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
       measuredPct: decayPct,
       verdict: admissible.length === 0
         ? "NO RESULT — nothing admissible was measured, so the prediction was not tested"
+        : admissible.length < PREDICTION.minAdmissible
+        ? `UNDERPOWERED — ${admissible.length} decisive rows is below the ${PREDICTION.minAdmissible}-row floor for saying anything about this prediction. Measured decay is ${decayPct.toFixed(1)}%, reported as an observation only, NOT as consistent or contrary.`
         : decayPct < PREDICTION.floorPct
           ? `CONSISTENT — measured ${decayPct.toFixed(1)}% is below the ${PREDICTION.floorPct}% floor`
           : `CONTRARY — measured ${decayPct.toFixed(1)}% is at or above the ${PREDICTION.floorPct}% floor, and that is reported as the result it is`,
@@ -676,15 +687,32 @@ const HELP = `census.mjs — re-execute stored recipes and report whether they s
 Safety: every command is screened by tooling/grip/screen.mjs before any spawn.
 The census never writes to tooling/grip/ledger/.`;
 
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+// Same main-module test the rest of tooling/grip uses. String-comparing
+// `file://${argv[1]}` against import.meta.url is NOT equivalent: any character
+// the URL encodes (a space, a `#`) makes the two differ, and the failure is
+// SILENT — the CLI becomes a no-op that exits 0 having measured nothing, which
+// reads exactly like a clean run.
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(HELP);
     process.exit(0);
   }
+  // A BOUND THAT SILENTLY UNBOUNDS ITSELF IS THE EPIC'S OWN DEFECT CLASS.
+  // `--limit` with a missing or non-numeric value used to parse to NaN, fail
+  // the isFinite test and run the ENTIRE 651-command corpus — the operator
+  // asked for a bounded run and got an unbounded one with no signal. Named
+  // rejection, nonzero exit.
   const limitAt = argv.indexOf("--limit");
-  const limit = limitAt >= 0 ? Number.parseInt(argv[limitAt + 1], 10) : Infinity;
+  let limit = Infinity;
+  if (limitAt >= 0) {
+    limit = Number.parseInt(argv[limitAt + 1] ?? "", 10);
+    if (!Number.isInteger(limit) || limit < 1) {
+      process.stderr.write(`census: --limit needs a positive integer, got ${JSON.stringify(argv[limitAt + 1] ?? null)}\n`);
+      process.exit(2);
+    }
+  }
   const commands = loadCorpusCommands().slice(0, Number.isFinite(limit) ? limit : undefined);
   const report = censusRun(commands, {
     corpusName: CORPUS_NAME,
