@@ -84,6 +84,303 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── cch-w1-refetch-storm · THE REQUEST COUNTER ──────────────────────────────
+// Overview binds to five reads. Every SSE tick used to re-run the whole loader:
+// 1 cold boot + 7 fleet ticks = 40 requests, 8 per endpoint — measured in
+// production and reproduced from source. The carve-out at the top of this file
+// says fetch flows and SSE are browser-coupled; that carve-out is exactly why
+// the storm survived a 640-test harness, so this group crosses it deliberately
+// and counts the requests ONE event costs.
+//
+// THE VACUOUS-GREEN TRAP (charter D4): loadOverview() short-circuits to the
+// welcome runway on an EMPTY fleet, before the four other reads. A fixture with
+// no instances would assert a small number and pass forever while the storm
+// raged for every real user. OVERVIEW_FLEET carries two instances, and the
+// first test in this group asserts that it does.
+
+// One healthy box + one degraded box: non-empty (D4) and it populates BOTH the
+// attention queue and the instances grid, so a scoped repaint has real markup
+// to rebuild rather than an empty branch.
+const OVERVIEW_FLEET = [
+  { id: "bp-1", name: "alpha", host: "alpha.example", health_status: "up", agent_status: "online" },
+  { id: "bp-2", name: "bravo", host: "bravo.example", health_status: "down", agent_status: "offline" },
+];
+const OVERVIEW_ENDPOINTS = [
+  "/v1/barkparks", "/v1/audit?limit=5", "/v1/usage/summary", "/v1/subscription", "/v1/onboarding",
+];
+
+// A trial subscription with an INCOMPLETE onboarding fold, so overviewStatePick
+// returns "runway" and the state band renders real markup — a scoped onboarding
+// refresh that fetched but never repainted would look identical to a fix
+// otherwise.
+function overviewOnboarding(publishedDone) {
+  return {
+    completed: false,
+    steps: [
+      { key: "subscription", done: true },
+      { key: "instance", done: true },
+      { key: "published_doc", done: !!publishedDone },
+    ],
+  };
+}
+
+function overviewNet() {
+  const paths = [];
+  const state = { onboarding: overviewOnboarding(false) };
+  const bodyFor = (path) => {
+    if (path === "/v1/barkparks") return { barkparks: OVERVIEW_FLEET };
+    if (path.startsWith("/v1/audit")) return { events: [] };
+    if (path === "/v1/usage/summary") return { usage: { team: { instances: { quota: 5 } }, instances: [] } };
+    if (path === "/v1/subscription") return { subscription: { status: "trialing", plan: "trial" } };
+    if (path === "/v1/onboarding") return { onboarding: state.onboarding };
+    return {};
+  };
+  return {
+    paths, state,
+    fetch(path) {
+      paths.push(String(path));
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
+        json: () => Promise.resolve(bodyFor(String(path))),
+      });
+    },
+    reset() { paths.length = 0; },
+    count(endpoint) { return paths.filter((p) => p === endpoint).length; },
+    tally() { return OVERVIEW_ENDPOINTS.map((e) => this.count(e)); },
+  };
+}
+
+// A flat id-addressed DOM: enough for loadOverview's mounts. Setting innerHTML
+// DESTROYS the nodes the previous markup mounted and registers the new ones —
+// mirroring the real DOM, so carrying the activity digest across a scoped
+// rebuild is genuinely exercised rather than trivially true.
+function overviewDom() {
+  const nodes = new Map();
+  const noop2 = () => {};
+  const make = (id) => {
+    const el = {
+      id, _html: "", _owned: [], hidden: false, textContent: "",
+      get innerHTML() { return this._html; },
+      set innerHTML(v) {
+        this._owned.forEach((childId) => nodes.delete(childId));
+        this._owned = [];
+        this._html = String(v);
+        const re = /id="([^"]+)"/g;
+        let m;
+        while ((m = re.exec(this._html))) {
+          this._owned.push(m[1]);
+          nodes.set(m[1], make(m[1]));
+        }
+      },
+      addEventListener: noop2, removeEventListener: noop2,
+      setAttribute: noop2, removeAttribute: noop2, getAttribute: () => null,
+      querySelector: () => null, querySelectorAll: () => [],
+      classList: { add: noop2, remove: noop2, toggle: noop2, contains: () => false },
+      style: {},
+    };
+    return el;
+  };
+  ["overview-body", "overview-greeting", "overview-sub", "overview-chips", "overview-launch"]
+    .forEach((id) => nodes.set(id, make(id)));
+  return {
+    nodes,
+    document: {
+      readyState: "complete",
+      addEventListener: noop2, removeEventListener: noop2,
+      querySelector: (sel) => (sel.startsWith("#") ? nodes.get(sel.slice(1)) || null : null),
+      querySelectorAll: () => [],
+      getElementById: (id) => nodes.get(id) || null,
+      createElement: (t) => make(t),
+      documentElement: make(""), body: make(""),
+    },
+  };
+}
+
+async function settleOverview() {
+  for (let i = 0; i < 4; i += 1) await new Promise((r) => setImmediate(r));
+}
+
+async function overviewHarness(run) {
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const priorHash = sandbox.location.hash;
+  const dom = overviewDom();
+  const net = overviewNet();
+  sandbox.document = dom.document;
+  sandbox.fetch = net.fetch;
+  sandbox.location.hash = "#overview";
+  hooks.overviewData.list = null;
+  hooks.overviewData.usage = null;
+  hooks.overviewData.onboarding = null;
+  try {
+    // Cold paint first: it fills the snapshot a scoped refresh repaints from.
+    hooks.loadOverview();
+    await settleOverview();
+    await run({ net, dom });
+  } finally {
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    sandbox.location.hash = priorHash;
+    hooks.overviewData.list = null;
+    hooks.overviewData.usage = null;
+    hooks.overviewData.onboarding = null;
+  }
+}
+
+test("cch-w1: the fixture carries instances — an empty fleet would make this whole group vacuous", () => {
+  // charter D4. loadOverview() returns at the runway before four of the five
+  // reads when the fleet is empty; an empty fixture asserts a number the storm
+  // never produced. This test exists so emptying the fixture reds LOUDLY.
+  assert.ok(OVERVIEW_FLEET.length >= 1,
+    "the overview fixture must carry >=1 barkpark row (charter D4)");
+});
+
+test("cch-w1: a cold Overview paint issues each of the five endpoints EXACTLY once", async () => {
+  await overviewHarness(async ({ net }) => {
+    assert.deepEqual(net.tally(), [1, 1, 1, 1, 1],
+      "cold paint per endpoint " + JSON.stringify(OVERVIEW_ENDPOINTS) + ", got " + JSON.stringify(net.paths));
+    assert.equal(net.paths.length, 5, "and nothing else: " + JSON.stringify(net.paths));
+  });
+});
+
+test("cch-w1: a fleet tick refetches ONLY /v1/barkparks (was all five)", async () => {
+  await overviewHarness(async ({ net }) => {
+    net.reset();
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    // PRE-FIX: [1,1,1,1,1] — one tick re-ran the entire loader.
+    assert.deepEqual(net.tally(), [1, 0, 0, 0, 0],
+      "a fleet tick must read the fleet and nothing else, got " + JSON.stringify(net.paths));
+  });
+});
+
+test("cch-w1: barkpark.suspended and barkpark.restored narrow the same way", async () => {
+  for (const type of ["barkpark.suspended", "barkpark.restored"]) {
+    await overviewHarness(async ({ net }) => {
+      net.reset();
+      hooks.handleLiveEvent(type);
+      await settleOverview();
+      assert.deepEqual(net.tally(), [1, 0, 0, 0, 0],
+        type + " must read the fleet and nothing else, got " + JSON.stringify(net.paths));
+    });
+  }
+});
+
+test("cch-w1: an UNREGISTERED barkpark.* type no longer fires the 5-endpoint bundle", async () => {
+  // charter D3: the version-skew fallback (handleLiveEvent's `barkpark.` prefix
+  // arm) is a SEPARATE storm trigger from the four registered types. A
+  // synthetic barkpark.unknown_skew was measured firing the full five.
+  await overviewHarness(async ({ net }) => {
+    assert.ok(!hooks.liveEventTypes.includes("barkpark.unknown_skew"),
+      "this type must stay UNregistered or the test stops covering the fallback");
+    net.reset();
+    hooks.handleLiveEvent("barkpark.unknown_skew");
+    await settleOverview();
+    assert.deepEqual(net.tally(), [1, 0, 0, 0, 0],
+      "the prefix fallback must narrow too, got " + JSON.stringify(net.paths));
+  });
+});
+
+test("cch-w1: an onboarding tick refetches ONLY /v1/onboarding — and repaints the band", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const band = () => dom.nodes.get("overview-state").innerHTML;
+    assert.match(band(), /runway-step/, "the cold paint must mount the runway band");
+    assert.match(band(), /2 of 3 done/, "…with the fold the server returned");
+    net.reset();
+    net.state.onboarding = overviewOnboarding(true); // the last step self-healed
+    hooks.handleLiveEvent("onboarding");
+    await settleOverview();
+    // PRE-FIX: [1,1,1,1,1]. The fold is the ONLY thing an onboarding event names.
+    assert.deepEqual(net.tally(), [0, 0, 0, 0, 1],
+      "an onboarding tick must read the fold and nothing else, got " + JSON.stringify(net.paths));
+    // Narrower must not mean staler: the band shows the NEW fold.
+    assert.match(band(), /3 of 3 done/, "the state band must repaint from the refetched fold");
+  });
+});
+
+test("cch-w1: seven fleet ticks after one boot cost 12 requests, not 40", async () => {
+  // The production capture, reproduced end to end: 1 cold boot (5) + 7 ticks.
+  await overviewHarness(async ({ net }) => {
+    for (let i = 0; i < 7; i += 1) {
+      hooks.handleLiveEvent("fleet");
+      await settleOverview();
+    }
+    assert.equal(net.paths.length, 12,
+      "1 boot (5) + 7 fleet ticks (1 each) = 12; pre-fix this was 40. Got " + JSON.stringify(net.paths));
+    assert.deepEqual(net.tally(), [8, 1, 1, 1, 1],
+      "only /v1/barkparks may repeat; the other four stay at their single cold read");
+  });
+});
+
+test("cch-w1: a scoped refresh keeps the activity digest instead of re-reading /v1/audit", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const digest = dom.nodes.get("overview-digest");
+    assert.ok(digest, "the cold paint must mount #overview-digest");
+    digest.innerHTML = '<div class="ov-digest-probe">recent activity</div>';
+    net.reset();
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(net.count("/v1/audit?limit=5"), 0, "no audit event fired — no audit read");
+    // The rebuild DESTROYS the old node (see overviewDom), so this is the new one.
+    assert.match(dom.nodes.get("overview-digest").innerHTML, /ov-digest-probe/,
+      "the digest must be carried across the rebuild, not blanked");
+  });
+});
+
+test("cch-w1: a tick that beats the first paint still does a FULL load", async () => {
+  // A scoped refresh has no snapshot to repaint from before the cold paint, so
+  // narrowing must degrade to the full loader rather than paint a half-empty
+  // dashboard out of caches that were never filled.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const priorHash = sandbox.location.hash;
+  const dom = overviewDom();
+  const net = overviewNet();
+  sandbox.document = dom.document;
+  sandbox.fetch = net.fetch;
+  sandbox.location.hash = "#overview";
+  hooks.overviewData.list = null;
+  try {
+    hooks.handleLiveEvent("fleet"); // no cold paint ran
+    await settleOverview();
+    assert.deepEqual(net.tally(), [1, 1, 1, 1, 1],
+      "an unprimed scoped refresh must fall back to the full load, got " + JSON.stringify(net.paths));
+  } finally {
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    sandbox.location.hash = priorHash;
+    hooks.overviewData.list = null;
+    hooks.overviewData.usage = null;
+    hooks.overviewData.onboarding = null;
+  }
+});
+
+test("cch-w1: off-Overview, a fleet tick still costs the Overview nothing", async () => {
+  // The mechanism already discriminated by VIEW correctly — this pins that the
+  // narrowing did not accidentally make an off-view tick start fetching.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const priorHash = sandbox.location.hash;
+  const dom = overviewDom();
+  const net = overviewNet();
+  sandbox.document = dom.document;
+  sandbox.fetch = net.fetch;
+  sandbox.location.hash = "#activity";
+  hooks.overviewData.list = null;
+  try {
+    assert.equal(hooks.currentView(), "activity", "the fixture route must not be overview");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(net.count("/v1/barkparks"), 0, "got " + JSON.stringify(net.paths));
+  } finally {
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    sandbox.location.hash = priorHash;
+    hooks.overviewData.list = null;
+  }
+});
+
 // ── gr-p5-account-2fa · GR54 THE SAFETY NET ─────────────────────────────────
 // The account modal is the ONE surface whose three operations (password change,
 // session revoke, log out) can lock a user out of their own console. Before the
