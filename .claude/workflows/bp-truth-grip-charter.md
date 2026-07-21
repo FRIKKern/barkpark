@@ -907,3 +907,112 @@ over-permits when the authoritative segment is not the fact's source — the
 sharpest residual in the level grammar), and `tgw3-bl-ssh-bare-host-alias` (a
 bare `ssh <alias>` derives L6; pre-existing, and widening `SSH_READ` is a
 promotion rule change that needs a decision, not a review fix).
+
+### Wave 2026-07-21 (2) — round 1, the substrate gets a caller. Grade A.
+
+Paper: `source-of-truth-grip-wave-4-2026-07-21`. Five round-1 slices built and
+reviewed; `tgw3-leads-verb` deferred by design (sequenced-rounds law), not
+stalled. All five carry `builder_model: opus` — three of them only after this
+review patched the field on, see the ledger note below.
+
+**THE LEDGER IS NO LONGER EMPTY.** Three waves said "the loop reads as closed
+one wave before it is". It is closed now. `node tooling/grip/ledger.mjs write
+<facts.json>` is shell-reachable, and on the merged tree
+`git ls-tree HEAD --name-only tooling/grip/ledger/` returns a real run file
+beside `README.md`. Nine rows fold to seven keys and RIVAL-METHOD fires once —
+the clustering D32 predicted, delivered on the first write. Re-derived in review,
+not taken on report.
+
+**Landed** (final branches carry a reviewer `-r` commit where one was needed):
+
+| Slice | Branch | What |
+|---|---|---|
+| `tgw3-write-verb` | `…ship-the-write-verb-and-the-minting-tran-0-r` | `mint.mjs` + the `write` verb: a fact→recipe TRANSFORMER, subject from the rerun's path token, `now` and `observed_at` from ONE `date -u` reading, all-or-nothing writes. 25 new tests. |
+| `tgw3-census-verb` | `…ship-the-decay-census-so-the-epic-measur-1-r` | `census.mjs`: family-first silence classification over the frozen corpus. 85.4% of 178 decisive recipes still answer, 14.6% decayed, reach 240/651 printed as the honest bound. 40 tests. |
+| `tgw4-screen-overwrite-guard` | `…close-the-arbitrary-file-overwrite-primi-2-r` | The `sort -o` / `uniq <in> <out>` / `tree -o` / `npm pack` / `curl -so<path>` overwrite primitive closed, DANGER_SET 23→29, NEVER_CRY_WOLF 4→10, census reach unchanged at 240. 39 tests. |
+| `tgw4-wiring-and-acceptance` | `…prove-the-screen-to-ledger-contract-with-3-r` | `test/wiring.test.mjs` (substring containment through both real modules) + `acceptance.mjs` (the six ratified specimens through the real adjudicator). 15 + 3 tests. |
+| `tgw4-rerun-silence-fixes` | `…stop-rerun-mjs-laundering-a-tool-error-i-4` | Family-dispatched silence in `rerun.mjs`, the `merge(?!-base)` carve-out, and a THIRD defect the builder found itself: git's global options let `git -C <path> push` classify SAFE. 55 tests. |
+
+**D49's proof reproduced by the reviewer, exactly as claimed.** The consistent
+rename `reason`→`why` across `screen.mjs` and its own suite leaves screen 34/0,
+ledger 60/0 and level 71/0 — every shipped suite 100% green — while
+`wiring.test.mjs` goes 3/3 red. That is the wave's most decisive artifact and it
+behaves as advertised.
+
+**The defect only the merge could see.** Each slice was green alone; the union of
+all five went RED. `screen.test.mjs` froze `classifySafety`'s corpus admission at
+`572`, a number belonging to `rerun.mjs` — a module that suite does not own — and
+`tgw4-rerun-silence-fixes` legitimately moved it to 583 (the `merge-base`
+carve-out re-admits 11 rows). Two correct fixes jointly producing a red, the
+co-scoped-merge class again. The sharper half is the irony: that test's own
+comment reads "ratios are asserted, not counts" with three frozen counts below
+it — the retired-statistic disease committed inside the cure. Fixed on the
+screen slice: the screen's own 240 stays pinned (it is what that suite owns), and
+`classifySafety`'s figure is asserted as a MARGIN and printed, never frozen.
+**A wave whose slices are individually green has not been reviewed until they
+have been merged into one tree and gated together.**
+
+**Other defects the review found and fixed.** The pattern held for a fourth wave
+— the epic's own failure modes keep appearing inside the tooling built to
+prevent them:
+
+1. **A bound that silently unbound itself.** `census.mjs --limit` with a missing
+   or non-numeric value parsed to `NaN`, failed the `isFinite` test and ran the
+   ENTIRE 651-command corpus. The operator asked for a bounded run and got an
+   unbounded one with no signal. Named rejection, exit 2.
+2. **An underpowered pass wearing a full census's authority.** `--limit 12`
+   admits 3 decisive rows, measures 0.0% decay and printed "CONSISTENT — below
+   the 22.4% floor". Zero-admissible already had a NULL STATE; too-few-to-say did
+   not. A 30-row floor now returns UNDERPOWERED and reports the measurement as an
+   observation, never as consistent or contrary. Control pair tested both ways.
+3. **The acceptance suite's escape hatch cost nothing.** "Each entry must be paid
+   off by a filed task" was a COMMENT, and nothing read it — an entry with an
+   empty `filed_as`, or one whose label did not actually diverge, silenced a real
+   finding just as well as an honest declaration. The shape is now checked at
+   module scope and FATAL on import, like PROBE-DRIFT. It still cannot prove the
+   task exists (that needs the network, and the module is hermetic); it proves
+   the declaration was written as a payoff rather than as a shrug.
+4. **The write verb died as an unhandled rejection.** `main` became async when
+   `write` landed and nothing caught it. A store whose CLI dies quietly is
+   indistinguishable from one that wrote nothing on purpose. Named crash, exit 2.
+5. **A test that made the suite flaky one run in three** — introduced by fix 3,
+   caught by running the union gate eight times rather than once. The mutated
+   module copy was written INTO `tooling/grip`, where another test in the same
+   process enumerates every file in that directory. Moved out of the tree with
+   its sibling imports rewritten to absolute URLs. Eight clean runs.
+
+**Ledger audit.** All five slices left `lifecycle: in_progress` with the
+merge-gated criterion honestly open — builders did not close what the lead
+closes. Two fixes were needed. (a) `builder_model` was ABSENT from all three
+`tgw4-*` tasks, against the wave's own hard model constraint; Decide filed the
+tgw4 slices on a thinner schema than the tgw3 ones (no `gate`, `round`, `size`,
+`surface` either). The Paper's wave plan states "Every slice runs on opus", so
+the intent was recorded at L5 while the spine the gates read carried nothing.
+Patched and re-published. (b) `tgw3-census-verb` criterion 5 (a clean `go vet`
+classifies as an ANSWER) was PROVEN and left unstamped — the task's own now-line
+said "12/13". Re-derived in review and stamped with evidence. No task outside
+this wave was touched.
+
+**What this wave did NOT prove.** The census is not hermetic: `bp` and `gh` are
+allowlisted read heads, so a run reaches live services and an outage would
+inflate the decay rate as RAN-AND-FAILED. 14.6% describes this box on this day
+more tightly than the render says. The mint's ~76% path-token yield is still
+INHERITED from the charter, not re-derived — the write verb has not yet been fed
+a real survey report, only nine hand-authored facts. And `absenceEligible` is
+enforced at exactly one seam: `adjudicate.mjs` maps on the verdict alone, so the
+veto survives on `ruling.rerun` but is never promoted.
+
+**What the next wave inherits.** Merge round 1 (five branches, verified merging
+clean together into one tree: 382 tests, 381 pass, 0 fail, 1 skipped by design;
+both selftests green; `acceptance.mjs` exit 0). Then `tgw3-leads-verb`, and only
+once BOTH `tgw3-write-verb` and `tgw3-census-verb` are on `origin/main` — it
+needs rows to read, it renders the census's verdict, and it edits the same
+`ledger.mjs` CLI routing the write verb just claimed. It ships REDUCED per D43:
+the substring filter is the feature; the band, the rank and the RIVAL-METHOD flag
+are all cut.
+
+The sharpest work after that is DOGFOODING what now exists rather than adding to
+it: run a real survey report through `ledger.mjs write` and re-derive the mint
+yield from something nobody hand-authored. Backlog filed this review:
+`tgw4-absence-veto-stops-at-the-rerun-seam` and
+`tgw4-census-run-is-not-hermetic`.
