@@ -105,6 +105,17 @@ Elixir security gates, path-triggered on `api/**`:
    `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
    suppression while the job remains advisory.
 
+   **Flip verdict 2026-07-21 — STAY ADVISORY.** The felix-pristine wave re-ran
+   D75's blocking-flip test and it fails: D75 gates the flip on the baseline
+   file:line entries reaching **0**, sequenced after the CSP slice. The CSP
+   slice (#3545, merged) cleared only the 5 `Config.CSP` router findings;
+   `origin/main:api/.sobelow-skips` still carries **137** baselined entries
+   (`grep -c '^[A-Za-z]'` = 137; 0 are `Config.CSP` — 74 Traversal.FileModule,
+   12 DOS.StringToAtom, 9 each XSS.SendResp/SQL.Query/CI.System, …). Draining
+   137 findings is a multi-slice remediation out of this wave's scope, so the
+   precondition is unmet and the `sobelow` job stays `continue-on-error: true`.
+   Re-evaluate only when the baseline reaches 0.
+
 10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
     dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
     pre-existing CVEs were remediated by a version bump (task-726cab56d9a84551),
