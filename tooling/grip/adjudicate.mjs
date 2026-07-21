@@ -44,6 +44,7 @@
 import { admitFact } from "./record.mjs";
 import { deriveLevel } from "./level.mjs";
 import { runRerun, VERDICT } from "./rerun.mjs";
+import { screenCommand } from "./screen.mjs";
 
 // The ten names. Frozen so a caller cannot grow the vocabulary by assignment.
 export const VERDICTS = Object.freeze({
@@ -83,6 +84,57 @@ export function stands(verdict) {
   return STANDING.has(verdict) || verdict === VERDICTS.CONFLICT;
 }
 
+// ── THE CALLER-BOUNDARY SAFETY WIRE (Design B, charter D88) ──────────────────
+//
+// THE HOLE THIS CLOSES. The cli → adjudicate → runRerun path re-EXECUTES a
+// fact's `rerun` command by default (execute: true, no injected runner). Left
+// to itself, `runRerun` gates only on `classifySafety` (rerun.mjs:676) before
+// `spawnSync("/bin/sh", ["-c", cmd])` at :337 — and `classifySafety` is a
+// denylist that admits 22 of 22 named outage probes (systemctl stop, reboot,
+// `mix ecto.drop`, `kill -9`, `pkill`, a bare `cp` into api/lib/, …) and 51 of
+// the 53-command DANGER_SET, versus `screenCommand`'s 0. So a facts.json whose
+// rerun is `cp /etc/hosts /tmp/grip-marker`, adjudicated with NO flags,
+// MATERIALISED the file — a default-on RCE.
+//
+// WHY THE WIRE LIVES HERE, NOT IN screen.mjs OR rerun.mjs (D29, D47, D88):
+//   - screen.mjs must import NOTHING from rerun.mjs (D29). It does not; this
+//     module imports BOTH, which is the allowed direction.
+//   - `classifySafety`'s grammar is NOT rewritten and `runRerun`'s internal
+//     gate at rerun.mjs:676 is NOT swapped (D88). `runRerun`'s own 35 direct
+//     callers in rerun.test.mjs keep their exact behaviour — this is a boundary
+//     wire, not a grammar change, so it carries zero test-flip cost there.
+//   - The seam is the DEFAULT RUNNER. `screenCommand` decides first; only a
+//     command it admits is handed to `runRerun` to execute. A refusal returns an
+//     UNSAFE-RERUN result BEFORE any spawnSync is reached, which the engine maps
+//     to REJECTED ("rejected before execution"). An injected runner (tests, the
+//     census, any caller passing opts.run) bypasses this by design — the screen
+//     guards the path that would otherwise execute an arbitrary corpus command.
+//
+// COVERAGE BOUNDARY — STATED, DELIBERATELY NOT EXPANDED (D88). The caller screen
+// inherits screen.mjs's current shape verbatim: it also refuses commands that
+// are safe reads. A fact whose rerun is `git merge-base --is-ancestor <a> <b>`
+// (the D40 merge proof) or `git -C <path> show …` is REFUSED through cli.mjs,
+// because screen.mjs carries the `git -C` parse defect and the merge-base
+// refusal until tgw4-screen-git-global-option-audit and tgw4-rerun-silence-fixes
+// land. That is an over-refusal on the read side, not an RCE: it fails CLOSED.
+// The RCE close is NOT deferred for it — this slice does not touch screen.mjs's
+// grammar to fix those reads; it wires the existing screen at the boundary.
+export function screenedRerun(command, opts = {}) {
+  const screened = screenCommand(command);
+  if (!screened.ok) {
+    // Shaped to travel EXECUTION_MAP as UNSAFE-RERUN → REJECTED. Nothing ran.
+    return {
+      command: String(command ?? "").trim(),
+      verdict: VERDICT.UNSAFE_RERUN,
+      scope: null,
+      ran: false,
+      ms: 0,
+      reason: `refused at the caller boundary before execution — ${screened.reason}`,
+    };
+  }
+  return runRerun(command, opts);
+}
+
 /**
  * adjudicate(input, opts) → ruling
  *
@@ -100,11 +152,16 @@ export function stands(verdict) {
  * @param {object} input  a fact-shaped record (record.mjs FACT_FIELDS)
  * @param {{execute?: boolean, run?: Function, root?: string, timeoutMs?: number}} [opts]
  *   execute — re-run the command (default true). false adjudicates admission alone.
- *   run     — injectable runner, defaults to runRerun. Tests pass a stub so the
- *             verdict mapping is provable without touching the network.
+ *   run     — injectable runner, defaults to screenedRerun (the caller-boundary
+ *             safety wire, D88): screenCommand decides, runRerun executes only
+ *             what it admits. Tests pass a stub so the verdict mapping is
+ *             provable without touching the network — and injecting `run` is
+ *             also how a caller deliberately bypasses the screen.
  */
 export function adjudicate(input = {}, opts = {}) {
-  const { execute = true, run = runRerun, root, timeoutMs } = opts;
+  // DEFAULT RUNNER IS THE SCREENED WIRE (D88), never bare runRerun. Any caller
+  // may still inject `run` (tests, the census) to bypass the screen deliberately.
+  const { execute = true, run = screenedRerun, root, timeoutMs } = opts;
 
   const admission = admitFact(input);
 

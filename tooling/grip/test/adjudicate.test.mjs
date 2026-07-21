@@ -13,15 +13,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   adjudicate, adjudicateAll, detectConflicts, conflictKey, renderLabel, stands, VERDICTS,
+  screenedRerun,
 } from "../adjudicate.mjs";
-import { VERDICT } from "../rerun.mjs";
+import { VERDICT, classifySafety } from "../rerun.mjs";
+import { screenCommand, DANGER_SET } from "../screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GRIP = join(HERE, "..");
@@ -336,4 +339,90 @@ test("a missing facts file is exit 2 — usage, never a verdict", () => {
   const r = cli([join(GRIP, "no-such-file.json")]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /cannot read/);
+});
+
+// ── D88 — THE CALLER-BOUNDARY SAFETY WIRE ────────────────────────────────────
+//
+// The default execution runner is screenedRerun: screenCommand decides, and
+// only what it admits is handed to runRerun to spawn. These tests would FAIL if
+// the wire were reverted to bare runRerun — the marker probe writes a real file,
+// so a bypass is observable, not a shape assertion.
+
+// A DANGER-set shape classifySafety ADMITS and runRerun WOULD execute. The
+// source exists; the write target is unique per-process so a leaked marker from
+// a bypass cannot be confused with another run's.
+const MARKER = join(tmpdir(), `grip-rce-marker-${process.pid}`);
+const OUTAGE_CP = `cp ${join(GRIP, "record.mjs")} ${MARKER}`;
+
+test("the default runner SCREENS: an outage `cp` is REJECTED before execution and writes NO file", () => {
+  rmSync(MARKER, { force: true });
+  // Precondition — this is a real bypass detector only while classifySafety
+  // WOULD have admitted (and runRerun executed) this exact command.
+  assert.equal(classifySafety(OUTAGE_CP).safe, true, "control invalid: classifySafety no longer admits the probe");
+
+  const ruling = adjudicate({ subject: "marker probe", claim: "a discrete claim about the marker", rerun: OUTAGE_CP });
+
+  assert.equal(ruling.verdict, VERDICTS.REJECTED, "an outage command must be REJECTED at the boundary");
+  assert.equal(ruling.fact, null, "a refused command yields no standing fact");
+  assert.match(ruling.note, /before execution/, "the refusal must be pre-execution");
+  assert.equal(existsSync(MARKER), false, "THE SCREEN WAS BYPASSED — the rerun executed and wrote a file (RCE)");
+  rmSync(MARKER, { force: true });
+});
+
+test("screenedRerun refuses without spawning, and delegates an ADMITTED read to runRerun", () => {
+  rmSync(MARKER, { force: true });
+  // (a) refusal — nothing ran, shaped to travel EXECUTION_MAP as UNSAFE-RERUN.
+  const refused = screenedRerun(OUTAGE_CP);
+  assert.equal(refused.verdict, VERDICT.UNSAFE_RERUN);
+  assert.equal(refused.ran, false);
+  assert.match(refused.reason, /caller boundary/);
+  assert.equal(existsSync(MARKER), false, "screenedRerun must not spawn a refused command");
+  // (b) delegation — an allowlisted read really executes through runRerun.
+  const ran = screenedRerun("grep -c 'reason:' " + join(GRIP, "record.mjs"));
+  assert.equal(ran.verdict, VERDICT.OK, `an admitted read should run and return OK, got ${ran.verdict}: ${ran.reason}`);
+  assert.equal(ran.ran, true);
+});
+
+test("22 named outage probes: classifySafety admits 22/22, the boundary refuses 22/22", () => {
+  // The pre-wave-4 named dangers — the shapes classifySafety rated SAFE and the
+  // census would have spawned. The count is RE-DERIVED here, never remembered.
+  const OUTAGE = DANGER_SET.filter((c) => classifySafety(c).safe).slice(0, 22);
+  assert.equal(OUTAGE.length, 22, "expected 22 classifySafety-admitted outage probes");
+
+  const csAdmits = OUTAGE.filter((c) => classifySafety(c).safe).length;
+  const screenRefuses = OUTAGE.filter((c) => !screenCommand(c).ok).length;
+  const boundaryRejects = OUTAGE.filter(
+    (c) => adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: c }).verdict === VERDICTS.REJECTED,
+  ).length;
+
+  assert.equal(csAdmits, 22, "classifySafety must admit all 22 (that is the hole)");
+  assert.equal(screenRefuses, 22, "the screen must refuse all 22");
+  assert.equal(boundaryRejects, 22, "adjudicate's default path must reject all 22 before execution");
+});
+
+test("an INJECTED runner still bypasses the screen — proving this is a boundary wire, not a grammar swap", () => {
+  // A caller that injects `run` opts out of the screen deliberately (the census
+  // owns its own screen; rerun.test.mjs's 35 direct runRerun calls keep their
+  // behaviour). Here the stub returns OK for a command the screen WOULD refuse,
+  // and the engine honours it — the screen sits on the DEFAULT path only.
+  // No level claim, so admission passes (reboot derives L6 → DEMOTED); the stub
+  // then stands in for execution. A screened default path would REJECT `reboot`
+  // before ever calling a runner, so counter.calls===1 IS the bypass proof.
+  const counter = { calls: 0 };
+  const ruling = adjudicate({ subject: "power", claim: "a discrete claim about power", rerun: "reboot" }, { run: stub(VERDICT.OK, counter) });
+  assert.equal(counter.calls, 1, "the injected runner must be the one consulted, not the screen");
+  assert.ok(stands(ruling.verdict), "an injected OK leaves the fact standing — the screen was not consulted");
+  assert.notEqual(ruling.verdict, VERDICTS.REJECTED, "the injected path is not screened");
+});
+
+test("git merge-base and `git -C` reads are refused at the boundary — the STATED coverage bound (D88)", () => {
+  // Not an RCE: these are safe reads the screen over-refuses today (its git -C
+  // parse defect + merge-base refusal), until tgw4-screen-git-global-option-audit
+  // and tgw4-rerun-silence-fixes land. The wire inherits the screen verbatim; it
+  // does NOT reach into screen.mjs's grammar to fix them. Documented, fails CLOSED.
+  for (const cmd of ["git merge-base --is-ancestor HEAD origin/main", "git -C tooling/grip show HEAD:README.md"]) {
+    assert.equal(screenCommand(cmd).ok, false, `the boundary is expected to refuse the safe read: ${cmd}`);
+    const ruling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: cmd });
+    assert.equal(ruling.verdict, VERDICTS.REJECTED, `over-refused (fails closed), not executed: ${cmd}`);
+  }
 });
