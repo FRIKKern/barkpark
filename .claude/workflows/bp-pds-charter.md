@@ -3836,3 +3836,47 @@ manifest `profile == full`) BEFORE any stamp, criterion text fetched to a file a
 with the ONE wave-19 run_id, **10 on merge with the merge SHA recorded**, **11 LAST and ALONE**. If any
 rung refused: stamp NOTHING, record the named refusal in the paper, sort each red HARNESS-BUG vs
 ENGINE-FAIL and file the successor (never fix mid-proof). **ZERO NEW SCRIPTS**; frozen blob untouched.
+
+### Wave 2026-07-21 (20) — DERIVE THE REAL FLOOR — round 1 built + reviewed, grade A (paper `pds-wave-20-2026-07-21`)
+
+**What landed.** One round-1 slice, `pds-w20-launcher-floor-arm` (branch
+`loop-epic/arm-the-launcher-at-the-derived-897-floo-0-r`, PR opened): `scripts/pds-crown-launch.sh`
+armed at the PDS-D276/D277 derived **897 MiB** floor and the derivation record
+`scripts/pds-w20-floor-derivation.md` written. The 2200 fossil (retired in-RAM engine's 2235 demand)
+is retired against the deployed streaming spill engine whose real peak-minus-baseline demand is
+**98.16 MiB** = (488564−388044)/1024 (wave-16 harness rung-3); FLOOR = 98.16 + 798.81 (D222 max
+drawdown) = 896.97 → 897. All **three** floor knobs move together (editing fewer is inert — the poll
+predicate silently defaults to 2200 and the child stands down forever): (1) `MEM_FLOOR_MIB` default
+`:-2200`→`:-897` (the poll predicate baked into source), (2) `MEM_FLOOR_LAW` 2200→897 (the tighten-only
+arm-refusal guard), (3) `export PDS_FULL_EXPORT_MIN_MEM_MB=897` inside `fire_detached`'s D249 contiguous
+block (reverses D244's UNSET so the frozen harness cond_b (b) matches). One shared producer
+(`arm_floor_record`/`arm_floor_summary`/extracted `write_run_meta`) records BOTH effective knobs
+distinctly in `run_dir/meta` and the arm banner — closing `pds-bl-w16-arm-never-records-its-own-floor`
+and `pds-bl-floor-env-silent-revert` (both merge-gated on the LEAD's close). Frozen harness blob
+`e219e97c` UNTOUCHED. Selftest 46 ok · 0 FAIL (baseline 40), exit 0, mutation-proven in review: reverting
+the export knob → 4 distinct FAIL (`full_export_min_mem_mb` reads UNSET); reverting the poll/law knobs →
+3 FAIL. Derivation arithmetic re-checked green; the §2 honesty caveat (the 388044 baseline is the
+harness's within-process rung-3 baseline, NOT a formal D104 paired control D211 demands) is recorded.
+
+**Review verdict — grade A.** Correct, doctrine-clean, disciplined. The three-knob coupling is the whole
+game and all three are set + individually mutation-proven; the two synthetic collect fixtures at
+`mem_mib=1800/floor=2200` are correctly LEFT (897 would flip their STAND-DOWN verdict to FIRE and make
+them internally inconsistent). Reviewer changed nothing in the slice — it was already right. Two honest
+notes, neither blocking: (a) the slice's stamped evidence for criterion 4 claims "reverting knob 3 → 15
+FAIL / knob 2 → 14 FAIL"; review measured 4 and 3 — the *substance* (distinct check per knob,
+mutation-provable) holds, the counts are overstated; (b) D276–D278 live in the wave Paper and in charter
+PR **#5514** (`pds/w20-decide`, open) but not yet in this charter body — a cold agent reading only the
+charter still sees D275's "never lower the 2200 floor" until #5514 merges.
+
+**What stalled / deferred (BY DESIGN, sequenced rounds).** `pds-w20-crown-fire` (round 2) and
+`pds-w20-crown-collect-and-seal` (round 3) were NOT built this run. `pds-w20-crown-fire` fires the
+detached climb at the baked 897 floor in the box's real 1796–2012 MiB regime — it MUST wait for
+`pds-w20-launcher-floor-arm` to MERGE (it invokes the merged launcher by path). `pds-w20-crown-collect-and-seal`
+is LEAD-only, after the climb completes.
+
+**Next wave takes:** merge round-1 (`pds-w20-launcher-floor-arm` -r) and charter PR #5514 first (the fire
+reads the baked 897 default from the MERGED launcher); then dispatch `pds-w20-crown-fire` (archive the
+stale wave-19 run dir per D269, same-breath 0b per D275, arm BY PATH `--prewarm-now --max-draws 2160
+--interval 10` detached, NO passenger per D278, prove `run_dir/meta` records `mem_floor_mib=897`, return —
+no polling); then, after the climb completes, the LEAD runs `pds-w20-crown-collect-and-seal` (D261 bundle
+cross-check, D278 self-confirm rung-3 delta ≤ 98.19, re-stamp 0–9 to one run_id, 10 on merge, 11 last-and-alone).
