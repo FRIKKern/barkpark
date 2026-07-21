@@ -1,0 +1,56 @@
+name: zz-probe-cssom
+
+# THROWAWAY PROBE — delete with this branch. Settles two unproven claims for the
+# cssom-parity CI wiring slice: (1) does ubuntu-latest ship a Chrome binary at a
+# path findChrome() discovers, (2) does cssom-parity.mjs run clean under Node 22.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zz-probe-cssom.yml"
+  workflow_dispatch:
+
+jobs:
+  cssom-parity-probe:
+    name: CSSOM parity probe (node 22 + runner Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: What Chrome does the runner ship?
+        run: |
+          echo "--- which ---"
+          which google-chrome-stable || echo "NO google-chrome-stable ON PATH"
+          which google-chrome || echo "NO google-chrome ON PATH"
+          which chromium || echo "NO chromium ON PATH"
+          which chromium-browser || echo "NO chromium-browser ON PATH"
+          echo "--- findChrome() candidate paths ---"
+          for p in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser; do
+            if [ -x "$p" ]; then echo "EXECUTABLE $p"; else echo "absent    $p"; fi
+          done
+          echo "--- version ---"
+          google-chrome-stable --version || echo "no version (binary absent)"
+          echo "--- CHROMEWEBDRIVER/CHROME env ---"
+          env | grep -i chrome || echo "no chrome env vars"
+
+      - name: Run cssom-parity.mjs (node 22, runner Chrome)
+        run: node cloud/priv/static/__preview__/cssom-parity.mjs
+
+      - name: Node 20 control — does it really fail?
+        if: always()
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run cssom-parity.mjs under node 20 (expected to fail)
+        if: always()
+        continue-on-error: true
+        run: |
+          node --version
+          node cloud/priv/static/__preview__/cssom-parity.mjs
+          echo "NODE20 EXIT=$?"
