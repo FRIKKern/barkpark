@@ -217,6 +217,21 @@ test("`git -C <path>` is the same statement as a cd prefix and is recorded the s
   assert.equal(verdict.cd_prefix, "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_e3a3a728-f3c-19");
 });
 
+test("a QUOTED or substituted cd target is recorded whole, not as its first token", () => {
+  // `cd "$(git rev-parse --show-toplevel)"` is this epic's own wave-gate line.
+  // Tokenising it recorded the fragment `"$(git`, which then rendered verbatim
+  // inside `reason` — a garbage string in the one field a reader is told to
+  // read instead of the class.
+  assert.equal(
+    classifyBinding(`cd "$(git rev-parse --show-toplevel)" && node --test tooling/grip/test/binding.test.mjs`).cd_prefix,
+    "$(git rev-parse --show-toplevel)",
+  );
+  assert.equal(
+    classifyBinding(`cd '/Volumes/SATECHI/github/bark park' && git ls-files .`).cd_prefix,
+    "/Volumes/SATECHI/github/bark park",
+  );
+});
+
 test("an absolute path in the READ still pins, even under a cd prefix", () => {
   const verdict = classifyBinding(
     "cd /tmp && grep -n needs_worktree /Volumes/SATECHI/github/barkpark/.claude/workflows/bp-epic-cycle.workflow.js",
@@ -268,6 +283,27 @@ test("the three mask severities are distinguished, because D76's single bit hide
   assert.equal(classifyBinding("git show origin/main:x | wc -l").exit_mask_rule, "MASK-PIPE-EXIT-AND-VALUE");
   assert.equal(classifyBinding("git show origin/main:x | grep -c func").exit_mask_rule, "MASK-PIPE-VALUE");
   assert.equal(classifyBinding("git show origin/main:x | grep -n func").exit_mask_rule, "MASK-PIPE-SILENT");
+});
+
+test("a `|` inside a QUOTED pattern is not a pipeline, and must not fabricate a mask warning", () => {
+  // Regression: the pipeline split ran over the RAW statement while every other
+  // scan ran over the quote-masked copy, so a grep alternation read as a pipe.
+  // Measured over fixtures/evidence-corpus.json: 46 of 652 proofs (7.1%) were
+  // reported exit_masked with no pipe anywhere in them. A module whose product
+  // is honest warnings cannot ship a fabricated one on 7% of its input.
+  for (const command of [
+    `grep -nE "foo|bar" tooling/grip/leads.mjs`,
+    `grep -n 'lifecycle\\|worker' scripts/pr-task-gate.sh`,
+    `rg "a|b" tooling/grip/`,
+  ]) {
+    const verdict = classifyBinding(command);
+    assert.equal(verdict.exit_masked, false, command);
+    assert.equal(verdict.exit_mask_rule, null, command);
+  }
+  // …and a REAL pipe over a quoted alternation still masks.
+  const piped = classifyBinding(`git show origin/main:x | grep -c "a|b"`);
+  assert.equal(piped.exit_masked, true);
+  assert.equal(piped.exit_mask_rule, "MASK-PIPE-VALUE");
 });
 
 test("`set -o pipefail` clears the mask — the read's failure reaches the caller", () => {

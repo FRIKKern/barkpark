@@ -433,10 +433,18 @@ function isCdStatement(text) {
   return /^[\s(]*cd\s+\S/.test(text);
 }
 
+// The target is the REST of the cd statement, not its first whitespace token:
+// the statement has already been split on `&&`/`;`, so everything after `cd` is
+// the destination — and the destination is routinely quoted or a command
+// substitution. `cd "$(git rev-parse --show-toplevel)"` (this epic's own gate
+// line) tokenises to the garbage fragment `"$(git`, which then renders verbatim
+// inside `reason`. Outer matching quotes are stripped; the substitution is kept
+// whole, because "the tree this resolved to" is exactly what a reader needs.
 function cdTarget(text) {
-  const list = tokens(text.replace(/^[\s(]+/, ""));
-  const at = list.indexOf("cd");
-  return at === -1 ? null : (list[at + 1] ?? null);
+  const rest = text.replace(/^[\s(]*cd\s+/, "").trim();
+  if (rest === "") return null;
+  const unquoted = rest.replace(/^(['"])([\s\S]*)\1$/, "$2").trim();
+  return unquoted === "" ? null : unquoted;
 }
 
 function stripDashC(text) {
@@ -722,9 +730,15 @@ export function classifyBinding(rerun) {
       }
     }
 
-    readTexts.push(text);
-    const head = splitPipeline(maskQuoted(text))[0] ?? text;
-    const verdict = classifyStatement(head);
+    // Everything downstream reads the MASKED statement. A `|` inside a quoted
+    // grep pattern is not a pipeline: scanning the raw text splits
+    // `grep -nE "foo|bar" x` into two segments and reports exit_masked on a
+    // command with no pipe in it at all — a fabricated warning, which is the
+    // one thing a module whose product is honest warnings cannot afford.
+    const maskedText = maskQuoted(text);
+    readTexts.push(maskedText);
+    const readSegment = splitPipeline(maskedText)[0] ?? maskedText;
+    const verdict = classifyStatement(readSegment);
     if (verdict) verdicts.push(verdict);
   }
 
