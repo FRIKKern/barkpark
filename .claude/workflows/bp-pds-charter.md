@@ -1855,6 +1855,363 @@ D203 are new — findings the build round produced that the Decide phase could n
   it must beat" and "satisfies the task's own acceptance bar" are two different claims, and the wave
   must not silently substitute the first for the second.*
 
+- **PDS-D217 — THE LOW-PEAK THESIS SURVIVES, AND THE NUMBER THAT SAVES IT IS NEW.** The sharpest attack
+  on wave 12 was that `revisions` (498,201,323 B, **no row count anywhere in this charter**) might hold
+  ≤500 rows and so stream as ONE chunk under Postgrex's `max_rows` default, putting the old regime back.
+  Measured live on `barkpark_prod`: **revisions 48,363 rows, mutation_events 62,441, documents 3,300**
+  (re-confirmed independently at Decide; an earlier same-day read gave 48,271/62,286/3,294 — the tables
+  drift, the conclusion does not). revisions streams as ~97 chunks and is NOT the peak driver. Worst-case
+  500-row window computed in the engine's real `ORDER BY` pk stream order and converted from
+  `octet_length(t::text)` to COPY bytes by the per-table measured ratio: **mutation_events 19.71 MiB (THE
+  PEAK)**, documents 18.01 MiB, revisions 6.64 MiB. That is 0.9% of the 2200 MiB frozen floor.
+  `Ecto.Adapters.SQL.stream(sql, [])` passes a LITERAL empty opts list (`workspace_bundle.ex:738`), so
+  Postgrex's `@max_rows 500` governs. Three corrections the derivation MUST carry: (i) the 4.82 MiB
+  figure circulated in the digest is an AVERAGE — the measured worst is 19.71 MiB, 3.9× it, and a floor
+  derived off a mean is dishonest; (ii) **`documents` is an unnamed near-peer** at 18.01 MiB across only
+  7 chunks (~30 KB/row, the densest table in the set) and sits 6 chunks from being a single-chunk table;
+  (iii) chunk peak is order-sensitive by ~57% (physical order gives 28.80 MiB, id order 18.38 MiB) — the
+  id-order figure is the correct one because `copy_out_sql` appends `ORDER BY t.<pk>`. The pathological
+  ceiling (500 consecutive max-size rows) is 260 MiB — not realized today at 7.5% of it, but the honest
+  upper bound. *Why: the epic spent two waves blocked by a memory wall; the number that proves the wall
+  is gone had never been measured, and a mean would have hidden a 4× skew.*
+
+- **PDS-D218 — THE WATCHDOG CANNOT EXIST. THE SAFETY POSTURE IS PRE-FIRE-ONLY, AND IT IS NAMED A
+  SAMPLER.** Wave 12's own Ruling 1 required "a live MemAvailable watchdog with a pre-declared abort
+  threshold". **That instrument is unbuildable, and this is now PROVEN, not argued.** A client was killed
+  at 194 ms having received ZERO bytes; the server logged `Sent 200 in 7110ms` — a **36× overrun** — and
+  a 0.25 s poll of the spill dir captured the ENTIRE lifecycle after the client was already dead: 15
+  spills appearing, a tar growing to its full 66,596,864 bytes, then `after`-clause cleanup. Every byte
+  was produced for a client that no longer existed. The mechanism: `export_bundle/2` sits in the `with`
+  HEAD (`workspace_controller.ex:165`); the `try/after` wraps ONLY `send_file/3`. No disconnect can reach
+  the export. Nor is there an external lever: `systemctl show` returns `MemoryMax=infinity`,
+  `MemoryHigh=infinity`, `OOMScoreAdjust=0`, `OOMPolicy=stop` — no cgroup cap, no OOM biasing, and
+  `OOMPolicy=stop` means a kernel OOM kill takes the LIVE content API down rather than shedding the
+  export. `archive.ex` already conceded "SIGKILL is out of reach here by construction". **RULING: the
+  pre-declared MemAvailable threshold checked BEFORE the request is issued is the ENTIRE safety
+  mechanism, and the derivation must say so in those words. The monitoring loop is still run — it
+  produces the peak series the floor is derived from — but it is called a SAMPLER, never a watchdog.**
+  A loop that observes and logs while claiming an abort capability it does not have is a false safety
+  net, which is the exact shape this epic exists to refuse. Note also: the export starves the DB pool
+  (an `EdgeProjector.ProjectorWorker` timed out at 15000 ms six seconds after the killed export), so the
+  cost lands on the live API whether or not anyone is waiting. *Why: `grep -c -i watchdog` over this
+  charter returns ZERO — the watchdog was a strategy-note invention with no D-number behind it, and
+  chartering it would have written an imaginary brake into law.*
+
+- **PDS-D219 — THE INSTRUMENT INHERITED THE DEADLOCK, SO IT NEEDS A SECOND CHARTERED BYPASS, AND THAT
+  BYPASS IS RECORDED AS A BYPASS.** D216 put the paired-control instrument BESIDE the frozen harness —
+  but it carried the harness's floor with it: `pds-export-peak-measure.sh:121` reads the same
+  `${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}` and `:301-303` refuses a full acquisition below it. Live-refused
+  twice, at 2055 and 2054 MiB. So the bootstrap deadlock Ruling 1 chartered a bypass FOR reproduces
+  itself INSIDE the tool built to escape it. **RULING: the measure fires with `PDS_FULL_EXPORT_MIN_MEM_MB`
+  explicitly exported to the pre-declared pre-fire threshold, and that export is recorded in the
+  derivation AS A BYPASS, with the number and its basis — never as a quiet env tweak.** The threshold is
+  a DERIVED safety artifact under D218 (it is the whole brake), never a token value like `100` chosen to
+  make the gate pass. *Why: firing with a quietly-lowered floor and not writing it down is precisely the
+  sin Ruling 1 was written to prevent, and the instrument's own §6c.3 says the floor is "read, never
+  written" — that sentence must be amended by this decision rather than silently violated.*
+
+- **PDS-D220 — TWO PRE-MERGE INSTRUMENT FIXES, AND THEY DO NOT BREAK THE FREEZE.** (a) **THE ZERO-SAMPLE
+  NEGATIVE-DEMAND BUG.** `peak_kb_of` returns `0` for an empty log (`:247`) and `:388` subtracts the
+  baseline unguarded, so an acquisition returning before the sampler's first ~1 s tick emits
+  `export_samples=0 export_peak_kb=0 export_delta_mib=-847.18` **and exits 0**. No `-le 0` guard exists
+  anywhere. A fast-failing full export — a 500 or a reset under memory pressure, precisely the regime
+  here — would feed a NEGATIVE demand into the floor derivation. Fix: REFUSE (exit 2) when
+  `EXPORT_SAMPLES` is 0. (b) **THE CONTROL MEASURES THE WRONG QUANTITY FOR D221's THRESHOLD.** The paired
+  idle control emits BEAM RSS delta; D221's contamination threshold is stated on MemAvailable RANGE.
+  Attaching one to the other would be a unit-class error of exactly the kind D185 exists to correct. Fix:
+  add a MemAvailable sampling leg to the control window and emit its range. **Both are edits to
+  `scripts/pds-export-peak-measure.sh`, which is NOT the frozen harness** — the freeze covers
+  `pds-pull-proof.sh` at blob `e219e97ccf7f33797c86a2b84d998d599b6bda31` and is untouched. *Why: a
+  pre-merge fix to a beside-instrument is not a mid-proof harness edit, and shipping a tool that can
+  silently emit a negative demand is worse than shipping it a day later.*
+
+- **PDS-D221 — THE CONTAMINATION-ABORT THRESHOLD IS 1048.16 MiB, ON MemAvailable RANGE.** No numeric
+  contamination threshold existed anywhere in this ledger (`bp search`, 1118 hits, none carrying a
+  number). Derived from 390 live samples (3 × 130 s idle windows, 1 Hz, kB/1024) on deployed guerrilla:
+  per-window MemAvailable ranges 788.47 / 766.69 / 988.99 MiB → mean 848.05, population σ 100.06 →
+  **mean + 2σ = 1048.16 MiB**. Distributional cross-check over all 390 points (σ = 262.29) puts a 2σ-on-
+  range bound at 1148.81 MiB. The two derivations bracket [1048.16, 1148.81]; **take the LOWER**, because
+  under D223's cheap exports a false abort costs one inexpensive export while a contaminated measurement
+  poisons the floor law permanently — asymmetric cost, strict end of the bracket. **RULE: if the paired
+  idle window's MemAvailable range ≥ 1048.16 MiB, the measurement is VOID and must be re-taken.** This
+  attaches ONLY to the MemAvailable leg D220(b) adds. For the RSS control leg the entire evidence base is
+  n = 1 (294.96 MiB) — **no threshold is derived from it, and none may be invented at the close.**
+  *Why: "the control was large" is a judgement call at 3 a.m. unless a number was written down first.*
+
+- **PDS-D222 — THE FLOOR IS DERIVED FROM THE DELTA, NEVER THE ABSOLUTE PEAK, AND THE MARGIN IS
+  798.81 MiB.** Two things this decision pins, because both were about to be got wrong. (i) **UNITS.**
+  The canonical 2235.43 MiB is a DELTA — the parked sidecar records `rss_peak_kb: 2483304` and
+  `rss_baseline_kb: 194228`, and (2483304 − 194228)/1024 = 2235.4258 exactly; the ABSOLUTE peak was
+  2425.10 MiB. `cond_b` compares the floor against live MemAvailable, and **MemAvailable measures
+  headroom for NEW allocation while the baseline RSS is already resident** — so the floor is
+  `measured_demand_delta + margin`, and adding the baseline back would DOUBLE-COUNT and over-set the
+  gate. (A Decide-round reading that it would UNDER-set is wrong and is recorded here so it is not
+  re-derived.) The old 2200 default sitting just under the 2235.43 delta confirms the convention was
+  already delta-based. (ii) **THE MARGIN IS 798.81 MiB.** The floor gates a single INSTANTANEOUS pre-fire
+  read and the export then runs; the quantity a margin must cover is the worst downward excursion from
+  any authorising instant to any later instant in the same window — the maximum drawdown,
+  `max_t ( v_t − min_{u≥t} v_u )`. Observed across the three windows: 570.44 / 756.35 / 798.81 MiB. **Take
+  the MAX, not the mean** — a mean-sized margin is refuted by a third of the observed windows. Per D114
+  this is a LOWER bound (1 Hz misses sub-second troughs, n = 3, and the build-contention channel was OFF),
+  which is the safe direction. **FLOOR = measured demand + 798.81 MiB.** *Why: D190 §5 said "no floor
+  value prevents this" — §5 is right that no floor CONSTRAINS the walk and wrong that none can SURVIVE
+  it; 798.81 is the measured size of the walk.*
+
+- **PDS-D223 — DELETING THE PARKED `.tar` IS PERMITTED; RESETTING `attempts` AND REPOINTING
+  `PDS_FULL_EXPORT_DIR` REMAIN FORBIDDEN.** Ruling 2 forbids the climb reusing another invocation's
+  bundle but named no mechanism, and the harness will defeat it on any RETRY: `acquire_full_bundle`
+  reuses the park for ZERO attempts whenever `full_meta_ok` AND meta `served_sha == DEPLOYED_SHA`
+  (`:1269-1283`, `return 0`). Today reuse cannot fire — the park records `15e057f83` against a deployed
+  `bc64d869a`. **But the moment the climb's first `--all` takes its fresh export it writes a new `.meta`
+  stamped `served_sha bc64d869a` (`:1452`); a second `--all` after a red at rung 5/6/7/8 then finds a
+  MATCHING sha and silently REUSES, printing "0 attempts spent this run"** — that retry's rungs 3/4 would
+  scan a bundle from the first invocation, the exact criterion-11 mosaic, arriving through the sanctioned
+  path with no warning. `full_meta_ok`'s first test is `[ -s "$FULL_TAR" ] || return 1`, so **removing the
+  `.tar` is the ONLY lever that forces a fresh export without touching either forbidden knob.** RULING:
+  it is permitted, and it must be stated in the transcript when done. *Why: deleting the tar SPENDS budget
+  where resetting `attempts` HIDES the spend — they are morally opposite acts that look superficially
+  alike, and Ruling 2 was incomplete without saying which is which.*
+
+- **PDS-D224 — THE BUDGET IS A FORMULA, NOT A LITERAL: `spent_at_fire_time + 2`.** `/tmp/pds-full-export/
+  attempts` reads `1` against `FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"` (`:130`), and `cond_c` tests
+  `spent < budget` (`:1313`) — so `1 < 1` is FALSE and the climb cannot fire at all today. Since `attempts`
+  must not be reset (D223), the ceiling must exceed the spend: on THIS host that means **3** (1 spent +
+  1 climb + 1 retry slack). But the store is HOST-LOCAL (D156) — a climb host reading `attempts=0` needs
+  2, not 3. **RULING: the builder is handed the FORMULA `spent + 2` and MUST re-read `attempts`
+  immediately before firing, never trusting a literal from a survey.** The raise is pre-authorised by
+  D137/D156 and goes on the record. *Why: three waves have quoted a stale literal from a survey taken
+  hours earlier on a different host.*
+
+- **PDS-D225 — THE CLIMB WORKTREE RULE SURVIVES, BUT ITS JUSTIFICATION IS REPLACED.** D212 grounded the
+  fresh-worktree requirement on "step 0b FAILS from the primary checkout". **That premise is REFUTED
+  today**: the primary is `b3dac3e8e`, has `origin/main` as an ancestor (0 behind, 2 ahead, both docs-only,
+  clean tree), so 0b would take the ancestor branch and PASS there. The rule is still right, on different
+  grounds: **the primary checkout is VOLATILE** — it moved from `1ccf6206a` to `b3dac3e8e` inside a single
+  session and accretes unpushed docs commits continuously, so a climb from it is a coin flip on whether it
+  has diverged by fire time. Re-proven affirmatively: from a fresh worktree pinned to `origin/main`, `--only
+  0a,0b` returns **`2 PASS · 0 ABORT · 0 FAIL`, exit 0**, with 0b taking the STRONGEST branch —
+  "deployed sha EQUALS the worktree", not the weaker ancestor branch. Two operational corrections ride
+  here: **`--step` IS NOT A FLAG** (the parser accepts only `--plan|--all|--only|--help` and exits 3 on
+  anything else — a `--step 0a` line pasted into a brief runs NOTHING while printing a usage line a
+  careless reader could skim as clean), and the spill dir is **`/opt/barkpark/api/tmp/bundle-spill`, NOT
+  `/tmp`** (`config.exs:19`; `BARKPARK_BUNDLE_SPILL_DIR` unset on the live slot) — a `/tmp/bp-ws-*` glob
+  returns "No such file" even mid-export and would be mis-sorted as "no export ran". *Why: a rule defended
+  by a refutable premise gets discarded by the first reviewer who checks the premise.*
+
+- **PDS-D226 — THE STAMP CEILING IS A NON-RISK; THE REAL TRAP IS CRITERION 11, AND THE LAW IS UNIFORM
+  FETCH-TO-FILE.** Both halves of the stamp recipe were proven live. Pasting criterion 6 inline into a
+  double-quoted string ran its four backtick pairs as command substitution and the server rejected the
+  stamp `criteria_mismatch`, exit 2, **nothing written**; `--criterion-text "$(cat c6.txt)"` with the
+  identical text stamped clean, exit 0. The ceiling was RE-DERIVED and the circulated figure is wrong:
+  it is not "live-bisected between 8900 and 9002" but **total URL 10016 OK / 10017 FAIL**, bisected to one
+  byte, reproduced 3/3 each side, and it is a TOTAL-bytes limit (re-bisecting with a 31-char criterion hit
+  the same boundary with 2671 more evidence bytes). The mechanism is **Bandit's `max_request_line_length`
+  default of 10_000** — not Caddy, not HTTP/2: over `--http1.1` and direct to `:4000` with Caddy bypassed
+  the same byte returns a legible **414**, and `5 ("POST ") + 9984 + 9 (" HTTP/1.1") + 2 = 10000` closes
+  exactly. `git grep max_request_line_length` returns NOTHING repo-wide. Durable law: **request target ≤
+  9984 bytes.** Per-criterion evidence budgets run **7197 (c6, the tightest) to 9759 (c3)**; the successful
+  c6 stamp spent **69 of 7197, under 1%**. **The ceiling is therefore DOWNGRADED — it cannot bite a terse
+  stamp.** What IS sharp: criterion 6 is the only one of twelve unsafe in a double-quoted string (8
+  backticks) and it fails LOUDLY, but **c5/c6/c11 carry single quotes, and criterion 11 carries exactly ONE
+  in 1248 characters** — invisible on inspection, stamped LAST and ALONE at maximum fatigue, and its
+  met-flip releases the auto-close brake. Two silent hazards: `` `command` `` is a zsh BUILTIN so it mangles
+  with NO "command not found" line (3 of 4 pairs warn, the 4th does not), and `"$(cat f)"` strips ALL
+  trailing newlines — safe here only because 0 of 12 criteria carry trailing whitespace, i.e. **safe by
+  luck of the data, not by construction**, so extraction MUST be a JSON-field write, never a here-doc.
+  **RULING: uniform fetch-to-file for ALL TWELVE, no per-criterion judgement.** Oversized stamps are
+  fail-closed (a `SENTINEL` at 9000+ bytes wrote nothing), so recovery is "retry shorter", never
+  "reconcile a half-write". Also: worker and epoch ride the BODY, not the URL. *Why: the circulated hazard
+  was the wrong one, and per-criterion judgement is how someone eyeballs c11, sees no backticks, and types
+  it inline.*
+
+### Wave 13 — FIRE THE CLIMB (decided 2026-07-21, PDS-D227–PDS-D241, paper `pds-wave-13-2026-07-21`)
+
+*Waves 10, 11 and 12 each planned the climb and each ended with an instrument — a sentinel, a paired
+control, a preflight, a stamp script. Every one was justified. Net movement on the crown across three
+waves: ZERO. This wave's success condition is THE TRANSCRIPT EXISTS, not that the preflight is better.*
+
+- **PDS-D227 — cond_b IS NOT A LOTTERY. IT IS A READOUT OF THE BUILD QUEUE, AND THE FIRE PREDICATE'S
+  LOAD-BEARING LEG IS `bp-site-build-*` IDLE.** Two concurrent 1 Hz instruments (600 samples, ~7 min,
+  2026-07-21 03:03–03:10 UTC) settle the question the last three waves treated as luck. Clearance of the
+  2200 MiB floor **conditional on build-idle is 244/246 = 99.19%; conditional on a build running it is
+  5/54 = 9.3%.** 96% of below-floor samples (49 of 51) had a site build running; 2% of above-floor samples
+  (5 of 249) did. Mean MemAvailable build-busy 2005 MiB vs build-idle 2466 MiB — a **461 MiB depression,
+  squarely inside PDS-D190 §4's 379/496 MiB two-step, replicated a year of waves later on the deployed
+  engine.** The two surveyors' amplitude disagreement (1614–2306 vs 1396.75–3060.76) is them sampling
+  different mixes of build-busy and build-idle time. **RULING: poll on D193's legs with (iii) leading —
+  `bp-site-build-*` running listing EMPTY, THEN MemAvailable ≥ floor, read in the same breath as firing.
+  Never poll on MemAvailable alone; that is what makes it look like a lottery.** `scripts/pds-window-
+  sentinel.sh` already implements this predicate — the wave needs NO new poller. *Why: three waves refused
+  on a number they had not explained, and the explanation makes the gate near-deterministic.*
+
+- **PDS-D228 — THE WINDOW IS LONG ENOUGH, AND IT WAS MEASURED, NOT ASSUMED.** Longest unbroken above-floor
+  run **212 s** (1 Hz instrument) and **254 s** (per-sample-SSH instrument) — both exceed the ~150 s the
+  export needs. 63 of 151 contiguous 150 s sub-windows held throughout (42%), rising to **66% conditional
+  on firing from a build-idle, above-floor instant.** HONESTY LIMIT, and it must travel with the number:
+  **those 63 windows are not 63 independent trials — they are sub-windows of ONE 212 s clean episode, n=1.**
+  The frequency claim rests on the build journal instead (n=133 gaps, 134 build starts in 3.1 h — an
+  07/17-class build-storm day). Hazard analysis over those gaps: waiting for **120 s of continuous build
+  silence** raises P(≥200 s more silence) from 8% to 27%, at the cost of such moments arriving ~7.2/h
+  instead of 43.3/h. Patience buys ~2.5×, not 10×. *Why: "nobody measured window length" was the wave's
+  biggest unknown; it is now closed, and the honest n travels with it so no Paper quotes 42% as 151 draws.*
+
+- **PDS-D229 — THE SWAP-EVICTION MECHANISM IS REGIME-DEPENDENT AND DID NOT DRIVE TODAY'S REGIME.** The
+  digest asserted headroom appears because the production BEAM is SWAPPED OUT. Across 600 samples that
+  mechanism is **absent**: SwapFree was FLAT (985.4 → 1008.4 MiB, whole-run range 23 MiB) and beam VmSwap
+  **FELL** (192.9 → 175.1 MiB — the BEAM was being swapped *in*). `r(MemAvailable, SwapFree)` = −0.150 and
+  +0.146 across the two instruments — sign-unstable and near zero. SwapFree sits at ~1008 of 2047 MiB, not
+  the "728 of 2048, 64% spent" the digest reported, so the claimed hard ceiling on the window-opening
+  mechanism is not there because the mechanism is not there. What actually moves the number is
+  `r(MemAvailable, beam RSS)` = −0.500/−0.468 (ordinary RSS oscillation, PDS-D190 §2) plus D227's build
+  channel, which dominates. **This charter does NOT rule that eviction never happens** — wave 10's
+  transcript shows it was real then (VmSwap 81156 → 514516 kB with RSS collapsing). It rules that **it did
+  not drive the 2026-07-21 03:03–03:10 regime, which was build-driven.** *Why: a mechanism claim stated
+  timelessly would be refuted by the next regime and would poison the predicate that actually works.*
+
+- **PDS-D230 — POLLING IS FREE AND cond_b IS NEVER RE-CHECKED MID-EXPORT, SO A TROUGH CANNOT FAIL THE
+  HARNESS.** Read off the frozen blob, not argued: the failed-precondition `return 1` sits immediately
+  above `spent_now=$((spent + 1))`, so **a closed gate costs zero export attempts** — polling is free. And
+  the export is a **single `curl` between `t0` and `t1` with no memory re-check and no abort-on-trough path
+  anywhere**, so a build arriving mid-export cannot make the harness abort. It can only hurt via a real
+  kernel OOM — and the 2200 floor was sized for the OLD in-memory engine (D185's 2235.43 MiB demand) while
+  the deployed spill engine's chunk peak is ~19.71 MiB. Today's *worst* observed MemAvailable, deep inside
+  a build storm, was 1571.52 MiB: over 1.5 GiB of headroom against a ~20 MiB consumer, on a box with
+  **zero OOM-kill lines in `dmesg`. RULING: fire; do not refuse on cond_b.** Poll the 4-leg predicate at
+  10 s cadence, prefer a moment with ≥120 s of build silence behind it, budget 30 polls, fire on the first
+  qualifying draw. 30 polls without one is itself a reportable stand-down that cost zero attempts.
+
+- **PDS-D231 — cond_c IS THE ONLY HARD BLOCKER, AND ITS FIX IS DEMONSTRATED END TO END — BUT THE
+  DESTINATION IS "GO WITH WARNINGS", NOT A CLEAN GREEN.** `PDS_FULL_EXPORT_BUDGET=3` (D224's `spent+2`,
+  spent read as 1) flips CHECK 2 from `EXHAUSTED: 1 of 1` to `1 < 3, so cond_c passes`, and the overall
+  `--strict` verdict from **rc=1 NO-GO to rc=2 GO WITH WARNINGS** — a licensed, documented exit
+  (`pds-climb-preflight.sh:40`: "exit 0 GO · 2 GO-WITH-WARN · 1 otherwise"). **Exactly ONE check changed
+  state**; CHECK 1/3/4 were byte-identical in substance across both runs, and CHECK 4 warns independently
+  of the budget on #5097/#2907. The attempts file was **read but never written** by either run — it read
+  `1` before, during and after, so D212/D223 was honored. The `required=3` figure was re-derived by the
+  script itself, not echoed from an error string. **Anyone citing this must cite GO-WITH-WARN naming
+  #5097/#2907 — never "the preflight went green".** *Why: precision loss here is the same failure class
+  D185 exists to forbid, one layer up.*
+
+- **PDS-D232 — THE FLOOR STAYS AT THE UNMODIFIED 2200, AND THE DERIVATION IS NOT PAYABLE THIS WAVE.**
+  `19.71 + 798.81 = 818.52` is ARITHMETIC, not a licensed derivation. D217's **19.71 MiB is a worst-single-
+  COPY-chunk WIRE-BYTE figure from a 0/4 census task**; D211/D222's "measured demand delta" is a **BEAM RSS
+  peak-minus-baseline under a D104 paired control**. Substituting one for the other is exactly the
+  unit-mixing PDS-D185 was written to forbid after wave 9/10 did it once already. Compounding it: **D221
+  voids any idle leg whose MemAvailable range exceeds 1048.16 MiB, and today's live range measured
+  1664.01 MiB** — an idle control sampled in the current regime would be VOID on its own rules. **RULING:
+  fire at the unmodified 2200 floor, raising ONLY `PDS_FULL_EXPORT_BUDGET`. No bypass, because nothing
+  needs bypassing — and a climb fired at the untouched floor carries no asterisk, where a climb fired
+  after lowering the gate would forever be "the climb we fired after lowering the gate".** The derivation
+  is filed as backlog and must never gate the shot.
+
+- **PDS-D233 — RUN_TAG IS THE ONLY PER-RUNG ANCHOR THE HARNESS PRODUCES, AND PINNING THE THREE ENV VARS TO
+  LITERALS DESTROYS IT.** `RUN_ID` reaches stdout in exactly TWO places — the banner (`:485`) and the
+  summary (`:2448`). `head_step` carries none. But `RUN_TAG="$(printf '%s' "$RUN_ID" | cksum | awk …)"`
+  (`:112`) seeds `BARKPARK_HOME`/`PDS_SCRATCH_POINTER`/`ART_DIR` via `${VAR:-default}`, and **those paths
+  print inside rung bodies** — in wave 7, `3fa886ec` (re-derived by hand from the run id) appears at lines
+  518–661 spanning steps 1, 3 and 4. That is a cryptographically checkable per-rung link. **Wave 9 pinned
+  `BARKPARK_HOME=/private/tmp/pds-w9c` and the anchor VANISHED — 0 occurrences vs wave 7's 7.** **RULING:
+  set the three vars to values that EMBED `$RUN_TAG` (e.g. `BARKPARK_HOME=/tmp/pds-w13.$RUN_TAG`), never
+  to a fixed literal.** Concurrency isolation against sibling cycles is preserved AND every rung body that
+  prints a path becomes self-anchoring. *Why: wave 9 gave up the anchor for nothing, and this cannot be
+  retrofitted to a spent attempt.*
+
+- **PDS-D234 — CRITERION 11's SCOPE IS ALL ELEVEN. THERE IS NO RUN-INVARIANT SUBSET AND NO CHEAP PARTIAL
+  RE-STAMP.** Each criterion was classified by its own TEXT, not its evidence. **Every one of 0–9 is a
+  claim about what a run did or what a transcript says**, in run-indexed language the authors chose
+  deliberately ("re-derived at RUN TIME", "the run output is pasted", "the run's OWN measured RSS peak",
+  "the run kept `PDS_STEP5_FAILDEMO=1`", "re-derived at run time rather than asserted from a snapshot").
+  **Zero make a run-invariant structural claim.** Criterion 0 is the quietest trap: it is the only met
+  criterion naming a run, so a stamper may leave it alone — but its claim is about the **deployed sha**,
+  which has moved to `859c137cd`, so it is stale in SUBSTANCE, not merely attribution. Criterion 10 is a
+  merge event, not a run, but must cite the run id **as a pointer** because its own text requires rungs
+  3+4 green "in the transcript of the wave that pays this criterion". **RULING: 0–9 are re-stamped with
+  the fresh RUN_ID; 10 carries the same id as a pointer and is stamped LAST by the LEAD on merge; 11 is
+  stamped ALONE after verifying the eleven ids are identical.**
+
+- **PDS-D235 — THE TWO EXISTING RUNS ARE EXACT COMPLEMENTS, AND THAT IS THE SHARPEST ARGUMENT FOR FIRING.**
+  Read off the committed transcripts rather than the ledger: **wave 7** (`20260720T032558Z-28651`) was a
+  complete `--all` — **10 PASS · 0 ABORT · 1 FAIL** — in which **rungs 3 AND 4 PASSED** off the one full
+  bundle this epic has ever taken (1,037,336,576 bytes, 130 s, attempt 1 of 1); only rung 6 FAILED ("THE
+  CONTROL DID NOT FIRE"). **Wave 9** (`pdsw9-reclimb-20260720`) paid **rung 6 PASS** but **3 and 4 ABORT**
+  on `env:full-export-unavailable`. So the nine met criteria are probably not a mosaic in fact — they look
+  like wave 7's output — but **neither run greens the whole ladder and the two are exact complements.**
+  Stitching them is precisely and literally what criterion 11 forbids. **The crown is ONE rung-6 green away
+  from complete, but only on a run that ALSO re-takes 3 and 4.** *Why: this reduces the epic to a single
+  sentence and removes every temptation to reason about partial credit.*
+
+- **PDS-D236 — "ONE RUN" IS PROVABLE, ON THREE LEGS, AND THE HARNESS STRUCTURALLY REFUSES TO OVERCLAIM.**
+  (i) The summary roster prints `SUMMARY — run $RUN_ID` and then enumerates **every rung id with its
+  outcome in one block emitted by one process after all rungs ran** — attribution by roster, not by
+  per-rung token. (ii) Lines 2478–2486 gate the unqualified `RESULT: PASS — the whole ladder ran and held.`
+  behind `n_ran == n_all`, else printing `RESULT: PASS (PARTIAL) … only \`--all\` can pay that claim.` **A
+  transcript carrying the unqualified line cannot have come from a partial invocation.** (iii) D233's
+  RUN_TAG paths, if embedded. What may honestly be asserted: *"Rung N passed under run `<id>`, as recorded
+  in that run's own summary roster in a transcript whose banner and summary both carry `<id>` and which
+  prints the unqualified full-ladder PASS line."* What may NOT: that each rung body is individually
+  in-band tokened. **Without D233's embedding, attribution is process-level, not rung-level.**
+
+- **PDS-D237 — THE IDLE SAMPLER CANNOT RIDE FREE AS WRITTEN, AND THE STRIP IS PROVEN BY CONTRAST.**
+  `pds-export-peak-measure.sh` takes `$FULL_DIR/lock` — **byte-identically the path the frozen harness
+  locks for the whole export** — UNCONDITIONALLY in preflight before Window 1, then evaluates the same
+  2200 floor. Launched beside an active climb it does not degrade gracefully; it **REFUSES with a PDS-D31
+  message that mid-wave reads as unrelated infra failure.** "Simply don't pass the flag" is unachievable:
+  the leg is structurally in the way. A verifier BUILT the strip and proved it both ways — with a dummy
+  lock held throughout, the stripped sampler ran 60 ticks to completion, `lock NOT TAKEN`, attempts
+  unchanged at 1, rc=0; the **unstripped original REFUSED (exit 2, PDS-D31) under the identical lock.**
+  **RULING: the sampler is permitted as a small stripped derivative (delete the lock block, the FULL_ACQ
+  floor gate, and all of Window 2), it keeps both D220a zero-sample refusals verbatim, and it MUST NOT
+  gate the fire.** If it is not ready, the climb fires without it.
+
+- **PDS-D238 — cond_d HAS NO RESERVATION SEMANTICS, AND THE HOLD WAS REQUESTED, NOT GRANTED.** The harness
+  checks `gh` ONCE before spending the attempt and **never re-polls during the ~130 s export**; a merge
+  landing mid-export moves the sha and is caught only retroactively at step 8, **by which point the attempt
+  IS spent**. `#5097` is MERGEABLE now and touches `api/**`; `#2907` is CONFLICTING and so not an immediate
+  threat, but a rebase re-arms it. A hold was requested from the fleet and **no reply arrived. Silence is
+  not consent. RULING: fire on cond_d's own check-and-go, accept the residual sha-drift window, and do NOT
+  record the coordination attempt as having closed the risk.**
+
+- **PDS-D239 — THE EXPORT STORE IS HOST-LOCAL BUT NOT RUN-LOCAL, AND THE CONTENTION WAS REPRODUCED LIVE.**
+  guerrilla carries **zero** trace of the attempt store (`ls` and a `find` over `/tmp` and `/opt` both
+  empty), so the counter is safe from the server. But `/tmp/pds-full-export/{lock,attempts}` is a literal
+  absolute path **unscoped by worktree, RUN_ID or `BARKPARK_HOME`**, and a verifier watched the lock get
+  taken at 05:03:50 and released by ~05:05:50 **by a process it did not start**, with no owner in `ps`, on
+  a Mac running 90+ concurrent worktrees. Because `attempts` is written only AFTER the `mkdir` lock
+  succeeds, two processes **cannot silently double-spend the same counter value** — the loser gets a named
+  "lock held" NO-GO. **So the trap is contention and blocking, not silent corruption.** Filed since wave 6
+  as `pds-bl-full-export-store-scoping` (0/5, still open). Note also: the reset/repoint prohibition is
+  **POLICY, not a technical control** — nothing in the code refuses `echo 0 > attempts`.
+
+- **PDS-D240 — RETRY DISCIPLINE, PRE-DECLARED SO IT IS EXECUTED AND NOT IMPROVISED AT 3 A.M.** D224's
+  formula is re-read at fire time, never a literal. **D223's parked-`.tar` deletion is the ONLY sanctioned
+  way to force a fresh export on retry**; resetting `attempts` and repointing `PDS_FULL_EXPORT_DIR` stay
+  FORBIDDEN. A **dead HTTP attempt needs NO manual deletion** — the harness's own failure path `rm -f`s the
+  tar, and the counter is flushed to disk BEFORE the request fires and is never decremented. **CAP: at most
+  TWO fires this wave** (budget 3 = spent 1 + 2), so retries cannot quietly become a criterion-11 mosaic.
+  The parked bundle is stale **in the wave's favour** — `served_sha 15e057f83` is a git-verified ANCESTOR
+  of the spill merge `87c9995f6`, so the one full export this epic ever took **predates `send_file`
+  entirely**, the reuse guard refuses it, and the climb takes its OWN fresh bytes exactly as criterion 11
+  requires.
+
+- **PDS-D241 — THE HARNESS FREEZE HOLDS EVERYWHERE A FIRE COULD ORIGINATE, AND RUNG 6's LAST LEVER IS
+  ENVIRONMENTAL.** Blob `e219e97ccf7f33797c86a2b84d998d599b6bda31` (`git rev-parse`, **never `shasum`**,
+  PDS-D154). Across all **1187 registered worktrees**: 984 lack the file, **128 match byte-for-byte, 75
+  carry an older committed blob — and all 75 resolve to stale pre-freeze wave-3..6 loop-epic worktrees.
+  ZERO uncommitted edits anywhere.** Every named wave-13 sibling worktree is clean and matches. The
+  **PRIMARY checkout is UNSUITABLE to fire from** (HEAD `a96aacce6`, a genuine fork whose merge-base with
+  origin/main is older than both; dirty) even though its own copy of the harness matches. On rung 6: the
+  visibility split in the exact scope is **still 31 private / 3 public, unchanged from wave 9**, so leg B's
+  visibility column still moves; the 3 public rows (`command`, `paper`, `task`) are **code-declared** by
+  scaffy/bulldocs/tasks, not incidental. The roster tripwire holds for the right reason — 34 in-scope rows
+  and **34 independently-derived Bootstrap REGISTER lines**. Two traps: `tag` is public too but excluded by
+  scope, so re-running the check WITHOUT the exclusion reads `public 4` and wrongly concludes the split
+  moved; and on a never-pulled target the table holds **35 rows, not 36 — `metric` is ABSENT pre-pull**, so
+  the census's 36 is a POST-PULL count. **`PDS_STEP6_GUARD_DEMO` must be left UNSET** — `=0` gives a
+  materially weaker green by the harness's own words. Boot cost is also on the critical path: `up --verify`
+  measured **155.72 s** today, not the documented ~32.7 s, because the coarse WARM discriminator reported
+  WARM while `api/_build/prod` had never been compiled. **Pre-warm `MIX_ENV=prod` before the timed window
+  opens.**
+
 ## Roadmap
 
 Wave 1 — data plane honest (COMPLETE; 8 slices; ROUNDS ARE LAW):
@@ -2079,7 +2436,153 @@ actually fails, or by an explicit charter thaw — see PDS-D159): seven undemons
 rung 1's absent control, the stale `tag`-exclusion comment #4770 falsified, the TagRegistry guard's
 missing rung, and guerrilla's leftover SSR services that eat the memory cond_b gates.
 
+**Wave 12 — THE CROWN, ON THE STREAMING ENGINE** (paper `pds-wave-12-2026-07-21`). The memory
+precondition that blocked waves 9–10 is GONE: the spill merged (#5083), the janitor merged (#5084),
+and the deployed sha `bc64d869a` equals `origin/main`'s tip exactly. D217 measured the number that
+proves it — worst 500-row COPY chunk is **19.71 MiB**, 0.9% of the frozen 2200 floor. The wave is a
+strict four-round CHAIN, and the chain is the plan:
+
+| R | # | Slice | Task | Files | Size | Model |
+|---|---|---|---|---|---|---|
+| 1 | 1 | Instrument merge-readiness — D220 fixes (a)+(b), push, PR | `pds-w12-instrument-merge` | `scripts/pds-export-peak-measure.sh`, `scripts/pds-export-cost-derivation.md` | medium | opus |
+| 1 | 2 | Climb preconditions runbook — worktree, D223 tar rule, D224 formula, quietness re-check | `pds-w12-climb-runbook` | `scripts/pds-crown-climb-runbook.md`, `scripts/pds-climb-preflight.sh` | medium | opus |
+| 1 | 3 | Stamp recipe — D226 fetch-to-file extractor + rehearsal | `pds-w12-stamp-recipe` | `scripts/pds-crown-stamp.sh`, `scripts/pds-crown-stamp-recipe.md` | small | opus |
+| 2 | 4 | THE MEASURE — out-of-band, D219 bypass recorded, D221 threshold applied | `pds-w12-measure` | `scripts/pds-export-cost-derivation.md` | medium | opus |
+| 3 | 5 | THE FLOOR — derive per D222, or refuse in writing | `pds-w12-floor-derivation` | `scripts/pds-export-cost-derivation.md`, `.claude/workflows/bp-pds-charter.md` | medium | opus |
+| 4 | 6 | THE CLIMB — ONE unsplit `--all`, or a named refusal | `pds-w12-crown-climb` | `scripts/pds-pull-proof.crown-transcript-w12.txt` | large | opus |
+
+Rounds 2–4 do NOT dispatch this run (sequenced-rounds law): slice 4 needs slice 1 ON MAIN, slice 5
+needs slice 4's number, slice 6 needs slice 5's floor. Only round 1 builds. **A NAMED REFUSAL IS A
+WIN** — if the measured demand does not land materially below 2235.43 MiB, D222's arithmetic puts
+the floor above the box's own weekly maximum and the crown is unfireable; slice 5 then refuses in
+writing with the number attached and slice 6 does not dispatch. That is strictly more than any prior
+wave produced, because **no wave has ever measured this engine at all.**
+
 ## Wave log
+
+### Wave 13 2026-07-21 — "Fire the Climb" — REVIEWED. THE CLIMB DID NOT FIRE. Grade C+ (paper `pds-wave-13-2026-07-21`)
+
+**THE HEADLINE IS THE FAILURE, AND IT IS THE FOURTH IN A ROW.** The wave's stated success condition was
+THE TRANSCRIPT EXISTS. It does not exist. `scripts/pds-pull-proof.crown-transcript-w13.txt` was never
+written, the crown still reads **9/12**, and the pattern the wave was chartered to break — verify the
+ground, find something real, build another instrument, don't take the shot — repeated with four more
+instruments. No amount of quality in the four green slices changes that, and this entry leads with it
+so no future reader mistakes a good review for a good outcome.
+
+**HOW IT DIED, precisely, because the mechanism matters for wave 14.** It was NOT a refusal on the
+merits and NOT a defect. The builder proved the freeze (`e219e97cc` by `rev-parse`, PDS-D154), booted a
+fresh worktree off `origin/main`, embedded `$RUN_TAG` per PDS-D233, held all three non-actions (floor
+untouched at 2200, no `PDS_STEP6_GUARD_DEMO`, `attempts` never reset), and armed a poller that would
+fire the unsplit `--all` itself on a qualifying draw. **Guerrilla never offered one**: builds went idle
+but MemAvailable read 1306 / 1725 / 1729 MiB against the untouched 2200 floor — the harness declining
+correctly, exactly as PDS-D227 predicts. Then **the builder's turn was cut by the harness at poll 3 of
+30**, and the worktree was reclaimed with the poller inside it. The shot was lost to AGENT-TURN LENGTH,
+not to the box.
+
+**THAT IS THE REAL FINDING OF WAVE 13, and it is a new one.** D227–D231 established the fire predicate
+is near-deterministic and that polling is free. What nobody costed is that **a 30-poll × 10 s budget can
+outlive the agent turn that owns it**, and a poller living in a workflow worktree dies with it. Every
+prior wave's post-mortem blamed the window. This one cannot. **Wave 14 must make the fire survive its
+launcher** — detach it from the agent turn, or fire from a persistent location, or shorten the wait so
+the draw is taken inside one turn. Filing another instrument without solving this reproduces wave 13.
+
+**NOTHING WAS BURNED.** `/tmp/pds-full-export/attempts` still reads **1**, so the `spent + 2` budget
+(PDS-D224) is intact and wave 14 inherits a clean lever. The leaked scratch target was still LIVE at
+review time (`beam.smp` on :48338, three Postgres on :21973, 76 MB under `/private/tmp/pds-w13.c0a98cf8`);
+review ran `teardown` — PASS, both ports released, zero orphans, root removed.
+
+**WHAT LANDED (four slices, all reviewed green, all file-disjoint, mergeable in any order):**
+
+- `pds-w13-charter-lands` — **D217–D241 finally reach `origin/main`**, 431 insertions / **0 deletions**,
+  one file, copied by git object (PDS-D90) never re-authored. This retires a real integrity hole: merged
+  wave-12 scripts were citing D219/D223/D224/D226, text no reader of `origin` could resolve. Review
+  independently read those four and confirms the citations are substantively honest — the check the
+  builder correctly flagged as their own blind spot.
+- `pds-w13-idle-sampler-strip` — `scripts/pds-idle-sampler.sh`, the lock-free paired control (PDS-D237).
+  Takes no mutex, reads no floor, fetches nothing; both D220a refusals byte-identical to the parent.
+- `pds-w13-scratch-cost-truth` — the boot-cost record stops lying by 4.75x. `ls -A api/_build` is coarse;
+  the real trigger is **`api/_build/prod` ABSENT**, which costs a 155.72 s prod compile. Comments-only in
+  the `.sh` (zero non-comment lines changed, proven).
+- `pds-w13-stamp-epoch-guidance` — `pds-crown-stamp.sh` names the **stale-claim-epoch** rejection first,
+  because `bp task pulse` bumps the epoch and across a 12-stamp climb that is the likeliest rejection.
+  Review confirmed it live: pulsing the climb task moved its epoch 5 → 6 mid-review.
+
+**CANDIDATE DECISIONS FOR WAVE 14 TO RATIFY (raised by review, not yet charter law):**
+
+1. **THE PRE-WARM IS THE HIGHEST-LEVERAGE STEP IN THE RUNBOOK, AND IT NEEDS `CC=/usr/bin/clang`.** The
+   climb ran the recipe for real and it **FAILED** first: `cc` resolves to the Claude CLI wrapper, so
+   `argon2_elixir` dies with `error: unknown option '-g'`. With the override, dev+prod compiled clean and
+   `up --verify` came back in **~10 s against the 155.72 s cold-prod figure**. `pds-scratch-target.sh`
+   pins `CC` itself in `export_real_cc` (TRAP 2), but the MANUAL pre-warm bypasses the script entirely —
+   which is exactly why the trap bit. Review committed the override into both the header and the cost
+   record. Worth a D-number: without it an operator gets a failed pre-warm, not a slow one.
+2. **A D220a GUARD MUST KEY ON THE VACUOUS PEAK, NOT ON THE SAMPLE COUNT.** Found by MUTATION during
+   review. The guard tests `samples <= 0` but its own refusal text describes a NEGATIVE control — and
+   those come apart: a log of well-formed lines whose `rss` field never arrived counts as samples > 0 and
+   still peaks at 0 kB, yielding a **−191.63 MiB drift at exit 0**. Fixed in the new sampler (peak-keyed
+   refusal, plus a non-refusing `negative_suspect` sign for the legitimately-negative blue/green case, no
+   magnitude threshold invented per PDS-D232). **The parent `pds-export-peak-measure.sh` still has the
+   hole and it feeds the floor re-derivation** — filed as `pds-bl-d220a-keyed-on-a-proxy`.
+
+**WHAT WAVE 14 SHOULD TAKE:** merge these four, then dispatch `pds-w13-crown-stamp-and-seal` only after
+a transcript exists. The wave is **one slice wide**: fire the climb, with the launcher problem above
+solved first. Do not file a fifth instrument.
+
+### Wave 13 2026-07-21 — "Fire the Climb" — DECIDED, 5 R1 slices building (paper `pds-wave-13-2026-07-21`)
+
+> **Superseded as a status line, 2026-07-21 (review).** "5 R1 slices building" was true when written.
+> Four built and passed review; the fifth, `pds-w13-crown-climb`, did NOT fire. See the review entry
+> above. The decisions D227–D241 recorded below stand — none was reversed by the outcome.
+
+THE PATTERN THIS WAVE EXISTS TO BREAK: waves 10, 11 and 12 each planned the climb and each shipped an
+instrument instead. Net movement on the crown across three waves: ZERO, still 9/12. **Success this wave
+is a committed transcript under one RUN_ID — anything else is failure, INCLUDING a better preflight.**
+
+THE WINDOW IS OPEN AND THE BLOCKING PREMISE IS STALE IN THE WAVE'S FAVOUR. Verified at L1 during Decide:
+guerrilla HEAD `859c137cd` (the spill engine #5083 AND the janitor #5084 are live) is a git-confirmed
+ANCESTOR of origin/main `fd820ab66`, with none of the five intervening commits touching a deploy path —
+`gh run list --workflow deploy.yml` shows its most recent run IS `859c137cd`, nothing in progress. At
+03:14 UTC the box read **MemAvailable 2402.83 MiB, zero `bp-site-build-*` units running, SwapFree
+1033.64 MiB, spill dir empty, lock free** — a firing draw on D227's predicate. **cond_c is the sole hard
+blocker and its fix is pre-authorised and demonstrated** (D231).
+
+FIVE PREMISES CORRECTED AT L1, three against the wave and two for it:
+- AGAINST: cond_b is not a calm green (D227/D228) — but the volatility is *explained*, not merely
+  measured: it is the `bp-site-build-*` channel at 99.19% vs 9.3% clearance, so the fire polls on
+  build-idle FIRST. A ≥150 s window exists (212 s / 254 s measured), and n=1 episode travels with it.
+- AGAINST: the idle sampler cannot ride free — it takes the harness's OWN lock and REFUSES beside a live
+  climb (D237); the strip was built and contrast-proven, and it must not gate the fire.
+- AGAINST: cond_d has no reservation semantics and the merge hold went unanswered (D238). Silence is not
+  consent; the residual is accepted, not closed.
+- FOR: the stamp tool is not lost — **PR #5133 MERGED 02:59:54Z and #5131 MERGED 02:56:32Z**, so
+  `scripts/pds-crown-stamp.sh` and `scripts/pds-export-peak-measure.sh` are BOTH on main already.
+- FOR: the parked bundle is stale by provenance, so the reuse guard refuses it and the climb takes its
+  own fresh bytes — exactly what criterion 11 requires (D240).
+
+THE MOVE THAT DISSOLVES THE PREREQUISITE CHAIN: wave 12's bootstrap deadlock was a claim about a live
+number, and the live number contradicts it. **When the gate is open you walk through it; you do not first
+build a better key.** Firing at the unmodified 2200 floor means NO bypass at all, so the transcript
+carries no asterisk (D232). The floor re-derivation is NOT payable this wave — `19.71 + 798.81` mixes a
+wire-byte figure into an RSS-delta slot, the exact unit error D185 forbids — and is filed as backlog
+rather than allowed to delay a fourth consecutive wave.
+
+THE STRANDED CHARTER IS RECOVERED. D217–D226 existed only on the primary checkout's unpushed local main
+(`de42c2af0`) and on an unpushed branch; origin/main's charter carried **zero** hits for them, so every
+wave-12 script comment citing D219/D223/D224/D226 cited text no reader of origin could verify. The block
+is restored here VERBATIM via `git show` + `git apply` (PDS-D90 — copied, never re-authored), and landing
+it on main is an explicit R1 slice rather than an assumption.
+
+- R1 `pds-w13-crown-climb` (opus, L) — **THE FIRE.** One unsplit `--all`, fresh RUN_ID, unmodified floor,
+  `PDS_FULL_EXPORT_BUDGET=3`, env pinned to `$RUN_TAG`-embedding paths (D233). Transcript OR a written
+  refusal naming the exact rung. Sole file: `scripts/pds-pull-proof.crown-transcript-w13.txt`.
+- R1 `pds-w13-charter-lands` (opus, S) — D217–D241 reach origin/main as a docs-only PR.
+- R1 `pds-w13-idle-sampler-strip` (opus, S) — the lock-free sample-only derivative (D237).
+- R1 `pds-w13-scratch-cost-truth` (opus, S) — the boot-cost record is wrong by 4.75× on a cold-prod
+  worktree (D241); correct it and name the real COLD trigger.
+- R1 `pds-w13-stamp-epoch-guidance` (opus, S) — re-apply the reviewed stale-claim-epoch rejection
+  guidance onto current main (it is local-only and not a descendant of the merged tip).
+- R2 `pds-w13-crown-stamp-and-seal` (opus, M) — the LEAD stamps 0–9 from the transcript, then 10 on
+  merge, then **11 alone and last**. AFTER `pds-w13-crown-climb` and `pds-w13-charter-lands` merge.
 
 ### Wave 11 2026-07-20 — "The Spill" — R1 built + reviewed, grade A− (paper `pds-wave-11-2026-07-20`)
 
