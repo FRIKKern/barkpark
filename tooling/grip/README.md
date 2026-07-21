@@ -77,16 +77,26 @@ this repo's own ExUnit files call `System.cmd("python3", ["-c", …])`
 that admits those and refuses `node` is not enforcing "no arbitrary execution".
 It is drawing a **reach** line, and the honest name for it is a reach line.
 
-It is also defeated **below its own grammar**. An assignment prefix in front of
-an admitted head passes:
+It was, until this same wave, defeated **below its own grammar**. An assignment
+prefix in front of an admitted head passed straight through:
 
 ```
-NODE_OPTIONS=--require=/tmp/evil.js mix test   → admitted
+NODE_OPTIONS=--require=/tmp/evil.js mix test   → admitted   (before wave 5)
+                                               → refused    (now)
 ```
 
-which is arbitrary JavaScript, loaded by node, through a head the screen
-allowed. (The narrower `env`/`npx`/bare-`NODE_OPTIONS=… node` forms are all
-closed — this one is not.)
+— arbitrary JavaScript, loaded by node, through a head the screen allowed. The
+environment-assignment prefix is now screened against an inert allowlist rather
+than stripped and discarded, so that form is closed. **This does not restore
+"no arbitrary execution" as a principle**, and nothing below changes: the two
+rows in the table above still admit `mix test` and `go test`, which is the whole
+argument. A reach line that got one hole plugged is still a reach line.
+
+The residual that replaced it is smaller and the same SHAPE: an unquoted
+parameter expansion (`grep -n $PATTERN .`) is still admitted, so the environment
+decides what the command means. Expansion yields DATA rather than the output of
+a command that ran, which is why it is smaller — and it is filed as
+`tgw5-screen-param-expansion` rather than left implicit here.
 
 **Why the refusal stands anyway.** The yield of relaxing it is near zero,
 measured over the frozen 651-command corpus in `fixtures/evidence-corpus.json`
@@ -103,20 +113,32 @@ own ledger: `node --test tooling/grip/test/*.test.mjs` and
 whole JS test idiom is out of the store's reach. That is a real hole in the
 index and it is a choice, not an achievement.
 
-## The grep wrapper is blind to `census.mjs` — re-derive with `/usr/bin/grep -a`
+## The grep wrapper WAS blind to `census.mjs` — every negative resting on it is still VOID
 
-`census.mjs` contains a NUL byte, so `file` reports it as *binary data* and the
-shell's `grep` wrapper treats it as binary: it prints nothing and exits 1, which
-reads exactly like "no matches".
+**Fixed in this same wave; the method ruling outlives the fix.** `census.mjs`
+carried a literal NUL byte at offset 8398 — a raw `0x00` written into a mask
+expression where a `\0` escape was meant — so `file` reported it as *binary
+data* and the shell's `grep` wrapper, which skips binaries, printed nothing and
+exited 1. That reads exactly like "no matches":
 
 ```
-$ grep -c 'census' tooling/grip/census.mjs      → (no output), exit 1
-$ /usr/bin/grep -ac 'census' tooling/grip/census.mjs → 30, exit 0
+$ grep -c 'census' tooling/grip/census.mjs            → (no output), exit 1     ← before
+$ /usr/bin/grep -ac 'census' tooling/grip/census.mjs  → 30, exit 0
 ```
 
-**Any negative anywhere in this epic that rests on grepping `census.mjs`
-through the wrapper is VOID and must be re-derived with `/usr/bin/grep -a`.**
-An absence measured by a tool that cannot see the file is not an absence.
+The byte is gone (`file` now reports UTF-8 text and the wrapper returns hits),
+but that does **not** restore any conclusion drawn while it was there:
+
+> **METHOD RULING.** Any negative anywhere in this epic that rests on grepping
+> `census.mjs` through the wrapper is **VOID** and must be re-derived with
+> `/usr/bin/grep -a`. An absence measured by a tool that could not see the file
+> is not an absence, and repairing the file does not retroactively make the
+> measurement have happened.
+
+This is the epic's own disease inside the epic's own instrument, and it is kept
+here after the fix precisely because the fix is the least interesting part of
+it: one verifier read the empty result and concluded the census never screens at
+all — the exact opposite of the truth — and caught itself only by accident.
 
 ## What this certifies — and what it does not
 

@@ -118,22 +118,46 @@ happened to pass IS the silent-strip defect at file granularity)
 
 That rule is right — a run file holding only the survivors *is* the silent-strip
 defect at file granularity — but you should not have to lose a batch to learn
-it. **There is no `prescreen` verb.** `tgw3-leads-verb` was sequenced into a
-later round and has not shipped; `node ledger.mjs` accepts exactly `write`,
-`fold` and `--selftest`. Until it does, screen your batch yourself with the
-module the write verb injects:
+it. So **rehearse the write first**:
 
 ```bash
-node --input-type=module -e '
-import { readFileSync } from "node:fs";
-import { screenCommand } from "./tooling/grip/screen.mjs";
-const p = JSON.parse(readFileSync(process.argv[1], "utf8"));
-for (const [i, f] of (Array.isArray(p) ? p : p.facts).entries()) {
-  const r = screenCommand(f.rerun);          // .ok — NOT .safe
-  console.log(`${r.ok ? "ADMIT " : "REFUSE"} [${i}] ${f.rerun}${r.ok ? "" : "\n         " + r.reason}`);
-}
-' path/to/facts.json
+node tooling/grip/ledger.mjs prescreen <facts.json>
 ```
+
+It mints through the same loader `write` uses, screens every row, prints the
+screen's own reason verbatim, and **writes nothing** — no run file, no
+directory. It exits `1` exactly when `write` would refuse the file, so a script
+can gate on it. A real run over a two-fact file, one good and one refused:
+
+```
+$ node tooling/grip/ledger.mjs prescreen /tmp/facts.json
+ledger prescreen — /tmp/facts.json
+  WRITES NOTHING: this is a rehearsal of `write`, not a partial write (charter D64)
+
+  facts read       2
+  mintable         2
+  screen admits    1
+  screen refuses   1
+
+  ADMIT  [0] tooling/grip/screen.mjs
+         $ grep -c 'export function' tooling/grip/screen.mjs
+         admitted: within the host bound, allowlisted head and sub-verb, no write shape
+  REFUSE [1] tooling/grip/test/screen.test.mjs
+         $ node --test tooling/grip/test/screen.test.mjs
+         not allowlisted: node executes arbitrary JavaScript (including fs writes)
+
+  `write` WOULD REFUSE THIS FILE and store nothing: 1 of 2 rows are refused,
+  and the write is all-or-nothing on purpose. Fix or drop those rows, then re-run prescreen.
+```
+
+> **Provenance, because this paragraph was wrong once.** The slice that wrote
+> this README measured `prescreen` as NOT EXISTING and said so, correctly: it
+> did not exist on the base that slice branched from. It ships in the SAME wave,
+> from `tgw3-leads-verb`, and this section was rewritten in review against the
+> merged tree with the output above pasted from a real run. The failure mode
+> being avoided is the one this whole epic is about — a doc is an L5 claim about
+> L2, and quoting a verb across a round boundary is a level-skip in either
+> direction.
 
 ### `screenCommand` returns `.ok`, NOT `.safe` — and the mistake reads as its own opposite
 
