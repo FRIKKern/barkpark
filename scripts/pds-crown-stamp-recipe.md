@@ -207,9 +207,15 @@ the floor. It is a true statement that answers the wrong question.
 For any criterion already reading `met`, verify the **string**, not the flag:
 
 ```sh
+N=0   # the criterion you just re-stamped
 bp task get pds-w1-crown-proof -o json 2>/dev/null | python3 -c '
-import json,sys; print(repr(json.load(sys.stdin)["doc"]["content"]["acceptance_criteria"][0]["evidence"]))'
+import json,sys
+print(repr(json.load(sys.stdin)["doc"]["content"]["acceptance_criteria"][int(sys.argv[1])]["evidence"]))' "$N"
 ```
+
+Run it **before** the re-stamp too, and compare the two strings. A single after-read
+tells you what is stored, not that your write is what put it there — and on a
+`met → met` re-stamp those are exactly the two things worth separating.
 
 (The document `rev` changing is a second, weaker signal — weaker because a
 concurrent pulse also moves it.)
@@ -226,13 +232,28 @@ repeatedly**, and they accumulate.
 
 Check and drop on the collect path:
 
+The suffix **is** the owning process's PID, so the liveness check is `ps -p` and the
+snippet does it for you rather than trusting you to remember. Dropping a database out
+from under a live control turns a clean rung 4 into an unattributable failure:
+
 ```sh
-psql postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'pds_secret_scan_ctl_%'" \
-  | while read -r db; do [ -n "$db" ] && psql postgres -q -c "DROP DATABASE IF EXISTS \"$db\""; done
+psql postgres -tAc \
+  "SELECT datname FROM pg_database WHERE datname LIKE 'pds_secret_scan_ctl_%'" \
+| while read -r db; do
+    [ -n "$db" ] || continue
+    pid="${db##*_}"
+    if ps -p "$pid" >/dev/null 2>&1; then
+      echo "SKIP $db — pid $pid is LIVE (a control is running; wait it out)"
+    else
+      psql postgres -q -c "DROP DATABASE IF EXISTS \"$db\"" && echo "dropped $db"
+    fi
+  done
 ```
 
-Empty output is the healthy state. Never drop one while a control run is live —
-the suffix is the owning process's PID, so `ps -p <pid>` settles it.
+Empty output is the healthy state. `ps -p`, never `pgrep` (PDS-D135). Note the PID
+space wraps in ~15–20 minutes on this host, so a `SKIP` on a very old stray can be a
+false positive — re-run later rather than forcing it, since the cost of one leftover
+database is nil and the cost of dropping a live one is a burnt export attempt.
 
 ---
 
