@@ -54,6 +54,23 @@
 #      2235.43 MiB is uncontaminated. This script never passes `--compressed`
 #      and refuses any override that would smuggle it in.
 #
+# WHAT THE CONTROL WINDOW ADDS BEYOND THE FROZEN PROCEDURE (PDS-D220b). The
+# idle window samples TWO quantities, not one. BEAM RSS is the frozen
+# procedure's quantity and stays the headline. `/proc/meminfo` MemAvailable is
+# sampled beside it because PDS-D221 states its contamination-abort threshold
+# (1048.16 MiB) on the RANGE of MemAvailable — a WHOLE-BOX figure. Attaching
+# that threshold to a per-process RSS delta compares two different quantities:
+# the same unit-class error PDS-D185 exists to correct, one level up. This
+# script EMITS `idle_memavail_min_kb / _max_kb / _range_mib` and stops there —
+# applying the threshold belongs to the measure slice, not the instrument.
+#
+# WHY A ZERO-SAMPLE WINDOW IS A REFUSAL, NOT A NUMBER (PDS-D220a). `peak_kb_of`
+# returns 0 for an empty log and the delta subtracts the baseline from it. An
+# acquisition that returns before the sampler's first ~1 s tick therefore once
+# emitted `export_samples=0 export_delta_mib=-847.18` and EXITED 0 — a NEGATIVE
+# demand, presented as a measurement, headed for the floor derivation. A window
+# that was never sampled now refuses (exit 2) and names the cause.
+#
 # THE KNOWN ASYMMETRY, DISCLOSED RATHER THAN QUIETLY FIXED. The frozen
 # procedure takes its BASELINE from the primary (oldest) slot alone but its
 # PEAK from the MAX across all slots. On a single-slot box the two agree. On a
@@ -95,7 +112,8 @@
 #                        ~/.config/barkpark/config.json. Never printed.
 #   PDS_RUN_ID           default a UTC stamp + pid
 #
-# EXIT: 0 measured · 2 refused by a precondition · 3 misconfigured.
+# EXIT: 0 measured · 2 refused (a precondition, or a window that logged nothing
+#       — see PDS-D220a) · 3 misconfigured.
 
 set -eu
 
@@ -131,6 +149,7 @@ OUT_FILE=""
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pds-peak.XXXXXX")"
 IDLE_LOG="$WORK_DIR/idle-rss.log"
+IDLE_MEM_LOG="$WORK_DIR/idle-memavail.log"
 EXPORT_LOG="$WORK_DIR/export-rss.log"
 BODY_FILE="$WORK_DIR/acquired.bin"
 
@@ -141,9 +160,11 @@ die()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 3; }
 refuse() { printf '%s: REFUSED — %s\n' "$SELF" "$*" >&2; exit 2; }
 
 IDLE_SAMPLER_PID=""
+IDLE_MEM_SAMPLER_PID=""
 EXPORT_SAMPLER_PID=""
 cleanup() {
   [ -n "$IDLE_SAMPLER_PID" ] && kill "$IDLE_SAMPLER_PID" 2>/dev/null || true
+  [ -n "$IDLE_MEM_SAMPLER_PID" ] && kill "$IDLE_MEM_SAMPLER_PID" 2>/dev/null || true
   [ -n "$EXPORT_SAMPLER_PID" ] && kill "$EXPORT_SAMPLER_PID" 2>/dev/null || true
   [ -n "$LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null || true
   rm -rf "$WORK_DIR" 2>/dev/null || true
@@ -244,7 +265,41 @@ start_sampler() { # <ticks> <logfile> — sets SAMPLER_PID
   SAMPLER_PID="$!"
 }
 
+# ── the MemAvailable sampler — the CONTROL'S OWN QUANTITY (PDS-D220b) ────────
+#
+# The RSS sampler above answers "how much did the BEAM grow?". PDS-D221's
+# contamination-abort threshold (1048.16 MiB) is stated on the RANGE of
+# /proc/meminfo MemAvailable — a WHOLE-BOX figure, not a per-process one.
+# Attaching a BEAM-RSS delta to a MemAvailable threshold compares two different
+# quantities and is the exact unit-class error PDS-D185 exists to correct.
+#
+# So the idle control window samples BOTH: RSS for continuity with the frozen
+# procedure, MemAvailable so the threshold has a quantity of its own class to
+# attach to. It runs as its OWN ssh loop rather than as extra lines inside the
+# RSS loop, because the RSS log's `<epoch> <pid> <rss_kb>` shape is the frozen
+# arithmetic's contract — a foreign line in that file would be read by
+# peak_kb_of() as a colossal RSS reading and silently wreck the headline.
+#
+# This instrument only MAKES THE NUMBER EXIST. It does not abort on the
+# threshold: applying 1048.16 MiB is the measure slice's job, against the
+# emitted range.
+start_memavail_sampler() { # <ticks> <logfile> — sets MEMAVAIL_SAMPLER_PID
+  local ticks="$1" log="$2"
+  : >"$log"
+  ssh -i "$SOURCE_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=20 \
+    -o StrictHostKeyChecking=accept-new "$SOURCE_SSH" \
+    "for i in \$(seq 1 $ticks); do t=\$(date +%s); m=\$(awk '/^MemAvailable:/{print \$2}' /proc/meminfo); [ -n \"\$m\" ] && printf '%s %s\\n' \"\$t\" \"\$m\"; sleep 1; done" \
+    >"$log" 2>/dev/null &
+  MEMAVAIL_SAMPLER_PID="$!"
+}
+MEMAVAIL_SAMPLER_PID=""
+
 peak_kb_of()    { awk '{ if ($3+0 > m) m = $3+0 } END { print m+0 }' "$1" 2>/dev/null || echo 0; }
+# field 2 of the MemAvailable log. An EMPTY log yields 0/0 — reported alongside
+# idle_memavail_samples=0 so a reader can see the range is vacuous rather than
+# reading a suspiciously perfect zero as a rock-steady box.
+min_f2_of()     { awk 'NF { v = $2+0; if (m == "" || v < m) m = v } END { print (m == "" ? 0 : m) }' "$1" 2>/dev/null || echo 0; }
+max_f2_of()     { awk 'NF { v = $2+0; if (v > m) m = v } END { print m+0 }' "$1" 2>/dev/null || echo 0; }
 # NOT `grep -c . || echo 0`: on an empty file grep PRINTS 0 and EXITS 1, so the
 # fallback fires too and the count reads "0\n0". Observed on the first live run.
 samples_in()    { awk 'NF { n++ } END { print n+0 }' "$1" 2>/dev/null || echo 0; }
@@ -329,9 +384,13 @@ info "                (diagnostic: max across all ${BEAM_N} slots at t=0 = ${IDL
 IDLE_T0="$(date +%s)"
 start_sampler "$IDLE_SECONDS" "$IDLE_LOG"
 IDLE_SAMPLER_PID="$SAMPLER_PID"
-info "sampling        pid $IDLE_SAMPLER_PID · issuing NOTHING for ${IDLE_SECONDS} s"
+start_memavail_sampler "$IDLE_SECONDS" "$IDLE_MEM_LOG"
+IDLE_MEM_SAMPLER_PID="$MEMAVAIL_SAMPLER_PID"
+info "sampling        rss pid $IDLE_SAMPLER_PID · MemAvailable pid $IDLE_MEM_SAMPLER_PID · issuing NOTHING for ${IDLE_SECONDS} s"
 wait "$IDLE_SAMPLER_PID" 2>/dev/null || true
 IDLE_SAMPLER_PID=""
+wait "$IDLE_MEM_SAMPLER_PID" 2>/dev/null || true
+IDLE_MEM_SAMPLER_PID=""
 IDLE_T1="$(date +%s)"
 
 IDLE_PEAK_KB="$(peak_kb_of "$IDLE_LOG")"
@@ -339,8 +398,21 @@ IDLE_SAMPLES="$(samples_in "$IDLE_LOG")"
 IDLE_WALL=$((IDLE_T1 - IDLE_T0))
 IDLE_DELTA_KB=$((IDLE_PEAK_KB - IDLE_BASELINE_KB))
 
+# PDS-D220b: the whole-box quantity PDS-D221's 1048.16 MiB threshold is stated
+# on. Emitted, never enforced here — the measure slice applies the threshold.
+IDLE_MEMAVAIL_SAMPLES="$(samples_in "$IDLE_MEM_LOG")"
+IDLE_MEMAVAIL_MIN_KB="$(min_f2_of "$IDLE_MEM_LOG")"
+IDLE_MEMAVAIL_MAX_KB="$(max_f2_of "$IDLE_MEM_LOG")"
+IDLE_MEMAVAIL_RANGE_KB=$((IDLE_MEMAVAIL_MAX_KB - IDLE_MEMAVAIL_MIN_KB))
+IDLE_MEMAVAIL_RANGE_MIB="$(mib "$IDLE_MEMAVAIL_RANGE_KB")"
+
 info "peak            ${IDLE_PEAK_KB} kB (MAX over ${IDLE_SAMPLES} readings across ${BEAM_N} slot(s), ${IDLE_WALL} s wall)"
-info "idle drift      ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB"
+info "idle drift      ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB   [BEAM RSS]"
+info "MemAvailable    min ${IDLE_MEMAVAIL_MIN_KB} kB · max ${IDLE_MEMAVAIL_MAX_KB} kB over ${IDLE_MEMAVAIL_SAMPLES} readings"
+info "                range ${IDLE_MEMAVAIL_MAX_KB} − ${IDLE_MEMAVAIL_MIN_KB} = ${IDLE_MEMAVAIL_RANGE_KB} kB = ${IDLE_MEMAVAIL_RANGE_MIB} MiB   [WHOLE BOX]"
+info "                this is the quantity PDS-D221's 1048.16 MiB threshold is stated on (PDS-D220b);"
+info "                the BEAM-RSS drift above is a DIFFERENT unit class and the threshold does not attach to it."
+info "                This instrument emits the range and does not abort on it — the measure slice applies it."
 say ""
 
 # ── WINDOW 2 — THE MEASURED ACQUISITION ──────────────────────────────────────
@@ -389,6 +461,20 @@ EXPORT_DELTA_KB=$((EXPORT_PEAK_KB - EXPORT_BASELINE_KB))
 BYTES="$(wc -c <"$BODY_FILE" 2>/dev/null | tr -d ' ' || echo 0)"
 
 info "acquisition     HTTP $HTTP_CODE · ${BYTES} bytes · ${EXPORT_WALL} s"
+
+# ── PDS-D220a: a window with no samples has no peak to subtract from ─────────
+#
+# peak_kb_of() returns 0 for an empty log, and EXPORT_DELTA_KB subtracts the
+# baseline from it unguarded. An acquisition that returns BEFORE the sampler's
+# first ~1 s tick — a 404, a 500, a reset under memory pressure, which is
+# exactly the regime this wave fires in — therefore produced
+# `export_samples=0 export_peak_kb=0 export_delta_mib=-847.18` AND EXITED 0,
+# feeding a NEGATIVE demand into the floor derivation as if it were a reading.
+# Refuse instead. Nothing is quoted from a window that was never sampled.
+if [ "$EXPORT_SAMPLES" -le 0 ]; then
+  refuse "the acquisition window logged ZERO samples, so there is no peak to subtract a baseline from. GET $ACQ_PATH returned HTTP $HTTP_CODE after ${EXPORT_WALL} s — faster than the ${SAMPLE_HZ} Hz sampler's first tick — and an empty log peaks at 0 kB, so the delta would have been reported as 0 − ${EXPORT_BASELINE_KB} = ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB. A NEGATIVE demand is not a measurement of anything (PDS-D220a). Re-run against an acquisition that lasts at least one sampler tick."
+fi
+
 info "peak            ${EXPORT_PEAK_KB} kB (MAX over ${EXPORT_SAMPLES} readings across ${BEAM_N} slot(s))"
 info "export delta    ${EXPORT_PEAK_KB} − ${EXPORT_BASELINE_KB} = ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB"
 say ""
@@ -424,9 +510,17 @@ say ""
 say "  PAIRED IDLE CONTROL (zero requests issued)"
 say "    baseline t=0 ......... ${IDLE_BASELINE_KB} kB"
 say "    peak ................. ${IDLE_PEAK_KB} kB   (MAX across ${BEAM_N} slot(s), ${IDLE_SAMPLES} readings)"
-say "    drift ................ ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
+say "    drift [BEAM RSS] ..... ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
 say "    window ............... ${IDLE_WALL} s at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
 say "    pairing .............. ${PAIRING}"
+say ""
+say "    MemAvailable, WHOLE BOX (a different unit class — PDS-D220b)"
+say "      min ................ ${IDLE_MEMAVAIL_MIN_KB} kB   over ${IDLE_MEMAVAIL_SAMPLES} readings"
+say "      max ................ ${IDLE_MEMAVAIL_MAX_KB} kB"
+say "      range .............. ${IDLE_MEMAVAIL_MAX_KB} − ${IDLE_MEMAVAIL_MIN_KB} = ${IDLE_MEMAVAIL_RANGE_KB} kB / 1024 = ${IDLE_MEMAVAIL_RANGE_MIB} MiB"
+say "      PDS-D221 states its contamination-abort threshold (1048.16 MiB) on THIS"
+say "      range, not on the BEAM-RSS drift above. This instrument emits the number"
+say "      and stops there; applying the threshold is the measure slice's call."
 say ""
 say "  HOW TO READ THESE TWO NUMBERS"
 say "    The reported demand is the MEASURED delta, $(mib "$EXPORT_DELTA_KB") MiB. The control is"
@@ -449,7 +543,7 @@ say "    profile narrowing. This run's acquisition was:"
 say "      $ACQ_PATH   (full-fidelity? $FULL_ACQ)"
 say ""
 
-MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB canonical_reference_mib=2235.43"
+MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43"
 
 say "$MACHINE_LINE"
 say ""

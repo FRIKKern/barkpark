@@ -378,12 +378,38 @@ guess when it cannot measure honestly:
 - no process with `comm == beam.smp` — never falls back to a looser argv match;
 - the frozen harness's lock `/tmp/pds-full-export/lock` is held — **PDS-D31**, two concurrent
   full exports OOM the box, so the two tools are mutually exclusive by construction;
-- a full acquisition with `MemAvailable` under `PDS_FULL_EXPORT_MIN_MEM_MB`. The floor is
-  **read, never written** — moving it is `pds-w11-floor-rederivation`, not this instrument.
+- a full acquisition with `MemAvailable` under `PDS_FULL_EXPORT_MIN_MEM_MB`;
+- **the acquisition window logged ZERO samples** — **PDS-D220a**. `peak_kb_of` returns 0 for an
+  empty log and the delta subtracts the baseline from it unguarded, so an acquisition returning
+  before the sampler's first ~1 s tick (a 404, a 500, a reset under memory pressure — exactly the
+  regime a crown run fires in) emitted `export_samples=0 export_delta_mib=-847.18` and **exited
+  0**. A negative demand is not a measurement; it is now a refusal that names the cause.
 
-That last gate is why wave 11 has no full-regime figure yet: `MemAvailable` read 1312 MiB and
-1490 MiB during this slice, against a 2200 MiB floor. The window was shut, and forcing it
-would have risked OOM-killing the live content API.
+That `MemAvailable` gate is why wave 11 has no full-regime figure yet: `MemAvailable` read
+1312 MiB and 1490 MiB during this slice, against a 2200 MiB floor. The window was shut, and
+forcing it would have risked OOM-killing the live content API.
+
+**The floor: read here, and — under PDS-D219 — writable by the measure, as a declared bypass.**
+This instrument still only READS `PDS_FULL_EXPORT_MIN_MEM_MB`; it contains no code that moves it.
+The earlier sentence here said the floor is *"read, never written — moving it is
+`pds-w11-floor-rederivation`, not this instrument"*. **PDS-D219 amends that** at the campaign
+level, not in this script: the wave-12 measure fires with `PDS_FULL_EXPORT_MIN_MEM_MB` explicitly
+exported to a threshold **pre-declared before the run**, and that override is recorded **as a
+bypass** — named, with its value and its reason, in the run's own evidence — rather than being
+folded in as if it were the derived floor. The distinction that matters: a pre-declared,
+recorded bypass is auditable; a floor quietly lowered until the gate opens is the vacuous green
+PDS-D20 forbids. The gate's own code is unchanged by D219, and re-deriving the floor's *value*
+remains the floor-rederivation slice's work, not this instrument's.
+
+**What the idle control emits, and its unit class — PDS-D220b.** The control window samples two
+quantities. BEAM RSS (`idle_delta_mib`) is the frozen procedure's quantity and stays the
+headline. `/proc/meminfo` MemAvailable is sampled alongside it and emitted as
+`idle_memavail_min_kb`, `idle_memavail_max_kb`, `idle_memavail_range_kb`,
+`idle_memavail_range_mib` and `idle_memavail_samples`, because **PDS-D221 states its
+contamination-abort threshold (1048.16 MiB) on the RANGE of MemAvailable** — a whole-box figure.
+Attaching that threshold to a per-process RSS delta compares two different quantities: the same
+unit-class error **PDS-D185** exists to correct, one level up. The instrument makes the number
+exist and does **not** abort on it; applying the threshold is the measure slice's call.
 
 **Three bugs the first live run found that reading could not.** Recorded because they are the
 argument for always firing the instrument before trusting it: (a) `PID="$(start_sampler …)"`
