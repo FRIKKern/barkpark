@@ -186,11 +186,19 @@ fire_detached() {
   is_int "$spent" || spent=0
   export PDS_FULL_EXPORT_BUDGET=$(( spent + 2 ))                    # PDS-D224
   # PDS_FULL_EXPORT_MIN_MEM_MB is deliberately LEFT UNSET (PDS-D244).
+  # The harness re-derives its OWN RUN_TAG as cksum(PDS_RUN_ID) (:112), but only
+  # to build DEFAULT paths — and all three of those are overridden just below, so
+  # that derivation reaches nothing. What PDS_RUN_ID DOES reach is the banner
+  # (:485), SUMMARY (:2448) and sentinel_id (:2162). Seeding it with the run_tag
+  # therefore makes the transcript print the SAME token that names this run's
+  # state dir and its three paths — one string to cross-reference, instead of a
+  # timestamp that appears nowhere else.
   export PDS_RUN_ID="$run_tag"
   export BARKPARK_HOME="/tmp/pds-w14.$run_tag"                      # PDS-D233
   export PDS_SCRATCH_POINTER="/tmp/pds-scratch.pds-w14.$run_tag.last"
   export PDS_PROOF_ARTIFACTS="/tmp/pds-proof-art.pds-w14.$run_tag"
-  python3 -c $'import os,sys\nlog,payload=sys.argv[1],sys.argv[2]\npid=os.fork()\nif pid==0:\n os.setsid()\n f=os.open(log,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o644)\n d=os.open("/dev/null",os.O_RDONLY)\n os.dup2(d,0);os.dup2(f,1);os.dup2(f,2)\n os.closerange(3,64)\n os.execvp("/bin/bash",["bash","-lc",payload])\nelse:\n print(pid)' "$log" "$payload" > "$pid_file"
+  python3 -c $'import os,sys\nlog,payload=sys.argv[1],sys.argv[2]\npid=os.fork()\nif pid==0:\n os.setsid()\n f=os.open(log,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o644)\n d=os.open("/dev/null",os.O_RDONLY)\n os.dup2(d,0);os.dup2(f,1);os.dup2(f,2)\n os.closerange(3,64)\n os.execvp("/bin/bash",["bash","-lc",payload])\nelse:\n print(pid)' "$log" "$payload" > "$pid_file" \
+    || die "the detach program itself failed to run. NOTHING was armed. This is the SyntaxError/ENOENT signature — read $log and the python error above it."
   # ── end D249 block ──────────────────────────────────────────────────────
 }
 
@@ -386,8 +394,12 @@ cmd_arm() {
       # itself against a dummy harness. Skipping it on a cold tree makes the
       # window pay a 155 s compile, which is why it is opt-in and never default.
       --no-prewarm)  DO_PREWARM=2 ;;
-      --max-draws)   shift; MAX_DRAWS="${1:-}" ;;
-      --interval)    shift; INTERVAL="${1:-}" ;;
+      # `shift` with nothing left returns 1, and under `set -e` that exits the
+      # script with status 1 and NO message — a silent misfire in the exact
+      # class this wave exists to kill. Demand the value before consuming it so
+      # a malformed arm REFUSES OUT LOUD on the documented exit 3.
+      --max-draws)   [ $# -ge 2 ] || die "--max-draws needs a value."; shift; MAX_DRAWS="$1" ;;
+      --interval)    [ $# -ge 2 ] || die "--interval needs a value."; shift; INTERVAL="$1" ;;
       *)             die "arm: unknown argument '$1'" ;;
     esac
     shift
@@ -513,8 +525,8 @@ cmd_collect() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      --transcript) shift; t="${1:-}" ;;
-      --pid-file)   shift; p="${1:-}" ;;
+      --transcript) [ $# -ge 2 ] || die "--transcript needs a path."; shift; t="$1" ;;
+      --pid-file)   [ $# -ge 2 ] || die "--pid-file needs a path."; shift; p="$1" ;;
       -*)           die "collect: unknown argument '$1'" ;;
       *)            tag="$1" ;;
     esac
@@ -587,9 +599,14 @@ cmd_collect() {
       rc=$?
       set -e
       if [ "$rc" -eq 2 ]; then
-        info "CAVEAT: pid '${pid:-<none>}' is not a validatable pid on this host"
-        info "(kern.maxproc bounds it). Liveness is UNPROVEN, not disproven —"
-        info "this reads KILLED because the pid file cannot be trusted."
+        # NOT kern.maxproc — see pid_live's header: maxproc caps concurrent
+        # processes, not pid VALUES, and bounding on it calls live pids dead.
+        # This branch means the pid file held nothing usable, or `ps` itself
+        # rejected the value ("process id too large").
+        info "CAVEAT: '${pid:-<none>}' is not a pid \`ps\` will evaluate — either the"
+        info "pid file is empty/absent, or ps rejected the value outright."
+        info "Liveness here is UNPROVEN, not disproven. It reads KILLED because"
+        info "the pid file cannot be trusted, NOT because a death was observed."
       else
         info "Neither marker, and the pid is gone. The process was killed"
         info "WITHOUT running its EXIT trap."
@@ -656,10 +673,12 @@ dead_pid_fixture() {
 
 cmd_selftest() {
   local scratch real_attempts_before real_attempts_after
+  local real_lock_before real_lock_after
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
   local state live_pid dead_pid out i
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
+  real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
 
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/pds-launch-selftest.XXXXXX")"
   trap '[ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"' EXIT
@@ -838,10 +857,17 @@ DUMMY
   say "7 · the real attempts counter and the real export lock are untouched"
   real_attempts_after="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   check "$real_attempts_after" "$real_attempts_before" "/tmp/pds-full-export/attempts unchanged"
-  if [ -d /tmp/pds-full-export/lock ]; then
-    bad "/tmp/pds-full-export/lock exists — the selftest must never create the real lock"
-  else
-    ok "/tmp/pds-full-export/lock absent — the real lock was never taken"
+  # UNCHANGED, not ABSENT. A lock that was ALREADY held when the selftest started
+  # is the PDS-D248 stranded lock — the precise hazard this wave braces for — and
+  # a selftest that fails there accuses ITSELF of a strand it did not cause, then
+  # blocks the retry with a false diagnosis. What this check owns is the
+  # DIFFERENCE it made, which is required to be none.
+  real_lock_after=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_after=present
+  check "$real_lock_after" "$real_lock_before" "/tmp/pds-full-export/lock unchanged (was $real_lock_before)"
+  if [ "$real_lock_before" = present ]; then
+    info "NOTE: the real export lock was ALREADY held before this selftest ran."
+    info "If no climb is running, that is the PDS-D248 strand — recover with:"
+    info "    rmdir /tmp/pds-full-export/lock"
   fi
 
   # ── 8. the forbidden mechanisms are absent from the CODE, not just the prose ──
