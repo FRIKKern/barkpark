@@ -965,6 +965,93 @@ bolted on afterward, which is worth nothing.
   tooling/grip` excluding tests returns ZERO files), so this is docs-only stranding. It is appended
   verbatim below, marked as landed retroactively, rather than rewritten from memory.*
 
+- **D84 — the 254-vs-240 divergence is a NON-FINDING; 240 is stale D63-superseded prose, not a
+  live count.** *Why: both entry points (`screenCommand` over the corpus and the census reach)
+  admit 254 of 651, and the admitted set-diff is empty — there is no disagreement to reconcile. The
+  `240` comments still sitting in `census.mjs` (and `screen.mjs:43`) are the pre-D63 waves-2-4
+  reach, superseded by tgw5-screen-hardening's 254/651. They are annotated as historical where a
+  slice touches them and filed as `tgw8-bl-stale-240-comment` where not; no future surveyor may
+  re-quote 240 as the live reach.*
+
+- **D85 — the real volume is +167 answering recipes = 3.7x, NOT 4x, and the ±live-services band is
+  named.** *Why: measured over the frozen 651-distinct corpus through the census-as-minting
+  instrument (D58): 254 admitted → 195 executed → 167 answering/minted. The store goes 63 rows/45
+  subjects → 230 rows/144 subjects (135 leads-indexed, `cmd:<head>` excluded per D45) = 3.71x. Of
+  the 167, 32 are network-reaching {bp:20, gh:11, curl:1} — the live-services band — so a hermetic
+  re-run floors at 135. The "4x" the Strategize estimate carried is retired; 3.7x is the re-run
+  number, and the band is published beside it, never hidden. Cost consequence, stated: the committed
+  230-row store means the grip suite now censuses 32 network-reaching commands on every run (~47s,
+  network-touching); on hermetic CI they degrade to SPAWN-ERROR which the tests tolerate.*
+
+- **D86 — `internal/cli` is 11 recipes today / 20 post-backfill — NOT 16, NOT 27.** *Why: a
+  verified number replacing two wrong ones (the D23/D37/D52 retired-figure discipline). Strategize
+  mis-stated 16; a later reconciliation mis-stated 27. Re-derived on the 62-row store it is 11, and
+  on the integrated post-backfill store the Review trial measured exactly 20 — the W4 prediction
+  pinned and confirmed.*
+
+- **D87 — the subsystem rollup is ALL-ANCESTOR-PREFIX MATCH-COUNT, the band EXCLUDES `cmd:<head>`
+  subjects, and the real move is 15 → 28 full / 15 → 25 leads-faithful, not the projected 36.**
+  *Why: two rules wore one name. All-ancestor-prefix counts a recipe under `api/lib` for `api`, for
+  `api/lib`, and for its exact subject (never a greedy single-bucket partition), reproducing 15 band
+  keys → 28 at 4x; greedy partition yields 6 → 17 — a different product. All-ancestor is pinned. The
+  band is computed over leads-indexed subjects only (`cmd:<head>` hidden per D45) so the reader's
+  quoted number matches the tool's. Post-backfill the Review trial confirmed the band shifting: at
+  229 rows `api/lib`(30) and `.claude/workflows`(21) cross into >20-buckets, so an over-band key
+  renders its immediate-child breakdown rather than a flat dump.*
+
+- **D88 — the RCE close is a CALLER-BOUNDARY WIRE (Design B), 0 test-flips, proven against a naive
+  `rerun.mjs:676` swap that is 12 flips with 8 `screenCommand` defects.** *Why: `cli → adjudicate →
+  runRerun` re-executed a fact's `rerun` by default, gating only on `classifySafety` — which admits
+  22/22 named outage probes (systemctl stop, `mix ecto.drop`, reboot, a bare `cp` into api/lib/) and
+  51/53 of DANGER_SET — before `spawnSync`. A `facts.json` whose rerun was `cp /etc/hosts
+  /tmp/grip-marker`, adjudicated with NO flags, MATERIALISED the file. The fix swaps adjudicate's
+  DEFAULT runner from bare `runRerun` to a new `screenedRerun`: `screenCommand` decides first,
+  `runRerun` executes only what it admits, a refusal returns UNSAFE-RERUN → REJECTED before any
+  spawn. `classifySafety`'s grammar is NOT rewritten and `runRerun`'s internal gate is NOT swapped
+  (git diff on rerun.mjs/screen.mjs = 0 lines), so `rerun.test.mjs`'s 35 direct `runRerun` callers
+  keep exact behaviour — zero flip cost. An injected runner still bypasses the screen BY DESIGN (the
+  census owns its own screen, D47). Coverage bound stated, not expanded: the boundary inherits
+  screen.mjs's `git -C` parse defect and merge-base refusal, so those safe reads are over-refused
+  (fail CLOSED) until tgw4-screen-git-global-option-audit / tgw4-rerun-silence-fixes land. Proven by
+  a marker probe that goes from materialised to refused (W7).*
+
+- **D89 — fold-hardening criterion 6 (re-derive `derived_level`) already SHIPPED via #5442 —
+  CONFIRM, don't rebuild — and the projection is a TWELVE-field allowlist, "six" is stale.** *Why:
+  `foldLedger` already re-derives `derived_level` from the command at fold time (level_restated=0
+  over the committed rows), so criterion 6 is confirmed by running the existing test, not
+  re-implemented. What tgw5-fold-hardening adds is orthogonal and real: the fold COMPOSES
+  `admitRecipe(row,{now,screen})` after the crash-safety gate and routes every rejection (VALUE-
+  STORED, REFUSED-COMMAND, FUTURE-OBSERVED-AT, LEVEL-SKIP, UNKNOWN-FIELD) into the existing
+  `unreadable[]` channel, which drives the fold CLI's nonzero exit — the READ path now rejects what
+  the WRITE path rejects. The projection that drops `value` before `entries[]` is a NAMED ALLOWLIST
+  of twelve fields (it grew from six when the fold began re-deriving its own key); the guarantee is
+  the allowlist, never its cardinality.*
+
+- **D90 — backfill criterion 7 (re-adjudicate P5) is STRUCK before dispatch — D79 SETTLED P5.**
+  *Why: D79 closed P5 ("no builder spends a slice re-running it"). A criterion ordering a builder to
+  re-litigate it would re-open a settled question; it is struck, D79/D90 cited, and the backfill
+  moves on.*
+
+- **D91 — `leads-subject-first` was a LIVE 25/30 defect (`leads js`), folded into S2 as SUBSYSTEM-
+  BOUNDARY SEGMENT MATCHING.** *Why: post-#5441 subject-default matching still hayed `js` against
+  `package.json` (via "json") and `.workflow.js` (via its extension) — 25 of 30 returned rows were
+  not under `js/`. The fix: a needle matches a subject iff it EQUALS it or is a leading PATH-SEGMENT
+  prefix (`js` matches `js/packages/x`, never `package.json`), case-insensitive, no needle
+  tokenising. Measured at Review on the integrated store: precision is 100% across every subsystem
+  query (against D79's retired 29.2% and post-#5441's 74.4%) — the W5 prediction (>80%) confirmed
+  decisively. A real capability tradeoff, ratified: `leads grip` no longer finds `tooling/grip/…`
+  because grip is a middle segment; the null state names it.*
+
+- **D92 — `leads`/`fold` truncated stdout on a pipe (a `process.exit` race); the fix is
+  `process.exitCode`, and every harness REDIRECTS to a file, never pipes.** *Why: `main().then((c)
+  => process.exit(c))` raced Node's asynchronous pipe flush — a multi-kilobyte fold/leads JSON tore
+  at ~512 bytes the instant a caller added `| cat` or `| jq`, and a piped `JSON.parse` threw on the
+  truncated bytes while a redirect to a file got the whole thing (512 → 2834 bytes measured).
+  Setting `process.exitCode` and letting the event loop drain flushes stdout on natural exit;
+  ledger.mjs opens no lingering handle, so the exit stays immediate. The leads-vs-grep trial
+  captures `leads --json` by REDIRECTING to a file descriptor for the same reason, and a test proves
+  the redirected JSON parses.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -1744,3 +1831,75 @@ makes the wave's headline true for the verb an agent actually types. Then
 `tgw6-leads-vs-grep-remeasured`, which cannot honestly run before round 2 ships,
 and which is the only thing that will tell this epic whether its read path earns
 the typing.
+
+### Wave 2026-07-21 (4) — the finishing wave: volume, a readable leads, the verdict, the last RCE. Grade A−.
+
+Paper: `source-of-truth-grip-wave-8-2026-07-21`. Seven round-1 slices, all
+file-disjoint, every one `builder_model: opus` (the wave's hard constraint,
+verified on all seven task documents). Wave 7 strategized, surveyed and verified
+but died at Decide (spend limit) before cutting a slice; wave 8 is the fresh wave
+that decided the slices wave-7's analysis supported, built them, and drove to
+seal. Decisions D84–D92 land with this entry (D42: the charter commit cannot be
+deferred).
+
+**Landed** (final branches carry a reviewer `-r` commit only where the review
+changed something):
+
+| Slice | Task | Final branch | What |
+|---|---|---|---|
+| S1 volume | `tgw5-corpus-backfill` | `…fill-the-ledger-by-re-execution-mint-the-0` | `backfill.mjs`: the census as a MINTING INSTRUMENT (D58). 651 distinct → 254 admitted → 195 executed → 167 answering/minted, committed as one immutable run file. Store 63→230 rows (3.71x, D85). Execution gated on `screenCommand`, never `classifySafety`. |
+| S2 readable | `tgw6-leads-subject-segment-noise` | `…leads-is-short-precise-and-declares-its--1` | `leads.mjs`: subsystem-boundary segment matching (D91, closes the live 25/30 `leads js` defect), dense one-line render, all-ancestor rollup (D87), per-row binding. Review-measured precision **100%**. |
+| S3 hardening | `tgw5-fold-hardening` | `…harden-the-fold-read-path-fix-the-main-s-2` | `ledger.mjs`: the fold COMPOSES `admitRecipe` and routes rejections into `unreadable[]` (nonzero exit); `process.exitCode` fixes the stdout-flush truncation race (D92); the self-provenance banner on stderr (D78). |
+| S4 census | `tgw6-census-binding-report` | `…census-reports-what-each-answer-was-abou-3` | `census.mjs`: every measured row carries its binding class; the render states which tree the census ran in; 254-hygiene (D84). Gates on `screenCommand` only (D47). |
+| S5 mint | `tgw6-mint-binds-to-caller` | `…mint-future-recipes-bound-to-the-caller--4` | `mint.mjs`: strips a leading `cd <abs> &&` iff `classifyBinding` rates the remainder ref-decided; a provable NO-OP over the index (0 committed rows moved). Imports the rule from `binding.mjs`, never restates it. |
+| S6 safety | `tgw-bl-screen-wire-into-rerun` | `…close-the-last-default-on-rce-caller-bou-5` | `adjudicate.mjs`: the caller-boundary screen wire (Design B, D88). The default runner is `screenedRerun`; a `cp /etc/hosts` fact no longer materialises the marker (W7). 0 test-flips. |
+| S7 verdict | `tgw6-leads-vs-grep-remeasured` | `…the-committed-leads-vs-grep-trial-store--6-r` | New committed `trial-leads-vs-grep.mjs`: `--store <dir>` so the same instrument measures the 62- and 229-row stores; frozen W1–W7; redirect-not-pipe (D92). **Reviewer fix**: a self-test assertion pinned to the 62-row store (`api/lib === zero-coverage`) flipped to `large-bucket` once the backfill lands in the same dir — replaced with a volume-independent bucket-coherence check. |
+
+**The wave's thesis, delivered.** All five in-fence outcomes shipped: volume
+minted (3.7x), leads reads like a CLI at 100% precision, the RCE closed with a
+spawn-detector proof, the committed verdict harness run at Review, reconciliation
+debts cleared. The seven branches merge in dispatch order with **zero conflicts**
+(the feared S2/S3 `leads.test.mjs` collision did not occur — S2 left the
+forged-value test at baseline, only S3 rewrote it), and the integrated suite is
+**621 pass / 0 fail / 1 pre-existing skip**.
+
+**The one defect the review found and fixed** — and it is the epic's own lesson
+one level up: a builder gating on its OWN isolated branch cannot see a
+store-VOLUME interaction with a sibling slice. S7's self-test asserted a
+62-row-store outcome; S1's backfill lands +167 rows into the SAME ledger dir, so
+`api/lib` moved from zero-coverage to large-bucket and the assertion failed on
+the integrated tree the wave actually ships — invisible to every isolated gate,
+caught only because Review built the integration and ran the full suite. Fixed by
+asserting the classifier's coherence (bucket_class is a pure function of
+`leads_on_subject`) instead of a volume-pinned outcome.
+
+**The verdict — does leads earn the typing?** Measured at Review on the merged
+229-row store, published whichever way it fell (D21). **W5 precision: 100%**
+(115/115 returned rows on-subject) against D79's retired 29.2% and post-#5441's
+74.4% — the decisive, unambiguous win. **W4: `internal/cli` = 20 rows**, the
+prediction pinned. **W6 head-to-head splits on the metric, and the metric choice
+IS the verdict**: on *first-command* (time-to-first-answer) leads wins 0/8 — a
+scoped grep gets there faster; on *full-scan* (lines to read the whole returned
+set) leads wins 5/8 (62.5%) via its dense render. The honest reading: **leads is
+a PRECISION INDEX, not a speed win** — everything it returns is about what you
+asked, densely rendered, with the tree it re-runs in labelled — which is exactly
+D46's ratified intra-epic scope and no wider. That is a valid seal per D46/D79
+precedent: the read-path ambition is HONESTLY BOUNDED, not failed.
+
+**What the next wave inherits.** Merge round 1 in dispatch order (S1 → S2 → S3 →
+S4 → S5 → S6 → S7-r); the lead closes each slice's single merge-gated criterion
+on merge (all seven sit `in_progress` with evidence stamped, one criterion open
+each). This charter commit lands its own PR. There is no round 2 — the wave is
+round-1-only by design. The in-fence thesis is COMPLETE; the SHORTEST PATH TO
+SEAL is: land these branches, then a thin wave 9 seals the epic and re-homes the
+out-of-fence remainders (server-side `type:fact` in an Elixir `before_publish`
+hook, api/**; grip-suite CI, .github/**; the ~65 priority-2-4 in-fence hardening
+long tail — screen sed-parser bounds, unquoted param expansion, pipefail masking,
+plainRule flag audit). Two hygiene items filed as backlog: `tgw8-bl-stale-240-comment`
+(D84) and the closed-by-content lifecycle flips for the wave-6 zombies
+(`tgw6-binding-classifier`, `tgw6-self-provenance`, `tgw6-fold-rederives-key`,
+`tgw2-fold-reread-derived-level`), which the charter's D89/D91 already record
+durably. Standing cost: the committed 230-row store makes the grip suite census
+32 network-reaching commands on every run (~47s, network-touching; hermetic CI
+degrades them to tolerated SPAWN-ERRORs) — inherent to censusing the product, and
+the suite still has no CI (D82), so every green stays a local green.
