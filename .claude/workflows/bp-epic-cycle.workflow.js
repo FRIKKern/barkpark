@@ -499,7 +499,7 @@ phase('Verify')
 const verifications = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
     agent(
-      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing; and the ledger carve-out below is DENIED to you: a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees)' : ' , and exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
+      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing; and the ledger carve-out below is DENIED to you: a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees)' : ', and exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
 

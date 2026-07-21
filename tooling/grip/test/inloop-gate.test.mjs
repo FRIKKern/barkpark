@@ -19,7 +19,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import vm from "node:vm";
@@ -378,4 +378,49 @@ test("the ruling also names the SECOND stranding path and how it is closed", () 
   const ruling = strandedRuling();
   assert.match(ruling, /second stranding path/i, "a ruling that covers one path while a second stays open reads complete and is not");
   assert.match(ruling, /DENYING the carve-out/, "the worktree path is closed by denial, not by recovery — the ruling must say so");
+});
+
+// ── 9. THE COPIES-THAT-MUST-AGREE CHECK (added in review) ────────────────────
+
+test("the verifier prompt exists in exactly ONE workflow file — no second copy to drift", () => {
+  // This epic exists because of copies that must agree and silently stop
+  // agreeing. Section 7-8 pins the WORDS in this file; that proves nothing if
+  // another workflow carries its own verifier prompt still granting the blanket
+  // ", no repo edits" ban, or still granting the ledger carve-out to a
+  // worktree verifier. Two prompts, one contract, no mechanism keeping them
+  // level — the exact shape the charter's D20 refuses to create by import.
+  //
+  // Measured: bp-epic-cycle.workflow.js is the only file with the string, so
+  // the seam is genuinely single-sourced today. This test is what makes that a
+  // property rather than an observation someone made once.
+  const dir = join(REPO, ".claude", "workflows");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
+  const carriers = files.filter((f) => readFileSync(join(dir, f), "utf8").includes("You are a VERIFIER on a Barkpark epic wave"));
+  assert.deepEqual(carriers, ["bp-epic-cycle.workflow.js"],
+    `the verifier prompt must live in exactly one file; found it in: ${carriers.join(", ")}. If a second workflow legitimately needs one, the two must be reconciled by hand HERE — there is no import to share (D19).`);
+
+  // And the retired blanket ban must be gone from every one of them, not just
+  // reworded in this one.
+  for (const f of files) {
+    const src = readFileSync(join(dir, f), "utf8");
+    assert.ok(!src.includes("' , no repo edits'"),
+      `${f} still carries the pre-carve-out ", no repo edits" ban, which now contradicts the ledger seam`);
+  }
+});
+
+test("the two verifier branches disagree on the carve-out, and BOTH say why", () => {
+  // The asymmetry IS the ruling, so it is asserted as an asymmetry rather than
+  // as two independent string matches: the worktree branch must DENY what the
+  // shared-checkout branch GRANTS, and neither may be silent about the reason.
+  const src = readFileSync(WORKFLOW, "utf8");
+  const at = src.indexOf("${q.needs_worktree");
+  assert.ok(at > 0, "the verifier prompt's branch point moved");
+  const ternary = src.slice(at, src.indexOf("}`", at));
+  assert.match(ternary, /carve-out below is DENIED to you/, "the worktree branch must deny the carve-out explicitly");
+  assert.match(ternary, /distinct filesystem path that Decide[^`]*never sees/, "the denial must carry its reason, or it reads as an arbitrary rule to route around");
+  assert.match(ternary, /you may WRITE re-derivation recipe rows under tooling\/grip\/ledger\//, "the shared-checkout branch must grant the carve-out");
+  assert.match(ternary, /You never commit them/, "the grant must state that Decide, not the verifier, commits");
+  // No stray space before the clause — the prompt is read by an agent, and a
+  // ragged "never touch main , and" reads as a truncation artifact.
+  assert.ok(!/\s+,\s/.test(ternary.slice(0, 400)), "stray whitespace before a comma in the granted branch");
 });
