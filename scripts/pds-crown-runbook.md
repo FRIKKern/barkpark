@@ -11,10 +11,89 @@ this proof are all environmental and all silent.
 
 Companion artifacts:
 
+- `scripts/pds-crown-launch.sh` — the detached launcher: `arm` fires, `collect` reads (§0).
 - `scripts/pds-pull-proof.sh` — the instrument. **FROZEN** (see §6).
 - `scripts/pds-scratch-target.sh` — boots/tears down the disposable local target.
 - `scripts/pds-secret-scan.sh` — the value-based scanner, consumed by rung 4.
 - `scripts/pds-pull-proof.crown-transcript.txt` — the append-only run record.
+- `scripts/pds-crown-climb-runbook.md` — the preflight-and-sequence card; same §0 applies.
+
+---
+
+## 0. Arm and collect — the climb is DETACHED
+
+The climb is not fired in the foreground of the turn that starts it. It is **armed** by one
+command that returns immediately, and **collected** later — by a different actor, possibly
+hours later.
+
+```sh
+scripts/pds-crown-launch.sh arm       # fires the child DETACHED and returns; does not poll
+scripts/pds-crown-launch.sh collect   # classifies the transcript; read-only, run it as often as you like
+```
+
+`arm` hands the poll loop to a child process that outlives the arming turn. `collect`
+classifies that child's transcript into exactly **six** states (PDS-D247):
+
+```
+NO-TRANSCRIPT · CRASHED · FINISHED · FINISHED-nosent · STILL-RUNNING · KILLED
+```
+
+There is no seventh state — if you are about to write one down, you are guessing. On
+`KILLED`, `collect` also reports the stranded export lock; that lock is the one a later
+actor must **not** `rmdir` blindly (PDS-D31 — two concurrent full exports OOM the box).
+
+### (i) The two env lines that must be in the SAME shell as `arm` (PDS-D251)
+
+```sh
+export PDS_CONTROL_PG=postgres     # or a fuller LOCAL maintenance conninfo
+unset PDS_AMMO_FILE
+```
+
+Neither is optional, and neither fails loudly when forgotten:
+
+- **Without `PDS_CONTROL_PG`**, rung 4's gate at `pds-pull-proof.sh:1730` is false, the
+  instrument control never runs, and `:1743` prints `instrument control: NOT RUN` at
+  **INFO** level — after which the rung reaches a terminal **PASS** anyway. That is a
+  permanently asterisked rung: a clean scan whose scanner was never shown able to fire.
+  A shell assignment that is not *exported* produces exactly this vacuous green.
+- **Without `unset PDS_AMMO_FILE`**, any ambient value short-circuits `resolve_ammo()` at
+  `pds-pull-proof.sh:1659` *before* it reaches the source DB, silently substituting whatever
+  that file names for the real SSH-derived webhook secrets.
+
+`PDS_CONTROL_PG` is a maintenance conninfo for a **LOCAL** Postgres, in which the scan
+creates and then drops its own throwaway fixture. It points at **no Barkpark database at
+all**, and aiming it at guerrilla is a category error rather than a shortcut — the control
+spends zero guerrilla export by construction.
+
+**The named price:** exporting it converts a silent INFO line into a **hard-fail leg**. A
+control that does not behave as a control takes rung 4 down with it. So prove the local
+server answers *before* arming, not after:
+
+```sh
+pg_isready       # must be green in the same shell, before `arm`
+```
+
+### (ii) What clearance actually looks like (PDS-D250)
+
+Precondition (b) of the full export is `MemAvailable >= 2200 MB`. **A stand-down is the
+EXPECTED outcome of an armed climb, and it is a first-class win** — not a failure to route
+around. An armed child that draws honestly and never fires has told you the truth about the
+box.
+
+Measured: a gapless 1200-sample, 1 Hz, 1249-second window yielded **862 build-idle draws,
+of which ZERO cleared 2200**. Idle ceiling **1948.13 MiB** — 251.87 MiB below the floor at
+*every single sample* — longest contiguous clearing run **0 s**. Four further live
+build-idle reads the same morning: 1857.92, 1707.36, 1897, 1903 MiB.
+
+The ruling that follows:
+
+- **Polling is free.** The failed-precondition return sits *above* the spend increment, so
+  a refused window costs zero export budget. Draw as often as you like.
+- **The floor NEVER moves.** `PDS_FULL_EXPORT_MIN_MEM_MB` encodes a real OOM risk to the
+  LIVE content API and is the most tempting, most dishonest lever available (§6, PDS-D156).
+  It is not a knob.
+- **The draw budget goes UP instead.** The sanctioned response to a stand-down is more draws
+  over more wall-clock (`--max-draws` / `--interval` on `arm`), never a lower floor.
 
 ---
 
@@ -114,10 +193,11 @@ Corollaries the operator owns:
 
 ### (f) Gate (b) is check-and-go, never a pounce
 
-`MemAvailable >= 2200 MB` is precondition (b) of the full export. It clears the
-floor roughly 87% of the time on a warm BEAM. **Polling is free**: a closed gate
-returns *before* the attempt counter increments, so a refused window costs zero
-budget. If it is closed, wait ~10 minutes and run again.
+`MemAvailable >= 2200 MB` is precondition (b) of the full export. It is closed far
+more often than it is open — see §0(ii): 862 build-idle draws, **zero** cleared,
+idle ceiling 1948.13 MiB. **Polling is free**: a closed gate returns *before* the
+attempt counter increments, so a refused window costs zero budget. If it is closed,
+keep drawing; a stand-down is the expected outcome, not a blocker to work around.
 
 Do **not** wait for or request a deploy. The restart curve is a memory *trough*
 first (both t+15 s and t+20 s readings sit far below the floor; sustained
@@ -212,6 +292,6 @@ earlier attempt's reds from the append-only transcript.
 The crown-proof task closes **only** if rungs 3 and 4 pass with their controls
 FIRING off the one full bundle, and rungs 1/2/5/6 pass against a real booted
 target. A severable headroom abort of 3/4 is an honest designed outcome and does
-**not** close it. Now that the gate is known to be open most of the time, the
-temptation is no longer "lower the floor" — it is "call a lucky partial the crown
-proof". Refuse that too.
+**not** close it. The gate is now known to be closed on essentially every idle draw
+(§0(ii)), so both temptations are live: "lower the floor" and "call a lucky partial
+the crown proof". Refuse both.
