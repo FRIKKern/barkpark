@@ -71,16 +71,7 @@ defmodule BarkparkWeb.MutateControllerTest do
   # of the plain-set one.
   describe "ledger close-bypass guard" do
     setup do
-      for schema_def <- Barkpark.Tasks.schema_definitions("test") do
-        attrs =
-          schema_def
-          |> Map.from_struct()
-          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
-          |> Map.new(fn {k, v} -> {to_string(k), v} end)
-
-        {:ok, _} = Content.upsert_schema(attrs, "test")
-      end
-
+      register_task_schemas!()
       :ok
     end
 
@@ -235,6 +226,20 @@ defmodule BarkparkWeb.MutateControllerTest do
       end
     end
 
+    defp register_task_schemas! do
+      for schema_def <- Barkpark.Tasks.schema_definitions("test") do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, "test")
+      end
+
+      :ok
+    end
+
     defp create_task(conn, id, content_extra \\ %{}) do
       content =
         Map.merge(
@@ -271,6 +276,429 @@ defmodule BarkparkWeb.MutateControllerTest do
       |> authed()
       |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
     end
+  end
+
+  # ── cch-w2: the claim's own fence, and the create-family doors ────────────
+  #
+  # Round 1 (cch-w1 / D22) fenced the two `patch` clauses against a blind close.
+  # This wave pays the CLASS rather than the two instances, and measurement
+  # refuted two of the assumptions round 1 shipped on:
+  #
+  #   * D52 — the patch door was NOT claim-safe. Three siblings measured HTTP
+  #     200 on main: `unset:["claim"]` + terminal set + CORRECT rev;
+  #     `set:{"claim":null}` + terminal set + correct rev; and `unset:["claim"]`
+  #     with no rev and no lifecycle change at all (pure claim theft). The
+  #     revision escape D22 relies on is precisely what let the first two
+  #     through, which is why the claim fence is a SEPARATE function with no
+  #     revision escape (D51) rather than another branch in the close guard.
+  #   * D53 — the create family was never guarded at all: `createOrReplace` and
+  #     `replace` reach `Content.create_document` and skip
+  #     `ensure_task_close_is_cas` entirely. `create` / `createIfNotExists` are
+  #     left exempt because they are STRUCTURALLY incapable of touching a live
+  #     row (409 / noop), which these tests prove rather than assume.
+  #
+  # Every test below is written so it FAILS (200 instead of 422) against the
+  # pre-guard tree — verified by reverting `mutations.ex` and re-running.
+  describe "ledger claim fence + create-family doors (cch-w2)" do
+    setup do
+      register_task_schemas!()
+      :ok
+    end
+
+    # ── D50: replace's contract is a 404, and that must stay pinned ─────────
+
+    # THE TRIPWIRE. `replace` reads first and propagates `{:error, :not_found}`
+    # for an absent id — `docs/api-v1.md:105` ("overwrites an *existing* draft,
+    # `not_found` if none"). While wiring the guards, binding `existing` to nil
+    # here "so the guard's nil fork is reachable" silently converted `replace`
+    # into an UPSERT: HTTP 200 and the row created. NOTHING caught it — the
+    # whole mutate + writer-fence suite stayed green through the regression.
+    # This test is the thing that catches it next time.
+    test "replace against a non-existent id is 404 and creates NOTHING", %{conn: conn} do
+      resp = mutate(conn, [%{"replace" => task_doc("cchw2-ghost", %{})}])
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+      assert {:error, _} = Content.get_document("drafts.cchw2-ghost", "task", "test")
+    end
+
+    # ── D52: the three patch-door claim siblings ────────────────────────────
+
+    test "PATCH SIBLING (a): unset:[\"claim\"] + terminal set + CORRECT rev is refused",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-drop-a")
+
+      # The correct rev satisfies the CLOSE guard's escape — which is exactly
+      # why a claim-drop branch appended to that guard's cond would be dead
+      # code. Only an orthogonal fence catches this.
+      patch =
+        "cchw2-drop-a"
+        |> task_patch(%{"lifecycle_status" => "done"})
+        |> Map.put("unset", ["claim"])
+        |> Map.put("ifRevisionID", task_rev("cchw2-drop-a"))
+
+      resp = mutate(conn, [%{"patch" => patch}])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["claim"]
+      assert message =~ "bp task release"
+      assert message =~ "revision precondition does NOT unlock this"
+
+      content = task_content("cchw2-drop-a")
+      assert content["claim"]["worker"] == "honest-worker"
+      assert content["lifecycle_status"] == "open"
+    end
+
+    test "PATCH SIBLING (b): set:{\"claim\":null} + terminal set + correct rev is refused",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-drop-b")
+
+      # No compound key — this lands on the PLAIN-SET clause, which is a
+      # separate `apply_one` head. Guarding one clause leaves the other open
+      # (the round-1 two-clause lesson), so both are wired.
+      patch =
+        "cchw2-drop-b"
+        |> task_patch(%{"lifecycle_status" => "done", "claim" => nil})
+        |> Map.put("ifRevisionID", task_rev("cchw2-drop-b"))
+
+      resp = mutate(conn, [%{"patch" => patch}])
+
+      assert resp.status == 422
+      assert [_message] = Jason.decode!(resp.resp_body)["error"]["details"]["claim"]
+
+      content = task_content("cchw2-drop-b")
+      assert content["claim"]["worker"] == "honest-worker"
+      assert content["lifecycle_status"] == "open"
+    end
+
+    test "PATCH SIBLING (c): PURE claim theft — unset:[\"claim\"], no rev, no lifecycle change",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-drop-c")
+
+      # The nastiest of the three, and the one D22's guard could never have
+      # seen: with no lifecycle transition the close guard's FIRST cond branch
+      # returns :ok before anything else is inspected. The row stays
+      # `in_progress` and simply loses its owner.
+      resp =
+        mutate(conn, [
+          %{"patch" => %{"id" => "cchw2-drop-c", "type" => "task", "unset" => ["claim"]}}
+        ])
+
+      assert resp.status == 422
+      assert [message] = Jason.decode!(resp.resp_body)["error"]["details"]["claim"]
+      assert message =~ "honest-worker"
+
+      assert task_content("cchw2-drop-c")["claim"]["worker"] == "honest-worker"
+    end
+
+    # ── D53: the two create-family lifecycle doors ──────────────────────────
+
+    test "createOrReplace cannot close an open task without a revision precondition",
+         %{conn: conn} do
+      create_task(conn, "cchw2-cor-close")
+
+      resp =
+        mutate(conn, [
+          %{"createOrReplace" => task_doc("cchw2-cor-close", %{"lifecycle_status" => "done"})}
+        ])
+
+      assert resp.status == 422
+      assert [message] = Jason.decode!(resp.resp_body)["error"]["details"]["lifecycle_status"]
+      assert message =~ "bp task close"
+      assert task_content("cchw2-cor-close")["lifecycle_status"] == "open"
+    end
+
+    test "replace cannot close an open task without a revision precondition", %{conn: conn} do
+      create_task(conn, "cchw2-rep-close")
+
+      resp =
+        mutate(conn, [
+          %{"replace" => task_doc("cchw2-rep-close", %{"lifecycle_status" => "done"})}
+        ])
+
+      assert resp.status == 422
+      assert [message] = Jason.decode!(resp.resp_body)["error"]["details"]["lifecycle_status"]
+      assert message =~ "bp task close"
+      assert task_content("cchw2-rep-close")["lifecycle_status"] == "open"
+    end
+
+    test "createOrReplace cannot close a CLAIMED task even with a correct ifRevisionID",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-cor-claimed")
+
+      # A whole-document write that omits `claim` erases it. The revision
+      # precondition unlocks the lifecycle guard (the caller did read the row),
+      # and the claim fence stops it anyway — the two guards compose.
+      attrs =
+        "cchw2-cor-claimed"
+        |> task_doc(%{"lifecycle_status" => "done"})
+        |> Map.put("ifRevisionID", task_rev("cchw2-cor-claimed"))
+
+      resp = mutate(conn, [%{"createOrReplace" => attrs}])
+
+      assert resp.status == 422
+      assert [_message] = Jason.decode!(resp.resp_body)["error"]["details"]["claim"]
+
+      content = task_content("cchw2-cor-claimed")
+      assert content["lifecycle_status"] == "open"
+      assert content["claim"]["worker"] == "honest-worker"
+    end
+
+    test "replace cannot close a CLAIMED task even with a correct ifRevisionID", %{conn: conn} do
+      create_claimed_task(conn, "cchw2-rep-claimed")
+
+      attrs =
+        "cchw2-rep-claimed"
+        |> task_doc(%{"lifecycle_status" => "done"})
+        |> Map.put("ifRevisionID", task_rev("cchw2-rep-claimed"))
+
+      resp = mutate(conn, [%{"replace" => attrs}])
+
+      assert resp.status == 422
+      assert [_message] = Jason.decode!(resp.resp_body)["error"]["details"]["claim"]
+
+      content = task_content("cchw2-rep-claimed")
+      assert content["lifecycle_status"] == "open"
+      assert content["claim"]["worker"] == "honest-worker"
+    end
+
+    test "the FLAT Sanity envelope is not an escape — no nested `content` map still lands content",
+         %{conn: conn} do
+      create_task(conn, "cchw2-flat")
+
+      # `Writer.from_envelope/1` folds every non-reserved top-level key into
+      # `content`, so this writes lifecycle_status=done exactly like the nested
+      # shape. The guard resolves the SAME envelope rather than reading
+      # `attrs["content"]` and seeing an empty map.
+      resp =
+        mutate(conn, [
+          %{
+            "createOrReplace" => %{
+              "_id" => "cchw2-flat",
+              "_type" => "task",
+              "title" => "flat envelope",
+              "kind" => "task",
+              "lifecycle_status" => "done"
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      assert task_content("cchw2-flat")["lifecycle_status"] == "open"
+    end
+
+    # ── D53: create / createIfNotExists are PROVEN exempt, not trusted ──────
+
+    test "create 409s and createIfNotExists noops against an existing claimed task",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-exempt")
+
+      forged = task_doc("cchw2-exempt", %{"lifecycle_status" => "done"})
+
+      resp = mutate(conn, [%{"create" => forged}])
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "conflict"
+
+      resp = mutate(conn, [%{"createIfNotExists" => forged}])
+      assert resp.status == 200
+      assert [%{"operation" => "noop"}] = Jason.decode!(resp.resp_body)["results"]
+
+      # Neither op is wired to either guard, because neither can reach a live
+      # row: the fence would be dead code.
+      content = task_content("cchw2-exempt")
+      assert content["lifecycle_status"] == "open"
+      assert content["claim"]["worker"] == "honest-worker"
+    end
+
+    test "the FRESH-create exemption is intact: an importer can still file an already-done task",
+         %{conn: conn} do
+      # There is no prior revision on a birth, so `ifRevisionID` is undefined
+      # here and the same guard shape would degrade from a fence into an
+      # unconditional ban — breaking the dataset importer (migration
+      # 20260528100000). This is the exemption, held deliberately.
+      resp =
+        mutate(conn, [
+          %{"createOrReplace" => task_doc("cchw2-import", %{"lifecycle_status" => "done"})}
+        ])
+
+      assert resp.status == 200
+      assert task_content("cchw2-import")["lifecycle_status"] == "done"
+    end
+
+    # ── The exemption's price, measured rather than asserted away ───────────
+
+    test "RESIDUAL HARM: one forged FRESH create unblocks a dependent in Tasks.Queue.ready",
+         %{conn: conn} do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id, dataset: "test"]
+
+      # The CONTROL is dependency-free and must appear in BOTH lists — without
+      # it a `ready` query that silently returns [] (wrong scope, wrong dataset)
+      # would make the "before" assertion pass vacuously.
+      create_task(conn, "cchw2-ac7-control")
+      create_task(conn, "cchw2-ac7-dependent", %{"dependencies" => ["cchw2-ac7-dep"]})
+
+      before_ids = ready_doc_ids(scope)
+      assert "drafts.cchw2-ac7-control" in before_ids
+      refute "drafts.cchw2-ac7-dependent" in before_ids
+
+      # A dangling dependency fails CLOSED, and `Queue.ready` satisfies a
+      # dependency on exactly one signal: a same-scope task with
+      # lifecycle_status == "done". Forging that row is a plain `create`, which
+      # this slice deliberately leaves exempt — so the dependent flips to ready
+      # with zero attribution anywhere in the ledger.
+      assert mutate(conn, [
+               %{"create" => task_doc("cchw2-ac7-dep", %{"lifecycle_status" => "done"})}
+             ]).status == 200
+
+      after_ids = ready_doc_ids(scope)
+      assert "drafts.cchw2-ac7-control" in after_ids
+      assert "drafts.cchw2-ac7-dependent" in after_ids
+
+      # NO COMPENSATING CONTROL SHIPS IN THIS SLICE. Closing this needs an
+      # attribution requirement on task BIRTHS, which is a different fence
+      # (`create` has no prior revision to assert against). Recorded here so the
+      # exemption stays visible instead of reading as "handled".
+    end
+
+    # ── The sanctioned path is never collateral damage ──────────────────────
+
+    test "after a refusal, Barkpark.Tasks.close/3 with the right worker+epoch still succeeds",
+         %{conn: conn} do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      create_task(conn, "cchw2-sanctioned")
+
+      {:ok, claimed} =
+        Barkpark.Tasks.claim_by_id("cchw2-sanctioned", "honest-worker",
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      epoch = claimed.content["claim"]["epoch"]
+
+      # The back door is shut…
+      assert mutate(conn, [
+               %{"patch" => %{"id" => "cchw2-sanctioned", "type" => "task", "unset" => ["claim"]}}
+             ]).status == 422
+
+      # …and the front door still opens, with attribution intact. (`Tasks.*`
+      # never routes through `Content.apply_mutations`, which is why the guard
+      # cannot reach it — proven here rather than argued.)
+      assert {:ok, %Barkpark.Content.Document{} = closed} =
+               Barkpark.Tasks.close(claimed.id, "honest-worker", observed_epoch: epoch)
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert closed.content["claim"]["closed_by"] == "honest-worker"
+    end
+
+    # ── Replication, and the side effect of `blocked` being terminal ────────
+
+    test "replication is exempt from the claim fence, and the exemption is not vacuous",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw2-sync")
+
+      # The `Sync.Applier.apply_upsert` shape (applier.ex:172-181): a
+      # createOrReplace carrying the FULL remote document, which has no `claim`
+      # because the claim happened LOCALLY after the last push. Refusing this
+      # rolls back the ENTIRE sync batch (one transaction) and wedges the
+      # replica on that row with no operator recourse.
+      assert {:ok, {_tx, [%{operation: "createOrReplace"}]}} =
+               Content.apply_mutations(
+                 [%{"createOrReplace" => task_doc("cchw2-sync", %{})}],
+                 "test",
+                 source: :sync
+               )
+
+      assert task_content("cchw2-sync")["claim"] == nil
+
+      # Control on a FRESH claimed row, so the assertion above cannot pass for
+      # the wrong reason (a fence that never fires at all): the SAME mirror
+      # write from the API source is refused. `:source` is server-set —
+      # MutateController prepends `source: :api` — so this exemption is not
+      # reachable from a request body.
+      # `distinct_from` is the Tasks.Dedup escape hatch — the two fixtures share
+      # a title stem by design (they are the same shape, one per source), and
+      # the find-or-create gate would otherwise 409 the second birth.
+      create_claimed_task(conn, "cchw2-sync-control", %{"distinct_from" => ["cchw2-sync"]})
+
+      assert {:error, {:invalid_task_content, %{"claim" => _}}} =
+               Content.apply_mutations(
+                 [%{"createOrReplace" => task_doc("cchw2-sync-control", %{})}],
+                 "test",
+                 source: :api
+               )
+
+      assert task_content("cchw2-sync-control")["claim"]["worker"] == "honest-worker"
+    end
+
+    test "MEASURED SIDE EFFECT: `blocked` is terminal, so createOrReplace now demands a rev for it",
+         %{conn: conn} do
+      create_task(conn, "cchw2-blocked")
+
+      # INTENDED, not incidental: `blocked` sits in close.ex's
+      # @closed_lifecycle_statuses, and the patch door has required a revision
+      # for it since round 1 (the drift-tripwire test above asserts exactly
+      # that). Extending the guard to two more ops makes the doors agree; a
+      # `blocked` that skipped the fence on createOrReplace would be the same
+      # unattributed terminal write under a different name.
+      assert mutate(conn, [
+               %{
+                 "createOrReplace" =>
+                   task_doc("cchw2-blocked", %{"lifecycle_status" => "blocked"})
+               }
+             ]).status == 422
+
+      assert task_content("cchw2-blocked")["lifecycle_status"] == "open"
+
+      # …and the revision precondition is the escape, exactly as for `done`.
+      attrs =
+        "cchw2-blocked"
+        |> task_doc(%{"lifecycle_status" => "blocked"})
+        |> Map.put("ifRevisionID", task_rev("cchw2-blocked"))
+
+      assert mutate(conn, [%{"createOrReplace" => attrs}]).status == 200
+      assert task_content("cchw2-blocked")["lifecycle_status"] == "blocked"
+    end
+
+    # ── fixtures ───────────────────────────────────────────────────────────
+
+    defp create_claimed_task(conn, id, content_extra \\ %{}) do
+      create_task(
+        conn,
+        id,
+        Map.merge(
+          %{
+            "claim" => %{
+              "worker" => "honest-worker",
+              "epoch" => 1,
+              "ts_iso" => "2026-07-21T00:00:00Z"
+            }
+          },
+          content_extra
+        )
+      )
+    end
+
+    # A whole-document create-family payload for `id` — the shape a
+    # createOrReplace/replace caller sends. Note what it does NOT carry:
+    # `claim`. That absence IS the door.
+    defp task_doc(id, content_extra) do
+      %{
+        "_id" => id,
+        "_type" => "task",
+        "title" => "Guard fixture #{id}",
+        "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+      }
+    end
+
+    defp task_rev(id) do
+      {:ok, doc} = Content.get_document("drafts.#{id}", "task", "test")
+      doc.rev
+    end
+
+    defp ready_doc_ids(scope), do: scope |> Barkpark.Tasks.ready() |> Enum.map(& &1.doc_id)
   end
 
   test "back-compat: validation error returns the legacy v1 envelope when Accept-Version is absent",
