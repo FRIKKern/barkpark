@@ -1,8 +1,97 @@
+<!-- doc-tier: human | canonical-for: pds-crown-climb-preflight-sequence | budget: 7000tok -->
+
 # PDS Crown Climb — Runbook
 
 The crown climb is ONE unsplit `scripts/pds-pull-proof.sh --all` under a single run id.
 This file is the operator's card for it: the rulings that govern the fire, the traps that
 have actually bitten, and the exact sequence.
+
+Sibling card: `scripts/pds-crown-runbook.md` owns the *operating procedure* (preconditions,
+reading the output, the freeze, the closing rule). This card owns the *preflight and
+sequence*. §0 below is common to both.
+
+---
+
+## §0 — Arm and collect: the climb is DETACHED
+
+The climb is not fired in the foreground of the turn that starts it. It is **armed** by one
+command that returns immediately, and **collected** later — by a different actor, possibly
+hours later.
+
+```
+scripts/pds-crown-launch.sh arm       # fires the child DETACHED and returns; does not poll
+scripts/pds-crown-launch.sh collect   # classifies the transcript; read-only, run it as often as you like
+```
+
+`arm` hands the poll loop to a child process that outlives the arming turn. `collect`
+classifies that child's transcript into exactly **six** states (PDS-D247):
+
+```
+NO-TRANSCRIPT · CRASHED · FINISHED · FINISHED-nosent · STILL-RUNNING · KILLED
+```
+
+There is no seventh state — if you are about to write one down, you are guessing. On
+`KILLED`, `collect` also reports the stranded export lock; that is the lock a later actor
+must **not** `rmdir` blindly (PDS-D31, and see check 3's lock rule below).
+
+### The two env lines that must be in the SAME shell as `arm` (PDS-D251)
+
+```
+export PDS_CONTROL_PG=postgres     # or a fuller LOCAL maintenance conninfo
+unset PDS_AMMO_FILE
+```
+
+Neither is optional, and neither fails loudly when forgotten:
+
+- **Without `PDS_CONTROL_PG`**, rung 4's gate at `pds-pull-proof.sh:1730` is false, the
+  instrument control never runs, and `:1743` prints `instrument control: NOT RUN` at
+  **INFO** level — after which the rung reaches a terminal **PASS** anyway. That is a
+  permanently asterisked rung: a clean scan whose scanner was never shown able to fire.
+  A shell assignment that is not *exported* produces exactly this vacuous green.
+- **Without `unset PDS_AMMO_FILE`**, any ambient value short-circuits `resolve_ammo()` at
+  `pds-pull-proof.sh:1659` *before* it reaches the source DB, silently substituting whatever
+  that file names for the real SSH-derived webhook secrets.
+
+`PDS_CONTROL_PG` is a maintenance conninfo for a **LOCAL** Postgres, in which the scan
+creates and then drops its own throwaway fixture. It points at **no Barkpark database at
+all**, and aiming it at guerrilla is a category error rather than a shortcut — the control
+spends zero guerrilla export by construction.
+
+**The named price:** exporting it converts a silent INFO line into a **hard-fail leg**. A
+control that does not behave as a control takes rung 4 down with it. So prove it *before*
+arming, not after — and prove the right thing. `pg_isready` says only that something
+answers; the control does `CREATE DATABASE "pds_secret_scan_ctl_<pid>"`
+(`pds-secret-scan.sh:327`) and needs the privilege to do it. A live-but-unprivileged
+Postgres passes `pg_isready` and hard-fails rung 4 hours later. Run the control itself,
+which is the exact leg rung 4 will run and spends zero guerrilla export by construction:
+
+```
+pg_isready                                       # necessary, not sufficient
+scripts/pds-secret-scan.sh control --pg postgres  # THE proof — must exit 0
+```
+
+### What clearance actually looks like (PDS-D250)
+
+Precondition (b) of the full export is `MemAvailable >= 2200 MB`. **A stand-down is the
+EXPECTED outcome of an armed climb, and it is a first-class win** — not a failure to route
+around. An armed child that draws honestly and never fires has told you the truth about the
+box.
+
+Measured: a gapless 1200-sample, 1 Hz, 1249-second window yielded **862 build-idle draws,
+of which ZERO cleared 2200**. Idle ceiling **1948.13 MiB** — 251.87 MiB below the floor at
+*every single sample* — longest contiguous clearing run **0 s**. Four further live
+build-idle reads the same morning: 1857.92, 1707.36, 1897, 1903 MiB.
+
+The ruling that follows:
+
+- **Polling is free.** The failed-precondition return sits *above* the spend increment, so
+  a refused window costs zero export budget. Draw as often as you like.
+- **The floor NEVER moves.** `PDS_FULL_EXPORT_MIN_MEM_MB` is listed below among the
+  forbidden knobs for exactly this reason, and a measured-closed gate does not promote it.
+- **The draw budget goes UP instead.** The sanctioned response to a stand-down is more draws
+  over more wall-clock (`--max-draws` / `--interval` on `arm`), never a lower floor.
+
+---
 
 **Everything here that can be measured is measured by `scripts/pds-climb-preflight.sh`.**
 Run that first, every time, including before a retry. It is read-only: it fires no export,
@@ -228,15 +317,34 @@ Two limits remain, and neither is closed by code:
    - check 4 red → wait for the in-flight deploy to land.
 3. Re-run the preflight until it is GO (or GO with a warning you have consciously taken
    the named action on).
-4. `export PDS_CONTROL_PG=…` — step 4 gates its control call on this being set
-   (`:1648`); without it the step prints `instrument control: NOT RUN` and **still
-   passes** (PDS-D79). One forgotten env var silently costs rung 4 its closing leg.
-5. **Fire, once, unsplit:**
+4. Set the two §0 env lines **in the shell you are about to arm from**:
    ```
-   scripts/pds-pull-proof.sh --all 2>&1 | tee scripts/pds-pull-proof.crown-transcript-w12.txt
+   export PDS_CONTROL_PG=postgres   # gate at :1730; unset ⇒ `instrument control: NOT RUN` at :1743 and a still-PASSING rung (PDS-D79)
+   unset PDS_AMMO_FILE              # ambient value short-circuits resolve_ammo() at :1659
+   pg_isready                       # exporting PDS_CONTROL_PG makes rung 4 hard-fail on a dead server — prove it first
    ```
-6. If it reds: re-run the preflight **before** the retry (check 3 will WARN — that is the
+5. **Arm, once, unsplit** — then **end the turn** and let a later actor `collect` (§0):
+   ```
+   scripts/pds-crown-launch.sh arm --max-draws 2160 --interval 10
+   ```
+   `arm` prints the run tag, the child pid and the transcript path, and returns. The
+   child runs the single `pds-pull-proof.sh --all` itself. Do not also fire `--all` by
+   hand; that is a second, unbudgeted climb.
+
+   **Where the bytes land.** The child writes
+   `/tmp/pds-crown-launch/<run-tag>/transcript.log`, with its pid beside it in
+   `child.pid` and the tag recorded in `/tmp/pds-crown-launch/last`. Bare
+   `scripts/pds-crown-launch.sh collect` reads that `last` pointer, so a later actor
+   needs no arguments; `collect --transcript P --pid-file F` addresses an older run
+   explicitly. Copy the printed run tag into the fire record either way — `last` is
+   overwritten by the next `arm`.
+6. **Read the outcome with `collect`, never by eye.** It returns one of the six §0 states.
+   A `CRASHED` transcript is sub-diagnosed by the stamps in its own bytes: a `FIRE` stamp
+   means the harness ran and an export attempt **was** spent; a terminal `STAND-DOWN` or a
+   `prewarm: FAILED` stamp means it was never invoked and re-arming is free. If it reds
+   for real: re-run the preflight **before** the retry (check 3 will WARN — that is the
    trap doing its job), delete the parked tar, raise the budget to the value check 2
-   prints, then fire `--all` again. One run id per transcript; never stitch two.
+   prints, then **`arm` again** — never a hand-run `--all`, which is the dialect this
+   sequence just retired. One run id per transcript; never stitch two.
 7. If it cannot be fired honestly: **refuse in writing and name the rung.** A named
    refusal is a win (PDS-D212). Firing early burns the one knob the charter lets us turn.
