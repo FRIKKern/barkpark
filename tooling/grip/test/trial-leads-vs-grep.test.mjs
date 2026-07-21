@@ -30,7 +30,20 @@ import {
   honestEmptyRate,
   buildReport,
   renderReport,
+  SINGLETON_MAX,
+  LARGE_BUCKET_MIN,
 } from "../trial-leads-vs-grep.mjs";
+
+// The bucket taxonomy is a PURE function of leads_on_subject — the same rule the
+// harness applies at line ~354. Re-derived here so the self-test can assert
+// COHERENCE at any store volume rather than pinning a specific outcome that the
+// backfill (tgw5-corpus-backfill) flips the moment it lands in the same dir.
+function expectedBucketClass(onSubject) {
+  if (onSubject === 0) return "zero-coverage";
+  if (onSubject <= SINGLETON_MAX) return "singleton";
+  if (onSubject >= LARGE_BUCKET_MIN) return "large-bucket";
+  return "scorable";
+}
 
 const HARNESS_SRC = readFileSync(fileURLToPath(new URL("../trial-leads-vs-grep.mjs", import.meta.url)), "utf8");
 const REAL_STORE = fileURLToPath(new URL("../ledger", import.meta.url));
@@ -298,12 +311,23 @@ test("buildReport self-tests against the REAL 62-row store and produces a cohere
     repoWide: false,
   });
   assert.equal(rep.store, REAL_STORE);
-  // internal/cli is genuinely covered in the 62-row store; api/lib is not (a real
-  // zero-coverage reading, not an error)
+  // internal/cli is genuinely covered in the shipping store at any volume it has
+  // carried (11 pre-backfill, 20+ post-backfill) — a real coverage reading.
   const cli = rep.subsystem_grain.queries.find((q) => q.term === "internal/cli");
   assert.ok(cli.leads_on_subject > 0, "internal/cli is covered in the shipping store");
-  const api = rep.subsystem_grain.queries.find((q) => q.term === "api/lib");
-  assert.equal(api.bucket_class, "zero-coverage");
+  // COHERENCE, not a pinned outcome: the store is a LIVE, growing artifact —
+  // tgw5-corpus-backfill lands +167 rows into this very dir, which flips api/lib
+  // from zero-coverage (62-row store) to large-bucket. A self-test pinned to one
+  // volume is a stale-figure trap (D23/D37/D52). So assert the classifier is
+  // internally coherent — every query's bucket_class is exactly the pure function
+  // of its own leads_on_subject — which holds at 62 rows and at 229.
+  for (const q of rep.subsystem_grain.queries) {
+    assert.equal(
+      q.bucket_class,
+      expectedBucketClass(q.leads_on_subject),
+      `bucket_class for ${q.term} must be the pure function of leads_on_subject=${q.leads_on_subject}`,
+    );
+  }
   // W5 precision is measured and is a real fraction (D80's subject-default lifted
   // it well off D79's retired 29.2%); the value is reported, never a verdict.
   assert.ok(rep.precision.value === null || (rep.precision.value >= 0 && rep.precision.value <= 1));
