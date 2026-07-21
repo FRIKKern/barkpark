@@ -1800,19 +1800,41 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn.status == 401
     end
 
-    test "bad ?token= query param → 401 (query-param auth path is wired)" do
-      conn = call(:get, "/v1/events?token=not-a-real-token")
+    test "bad ?ticket= query param → 401 (query-param auth path is wired)" do
+      conn = call(:get, "/v1/events?ticket=not-a-real-ticket")
       assert conn.status == 401
     end
 
-    test "valid ?token= for a teamless user → 422 no_team (query-param auth resolves a real user)" do
+    test "valid ?ticket= for a teamless user → 422 no_team (query-param auth resolves a real user)" do
       user = user_fixture()
-      {:ok, token} = Accounts.create_user_session_token(user)
+      {:ok, ticket} = Accounts.create_sse_ticket(user)
 
-      conn = call(:get, "/v1/events?token=#{token}")
+      conn = call(:get, "/v1/events?ticket=#{ticket}")
 
       assert conn.status == 422
       assert json_body(conn)["error"] == "no_team"
+    end
+
+    # THE LEAK THIS SLICE CLOSES (cch-w3). A 30-day session token in the query
+    # string lands in every access log and proxy trace; `?token=` used to accept
+    # one. It is now dead: only a single-use `?ticket=` opens the stream from a
+    # URL, and a session token stays credible ONLY in the Authorization header,
+    # which is never written anywhere.
+    test "a session token in the query string no longer opens the stream" do
+      # A TEAMLESS user throughout, so every branch answers synchronously (a
+      # user WITH a team parks in the SSE receive loop and would hang the test):
+      # 401 = the credential was refused, 422 no_team = it resolved a real user.
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # The retired parameter name: not a weaker check now — no check at all.
+      assert call(:get, "/v1/events?token=#{token}").status == 401
+      # And it is not merely the NAME that changed: a session token is not a
+      # ticket, so renaming the param in a bookmarked URL buys nothing either.
+      assert call(:get, "/v1/events?ticket=#{token}").status == 401
+      # The header path still takes a session token (curl / an EventSource
+      # polyfill / the CLI) — that path never writes the credential into a URL.
+      assert call(:get, "/v1/events", nil, token).status == 422
     end
   end
 

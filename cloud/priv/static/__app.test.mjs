@@ -4337,6 +4337,249 @@ test("liveFreshness: compact relative label, empty until the first event", () =>
   assert.equal(hooks.liveFreshness(now + 5_000, now), "just now");
 });
 
+// ── Liveness chip: the FOURTH (terminal) state, cch-w3 ──────────────────────
+// The SSE ticket is single-use, so a mint refused with 401/403 means the SESSION
+// is gone and the stream is never coming back. Before this state existed the
+// chip could only say "reconnecting", which after a terminal 401 was a
+// permanent lie in the topbar.
+
+test("liveDotState: a dead stream reads 'dead', outranking every other signal", () => {
+  const now = 1_000_000;
+  assert.equal(hooks.liveDotState(false, null, now, true), "dead");
+  // Dead beats a fresh event, beats errored, beats stale — retrying is a lie in
+  // all three, so nothing may downgrade it.
+  assert.equal(hooks.liveDotState(false, now, now, true), "dead");
+  assert.equal(hooks.liveDotState(true, now, now, true), "dead");
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, true), "dead");
+  // And the fourth arg is genuinely load-bearing: the same inputs without it
+  // return the OLD answers, so these assertions cannot pass vacuously.
+  assert.equal(hooks.liveDotState(true, now, now, false), "reconnecting");
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false), "stale");
+});
+
+test("liveDotState: the return set is a CLOSED enum of exactly four states", () => {
+  // Without this, JS's permissive arity keeps every 3-arg equality test above
+  // green after a new state lands — the suite would report green while asserting
+  // nothing about the new behaviour. Pin the SET, not just the members.
+  // .join() rather than deepEqual: hooks come from a vm sandbox, so their arrays
+  // carry a foreign Array.prototype and strict deepEqual fails on the realm, not
+  // the contents.
+  assert.equal([...hooks.liveDotStates].sort().join("|"), "dead|live|reconnecting|stale");
+  const now = 1_000_000;
+  const inputs = [];
+  for (const dead of [false, true]) {
+    for (const errored of [false, true]) {
+      for (const last of [null, now, now - 10 * hooks.liveStaleMs]) {
+        inputs.push([errored, last, now, dead]);
+      }
+    }
+  }
+  const seen = new Set(inputs.map((a) => hooks.liveDotState(...a)));
+  for (const s of seen) {
+    assert.ok(hooks.liveDotStates.includes(s), `unknown state escaped the enum: ${s}`);
+  }
+  // Every declared state is REACHABLE — a closed enum that lists a state nothing
+  // can produce is its own kind of lie.
+  assert.equal([...seen].sort().join("|"), [...hooks.liveDotStates].sort().join("|"));
+});
+
+test("liveness chip copy: every state has copy + aria, and unknown never says 'Live'", () => {
+  for (const s of hooks.liveDotStates) {
+    assert.ok(hooks.LIVE_CHIP_COPY[s], `no copy for ${s}`);
+    assert.ok(hooks.LIVE_CHIP_ARIA[s], `no aria for ${s}`);
+  }
+  assert.equal(hooks.liveChipCopy("dead"), "Not live");
+  assert.match(hooks.liveChipAria("dead"), /stopped/);
+  // The old `LIVE_CHIP_COPY[state] || "Live"` fallback would have announced a
+  // permanently dead stream as "Live". An unmapped state now reads not-live.
+  assert.equal(hooks.liveChipCopy("something-new"), "Not live");
+  assert.notEqual(hooks.liveChipCopy("something-new"), "Live");
+  assert.notEqual(hooks.liveChipAria("something-new"), "Live updates");
+  assert.match(hooks.liveChipAria("something-new"), /unavailable/);
+});
+
+test("events reopen backoff: starts at the floor, doubles, and is CAPPED", () => {
+  // Uncapped, a hard-down control plane (or a revoked session that somehow
+  // stayed transient) would spin the mint route forever.
+  let d = hooks.nextEventsBackoffMs(0);
+  assert.equal(d, hooks.eventsBackoffMinMs);
+  const seen = [d];
+  for (let i = 0; i < 12; i++) { d = hooks.nextEventsBackoffMs(d); seen.push(d); }
+  assert.equal(seen[1], hooks.eventsBackoffMinMs * 2);
+  assert.equal(d, hooks.eventsBackoffMaxMs, "saturates at the cap");
+  assert.ok(seen.every((x) => x <= hooks.eventsBackoffMaxMs));
+  // onopen resets to the floor by zeroing the accumulator.
+  assert.equal(hooks.nextEventsBackoffMs(0), hooks.eventsBackoffMinMs);
+});
+
+// ── SSE reconnect loop: the client survives a drop INDEFINITELY (cch-w3) ────
+// MEASURED (headless Chrome 150 over CDP) and NOT re-litigated here: EventSource
+// freezes its URL at construction and replays it byte-identically, and ANY 401
+// is TERMINAL — one onerror at readyState 2, zero further requests, forever. So
+// under single-use tickets the browser's own retry is a guaranteed 401 and the
+// recovery has to be OURS. This drives that loop end-to-end against a stubbed
+// fetch + EventSource: what the browser does is a measurement, what OUR code
+// does on top of it is a test.
+function sseHarness(opts) {
+  opts = opts || {};
+  const mints = [];
+  const opened = [];
+  const timers = [];
+  let mintN = 0;
+  const orig = {
+    fetch: sandbox.fetch, EventSource: sandbox.EventSource,
+    localStorage: sandbox.localStorage, sessionStorage: sandbox.sessionStorage,
+    setTimeout: sandbox.setTimeout, clearTimeout: sandbox.clearTimeout,
+  };
+  const sess = JSON.stringify({ token: "SESSION-TOKEN-30-DAY", team_id: "t1" });
+  sandbox.localStorage = { getItem: (k) => (k === "bpcloud.session" ? sess : null), setItem() {}, removeItem() {} };
+  sandbox.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  sandbox.fetch = (path, init) => {
+    mints.push({ path, init });
+    const status = opts.mintStatus ? opts.mintStatus(mints.length) : 200;
+    const body = status === 200 ? { ticket: "TICKET-" + ++mintN, expires_in: 60 } : { error: "unauthorized" };
+    return Promise.resolve({
+      ok: status >= 200 && status < 300, status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  sandbox.EventSource = function (url) {
+    const es = { url, closed: false, close() { this.closed = true; } };
+    opened.push(es);
+    return es;
+  };
+  sandbox.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  sandbox.clearTimeout = () => {};
+  // Drain the promise queue the mint rides on (fetch → .then → .then).
+  const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+  const fireTimer = () => { const t = timers.pop(); assert.ok(t, "a retry was scheduled"); t.fn(); return t.ms; };
+  const restore = () => Object.assign(sandbox, orig);
+  return { mints, opened, timers, settle, fireTimer, restore, sess };
+}
+
+test("SSE: the stream URL carries a single-use ticket — NEVER the session token", async () => {
+  const h = sseHarness();
+  try {
+    hooks.connectEvents();
+    await h.settle();
+
+    // The mint went out as a POST with the bearer in an Authorization HEADER.
+    assert.equal(h.mints.length, 1);
+    assert.equal(h.mints[0].path, "/v1/auth/sse-ticket");
+    assert.equal(h.mints[0].init.method, "POST");
+    assert.equal(h.mints[0].init.headers.Authorization, "Bearer SESSION-TOKEN-30-DAY");
+
+    // And the URL that gets logged carries the ticket, not the credential.
+    assert.equal(h.opened.length, 1);
+    assert.equal(h.opened[0].url, "/v1/events?ticket=TICKET-1");
+    assert.doesNotMatch(h.opened[0].url, /SESSION-TOKEN-30-DAY/);
+    assert.doesNotMatch(h.opened[0].url, /[?&]token=/);
+  } finally {
+    h.restore();
+    hooks.closeEvents();
+  }
+});
+
+test("SSE: three consecutive recoveries — each drop remints a FRESH ticket and reopens", async () => {
+  const h = sseHarness();
+  try {
+    hooks.connectEvents();
+    await h.settle();
+    assert.equal(h.opened.length, 1);
+
+    const delays = [];
+    for (let i = 1; i <= 3; i++) {
+      const es = h.opened[h.opened.length - 1];
+      es.onerror();                       // the drop (or the 401'd replay)
+      assert.equal(es.closed, true, "the dead stream is explicitly closed");
+      delays.push(h.fireTimer());         // backoff elapses
+      await h.settle();
+      assert.equal(h.opened.length, i + 1, `recovery ${i} reopened the stream`);
+      // A FRESH ticket every time — replaying the burnt one is a guaranteed 401.
+      assert.equal(h.opened[i].url, "/v1/events?ticket=TICKET-" + (i + 1));
+      assert.notEqual(h.opened[i].url, h.opened[i - 1].url);
+      assert.doesNotMatch(h.opened[i].url, /SESSION-TOKEN-30-DAY/);
+    }
+    // Capped exponential: 500 → 1000 → 2000, never unbounded.
+    assert.deepEqual(delays, [500, 1000, 2000]);
+    assert.equal(h.mints.length, 4);
+
+    // onopen resets the ladder to the floor, so a flaky link doesn't ratchet
+    // into an 8s wait forever.
+    h.opened[3].onopen();
+    h.opened[3].onerror();
+    assert.equal(h.fireTimer(), 500);
+  } finally {
+    h.restore();
+    hooks.closeEvents();
+  }
+});
+
+test("SSE: a 401 on the MINT is terminal — dead chip, no retry, no spin", async () => {
+  // The session credential itself is gone. Retrying cannot fix it, so the loop
+  // must STOP and the chip must say so rather than promise a reconnect forever.
+  const h = sseHarness({ mintStatus: () => 401 });
+  try {
+    hooks.connectEvents();
+    await h.settle();
+    assert.equal(h.opened.length, 0, "no stream opened");
+    assert.equal(h.timers.length, 0, "and no retry was scheduled — this is terminal");
+    assert.equal(h.mints.length, 1, "exactly one mint attempt, not a spin");
+
+    // connectEvents runs on EVERY re-render, so terminal has to survive one:
+    // otherwise each navigation fires another known-401 mint, which is a fresh
+    // line of exactly the access-log noise this slice exists to remove.
+    hooks.connectEvents();
+    hooks.connectEvents();
+    await h.settle();
+    assert.equal(h.mints.length, 1, "a re-render must not re-mint a dead session");
+
+    // A real sign-in still recovers: closeEvents clears the terminal flag.
+    hooks.closeEvents();
+    hooks.connectEvents();
+    await h.settle();
+    assert.equal(h.mints.length, 2, "logout → login re-arms the loop");
+  } finally {
+    h.restore();
+    hooks.closeEvents();
+  }
+});
+
+test("SSE: a transient mint failure is NOT terminal — it backs off and recovers", async () => {
+  // 500 / network-down must keep retrying; only 401/403 is terminal. Getting
+  // this backwards silently kills live updates on a blip.
+  const h = sseHarness({ mintStatus: (n) => (n <= 2 ? 500 : 200) });
+  try {
+    hooks.connectEvents();
+    await h.settle();
+    assert.equal(h.opened.length, 0);
+    assert.equal(h.fireTimer(), 500);
+    await h.settle();
+    assert.equal(h.opened.length, 0);
+    assert.equal(h.fireTimer(), 1000);
+    await h.settle();
+    assert.equal(h.opened.length, 1, "recovered once the control plane came back");
+    assert.equal(h.opened[0].url, "/v1/events?ticket=TICKET-1");
+  } finally {
+    h.restore();
+    hooks.closeEvents();
+  }
+});
+
+test("SSE: closeEvents orphans an in-flight mint (no stream after logout)", async () => {
+  const h = sseHarness();
+  try {
+    hooks.connectEvents();
+    hooks.closeEvents();     // logout lands while the mint is still in flight
+    await h.settle();
+    assert.equal(h.opened.length, 0, "a resolved mint must not resurrect the stream");
+  } finally {
+    h.restore();
+    hooks.closeEvents();
+  }
+});
+
 // ── Liveness chip DOM wiring (fake-DOM smoke) ───────────────────────────────
 // The mount/paint is browser-coupled (real topbar exercised live), but a tiny
 // fake DOM pins the structural contract: ensureLivenessChip injects one chip
@@ -4430,6 +4673,64 @@ test("liveness chip: renderLivenessChip paints a data-state + label without thro
   } finally {
     sandbox.document = orig;
   }
+});
+
+test("liveness chip: the terminal state paints 'dead' — never 'Live', never an 'as of'", () => {
+  // The stream signals are private closure state, so renderLivenessChip takes an
+  // override purely so this contract is assertable at all.
+  const orig = sandbox.document;
+  const { document: doc } = fakeDom();
+  sandbox.document = doc;
+  try {
+    const chip = hooks.ensureLivenessChip();
+    const now = 1_000_000;
+    hooks.renderLivenessChip({ evtDead: true, evtErrored: false, lastEventMs: now - 2_000, nowMs: now });
+    // data-state is the selector the CSS paints off — app.css must carry a
+    // .live-chip[data-state="dead"] rule or this renders a calm neutral grey.
+    assert.equal(chip.getAttribute("data-state"), "dead");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Not live");
+    assert.notEqual(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.match(chip.getAttribute("aria-label"), /stopped/);
+    assert.doesNotMatch(chip.getAttribute("aria-label"), /^Live updates connected/);
+    // No "2s ago" reassurance beside a dead dot — the data STOPPED arriving.
+    assert.equal(chip.querySelector(".live-chip-ago").textContent, "");
+    assert.equal(chip.querySelector(".live-chip-ago").hidden, true);
+    assert.doesNotMatch(chip.getAttribute("title"), /last event/);
+
+    // And the override really is driving it: the same recency, not dead, is live.
+    hooks.renderLivenessChip({ evtDead: false, evtErrored: false, lastEventMs: now - 2_000, nowMs: now });
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+    // Reconnecting is the RECOVERABLE state and stays distinct from dead.
+    hooks.renderLivenessChip({ evtDead: false, evtErrored: true, lastEventMs: now, nowMs: now });
+    assert.equal(chip.getAttribute("data-state"), "reconnecting");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Reconnecting…");
+  } finally {
+    sandbox.document = orig;
+  }
+});
+
+test("liveness chip: app.css carries a paint rule for EVERY chip state", () => {
+  // D31/D32: a data-state with no author rule is not "unstyled" — it inherits
+  // .live-dot { background: var(--dim) } = a calm neutral grey, i.e. the MOST
+  // severe state painting quieter than the amber it replaces. And no existing
+  // gate can catch it: __css_check E2 extracts CLASS emissions only
+  // (/\.className\s*=/, /classList\.(add|remove|toggle)\(/) and is structurally
+  // blind to setAttribute("data-state", …); cssom-parity.mjs has zero
+  // data-state references. This test IS the fence.
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  for (const s of hooks.liveDotStates) {
+    if (s === "live" || s === "stale") {
+      // These two already have rules; assert them anyway so the loop is total.
+      assert.ok(css.includes(`.live-chip[data-state="${s}"]`), `no paint rule for ${s}`);
+      continue;
+    }
+    assert.ok(css.includes(`.live-chip[data-state="${s}"] .live-dot`),
+      `no DOT paint rule for the "${s}" state — it would fall back to var(--dim)`);
+  }
+  // The terminal state must read as danger, not as another amber "retrying".
+  const dead = css.slice(css.indexOf('.live-chip[data-state="dead"]'));
+  assert.match(dead.slice(0, 400), /--danger/);
 });
 
 // ── /activate device-login render states (fake-DOM swap) ────────────────────

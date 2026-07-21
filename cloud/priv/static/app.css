@@ -3484,6 +3484,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   50%      { opacity: 0.35; }
 }
 
+/* dead (cch-w3) — TERMINAL: the stream is down and cannot come back on its own
+   (the session credential itself was refused when reminting the stream ticket).
+   Danger, and deliberately STATIC: there is no activity to signal here, and a
+   pulse would be the same lie the amber "reconnecting" state used to tell.
+   This rule is load-bearing, not decoration. Without it a fourth data-state
+   matches ZERO author rules and inherits .live-dot { background: var(--dim) } =
+   rgb(95,106,123) — a calm neutral grey for the MOST severe state, quieter than
+   the less-severe amber it replaces. And no gate would catch that: __css_check
+   E2 extracts CLASS emissions only (/\.className\s*=/, /classList\.(add|remove|
+   toggle)\(/) and is structurally blind to setAttribute("data-state", …), while
+   cssom-parity.mjs has no data-state references at all. */
+.live-chip[data-state="dead"] {
+  border-color: hsl(var(--danger-hsl) / 0.35);
+  background: var(--danger-soft);
+}
+.live-chip[data-state="dead"] .live-dot { background: var(--danger); }
+
 @media (prefers-reduced-motion: reduce) {
   /* Motion is redundant with colour + label here — drop it entirely. */
   .live-chip[data-state="reconnecting"] .live-dot { animation: none; }
