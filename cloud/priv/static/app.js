@@ -1002,12 +1002,35 @@
 
     var revokeAll = $("#sessions-revoke-all");
     if (revokeAll) revokeAll.addEventListener("click", function () {
-      api("DELETE", "/v1/account/sessions").then(function (r) {
-        if (r.ok) {
-          toast({ kind: "success", title: "Signed out other devices", body: (r.data.revoked || 0) + " session(s) revoked." });
-          loadSessions();
-        } else {
-          toast({ kind: "error", title: "Couldn't sign out", body: friendly(r.data) });
+      // GR41 danger tier — grave but REVERSIBLE (every signed-out device can
+      // sign in again), so btn-danger weight WITHOUT the typed echo, exactly
+      // the 2FA-disable precedent above. The echo stays reserved for destroy.
+      openConfirmModal({
+        tier: "danger",
+        title: "Sign out everywhere else?",
+        confirmLabel: "Sign them out",
+        busyLabel: "Signing out…",
+        bodyHtml: "Every other browser and device is signed out <b>immediately</b>. " +
+          "This device stays signed in, and anyone signed out can sign back in with their password.",
+        // Named so the recovery arm can RE-ISSUE the request (a recovery
+        // handler that only calls busy() spins the button forever).
+        onConfirm: function run(ctl) {
+          api("DELETE", "/v1/account/sessions", null, { noBounce: true }).then(function (r) {
+            if (r.ok) {
+              ctl.succeed();
+              toast({ kind: "success", title: "Signed out other devices", body: ((r.data && r.data.revoked) || 0) + " session(s) revoked." });
+              // MANDATORY, not cosmetic: the confirm sheet REPLACED the account
+              // modal's body (openModal writes #modal-body.innerHTML) and
+              // ctl.succeed() → closeModal() then empties it, so #sessions-box
+              // is GONE from the document. A bare loadSessions() here bails at
+              // its `if (!box) return` and the operator is left staring at
+              // nothing. Re-render the account screen, same as a2f-disable.
+              openAccountModal();
+            } else {
+              ctl.fail(friendly(r.data, "Couldn't sign out the other devices."), "Try again",
+                function (again) { again.busy(); run(again); });
+            }
+          });
         }
       });
     });
@@ -1076,9 +1099,25 @@
       box.innerHTML = rows.map(sessionRowHtml).join("");
       box.querySelectorAll(".session-revoke").forEach(function (b) {
         b.addEventListener("click", function () {
+          // NO confirm sheet on this leg, deliberately: revoking ONE named row
+          // is a precise, reversible act with the device right there on screen —
+          // the sheet belongs on the blast-radius button ("everywhere else").
+          // What it DOES owe the operator is honesty about the in-flight state
+          // and a signal that the server acted.
+          if (b.disabled) return;              // idempotent: a double-tap is one DELETE
+          b.disabled = true;
+          b.textContent = "Revoking…";
           api("DELETE", "/v1/account/sessions/" + encodeURIComponent(b.getAttribute("data-id"))).then(function (r) {
-            if (r.ok) loadSessions();
-            else toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data) });
+            if (r.ok) {
+              toast({ kind: "success", title: "Device signed out", body: "That session can no longer use your account." });
+              loadSessions(); // repaints the whole list; this button goes with it
+            } else {
+              // The row SURVIVES a failure — restore it rather than leaving a
+              // dead "Revoking…" button the operator can never retry.
+              b.disabled = false;
+              b.textContent = "Revoke";
+              toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data) });
+            }
           });
         });
       });
