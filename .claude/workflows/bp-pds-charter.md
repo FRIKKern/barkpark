@@ -2460,7 +2460,79 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 13 2026-07-21 — "Fire the Climb" — REVIEWED. THE CLIMB DID NOT FIRE. Grade C+ (paper `pds-wave-13-2026-07-21`)
+
+**THE HEADLINE IS THE FAILURE, AND IT IS THE FOURTH IN A ROW.** The wave's stated success condition was
+THE TRANSCRIPT EXISTS. It does not exist. `scripts/pds-pull-proof.crown-transcript-w13.txt` was never
+written, the crown still reads **9/12**, and the pattern the wave was chartered to break — verify the
+ground, find something real, build another instrument, don't take the shot — repeated with four more
+instruments. No amount of quality in the four green slices changes that, and this entry leads with it
+so no future reader mistakes a good review for a good outcome.
+
+**HOW IT DIED, precisely, because the mechanism matters for wave 14.** It was NOT a refusal on the
+merits and NOT a defect. The builder proved the freeze (`e219e97cc` by `rev-parse`, PDS-D154), booted a
+fresh worktree off `origin/main`, embedded `$RUN_TAG` per PDS-D233, held all three non-actions (floor
+untouched at 2200, no `PDS_STEP6_GUARD_DEMO`, `attempts` never reset), and armed a poller that would
+fire the unsplit `--all` itself on a qualifying draw. **Guerrilla never offered one**: builds went idle
+but MemAvailable read 1306 / 1725 / 1729 MiB against the untouched 2200 floor — the harness declining
+correctly, exactly as PDS-D227 predicts. Then **the builder's turn was cut by the harness at poll 3 of
+30**, and the worktree was reclaimed with the poller inside it. The shot was lost to AGENT-TURN LENGTH,
+not to the box.
+
+**THAT IS THE REAL FINDING OF WAVE 13, and it is a new one.** D227–D231 established the fire predicate
+is near-deterministic and that polling is free. What nobody costed is that **a 30-poll × 10 s budget can
+outlive the agent turn that owns it**, and a poller living in a workflow worktree dies with it. Every
+prior wave's post-mortem blamed the window. This one cannot. **Wave 14 must make the fire survive its
+launcher** — detach it from the agent turn, or fire from a persistent location, or shorten the wait so
+the draw is taken inside one turn. Filing another instrument without solving this reproduces wave 13.
+
+**NOTHING WAS BURNED.** `/tmp/pds-full-export/attempts` still reads **1**, so the `spent + 2` budget
+(PDS-D224) is intact and wave 14 inherits a clean lever. The leaked scratch target was still LIVE at
+review time (`beam.smp` on :48338, three Postgres on :21973, 76 MB under `/private/tmp/pds-w13.c0a98cf8`);
+review ran `teardown` — PASS, both ports released, zero orphans, root removed.
+
+**WHAT LANDED (four slices, all reviewed green, all file-disjoint, mergeable in any order):**
+
+- `pds-w13-charter-lands` — **D217–D241 finally reach `origin/main`**, 431 insertions / **0 deletions**,
+  one file, copied by git object (PDS-D90) never re-authored. This retires a real integrity hole: merged
+  wave-12 scripts were citing D219/D223/D224/D226, text no reader of `origin` could resolve. Review
+  independently read those four and confirms the citations are substantively honest — the check the
+  builder correctly flagged as their own blind spot.
+- `pds-w13-idle-sampler-strip` — `scripts/pds-idle-sampler.sh`, the lock-free paired control (PDS-D237).
+  Takes no mutex, reads no floor, fetches nothing; both D220a refusals byte-identical to the parent.
+- `pds-w13-scratch-cost-truth` — the boot-cost record stops lying by 4.75x. `ls -A api/_build` is coarse;
+  the real trigger is **`api/_build/prod` ABSENT**, which costs a 155.72 s prod compile. Comments-only in
+  the `.sh` (zero non-comment lines changed, proven).
+- `pds-w13-stamp-epoch-guidance` — `pds-crown-stamp.sh` names the **stale-claim-epoch** rejection first,
+  because `bp task pulse` bumps the epoch and across a 12-stamp climb that is the likeliest rejection.
+  Review confirmed it live: pulsing the climb task moved its epoch 5 → 6 mid-review.
+
+**CANDIDATE DECISIONS FOR WAVE 14 TO RATIFY (raised by review, not yet charter law):**
+
+1. **THE PRE-WARM IS THE HIGHEST-LEVERAGE STEP IN THE RUNBOOK, AND IT NEEDS `CC=/usr/bin/clang`.** The
+   climb ran the recipe for real and it **FAILED** first: `cc` resolves to the Claude CLI wrapper, so
+   `argon2_elixir` dies with `error: unknown option '-g'`. With the override, dev+prod compiled clean and
+   `up --verify` came back in **~10 s against the 155.72 s cold-prod figure**. `pds-scratch-target.sh`
+   pins `CC` itself in `export_real_cc` (TRAP 2), but the MANUAL pre-warm bypasses the script entirely —
+   which is exactly why the trap bit. Review committed the override into both the header and the cost
+   record. Worth a D-number: without it an operator gets a failed pre-warm, not a slow one.
+2. **A D220a GUARD MUST KEY ON THE VACUOUS PEAK, NOT ON THE SAMPLE COUNT.** Found by MUTATION during
+   review. The guard tests `samples <= 0` but its own refusal text describes a NEGATIVE control — and
+   those come apart: a log of well-formed lines whose `rss` field never arrived counts as samples > 0 and
+   still peaks at 0 kB, yielding a **−191.63 MiB drift at exit 0**. Fixed in the new sampler (peak-keyed
+   refusal, plus a non-refusing `negative_suspect` sign for the legitimately-negative blue/green case, no
+   magnitude threshold invented per PDS-D232). **The parent `pds-export-peak-measure.sh` still has the
+   hole and it feeds the floor re-derivation** — filed as `pds-bl-d220a-keyed-on-a-proxy`.
+
+**WHAT WAVE 14 SHOULD TAKE:** merge these four, then dispatch `pds-w13-crown-stamp-and-seal` only after
+a transcript exists. The wave is **one slice wide**: fire the climb, with the launcher problem above
+solved first. Do not file a fifth instrument.
+
 ### Wave 13 2026-07-21 — "Fire the Climb" — DECIDED, 5 R1 slices building (paper `pds-wave-13-2026-07-21`)
+
+> **Superseded as a status line, 2026-07-21 (review).** "5 R1 slices building" was true when written.
+> Four built and passed review; the fifth, `pds-w13-crown-climb`, did NOT fire. See the review entry
+> above. The decisions D227–D241 recorded below stand — none was reversed by the outcome.
 
 THE PATTERN THIS WAVE EXISTS TO BREAK: waves 10, 11 and 12 each planned the climb and each shipped an
 instrument instead. Net movement on the crown across three waves: ZERO, still 9/12. **Success this wave
