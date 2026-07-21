@@ -507,11 +507,26 @@ defmodule Barkpark.Content.Mutations do
   #     `apply_mutations` entirely — this is a door guard, not a row invariant;
   #   * the sanctioned `Barkpark.Tasks.*` modules, which are deliberately
   #     upstream of it and keep full authority over a claim's lifetime;
-  #   * a claim REPLACED by a different claim map (theft-by-overwrite rather
-  #     than theft-by-erasure) — out of this slice's fence, and separately
-  #     guarded for the sanctioned path by the epoch CAS in `Tasks.Claim`;
   #   * the FRESH-CREATE exemption above and its measured residual harm — a
   #     forged birth has no claim to drop, so this guard cannot see it.
+  #
+  # SUBSTITUTION IS NOW IN SCOPE (cch-w3, epic decision D52 residue). Wave 2
+  # declared "a claim REPLACED by a different claim map is out of scope"; wave 3
+  # MEASURED that boundary and it was a live hole, not a comment: patch
+  # `set:{"claim":{"worker":"attacker","epoch":99}}` on a task claimed by
+  # honest-worker(epoch=1) returned HTTP 200, the stored claim became the
+  # attacker's, and `Barkpark.Tasks.close(honest-worker, epoch: 1)` then returned
+  # `{:error, :fenced_off}` — the honest owner locked out of its own row, the
+  # exact D22 failure shape with one extra step. The fence therefore refuses ANY
+  # api-door write that CHANGES a live claim (erasure OR substitution): the
+  # predicate is `now == was`, not `now != nil`. There is still no legitimate
+  # api-door claimant rewrite — every sanctioned verb (`Tasks.Claim` renewal,
+  # `Tasks.Fence` epoch bump, `Tasks.Release`, `Tasks.TtlSweeper`) `Map.put`s the
+  # new claim through `Repo`, never `Content.apply_mutations`, so an honest
+  # renewal never reaches this guard. Replication (`source != :api`) is exempt
+  # BEFORE the change check so a mirror that substitutes a claim upstream still
+  # applies. A patch that leaves the claim byte-identical (`now == was`, e.g. a
+  # value-writeback touching an unrelated field) passes untouched.
   #
   # REPLICATION IS EXEMPT, AND THE SCENARIO IS CONCRETE — not copy-paste from
   # D22. `Sync.Applier.apply_upsert` mirrors an upstream row with
@@ -533,12 +548,15 @@ defmodule Barkpark.Content.Mutations do
     cond do
       # Nothing to preserve — an unclaimed row is not this guard's business.
       not is_map(was) or map_size(was) == 0 -> :ok
-      # The claim survived the write. (A REPLACED claim is out of scope; see the
-      # coverage boundary above.)
-      not is_nil(now) -> :ok
-      # Replication mirrors upstream rows verbatim.
+      # Replication mirrors upstream rows verbatim (erasure OR substitution) —
+      # checked BEFORE the change predicate so a mirror still applies.
       Keyword.get(opts, :source, :api) != :api -> :ok
-      true -> {:error, {:invalid_task_content, claim_drop_error(was)}}
+      # The claim is untouched by this write — an unrelated patch is fine.
+      now == was -> :ok
+      # The claim was ERASED (drop).
+      is_nil(now) -> {:error, {:invalid_task_content, claim_drop_error(was)}}
+      # The claim was SUBSTITUTED for a different map (theft-by-overwrite).
+      true -> {:error, {:invalid_task_content, claim_substitution_error(was)}}
     end
   end
 
@@ -561,6 +579,28 @@ defmodule Barkpark.Content.Mutations do
           "NOT unlock this — release it (`bp task release <id> <worker> <epoch>`, " <>
           "POST /v1/tasks/:id/release) or close it (`bp task close <id> <worker> <epoch>`), " <>
           "both of which record who let it go."
+      ]
+    }
+  end
+
+  # Theft-by-overwrite: the claim was replaced by a DIFFERENT map through the
+  # api door (cch-w3, D52 residue). Same `invalid_task_content` family and same
+  # `claim` key as the drop message, so no new error code and no new controller
+  # branch — but worded for substitution: the honest holder of the current epoch
+  # is fenced off from `bp task close` (which CAS-checks `claim.epoch`) the
+  # instant a foreign claim lands, so the row becomes uncloseable by its owner.
+  defp claim_substitution_error(claim) do
+    worker = if is_map(claim), do: claim["worker"], else: nil
+
+    %{
+      "claim" => [
+        "cannot be reassigned through /v1/data/mutate" <>
+          if(is_binary(worker), do: " — this task is claimed by #{inspect(worker)}", else: "") <>
+          ". Substituting the claim map impersonates the claimant: the honest holder of the " <>
+          "current epoch is immediately fenced off from `bp task close` (which fences on " <>
+          "`claim.epoch`), so the row becomes uncloseable by its real owner. A revision " <>
+          "precondition does NOT unlock this — claim, renew, release or close it through the " <>
+          "task lifecycle (`bp task claim`/`release`/`close`), which record who holds the claim."
       ]
     }
   end
