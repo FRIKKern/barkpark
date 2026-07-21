@@ -224,6 +224,355 @@ bolted on afterward, which is worth nothing.
   builder-authored simulation, never in the loop. "The throw is the only enforcement that genuinely
   fires" is an intent, not an observation, until a wave observes one.*
 
+- **D29 — The census may NEVER gate on `classifySafety`. It gets its own fail-closed screen, and
+  the screen is an ALLOWLIST first.** Three layers, in order: (a) a HOST BOUND refusing any command
+  naming `ssh`/`scp`/`rsync`, `157.180.90.121`, `178.105.92.191`, `guerrilla`, `barkpark.cloud` or
+  `root@`; (b) an allowlist of command heads and sub-verbs that fails CLOSED on an unknown head;
+  (c) the `WRITE_SHAPES` gaps patched as SECOND-layer defence, never as the gate. Measured reach:
+  the allowlist admits **194 of 651 = 29.8%** of the frozen corpus, and that is the census's honest
+  reach — a decay statistic over it may never be reported as covering "651 commands". Two judgement
+  calls are ruled here rather than left to a builder: `git fetch` is REFUSED (it mutates `.git`
+  refs in a checkout three live cycles share) and all 12 `npx` commands are REFUSED (npx installs
+  and executes an arbitrary package). *Why: `classifySafety` marks 26 of 31 synthetic
+  outage-capable commands SAFE — including `reboot`, `mix ecto.drop`, `kill -9`, `pkill`,
+  `cp <anything> <repo path>` and `curl -o /opt/barkpark/deploy/site-deploy.sh` — and `runRerun`
+  gates on it and then calls `spawnSync("/bin/sh", ["-c", cmd])`, so every false-safe is an
+  execution. A patch was written, measured and made able to fail (22/22 danger refused, 0/7
+  over-refusals, 0/12 cry-wolf, 0/18 existing `mustAllow` broken) — and it took FOUR correction
+  rounds against the corpus, oscillating between false-safe and false-refusal each time, with the
+  full corpus in hand and a harness running. `rerun.mjs:75` and `:121-131` already say it: "a
+  denylist of mutating APIs cannot be complete… the verdict it supports is 'no write shape
+  detected', never 'this command cannot write'." A second verifier, screening the corpus from the
+  opposite direction to run the decay census, independently had to write the same second denylist
+  and rejected 5 systemctl and 5 deploy-script commands `classifySafety` green-lit. Two
+  investigations, opposite directions, same hole.*
+
+- **D30 — The "cheap high-value" `L3_HEADS` head-token fix is CUT AS WORDED and REPLACED.** Adding
+  `bp`, `gh` and `cd` to `L3_HEADS` was the Digest's cheapest recommendation; verification refuted
+  it three independent ways and it may not ship in that form. What ships instead, in one slice:
+  (a) the curl/wget/URL-sniff L1 check is UN-GATED from head-only matching so it fires anywhere in
+  a compound; (b) a wrapper-strip path handles `cd X && …`, `for … do …` and env-assignment
+  prefixes so the head token is found PAST the wrapper — adding no head to `L3_HEADS`; (c) `bp` and
+  non-`api` `gh` route to **L2**, the level `gh api` already holds, because they are remote-API
+  reads; (d) a PARSEABILITY FLOOR: a `rerun` string that is not a syntactically valid command
+  cannot derive above L6. *Why: (1) `bp` reads `https://guerrilla.barkpark.cloud` and `gh` reads
+  `api.github.com` — both live remote reads — so filing them at L3 "local checkout" is a two-level
+  SKIP, this charter's own line 50 disease wearing the doctrine's uniform, and it would mislabel
+  volatile remote state as checkout-stable, corrupting the decay axis. (2) `deriveLevel`'s L1
+  curl/wget check is head-gated while `SSH_READ` is not, so adding `cd` makes
+  `cd /opt/barkpark && curl https://guerrilla.barkpark.cloud/health` derive **L3** — it was L6,
+  safe-by-demotion — a proven authority inflation on a command that provably reaches production,
+  with ZERO tests covering any compound `&&` shape. (3) 13.3% of the frozen corpus's `rerun`
+  strings are PROSE, not commands (`python3 confusion matrix (15 per PREDICTED class…)`,
+  `grep/read <path> around lines 200-219`), and `deriveLevel` grades 33 of those 58 at L2/L3
+  because it inspects a head token and never asks whether the string parses — so the head-token fix
+  shipped ALONE would move prose INTO L3 and make the grammar's central promise weaker, not
+  stronger. The parseability floor errs by DEMOTION, which D3 already establishes as the safe
+  direction.*
+
+- **D31 — `observed_at` gets a caller-supplied `now` bound, and the CLI sources `now` from the
+  SHELL, never from agent-supplied JSON.** `admitRecipe(input, { now })` compares ISO strings and
+  rejects a future `observed_at`; omitting `now` admits, so no existing caller breaks. The WRITE
+  verb bakes `date -u +%Y-%m-%dT%H:%M:%SZ` into itself. `observed_at` MUST be Z-only at the write
+  seam, with a named rejection for an offset form. *Why: a forged row — two commands never run,
+  dated 2031 and 2087 — was ADMITTED, written to disk and folded back as authoritative, one at
+  **L1** and one at **L2**, and the L2 one does not even execute (`fatal: path
+  'tooling/grip/ledger/recipes.json' does not exist in 'origin/main'`). Every rejection class that
+  fires is a SHAPE class; zero honesty classes exist. Typing an ssh-shaped string mints L1 for
+  free. Of the three doors offered — prompt discipline, a `Date.now` bound, or nothing — the
+  `Date.now` bound reds TWO tests, and the second red is the finding: a fixture hardcoded
+  `2026-07-21T09:00:00Z` sits 8 hours in the future, so a clock in the module converts a
+  deterministic suite into a wall-clock-dependent one, invisibly. The caller-supplied bound passes
+  37/37, keeps the module clock-free, and rejects the forgery. Z-only is required because lexical
+  ISO comparison is correct only for same-offset instants, and normalising offsets needs
+  `Date.parse`, which re-trips the clock-free grep the fourth door exists to avoid.*
+
+- **D32 — `subject` is MINTED from the `rerun` command's first normalised repo path token, with a
+  `cmd:<head-token>` fallback; `quantity` is minted from the command's verb phrase. Neither is ever
+  free-typed or derived from claim prose.** *Why: over this wave's own 104 real survey facts, a
+  claim-derived subject produces **104 distinct keys out of 104** — a provably injective key, a
+  `detectConflicts` that can never fire and a leads index in which nothing is ever a lead. Path-token
+  minting gives 67% coverage, 22 distinct subjects, and **8 subjects shared by 2+ facts covering 56
+  of 104** — a working index (`bp-epic-cycle.workflow.js` ×23, `ledger.mjs` ×14). `findRefs`/
+  `classifyRef` are the WRONG tool and were measured as such: `REF_CANDIDATE` requires a literal
+  `:digits` suffix and scores 0 of 104 on both claims and reruns. The fallback is what keeps the
+  verb from ever reporting 100% REJECTED.*
+
+- **D33 — The ledger fold's flag is RENAMED to `RIVAL-METHOD`. The adjudicator's `CONFLICT` stays
+  library-only (D25 stands), and `tgw2-ledger-adjudicator-vocab`'s premise is FALSE.** *Why: a 2×2
+  probe ran all four cells. `foldLedger` fires on ≥2 distinct rerun COMMAND STRINGS and has no
+  value field to compare, so it fired CONFLICT on `wc -l /abs/path` vs `wc -l rel/path` — both
+  verified to output `544`. `detectConflicts` fires on ≥2 distinct claim VALUES and never reads
+  rerun, so it correctly returned 0 conflicts on that same pair and 2 on a genuine `544` vs `999`
+  disagreement, which `foldLedger` is structurally incapable of seeing. The shapes are not
+  identical by construction — they detect OPPOSITE things — so re-pointing the ledger's constant at
+  `VERDICTS.CONFLICT` would import a name for a different concept, making one canonical string
+  definitionally shared by two incompatible meanings. Under D32's path-grain key, `RIVAL-METHOD`
+  will fire on those 8 corroboration groups on day one: that is the PRODUCT — "multiple checks
+  exist, re-run and compare" — not a defect, and it must be documented as expected before the read
+  path ships, or the first honest multi-recipe entry discredits the flag permanently.*
+
+- **D34 — The surface fence is PATHS, never a directory.** `tooling/grip/**`,
+  `.claude/workflows/bp-truth-grip-charter.md`, `.claude/workflows/bp-epic-cycle.workflow.js`.
+  Nothing else, and specifically no other charter under `.claude/workflows/`. *Why: that directory
+  holds 80+ files including three actively-running epics' charters, and the hazard is live, not
+  theoretical — open PR #5106 and an unpushed local commit both append to
+  `bp-cloud-gui-remake-charter.md` at the same anchor line 1331, so whoever pushes second eats a
+  conflict. A fence stated as a bare directory reads as permission to edit those.*
+
+- **D35 — The Verify carve-out and Decide's commit ship in ONE slice, the carve-out is granted ONLY
+  in the shared-checkout branch, and the stranded-file case is ruled: THE LOSS IS ACCEPTED.**
+  A verify assignment that sets `needs_worktree` may not write ledger rows, and Digest's prompt
+  says so. If Decide crashes or cuts zero slices, uncommitted rows are lost; no sweep is built, and
+  a code comment states that this is a decision. *Why: amending "no repo edits" without extending
+  Decide's explicit-path commit strands rows in a checkout other sessions share — Decide's prompt
+  today commits exactly one file, the charter, "by explicit path only — never `git add -A`", and
+  names no other path. There are TWO stranding paths, not the one the plan assumed: a
+  `needs_worktree` verifier writes into its own throwaway worktree, which Decide never sees no
+  matter how its commit is amended — so the carve-out must be scoped to the branch that shares
+  Decide's checkout, or the ruling looks complete while staying silently lossy. No sweep is built
+  because a sweep in a contended checkout is more dangerous than the loss, and a recipe is cheap to
+  re-derive by construction — that is the entire point of the store. Silence here would have been
+  the defect; this is the ruling.*
+
+- **D36 — The wave's headline is THREE numbers, and the Digest's four are RETIRED.** Published:
+  **100% PRESENT / 93.1% EXECUTABLE / 86.3% ANSWERING**, over **104** facts. Fill rate may never be
+  published alone — it is the weakest of the three. *Why: the Digest reported 95 facts, 14.7%
+  nominal L6, 13-of-14 bp-or-gh, and "exactly one genuine L6 ≈1.1%". Re-extracted programmatically
+  from the 18 raw surveyor transcripts, every one of those four is wrong: **104** facts (the digest
+  lost 9), nominal L6 **19/104 = 18.3%**, bp-or-gh **14/19 = 73.7%**, and TRUE L6 **0/104 = 0.0%**
+  — there is not one unclassifiable command in the corpus. The cause is the finding: the digest
+  levelled a hand-normalised PARAPHRASE of its own corpus. 27 of its 95 strings appear nowhere in
+  the survey output, real paths were replaced with a literal `x` placeholder, and `cd <path> &&`
+  prefixes were STRIPPED — which is exactly the wrapper `headToken` cannot see past, so the
+  normalisation silently converted L6 rows into L3 rows. The digest measured its own typing. The
+  predeclared prediction of ~85% L6 is REFUTED, and it was predeclared in a form that could not be
+  retrofitted, which is the discipline working. The honest name stays long: "fill rate under the
+  wave-2-shipped, already-rerun-tutored prompt" — four live instruction sites push on rerun and
+  this wave added zero, so it is a clean read of the shipped prompt but NOT evidence about organic
+  agent behaviour.*
+
+- **D37 — D21's entropy statistic is RETIRED and may not be quoted again; D21's DECISION stands.**
+  The figures struck: entropy 1.118 of 2.322 bits, `L1+L2 = 1.8%`, buckets `{L1:8, L2:27, L3:1047,
+  L6:820}` summing to 1902. *Why: it is not re-derivable from anything committed. The extraction
+  script that produced it is absent from `tooling/grip/` and from that path's entire history, and
+  it cannot be reproduced by the shipped grammar because `deriveLevel` reads a `rerun` field alone
+  while the 1,902-entry `evidence` array has no command field at all — applying the real
+  `deriveLevel` to what those rows actually carry returns L6 for 1902 of 1902. That is an L6 claim
+  by this epic's own grammar, sitting inside the epic's own trial-cutting rationale, and it gets
+  the same treatment D23 gave the retired 676/24% figure. The QUALITATIVE finding survives — L1+L2
+  near-zero, L3/L6 dominant — confirmed independently by two methods. The wave-2 corpus census
+  (L1 33 / L2 31 / L3 336 / L6 252 over the 652 `proofs`) is a DIFFERENT corpus and remains valid;
+  any census verb must name which corpus it read.*
+
+- **D38 — The census verb must classify SILENCE-AS-ANSWER explicitly, and the answer-DRIFT rate is
+  UNMEASURED and may not be quoted.** *Why: 7 of 104 facts have empty output as their CORRECT
+  answer — 4 `rc=0`-with-no-stdout byte-identity proofs and 3 `grep`-`rc=1` absence proofs — so a
+  naive `rc==0 && stdout` predicate scores all 7 as decayed and INVERTS three of them, on a clean
+  corpus. The decay axis was insurance and it paid: over 406 screened commands, **59.4% still
+  answer, 22.4% have genuinely decayed** (a FLOOR — the 245 excluded commands are systematically
+  more decay-prone), and **13.3% were never executable commands at all**. The single most valuable
+  specimen is an absence claim that has gone false: `git ls-tree -r origin/main | grep -i
+  "internal/scaffy"` recorded "(empty output — no matches)" and today returns 58 files — a
+  value-storing index would have got that wrong where a recipe-storing index gets it right, which
+  is the strongest empirical argument for D26 anyone has produced. The drift rate is a different
+  matter: the 154 mismatches measured are truncation-bound, not drift, because only the first 200
+  chars of stdout were captured. It is a BOUND, not a rate, and it is filed as backlog rather than
+  quoted.*
+
+- **D39 — The write seam gets a safety gate BY INJECTION.** `admitRecipe` takes an optional `screen`
+  predicate and rejects a command the census screen would refuse to run, under a named class. The
+  ledger imports nothing from the screen module; the CLI wires them together. *Why: `admitRecipe`
+  never calls any safety check, so `systemctl stop bp-crux-parent` and `rm -rf
+  /opt/barkpark/releases` are both ADMITTED as recipes today — and a recipe is precisely a thing
+  this epic exists to make agents re-run cheaply and often. The danger is not only that the census
+  re-executes historical commands; it is that the store will happily persist an outage-capable one
+  for someone else to re-run later. Injection rather than import keeps the two slices' files
+  disjoint so they build in the same round.*
+
+- **D40 — Merge is proven by CONTENT on `origin/main`, never by commit ancestry, and the ten
+  done-but-open slices are closed on that basis.** *Why: all 7 distinct branch-tip SHAs cited by
+  those tasks return `is-ancestor exit=1` against `origin/main` — squash-merge erased ancestry for
+  every one — while each slice's characteristic exports are present verbatim on main. An
+  ancestry check would have produced 10 false negatives; a content check produced 10 true
+  positives. The urgency is not hygiene: all 10 currently surface in `bp task ready --all` with
+  claims expired since 2026-07-20T13-16Z, so `bp task next` would hand a builder already-shipped
+  work today. Note also that the verification recipe circulated for this check was itself broken —
+  it read a `tasks`/`documents` key where the API returns `docs`, and omitted `--all` against a
+  905-row pool, so run verbatim it printed an empty list and read as good news. A vacuous green.*
+
+- **D41 — The wave-3 landing (four branches plus the D29–D40 charter commit) is a PRECONDITION,
+  not progress, and it is landed by one PR before any wave-4 builder flies.** *Why: proven by dry
+  run against three successive tips. All four branches merge clean in the order screen → level →
+  ledger → verify-seam, and `a96aacce6` cherry-picks clean (rc=0, 208 insertions, one file) despite
+  sitting on a local `main` diverged by three other epics — because it is the tip of that divergence
+  and touches exactly one file. But the sharpest finding is the negative one: on the fully merged
+  tree, `git ls-tree HEAD --name-only tooling/grip/ledger/` STILL returns only `README.md` and
+  `node ledger.mjs --help` still prints `usage: node ledger.mjs [fold [dir] | --selftest]`. Round 0
+  buys a correct record and zero rows. Budgeting it as progress toward "the ledger stops being
+  empty" would under-plan the wave. It is landed as a PR from an isolated worktree — never as a
+  commit to the shared checkout's local `main`, which is how D29–D40 went missing in the first
+  place.*
+
+- **D42 — Between the four artifacts and a charter commit, the charter commit is the one that
+  cannot be deferred, because a decision nobody can read is a decision that does not exist.**
+  *Why: observed directly mid-flight. After the four merges but BEFORE the cherry-pick, the charter
+  held exactly 28 decision rows while the wave-log added by branch 4 cited D29, D31, D33, D35 and
+  D39 — five references to decisions with no text anywhere on the branch. That is precisely the
+  state a round 0 that only pushed branches would have left on main, and it is wave 1's
+  charter-never-reached-main defect repeating one wave later. Every wave-3 and wave-4 brief was
+  written against D29–D40; a fresh worktree saw D1–D28.*
+
+- **D43 — `grip leads` ships REDUCED, on measured grounds: the substring filter is the feature, and
+  the staleness band, the ranking, and the RIVAL-METHOD flag are all cut.** *Why: the predeclared
+  hit rate came in at ~19% of 18 survey assignments (~13% over 27 incl. verify) — in-band at the
+  top edge, so not the null result that would have cut the verb entirely. But three cuts are each
+  carried by a number. (a) RIVAL-METHOD carries ZERO BITS: at the `(subject, quantity)` grain D33
+  specifies, 282 of 297 pairs (94.9%) are singletons where it cannot fire, and it fires on 15 of 15
+  where it can, with 0 corroboration cases — at subject grain, 41 of 41. It is either impossible or
+  certain, never informative. D33's rename DECISION stands; what is cut is rendering it as a flag,
+  replaced by the row count itself ("3 methods on this key — run all three and compare"), which
+  delivers D33's product with no false authority. (b) The staleness BAND is a constant column on
+  day one, because every row at ship is minted this wave; and no row in the 652-proof corpus carries
+  any timestamp field, so it cannot even be backfilled. (c) "Ranked" has no rank signal at n≈100
+  with all-fresh rows — a ranked list with no ranking is the laundering this epic exists to abolish.
+  What survives is the rerun-substring filter, which narrows the busiest real bucket 2–8x
+  (`internal/cli/` 31 rows → 8 on "vet", 14 on "test", 4 on "build") and is the measured answer to
+  the granularity attack.*
+
+- **D44 — The leads substring filter is CASE-INSENSITIVE, and the null state names the structural
+  misses out loud.** *Why: a case-sensitive filter produces a FALSE honest-empty — measured:
+  substring "completion" returns 0 rows over a bucket that contains
+  `go test -run TestCompletionNounsCoverAllDispatchedBuiltins ./internal/cli/`. Against this epic's
+  own bar ("honest empty is an answer"), an empty that lies is worse than no filter at all. The null
+  state must say "no recipes for this subject — the ledger indexes repo PATHS; it cannot index bp
+  task ids, and it cannot answer judgment questions", which converts two of the three measured
+  structural miss classes from silent failures into diagnoses.*
+
+- **D45 — `cmd:<head>` fallback subjects are excluded from the leads index.** *Why: the fallback
+  exists so the WRITE verb never reports 100% REJECTED (D32) — that is a write-path concern and
+  does not obligate the read path to index them. Measured, they are dumps, not subjects: `cmd:bp`
+  is the single largest bucket in this wave's own corpus at 16 rows, and repo-wide `cmd:bp` is 55,
+  `cmd:git` 42, `cmd:curl` 27. The first user query against a dumping ground discredits the
+  feature.*
+
+- **D46 — The honest scope of leads is intra-epic, and the charter says so rather than claiming
+  repo-wide lookup.** *Why: within one wave's fence the mint clusters (51 distinct keys for 119
+  facts; 16 subjects shared by 2+ covering 84 of 119) because a single wave is a monoculture.
+  Repo-wide over the frozen 652-proof corpus it degenerates: 337 distinct subjects, 268 of them
+  singletons. Leads beats grep only in a bucket-size band of roughly 3–20. The claim that survives
+  measurement is "leads help THIS EPIC stop re-deriving its own housekeeping facts", not "leads
+  help surveyors generally".*
+
+- **D47 — The census OWNS the screen composition. `rerun.mjs`'s gate is NOT swapped, and
+  `runRerun` is not on the census path at all.** *Why: this was the wave's genuinely undecided
+  design, and two builders guessing differently IS the wave-3 cross-slice break repeating.
+  Three findings settle it. (a) The ordering defect the direction alleged does not exist:
+  `shell()` is DEFINED at rerun.mjs:335 and CALLED at :360, :450 and :492, all after the gate at
+  :420 — a builder sent to fix the ordering would find nothing and might weaken the gate hunting
+  for it. (b) There are THREE call sites, not two, so a slice that swaps the gate at :420 and stops
+  leaves :360 reachable. (c) `probeHttp` at :360 is a fixed read-only curl, not a bypass. Census
+  therefore calls `screenCommand` itself and executes only what passes, which keeps screen.mjs
+  importing nothing from rerun.mjs (D29), keeps the files disjoint, and keeps the blast radius off
+  the only gate currently running on main.*
+
+- **D48 — `screen.mjs` admits an arbitrary file-overwrite primitive, and this wave closes it.**
+  *Why: `screenCommand("sort input.txt -o api/lib/barkpark/application.ex")` returns `ok: true`,
+  and the overwrite is real, not theoretical — `sort -o` turned a victim file's contents from
+  "original content" into "PWNED" in a live probe. `uniq in out` and `tree -o` are the same shape.
+  `sort`, `uniq` and `tree` are registered as bare `plainRule()` with no flag inspection and no
+  WRITE_SHAPES backstop. This matters beyond its size: D29's own named danger is
+  `cp /tmp/evil.js api/lib/barkpark/application.ex`, which screen.mjs closes BY NAME while leaving
+  a byte-identical outcome open through `sort -o`. That is denylist thinking surviving inside the
+  module whose entire thesis is that denylists cannot be complete, and it is invisible to the
+  shipped suite precisely because DANGER_SET was written from the same head-list that has the gap.
+  Honest bound: LATENT, not live — 0 of 240 admitted corpus rows use these shapes. But harvest.mjs
+  regenerates the corpus from arbitrary other agents' transcripts, so today's fixture bounds
+  nothing about tomorrow's input. The fix is a flag guard plus a WRITE_SHAPES backstop plus
+  DANGER_SET entries so the suite can fail on them.*
+
+- **D49 — The cross-slice wiring test asserts SUBSTRING CONTAINMENT of the screen's live output
+  inside the ledger's live output, importing both real modules — never a shape assertion.** *Why:
+  this is the wave's most decisive proof. A shape assertion would duplicate `screen.test.mjs`,
+  which already goes 16–19 tests red on a naive mutation. The gap is the CONSISTENT refactor: a
+  complete, self-consistent rename of `reason` → `why` (in `refuse()`, in the admit return, in
+  `screenAll`'s own consumer at screen.mjs:806, and throughout `test/screen.test.mjs`) leaves
+  `screen.test.mjs` 34/0, `ledger.test.mjs` 60/0 and `level.test.mjs` 71/0 — EVERY shipped suite
+  100% green — while the ledger silently falls back to "the injected screen refused it". Wave 3's
+  headline defect, reproduced on the merged tip, invisible to the entire shipped suite. Only a
+  containment assertion catches it, and only a test importing both modules can express one. Note
+  the trap: `test/ledger.test.mjs:826` is already TITLED "the injected-screen contract MEETS
+  screen.mjs's real return shape" while line 836 states it uses a STAND-IN rather than importing
+  screen.mjs — a builder may find that title and believe the work is done.*
+
+- **D50 — Silence is classified by TOOL FAMILY first and exit code second; there is no flat
+  predicate, and `git show`'s rc128 is discriminated by STDERR PATTERN.** *Why: a flat
+  `rc==0 && stdout non-empty` misclassifies a byte-identity `git diff` (rc0+empty is the ANSWER)
+  and a grep absence (rc1+empty is the ANSWER). The obvious repair — "rc1 means absence" — inverts
+  polarity on `diff`, whose rc1 carried 7,357 bytes of real differences in the probe. And rc128
+  cannot key decay: path-gone ("does not exist in"), ref-gone ("invalid object name") and wrong-cwd
+  ("not a git repository") all exit 128, so a census run in a worktree that has not fetched
+  `origin` would report the ENTIRE ledger as decayed — an outage forging a decay wave. REF-GONE
+  and WRONG-CWD are environment faults and INADMISSIBLE, never decay. Scope: 246 of 652 corpus
+  commands (37.7%) sit in an exit-code-ambiguous family, and 12 non-grep silent-PASS specimens —
+  including a clean `go vet`, the canonical green — are discarded as NULL-READ today.*
+
+- **D51 — Two live defects in `rerun.mjs` are fixed independently of whether the census ships.**
+  *Why: (a) `diff a b` where b does not exist exits 2, reads nothing, and is ADMITTED as evidence
+  that something is absent — a tool error laundered into an absence claim. `readIsNull`
+  special-cases grep's exit 2 and nothing else, so grep is protected and every other tool is not.
+  This is a false ADMISSION, strictly worse than the discards, because it manufactures a false
+  claim rather than dropping a true one. (b) `git merge-base --is-ancestor` is refused
+  UNSAFE-RERUN because the write-verb regex lists `merge` and `\b` matches inside `merge-base` —
+  so the epic's own D40 merge-proof check and every stranded-branch ancestry check cannot be rerun
+  by its own instrument. One-token fix (`merge(?!-base)`), but it sits inside the safety allowlist
+  and must be ruled explicitly and paired with a protective test, or a builder "fixing safety" near
+  WRITE_SHAPES is exactly the weakening this charter warns against.*
+
+- **D52 — Three statistics are RETIRED, and each is replaced by one that can be re-run.** *Why:
+  D21's precedent, applied to this epic's own favourite numbers. (a) "26 of 31 outage probes
+  green-lit" is unrecoverable and lives in SHIPPED SOURCE (screen.mjs:21, screen.test.mjs:351), not
+  merely in briefs — replaced by the re-runnable pair: 22/22 named outage probes admitted by
+  `classifySafety` vs 0/22 by `screenCommand`, and 572/651 vs 240/651 over the frozen corpus. Safe
+  to retire: no test asserts the number, the test asserts 14 SHAPE regexes. (b) The mint rule's
+  "70 of 104 = 67%" is carried as a fact with NO RERUN — structurally identical to D21's retired
+  entropy statistic — replaced by 90 of 119 = 75.6%, re-derivable from this wave's own journal.
+  (c) The "7 of 104" silence figure cannot be re-derived as stated, because 0 of 652 corpus proofs
+  have an empty `output_excerpt`: agents NARRATE silence rather than record it. Replaced by 38 of
+  652 (5.8%) under the strict narration pattern.*
+
+- **D53 — Prediction 1 is REFUTED, and the metric is named rather than the favourable reading
+  quoted.** *Why: path-token mint yield over this wave's own 122 facts is 75.6% of rerun-bearing
+  facts (73.8% of all) — above wave 3's 67% prior by 7–12 points, but not the predeclared ≥90%.
+  The loose reading ("mints a subject at all", counting the `cmd:` fallback) is 97.5% and would
+  satisfy the prediction, but D32's own prose shows the fallback was designed as a FLOOR, not as
+  coverage. Quoting 97.5% without naming the metric would repeat exactly the 26-of-31 failure this
+  wave is retiring. The honest headline is ~76%. Injectivity is confirmed on fresh data: the
+  path key gives 51 distinct keys for 119 facts (it CLUSTERS), while the claim-derived control
+  gives 119 for 119 — perfectly injective, a dead index. D32's central argument holds.*
+
+- **D54 — The write verb mints its own `run_id` from a sanitized UTC bound, and the
+  foreign-row staging hole is stated as a CEILING rather than patched.** *Why: `run_id` appears
+  NOWHERE in the workflow JS (zero occurrences of run_id/randomUUID/crypto/Date.now), and
+  `ledger.mjs` deliberately owns no minting policy — its BAD-RUN-ID message says run_id "is
+  supplied by the caller because this module has no clock and no random source to invent one".
+  Critically, a raw `date -u` string CANNOT be the run_id: colons violate the RUN_ID regex, so
+  "bake date -u into the write path" does not work literally and must be sanitized. Landing the
+  wave-3 branch does NOT close the Decide-staging hole: two simultaneous untracked rows appear as
+  identical bare `??` and Decide's shipped instructions stage both. Since the workflow cannot
+  supply a shared per-wave prefix, run_id-prefix filtering cannot be made reliable, and the honest
+  claim is that explicit-path staging bounds the blast radius without eliminating it.*
+
+- **D55 — `harvest.mjs` is READ and named, not absorbed: the safety enumeration is TWO exec
+  primitives, one fact-driven and gated, one fixed and read-only.** *Why: three waves of "606
+  lines unread" ended. It holds exactly one exec — `execFileSync("bash", ["-c", LIST_COMMAND])` at
+  :78, where LIST_COMMAND is a module-level `find … -print0` constant with zero interpolation — and
+  it has ZERO import sites anywhere in `tooling/grip`. It is invoked only by a human running
+  `--harvest` by hand. It is also disqualified as a write-verb fact source BY CONSTRUCTION: no row
+  in its corpus carries a `rerun` field ("100% of these strings are prose"), which is what killed
+  the backfill rival on the merits. Naming it beats absorbing it: the claim "only one execution
+  path exists" was false, and a charter that says so stays trustworthy.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -259,9 +608,61 @@ untouched; the recipe ledger simply never joins that store.
 | 7 | `tgw2-acceptance-suite` — fail-before / pass-after / never-cry-wolf, every verdict class proven able to fail | 2 | large | tooling/grip |
 | 8 | `tgw2-verify-writes-back` — the narrow verify-writes / Decide-commits carve-out (D27) | 2 | medium | .claude/workflows |
 
-Later waves, in the ratified order: **wave 3** survey-reads-leads; **wave 4+** the server-side
+### Wave 3 — the CLI is the seam. Parent task `truth-grip-epic`. Paper `source-of-truth-grip-wave-3-2026-07-21`.
+
+**The realisation that reframes the epic.** D19 permanently forbids the workflow JS from reading a
+file, importing a module, running a command or reading a clock. Wave 2 correctly wired the only
+thing the orchestrator CAN do — a grammar-free demote. But the orchestrator was never the right
+consumer. Every phase of this loop dispatches an AGENT WITH A SHELL, and that premise was re-run at
+Digest rather than assumed: D19's vm-sandbox scopes to the `.workflow.js` file, not to dispatched
+agents; Verify's default dispatch carries no isolation key and runs in the shared checkout exactly
+as Decide does; a probe write under `tooling/grip/ledger/` succeeded. Wave 1 shipped a substrate
+nothing called; wave 2 made the one caller D19 permanently cripples call it; wave 3 hands it to the
+caller that can actually do the work.
+
+**Conceded openly:** everything the builders produce goes live NEXT wave, not this one. The
+phase-agent choreography rehearsed inside this wave is a REHEARSAL and the debrief must label it as
+one.
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw3-census-screen` — the fail-closed allowlist screen, its own module, three layers (D29) | 1 | large | tooling/grip |
+| 2 | `tgw3-level-compound-fix` — un-gate the remote checks, strip wrappers, bp/gh → L2, parseability floor (D30) | 1 | large | tooling/grip |
+| 3 | `tgw3-ledger-honesty` — the injected `now` bound, Z-only, injected safety screen, `RIVAL-METHOD` (D31/D33/D39) | 1 | medium | tooling/grip |
+| 4 | `tgw3-prompt-seam` — the Verify carve-out + Decide's ledger commit + the stranded-file ruling (D35) | 1 | medium | .claude/workflows |
+| 5 | `tgw3-write-verb` — the WRITE CLI + the subject/quantity minting transformer (D32) | 2 | large | tooling/grip |
+| 6 | `tgw3-census-verb` — the decay census, silence-as-answer, its honest 29.8% reach (D38) | 2 | large | tooling/grip |
+| 7 | `tgw3-leads-verb` — the read path, one command, one screen, staleness called out, no answer ever shown | 3 | medium | tooling/grip |
+
+Rounds 2 and 3 do NOT dispatch this run. `tgw3-write-verb` waits on 1 and 3 (it wires the screen
+into the write seam and routes the renamed fold); `tgw3-census-verb` waits on 1; `tgw3-leads-verb`
+waits on 5, because both edit `ledger.mjs`'s CLI routing.
+
+Later waves, in the ratified order: **wave 4+** the server-side
 `type:fact` backend, whose grammar must live in an Elixir `before_publish` hook because schema-v2's
 cross-field `validations:` slot is parsed but inert.
+
+### Wave 4 — the ledger stops being empty. Parent task `truth-grip-epic`. Paper `source-of-truth-grip-wave-4-2026-07-21`.
+
+Round 0 landed before any builder flew: the four wave-3 branches plus the D29–D40 charter commit,
+one PR, merged by CONTENT (D40/D41/D42).
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw3-write-verb` — the WRITE CLI + the minting transformer + the first real rows (D32/D53/D54) | 1 | large | tooling/grip |
+| 2 | `tgw3-census-verb` — the decay census, family-dispatch silence, census owns the screen (D47/D50) | 1 | large | tooling/grip |
+| 3 | `tgw4-screen-overwrite-guard` — close `sort -o`/`uniq`/`tree -o`, retire the 26-of-31 prose (D48/D52) | 1 | medium | tooling/grip |
+| 4 | `tgw4-wiring-and-acceptance` — the containment wiring test + the acceptance suite (D49) | 1 | large | tooling/grip |
+| 5 | `tgw4-rerun-silence-fixes` — the `diff` rc2 false-admission + the merge-base false-unsafe (D51) | 1 | medium | tooling/grip |
+| 6 | `tgw3-leads-verb` — the REDUCED read path: substring filter, no band, no rank, no flag (D43–D46) | 2 | medium | tooling/grip |
+
+The three verb slices keep their wave-3 task ids rather than being re-filed under `tgw4-*`: they
+were correctly filed and correctly dependency-blocked on branches that were not on main, and round
+0 is exactly what lifts that block. Minting duplicate ids for work that already has a good task is
+the zombie-task disease this wave is treating.
+
+Round 2 does NOT dispatch this run. `tgw3-leads-verb` waits on 1 (it needs rows to read) and on 2
+(its staleness column renders the census's verdict, and both edit `ledger.mjs`'s CLI routing).
 
 ## Wave log
 
