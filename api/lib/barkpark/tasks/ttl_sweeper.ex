@@ -88,6 +88,38 @@ defmodule Barkpark.Tasks.TtlSweeper do
   (config.exs default 2700 s / 45 min; runtime override via
   `BARKPARK_TASK_LEASE_TTL_SECONDS`). Tests override this to make the
   sweep deterministic at zero-time.
+
+  ## Second sweep — engagement honesty (tlv-s6, charter D4)
+
+  `perform/1` also runs `sweep_engagement/1`: the honesty lease for the
+  THOUGHT states (`considering` / `researching`, TLV charter D1). A task
+  stuck in `researching` because its cycle crashed is a lie — nothing
+  else ever moves it. Same advisory-lock family (`task:<doc_id>`), same
+  select-candidates → recheck-under-lock → CAS-rev `update_all` pattern,
+  and deliberately NO claim-epoch machinery: thought is not contended
+  work, so there is nothing to fence.
+
+  Lapse rules (the sweep never cancels — kills are a deliberate verb):
+
+    * `researching` with a stale/absent `engagement.ts` → `considering`,
+      engagement cleared. (Researching WITHOUT an engagement map is
+      malformed — the stage verb always stamps one — and lapses too.)
+    * `considering` with an engagement map whose ts is stale/absent →
+      engagement cleared, stays `considering`. Unowned considering is
+      the legible resting state, so a considering row with NO engagement
+      map is NOT a candidate (otherwise the sweep would re-lapse it
+      every minute forever).
+
+  Each lapse emits an additive `task.engagement_lapsed` mutation event
+  (payload mirrors `task.lease_expired` MINUS the epoch fields:
+  previous_rev, rev, previous_holder, from_status, to_status, plus the
+  cleared engagement object) and then the same post-commit PubSub
+  broadcast as the reap.
+
+  Configuration: `Application.get_env(:barkpark, :task_engagement_ttl_seconds, 900)`
+  (config.exs default 900 s / 15 min — thought idles faster than the
+  45-min work lease; runtime override via
+  `BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS`).
   """
 
   use Oban.Worker, queue: :tasks_ttl, max_attempts: 3
@@ -103,17 +135,41 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # and listen endpoint surface lease expiries with zero schema work.
   @event_task_lease_expired "task.lease_expired"
 
-  @default_ttl_seconds 2700
+  # tlv-s6 (charter D4): the additive event kind the engagement sweep emits.
+  # Same mutation channel as task.lease_expired — spine/webhooks/listen get
+  # it with zero schema work.
+  @event_task_engagement_lapsed "task.engagement_lapsed"
 
-  @doc "The mutation_events kind this worker emits."
+  @default_ttl_seconds 2700
+  @default_engagement_ttl_seconds 900
+
+  # The two thought states the engagement sweep owns (TLV charter D1).
+  @thought_states ~w(considering researching)
+
+  @doc "The mutation_events kind the lease sweep emits."
   @spec event_kind() :: String.t()
   def event_kind, do: @event_task_lease_expired
+
+  @doc "The mutation_events kind the engagement sweep emits."
+  @spec engagement_event_kind() :: String.t()
+  def engagement_event_kind, do: @event_task_engagement_lapsed
 
   @impl Oban.Worker
   def perform(%Oban.Job{} = _job) do
     ttl_seconds = Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_ttl_seconds)
 
-    {:ok, sweep(ttl_seconds)}
+    engagement_ttl_seconds =
+      Application.get_env(
+        :barkpark,
+        :task_engagement_ttl_seconds,
+        @default_engagement_ttl_seconds
+      )
+
+    # Both sweeps in the one per-minute job: the lease reap first (contended
+    # work), then the engagement honesty lease (thought states). The result
+    # map keeps the historical top-level {swept, skipped} for the lease sweep
+    # and nests the second sweep under :engagement.
+    {:ok, Map.put(sweep(ttl_seconds), :engagement, sweep_engagement(engagement_ttl_seconds))}
   end
 
   @doc """
@@ -130,6 +186,28 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
     Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
       case reap_one(doc_id, cutoff) do
+        :swept -> %{acc | swept: acc.swept + 1}
+        :skipped -> %{acc | skipped: acc.skipped + 1}
+      end
+    end)
+  end
+
+  @doc """
+  The engagement honesty sweep (tlv-s6, charter D4) — lapses THOUGHT
+  states whose `engagement.ts` went stale. Pure entry point, same shape
+  as `sweep/1`; `perform/1` runs both.
+  """
+  @spec sweep_engagement(non_neg_integer()) :: %{
+          swept: non_neg_integer(),
+          skipped: non_neg_integer()
+        }
+  def sweep_engagement(ttl_seconds) when is_integer(ttl_seconds) and ttl_seconds >= 0 do
+    cutoff = DateTime.utc_now() |> DateTime.add(-ttl_seconds, :second)
+
+    candidates = engagement_candidates(cutoff)
+
+    Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
+      case lapse_one(doc_id, cutoff) do
         :swept -> %{acc | swept: acc.swept + 1}
         :skipped -> %{acc | skipped: acc.skipped + 1}
       end
@@ -155,6 +233,34 @@ defmodule Barkpark.Tasks.TtlSweeper do
       where:
         fragment(
           "((?->'claim'->>'ts_iso')::timestamptz IS NULL OR (?->'claim'->>'ts_iso')::timestamptz < ?)",
+          d.content,
+          d.content,
+          ^cutoff
+        ),
+      select: %Document{id: d.id}
+    )
+    |> Repo.all()
+  end
+
+  # SELECT every thought-state task that LOOKS lapsed from the outside; the
+  # per-row lapse path re-validates under the advisory lock (same generous-
+  # candidate philosophy as expired_candidates/1).
+  #
+  # Asymmetry by design: `researching` is a candidate even WITHOUT an
+  # engagement map (researching must carry its object — a bare row is
+  # malformed and lapses to considering), while `considering` requires the
+  # `engagement` key to be present — unowned considering is the legible
+  # resting state, and re-lapsing it every minute would spam events forever.
+  defp engagement_candidates(%DateTime{} = cutoff) do
+    from(d in Document,
+      where: d.type == "task",
+      where: fragment("?->>'lifecycle_status'", d.content) in ^@thought_states,
+      where:
+        fragment("?->>'lifecycle_status'", d.content) == "researching" or
+          fragment("? \\? 'engagement'", d.content),
+      where:
+        fragment(
+          "((?->'engagement'->>'ts')::timestamptz IS NULL OR (?->'engagement'->>'ts')::timestamptz < ?)",
           d.content,
           d.content,
           ^cutoff
@@ -345,6 +451,157 @@ defmodule Barkpark.Tasks.TtlSweeper do
         "content" => doc.content,
         "rev" => doc.rev,
         "lease_expired" => payload
+      },
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
+      dataset_id: doc.dataset_id,
+      inserted_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
+  end
+
+  # ─── Per-task engagement lapse (tlv-s6 — the locked, idempotent unit) ─────
+
+  defp lapse_one(doc_id, %DateTime{} = cutoff) do
+    result =
+      Repo.transaction(fn ->
+        # Same advisory-lock family as the reap and Tasks.close/3 — a lapse
+        # can never interleave with a close/claim/reap on the same task.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
+
+        case Repo.get(Document, doc_id) do
+          nil ->
+            :skipped
+
+          %Document{} = doc ->
+            if engagement_lapsed?(doc, cutoff), do: apply_lapse(doc), else: :skipped
+        end
+      end)
+
+    case result do
+      {:ok, {:swept, doc, event_id, previous_rev}} ->
+        # Post-commit PubSub — exactly like the reap path.
+        Barkpark.Content.broadcast_document_mutation(doc, @event_task_engagement_lapsed,
+          event_id: event_id,
+          previous_rev: previous_rev
+        )
+
+        :swept
+
+      {:ok, outcome} ->
+        outcome
+
+      {:error, _} ->
+        :skipped
+    end
+  end
+
+  # Recheck under the lock: still a thought state, and (per the candidate
+  # asymmetry) a considering row must still CARRY an engagement map to lapse.
+  defp engagement_lapsed?(%Document{content: content}, %DateTime{} = cutoff) do
+    status = Map.get(content, "lifecycle_status")
+    engagement = Map.get(content, "engagement")
+
+    cond do
+      status not in @thought_states -> false
+      status == "considering" and not is_map(engagement) -> false
+      true -> stale_engagement_ts?(engagement, cutoff)
+    end
+  end
+
+  # A missing map / missing ts / unparseable ts is stale (NULL-tolerance,
+  # mirroring still_expired?/2): a healthy holder re-stamps ts, an absent ts
+  # means nobody owns the thought anymore.
+  defp stale_engagement_ts?(%{"ts" => iso}, %DateTime{} = cutoff) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _offset} -> DateTime.compare(dt, cutoff) == :lt
+      _ -> true
+    end
+  end
+
+  defp stale_engagement_ts?(_, _cutoff), do: true
+
+  defp apply_lapse(%Document{} = doc) do
+    observed_rev = doc.rev
+    new_rev = generate_rev()
+    engagement = Map.get(doc.content, "engagement")
+    from_status = Map.get(doc.content, "lifecycle_status")
+    to_status = "considering"
+    previous_holder = if is_map(engagement), do: Map.get(engagement, "holder")
+
+    # Both rules land on the same write: lifecycle collapses to considering
+    # (a no-op key-wise when it already was) and the engagement map is
+    # CLEARED — deleted, not blanked, so the brief card's omit-when-absent
+    # law reads the row as unowned. NO claim/epoch fields are touched.
+    new_content =
+      doc.content
+      |> Map.put("lifecycle_status", to_status)
+      |> Map.delete("engagement")
+
+    {rows, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+      |> Repo.update_all(
+        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+      )
+
+    case rows do
+      1 ->
+        updated = %{doc | content: new_content, rev: new_rev}
+
+        ev =
+          insert_engagement_lapsed_event!(
+            updated,
+            observed_rev,
+            previous_holder,
+            from_status,
+            to_status,
+            engagement
+          )
+
+        {:swept, updated, ev.id, observed_rev}
+
+      0 ->
+        # CAS failed under the lock — a non-task-lifecycle writer moved the
+        # row. Skip; next minute's sweep re-evaluates.
+        :skipped
+    end
+  end
+
+  # Mirror of insert_lease_expired_event! MINUS the epoch fields (charter D4:
+  # thought is not contended work — there is no fence to record).
+  defp insert_engagement_lapsed_event!(
+         %Document{} = doc,
+         previous_rev,
+         previous_holder,
+         from_status,
+         to_status,
+         engagement
+       ) do
+    payload = %{
+      "previous_rev" => previous_rev,
+      "rev" => doc.rev,
+      "previous_holder" => previous_holder,
+      "from_status" => from_status,
+      "to_status" => to_status,
+      "engagement" => engagement
+    }
+
+    %MutationEvent{}
+    |> Ecto.Changeset.change(%{
+      dataset: doc.dataset,
+      type: doc.type,
+      doc_id: doc.doc_id,
+      mutation: @event_task_engagement_lapsed,
+      rev: doc.rev,
+      previous_rev: previous_rev,
+      document: %{
+        "doc_id" => doc.doc_id,
+        "type" => doc.type,
+        "title" => doc.title,
+        "status" => doc.status,
+        "content" => doc.content,
+        "rev" => doc.rev,
+        "engagement_lapsed" => payload
       },
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
