@@ -287,8 +287,21 @@ check_fire_window() {
   info "deploy.yml queued ........ ${queued:-none}"
 
   hits=""; instance_hits=""
+  # The PR read fails CLOSED for the same reason the run reads above do, and it
+  # is captured SEPARATELY from its stdout for the same reason: `|| prs=""`
+  # makes a 503 and a genuinely empty PR list read IDENTICALLY, and an empty
+  # list flows all the way down to `state=GO … no open PR touches a deploy
+  # path`. That is the precise vacuous green this check exists to prevent —
+  # the quietest-looking verdict in the script, produced by not being able to
+  # see. Empty-with-rc-0 is a real fact; empty-because-the-API-failed is not
+  # (PDS-D98).
+  pr_rc=0
   prs="$(gh pr list --state open --limit 100 --json number,files \
-           -q '.[] | "\(.number)\t\([.files[].path] | join(" "))"' 2>/dev/null)" || prs=""
+           -q '.[] | "\(.number)\t\([.files[].path] | join(" "))"' 2>/dev/null)" || pr_rc=$?
+  if [ "$pr_rc" -ne 0 ]; then
+    verdict 4 "FIRE WINDOW" UNKNOWN "the deploy.yml pipeline is quiet (in_progress:${running:-none} queued:${queued:-none}), but \`gh pr list\` exited $pr_rc, so open PRs on the deploy paths are UNREADABLE. A merge landing mid-climb moves guerrilla's sha and reds rung 0b (PDS-D78, minimum observed gap 9 SECONDS), and this check cannot currently rule one out. Unreadable is UNKNOWN, never quiet (PDS-D98). Re-run; the GitHub API 503s often enough that a retry usually clears it."
+    return 0
+  fi
   if [ -n "$prs" ]; then
     while IFS="$(printf '\t')" read -r n files; do
       [ -n "$n" ] || continue
