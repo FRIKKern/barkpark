@@ -1493,3 +1493,187 @@ merge-gated criteria open for the lead. A's task is honestly `in_progress` under
    sequenced-rounds law, not a failure of this wave.
 
 Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
+
+### Wave 14 amendments (2026-07-21, D190–D197) — HARDEN-AND-CONVERGE
+
+Paper: `spd-inspector-shape-harden-wave-2026-07-21`. Root task: `spd-b39-user-opened-inspector-shape-successor`.
+
+- **D190 — Wave 14 is convergence, not design.** The founding defect (user-opened inspector crushing
+  the reading column) is SOLVED in shape and LIVE: wide docks in-flow (Tier-2 ladder, `display_state/5`,
+  #4922), narrow is a summoned full-panel destination with dimming abolished + a Tier-3 return grammar
+  (#4923/#5014/#5015), keyboard Escape+focus-in+focus-return is PAID (#5086), and round-trip fidelity
+  returns the column BIT-IDENTICAL 27/27 on the deployed build (D182). The wave's job is to make that
+  shape **defensible** — turn the still-unguarded behaviours into mutation-proven tests — while the two
+  named seal-blockers (bracketed run, scrim FIX) stay named residue. Spine = `api/test/barkpark_web/**`
+  (collision-free with the crown that owns `root.html.heex`).
+
+- **D191 — The scrim FIX is NOT taken in-fence this wave (PIN-ONLY).** Verification proved
+  `spd-standard-bucket-scrim-unruled` is mechanically claimable now — tier3-keyboard #5086 (b650154a1)
+  is an ancestor of `origin/main`, no open PR touches `root.html.heex`, and cloud-gui-remake lives in
+  `cloud/**` (zero `.heex`), so the "crown owns root.html.heex" framing was refuted. BUT a crown merge-
+  freeze is arming and D16 gives `root.html.heex` exactly one owner per round. RULING: this wave pins
+  the behavioural half via `spd-w13-secondary-doc-zero-coverage` (pure LiveView test, no `root.html.heex`
+  edit); the CSS/assign FIX stays **SEAL-BLOCKER 2** residue, dispatched by the lead post-freeze as a
+  round-owning root.html.heex slice. RIVAL B (make the fix the whole wave) rejected as the spine —
+  strand/collision risk under the freeze; absorbed as residue instead.
+
+- **D192 — The complete secondary_doc fix clears in BOTH `clear_paper_view/1` AND `setup_paper_view/2`.**
+  paper→non-paper routes through `clear_paper_view/1` (shared.ex:779-814 `_ ->` branch); paper→paper
+  routes through `setup_paper_view/2`. Neither clears `secondary_doc` on `origin/main` (confirmed) — so
+  a stale secondary doc set via `select-secondary` survives navigation, shrinks the standard-bucket panel
+  to 620px < the 860px scrim threshold, and the scrim paints over live prose (D175/D187). The wave-14
+  test asserts the CURRENT persistence on BOTH legs (green today, `paper_doc==nil` proving the nav path
+  ran = non-vacuity), so whichever leg the fix lands on, the behaviour change touches this test.
+
+- **D193 — `spd-b41`'s remaining leg (`root.html.heex` CSS ↔ `visually_open?`) is the one true coupling
+  gap; it is locked READ-ONLY.** The 2↔3 leg (`components.ex:visually_open?` ↔ `handlers/paper.ex:painted_closed?`)
+  is already green and mutation-proven (paper_canvas_test.exs:1606, 129/0). The 1↔2 leg — root.html.heex:2002's
+  `:not([data-width-bucket="wide"]) … :not([data-user-opened])` compound vs the negation of
+  `visually_open? = panel_open && (bucket=="wide" || user_opened)` — has ZERO cross-file coverage. A new
+  file-disjoint test `File.read!`s root.html.heex and asserts the painted-closed bucket set equals that
+  negation, mutation-proven with a SYNTHETIC sabotaged selector string (never editing root.html.heex).
+  In-fence: the test is a READER of the crown file, never a writer.
+
+- **D194 — format-bubble stays residue, NOT a slice.** The blur/hide + Escape-swallow logic is in
+  `api/assets/paper-editor/src/format-bubble.js` — a THIRD fence (npm/JS, D174-excluded), its proof bar
+  is a real browser, its bundle is 5 commits stale, and it is ALREADY filed as
+  `paper-editor-bundle-stale-and-escape-stoppropagation`. Do not duplicate; do not half-ship.
+
+- **D195 — The merged-unclosed set is 14, not 7.** A BFS over spd-b39's 69-descendant subtree, filtered
+  for "all criteria met except one MERGE-GATED", cross-checked by `git merge-base --is-ancestor`, found
+  14 tasks merged-to-main yet lifecycle=open: the 8 already known (#4922-4925, #5014-5016, #5086) PLUS
+  #5087, #5088, #5097, #5098, #5127, #5128. `spd-b39-seven-merged-children-need-the-merge-stamp` is
+  itself stale ("seven"). `spd-b29f` is a same-species case (done-not-closed, criterion still met:false)
+  under the OLD parent. A reconciliation task widens the sweep to 14 and re-stamps the root's 5 criteria.
+
+- **D196 — The shortest seal move is a git push, not code.** The bracketed run's slices A (#5098) and
+  B (#5127) are merged; only slice C (`spd-w13-prediction-registered`, branch
+  `loop-epic/register-the-terminal-run-s-prediction-a-2-r`, tip eb39567c0) is unpushed — 2-ahead,
+  merge-tree clean (0 conflicts, 2 additive files under `scripts/measurements/`), never on origin, no
+  PR. Push C → merge → an OPERATOR holding `~/.ssh/barkpark_indx` fires
+  `inspector-shape-bracketed-deployed-run` (readProvenance() die()s without ssh to guerrilla). That
+  stamps **SEAL-BLOCKER 1**. No agent/CI can fire the run — Decide names the human.
+
+- **D197 — "sealable" ≠ "ledger-reads-sealed".** No mechanical seal predicate exists for spd-b39 (the
+  only `seal-predicate.mjs` in the repo belongs to cloud-gui-remake). The root's 5 acceptance_criteria
+  all read met:false despite D182/D148-D189 — stale prose inherited from the wave-8/9 handoff, never
+  re-stamped. Nothing auto-flips them when the blockers clear. Reconciliation is named LEAD work,
+  distinct from and blocking any future seal claim.
+
+**The seal path (what stands between this wave and a sealable desk).** Two out-of-fence stamps + one
+ledger reconcile: (1) push+merge slice C, then the operator fires the bracketed run — SEAL-BLOCKER 1;
+(2) the lead dispatches `spd-standard-bucket-scrim-unruled` as a round-owning root.html.heex slice once
+the freeze lifts — SEAL-BLOCKER 2; (3) `spd-b39-seal-ledger-reconciliation` executes the 14-task
+stamp-and-close sweep and re-stamps the root's 5 criteria. Cross-surface inspector (sheet/graph/media)
+is EXPANSION, post-seal.
+
+**Wave 14 slice table.**
+
+| # | slice | task | round | builder | files |
+|---|---|---|---|---|---|
+| S1 | Pin secondary_doc persistence (D175 behavioural half) both nav legs | `spd-w13-secondary-doc-zero-coverage` | 1 | fable | `api/test/barkpark_web/live/studio/studio_live_secondary_doc_test.exs` (new) |
+| S2 | Couple the painted-closed CSS rule to `visually_open?` (1↔2 leg) | `spd-b41-inspector-paint-rule-vs-announcement-uncoupled` | 1 | fable | `api/test/barkpark_web/studio/inspector_paint_announcement_coupling_test.exs` (new) |
+
+Two disjoint new test files, both in-fence, both round 1, `root.html.heex` has **no writer** this wave
+(S2 reads it) — D16 satisfied trivially. The scrim FIX, the bracketed run, and format-bubble are named
+residue, not slices.
+
+### Wave 15 amendments (2026-07-21, D198–D205) — KILL THE LAST REACHABLE CRUSH
+
+Paper: `spd-standard-scrim-crush-wave-2026-07-21`. Root task: `spd-b39-user-opened-inspector-shape-successor`.
+Wave 14's pins (S1/S2) never landed on `origin/main` (verified: no `secondary_doc` test anywhere, no
+`inspector_paint_announcement_coupling_test.exs`) — so this wave WRITES the fix, it does not flip a pin.
+NOTE for the lead: the D190–D197 amendment itself was stranded on a feature branch (never merged to
+`origin/main`, whose charter stopped at D189); this wave-15 commit carries D190–D205 forward together.
+
+- **D198 — Wave 15 TAKES the scrim FIX (reverses D191's PIN-ONLY posture).** Lead-verified at dispatch:
+  ZERO of 24 open PRs touch `root.html.heex` or `shared/paper.ex` (widened to `shared.ex` — still zero),
+  and the D16 round-1 owner tier3-keyboard `#5086` (b650154a1) has released to `origin/main` — so
+  single-ownership of `root.html.heex` is UNCONTENDED this wave and D191's "crown owns the file" framing
+  no longer holds. The PDS-crown merge-freeze (wave 20) blocks MERGING, never BUILDING. RIVAL A wins:
+  pay the LIVE breach this wave with two file-disjoint mutation-proven slices; push normally, expect
+  merge to lag behind the crown. RIVAL B (shape rebuild) rejected — the docking arithmetic already loses
+  (a 300px dock at v=1024 yields 34ch, worse than the overlay) and D190 already ruled this epic
+  convergence, not design. RIVAL C (test-only, wave-14 redux) rejected — the wish says FIX, and banking
+  tests around a known-broken behaviour adds no user value while the breach stays live.
+
+- **D199 — FIX 1 is IDENTITY-GATED, not unconditional (corrects D192's literal seam).** Verification
+  (V1) PROVED by mutation that bolting `secondary_doc: nil` onto `clear_paper_view/1` +
+  `setup_paper_view/2` REGRESSES split-view-compare: `clear_paper_view/1` is not only a nav leg — it
+  fires on same-document Save/reload through `rebuild_panes`'s `_ ->` branch (`Fields.save` on
+  "Saved", `reload-remote-doc`), so an unconditional clear WIPES a live `.bp-secondary-pane` on the
+  next save (probe: `present? false` after a same-doc reload with the naive fix; `true` on clean code).
+  RULING: clear the `secondary_doc`/`secondary_schema`/`secondary_type` trio ONLY on an ACTUAL
+  primary-document identity change — `not same_editor_doc?(old, new)` (the predicate already exists at
+  `shared.ex:934`, already consumed at `shared.ex:741`/`:758`). This kills the compound scrim on real
+  navigation while leaving same-doc saves/reloads (and the same-PAPER slug-rename re-render of
+  `setup_paper_view/2`) untouched. The protective test MUST assert BOTH: nav-to-a-different-doc clears
+  `secondary_doc` (with `paper_doc` non-nil proving the nav path ran = non-vacuity) AND a same-document
+  Save/reload with a split-view open PRESERVES it.
+
+- **D200 — FIX 2 REPAIRS the merged positive control, not only adds a guard.**
+  `inspector_summoned_destination_test.exs:344-367` hard-codes today's bug (`winning_content(standard,
+  user_opened:true, pane:860) == ""`) as its "positive control" — written before D175 found the compound
+  breach. Verification (V2) proved that adding ONLY the standard suppressor flips BOTH of that test's
+  assertions (`860 → "none"`, and `861 → "none"` too, because the suppressor sits OUTSIDE the 860px
+  `@container` and is therefore pane-unbounded). So FIX 2 = one CSS suppressor
+  (`html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after
+  { content: none; }`, mirroring the narrow/phone sibling at `root.html.heex:2141-2142`) + two NET-NEW
+  mutation-proven guards (`standard/620 == "none"` with a non-vacuity precondition, plus a
+  deletion-mutation control that reds when the suppressor is regex-removed from the source string) + a
+  REQUIRED repair of the positive control at BOTH assertions. `task-c967eebb8a51715f` (positive-control
+  repair) is FOLDED into S2 (same test file → D16 same-file collision), not built independently.
+
+- **D201 — Task reuse, ZERO mint for the fix work.** S1 = `spd-w13-secondary-doc-zero-coverage` (direct
+  child of spd-b39; EXPANDED from test-only to identity-gated behavioural clear + LiveView test). S2 =
+  `spd-standard-bucket-scrim-unruled` (NARROWED to the FIX-2 CSS+test half; re-parented from the
+  grandchild slot to spd-b39 direct). `task-c967eebb8a51715f` patched "do not claim — folded into S2."
+  The two slices are file-disjoint (S1: `shared.ex`/`shared/paper.ex` + `studio_live_secondary_doc_test.exs`;
+  S2: `root.html.heex` + `inspector_summoned_destination_test.exs`), both round 1, parallel.
+
+- **D202 — The arithmetic absorbs the sharpest attack on RIVAL A.** CLEAN standard (no `secondary_doc`)
+  NEVER crosses 860 within 1024-1279: panel = v − 44, crossing at v ≤ 904, entirely inside NARROW (floor
+  640, ceiling 1023). So FIX 1 alone removes the ONLY reachable standard scrim (the COMPOUND state,
+  panel = v − 44 − 360 = 620 at v=1024); FIX 2 is genuine defense-in-depth, its guard modelling the 620px
+  compound width. The survey's 900/800/764/700 widths are NARROW, not standard, and moot — narrow/phone
+  abolish dimming unconditionally via the `inset:0` destination-cover rule (`root.html.heex:2120`), never
+  reaching the `@container(panel≤860)` path. Abolishing prose-dimming at standard applies the SETTLED
+  D127 invariant, not exempting a mode after an unfavourable table — it dodges the D170-ordering trap.
+
+- **D203 — Ledger reconcile is 15 rows, not 14.** Verification (V4/V6) confirmed all 14 of D195's
+  merged-unclosed tasks (`#4922-4925, #5014-5016, #5086-5088, #5097-5098, #5127-5128`) are MERGED and
+  still lifecycle=open with exactly one unmet MERGE-GATED criterion each; PLUS
+  `spd-b29f-inspector-aria-lie-in-painted-closed` is a 15th same-species row (lifecycle=done, PR `#4738`
+  merged) under the OLD closed parent `studio-space-priority-desk`. File `spd-b39-seal-ledger-reconciliation`
+  (parent spd-b39) carrying the 15-row stamp-and-close worklist AND a SEPARATE per-criterion re-verify of
+  spd-b39's own 5 root criteria — NOT a blanket flip (≥2 of the 5 demand the shape be RULED+MEASURED on
+  the deployed build, still open pending SEAL-BLOCKER 2 landing). Patch
+  `spd-b39-seven-merged-children-need-the-merge-stamp` (stale "seven") as superseded. All 15 PRs merged
+  pre-freeze, so their task rows CAN close now — the freeze holds only NEW merges.
+
+- **D204 — Seal path, status-updated.** SEAL-BLOCKER 1 = push slice C (`spd-w13-prediction-registered`,
+  branch `loop-epic/register-the-terminal-run-s-prediction-a-2-r`, tip eb39567c0, re-confirmed
+  merge-tree-clean against the CURRENT origin/main tip, 2 additive `scripts/measurements/` files, no PR)
+  → merge → an OPERATOR holding `~/.ssh/barkpark_indx` fires `inspector-shape-bracketed-deployed-run`
+  (D196 human-only; `readProvenance()` die()s without ssh). SEAL-BLOCKER 2 = this wave's FIX (S1+S2) —
+  moves from PIN-ONLY residue to IN-FLIGHT. Reconcile = D203. Cross-surface inspector (sheet/graph/media)
+  = EXPANSION, post-seal.
+
+- **D205 — `reset_nav_for_switch/1` async transient is named, not fixed.** Verification (V5) found the
+  workspace/project-switch leg assigns `editor_view: :form` directly (bypassing the `rebuild_panes` case)
+  but every one of its exits chains into `rebuild_panes()` or `push_patch → handle_params →
+  rebuild_panes` — so the identity-gated clear still closes this leg, just possibly one LiveView cycle
+  later. Benign: the transient window holds `editor_view: :form`, never `:paper`, so it is not a
+  reachable scrim state. S1's builder is told the identity gate disarms it; no separate fix.
+
+**Wave 15 slice table.**
+
+| # | slice | task | round | builder | files |
+|---|---|---|---|---|---|
+| S1 | FIX 1 — identity-gated `secondary_doc` clear on nav + LiveView protective test (both legs) | `spd-w13-secondary-doc-zero-coverage` | 1 | fable | `api/lib/barkpark_web/live/studio/studio_live/shared.ex`, `shared/paper.ex`, `test/barkpark_web/live/studio/studio_live_secondary_doc_test.exs` (new) |
+| S2 | FIX 2 — standard-bucket scrim suppressor + cascade guard + positive-control repair | `spd-standard-bucket-scrim-unruled` | 1 | fable | `api/lib/barkpark_web/layouts/root.html.heex`, `test/barkpark_web/studio/inspector_summoned_destination_test.exs` |
+
+Two file-disjoint slices, both round 1, dispatched in parallel. S2 is `root.html.heex`'s sole owner this
+round (D16). Both fable — S1 carries the split-view regression trap (D199), S2 the cascade + merged
+positive-control repair (D200). Ledger reconcile (`spd-b39-seal-ledger-reconciliation`) and slice-C push
+(SEAL-BLOCKER 1) are LEAD/operator work, not builder slices.
