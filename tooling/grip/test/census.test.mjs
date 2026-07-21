@@ -28,7 +28,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -821,4 +822,63 @@ test("CONTROL: the CLI actually exits 2 on an unknown flag and 0 on --ledger", (
   // this string zero times — so a bare exit-0 gate would pass without the
   // feature. The name is what makes the gate able to fail.
   assert.match(ok.stdout, /tooling\/grip\/ledger/);
+});
+
+// ── THE UNREADABLE BRANCH, FIRED RATHER THAN INSPECTED ───────────────────────
+//
+// The preamble's unreadable block is dead on today's store (0 unreadable), so
+// the builder shipped it UNPROVEN BY EXECUTION and said so. A branch nobody has
+// run is a branch nobody knows the shape of — and this one exists precisely to
+// stop a partially-read store publishing itself as a smaller clean one, which
+// is the failure mode with the highest cost in this whole module. So it is
+// fired here against a synthesised rotten store rather than read.
+
+test("a rotten run file is REPORTED in the preamble and kept OUT of both rates", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-census-rotten-"));
+  writeFileSync(join(dir, "grip-20260721T000000Z-rotten.json"), "{ this is not json");
+  writeFileSync(
+    join(dir, "grip-20260721T000001Z-good.json"),
+    JSON.stringify({
+      run_id: "grip-20260721T000001Z",
+      recipes: [{
+        subject: "tooling/grip/census.mjs", quantity: "wc:-l",
+        rerun: "wc -l tooling/grip/census.mjs",
+        derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:01Z",
+      }],
+    }),
+  );
+
+  const source = loadLedgerRecipes(dir);
+  assert.equal(source.stats.unreadable, 1, "precondition: the fold sees the rotten file");
+  assert.equal(source.commands.length, 1, "the readable row still censuses");
+
+  const text = renderLedgerPreamble(source);
+  assert.match(text, /unreadable       1/, "the count must be on the face of the report");
+  assert.match(text, /NOT ABOUT DECAY/, "and it must say what it is NOT, or a reader scores it as decay");
+  assert.match(text, /rotten\.json/, "naming the file is what makes it re-derivable");
+  assert.match(text, /UNPARSEABLE/);
+
+  // The load-bearing half: an unreadable row is in NEITHER rate. It never
+  // reached the engine, so it cannot be an answer and it cannot be decay.
+  const report = censusRun(source.commands, { corpusName: "rotten-store probe" });
+  assert.equal(report.reach.distinct, 1, "only the readable row was censused");
+  assert.equal("unreadable" in report, false, "summarise has no field for it — which is WHY the preamble exists");
+});
+
+test("CONTROL: a clean store's preamble does NOT print the unreadable block", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-census-clean-"));
+  writeFileSync(
+    join(dir, "grip-20260721T000001Z-good.json"),
+    JSON.stringify({
+      run_id: "grip-20260721T000001Z",
+      recipes: [{
+        subject: "tooling/grip/census.mjs", quantity: "wc:-l",
+        rerun: "wc -l tooling/grip/census.mjs",
+        derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:01Z",
+      }],
+    }),
+  );
+  const text = renderLedgerPreamble(loadLedgerRecipes(dir));
+  assert.match(text, /unreadable       0/);
+  assert.doesNotMatch(text, /NOT ABOUT DECAY/, "a clean store must not cry wolf");
 });
