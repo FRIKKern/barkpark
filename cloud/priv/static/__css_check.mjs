@@ -135,16 +135,22 @@
 //   Hence no check is added here and no second test is added there — that pair
 //   would be duplicate coverage of the identical liveDotState/app.css seam.
 //
-//   KNOWN GRANULARITY LIMIT (stated, not papered over). That fence proves
-//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival — the
-//   same substring-presence technique E2 itself uses. Measured on this tree:
-//   deleting ONLY `.live-chip[data-state="stale"] .live-dot { background: … }`
-//   while the `.live-chip-label` rule with the same prefix survives reds
-//   NEITHER check (both green); deleting BOTH reds __app.test.mjs with
-//   `no paint rule for stale`. __css_check stays green in both mutations — it
-//   never sees data-state at all, which is exactly this boundary. A state can
-//   therefore lose its DOT colour silently. Closing that needs a
-//   per-declaration CSSOM assertion, not another text scan.
+//   KNOWN GRANULARITY LIMIT — CLOSED (D41/D66). The original HEAD fence proved
+//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival: deleting
+//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (app.css:3470)
+//   while the same-prefix `.live-chip-label` rule on :3471 survived red NEITHER
+//   check, so a state could lose its DOT colour — its one severity signal —
+//   silently. That gap is now closed by a PER-DECLARATION probe in __app.test.mjs:
+//   the test `every state's .live-dot rule DECLARES a background (per-declaration
+//   fence)` loops hooks.liveDotStates, isolates each state's OWN `.live-dot {…}`
+//   block (first-occurrence indexOf over the ` .live-dot {` marker, which skips the
+//   `.live-dot.is-ping::after` decoy and the @media duplicate), and asserts a
+//   `background:` declaration survives INSIDE it — so a background-ONLY deletion
+//   reds as well as a whole-rule deletion. Mutation-proved: deleting app.css:3470
+//   reds it with `no .live-dot paint rule for the "stale" state … falls back to
+//   var(--dim)` while the prefix fence stayed green. __css_check itself is
+//   UNCHANGED and still never reads data-state — that E2 boundary declared above
+//   stands; the closure lives in the app.js/app.css-paired test, not here.
 //
 // Zero dependencies. Run: node __css_check.mjs
 

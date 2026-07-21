@@ -4733,6 +4733,29 @@ test("liveness chip: app.css carries a paint rule for EVERY chip state", () => {
   assert.match(dead.slice(0, 400), /--danger/);
 });
 
+test("liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)", () => {
+  // D41/D66 — closes the KNOWN GRANULARITY LIMIT the sibling fence above declared.
+  // That fence proves SELECTOR-PREFIX presence: deleting ONLY app.css:3470
+  // (`.live-chip[data-state="stale"] .live-dot { background: … }`) leaves the
+  // same-prefix `.live-chip-label` rule on :3471, so the prefix survives and every
+  // gate stays green while the state silently loses its dot colour — the one
+  // property that carries the severity signal. This probe reads PER DECLARATION:
+  // it isolates each state's own `.live-dot {…}` block and asserts the background
+  // survives INSIDE it, so a background-only deletion reds too, not just a
+  // whole-rule deletion. Not a prefix substring one level down.
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  for (const s of hooks.liveDotStates) {
+    // Trailing ` .live-dot {` excludes the `.live-dot.is-ping::after` ping decoy;
+    // first indexOf picks the authored rule over the @media duplicate that follows.
+    const start = css.indexOf(`.live-chip[data-state="${s}"] .live-dot {`);
+    assert.notEqual(start, -1,
+      `no .live-dot paint rule for the "${s}" state — its dot colour falls back to var(--dim)`);
+    const block = css.slice(start, css.indexOf("}", start));
+    assert.match(block, /background\s*:/,
+      `the .live-dot rule for the "${s}" state declares no background — the dot colour is gone`);
+  }
+});
+
 // ── /activate device-login render states (fake-DOM swap) ────────────────────
 // bp-login-ux W3 (decision 40). The pre-click skeletons (entry/confirm/gone/
 // rate_limited) are smoke-pinned in __preview__/smoke.mjs, but the click-driven
