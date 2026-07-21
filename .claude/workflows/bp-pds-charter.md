@@ -3718,3 +3718,42 @@ byte-identical check fails unless every one is re-stamped) with the ONE wave-18 
 with the merge SHA recorded**, **11 LAST and ALONE** (disarms the cmux Stop-hook false-close). If any
 rung refused: stamp NOTHING, record the refusal in the paper, file the successor. **ZERO NEW SCRIPTS**
 and the frozen harness blob is untouched.
+
+### Wave 18 2026-07-21 — R1 built + reviewed; the climb FIRED and FAILED on source instability, grade A− (paper `pds-wave-18-2026-07-21`)
+
+**WHAT LANDED.** `pds-w18-crown-fire` (branch `pds/w18-fire`, PR #5477, `scripts/pds-w18-fire-record.md`,
++250 lines, ZERO new scripts). The re-fire was armed correctly: scratch target booted FIRST at the
+run_tag-derived home `/tmp/pds-w14.c7528814` (`up --verify` → PASS), `scratch.env` hand-asserted present
+BEFORE arming (PDS-D266 — the exact fix for wave 16's sole `env:scratch-target-not-booted` blocker),
+reuse-dead reconfirmed live, floor left UNSET so 2200 stands, arm shell scrubbed, launcher armed
+`--prewarm-now --max-draws 2160 --interval 10` → pid 83700 (detached, ppid 1), `child.sh:7` HARNESS
+proven = the fire worktree's own frozen `pds-pull-proof.sh` (blob `e219e97c`, UNTOUCHED). Reviewer
+independently re-derived EVERY load-bearing claim; the arm-time slice gate was rc=0.
+
+**THE OUTCOME — FIRE-and-FAIL (D262 outcome a, FAIL verdict).** Headroom recovered: DRAW 70 (15:30:02Z)
+read `mem_mib=2296 ≥ 2200` → FIRE. The one-shot harness ran the full ladder and returned **RESULT: FAIL
+(7 PASS · 2 ABORT · 2 FAIL, rc=1)**; the child exited (`EXIT: 1`, pid gone — so the arm gate's `ps -p`
+no longer matches, which is the one-shot launcher working as designed, not a regression). ROOT CAUSE is
+**HARNESS/ENV, NOT ENGINE-FAIL**: guerrilla was in an active deploy STORM through the ~90-second climb,
+redeploying at least twice under the run (arm-time `e16869ac` → step-0a `f34052df` → step-8 `34b9b25d`).
+Every failing/aborting rung is a moving-target GUARD firing correctly, refusing a false green: (0b)
+deployed `f34052df` is NOT an ancestor of the fire worktree `6782db5d`; (3,4) full-export precondition
+(d) FAILED — `deploy.yml run 29844020764 in progress` swaps the slot mid-export, so the full bundle
+could not be acquired (SEVERABLE, no extra attempt burned); (8) source redeployed again mid-run. Every
+engine rung that COULD run passed clean: 0a, 0c, 1, 2, 5, 6, 7. The harness caught the churn and refused
+rather than emit a vacuous green — the system working. Crown stays honestly at **9/12**. Ledger honest:
+fire task `in_progress`, criteria 0–8 met, 9 open. Reviewer fix: PR #5477 body lacked its canonical
+`Task:` line (required gate red) — added, gate flipped SUCCESS. No branch-content change; final branch is
+the original `pds/w18-fire`.
+
+**WHAT THE NEXT WAVE (LEAD) TAKES.** (1) Merge #5477 as an honest record of a correctly-armed re-fire
+(required gates green; it never claimed a pass). (2) Dispatch round 2 `pds-w18-crown-collect-and-seal`
+(LEAD-only): `collect c7528814` → RESULT: FAIL → **REFUSAL PATH — stamp NOTHING**, classify HARNESS/ENV
+(source deploy-storm), file the successor, leave the crown at 9/12. Do NOT close criterion 9 (rungs 3/4
+aborted). (3) THE REAL BLOCKER the climb surfaced — two structural findings the next fire MUST design
+around: (i) the crown proof cannot certify against a **live auto-deploying guerrilla** — it needs a
+SETTLED source (no `deploy.yml` run in progress AND deployed sha stable for the whole climb); (ii) rung
+0b requires the deployed sha to be an ANCESTOR of the fire worktree, so the fire worktree must sit **on
+main AT guerrilla's currently-deployed sha with no commits ahead**, not on a feature branch cut earlier.
+Wave 18 got materially further than wave 16 (which never fired rungs 3/4 at all) and paid for that
+progress with these two findings.
