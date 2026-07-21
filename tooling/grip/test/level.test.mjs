@@ -729,3 +729,57 @@ test("deriveLevel never throws on hostile input", () => {
     assert.ok(Object.keys(LEVELS).includes(level), `${JSON.stringify(hostile)} → ${level}`);
   }
 });
+
+// ── THE PROSE FLOOR'S CRY-WOLF EDGE (added in review) ────────────────────────
+
+test("a BACKSLASH-ESCAPED paren is a literal argument, not a prose aside", () => {
+  // `find . \( -name a -o -name b \)` is an ordinary local read. The escaped
+  // group read as a parenthetical whose first word (`-name`) is not a plausible
+  // command head, so the floor demoted a good command L3 → L6.
+  //
+  // WHY THE MEASUREMENT COULD NOT SEE IT: zero occurrences in the 651-command
+  // corpus, so the before/after distribution was bit-identical with the bug
+  // present and with it fixed. That is the same blindness that hid the
+  // `sort < in.txt > out.txt` cry-wolf. A corpus distribution is a LOWER BOUND
+  // on cry-wolf; only probing the class by hand finds the rest.
+  assert.equal(deriveLevel("find . \\( -name a -o -name b \\)"), "L3");
+  assert.equal(deriveLevel("find api -type f \\( -name '*.ex' -o -name '*.exs' \\) -newer mix.exs"), "L3");
+
+  // The floor must still fire on the shapes it exists for — the fix widens
+  // nothing else. An UNESCAPED aside is still prose.
+  assert.equal(deriveLevel("cd api && (Edit: add agent_state to the base map) && mix test"), "L6");
+  assert.equal(deriveLevel("bp sites -o json | python3 (count)"), "L6");
+  // …and a REAL subshell, opening on a known head, is still walked normally.
+  assert.equal(deriveLevel("(cd __preview__ && node smoke.mjs)"), "L3");
+});
+
+test("the review's floor fix costs the corpus distribution nothing", () => {
+  // The standing bar for any floor edit: it may not move a single one of the
+  // 651 frozen commands. If a cry-wolf fix changes the distribution, it widened
+  // the floor rather than narrowing it.
+  const corpus = JSON.parse(readFileSync(new URL("../fixtures/evidence-corpus.json", import.meta.url), "utf8"));
+  const commands = [...new Set(corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim()))];
+  const dist = {};
+  for (const c of commands) dist[deriveLevel(c)] = (dist[deriveLevel(c)] || 0) + 1;
+  assert.equal(commands.length, 651);
+  assert.deepEqual(dist, { L1: 32, L2: 93, L3: 380, L6: 146 });
+});
+
+test("KNOWN L1 SHAPES: the ssh forms the corpus actually uses are never demoted", () => {
+  // The standing bar is ZERO false demotions of honest L1/L2 commands, and the
+  // floor is the thing most able to break it. Every ssh row in the frozen
+  // corpus uses `root@<host>`, and all of them must survive the walk.
+  for (const cmd of [
+    "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'journalctl -u barkpark.service -n 15'",
+    "ssh -o ConnectTimeout=15 root@178.105.92.191 'docker ps'",
+    "ssh root@157.180.90.121 \"cd /opt/barkpark && git log -1 --format='%H'\"",
+  ]) {
+    assert.equal(deriveLevel(cmd), "L1", cmd);
+  }
+  // KNOWN GAP, pre-existing and unchanged by this wave: a BARE host alias with
+  // no `user@` does not match SSH_READ and derives L6. D2 ratifies the level as
+  // `ssh <user>@<host>`, so widening it is a PROMOTION rule change — the unsafe
+  // direction — and belongs in a ruling, not in a review. Filed as
+  // tgw3-bl-ssh-bare-host-alias. Pinned here so the gap is visible, not silent.
+  assert.equal(deriveLevel("ssh guerrilla systemctl status barkpark"), "L6");
+});

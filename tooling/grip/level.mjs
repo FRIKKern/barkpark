@@ -394,7 +394,15 @@ const SLASH_JOINED_NUMBERS = /(^|\s)\d+(\/\d+)+(\s|$)/;
 // per-class precision is unbiased)`. A real subshell — `(cd __preview__ && node
 // smoke.mjs)` — opens on a known head and is left alone. A function-call paren
 // (`count(…)`) is attached to a word character and never examined.
-const PAREN_GROUP = /(^|[^$\w])\(([^()\n]{0,240})\)/g;
+//
+// A BACKSLASH-ESCAPED paren is not a group at all — it is a literal argument
+// passed to a program, and `find . \( -name a -o -name b \)` is the shape that
+// matters: `-name` is not a plausible command head, so the escaped group read
+// as prose and floored a perfectly good `find` from L3 to L6. Zero occurrences
+// in the 651-command corpus, so the distribution measurement was blind to it,
+// exactly as it was blind to the `sort < in > out` cry-wolf the builder found
+// by hand. A corpus is a lower bound on cry-wolf, never a proof of its absence.
+const PAREN_GROUP = /(^|[^$\w\\])\(([^()\n]{0,240})\)/g;
 
 function parentheticalIsProse(mask) {
   PAREN_GROUP.lastIndex = 0;
