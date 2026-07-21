@@ -29,10 +29,13 @@ defmodule Barkpark.Tasks.Queue do
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edge, QueueGate}
+  alias Barkpark.Tasks.{Edge, QueueGate, Validation}
 
   @ready_default_limit 50
-  @ready_lifecycle_statuses ~w(open blocked)
+  # Derived at compile time from the ONE claimability source of truth
+  # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
+  # literal. The raw-SQL CTE below binds this same list via `= ANY(?)`.
+  @ready_lifecycle_statuses Validation.claimable_statuses()
 
   def ready(opts \\ []) do
     opts
@@ -88,10 +91,11 @@ defmodule Barkpark.Tasks.Queue do
           WHERE candidate.type = 'task'
             AND candidate.workspace_id = ?
             AND candidate.content->>'kind' = 'task'
-            AND candidate.content->>'lifecycle_status' IN ('open', 'blocked')
+            AND candidate.content->>'lifecycle_status' = ANY(?)
             AND done.normalized_id IS NULL
           """,
-          ^workspace_uuid
+          ^workspace_uuid,
+          ^@ready_lifecycle_statuses
         ),
         select: %{id: field(u, :id)}
       )

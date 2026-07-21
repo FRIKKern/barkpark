@@ -20,10 +20,14 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, WorkDigest}
+  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
-  @ready_lifecycle_statuses ~w(open blocked)
+  # Derived at compile time from the ONE claimability source of truth
+  # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
+  # literal. Keeps `check_ready_for_targeted_claim/1` in lockstep with the
+  # ready-queue allowlist in Tasks.Queue.
+  @ready_lifecycle_statuses Validation.claimable_statuses()
 
   def claim(worker_id, opts \\ []) when is_binary(worker_id) do
     result =

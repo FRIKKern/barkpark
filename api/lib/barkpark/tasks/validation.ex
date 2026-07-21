@@ -18,9 +18,17 @@ defmodule Barkpark.Tasks.Validation do
   # then the two thought states appended (considering researching). Order is
   # load-bearing for readers that render a ladder; the append keeps every
   # existing index stable. "OPEN MEANS READY" is held by construction — only
-  # open|blocked is claimable (queue.ex/claim.ex allowlists), and the two new
-  # states are simply not in that allowlist.
+  # open|blocked is claimable (`claimable_statuses/0` below, the ONE source the
+  # queue.ex/claim.ex allowlists derive from), and the two new states are
+  # simply not in that allowlist.
   @lifecycle_statuses ~w(open in_progress blocked done cancelled considering researching)
+
+  # The claimability allowlist — which lifecycle states `ready` lists and
+  # `claim`/`claim_by_id` will take. `blocked` is claim-equivalent to `open`
+  # by DECISION (spd-b24 intended-soft ruling): blocking is advisory metadata,
+  # not a hard primitive — the readiness gates (blocks-edges +
+  # content.dependencies) are what actually hold work back.
+  @claimable_statuses ~w(open blocked)
   @kinds ~w(task)
 
   alias Barkpark.Tasks.{ExecutionPolicy, QueueGate}
@@ -28,6 +36,11 @@ defmodule Barkpark.Tasks.Validation do
   @doc "The seven lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   def lifecycle_statuses, do: @lifecycle_statuses
+
+  # @canonical capability:task-claimable-statuses aka:ready,allowlist,open-blocked,claim-equivalent doc:docs/setup/TASK-SYSTEM.md
+  @doc "The lifecycle-status values a task may be claimed from (ready allowlist)."
+  @spec claimable_statuses() :: [String.t()]
+  def claimable_statuses, do: @claimable_statuses
 
   @doc "The `content.kind` discriminator values (only `task`)."
   @spec kinds() :: [String.t()]
