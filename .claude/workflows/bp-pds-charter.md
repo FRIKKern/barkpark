@@ -3880,3 +3880,42 @@ stale wave-19 run dir per D269, same-breath 0b per D275, arm BY PATH `--prewarm-
 --interval 10` detached, NO passenger per D278, prove `run_dir/meta` records `mem_floor_mib=897`, return —
 no polling); then, after the climb completes, the LEAD runs `pds-w20-crown-collect-and-seal` (D261 bundle
 cross-check, D278 self-confirm rung-3 delta ≤ 98.19, re-stamp 0–9 to one run_id, 10 on merge, 11 last-and-alone).
+
+### Wave 2026-07-21 (21) — READ THE ABORT, THEN FIRE — last attempt FIRED and PASSED 11/11, CROWN SEALED 12/12, grade A− (paper `pds-wave-21-2026-07-21`)
+
+**THE EPIC PAYOFF LANDED.** One round-1 slice, `pds-w21-diagnose-and-fire` (opus). **PART A — app-path
+isolation (D280)** proved verdict **(a) DIRTY-SCRATCH** to ground truth: a guaranteed-fresh scratch under
+`PDS_RUN_ID=pdsw21-iso` took the EXACT rung-1 import that 500'd with **25P02** against the dirty wave-18
+target and imported it **CLEAN** (exit 0, `content_edges=5109 / total_rows=15915 / 34 blobs 0 failed`),
+ZERO crown attempts spent — confirming **PDS-D279** (the 25P02 masked a 23505 on
+`content_edges_from_to_kind_uniq` from a pre-existing wave-18 row; `merge_upsert`'s ON CONFLICT arbiter is
+PK-only; `merge_import` is **not** broken). **PART B — THE FIRE — armed and the whole crown ladder PASSED.**
+
+**The last crown attempt fired clean and PASSED — RESULT: PASS, 11 PASS · 0 ABORT · 0 FAIL** (run_id
+`pdsw21-crown`, run_tag `5abf6afd`, armed 2026-07-21T21:29:57Z, done 21:35:29Z, EXIT 0, 1 draw). Every rung
+green (0a/0b/0c/1/2/3/4/5/6/7/8) at floor **897** MiB, **attempt 6 of 7**. **RUNG 1 — the wave-20 killer —
+is GREEN**: export --profile dev --dataset production --with-blobs then import --yes --merge --with-blobs,
+exit 0 in 9s, `content_edges=5117 documents=3612 total_rows=15933`, PDS-D9 adoption fired. Fired at
+**d633786** (= origin/main = guerrilla live HEAD), NOT the brief's pin `f76367999` — the pin went STALE
+mid-wave (origin/main + guerrilla advanced with #5535–#5538); rung 0b PASS confirms d633786, and the
+launcher-897 + `merge_import` are byte-identical `f76367999..d633786`.
+
+**CROWN SEALED 12/12.** The LEAD merged fire-record PR **#5547** (`scripts/pds-w21-fire-record.md`, merge
+`59818468e`) and stamped `pds-w1-crown-proof` criteria **0–11** all to run_id `5abf6afd` — criterion 10
+[MERGE-GATED] on the real merge, criterion 11 last-and-alone after the single-run-id fence check.
+`pds-w1-crown-proof` is **lifecycle done, 12/12**. The 15-wave crown proof is COMPLETE.
+
+**Review verdict — grade A−.** The wave achieved the epic's terminal goal: the last attempt fired clean, the
+full ladder held, rung 1 (the wave-20 blocker) is green, and the crown sealed 12/12 on an honest merge-gate.
+Two deductions keep it off A: (1) a **duplicate-builder race** — two instances ran the slice under the SAME
+worker id; one stood down (correctly, to avoid a double-arm = two full exports = OOM the live content API,
+PDS-D31), the other armed and drove the PASS. Exactly one clean arm happened, but by coordination luck, not
+design. (2) The arming instance ended without committing the fire-record or stamping — the crown-proof PASS
+was briefly **stranded in ephemeral `/tmp`**; the LEAD (via #5547) and the reviewer independently recovered
+it. Ledger corrected in review (now-line + criterion 2 re-stamped to ARM+PASS; the LEAD stamped 3/4/5).
+
+**Next wave takes:** the crown is CLOSED — no further fire (attempt 7 is the only one left and is not needed).
+Remaining housekeeping only: prune the orphaned fire worktree at `/Volumes/SATECHI/github/barkpark-w21-fire`
+(d633786 detached, not in `git worktree list`); close the now-satisfied slice `pds-w21-diagnose-and-fire`
+(its criterion 6 merge-gate is met by #5547's merge — LEAD closes) and the `pds-w21-crown-collect-and-seal`
+task the seal already fulfilled. The next epic direction is a fresh wish, not another crown fire.
