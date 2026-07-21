@@ -59,6 +59,220 @@ defmodule BarkparkWeb.MutateControllerTest do
     })
   end
 
+  # The ledger's back door (cch-w1-ledger-close-guard, epic decision D22).
+  #
+  # OBSERVED LIVE before the guard: a `type:task` row went `open` → `done`
+  # through one `/v1/data/mutate` patch carrying `set:{"lifecycle_status":
+  # "done"}` — HTTP 200, `claim=None closed_by=None`. That is the mechanism
+  # behind the 11-tasks-fake-done defect. Both patch clauses in
+  # `Content.Mutations` were exploitable, and the compound clause is reachable
+  # through its OWN `set` merge (NOT through `unset`, which 422s because the
+  # schema marks the field required) — so it needs its own test, not a variant
+  # of the plain-set one.
+  describe "ledger close-bypass guard" do
+    setup do
+      for schema_def <- Barkpark.Tasks.schema_definitions("test") do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, "test")
+      end
+
+      :ok
+    end
+
+    test "PLAIN-SET clause: a blind terminal lifecycle_status patch is refused",
+         %{conn: conn} do
+      create_task(conn, "guard-plain")
+
+      resp =
+        mutate(conn, [%{"patch" => task_patch("guard-plain", %{"lifecycle_status" => "done"})}])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      # The message IS the retry instruction — it names the sanctioned path.
+      assert [message] = body["error"]["details"]["lifecycle_status"]
+      assert message =~ "bp task close"
+      assert message =~ "ifRevisionID"
+
+      # The whole batch rolled back: the row is still open.
+      assert task_content("guard-plain")["lifecycle_status"] == "open"
+    end
+
+    test "COMPOUND-OP clause: the same close through setIfMissing + unset + set is refused, " <>
+           "and the forged attribution never lands",
+         %{conn: conn} do
+      create_task(conn, "guard-compound")
+
+      # `setIfMissing` routes this patch to the COMPOUND clause (it matches on
+      # the presence of any compound key), so it never reaches the plain-set
+      # clause — guarding only that one leaves this vector fully open.
+      # `setIfMissing` is also the attribution forgery: it writes a `closed_by`
+      # the closer never earned.
+      patch =
+        "guard-compound"
+        |> task_patch(%{"lifecycle_status" => "done"})
+        |> Map.put("setIfMissing", %{"closed_by" => "compound-clause-probe"})
+        |> Map.put("unset", ["priority"])
+
+      resp = mutate(conn, [%{"patch" => patch}])
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+
+      content = task_content("guard-compound")
+      assert content["lifecycle_status"] == "open"
+      # Rolled back atomically — the forged closer identity is NOT persisted.
+      refute Map.has_key?(content, "closed_by")
+      # …nor did the piggybacked unset take effect.
+      assert content["priority"] == 1
+    end
+
+    test "a revision precondition is the escape: the same close with ifRevisionID succeeds",
+         %{conn: conn} do
+      create_task(conn, "guard-cas")
+      {:ok, doc} = Content.get_document("drafts.guard-cas", "task", "test")
+
+      patch =
+        "guard-cas"
+        |> task_patch(%{"lifecycle_status" => "done"})
+        |> Map.put("ifRevisionID", doc.rev)
+
+      assert mutate(conn, [%{"patch" => patch}]).status == 200
+      assert task_content("guard-cas")["lifecycle_status"] == "done"
+    end
+
+    test "the guard fires only on a CHANGE into a terminal state: patching an unrelated field " <>
+           "on an already-closed task still works",
+         %{conn: conn} do
+      create_task(conn, "guard-noop", %{"lifecycle_status" => "done"})
+
+      # `lifecycle_status` is present and terminal in BOTH the existing row and
+      # the merge result, but unchanged — bookkeeping on closed rows (retros,
+      # digests, compaction) must not be collateral damage.
+      resp =
+        mutate(conn, [%{"patch" => task_patch("guard-noop", %{"close_reason" => "shipped"})}])
+
+      assert resp.status == 200
+      assert task_content("guard-noop")["close_reason"] == "shipped"
+      assert task_content("guard-noop")["lifecycle_status"] == "done"
+    end
+
+    test "replication is not collateral damage: the same mutation with source: :sync applies",
+         %{conn: conn} do
+      create_task(conn, "guard-sync")
+
+      # `Sync.Applier` passes `source: :sync` (applier.ex:177) where
+      # `MutateController` passes `source: :api` (mutate_controller.ex:14). A
+      # replica must be able to mirror an upstream close it did not itself
+      # perform, so the guard keys on that already-threaded opt.
+      assert {:ok, {_tx, [%{operation: "update"}]}} =
+               Content.apply_mutations(
+                 [%{"patch" => task_patch("guard-sync", %{"lifecycle_status" => "done"})}],
+                 "test",
+                 source: :sync
+               )
+
+      assert task_content("guard-sync")["lifecycle_status"] == "done"
+
+      # Control: the SAME mutation shape from the API source is refused, so the
+      # assertion above cannot pass for the wrong reason (e.g. a guard that
+      # never fires at all). It runs against a FRESH row — replaying it against
+      # `guard-sync` would be a no-change write, which the guard deliberately
+      # permits, and would have passed vacuously.
+      create_task(conn, "guard-sync-control")
+
+      assert {:error, {:invalid_task_content, _}} =
+               Content.apply_mutations(
+                 [
+                   %{"patch" => task_patch("guard-sync-control", %{"lifecycle_status" => "done"})}
+                 ],
+                 "test",
+                 source: :api
+               )
+    end
+
+    # THE DRIFT TRIPWIRE. The guard's terminal set is DUPLICATED from
+    # `@closed_lifecycle_statuses` in `api/lib/barkpark/tasks/close.ex` (that
+    # module owns the definition and exposes no public accessor, and widening
+    # this slice's fence to add one was out of scope). A copied constant with
+    # nothing pinning it is a door that silently re-opens: add a terminal status
+    # to close.ex, and the guard misses it while every test above stays green.
+    #
+    # So this reads close.ex's OWN list out of its source and proves the guard
+    # refuses a blind patch into EVERY status in it. It is behavioural, not a
+    # string compare — it fails if the guard stops covering a status for any
+    # reason, not only if the literal drifts.
+    test "every terminal status close.ex owns is fenced — the copied list cannot drift silently",
+         %{conn: conn} do
+      source = File.read!(Path.join(__DIR__, "../../../lib/barkpark/tasks/close.ex"))
+
+      [_, inner] =
+        Regex.run(~r/@closed_lifecycle_statuses\s+~w\(([^)]*)\)/, source) ||
+          flunk(
+            "could not find @closed_lifecycle_statuses in close.ex — did it move or change shape?"
+          )
+
+      statuses = inner |> String.split(~r/\s+/, trim: true)
+      assert length(statuses) >= 3, "expected close.ex to own at least done/cancelled/blocked"
+
+      for status <- statuses do
+        id = "guard-drift-#{status}"
+        create_task(conn, id)
+
+        resp = mutate(conn, [%{"patch" => task_patch(id, %{"lifecycle_status" => status})}])
+
+        assert resp.status == 422,
+               "close.ex treats #{inspect(status)} as terminal, but /v1/data/mutate accepted a " <>
+                 "blind patch into it (HTTP #{resp.status}). Add it to " <>
+                 "@terminal_lifecycle_statuses in Barkpark.Content.Mutations."
+
+        assert task_content(id)["lifecycle_status"] == "open"
+      end
+    end
+
+    defp create_task(conn, id, content_extra \\ %{}) do
+      content =
+        Map.merge(
+          %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+          content_extra
+        )
+
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => id,
+              "_type" => "task",
+              "title" => "Guard fixture #{id}",
+              "content" => content
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      resp
+    end
+
+    defp task_patch(id, set_fields),
+      do: %{"id" => id, "type" => "task", "set" => set_fields}
+
+    defp task_content(id) do
+      {:ok, doc} = Content.get_document("drafts.#{id}", "task", "test")
+      doc.content
+    end
+
+    defp mutate(conn, mutations) do
+      conn
+      |> authed()
+      |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+    end
+  end
+
   test "back-compat: validation error returns the legacy v1 envelope when Accept-Version is absent",
        %{conn: conn} do
     resp = conn |> authed() |> post("/v1/data/mutate/test", invalid_payload())
