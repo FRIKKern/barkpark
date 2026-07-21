@@ -1413,3 +1413,83 @@ SHA (D47/D63).
    distance is now **71** commits and grows daily — compute it fresh, never quote a fixed number.
 
 Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
+
+## Wave log — wave 13
+
+### Wave 2026-07-21 — Wave 13 (THE ROUND TRIP RAN), Review. Grade A−.
+
+**The wish is PAID, and the payment survived being attacked.** D127(a) — round-trip fidelity, the
+epic's oldest unmeasured condition — is now measured on the deployed build and returns the reading
+column **bit-identical at 27 of 27 cells**, re-confirmed by Review in three further full runs against
+`bc64d869a3a82beb1b39824196f60236b2082dbc` / slot blue, bracketed PRE and POST. The wave's real
+achievement is not the green: it is that the green is now **defensible**, because the instrument
+asserts its own preconditions and the prediction that governs it was frozen before the run.
+
+**What landed, per slice (final branch = the `-r` carrier).**
+- **B — `spd-w13-instrument-bucket-precondition`**
+  (`…the-instrument-asserts-its-own-bucket-pr-1-r`, **carries the charter**). D171/D185's bucket
+  precondition, which did not exist in code, now checks **72 readings per run** (54 sweep + 18
+  round-trip legs) where the count was previously 0 — in the RAW `bandNameFor()` form D185 requires,
+  never a held-bucket mirror that would agree by construction. Reports, never `die()`s. D183's
+  dismiss half-truth is gone (per-width table + rollup replace the `widths[0]` scalar); D186's
+  `overlayAsserted` is narrowed to `standard AND panel <= 860` rather than silenced, warnings 6 → 3
+  with the survivors pre-existing and already filed.
+- **C — `spd-w13-prediction-registered`** (`…register-the-terminal-run-s-prediction-a-2-r`). The
+  repo's first committed prediction file, frozen, split from a fixable checker that RECOMPUTES every
+  verdict and never trusts a row's own — with four exit states demonstrated, `SELF_INCONSISTENT`
+  among them.
+- **D — `spd-w13-d175-compound-repro`** (`…commit-the-d175-compound-state-repro-the-3-r`). D187's
+  compound-state scrim made permanently re-runnable through real affordances only. Re-run live by
+  Review: 9/9 PASS, 620px geometry exact, `--simulate-fixed-build` goes RED on exactly the three
+  scrim-dependent checks.
+- **A — `scrim-threshold-forced-container-control`** was NOT rebuilt: the rescue had already been
+  performed by its claim holder, PR #5098 is open, rebases clean and its gate passes. It needs a
+  merge decision, not a builder.
+
+**Review fixed three things in place, two of them defects neither builder could have seen alone.**
+1. **The bucket precondition did not reach the round-trip CELLS** (B). A width whose stamp disagreed
+   with the raw band warned, but its three face cells still counted toward `cells`/`identical_cells`
+   — so `returns_bit_identical`, the headline this wave exists to establish and the value round 2's
+   gate asserts, could be computed partly over a comparison of two different TIERS. The builder found
+   this and filed it rather than fixing it; it sits on the wish's own metric, so Review closed it.
+   Withdrawn cells now report `identical: null`, are counted visibly, and full coverage is required
+   before the claim is made. **Proven by mutation:** band edge 640 → 700 gives 64/72 preconditions,
+   3 cells withdrawn at 640, and `returns_bit_identical` **false** on a 24-of-24-identical sweep that
+   would previously have read 27/27 **true**.
+2. **A genuine CROSS-SLICE defect** (C). C's dismiss-grammar check read the run-level
+   `rt.dismiss_control` scalar and skipped itself when absent — and B **deletes that scalar**, by
+   D183, by name. Merged as-is, two individually-correct slices would have produced a guard that
+   CANNOT FAIL on the exact affordance condition D161(ii) turns on, silently and green. The checker
+   now reads the per-width table and treats a missing grammar as a MISS; the frozen prediction is
+   untouched, which is precisely the split D189 exists to permit. Proven by four mutations.
+3. **A cold-reader gap** (D): L4's failure could not distinguish "the desk removed the picker" from
+   "today's unpinned first task lacks one". It now names the task and says to pin `--task`.
+
+**THE FINDING THIS WAVE PRODUCED BY ACCIDENT, AND IT MATTERS FOR ROUND 2.** Running C's checker
+against a real round-trip artefact — which no builder ever had — gives **exit 1, 24 misses, all at
+viewport 1280, all three faces**, with **0 self-inconsistencies and 27/27 cells returned unchanged**.
+`content_px` at 1280 reads **640**, where the 2026-07-20 table recorded **596**: exactly +44px, the
+collapsed-strip width, deterministic across three independent runs. This is **not** a round-trip
+failure — the round trip is clean — it is the desk having genuinely moved at one width since
+`65541e2d`, caught by a `prior-observation` basis doing exactly the job D189 designed it to do. The
+prediction stays FROZEN: a prediction edited to match the run it governs is worthless. **Round 2 must
+therefore NOT gate green on `check-prediction` exiting 0.** Gate on
+`round_trip.ran === true && returns_bit_identical === true` (D184), and REPORT the 1280 misses as the
+registered, correctly-labelled staleness they are.
+
+**Ledger audited.** All three built tasks claimed, stamped as they worked, left `in_progress` with
+merge-gated criteria open for the lead. A's task is honestly `in_progress` under its rescue holder.
+
+**What the lead must know before merging.**
+1. **B's `-r` branch carries the charter** (D182–D189 + this log). It was stranded on **local main**
+   — the **7th** recurrence of the D135/D68 disease. If B is dropped, the decisions C and D cite
+   resolve to nothing on `origin/main`.
+2. **Merge B BEFORE C.** They are file-disjoint and will not conflict, but C's fix is what keeps B's
+   scalar deletion from silently voiding a guard. Either order is safe on disk; B-then-C is the order
+   the evidence was gathered in.
+3. **A (#5098) needs a merge decision, not a builder.** Its remaining reds are content-impossible for
+   a two-`.mjs` diff.
+4. **Round 2 is `inspector-shape-bracketed-deployed-run`** — deferred BY DESIGN under the
+   sequenced-rounds law, not a failure of this wave.
+
+Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
