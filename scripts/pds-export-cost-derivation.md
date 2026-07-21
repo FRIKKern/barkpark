@@ -384,6 +384,22 @@ guess when it cannot measure honestly:
   before the sampler's first ~1 s tick (a 404, a 500, a reset under memory pressure — exactly the
   regime a crown run fires in) emitted `export_samples=0 export_delta_mib=-847.18` and **exited
   0**. A negative demand is not a measurement; it is now a refusal that names the cause.
+- **either leg of the IDLE CONTROL window logged ZERO samples** — **PDS-D220a, applied to the
+  control**. The guard above was chartered for the acquisition leg; review found the identical
+  hole on the control leg, where it matters more. A dropped sampler `ssh` session left the RSS
+  log empty, and the run **printed `idle drift … = -1190.45 MiB [BEAM RSS]` as a reported
+  figure, carried on past the control, and fired a real 67 MB acquisition** before stopping.
+  This instrument exists to put a control *beside* the demand (**PDS-D104**, **PDS-D216**); a
+  control indistinguishable from a failed sampler is the exact failure it was built to prevent.
+  The `MemAvailable` leg refuses on the same rule for a sharper reason: an unsampled leg yields
+  min 0 / max 0 / **range 0.00 MiB**, which reads to a threshold check as *the quietest possible
+  box* and would **pass PDS-D221's 1048.16 MiB contamination abort vacuously**. The sample count
+  is therefore *enforced* here, not merely emitted for a downstream reader to remember to check.
+  Both refusals fire **before** the acquisition, so — unlike the export-leg guard — they also
+  spend no export. Proven by mutation against deployed `bc64d869a`: emptying the RSS log alone
+  gives exit 2 naming the −1196.71 MiB it declined to report; emptying the `MemAvailable` log
+  alone gives exit 2 naming the vacuous range; an unmutated run of the same script exits 0 with
+  both legs sampled, so neither guard false-positives.
 
 That `MemAvailable` gate is why wave 11 has no full-regime figure yet: `MemAvailable` read
 1312 MiB and 1490 MiB during this slice, against a 2200 MiB floor. The window was shut, and

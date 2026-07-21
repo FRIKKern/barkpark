@@ -407,6 +407,34 @@ IDLE_MEMAVAIL_RANGE_KB=$((IDLE_MEMAVAIL_MAX_KB - IDLE_MEMAVAIL_MIN_KB))
 IDLE_MEMAVAIL_RANGE_MIB="$(mib "$IDLE_MEMAVAIL_RANGE_KB")"
 
 info "peak            ${IDLE_PEAK_KB} kB (MAX over ${IDLE_SAMPLES} readings across ${BEAM_N} slot(s), ${IDLE_WALL} s wall)"
+
+# ── PDS-D220a, APPLIED TO THE CONTROL WINDOW TOO ────────────────────────────
+#
+# The export window's zero-sample guard below was the defect this slice was
+# chartered to fix. The IDLE window had the identical hole and the identical
+# consequence: if its ssh sampler dies (dropped connection, remote loop killed)
+# peak_kb_of() returns 0, the delta reads roughly −1142 MiB, and the run
+# proceeds to the acquisition and EXITS 0 carrying a nonsense control.
+#
+# That is worse here than on the export leg, not better. This instrument exists
+# to put a CONTROL beside the demand figure (PDS-D104, PDS-D216); a control the
+# reader cannot distinguish from a failed sampler is the thing the instrument
+# was built to prevent. Refuse before any figure is printed.
+if [ "$IDLE_SAMPLES" -le 0 ]; then
+  refuse "the IDLE CONTROL window logged ZERO samples over its ${IDLE_WALL} s, so there is no peak to subtract a baseline from. An empty log peaks at 0 kB, so the drift would have been reported as 0 − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. A NEGATIVE control is not a control (PDS-D220a — the same defect as the acquisition window's, on the leg that gives the demand figure its meaning). The RSS sampler almost certainly lost its ssh session; re-run."
+fi
+
+# The MemAvailable leg refuses on the same rule, for a sharper reason. Its
+# range is what PDS-D221's 1048.16 MiB contamination-abort threshold is stated
+# on, and a leg that logged nothing yields min 0 / max 0 / range 0.00 MiB —
+# which reads to a threshold check as the QUIETEST POSSIBLE BOX and passes.
+# A vacuous zero must never be able to authorise a measurement, so the sample
+# count is enforced here rather than merely emitted for a downstream reader to
+# remember to check.
+if [ "$IDLE_MEMAVAIL_SAMPLES" -le 0 ]; then
+  refuse "the idle window's MemAvailable leg logged ZERO samples, so its range is vacuously 0 kB = 0.00 MiB. PDS-D221 states its contamination-abort threshold (1048.16 MiB) on THIS range, and an unsampled leg would clear that threshold as though the box were perfectly quiet (PDS-D220a/PDS-D220b). A range that was never measured must not authorise a measurement; re-run."
+fi
+
 info "idle drift      ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB   [BEAM RSS]"
 info "MemAvailable    min ${IDLE_MEMAVAIL_MIN_KB} kB · max ${IDLE_MEMAVAIL_MAX_KB} kB over ${IDLE_MEMAVAIL_SAMPLES} readings"
 info "                range ${IDLE_MEMAVAIL_MAX_KB} − ${IDLE_MEMAVAIL_MIN_KB} = ${IDLE_MEMAVAIL_RANGE_KB} kB = ${IDLE_MEMAVAIL_RANGE_MIB} MiB   [WHOLE BOX]"
