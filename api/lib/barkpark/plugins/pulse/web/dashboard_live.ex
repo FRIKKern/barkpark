@@ -25,17 +25,31 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      for name <- channel_names(), do: BarkparkWeb.Endpoint.subscribe("pulse:" <> name)
-      Process.send_after(self(), :refresh, @refresh_ms)
-      Process.send_after(self(), :vitals, @vitals_ms)
-    end
+    # The disconnected (dead) render is discarded by the client the instant the
+    # LiveView socket connects, so running the three DB projections there is
+    # pure waste — 3 discarded queries per open (2× per page load). Gate the
+    # loaders behind `connected?/1` and paint a loading skeleton on the dead
+    # render; the real data arrives on connect. (#2402 connected?-mount scar.)
+    socket =
+      if connected?(socket) do
+        for name <- channel_names(), do: BarkparkWeb.Endpoint.subscribe("pulse:" <> name)
+        Process.send_after(self(), :refresh, @refresh_ms)
+        Process.send_after(self(), :vitals, @vitals_ms)
 
-    {:ok,
-     socket
-     |> assign(:rows, load_rows())
-     |> assign(:vitals, load_vitals())
-     |> assign(:storage, safe_storage())}
+        socket
+        |> assign(:loading, false)
+        |> assign(:rows, load_rows())
+        |> assign(:vitals, load_vitals())
+        |> assign(:storage, safe_storage())
+      else
+        socket
+        |> assign(:loading, true)
+        |> assign(:rows, [])
+        |> assign(:vitals, placeholder_vitals())
+        |> assign(:storage, %{events_bytes: 0, counters_bytes: 0, event_rows: 0})
+      end
+
+    {:ok, socket}
   end
 
   # a strike broadcast on any channel topic — bump that channel's total live
@@ -71,6 +85,22 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
   end
 
   defp channel_names, do: Pulse.channels() |> Map.keys() |> Enum.sort()
+
+  # Zeroed vitals for the disconnected render. The cost section is hidden while
+  # loading, so these are never painted — they only keep the assign shape stable
+  # so a stray template reference can't KeyError.
+  defp placeholder_vitals do
+    %{
+      cpu_util: 0.0,
+      mem_mb: 0.0,
+      run_queue: 0,
+      cursor_per_s: 0.0,
+      strikes_per_min: 0.0,
+      online: 0,
+      fanout_per_s: 0.0,
+      cost_so_far: 0.0
+    }
+  end
 
   defp load_vitals do
     snap = Metrics.snapshot()
@@ -148,7 +178,12 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
         </small>
       </p>
 
-      <section data-role="pulse-cost"
+      <div :if={@loading} data-role="pulse-loading" data-test-id="pulse-loading"
+           style="border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0; opacity: 0.6;">
+        <p><em>Loading live counters…</em></p>
+      </div>
+
+      <section :if={not @loading} data-role="pulse-cost"
                style="border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
         <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
           <strong>what the storm costs right now</strong>
@@ -180,7 +215,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
         </p>
       </section>
 
-      <div :if={@rows == []} data-role="pulse-empty">
+      <div :if={not @loading and @rows == []} data-role="pulse-empty">
         <p><em>No Pulse channels configured on this instance.</em></p>
       </div>
 
