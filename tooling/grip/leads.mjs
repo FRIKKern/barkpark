@@ -201,9 +201,21 @@ export function selectLeads(folded, query, { census = null } = {}) {
     || a.rerun.localeCompare(b.rerun)
   ));
 
+  // A PARTIALLY-ROTTEN STORE MUST NOT RENDER AS A CLEAN SMALLER ONE. `foldLedger`
+  // already reports the run files and rows it could not use in `unreadable[]`,
+  // and the fold CLI exits 1 on it — but a filter that reads only `entries[]`
+  // inherits the exact defect the fold's own header warns about, one layer up:
+  // a store with half its rows dropped produces a confident "HONEST EMPTY, N
+  // subjects indexed" that is neither honest nor an empty. It is carried here
+  // and stated in BOTH render paths, because the empty state is precisely where
+  // a hidden read failure is indistinguishable from a real absence (D6).
+  const unreadable = Array.isArray(folded?.unreadable) ? folded.unreadable : [];
+
   return {
     query: String(query ?? "").trim(),
     rows,
+    unreadable: unreadable.length,
+    unreadable_detail: unreadable.map((u) => String(u?.message ?? u?.reason ?? "(unnamed)")),
     matched_subjects: matchedKeys.size,
     indexed_subjects: indexed.length,
     indexed_recipes: indexed.reduce((n, e) => n + (Array.isArray(e.recipes) ? e.recipes.length : 0), 0),
@@ -235,9 +247,25 @@ export function renderLeads(result) {
   o(`grip leads — recipes matching ${JSON.stringify(result.query)} (case-insensitive, over subject and rerun)`);
   o();
 
+  // Stated FIRST, above both the hit list and the empty, because it changes what
+  // every number below it means: these rows were never filtered out, they were
+  // never read.
+  if (result.unreadable > 0) {
+    o(`  ⚠ THE STORE IS PARTIALLY UNREADABLE — ${result.unreadable} run file(s)/row(s) could not be read, so the`);
+    o("    counts below describe the readable remainder ONLY. An empty here may be a read failure,");
+    o("    not an absence. Re-derive with: node tooling/grip/ledger.mjs fold (it exits 1 on this).");
+    for (const detail of result.unreadable_detail ?? []) o(`      · ${detail}`);
+    o();
+  }
+
   if (result.rows.length === 0) {
     o(`  HONEST EMPTY — no recipe matches. ${result.indexed_subjects} subjects (${result.indexed_recipes} recipes) are indexed,`);
-    o("  and none of their paths or commands contains that substring. This is an answer, not a blank.");
+    o(
+      result.unreadable > 0
+        ? "  and none of their paths or commands contains that substring — but see the warning above:"
+          + "\n  this empty is NOT clean, because part of the store was never read."
+        : "  and none of their paths or commands contains that substring. This is an answer, not a blank.",
+    );
     o();
     o("  Three misses here are STRUCTURAL — a bigger corpus does not close them:");
     for (const miss of STRUCTURAL_MISSES) o(`    · ${miss}`);

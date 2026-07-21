@@ -441,3 +441,47 @@ test("a bad --census path is a named refusal, never a silently verdict-less rend
   assert.equal(res.status, 2);
   assert.match(res.stdout, /is not a readable census --json report/);
 });
+
+// ── 9. A PARTIALLY-UNREADABLE STORE IS NOT A SMALLER CLEAN ONE ───────────────
+//
+// `foldLedger` reports every run file and row it could not use in
+// `unreadable[]`, and the fold CLI exits 1 on it. A filter that reads only
+// `entries[]` inherits the exact defect the fold's own header warns about, one
+// layer up: rows that were never READ render as rows that do not EXIST. The
+// empty state is where that is most dangerous, because a hidden read failure is
+// then indistinguishable from a real absence — D6's rule at the read layer.
+
+test("an unreadable run file is SURFACED, not silently dropped, on hits AND on the empty", () => {
+  const dir = tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]);
+  writeFileSync(join(dir, "grip-20260721T000001Z-rotten.json"), "{ this is not json");
+
+  const folded = foldLedger(dir);
+  assert.ok(folded.unreadable.length > 0, "precondition: the fold sees the rotten file");
+
+  // On a HIT.
+  const hit = selectLeads(folded, "api/lib");
+  assert.equal(hit.rows.length, 1);
+  assert.equal(hit.unreadable, folded.unreadable.length);
+  const hitRender = renderLeads(hit);
+  assert.match(hitRender, /PARTIALLY UNREADABLE/, "a hit list over a rotten store must say so");
+  assert.match(hitRender, /rotten\.json/, "and must name the file, so it can be re-derived");
+
+  // On the EMPTY — the case that would otherwise read as a confident absence.
+  const empty = selectLeads(folded, "nothing-matches-this-needle");
+  assert.equal(empty.rows.length, 0);
+  const emptyRender = renderLeads(empty);
+  assert.match(emptyRender, /PARTIALLY UNREADABLE/);
+  assert.ok(
+    !emptyRender.includes("This is an answer, not a blank."),
+    "an empty over a partially-unread store may NOT claim to be a clean answer",
+  );
+  assert.match(emptyRender, /this empty is NOT clean/);
+});
+
+test("CONTROL: a clean store says nothing about unreadability and keeps the honest-empty wording", () => {
+  const clean = selectLeads(foldLedger(tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")])), "zzz-no-match");
+  assert.equal(clean.unreadable, 0);
+  const rendered = renderLeads(clean);
+  assert.ok(!rendered.includes("PARTIALLY UNREADABLE"), "a clean store must not cry wolf");
+  assert.match(rendered, /This is an answer, not a blank\./);
+});
