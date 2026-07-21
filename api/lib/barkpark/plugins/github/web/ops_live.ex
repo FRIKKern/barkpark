@@ -34,8 +34,26 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Process.send_after(self(), :refresh, @refresh_ms)
-    {:ok, assign(socket, :health, Health.snapshot())}
+    connected = connected?(socket)
+
+    if connected, do: Process.send_after(self(), :refresh, @refresh_ms)
+
+    # NAMED COST (doctrine lever #2, query-count): `Health.snapshot/0` is 5+ DB
+    # round-trips — a `SELECT 1` liveness ping, the open-conflict GROUP-BY count
+    # + a capped row read, one per-dataset cursor/lag/pending read, and the Oban
+    # `github_mirror` queue-depth read. The disconnected (dead) mount render is
+    # DISCARDED the instant the WebSocket connects and `mount/3` re-runs — and
+    # this console is admin-gated (`:ops`), so no crawler/unfurler ever consumes
+    # that HTML. Running the snapshot there was pure waste (2× per page open).
+    # Guard it behind `connected?/1` (the board_live.ex/#2402 precedent): paint a
+    # DB-free loading skeleton on the dead render (`blank_health/0`), and read the
+    # real snapshot ONCE, on connect. The 5s `:refresh` poll is untouched.
+    health = if connected, do: Health.snapshot(), else: blank_health()
+
+    {:ok,
+     socket
+     |> assign(:loading, not connected)
+     |> assign(:health, health)}
   end
 
   # Slow periodic re-read — keeps cursor/lag/pending/queue honest; conflicts too.
@@ -59,6 +77,28 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
     end
 
     {:noreply, assign(socket, :health, Health.snapshot())}
+  end
+
+  # Dead-render skeleton: the disconnected mount no longer runs
+  # `Health.snapshot/0`, so it has no readings to paint. Rather than flash an
+  # all-zeros board (which would falsely read as "DB down / everything caught up,
+  # zero conflicts" — a genuinely-quiet snapshot is indistinguishable from an
+  # unloaded one), paint a light, self-contained loading state; the connected
+  # mount (~one RTT later) replaces it with the real health. CSP-safe, no JS, no
+  # external assets — mirrors the board_live.ex precedent.
+  @impl true
+  def render(%{loading: true} = assigns) do
+    ~H"""
+    <main class="container" style="max-width: 66rem;" data-role="github-ops-loading">
+      <h1>🔗 GitHub Sync</h1>
+      <p style="display:flex; align-items:center; gap:0.6rem; opacity:0.7;">
+        <span aria-hidden="true"
+              style="width:8px; height:8px; border-radius:999px; background:var(--primary); display:inline-block;">
+        </span>
+        Loading sync health…
+      </p>
+    </main>
+    """
   end
 
   @impl true
@@ -250,6 +290,23 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   # ---------------------------------------------------------------------------
 
   defp conflict_kinds, do: @conflict_kinds
+
+  # DB-free placeholder assigned on the disconnected (dead) mount render so
+  # `mount/3` issues ZERO `Health.snapshot/0` probes on the discarded first
+  # paint. Fully shaped (mirrors `Health.t()`) so any accidental field reference
+  # stays crash-safe; the `loading: true` render clause paints a skeleton and
+  # never reads these values. `db_ok`/`active` default false — a placeholder
+  # never claims a healthy DB it has not probed.
+  defp blank_health do
+    %{
+      active: false,
+      db_ok: false,
+      repo: nil,
+      conflicts: %{out_of_band_edit: 0, detached: 0, dedup_refused: 0, total: 0, open: []},
+      datasets: [],
+      queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0}
+    }
+  end
 
   # phx-value ids arrive as strings. Accept only a clean integer; anything else
   # (garbage, empty, a float, trailing junk) is rejected so the handler no-ops
