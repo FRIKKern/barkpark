@@ -141,6 +141,15 @@ FULL_DIR="${PDS_FULL_EXPORT_DIR:-/tmp/pds-full-export}"
 FULL_LOCK="$FULL_DIR/lock"
 LOCK_OWNED=""
 
+# The SHARED attempt ledger — the same file and the same budget name the frozen
+# harness uses (pds-pull-proof.sh:128 / :1368). Both are read here; the ledger
+# is written ONLY on the unscoped path, and only just before the fire. See the
+# ATTEMPT LEDGER block below the ssh helpers for why.
+FULL_ATTEMPTS_FILE="$FULL_DIR/attempts"
+FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"
+ATTEMPT_CHARGED=no                # did THIS run charge the ledger?
+ATTEMPTS_AFTER=""                 # the counter's value once this run was done with it
+
 SAMPLE_HZ=1                       # stated in the output; see PDS-D114
 IDLE_SECONDS=130                  # the canonical export's wall time
 ACQ_PATH=""
@@ -314,6 +323,61 @@ oneshot_rss_set_kb() {
     | awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }'
 }
 
+# ── THE FULL-EXPORT ATTEMPT LEDGER (PDS-D244) ───────────────────────────────
+#
+# An UNSCOPED acquisition here IS the ~2.2 GiB full export — the same physical
+# event the frozen harness charges an attempt for at pds-pull-proof.sh:1367-1368.
+# This instrument used to fire it while touching no counter at all (`grep -c
+# FULL_ATTEMPTS_FILE` returned 0), so the harness's cond_c ("attempts < budget")
+# could not see an instrument-driven full export AT ALL: the cost was paid on
+# the box and the ledger kept its old value, leaving a later climb free to fire
+# on budget it had physically already consumed. An instrument whose cost the
+# ledger cannot see is reporting a spend nobody observed.
+#
+# The ledger is therefore SHARED, exactly as $FULL_LOCK is shared, and the
+# ordering is the harness's — for the harness's reasons:
+#
+#   * every failed precondition returns ABOVE the spend, so a closed gate costs
+#     ZERO attempts (the harness's `return 1` at :1362 sits above its spend at
+#     :1367-1368, and every `refuse` in this file sits above the call site);
+#   * the spend is flushed with `sync` BEFORE the request, because a dead export
+#     still paid its memory peak — a run killed mid-export must not come back to
+#     a counter that never moved.
+#
+# A SCOPED acquisition (profile=dev → FULL_ACQ=no) is NOT that event and stays
+# FREE: it never writes this file, and a scoped run leaves both its value and
+# its mtime unchanged. That property is load-bearing; do not regress it.
+#
+# This instrument RECORDS the spend; it does not enforce the budget. cond_c in
+# the frozen harness is the enforcement point, and it can only enforce what it
+# can see — which is precisely what this block exists to give it.
+
+full_attempts() { # -> integer (absent / empty / garbage counter file reads 0)
+  local n=""
+  if [ -f "$FULL_ATTEMPTS_FILE" ]; then
+    n="$(tr -dc '0-9' <"$FULL_ATTEMPTS_FILE" | head -c 6)"
+  fi
+  printf '%s' "${n:-0}"
+}
+
+spend_full_attempt() { # unscoped path ONLY, called ONLY once every refusal is behind us
+  local spent spent_now
+  spent="$(full_attempts)"
+  spent_now=$((spent + 1))
+  mkdir -p "$FULL_DIR" 2>/dev/null || true
+  printf '%s\n' "$spent_now" >"$FULL_ATTEMPTS_FILE"
+  # Flushed BEFORE the request: a run killed mid-export must not come back to a
+  # counter that never moved, because the box already paid the peak.
+  ( command -v sync >/dev/null 2>&1 && sync ) 2>/dev/null || true
+  ATTEMPT_CHARGED=yes
+  ATTEMPTS_AFTER="$spent_now"
+  info "attempt ledger  CHARGED $spent -> $spent_now (budget $FULL_BUDGET) — a FULL acquisition is"
+  info "                about to fire, so the shared ledger is written and sync-flushed to"
+  info "                $FULL_ATTEMPTS_FILE BEFORE the request. A dead export still paid its peak."
+  info "                Recorded here, ENFORCED by the frozen harness's cond_c — the check that"
+  info "                could not see this instrument at all before PDS-D244."
+}
+
 # ── preflight ────────────────────────────────────────────────────────────────
 
 rule
@@ -351,6 +415,15 @@ if mkdir "$FULL_LOCK" 2>/dev/null; then
   info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
 else
   refuse "$FULL_LOCK is held by another run. Two concurrent exports against this box OOM it (PDS-D31)."
+fi
+
+# READ-ONLY here. The ledger is not charged until window 2, below every refusal.
+if [ "$FULL_ACQ" = yes ]; then
+  info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
+  info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
+else
+  info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (read only)"
+  info "                this acquisition is NARROWED, so it charges 0 attempts and leaves that file's value and mtime untouched"
 fi
 
 if [ "$FULL_ACQ" = yes ] && [ "$MEM_AVAIL_MB" -lt "$FULL_MIN_MEM_MB" ]; then
@@ -459,6 +532,25 @@ info "t=0 baseline    ${EXPORT_BASELINE_KB} kB — one-shot \`ps -o rss= -p $BEA
 info "                NOT the sampler's first tick: that lands at t≈+1 s and already carries part of the export's own allocation"
 info "                (diagnostic: max across all slots at t=0 = ${EXPORT_BASELINE_SET_KB} kB)"
 
+# ── THE LEDGER IS CHARGED HERE: after every refusal, before the request ──────
+#
+# Everything that can refuse this run has already run and returned ABOVE this
+# line — ssh reachability, the shared PDS-D31 lock, the MemAvailable floor, the
+# beam.smp selector, and BOTH of window 1's PDS-D220a zero-sample guards. So a
+# run that never fires never charges the ledger, which is the harness's
+# discipline at pds-pull-proof.sh:1362 (return) vs :1367-1368 (spend), and the
+# property criterion 4 proves by MUTATION rather than by a green.
+#
+# Below this line the box is about to be asked for ~2.2 GiB. From here the cost
+# is paid whether or not the request completes, so from here the ledger says so.
+if [ "$FULL_ACQ" = yes ]; then
+  spend_full_attempt
+else
+  ATTEMPTS_AFTER="$(full_attempts)"
+  info "attempt ledger  NOT charged — this acquisition is narrowed ($ACQ_PATH), not the full"
+  info "                export the budget is stated on. Ledger stands at $ATTEMPTS_AFTER of $FULL_BUDGET, untouched."
+fi
+
 # Ticks are generous — the sampler is killed the moment the acquisition returns.
 EXPORT_TICKS=$(( IDLE_SECONDS * 8 ))
 if [ "$EXPORT_TICKS" -lt 120 ]; then EXPORT_TICKS=120; fi
@@ -523,6 +615,53 @@ else
   IDLE_RATE="0.00"
 fi
 
+# ── IS A FLOOR DERIVABLE FROM THIS RUN AT ALL? (PDS-D244) ───────────────────
+#
+# The instrument's whole job is to hand a floor derivation a number it can
+# stand on. Two measured outcomes cannot do that, and BOTH were observed on the
+# first real end-to-end run:
+#
+#   * a NON-POSITIVE delta. The scoped run measured 687904 − 695632 = −7728 kB
+#     = −7.55 MiB. Memory did not go DOWN because of an export; the baseline
+#     simply happened to be taken at a higher point than any sampler tick
+#     reached. There is no demand in a negative number.
+#
+#   * a DRIFT-DOMINATED delta. That same −7.55 MiB sat beside a paired idle
+#     control drifting +110.22 MiB — ~15x its magnitude, in the OPPOSITE
+#     direction. When the box's own weather moves further than the thing being
+#     measured, the measurement did not resolve the acquisition's cost, which
+#     is exactly the confound PDS-D104 put the control there to expose.
+#
+# The report already explained how to read the pair. Explaining is not enough:
+# `19.71 + 798.81` happened because an unusable number was emitted in the same
+# voice as a usable one and someone downstream did the arithmetic anyway. So
+# the run now states the verdict itself, in its own voice, and carries it in
+# the machine line so a consumer can branch on it without re-deriving it.
+#
+# The EXIT CODE stays 0 deliberately. The measurement itself succeeded — these
+# readings are real, and a run that refuses at the D220a guards (exit 2) sampled
+# NOTHING, which is a different thing entirely. Conflating "I measured, and what
+# I measured cannot bear a floor" with "I failed to measure" would throw away a
+# valid control. The refusal is loud, machine-readable, and repeated at the tail.
+
+EXPORT_DELTA_ABS_KB="$EXPORT_DELTA_KB"
+if [ "$EXPORT_DELTA_ABS_KB" -lt 0 ]; then EXPORT_DELTA_ABS_KB=$(( 0 - EXPORT_DELTA_ABS_KB )); fi
+IDLE_DELTA_ABS_KB="$IDLE_DELTA_KB"
+if [ "$IDLE_DELTA_ABS_KB" -lt 0 ]; then IDLE_DELTA_ABS_KB=$(( 0 - IDLE_DELTA_ABS_KB )); fi
+
+FLOOR_DERIVABLE=yes
+FLOOR_REFUSAL_CODE=none
+FLOOR_REFUSAL=""
+if [ "$EXPORT_DELTA_KB" -le 0 ]; then
+  FLOOR_DERIVABLE=no
+  FLOOR_REFUSAL_CODE=non_positive_delta
+  FLOOR_REFUSAL="the measured delta is ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB, which is NOT POSITIVE, while the paired idle control drifted ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. An acquisition cannot demand a negative amount of memory: the peak simply never rose above the pre-fire baseline within the ${SAMPLE_HZ} Hz grid. There is no demand figure in this run to derive a floor from."
+elif [ "$EXPORT_DELTA_ABS_KB" -le "$IDLE_DELTA_ABS_KB" ]; then
+  FLOOR_DERIVABLE=no
+  FLOOR_REFUSAL_CODE=drift_dominated
+  FLOOR_REFUSAL="the measured delta is ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB but the paired idle control — zero requests issued — drifted ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB over its own window. The box's background weather moved at least as far as the thing being measured, so this run did NOT resolve the acquisition's own cost from the drift (PDS-D104). No floor may be derived from it."
+fi
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 
 rule
@@ -570,8 +709,41 @@ say "    acquisition is the same one: GET /api/workspaces/<ws>/export with no"
 say "    profile narrowing. This run's acquisition was:"
 say "      $ACQ_PATH   (full-fidelity? $FULL_ACQ)"
 say ""
+if [ "$FULL_ACQ" = no ]; then
+  say "    This acquisition was NARROWED, so it is NOT comparable to 2235.43 MiB in any"
+  say "    case: it measures a different, smaller export. Nothing here may be placed"
+  say "    beside the canonical figure, and nothing may be subtracted from it."
+  say ""
+fi
 
-MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43"
+# ── the derivability verdict, in the instrument's own voice ─────────────────
+if [ "$FLOOR_DERIVABLE" = no ]; then
+  say "  ┌──────────────────────────────────────────────────────────────────────────┐"
+  say "  │ REFUSAL — NO FLOOR MAY BE DERIVED FROM THIS RUN                           │"
+  say "  └──────────────────────────────────────────────────────────────────────────┘"
+  say "    reason ($FLOOR_REFUSAL_CODE):"
+  printf '      %s\n' "$FLOOR_REFUSAL" | fold -s -w 72 | sed 's/^/  /'
+  say ""
+  say "    The readings above are REAL and are reported in full — this run sampled"
+  say "    ${EXPORT_SAMPLES} export readings and ${IDLE_SAMPLES} control readings, and it is not"
+  say "    hiding them. What it refuses is the NEXT step: this pair of numbers may"
+  say "    not be turned into a memory floor, quoted as an export's demand, or added"
+  say "    to any other figure. Re-run when the control window is quiet relative to"
+  say "    the acquisition, against an acquisition that actually moves the BEAM."
+  say ""
+  say "    Machine consumers: branch on floor_derivable=no in the line below rather"
+  say "    than on the exit code — the measurement SUCCEEDED (exit 0); it is the"
+  say "    derivation that is refused. Exit 2 means a window was never sampled at all."
+else
+  say "  FLOOR DERIVABILITY"
+  say "    The measured delta $(mib "$EXPORT_DELTA_KB") MiB is positive and exceeds the paired"
+  say "    control's drift of $(mib "$IDLE_DELTA_KB") MiB, so this run resolves an acquisition"
+  say "    cost above the box's own weather. It is still a LOWER BOUND (PDS-D114),"
+  say "    and the control is context beside it, never subtracted from it."
+fi
+say ""
+
+MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43 full_attempt_charged=$ATTEMPT_CHARGED attempts_after=${ATTEMPTS_AFTER:-unknown} attempts_budget=$FULL_BUDGET floor_derivable=$FLOOR_DERIVABLE floor_refusal=$FLOOR_REFUSAL_CODE"
 
 say "$MACHINE_LINE"
 say ""
@@ -586,6 +758,21 @@ if [ "$HTTP_CODE" != "200" ]; then
   say "  are real readings, but they describe a FAILED acquisition — a dead export"
   say "  still pays its memory peak, and this instrument reports what it sampled"
   say "  rather than hiding a non-200 behind a plausible-looking number."
+fi
+
+if [ "$ATTEMPT_CHARGED" = yes ]; then
+  say ""
+  say "  LEDGER: this run charged 1 FULL-export attempt — $FULL_ATTEMPTS_FILE now reads"
+  say "  $ATTEMPTS_AFTER of $FULL_BUDGET. That file is shared with the frozen harness, whose cond_c"
+  say "  gate reads it before the crown climb fires. Resetting it is FORBIDDEN (PDS-D212)."
+fi
+
+# The last thing a reader or a `tail` sees must be the refusal, not a number.
+if [ "$FLOOR_DERIVABLE" = no ]; then
+  say ""
+  say "  REFUSED ($FLOOR_REFUSAL_CODE): no floor may be derived from this run. See the"
+  say "  REFUSAL block above for the delta, the control drift, and why. The exit code"
+  say "  is 0 because the measurement itself succeeded."
 fi
 
 exit 0
