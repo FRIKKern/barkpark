@@ -768,3 +768,57 @@ test("a rotten row is reported, not silently skipped — the fold's own D6 rule 
   const folded = foldLedger([{ file: "rot.json", run_id: "r", recipes: [{ subject: 1, quantity: "q", rerun: "cat a" }] }]);
   assert.equal(folded.stats.unreadable, 1, "stats must carry it, or a caller reading stats alone sees a clean, smaller, wrong world");
 });
+
+// ── THE SCREEN CONTRACT'S EDGES (added in review) ────────────────────────────
+
+test("an ASYNC screen is SCREEN-NOT-SYNC — fail closed, but diagnosed honestly", () => {
+  // The tolerant screen contract accepts true / {ok} / a string, and fails
+  // everything else CLOSED. That is right. But a Promise is not a refusal —
+  // it is a SIGNATURE MISMATCH, and reporting it as REFUSED-COMMAND would make
+  // a wrongly-wired CLI look like an over-aggressive safety screen. Every row
+  // refused, with a reason string pointing at the wrong suspect.
+  //
+  // admitRecipe is synchronous by design: it sits one phase from a workflow
+  // file that may not await (D19). So an async screen cannot ever be honoured
+  // here, and saying so beats silently declining everything.
+  const row = { subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" };
+  const v = admitRecipe(row, { screen: async () => true });
+  assert.equal(v.ok, false, "an async screen must not admit — it screened nothing");
+  const reasons = v.rejections.map((r) => r.reason);
+  assert.ok(reasons.includes("SCREEN-NOT-SYNC"), `expected SCREEN-NOT-SYNC, got ${reasons.join(", ")}`);
+  assert.ok(!reasons.includes("REFUSED-COMMAND"), "an async screen is a contract mismatch, never a refusal of the command");
+  assert.match(v.rejections.find((r) => r.reason === "SCREEN-NOT-SYNC").message, /synchronous/);
+
+  // A bare thenable counts too — the check is the shape, not the keyword.
+  const thenable = admitRecipe(row, { screen: () => ({ then(res) { res(true); } }) });
+  assert.ok(thenable.rejections.map((r) => r.reason).includes("SCREEN-NOT-SYNC"));
+
+  // And the ordinary contract is untouched in both directions.
+  assert.equal(admitRecipe(row, { screen: () => true }).ok, true);
+  assert.equal(admitRecipe(row, { screen: () => ({ ok: true }) }).ok, true);
+  assert.equal(admitRecipe(row, { screen: () => false }).ok, false);
+});
+
+test("no consumer reads the fold's OLD field names — the rename left nothing dangling", () => {
+  // `foldLedger().conflicts` → `.rival_methods`, `entry.conflict` →
+  // `entry.rival_method`, and the `CONFLICT` export is gone. adjudicate.mjs
+  // keeps its own identically-spelled verdict, which fires on the OPPOSITE
+  // input (claim VALUES, not rerun COMMANDS) — so this pins that the ledger's
+  // fold no longer answers to the old names, rather than grepping the tree for
+  // a string two modules legitimately share.
+  const runs = [
+    { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l /abs/x", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
+    { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l rel/x", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
+  ];
+  const folded = foldLedger(runs);
+  assert.equal(folded.rival_methods.length, 1);
+  assert.equal(folded.conflicts, undefined, "the old `conflicts` key must be gone, not shadowed");
+  assert.equal(folded.stats.conflicts, undefined);
+  assert.equal(folded.stats.rival_methods, 1);
+  assert.equal(folded.entries[0].rival_method, true);
+  assert.equal(folded.entries[0].conflict, undefined);
+  assert.equal(folded.rival_methods[0].reason, "RIVAL-METHOD");
+  // The message must read as the PRODUCT, or the flag discredits itself on the
+  // first honest multi-recipe entry — which under D32's path-grain key is day one.
+  assert.match(folded.rival_methods[0].message, /FEATURE of the row, not a defect report/);
+});

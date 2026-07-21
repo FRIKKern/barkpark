@@ -371,6 +371,20 @@ export function admitRecipe(input = {}, options = {}) {
         "SCREEN-FAILED",
         `the injected screen threw on this command (${threw?.message ?? String(threw)}) — it therefore refused nothing and allowed nothing, so the row is not admitted. A safety check that fails open is not a safety check.`,
       ));
+    } else if (verdict !== null && typeof verdict === "object" && typeof verdict.then === "function") {
+      // A PROMISE IS A CONTRACT MISMATCH, NOT A REFUSAL, and it must not be
+      // reported as one. `admitRecipe` is synchronous by design (it is one
+      // phase from a workflow file that may not await), so an async screen can
+      // never be awaited here — but a thenable is not `true` and is not
+      // `{ ok: true }`, so the tolerant branch below would fail it CLOSED under
+      // REFUSED-COMMAND. Fail-closed is right; the DIAGNOSIS was not. Every row
+      // would be refused, and the reason string would send whoever wired the
+      // CLI hunting an over-aggressive screen instead of the wrong function
+      // shape. The verdict is unchanged — only the name it fails under.
+      rejections.push(reject(
+        "SCREEN-NOT-SYNC",
+        `the injected screen returned a Promise. admitRecipe is synchronous — it cannot await a verdict — so an async screen screens NOTHING and every row would be refused. Pass a synchronous predicate; resolve any async work before calling.`,
+      ));
     } else {
       const allowed = verdict === true || (verdict !== null && typeof verdict === "object" && verdict.ok === true);
       if (!allowed) {
@@ -738,6 +752,17 @@ function selftest() {
         { screen: () => { throw new Error("boom"); } },
       );
       return !v.ok && v.rejections.some((r) => r.reason === "SCREEN-FAILED");
+    }],
+    ["an ASYNC screen is diagnosed SCREEN-NOT-SYNC, not reported as a refusal", () => {
+      // Fail-closed either way; the point is the DIAGNOSIS. Under the tolerant
+      // branch a Promise is neither `true` nor `{ok:true}`, so every row would
+      // have been refused REFUSED-COMMAND and whoever wired the CLI would have
+      // gone hunting an over-aggressive screen rather than a wrong signature.
+      const v = admitRecipe(
+        { subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" },
+        { screen: async () => true },
+      );
+      return !v.ok && v.rejections.some((r) => r.reason === "SCREEN-NOT-SYNC");
     }],
     ["a malformed bound is rejected BAD-OPTION rather than silently not bounding", () => {
       const badNow = admitRecipe({ subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" }, { now: "yesterday" });
