@@ -11788,14 +11788,46 @@
   // =========================================================== LIVE EVENTS (SSE)
   // One EventSource per session streams coarse {type} invalidations from the
   // control plane; on each we refetch the AFFECTED collection if its view is on
-  // screen (the event is a signal to refetch, never trusted as state). Token
-  // rides as a query param because EventSource can't set an Authorization
-  // header. EventSource auto-reconnects on drop; we only close it on logout.
+  // screen (the event is a signal to refetch, never trusted as state).
+  //
+  // AUTH: EventSource cannot set an Authorization header, so the credential has
+  // to ride the URL — and what rides it is a SINGLE-USE 60s ticket minted over
+  // POST /v1/auth/sse-ticket (bearer in a header), never the session token. The
+  // ticket is burned by the connect, so the copy in the access log is dead.
+  //
+  // RECONNECT IS OURS, NOT THE BROWSER'S. Measured in headless Chrome 150 over
+  // CDP: EventSource freezes its URL at construction and replays it BYTE-
+  // IDENTICALLY on every native retry — which under single-use tickets is a
+  // guaranteed 401 — and ANY 401 is TERMINAL (readyState 2, zero further
+  // requests, ever). So we never lean on the native retry: on any onerror we
+  // close, remint over a header, and reopen on a capped backoff.
   var evtSource = null;
-  // Tracks whether the stream is currently in the dropped state, so a single
-  // disconnect toasts exactly ONCE (not on every retry) and a reconnect can
-  // confirm recovery.
+  // Tracks whether the stream is currently in the dropped-but-recoverable state,
+  // so a single disconnect toasts exactly ONCE (not on every retry) and a
+  // reconnect can confirm recovery.
   var evtErrored = false;
+  // TERMINAL: the session credential ITSELF was refused when reminting, so no
+  // amount of retrying brings the stream back — only a fresh sign-in does. This
+  // is the state the chip previously had no word for (it said "reconnecting"
+  // forever over a stream that was never coming back).
+  var evtDead = false;
+  // Reconnect bookkeeping: the pending retry timer, the current backoff delay,
+  // whether a mint is in flight, and a generation counter so a mint that
+  // resolves AFTER a logout (or after a newer attempt superseded it) is dropped
+  // instead of resurrecting a stream for a session that is gone.
+  var evtRetryTimer = null;
+  var evtBackoffMs = 0;
+  var evtOpening = false;
+  var evtGeneration = 0;
+  var EVT_BACKOFF_MIN_MS = 500;
+  var EVT_BACKOFF_MAX_MS = 8000;
+
+  // Capped exponential backoff for stream reopen attempts. Pure + node-pinned:
+  // the cap is what keeps a hard-down control plane from spinning the mint route.
+  function nextEventsBackoffMs(prevMs) {
+    if (!prevMs) return EVT_BACKOFF_MIN_MS;
+    return Math.min(prevMs * 2, EVT_BACKOFF_MAX_MS);
+  }
   // Epoch (ms) of the last confirmed sign of life on the stream — set on the
   // initial connect/reconnect (onopen) and on every real data frame (onmessage).
   // The heartbeat the server sends every 25s is an SSE COMMENT (": ping"), which
@@ -11805,15 +11837,24 @@
 
   // ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ────────────
   // Pure state machine for the topbar dot, driven ONLY by the existing
-  // EventSource signals (no second stream, no new SSE type). Three honest states:
-  //   reconnecting — onerror fired and we have not recovered (stream is DOWN);
+  // EventSource signals (no second stream, no new SSE type). FOUR honest states:
+  //   dead         — the stream is down AND cannot come back on its own: the
+  //                  session credential itself was refused when reminting. This
+  //                  is the state the chip used to lack, which is why it sat on
+  //                  "Reconnecting…" forever over a permanently closed stream.
+  //   reconnecting — onerror fired and we ARE retrying (remint + reopen on a
+  //                  capped backoff — no longer a claim about the browser).
   //   stale        — stream is up but no data frame in LIVE_STALE_MS (we cannot
   //                  PROVE currency, so we say so — a quiet fleet, not a lie);
   //   live         — connected, recently confirmed (or freshly connected).
-  // The dot colour tracks up-vs-dropped exactly (green family vs amber); the
-  // "as of" label carries recency. Exported + unit-tested at the boundaries.
+  // The dot colour tracks the truth exactly (green family / amber / red); the
+  // "as of" label carries recency. Exported + unit-tested at the boundaries, and
+  // LIVE_DOT_STATES pins the return set as a CLOSED enum — without that, JS's
+  // permissive arity lets a new state land while every equality test stays green.
   var LIVE_STALE_MS = 90000; // 90s of silence → "stale" (well past the 25s heartbeat)
-  function liveDotState(evtErrored, lastEventMs, nowMs) {
+  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead"];
+  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead) {
+    if (evtDead) return "dead"; // outranks everything: retrying would be a lie
     if (evtErrored) return "reconnecting";
     if (lastEventMs == null) return "live"; // connected; sparse events ≠ trouble
     if (nowMs - lastEventMs > LIVE_STALE_MS) return "stale";
@@ -11831,11 +11872,26 @@
     var hrs = Math.round(mins / 60);
     return hrs + "h ago";
   }
-  var LIVE_CHIP_COPY = { live: "Live", stale: "Live", reconnecting: "Reconnecting…" };
+  var LIVE_CHIP_COPY = {
+    live: "Live", stale: "Live", reconnecting: "Reconnecting…", dead: "Not live",
+  };
   var LIVE_CHIP_ARIA = {
     live: "Live updates connected", stale: "Live updates connected but quiet",
     reconnecting: "Live updates interrupted, reconnecting",
+    dead: "Live updates stopped, sign in again to resume",
   };
+  // A state with no entry must NEVER fall through to the word "Live" — that was
+  // the old `LIVE_CHIP_COPY[state] || "Live"` fallback, which would have made an
+  // unmapped terminal state announce the console as current. Unknown reads as
+  // not-live, the safe direction.
+  function liveChipCopy(state) {
+    return Object.prototype.hasOwnProperty.call(LIVE_CHIP_COPY, state)
+      ? LIVE_CHIP_COPY[state] : "Not live";
+  }
+  function liveChipAria(state) {
+    return Object.prototype.hasOwnProperty.call(LIVE_CHIP_ARIA, state)
+      ? LIVE_CHIP_ARIA[state] : "Live updates unavailable";
+  }
 
   // Inject the chip into the persistent topbar exactly once (index.html is frozen
   // this wave, so the SPA owns the node). Idempotent: a re-login reuses it.
@@ -11863,24 +11919,35 @@
   // Paint the chip from the current stream signals. Cheap + idempotent; called on
   // every state transition AND once per second by the chip ticker (so the "as of"
   // label counts up and a quiet stream ages honestly into "stale").
-  function renderLivenessChip() {
+  //
+  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs}. The
+  // stream signals are private closure state, so without it the terminal state's
+  // DOM contract (which data-state, which label, which announced sentence) is
+  // literally unassertable from node. Absent in production — every real caller
+  // passes nothing and reads the live closure.
+  function renderLivenessChip(override) {
     var chip = document.getElementById("liveness-chip");
     if (!chip) return;
-    var now = Date.now();
-    var state = liveDotState(evtErrored, lastEventMs, now);
+    var o = override && typeof override === "object" ? override : null;
+    var now = o && o.nowMs != null ? o.nowMs : Date.now();
+    var errored = o ? !!o.evtErrored : evtErrored;
+    var dead = o ? !!o.evtDead : evtDead;
+    var last = o ? (o.lastEventMs != null ? o.lastEventMs : null) : lastEventMs;
+    var state = liveDotState(errored, last, now, dead);
     chip.setAttribute("data-state", state);
-    var ago = state === "reconnecting" ? "" : liveFreshness(lastEventMs, now);
+    // No "as of" on a down stream: a recency stamp beside a dead dot reads as
+    // reassurance ("2s ago") for data that has stopped arriving.
+    var ago = state === "reconnecting" || state === "dead" ? "" : liveFreshness(last, now);
     var label = chip.querySelector(".live-chip-label");
-    if (label) label.textContent = LIVE_CHIP_COPY[state] || "Live";
+    if (label) label.textContent = liveChipCopy(state);
     var agoEl = chip.querySelector(".live-chip-ago");
     if (agoEl) { agoEl.textContent = ago ? "· " + ago : ""; agoEl.hidden = !ago; }
     // role="status" is a live region: keep the ANNOUNCED name to the stable
     // per-state sentence (changes only on a real transition), so the per-second
     // "as of" tick — aria-hidden in the span — never spams a screen reader. The
     // ticking recency rides the title (a hover tooltip, not an announcement).
-    chip.setAttribute("aria-label", LIVE_CHIP_ARIA[state] || "Live updates");
-    chip.setAttribute("title",
-      (LIVE_CHIP_ARIA[state] || "Live updates") + (ago ? ", last event " + ago : ""));
+    chip.setAttribute("aria-label", liveChipAria(state));
+    chip.setAttribute("title", liveChipAria(state) + (ago ? ", last event " + ago : ""));
   }
 
   // A fresh data frame arrived — snap the dot's one-shot ping so motion signals
@@ -11901,7 +11968,10 @@
   function startChipTicker() {
     if (chipTicker) return;
     renderLivenessChip();
-    chipTicker = setInterval(renderLivenessChip, 1000);
+    // Wrapped, never passed by reference: renderLivenessChip now takes an
+    // override object, and a host that hands its interval callback an argument
+    // would otherwise drive the chip off a fabricated state.
+    chipTicker = setInterval(function () { renderLivenessChip(); }, 1000);
   }
   function stopChipTicker() {
     if (chipTicker) { clearInterval(chipTicker); chipTicker = null; }
@@ -11914,49 +11984,154 @@
     // (a re-render calls connectEvents again) — mount + tick it before the guard.
     ensureLivenessChip();
     startChipTicker();
-    if (evtSource) return;
-    try {
-      evtSource = new EventSource("/v1/events?token=" + encodeURIComponent(s.token));
-    } catch (e) { return; }
-    evtSource.onopen = function () {
-      // First connect (or a recovery after a drop): a confirmed sign of life.
-      lastEventMs = Date.now();
-      // Only announce a RECONNECT — the initial connect is silent.
-      if (evtErrored) {
-        evtErrored = false;
-        toast({ kind: "success", title: "Live updates reconnected", duration: 2500 });
+    // `dead` is TERMINAL and must stay terminal: connectEvents runs on every
+    // re-render, so without this guard each navigation would fire another mint
+    // that is already known to 401 — a fresh line of exactly the access-log
+    // noise this slice exists to remove. closeEvents (logout) clears the flag,
+    // so a real sign-in still recovers.
+    if (evtSource || evtOpening || evtRetryTimer || evtDead) return;
+    openEventStream();
+  }
+
+  // Mint a fresh single-use ticket — the session token rides an Authorization
+  // HEADER here, which is the whole point of the route — then open the stream on
+  // the ticket. `noBounce` because a mint 401 is handled HERE (terminal chip
+  // state + one honest toast); api()'s default 401 behaviour would silently
+  // clear the session and re-render the login screen out from under the user.
+  function mintSseTicket(cb) {
+    api("POST", "/v1/auth/sse-ticket", {}, { noBounce: true }).then(function (r) {
+      if (r.ok && r.data && typeof r.data.ticket === "string" && r.data.ticket) {
+        cb(null, r.data.ticket);
+      } else {
+        // 401/403 = the SESSION is gone (revoked, expired, signed out elsewhere).
+        // Retrying cannot fix that, so it is terminal. Anything else (network
+        // down, 500, a proxy hiccup) is transient and gets the backoff.
+        cb({ terminal: r.status === 401 || r.status === 403, status: r.status });
       }
-      renderLivenessChip();
-    };
-    evtSource.onmessage = function (e) {
-      // A real data frame (not the invisible heartbeat comment): the stream is
-      // demonstrably current. Stamp it, pulse the dot, refresh the chip.
-      lastEventMs = Date.now();
-      pingLivenessChip();
-      renderLivenessChip();
-      var ev;
-      try { ev = JSON.parse(e.data); } catch (x) { return; }
-      // W4: the stage rail reads the pushed payload (site/deployment/stage), not
-      // just the type — the coarse-invalidation handlers ignore the second arg.
-      handleLiveEvent(ev && ev.type, ev && ev.payload);
-    };
-    evtSource.onerror = function () {
-      // EventSource auto-reconnects on a dropped connection; surface it ONCE so
-      // the user knows live updates paused and are retrying (a stale dashboard
-      // otherwise looks fine but silently stops updating). A revoked-token 401
-      // also lands here repeatedly — the guard keeps it to a single toast; the
-      // next authed XHR 401 logs the user out cleanly.
-      if (!evtErrored) {
-        evtErrored = true;
-        toast({ kind: "info", title: "Live updates interrupted", body: "Reconnecting…", duration: 5000 });
+    });
+  }
+
+  function openEventStream() {
+    var s = session();
+    if (!s || !s.token) return;
+    if (evtSource || evtOpening) return;
+    evtOpening = true;
+    var gen = ++evtGeneration;
+    mintSseTicket(function (err, ticket) {
+      evtOpening = false;
+      // A logout (or a newer attempt) happened while the mint was in flight —
+      // drop this one rather than resurrect a stream for a session that is gone.
+      if (gen !== evtGeneration) return;
+      if (err) {
+        if (err.terminal) { markEventsDead(); return; }
+        markEventsErrored();
+        scheduleEventsRetry();
+        return;
       }
-      renderLivenessChip(); // dot → amber every retry (cheap + idempotent)
-    };
+      var es;
+      try {
+        // A single-use ticket, never the session token. Even so, this URL is
+        // logged — and by the time anyone reads the log, the ticket is burnt.
+        es = new EventSource("/v1/events?ticket=" + encodeURIComponent(ticket));
+      } catch (e) {
+        markEventsErrored();
+        scheduleEventsRetry();
+        return;
+      }
+      evtSource = es;
+      es.onopen = function () {
+        if (evtSource !== es) return;
+        // First connect (or a recovery after a drop): a confirmed sign of life.
+        lastEventMs = Date.now();
+        evtBackoffMs = 0; // recovery resets the ladder to its floor
+        // Only announce a RECONNECT — the initial connect is silent.
+        if (evtErrored || evtDead) {
+          evtErrored = false;
+          evtDead = false;
+          toast({ kind: "success", title: "Live updates reconnected", duration: 2500 });
+        }
+        renderLivenessChip();
+      };
+      es.onmessage = function (e) {
+        // A real data frame (not the invisible heartbeat comment): the stream is
+        // demonstrably current. Stamp it, pulse the dot, refresh the chip.
+        lastEventMs = Date.now();
+        pingLivenessChip();
+        renderLivenessChip();
+        var ev;
+        try { ev = JSON.parse(e.data); } catch (x) { return; }
+        // W4: the stage rail reads the pushed payload (site/deployment/stage), not
+        // just the type — the coarse-invalidation handlers ignore the second arg.
+        handleLiveEvent(ev && ev.type, ev && ev.payload);
+      };
+      es.onerror = function () {
+        // MEASURED (headless Chrome 150 over CDP), correcting what this comment
+        // used to claim: a 401 does NOT "land here repeatedly". It fires onerror
+        // exactly ONCE, at readyState 2 (CLOSED), and the browser never issues
+        // another request — so the old evtErrored guard was defending against
+        // something impossible while the stream stayed silently dead forever.
+        //
+        // We therefore do not distinguish readyState 0 from 2, and we do not
+        // wait for the native retry even when one is coming: under single-use
+        // tickets that retry replays a spent ticket and is a guaranteed 401,
+        // costing ~3s of dead stream (Chrome's default delay; stream_events
+        // sends no `retry:` field to tune it) plus one junk 401 per flap in the
+        // access log. Close, remint, reopen — ourselves.
+        if (evtSource !== es) return; // a superseded stream's late error
+        try { es.close(); } catch (x) {}
+        evtSource = null;
+        markEventsErrored();
+        scheduleEventsRetry();
+      };
+    });
+  }
+
+  // The stream is down but we ARE coming back for it — so "Reconnecting…" is now
+  // a true statement about what this client does next, not a guess about the
+  // browser. One toast per outage; the chip carries the ongoing state.
+  function markEventsErrored() {
+    if (!evtErrored && !evtDead) {
+      toast({ kind: "info", title: "Live updates interrupted", body: "Reconnecting…", duration: 5000 });
+    }
+    evtErrored = true;
+    evtDead = false;
+    renderLivenessChip();
+  }
+
+  // TERMINAL: the session credential itself was refused, so there is nothing to
+  // retry. Say so plainly and stop — a chip that keeps promising a reconnect
+  // that will never arrive is exactly the lie this console is shedding.
+  function markEventsDead() {
+    if (!evtDead) {
+      toast({
+        kind: "error", title: "Live updates stopped",
+        body: "Your session was refused, so this page has stopped updating. Sign in again to resume.",
+        duration: 0,
+      });
+    }
+    evtDead = true;
+    evtErrored = false;
+    if (evtRetryTimer) { clearTimeout(evtRetryTimer); evtRetryTimer = null; }
+    renderLivenessChip();
+  }
+
+  function scheduleEventsRetry() {
+    if (evtRetryTimer || evtDead) return;
+    evtBackoffMs = nextEventsBackoffMs(evtBackoffMs);
+    evtRetryTimer = setTimeout(function () {
+      evtRetryTimer = null;
+      openEventStream();
+    }, evtBackoffMs);
   }
 
   function closeEvents() {
+    evtGeneration++; // orphan any mint still in flight
     if (evtSource) { try { evtSource.close(); } catch (e) {} evtSource = null; }
+    if (evtRetryTimer) { clearTimeout(evtRetryTimer); evtRetryTimer = null; }
+    evtOpening = false;
+    evtBackoffMs = 0;
     evtErrored = false;
+    evtDead = false;
     lastEventMs = null;
     stopChipTicker();     // the topbar chip's clock dies with the session
     renderLivenessChip(); // reset to a neutral "live/—" before the shell hides
@@ -16831,6 +17006,23 @@
       // the same way mountInstanceTimeline is exercised — real browser is live).
       liveDotState: liveDotState, liveFreshness: liveFreshness,
       liveStaleMs: LIVE_STALE_MS,
+      // cch-w3 (D33): the chip's COPY tables and its render seam. liveDotState's
+      // return set is now a CLOSED enum (liveDotStates) so a fifth state can't
+      // slip in behind four passing equality assertions, and renderLivenessChip
+      // takes an override so the terminal state's DOM contract — data-state,
+      // label, announced sentence — is assertable from node at all (the stream
+      // signals it reads are otherwise private closure state).
+      liveDotStates: LIVE_DOT_STATES,
+      LIVE_CHIP_COPY: LIVE_CHIP_COPY, LIVE_CHIP_ARIA: LIVE_CHIP_ARIA,
+      liveChipCopy: liveChipCopy, liveChipAria: liveChipAria,
+      renderLivenessChip: renderLivenessChip, ensureLivenessChip: ensureLivenessChip,
+      // Capped reopen ladder for the SSE remint loop, plus the loop itself. The
+      // reconnect is the SPA's job now (the browser's native retry replays a
+      // spent ticket), so the recovery loop is driven end-to-end in node against
+      // a stubbed fetch + EventSource rather than asserted from its parts.
+      nextEventsBackoffMs: nextEventsBackoffMs,
+      eventsBackoffMinMs: EVT_BACKOFF_MIN_MS, eventsBackoffMaxMs: EVT_BACKOFF_MAX_MS,
+      connectEvents: connectEvents, closeEvents: closeEvents,
       ensureLivenessChip: ensureLivenessChip, renderLivenessChip: renderLivenessChip,
       // S5 four-surface coherence harness (__preview__/coherence.html): the pure
       // theme-propagation / token-manifest / fixture-transform helpers. The block

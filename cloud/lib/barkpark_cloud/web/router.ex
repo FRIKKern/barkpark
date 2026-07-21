@@ -30,6 +30,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
       GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
       DELETE  /v1/auth/logout      user      revoke the calling session token
+      POST    /v1/auth/sse-ticket  user      mint a 60s single-use ticket for GET /v1/events
       POST    /v1/account/two-factor/enroll user   start TOTP enroll → {otpauth_uri, secret}
       POST    /v1/account/two-factor/confirm user  {code} → {recovery_codes} (2FA on)
       GET     /v1/account/two-factor user   {enabled: bool}
@@ -51,7 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
       PUT     /v1/account/password         user  change password ⇒ sign out everywhere
       GET     /v1/subscription     user      {subscription | nil} — current plan
-      GET     /v1/events           user*     Server-Sent-Events live stream (*token= or Bearer)
+      GET     /v1/events           user*     Server-Sent-Events live stream (*ticket= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
@@ -1281,6 +1282,37 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/auth/sse-ticket → 200 {ticket, expires_in}. Mints a single-use,
+  # 60-second, SSE-scoped ticket over a request carrying the session token in an
+  # Authorization HEADER. The browser's EventSource API cannot set headers, so
+  # GET /v1/events has to take its credential from the URL; this route makes the
+  # thing in that URL a burn-on-open ticket instead of a 30-day session token.
+  #
+  # It is a POST, and there is deliberately NO `get "/v1/auth/sse-ticket"` — and
+  # the PATH-has-no-GET part is the actual invariant, not the verb. `plug(Plug.Head)`
+  # rewrites HEAD→GET unconditionally BEFORE matching, so a HEAD prober can only
+  # be refused by there being no GET clause on the path at all. (Measured
+  # counterexample: HEAD /v1/tokens answers 401, not 404, precisely because a GET
+  # twin lives beside its POST.) Pinned by router_sse_ticket_test.exs.
+  post "/v1/auth/sse-ticket" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.create_sse_ticket(conn.assigns.current_user) do
+        {:ok, ticket} ->
+          json(conn, 200, %{
+            ticket: ticket,
+            expires_in: Accounts.sse_ticket_validity_seconds()
+          })
+
+        {:error, _cs} ->
+          json(conn, 500, %{error: "ticket_mint_failed"})
+      end
+    end
+  end
+
   # GET /v1/account/sessions → 200 {sessions: [{id, ip_address, user_agent,
   # last_used_at, inserted_at, current}]}. `current` flags the row matching the
   # calling token so the UI can label "This device". The token_hash is NEVER
@@ -1410,9 +1442,12 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/events — the live dashboard's Server-Sent-Events stream. Auth is by
-  # `?token=<session-token>` (a query param, because the browser EventSource API
-  # CANNOT set an Authorization header) OR a normal Bearer header for non-browser
-  # clients. On success the request process subscribes to its team's :pg group
+  # `?ticket=<single-use-sse-ticket>` (a query param, because the browser
+  # EventSource API CANNOT set an Authorization header — so the query param takes
+  # a 60s burn-on-open ticket from POST /v1/auth/sse-ticket, NEVER a session
+  # token) OR a normal Bearer header for non-browser clients. The ticket is
+  # consumed by the connect: a replay of the URL out of an access log gets 401.
+  # On success the request process subscribes to its team's :pg group
   # and parks in a receive loop, chunking each broadcast as an SSE `data:` frame
   # plus a periodic heartbeat comment to keep proxies from idling it out. The
   # browser refetches the relevant GET on each event — the event is an
@@ -9699,14 +9734,40 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # Auth for GET /v1/events. The browser EventSource API can't set headers, so a
-  # `?token=` query param is accepted in addition to the normal Bearer header.
+  # Auth for GET /v1/events. The browser EventSource API can't set headers, so
+  # the stream credential HAS to ride the URL — but what rides it is a `?ticket=`,
+  # never a session token: a single-use, 60-second, SSE-scoped ticket minted over
+  # POST /v1/auth/sse-ticket with the bearer in an Authorization header. Redeeming
+  # it BURNS it, so the copy left behind in every access log and proxy trace is
+  # dead on arrival. An Authorization header is still honoured and still takes a
+  # full session token (curl, an EventSource polyfill, the CLI) — that path never
+  # writes the credential into a URL, so it is not the leak.
+  #
+  # A burnt/expired/absent ticket answers 401, which is TERMINAL for EventSource
+  # (measured: the browser goes to readyState 2 and NEVER retries), so recovery is
+  # the SPA's job, not the browser's: app.js remints and reopens on every stream
+  # error rather than letting the native retry replay a spent ticket.
+  #
   # Assigns :current_user + :current_team on success; halts 401 otherwise.
   defp require_user_sse(conn) do
     conn = Plug.Conn.fetch_query_params(conn)
-    token = Auth.bearer_token(conn) || conn.query_params["token"]
 
-    case is_binary(token) && token != "" && Accounts.verify_user_session_token(token) do
+    user =
+      case Auth.bearer_token(conn) do
+        header when is_binary(header) and header != "" ->
+          Accounts.verify_user_session_token(header)
+
+        _ ->
+          case conn.query_params["ticket"] do
+            ticket when is_binary(ticket) and ticket != "" ->
+              Accounts.consume_sse_ticket(ticket)
+
+            _ ->
+              nil
+          end
+      end
+
+    case user do
       %{} = user ->
         conn
         |> assign(:current_user, user)

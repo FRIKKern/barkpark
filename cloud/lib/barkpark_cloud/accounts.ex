@@ -66,6 +66,19 @@ defmodule BarkparkCloud.Accounts do
   # the code off an authenticator and type it. After this the user logs in again.
   @two_factor_pending_minutes 5
 
+  # How long a minted SSE stream ticket stays redeemable, in SECONDS — NOT the
+  # house `*_minutes` idiom, because a minute is the entire budget here and
+  # minutes would be a lossy unit for it. 60s is ~20x the measured ~3000ms
+  # native EventSource reconnect delay, so a ticket comfortably survives the
+  # mint→open round trip on a slow link, while the copy of it left in an access
+  # log is worthless within a minute. The window is SELF-HEALING under the
+  # client's remint-on-error loop: an expired ticket costs exactly one extra
+  # mint round-trip, never a dead stream. The ~3000ms figure is Chrome 150 only
+  # (Safari is untested and has historically diverged on EventSource error
+  # handling), which is why the TTL sits an order of magnitude above it rather
+  # than tuned tightly against one browser.
+  @sse_ticket_validity_seconds 60
+
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
   # needs to tune it.
@@ -1957,6 +1970,113 @@ defmodule BarkparkCloud.Accounts do
     from(t in UserToken, where: t.user_id == ^user_id and t.context == "2fa_pending")
     |> Repo.delete_all()
   end
+
+  ## SSE stream tickets
+
+  ## A THIRD `user_tokens.context`, `"sse"`, riding the same polymorphic table:
+  ## the credential `GET /v1/events` accepts in its URL. It exists so that the
+  ## thing in the URL is NOT a 30-day session token. Reuses the discriminator, so
+  ## no migration: `verify_user_session_token/1` filters `context == "session"`
+  ## and rejects an SSE ticket everywhere else, and vice-versa.
+
+  @doc "The SSE ticket TTL in seconds — the value the mint route reports as `expires_in`."
+  @spec sse_ticket_validity_seconds() :: pos_integer()
+  def sse_ticket_validity_seconds, do: @sse_ticket_validity_seconds
+
+  @doc """
+  Mint a single-use SSE stream ticket (#{@sse_ticket_validity_seconds}s TTL) for
+  `user`. Returns the plaintext exactly once.
+
+  The browser's `EventSource` API cannot set request headers, so the stream
+  credential has to ride the URL and land in every access log and proxy trace.
+  This ticket is what makes that survivable: SSE-scoped, 60 seconds long, and
+  BURNED on first redemption by `consume_sse_ticket/1`, so the logged copy is
+  dead on arrival.
+
+  Mint is deliberately NON-SUPERSEDING — it never revokes the user's other live
+  tickets (the mint template is `create_two_factor_pending_token/1`, which is
+  matched-row-only; the password-reset mint, which supersedes, is NOT the model).
+  Two console tabs each hold their own ticket, and a mint in one must not evict
+  the other's unredeemed ticket: that tab would 401, which would make it remint,
+  which would evict the first — a mutual-eviction storm, one junk 401 per turn.
+  """
+  @spec create_sse_ticket(User.t()) :: {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_sse_ticket(%User{} = user) do
+    plaintext = generate_token()
+
+    expires_at =
+      DateTime.utc_now()
+      |> DateTime.add(@sse_ticket_validity_seconds, :second)
+      |> DateTime.truncate(:microsecond)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: "sse",
+      token_hash: UserToken.hash_token(plaintext),
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _token} -> {:ok, plaintext}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Redeem an SSE ticket exactly once: resolve it to its `User` and burn it in the
+  SAME transaction. Returns the `User`, or `nil` for an unknown, already-burned,
+  expired, or wrong-context token.
+
+  STRICTLY SINGLE-USE and MATCHED-ROW-ONLY. The lookup locks the ONE row matching
+  the presented hash `FOR UPDATE` and stamps `revoked_at` on THAT row before the
+  transaction commits, so two concurrent redemptions of the same plaintext
+  serialize and the loser finds it revoked. It deliberately does NOT reuse any
+  `revoke_*_tokens(user_id, …)` helper: every one of those is scoped by
+  `user_id + context` with NO `token_hash`, so burning one ticket would revoke
+  every live sibling of the same user — see the two-tab storm in
+  `create_sse_ticket/1`.
+
+  The validity filters mirror `verify_user_session_token/1` (context, then
+  `is_nil(revoked_at)`, then unexpired). `verify_two_factor_pending_token/1` is
+  explicitly NOT the model: it omits the `revoked_at` filter entirely, so a
+  burned token would still resolve through it and single-use would be
+  unenforceable.
+  """
+  @spec consume_sse_ticket(binary()) :: User.t() | nil
+  def consume_sse_ticket(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = lifecycle_now()
+
+    result =
+      Repo.transaction(fn ->
+        token =
+          Repo.one(
+            from t in UserToken,
+              where: t.token_hash == ^hash,
+              where: t.context == "sse",
+              where: is_nil(t.revoked_at),
+              where: is_nil(t.expires_at) or t.expires_at > ^now,
+              lock: "FOR UPDATE"
+          )
+
+        case token do
+          %UserToken{user_id: user_id} = t ->
+            {:ok, _burned} = Repo.update(UserToken.changeset(t, %{revoked_at: now}))
+            Repo.get(User, user_id)
+
+          nil ->
+            nil
+        end
+      end)
+
+    case result do
+      {:ok, user} -> user
+      {:error, _reason} -> nil
+    end
+  end
+
+  def consume_sse_ticket(_), do: nil
 
   ## Onboarding
 
