@@ -1459,6 +1459,92 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "peek field-visibility seal (Envelope gate)" do
+    # The board mount is UNGATED — it renders the peek to any admin board viewer.
+    # The peek hand-picks content fields straight off the raw doc, so without the
+    # Envelope cross-check a schema-declared PRIVATE field leaks. Seed a `task`
+    # schema (the SAME one `tasks/query.ex` resolves via `Content.get_schema/3`)
+    # that marks two hand-picked peek fields private, plus a doc carrying them.
+    setup do
+      {:ok, _schema} =
+        Barkpark.Content.upsert_schema(
+          %{
+            "name" => "task",
+            "title" => "Task",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{
+                "name" => "description",
+                "title" => "Body",
+                "type" => "text",
+                "visibility" => "private"
+              },
+              %{
+                "name" => "acceptance_criteria",
+                "title" => "Criteria",
+                "type" => "array",
+                "visibility" => "private"
+              }
+            ]
+          },
+          "production"
+        )
+
+      task("sec-task", "Sealed task",
+        lifecycle: "in_progress",
+        description: "SECRET-BODY-should-not-leak",
+        criteria: [
+          %{"criterion" => "SECRET-CRITERION", "met" => true, "evidence" => "SECRET-EVIDENCE"}
+        ]
+      )
+
+      :ok
+    end
+
+    test "a peek field the schema marks private is OMITTED for the ungated board viewer",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=sec-task")
+
+      # The peek opens and the always-public title still renders...
+      assert html =~ ~s(data-role="peek")
+      assert html =~ "Sealed task"
+
+      # ...but every PEEK private field is redacted to its empty value, so the
+      # panel sections that project it never render: `@peek.description` gated to
+      # nil drops `:if={@peek.description || @peek.design_doc}`, and
+      # `@peek.criteria` gated to `[]` drops `:if={@peek.criteria != []}` (and
+      # with it every `peek-criterion` / `peek-evidence` row). No empty shell
+      # hints the hidden field exists. Removing the Envelope gate makes these
+      # peek sections reappear — the mutation that proves this test bites.
+      refute html =~ ~s(data-role="peek-description")
+      refute html =~ ~s(data-role="peek-criteria")
+      refute html =~ ~s(data-role="peek-criterion")
+      refute html =~ ~s(data-role="peek-evidence")
+
+      # NOTE (scope): the same private `description` / `acceptance_criteria`
+      # values still surface via the deck card (`card-criteria`,
+      # `description_excerpt`) and the gantt (`gantt-criteria`) — SEPARATE
+      # `Board.snapshot` list-card reads this slice deliberately does not touch
+      # (brief: "peek ONLY; do NOT touch the list-card reads at ~L904/977/998").
+      # That sibling field-visibility bypass is filed as its own backlog child
+      # (task-felix-w13-boardsnapshot-fieldvis-seal), so these assertions are
+      # scoped to the peek surface, never the deck card or the gantt.
+    end
+
+    test "a peek field with NO visibility declaration stays public (legacy parity)",
+         %{conn: conn} do
+      # `labels` is undeclared in the seeded schema ⇒ `field_readable?` true ⇒ the
+      # gate is selective, not a blanket redaction of every peek field.
+      task("sec-labeled", "Labeled task", lifecycle: "open", labels: ["urgent-label"])
+
+      {:ok, _view, html} = live(conn, "/admin/projects?task=sec-labeled")
+
+      assert html =~ ~s(data-role="peek")
+      assert html =~ "urgent-label"
+    end
+  end
+
   describe "peek context & insight (wave 14)" do
     setup do
       task("ctx-grand", "Grand goal", lifecycle: "open")

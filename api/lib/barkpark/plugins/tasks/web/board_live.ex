@@ -656,25 +656,38 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         ancestors = peek_ancestors(board, Map.get(content, "parent_id"))
         subtree = peek_subtree(board, lid)
 
+        # Field-visibility seal: this panel hand-picks content fields straight
+        # off the raw doc, so — unlike the sanctioned `tasks/query.ex` read path —
+        # nothing here rides `Envelope.render`. Resolve the SAME task schema ONCE
+        # and gate every hand-picked field through the shared visibility predicate
+        # as an ANONYMOUS, fail-closed caller (mirrors `tasks/query.ex`
+        # measure_field_readable?/2). A field the schema declares private /
+        # owner_only / readable_by is redacted to its empty value so this ungated
+        # board mount can never leak it; an undeclared field stays public (legacy
+        # parity). No task field declares visibility today — fail-closed
+        # hardening, not a behavior change.
+        schema = peek_schema()
+        readable? = fn field -> peek_field_readable?(schema, field) end
+
         %{
           doc_id: lid,
           title: doc.title,
           col: card && card.col,
           lifecycle_status: Map.get(content, "lifecycle_status") || "open",
-          priority: Map.get(content, "priority"),
-          parent_id: Map.get(content, "parent_id"),
-          labels: (card && card.labels) || [],
+          priority: if(readable?.("priority"), do: Map.get(content, "priority")),
+          parent_id: if(readable?.("parent_id"), do: Map.get(content, "parent_id")),
+          labels: if(readable?.("labels"), do: (card && card.labels) || [], else: []),
           github: card && card.github,
-          claim: peek_claim(content),
-          description: presence(Map.get(content, "description")),
-          design_doc: presence(Map.get(content, "design_doc")),
-          criteria: peek_criteria(content),
+          claim: if(readable?.("claim"), do: peek_claim(content)),
+          description: if(readable?.("description"), do: presence(Map.get(content, "description"))),
+          design_doc: if(readable?.("design_doc"), do: presence(Map.get(content, "design_doc"))),
+          criteria: if(readable?.("acceptance_criteria"), do: peek_criteria(content), else: []),
           ancestors: ancestors,
           subtree: subtree,
           tree: peek_tree(board, lid, ancestors, subtree),
           blockers: peek_blockers(doc.id),
           blocks: peek_blocks(doc.id),
-          events: peek_events(lid),
+          events: if(readable?.("events"), do: peek_events(lid), else: []),
           created_at: doc.inserted_at,
           updated_at: doc.updated_at
         }
@@ -705,6 +718,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset,
         limit: 1
       )
+    )
+  end
+
+  # Resolve the task schema for the peek field-visibility cross-check,
+  # dataset-scoped to the board's own `@dataset` (mirrors `tasks/query.ex`
+  # load_task_schema/3). nil on miss ⇒ every field undeclared ⇒ public (legacy
+  # parity), never a crash. One indexed `Repo.one` per peek open/refresh.
+  defp peek_schema do
+    case Content.get_schema("task", @dataset, []) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
+
+  # ANONYMOUS + fail-closed field-visibility check (mirrors `tasks/query.ex`
+  # measure_field_readable?/2). A declared private / owner_only / readable_by
+  # field is denied to the ungated board viewer; an undeclared field is public.
+  defp peek_field_readable?(schema, field) do
+    Barkpark.Content.Envelope.field_readable?(
+      schema,
+      field,
+      Barkpark.Content.CallerContext.anonymous()
     )
   end
 
