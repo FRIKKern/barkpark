@@ -2142,6 +2142,41 @@
     html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
       content: none;
     }
+    /* THE STANDARD BUCKET IS RULED, NOT LEFT TO ARITHMETIC (charter D175/D187;
+       D127 harden). A clean standard desk never brings the pane under the
+       860px generator — panel = vw − 44, which crosses 860 only at
+       viewport ≤ 904, inside `narrow` — but the COMPOUND state is real and
+       was executed on the deployed build: a 360px `.bp-secondary-pane` opened
+       on a task survives navigation into a paper (`Scope.select/2` is
+       push_patch, so `secondary_doc` rides along), and at standard/1024 the
+       pane is 620 = 1024 − 44 − 360 exactly. The generator matched and
+       PAINTED — mean luminance over the reading column 240.493 → 175.104
+       (Δ 65.389) — the exact half-suspended read D127 ruled a defect, with
+       the inspector genuinely docked beside the prose it dims. No suppressor
+       covered standard + `[data-user-opened]`: the b29 guard excludes
+       user-opened, the narrow/phone rule above is bucket-scoped away, and
+       D170's is wide-only. This rule closes that gap.
+
+       BOTH HALVES SHIP, DELIBERATELY (D175/D199). The behavioural half clears
+       `secondary_doc` on primary-document navigation; this suppressor is the
+       CSS half, and neither stands down because the other exists. Resting an
+       abolition on a routing invariant alone is precisely the mistake D170
+       already made once: its supporting arithmetic — panel = vw − 304 at
+       every wide viewport — is FALSIFIED the moment a 360px secondary pane
+       is open. Wide stays safe today only because D170's kill switch above
+       is UNCONDITIONAL — specificity (0,4,2) over the generator's (0,3,1) —
+       not because the geometry holds. An invariant can break; the
+       suppressor cannot.
+
+       Same idiom as the narrow/phone sibling directly above: `content: none`
+       on the `::after` generates no box at all — zero rendered scrims, not a
+       transparent one. Specificity (0,5,1) over the generator's (0,3,1) and
+       later in source order, so it wins on both counts; and it sits OUTSIDE
+       the 860px @container on purpose, unbounded by pane width, so no future
+       pane composition can slip back under the threshold and re-dim. */
+    html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
+      content: none;
+    }
     .bp-doc-sidebar__head {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
