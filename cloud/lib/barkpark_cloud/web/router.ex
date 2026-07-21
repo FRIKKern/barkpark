@@ -281,6 +281,27 @@ defmodule BarkparkCloud.Web.Router do
   # only layer that can drop it for a `send_file/3` response too. It runs BEFORE
   # `Plug.Static` so HEAD /favicon.ico and HEAD /app.css are honest as well, and
   # AFTER the www→apex canonicalization so a HEAD still gets the 308.
+  #
+  # …but HEAD-as-GET is only honest for routes that READ. A handful of GETs
+  # MUTATE, and `Plug.Head` hands them to every unfurler, prefetcher, AV link
+  # scanner and uptime checker on the internet. Measured over a real Bandit
+  # socket: `HEAD /v1/auth/oauth/github/callback` ran the whole with-chain
+  # (state consume → identity fetch → user create → session-token mint) and
+  # answered `302` with a LIVE session token verbatim in the `location` header,
+  # because Bandit suppresses only the BODY on HEAD (`send_resp_body?/1`,
+  # adapter.ex:263) — `send_headers/4` runs unconditionally. Same probe also
+  # BURNED the single-use state nonce, so the user's own click then failed.
+  # Note the shape: this exposure was CREATED by the HEAD-honesty fix above.
+  # Two individually-correct fixes jointly producing a defect.
+  #
+  # So: fence the side-effecting GETs BEFORE the rewrite. It has to be here.
+  # `Plug.Head.call/2` is `%{conn | method: "GET"}` and stashes nothing — no
+  # assign, no private — so by the time control reaches a route, HEAD-ness is
+  # destroyed and a per-route short-circuit is IMPOSSIBLE, not merely inferior
+  # (D11). One fenced greppable list is also directly mutation-testable: drop an
+  # entry and its test reds.
+  plug(:refuse_head_on_side_effecting_gets)
+
   plug(Plug.Head)
 
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
@@ -415,6 +436,57 @@ defmodule BarkparkCloud.Web.Router do
       query -> base <> conn.request_path <> "?" <> query
     end
   end
+
+  # The side-effecting-GET fence (see the block above `plug(Plug.Head)`).
+  #
+  # Answers 405 + `allow: GET` — NOT 404 (D12). "This path exists, that method is
+  # refused" is the honest answer; 404 is the exact lie `plug(Plug.Head)` was
+  # landed to remove, and re-telling it here would undo that fix on these paths.
+  #
+  # Matching is on `conn.path_info` SEGMENT LISTS, never a string prefix (D14).
+  # This plug runs before `:match`, so `conn.path_params` is EMPTY — there is no
+  # `:provider` to read — and the initiator and the callback share a prefix, so a
+  # `String.starts_with?("/v1/auth/oauth")` guard would be both over-broad (it
+  # would swallow the read-only providers list) and under-specific. The segment
+  # arity does the discrimination for free.
+  #
+  # COVERAGE BOUNDARY, stated deliberately: this list fences exactly TWO routes,
+  # and 2 is a FLOOR, not a ceiling. It does NOT cover the 45 authenticated GETs
+  # on which a bare HEAD also performs a DB write (every authenticated request
+  # touches `user_tokens.last_used_at`) — that is a property of AUTHENTICATION,
+  # not of any route, so there is no route subset to carve out, and denying HEAD
+  # across 45 of the 56 top-level GETs would reinstate the 404 lie on four fifths
+  # of the API (D34). Out of scope BY DECISION. Do not grow this list to cover
+  # them. Full measurement lives on task cch-w2-head-sideeffect-fence.
+  defp refuse_head_on_side_effecting_gets(%Plug.Conn{method: "HEAD"} = conn, _opts) do
+    if side_effecting_get?(conn.path_info) do
+      conn
+      |> put_resp_header("allow", "GET")
+      |> json(405, %{error: "method_not_allowed"})
+      |> halt()
+    else
+      conn
+    end
+  end
+
+  defp refuse_head_on_side_effecting_gets(conn, _opts), do: conn
+
+  # `/v1/auth/oauth/providers` is a READ (the SPA's button list) and shares the
+  # initiator's segment arity, because `get "/v1/auth/oauth/providers"` is
+  # declared BEFORE `get "/v1/auth/oauth/:provider"` and wins the match. It must
+  # be excluded FIRST or this fence would 405 a harmless read — the concrete form
+  # of the D14 trap.
+  defp side_effecting_get?(["v1", "auth", "oauth", "providers"]), do: false
+
+  # Mints an `oauth_states` row per hit (OAuth.authorize_url → mint_state), on an
+  # UNAUTHENTICATED route.
+  defp side_effecting_get?(["v1", "auth", "oauth", _provider]), do: true
+
+  # Consumes the single-use state nonce, may CREATE a user, and mints a live
+  # session token that it returns in the `location` header.
+  defp side_effecting_get?(["v1", "auth", "oauth", _provider, "callback"]), do: true
+
+  defp side_effecting_get?(_path_info), do: false
 
   @doc """
   A `Plug.Parsers` `:body_reader` that caches the RAW request body on

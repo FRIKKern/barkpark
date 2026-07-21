@@ -204,6 +204,12 @@ config :barkpark_cloud, Oban,
        # `bp login` flows). Pure hygiene — expiry is enforced in-band by every
        # DeviceAuth query — so it rides the cheap :maintenance queue.
        {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
+       # cch-w2: the same sweep for abandoned OAuth `state` nonces. Both oauth
+       # GET legs insert a row per hit on an UNAUTHENTICATED route and only the
+       # REDEEMED row was ever deleted, so every bounced consent screen leaked a
+       # tombstone. Expiry is enforced in-band by verify_state/consume_state —
+       # pure hygiene, so it rides :maintenance beside its twin above.
+       {"* * * * *", BarkparkCloud.Workers.OAuthStateReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
