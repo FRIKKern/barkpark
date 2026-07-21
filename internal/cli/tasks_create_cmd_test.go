@@ -1,9 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
 // The two fields the task schema REQUIRES at creation — the whole reason this
@@ -74,6 +81,74 @@ func TestParseTaskCreateArgs_Errors(t *testing.T) {
 		if _, _, err := parseTaskCreateArgs(tc); err == nil {
 			t.Errorf("parseTaskCreateArgs(%v) = nil error, want error", tc)
 		}
+	}
+}
+
+// tlv-s6 (TLV charter D14): the create receipt echoes the lifecycle_status the
+// task was born with — a birth-as-considering must be visible, never silently
+// assumed "open". Runs the real runTaskCreate against a stub mutate endpoint.
+func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			io.WriteString(rw, `{"results":[{"id":"drafts.task-9"}]}`)
+			return
+		}
+		rw.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	cases := []struct {
+		name string
+		tail []string
+		want string
+	}{
+		{"default open", []string{"a task"}, "open"},
+		{"born considering", []string{"a task", "--set", "lifecycle_status=considering"}, "considering"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var so, se bytes.Buffer
+			w := &writer{stdout: &so, stderr: &se, output: "json"}
+			if code := runTaskCreate(w, globals{yes: true}, ctx, tc.tail); code != exitOK {
+				t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+			}
+			var receipt struct {
+				ID              string `json:"id"`
+				Draft           string `json:"draft"`
+				Status          string `json:"status"`
+				LifecycleStatus string `json:"lifecycle_status"`
+			}
+			if err := json.Unmarshal(so.Bytes(), &receipt); err != nil {
+				t.Fatalf("receipt did not parse: %v (%q)", err, so.String())
+			}
+			if receipt.ID != "task-9" || receipt.Draft != "drafts.task-9" || receipt.Status != "draft" {
+				t.Fatalf("receipt = %+v, want id task-9 / draft drafts.task-9 / status draft", receipt)
+			}
+			if receipt.LifecycleStatus != tc.want {
+				t.Fatalf("receipt.lifecycle_status = %q, want %q", receipt.LifecycleStatus, tc.want)
+			}
+		})
+	}
+}
+
+// The human (non-machine) receipt line names the born lifecycle too.
+func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-3"}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	tail := []string{"a task", "--set", "lifecycle_status=considering"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, tail); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	if got := so.String(); !strings.Contains(got, "lifecycle considering") {
+		t.Fatalf("human receipt %q does not name the born lifecycle", got)
 	}
 }
 

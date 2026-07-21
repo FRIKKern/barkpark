@@ -113,15 +113,21 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		status = "published"
 	}
 
+	// tlv-s6 (TLV charter D14): the receipt echoes the lifecycle_status the
+	// task was actually born with (the body value the server accepted — default
+	// "open", overridable via --set), so a birth-as-considering is visible in
+	// the receipt instead of silently assumed open.
+	born := body["lifecycle_status"]
 	if out.machineOut() {
 		out.renderJSON(map[string]any{
-			"id":     bareID,
-			"draft":  draftID,
-			"status": status,
+			"id":               bareID,
+			"draft":            draftID,
+			"status":           status,
+			"lifecycle_status": born,
 		})
 		return exitOK
 	}
-	out.outf("created task %s (%s)", bareID, status)
+	out.outf("created task %s (%s, lifecycle %v)", bareID, status, born)
 	return exitOK
 }
 
