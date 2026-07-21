@@ -1632,3 +1632,115 @@ is upstream of the store backfill writes into. Then `tgw5-corpus-backfill`
 (after screen + mint + census are on `origin/main`, proven BY CONTENT per D40)
 and `tgw5-fold-hardening` (after leads). Round 2 is where this epic's central
 claim finally gets tested at a row count where an honest empty is informative.
+
+### Wave 2026-07-21 — bind the answer to the tree. Round 1. Grade A−.
+
+Paper: `source-of-truth-grip-wave-6-2026-07-21`. Four round-1 slices built and
+reviewed; slices 5-7 deferred by design (sequenced-rounds law, now 8-for-8), not
+stalled.
+
+**Landed** (every final branch carries a reviewer `-r` commit — merge the `-r`
+variant, never the original):
+
+| Slice | Final branch | What |
+|---|---|---|
+| `tgw6-binding-classifier` | `…classify-what-every-stored-recipe-is-anc-0-r` | `binding.mjs` (+867 lines) + 63 tests: five classes keyed on REF IDENTITY per D73, 17 named rules with `is_default` flags, `exit_masked` + `exit_mask_rule`, `cd_prefix` recorded and never weighed. Gated on the 652-proof corpus per D81. |
+| `tgw6-self-provenance` | `…make-every-grip-verb-say-which-tree-it-i-1-r` | `provenance.mjs` + 22 tests: four facts, four batched git calls, STDERR only (D78), TOTAL by construction, no fetch. Wired into `census.mjs` / `acceptance.mjs` / `cli.mjs`, and `cli.mjs` finally got the entry guard it never had. |
+| `tgw6-fold-rederives-key` | `…stop-the-store-rendering-a-line-count-as-2-r` | `foldLedger` keys on `quantityPhrase(rerun)` and re-derives `derived_level`, closing `tgw2-fold-reread-derived-level` in the same seam. Stored values survive as drift signals; fallbacks are NAMED and counted. |
+| `tgw6-leads-subject-first` | `…make-leads-answer-about-the-subject-you--3-r` | `matchesQuery` matches the SUBJECT by default, command text behind `--cmd` and COUNTED, `MATCH_RULE` printed verbatim on every render. |
+
+**The measured outcomes, all re-derived on the integrated tree.** The store goes
+48 subjects → 62 with **0 rival methods** (from 4), and not one byte on disk
+changed — `git diff … -- tooling/grip/ledger/` is empty, which is the whole
+point of D77's ruling. `census --ledger` stops printing "9 recipes for
+`git:show`". `leads origin/main` goes 51 rows → 0 with the honest empty naming
+the 51 and the flag. The 62-row binding census is
+`{content-addressed 0, shared-ref 51, per-worktree 2, cwd-bound 7,
+foreign-tree-pinned 2}` with **zero** else-branch verdicts, and on the 652-proof
+corpus the grammar's else share is 4.8% against a naive 3-way rule's 89.0% — the
+unflattering 61.3% "a trivial always-cwd-bound classifier would agree" is printed
+beside it rather than omitted. All four branches merge clean into `origin/main`
+and into each other: **565 tests / 564 pass / 0 fail / 1 skipped** on the
+integrated tree, with `fold`, `census --ledger`, `leads` and `leads --json` all
+green.
+
+**Defects the review found and fixed** — three of the four are the epic's own
+disease inside the tooling built to cure it:
+
+1. **A FABRICATED honest warning, on 7.1% of the corpus.** `binding.mjs` split
+   pipelines over the RAW statement while every other scan ran over the
+   quote-masked copy, so a quoted grep alternation read as a pipe:
+   `grep -nE "foo|bar" x` reported `exit_masked: true` / `MASK-PIPE-SILENT` on a
+   command containing no pipe at all. Measured: **46 of 652 proofs**. Zero
+   `binding_class` verdicts move, so every census number in the slice's evidence
+   stands. A module whose product is honest warnings cannot ship a fabricated one.
+2. **A confidently WRONG diagnosis in the provenance banner.** Node raises the
+   identical `{ code: "ENOENT", path: "git" }` for a missing binary and a missing
+   cwd, so `treeProvenance` told anyone whose worktree had been pruned that "git
+   is not on PATH". Now disambiguated (`no-such-cwd` / "NO SUCH DIRECTORY"), with
+   a test that also asserts a real non-repo still reports `NOT_A_REPO` so the new
+   arm cannot swallow the old one.
+3. **Silent absorption of the wave's own headline number.** The fold restates
+   **57 of 62** stored keys and NOTHING rendered it — `census --ledger` printed
+   "rival methods 0" with no hint that the clean number is a property of the READ
+   rather than of the DATA. Two lines added to the preamble: the restatement
+   counts, and separately the FALLBACK counts, which are the only signal the fold
+   could still be keying on a stale value.
+4. **A false statement in the honesty footer itself.** `NO_VALUE_FOOTER` — printed
+   to the user on every `leads` render — claimed the fold rebuilds each recipe
+   from "six NAMED fields". It is twelve after this wave. The guarantee was never
+   the count; all three sites now say "a NAMED ALLOWLIST". The header's claim that
+   `tgw2-fold-reread-derived-level` is an OPEN defect was fixed the same way.
+   Closes `tgw6-leads-header-stale-after-fold-rederive`, filed by a builder who
+   correctly judged it a merge-conflict risk mid-round — it stopped being one once
+   the review made the shared hunk byte-identical on both branches.
+
+Also pre-resolved: the wave's ONE genuine merge conflict. Two round-1 slices edit
+the same line of `leads.mjs`, and resolving it the wrong way makes
+`level_restated` read `false` forever — the drift annotation retiring in silence.
+Both branches now carry that hunk byte-for-byte identically, so it merges without
+anyone adjudicating it.
+
+**Ledger audit.** Clean, and the best-stamped wave of the six. All four built
+slices left `lifecycle: in_progress` with only the merge-gated criterion open,
+every other criterion stamped with quoted run output as the work happened.
+`tgw6-leads-subject-first` criterion 2 is a stamped honest **`--miss`** with the
+full measurement (`leads js` 30 → 30, `cmd_only_recipes` 0) and a filed
+follow-up, rather than a criterion quietly re-read to fit. Nine backlog tasks
+filed by builders and Decide are present and published; no task outside this wave
+was touched. Review writes: a `review_note` on each of the four naming the final
+`-r` branch, `tgw6-leads-header-stale-after-fold-rederive` closed 3/3, and one
+new task filed — see below.
+
+**What this wave did NOT prove, and one charter line that needs reading
+narrowly.** The wave-6 section above says "after round 1, an agent in any
+worktree types `node tooling/grip/ledger.mjs leads internal/cli` and the first
+thing it learns is WHICH TREE the answer is about". **That is a round-2
+statement, not a round-1 one.** `ledger.mjs` is deliberately excluded from
+`tgw6-self-provenance`'s fence, so after this round the banner reaches
+`census`, `acceptance` and `cli` — and the `leads` verb the sentence names has
+no banner until `tgw6-leads-declares-binding` lands. Same shape for the
+classifier: after round 1 the binding of every row is COMPUTABLE and nothing
+RENDERS it. Round 1 buys a correct instrument and no visible answer, exactly as
+D41 warned about round 0 last time.
+
+And the wish's second half — "then measure whether leads beats grep" — was not
+measured, by any slice, because no slice covered it. D79's head-to-head (10 of 10
+against a repo-wide grep, 8 of 10 against a scoped one, **3 of 20** corrected for
+precision) was measured against the concatenated haystack `tgw6-leads-subject-first`
+just removed, so quoting it after this merge is the D23/D37/D52 stale-figure class
+for the fourth time. Filed as `tgw6-leads-vs-grep-remeasured` (p1) with the
+predeclare-the-term-list discipline written into its criteria, because a term list
+assembled after seeing results is shopping for a number.
+
+**What the next wave inherits.** Merge round 1 as ONE unit, in dependency order:
+`binding-classifier-r` (carries this charter entry), then `self-provenance-r`,
+then `fold-rederives-key-r`, then `leads-subject-first-r`. All four are proven to
+merge clean in that order and in any other. Then dispatch round 2 as its
+dependencies land — `tgw6-mint-binds-to-caller` needs only the classifier;
+`tgw6-census-binding-report` needs the classifier and provenance;
+`tgw6-leads-declares-binding` needs all four, and it is the slice that finally
+makes the wave's headline true for the verb an agent actually types. Then
+`tgw6-leads-vs-grep-remeasured`, which cannot honestly run before round 2 ships,
+and which is the only thing that will tell this epic whether its read path earns
+the typing.
