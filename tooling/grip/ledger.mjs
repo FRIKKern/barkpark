@@ -936,5 +936,14 @@ async function main(argv) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  main(process.argv.slice(2)).then((code) => process.exit(code));
+  // `main` became async when `write` landed (it dynamically imports mint.mjs
+  // and screen.mjs). An unhandled rejection is a NAMED failure here, never a
+  // bare stack trace and never a silent exit: a store whose CLI dies quietly
+  // is indistinguishable from a store that wrote nothing on purpose.
+  main(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`ledger: crashed before any write — ${err?.stack ?? err?.message ?? String(err)}\n`);
+      process.exit(2);
+    });
 }
