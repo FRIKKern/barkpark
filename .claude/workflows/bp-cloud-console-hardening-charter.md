@@ -130,3 +130,49 @@ rows still at census-grade L4 confidence.
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
+
+### Wave 2026-07-21 (1) — round 1 built and reviewed, grade A−
+
+First wave against the successor. Six round-1 slices built, all six green, all six reviewed. Rounds
+2 and 3 (`cch-w2-head-sideeffect-fence`, `cch-w3-sse-ticket`) were **not** built — deferred by the
+sequenced-rounds law, not stalled.
+
+| Slice | Final branch | Reviewer verdict |
+|---|---|---|
+| `cch-w1-refetch-storm` | `…/overview-stops-refetching-everything-sco-0-r` | 40→12 requests, mutation-proved. Reviewer cleared the per-account `overviewData` snapshot on sign-out. |
+| `cch-w1-peer-ip-pin` | `…/the-console-stops-telling-every-user-the-1-r` | D5/D6/D7 all honoured; the `{172,18,0,77}` anti-widening test is the deliverable. Reviewer made nil config fail closed and wrote the deploy step into the compose file. |
+| `cch-w1-cssom-ci-wiring` | `…/wire-cssom-parity-into-ci-as-a-node-22-j-2` (PR #5290) | Job green on the real runner; D20 floor re-mutation-proved by the reviewer (1201→1188, MISSES 0, exit 1). No fixes needed. |
+| `cch-w1-emit-marker-fence` | `…/emit-mjs-write-stops-silently-deleting-h-3-r` | Fence refuses and names the lines, on both artifact classes. Reviewer added `check.mjs` Part I so the fence's own predicates can red the gate. |
+| `cch-w1-ledger-close-guard` | `…/close-the-ledger-s-back-door-v1-data-mut-4-r` | Both patch clauses fenced per D22. Reviewer added a behavioural tripwire pinning the copied terminal set to `close.ex`'s own list. |
+| `cch-w1-census-disposition` | none (ledger-only by design) | 6 rows evidence-closed; three brief claims measured WRONG. |
+
+**Grade: A−.** Every slice mutation-proved its own gate before claiming green, and every builder
+volunteered its own blind spots unprompted. Held back from A by two things: the peer-IP fix is
+unproven above unit level and needs a one-time operator step before it can be proven at all, and
+four of five branches arrived unpushed because the spawn prompt and the task brief gave opposite
+push instructions.
+
+**Three things the next wave must carry.**
+
+1. **LAW 3 HAS A COUNTEREXAMPLE — amend your priors.** The charter says census staleness is always
+   in the safe direction (rows more done than claimed). `cch-w1-census-disposition` found the
+   opposite on `gr-backlog-provider-reconnect`: the DB half shipped while `app.js:1959-1964` still
+   asserts "no unique index, no 409", so the census claimed MORE done than reality. Three of the
+   fourteen rows that pass named were mis-stated — roughly one in four. Treat the untouched ~55
+   Band 1/3/6 rows as unreliable in **both** directions.
+2. **THE PUSH INSTRUCTION MUST BE SINGULAR.** Four of five builders held their branches because the
+   spawn prompt said "do not push" while the task brief said "push and open a PR". Every one of them
+   flagged it, correctly, and every one chose the restrictive reading. The reviewer pushed all four
+   `-r` branches. Fix the prompt, not the builders.
+3. **`bp doc create` NESTS UNDER `content` AND THE CLI SWALLOWS THE WALL'S `details`.** A publish
+   rejection reports only "label spine" with a generic hint; the actual rule ("a rationale must be
+   at least 20 characters") is present **only** in the `details` object returned by
+   `POST /v1/data/mutate` over HTTP. Two builders lost time to this; so did the reviewer. File rows
+   over HTTP with the flat fields inside `content`, and read `details` from the raw response.
+
+**Next wave takes round 2 then round 3, in dependency order** — `cch-w2-head-sideeffect-fence`
+rebased onto the merged peer-IP pin, then `cch-w3-sse-ticket` rebased onto both that and the merged
+refetch slice. Alongside them: the epoch-only close fence (the CAS escape this wave shipped is not
+authorization — anyone who can read a task can still close it), `cch-w2-ledger-close-guard-create-ops`
+(the `createOrReplace` door is still open), and `cch-hg-compose-network-recreation`, which gates the
+only production proof the peer-IP pin can ever get.
