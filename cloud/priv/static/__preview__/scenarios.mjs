@@ -540,6 +540,19 @@ const accountSessionsTall = Array.from({ length: 9 }, (_, i) => ({
   current: i === 0,
 }));
 
+// cch-w2-revoke-click-oracle — the REVOKE shape: the acting device plus THREE
+// revokable others. Three, not one, so the two legs stay distinguishable after
+// the click oracle drives them in sequence: revoking one row leaves 4→3 rows
+// (2 still revokable), and the subsequent "sign out everywhere" then reports
+// revoked:2 — a count that is neither 0 (the generic-200 false green) nor any
+// constant a client could have invented.
+const accountSessionsRevoke = [
+  { id: "sess_here", user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/126.0", ip_address: "84.212.31.7", last_used_at: tMinus(60), current: true },
+  { id: "sess_phone", user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5) Safari/605.1", ip_address: "84.212.31.8", last_used_at: tMinus(3 * 3600), current: false },
+  { id: "sess_cli", user_agent: "barkpark-cli/0.9", ip_address: "84.212.31.9", last_used_at: tMinus(2 * 86400), current: false },
+  { id: "sess_old", user_agent: "Mozilla/5.0 (X11; Linux x86_64) Firefox/128.0", ip_address: "84.212.31.10", last_used_at: tMinus(9 * 86400), current: false },
+];
+
 // ── me / subscription helpers ────────────────────────────────────────────────
 // onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
 // vocabulary is CLOSED — subscription | instance | published_doc — and the
@@ -2575,6 +2588,24 @@ export const SCENARIOS = {
       accountSessions: accountSessionsTall,
     },
   },
+  // cch-w2-revoke-click-oracle. The only scenario in this file driven by real
+  // CLICKS rather than a deep link: smoke.mjs clicks #acct-btn, then a row's
+  // Revoke, then Sign-out-everywhere, and reads what the REAL code path paints.
+  // Named with the `account-modal` prefix, which (as GR76 notes) auto-enrols it
+  // in shoot.sh's screenshot set — intended, so the revoke state gets an eye too.
+  "account-modal-revoke": {
+    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessionsRevoke,
+    },
+  },
   "account-modal-2fa-badcode": {
     label: "Account modal — enrollment rejected: 422 invalid_otp, inline in the #pw-error grammar (never a toast)",
     authed: true,
@@ -2610,11 +2641,24 @@ export const SCENARIOS = {
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
 export const DEFAULT_SCENARIO = "empty";
 
-// route(name, method, path) → { status, body } | null.
+// The account modal's live session list, as a MUTABLE per-boot store when the
+// caller supplies a state bag (smoke.mjs) and as the read-only fixture when it
+// does not (mock.js). Copies each row so a revoke can never leak across boots
+// by mutating the module-level fixture.
+function sessionsOf(d, state) {
+  if (!state) return (d.accountSessions || []).slice();
+  if (!state.sessions) state.sessions = (d.accountSessions || []).map((s) => Object.assign({}, s));
+  return state.sessions;
+}
+
+// route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
 //   depends on server-side filtering for these fixtures).
-export function route(name, method, path) {
+//   `state` is an OPTIONAL per-boot mutable bag for routes that must actually
+//   change something (see sessionsOf). Omitting it keeps every route stateless,
+//   which is what the browser harness (mock.js) does.
+export function route(name, method, path, state) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
   const p = String(path || "").split("?")[0];
@@ -2699,8 +2743,45 @@ export function route(name, method, path) {
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
   // of the modal's couldn't-load state.
+  //
+  // cch-w2-revoke-click-oracle — the list is now served from a per-boot STORE
+  // when the caller supplies one, so the two DELETEs below actually change it.
+  // With a stateless fixture the list is byte-identical before and after a
+  // revoke, so a per-row revoke that never fired is indistinguishable from one
+  // that did: the check passes either way (D39). smoke.mjs passes a store;
+  // mock.js (3 args) does not, and keeps the old read-only behaviour.
   if (p === "/v1/account/sessions" && method === "GET") {
-    return { status: 200, body: { sessions: d.accountSessions || [] } };
+    return { status: 200, body: { sessions: sessionsOf(d, state) } };
+  }
+  // DELETE /v1/account/sessions/:id → revoke ONE session. Mirrors router.ex
+  // (`revoke_user_session/2`): 200 {ok} on a hit, 404 not_found on a miss.
+  // Before this handler existed the request fell through to the generic
+  // `/v1/` 200 {} at the bottom of route(), so the row vanished from the
+  // re-render for no reason other than the fixture being static.
+  const sessOne = p.match(/^\/v1\/account\/sessions\/([^/]+)$/);
+  if (sessOne && method === "DELETE") {
+    const list = sessionsOf(d, state);
+    const i = list.findIndex((s) => s.id === sessOne[1]);
+    if (i < 0) return { status: 404, body: { error: "not_found" } };
+    if (state) list.splice(i, 1);
+    return { status: 200, body: { ok: true } };
+  }
+  // DELETE /v1/account/sessions → "sign out everywhere", 200 {revoked: N}.
+  // N counts the OTHER sessions, never the acting one — router.ex keeps the
+  // caller alive via `except: Auth.bearer_token(conn)`. This is the ONE
+  // destructive route in the console whose toast interpolates a SERVER value
+  // ((r.data.revoked || 0) at app.js:1005), so without this handler the
+  // generic 200 {} made the console announce "0 session(s) revoked." after
+  // revoking real ones. The live route is honest; the harness was not.
+  if (p === "/v1/account/sessions" && method === "DELETE") {
+    const list = sessionsOf(d, state);
+    const others = list.filter((s) => !s.current);
+    if (state) {
+      const keep = list.filter((s) => s.current);
+      list.length = 0;
+      for (const s of keep) list.push(s);
+    }
+    return { status: 200, body: { revoked: others.length } };
   }
   // gr-p5-account-2fa: the five password-free two-factor routes. Overridable per
   // scenario (d.twoFactorConfirm) so the 422 invalid_otp / not_enrolled arms are

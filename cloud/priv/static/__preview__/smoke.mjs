@@ -30,45 +30,201 @@ const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
 // An element is a plain bag of the props app.js reads/writes. The critical
 // invariant: getElementById(id) and querySelector("#id") return the SAME object
 // across calls (a registry), so an innerHTML the app writes to #fleet-body is
-// still there when the assertion reads it back. Wiring calls (addEventListener,
-// classList, focus, sub-tree querySelector) are inert — we observe markup, not
-// behaviour.
+// still there when the assertion reads it back.
+//
+// cch-w2-revoke-click-oracle — THE SHIM IS NOW CLICK-CAPABLE. It used to be
+// incapable four independent ways, which is why no scenario had ever exercised
+// a click path for ANY button:
+//   (a) addEventListener DROPPED its handler,
+//   (b) click() was a no-op,
+//   (c) querySelectorAll always answered [] because innerHTML was an opaque
+//       string, so a delegate loop over freshly-rendered rows wired nothing,
+//   (d) there was no `isConnected` at all — and app.js guards three async
+//       render paths with `if (!box.isConnected) return;` (:1072 loadSessions,
+//       :2256, :10561). Every one of them bailed before painting, so the
+//       account modal's session list had NEVER rendered through the real code
+//       path here (account-modal-tall regex-splices rows in by hand to work
+//       around exactly this).
+//
+// What is modelled and what is NOT — read this before writing a new check:
+//   • innerHTML is a real accessor. Setting it re-parses; appendChild appends
+//     the child's serialization, so a mounted node is observable in innerHTML.
+//   • The parse is FLAT, not a tree: open tags become sibling stubs. Nesting,
+//     text nodes and closing-tag structure are not modelled — a parsed stub's
+//     own innerHTML is always "".
+//   • The whitelist is DELIBERATELY only `button` and `a` — the leaf controls a
+//     click oracle needs. It must NOT be widened to containers. app.js has
+//     paths shaped like `var box = panel.querySelector(".fleet-body") || panel;`
+//     (mountUsageTab, app.js:14321), which fall back to the panel precisely
+//     because a harness may not resolve the sub-query. Parsing `div` hands
+//     those paths a DETACHED stub instead: the write lands on a node whose
+//     content this flat parse cannot reflect back into its parent, so the panel
+//     reads empty and six pre-existing scenarios go red. Modelling that
+//     properly means a real tree; until someone builds one, containers stay
+//     unparsed and those fallbacks keep working.
+//   • Selectors: a single `.class` (and a bare `#id`) only. Anything richer
+//     answers [] / null rather than throwing, so a compound selector silently
+//     matches NOTHING. ⇒ EVERY click-driven check MUST assert a positive
+//     click count (the `fired` idiom below); otherwise an empty node list reads
+//     as a clean pass and you have written a false green inside the harness
+//     whose whole job is to catch them.
+const PARSED_TAGS = "button|a";
+const TAG_RE = new RegExp("<(" + PARSED_TAGS + ")\\b([^>]*?)/?>", "gi");
+const ATTR_RE = /([\w:.-]+)="([^"]*)"/g;
+const CLASS_SEL = /^\.[\w-]+$/;
+const ID_SEL_SUB = /^#[\w-]+$/;
+
+// Flat scan: every whitelisted OPEN tag in `html` becomes a sibling stub
+// carrying its double-quoted attributes (so getAttribute("data-id") answers a
+// real value). Deliberately not a parser — see the contract above.
+function parseChildren(html, makeEl) {
+  const out = [];
+  TAG_RE.lastIndex = 0;
+  let m;
+  while ((m = TAG_RE.exec(html)) !== null) {
+    const el = makeEl("", m[1]);
+    const raw = m[2] || "";
+    ATTR_RE.lastIndex = 0;
+    let a;
+    while ((a = ATTR_RE.exec(raw)) !== null) el.setAttribute(a[1], a[2]);
+    el.disabled = /\bdisabled\b/.test(raw);
+    out.push(el);
+  }
+  return out;
+}
+
+// Serialize a mounted node back into its parent's innerHTML, so appendChild is
+// observable. Attribute order is stable (class first, then insertion order).
+function serializeEl(el) {
+  if (!el) return "";
+  const tag = String(el.tagName || "div").toLowerCase();
+  let attrs = "";
+  if (el.className) attrs += ' class="' + el.className + '"';
+  for (const k of Object.keys(el._attrs || {})) {
+    if (k === "class") continue;
+    attrs += " " + k + '="' + el._attrs[k] + '"';
+  }
+  return "<" + tag + attrs + ">" + (el.innerHTML || "") + "</" + tag + ">";
+}
+
 function makeDom() {
   const registry = new Map();
 
-  function makeEl(id) {
+  function makeEl(id, tagName) {
+    // Backing state for the innerHTML accessor: the serialized markup and the
+    // flat child list parsed out of it (plus anything appendChild mounted).
+    let html = "";
+    let kids = [];
+    const handlers = Object.create(null);
+    const attrs = Object.create(null);
+
     const el = {
       id: id || "",
-      innerHTML: "",
+      tagName: (tagName || "div").toUpperCase(),
       textContent: "",
       value: "",
       hidden: false,
       className: "",
       disabled: false,
+      // (d) The fourth incapacity. Present and true: every element this shim
+      // hands out is mounted, so the isConnected guards let their render run.
+      isConnected: true,
       style: {},
       dataset: {},
       scrollTop: 0,
       scrollHeight: 0,
       clientHeight: 0,
       parentNode: null,
+      // Exposed for serializeEl only (a mounted node must round-trip into its
+      // parent's innerHTML); app.js never reads it.
+      _attrs: attrs,
       classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-      addEventListener() {},
-      removeEventListener() {},
-      setAttribute() {},
-      removeAttribute() {},
-      getAttribute() { return null; },
-      hasAttribute() { return false; },
+      // (a) Handlers are KEPT, per type, in registration order.
+      addEventListener(type, fn) {
+        if (typeof fn !== "function") return;
+        (handlers[type] || (handlers[type] = [])).push(fn);
+      },
+      removeEventListener(type, fn) {
+        const list = handlers[type];
+        if (!list) return;
+        const i = list.indexOf(fn);
+        if (i >= 0) list.splice(i, 1);
+      },
+      // Returns how many handlers actually ran — the number a check asserts on
+      // so a never-wired (or wrongly-typed) listener cannot pass as success.
+      dispatchEvent(ev) {
+        const type = (ev && ev.type) || "click";
+        const list = (handlers[type] || []).slice();
+        const event = Object.assign({
+          type,
+          target: el,
+          currentTarget: el,
+          preventDefault() {},
+          stopPropagation() {},
+        }, ev || {});
+        for (const fn of list) fn.call(el, event);
+        return list.length;
+      },
+      // (b) A real click: dispatches every "click" handler and reports the
+      // count. `el.click()` returning 0 means the button is DEAD.
+      click() { return el.dispatchEvent({ type: "click" }); },
+      setAttribute(k, v) {
+        attrs[k] = String(v);
+        if (k === "class") el.className = String(v);
+        if (k === "id") el.id = String(v);
+      },
+      removeAttribute(k) { delete attrs[k]; },
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      hasAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k); },
       focus() {},
       blur() {},
-      click() {},
-      appendChild(child) { return child; },
-      removeChild(child) { return child; },
-      insertAdjacentHTML(_pos, html) { this.innerHTML += html; },
-      querySelector() { return null; },
-      querySelectorAll() { return []; },
+      appendChild(child) {
+        if (!child) return child;
+        kids.push(child);
+        child.parentNode = el;
+        html += serializeEl(child);
+        return child;
+      },
+      removeChild(child) {
+        const i = kids.indexOf(child);
+        if (i >= 0) kids.splice(i, 1);
+        const s = serializeEl(child);
+        const at = html.indexOf(s);
+        if (at >= 0) html = html.slice(0, at) + html.slice(at + s.length);
+        if (child) child.parentNode = null;
+        return child;
+      },
+      insertAdjacentHTML(_pos, frag) { el.innerHTML = html + String(frag == null ? "" : frag); },
+      // (c) Sub-tree lookup over the parsed children — the same objects across
+      // calls, so a handler app.js attached to a row survives to the click.
+      querySelectorAll(sel) {
+        if (typeof sel !== "string") return [];
+        if (CLASS_SEL.test(sel)) {
+          const want = sel.slice(1);
+          return kids.filter((k) => String(k.className || "").split(/\s+/).indexOf(want) >= 0);
+        }
+        if (ID_SEL_SUB.test(sel)) {
+          const want = sel.slice(1);
+          return kids.filter((k) => k.id === want);
+        }
+        return [];
+      },
+      querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
       closest() { return null; },
       getClientRects() { return []; },
+      get children() { return kids.slice(); },
     };
+
+    Object.defineProperty(el, "innerHTML", {
+      get() { return html; },
+      set(v) {
+        html = String(v == null ? "" : v);
+        kids = parseChildren(html, makeEl);
+      },
+      enumerable: true,
+      configurable: true,
+    });
+
     return el;
   }
 
@@ -95,15 +251,17 @@ function makeDom() {
     querySelector: query,
     querySelectorAll() { return []; },
     getElementById: byId,
-    // Created (non-registry) elements are throwaway wiring surfaces here. Their
-    // querySelector answers an inert element (never null) so a primitive that
-    // wires its own fresh markup — toast()'s close button is the first smoke-
-    // exercised case (gr-p2 portal-return ack) — stays inert instead of
-    // crashing the boot. Registry (#id) elements keep the null-returning
-    // querySelector above, so existence-driven logic is untouched.
-    createElement() {
-      const el = makeEl("");
-      el.querySelector = () => makeEl("");
+    // Created (non-registry) elements are freshly-authored wiring surfaces. Now
+    // that innerHTML really parses, their querySelector finds the real control
+    // (toast()'s close button, the first smoke-exercised case) — but it still
+    // NEVER answers null, because a primitive wiring markup this flat parse
+    // does not model must not abort the boot by throwing on `.addEventListener`
+    // of undefined. Registry (#id) elements keep the document-level null-
+    // returning query above, so existence-driven logic is untouched.
+    createElement(tag) {
+      const el = makeEl("", tag);
+      const real = el.querySelector.bind(el);
+      el.querySelector = (sel) => real(sel) || makeEl("", "div");
       return el;
     },
   };
@@ -150,11 +308,26 @@ function bootScenario(name) {
     href: "http://localhost/",
   };
 
+  // Per-boot mutable fixture state (cch-w2, D39). Handed to route() so a
+  // scenario can model a route that actually CHANGES something — a stateless
+  // fixture returns a byte-identical list after a destructive call, which is
+  // indistinguishable from the call never having happened, i.e. exactly the
+  // false green this slice exists to kill. Absent for mock.js (3-arg caller),
+  // which keeps the browser harness stateless and unchanged.
+  const fixtureState = {};
+
+  // Every request is logged so a check can assert the WIRE (method + path),
+  // which is the only coverage available for the destructive routes whose
+  // toast text is a client-side constant and therefore identical whether the
+  // server did the work or not.
+  const calls = [];
+
   // fetch → scenario router → a Response-like the app's api() understands.
   function fetchStub(url, init) {
     const method = (init && init.method) || "GET";
     const p = String(url);
-    const res = route(name, method, p) || { status: 404, body: { error: "not_found" } };
+    calls.push({ method, path: p.split("?")[0] });
+    const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
     return Promise.resolve({
       ok: res.status >= 200 && res.status < 300,
       status: res.status,
@@ -208,7 +381,7 @@ function bootScenario(name) {
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry, hooks: captured.hooks };
+  return { registry, hooks: captured.hooks, calls, fixtureState };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -283,6 +456,107 @@ const EXPECTATIONS = {
       // Honest about the limit: at the harness's 1000px height nine rows FIT, so
       // this documents the tall shape rather than proving overflow containment.
       assert.ok(html.includes(">Close<") && html.includes(">Log out<"), "the footer survives the tall list");
+    },
+  },
+  // ── cch-w2-revoke-click-oracle: THE CLICK ORACLE ───────────────────────────
+  // Every other expectation in this file reads markup. This one WATCHES THE APP
+  // DO SOMETHING: it clicks #acct-btn and lets the real openAccountModal →
+  // loadSessions → render → wire chain run, then clicks the buttons that chain
+  // produced. Nothing is spliced, mounted or simulated on the app's behalf —
+  // contrast account-modal-tall above, which hand-builds the rows with
+  // sessionRowHtml because until now the list could not render here at all.
+  //
+  // WHAT IT ASSERTS, and why each assertion is the one that can fail:
+  //   1. rows rendered through the REAL path      — proves the isConnected gate is open
+  //   2. clicking a row's Revoke returns fired>0  — proves the button is WIRED for "click"
+  //   3. DELETE /v1/account/sessions/<id> on wire — proves the right URL, right method
+  //   4. the list SHRINKS 4→3                     — proves the server acted (stateful fixture, D39)
+  //   5. sign-out-everywhere toasts the SERVER's count — the one text-observable false green
+  //
+  // COVERAGE BOUNDARY (D40 — an enforcement mechanism states its own limits).
+  // Of the 8 unfixtured destructive DELETEs this slice is scoped to, exactly
+  // ONE — /v1/account/sessions (app.js:1005) — interpolates a server value into
+  // its toast, so it is the only one where a missing fixture is visible AS TEXT
+  // ("0 session(s) revoked."). This oracle covers it by TEXT. The per-row
+  // sibling (:1079) is covered by WIRE + STATE (it toasts nothing on success).
+  // The remaining six — /v1/auth/logout (:1027), /v1/github/installation
+  // (:2295), /v1/barkparks/:id (:5430, :5474), the webhook DELETE (:7381) and
+  // /v1/sites/:id/github (:9991) — toast client-side CONSTANTS ("Instance
+  // removed", "Webhook deleted"), so a generic 200 produces a message that is
+  // both indistinguishable from the real one and, in fact, honest. Their defect
+  // is not "prod says 0", it is "nothing here would catch a regression". They
+  // are NOT covered by this scenario; they are click-reachable now that the
+  // shim works, and that is follow-on work, filed — not silently implied.
+  "account-modal-revoke": {
+    what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke fires the right DELETE and shrinks the list, sign-out-everywhere reports the SERVER's count",
+    async check(reg, hooks, ctx) {
+      // ─ 1. the modal opens by CLICK, exactly as a user opens it ─────────────
+      const acct = reg.get("acct-btn");
+      assert.ok(acct, "#acct-btn was never touched — init() did not wire the shell");
+      assert.equal(acct.click(), 1, "#acct-btn must have exactly one click handler (it opens the account modal)");
+      await ctx.settle();
+
+      // The session list rendered through the REAL loadSessions, which is only
+      // possible because the shim now answers isConnected (app.js:1072).
+      const box = reg.get("sessions-box");
+      const rendered = box.innerHTML || "";
+      assert.ok(rendered.includes("session-row"),
+        "#sessions-box is empty — loadSessions bailed at its `if (!box.isConnected) return;` guard, " +
+        "which is the state this harness sat in for its whole existence");
+      assert.equal(countMatches(rendered, 'class="session-row"'), 4, "the fixture's four sessions render");
+      assert.equal(ctx.countCalls("GET", "/v1/account/sessions"), 1, "the list was fetched once on open");
+
+      // ─ 2/3/4. the PER-ROW revoke: wired, right URL, and it ACTS ────────────
+      const revokes = box.querySelectorAll(".session-revoke");
+      assert.equal(revokes.length, 3, "three revokable rows — the current device is never self-revokable");
+      const victim = revokes[0].getAttribute("data-id");
+      assert.ok(victim && victim !== "sess_here",
+        "the row must carry a real data-id and must not be the acting session, got " + JSON.stringify(victim));
+
+      // THE CLICK-COUNT ASSERTION IS LOAD-BEARING. This shim's selector support
+      // is narrow, so a selector it cannot parse answers an EMPTY list — and a
+      // loop over nothing "succeeds". A dead button (wired to "mousedown", say)
+      // dispatches zero handlers, and only this line notices.
+      const fired = revokes[0].click();
+      assert.equal(fired, 1,
+        "the per-row Revoke dispatched " + fired + " click handlers — the button is DEAD. " +
+        "Every source string can still be present and correct; nothing is bound to \"click\".");
+      await ctx.settle();
+
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/sessions/" + victim), 1,
+        "the click must issue exactly one DELETE for that row's id");
+      // D39: this line is the reason the fixture is stateful. Against a static
+      // fixture the re-render returns a byte-identical list, so this assertion
+      // would hold whether or not the DELETE ever reached the server — a false
+      // green planted inside the anti-false-green scenario.
+      const after = reg.get("sessions-box").innerHTML || "";
+      assert.equal(countMatches(after, 'class="session-row"'), 3,
+        "the revoked row must be GONE on the re-render (4 → 3); an unchanged list means the DELETE did nothing");
+      assert.ok(!after.includes('data-id="' + victim + '"'), "the revoked row's id must not come back");
+      assert.equal(ctx.countCalls("GET", "/v1/account/sessions"), 2, "the success arm refetches the list");
+
+      // ─ 5. SIGN OUT EVERYWHERE: the one text-observable false green ─────────
+      const all = reg.get("sessions-revoke-all");
+      assert.equal(all.click(), 1, "the Sign-out-everywhere button must be wired for \"click\"");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/sessions"), 1, "one sign-out-everywhere DELETE on the wire");
+
+      const toasts = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(toasts.includes("Signed out other devices"), "the success toast must actually mount");
+      // Two sessions remained revokable after the per-row revoke, so the SERVER
+      // says 2. app.js:1005 renders `(r.data.revoked || 0)` — with no DELETE
+      // fixture the generic `/v1/` 200 {} answers `{}`, `revoked` is undefined,
+      // and the console cheerfully announces a revoke of nothing.
+      assert.ok(!toasts.includes("0 session(s) revoked"),
+        "THE FALSE GREEN: the console reported '0 session(s) revoked.' after revoking real sessions — " +
+        "DELETE /v1/account/sessions answered the generic 200 {} instead of {revoked: N}");
+      assert.ok(toasts.includes("2 session(s) revoked"),
+        "the toast must carry the SERVER's count (2 others remained), not a client-invented number; got: " + toasts);
+
+      // And the list settles on the acting device alone.
+      const settled = reg.get("sessions-box").innerHTML || "";
+      assert.equal(countMatches(settled, 'class="session-row"'), 1, "only the acting session survives");
+      assert.ok(settled.includes("This device"), "and it is the current one");
     },
   },
   "account-modal-2fa-badcode": {
@@ -1657,11 +1931,22 @@ function countMatches(hay, needle) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, hooks } = bootScenario(name);
+  const { registry, hooks, calls, fixtureState } = bootScenario(name);
   await flush();
 
   if (exp.check) {
-    exp.check(registry, hooks);
+    // check may be async: a click-driven scenario has to settle the fetch
+    // chain the click started before it can read the re-render. `ctx.settle()`
+    // is that await; sync checks simply ignore the third argument.
+    await exp.check(registry, hooks, {
+      calls,
+      state: fixtureState,
+      settle: flush,
+      // How many times METHOD PATH was requested — the wire assertion.
+      countCalls(method, path) {
+        return calls.filter((c) => c.method === method && c.path === path).length;
+      },
+    });
     return exp.what;
   }
 
