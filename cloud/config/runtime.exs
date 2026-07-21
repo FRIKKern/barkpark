@@ -363,3 +363,40 @@ if config_env() == :prod do
     config :barkpark_cloud, :public_url, public_url
   end
 end
+
+# cch-w1-peer-ip-pin: the front-door peers whose X-Forwarded-For may move
+# conn.remote_ip, as a comma-separated list of IP addresses (e.g.
+# "172.18.0.1"). Loopback is always trusted in code and does not need listing.
+#
+# Deliberately OUTSIDE the prod block: the container runs this stack in any
+# MIX_ENV, and the docker bridge gateway is a property of the DEPLOYMENT, not of
+# the environment name. Unset keeps the config.exs default (the pinned gateway),
+# which is what compose's pinned subnet allocates.
+#
+# List INDIVIDUAL ADDRESSES ONLY, and keep this in step with the `networks:`
+# subnet in cloud/docker-compose.yml. Do not be tempted to accept CIDR ranges
+# here: a range re-opens the forgery hole this pin exists to close (charter D5 —
+# 172.18.0.2 is an internet-facing SMTP container). A malformed entry raises at
+# boot rather than silently degrading the guard to a no-op.
+if peers = System.get_env("TRUSTED_PROXY_PEERS") do
+  config :barkpark_cloud,
+         :trusted_proxy_peers,
+         peers
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+         |> Enum.map(fn peer ->
+           case :inet.parse_address(String.to_charlist(peer)) do
+             {:ok, address} ->
+               address
+
+             {:error, _} ->
+               raise """
+               TRUSTED_PROXY_PEERS contains #{inspect(peer)}, which is not a valid IP address.
+               Expected a comma-separated list of individual addresses, e.g. "172.18.0.1".
+               CIDR ranges are NOT supported: trusting a whole subnet lets any container on
+               it forge every client's session IP and rate-limit bucket.
+               """
+           end
+         end)
+end

@@ -77,6 +77,19 @@ x-control-plane: &control_plane
     - SMTP_VERIFY_PEER=${SMTP_VERIFY_PEER:-false}
     - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@barkpark.cloud}
     - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Barkpark Cloud}
+    # cch-w1-peer-ip-pin: the peers whose X-Forwarded-For may move
+    # conn.remote_ip. Caddy runs as a HOST service proxying to localhost:4100,
+    # and Docker's hairpin NAT rewrites the source the container sees to the
+    # bridge GATEWAY — so in prod the peer is the gateway, never 127.0.0.1, and
+    # without this every session recorded 172.18.0.1 (measured: 48 of 49 rows)
+    # and the device-auth rate bucket collapsed into one global bucket.
+    #
+    # The default is the .1 gateway of the subnet PINNED under `networks:` at
+    # the bottom of this file — these two values MUST move together. Individual
+    # addresses only, never a CIDR range: the `postfix` service below publishes
+    # 0.0.0.0:587 to the internet from this same network, so trusting the whole
+    # subnet would let it forge any client's IP.
+    - TRUSTED_PROXY_PEERS=${TRUSTED_PROXY_PEERS:-172.18.0.1}
   restart: unless-stopped
 
 services:
@@ -134,6 +147,25 @@ services:
       - postfix_queue:/var/spool/postfix
       - postfix_tls:/etc/postfix/tls
     restart: unless-stopped
+
+# cch-w1-peer-ip-pin (charter D6). This block did not exist before: the network
+# was auto-created and its subnet AUTO-ALLOCATED, landing on 172.18.0.0/16 only
+# because a pre-existing default bridge had taken 172.17.0.0/16.
+#
+# That mattered because the control plane trusts the bridge GATEWAY's
+# X-Forwarded-For (see TRUSTED_PROXY_PEERS above): with an allocation-order
+# subnet, the very next `docker compose down && up` on a differently-populated
+# host silently moves the gateway, and the trust check degrades back into the
+# permanent no-op it was — while its tests keep passing. Pinning the subnet is
+# what makes the pinned peer a fact instead of a coincidence.
+#
+# If you change this subnet, change TRUSTED_PROXY_PEERS to match its .1 gateway
+# in the SAME commit.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
 
 volumes:
   cloud_pgdata:

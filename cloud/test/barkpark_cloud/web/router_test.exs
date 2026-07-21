@@ -2192,5 +2192,74 @@ defmodule BarkparkCloud.Web.RouterTest do
       conn = Router.call(conn(:get, "http://localhost:4100/up"), @opts)
       assert conn.remote_ip == {127, 0, 0, 1}
     end
+
+    # cch-w1-peer-ip-pin. Measured on production: 48 of 49 user_tokens rows carry
+    # 172.18.0.1 and exactly one carries a real client IP. Caddy is a HOST systemd
+    # service reverse-proxying to localhost:4100, but Docker's hairpin NAT rewrites
+    # the source the container sees to the bridge GATEWAY — so the loopback-only
+    # guard was a permanent no-op in prod and every session recorded the gateway.
+    test "X-Forwarded-For honored when the peer is the docker bridge gateway" do
+      conn =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {172, 18, 0, 1}}
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      assert conn.remote_ip == {203, 0, 113, 5}
+    end
+
+    # THE PIN, not a 172.16/12 widening (charter D5). This is the ONLY case that
+    # distinguishes the two: the three tests above pass under BOTH. With the wide
+    # version applied, this peer successfully forged 203.0.113.5 — and
+    # cloud-postfix-1 sits on 172.18.0.2 publishing 0.0.0.0:587 to the internet,
+    # so widening would hand an internet-facing SMTP container the ability to
+    # forge any client's session IP and rate-limit bucket. Do not "simplify" the
+    # trusted-peer list into a CIDR range to make this test pass.
+    test "X-Forwarded-For IGNORED for a private peer that is NOT the gateway" do
+      conn =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {172, 18, 0, 77}}
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      assert conn.remote_ip == {172, 18, 0, 77}
+    end
+
+    # WHY trusting the gateway is safe: RemoteIp resolves the RIGHTMOST unproxied
+    # entry, not the leftmost. Caddy APPENDS the real peer at the right end, so a
+    # client-supplied XFF prefix is discarded even once the gateway is trusted.
+    # (Had it been leftmost, trusting the gateway would have opened universal
+    # client-side IP forgery.) This test pins the property the router's comment
+    # claims — it used to claim the opposite.
+    test "a multi-hop chain resolves to the RIGHTMOST entry, so a client prefix cannot forge" do
+      conn =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {172, 18, 0, 1}}
+        |> put_req_header("x-forwarded-for", "1.2.3.4, 203.0.113.5")
+        |> Router.call(@opts)
+
+      assert conn.remote_ip == {203, 0, 113, 5}
+    end
+
+    # The trusted peer is config-driven (charter D6) so compose's pinned subnet
+    # and the router share ONE source of truth: an operator who moves the bridge
+    # moves this value, and nothing about the guard's SHAPE changes.
+    test "the trusted-peer list is config-driven, and an unlisted peer stays untrusted" do
+      original = Application.get_env(:barkpark_cloud, :trusted_proxy_peers)
+      Application.put_env(:barkpark_cloud, :trusted_proxy_peers, [{10, 9, 8, 7}])
+      on_exit(fn -> Application.put_env(:barkpark_cloud, :trusted_proxy_peers, original) end)
+
+      trusted =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {10, 9, 8, 7}}
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      assert trusted.remote_ip == {203, 0, 113, 5}
+
+      # ...and the default gateway is no longer trusted once it is out of the list.
+      untrusted =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {172, 18, 0, 1}}
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      assert untrusted.remote_ip == {172, 18, 0, 1}
+    end
   end
 end

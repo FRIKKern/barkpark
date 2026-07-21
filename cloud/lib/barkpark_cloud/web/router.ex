@@ -349,34 +349,79 @@ defmodule BarkparkCloud.Web.Router do
 
   # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
   # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
-  # our own front so a multi-hop chain resolves to the leftmost real client. The
-  # peer-trust guard lives in :trust_forwarded_ip below — RemoteIp itself does
-  # not inspect the raw peer, so we only invoke it once we've confirmed the peer
-  # is loopback.
+  # our own front.
+  #
+  # MEASURED, and the whole reason this is safe: RemoteIp resolves the RIGHTMOST
+  # entry of the chain that is not a known proxy, NOT the leftmost. Given
+  # `x-forwarded-for: "1.2.3.4, 203.0.113.5"` it yields 203.0.113.5. Caddy
+  # APPENDS the peer it actually saw at the right end, so a client-supplied XFF
+  # prefix is discarded — which is why trusting the bridge gateway below cannot
+  # open client-side IP forgery. (An earlier version of this comment claimed
+  # "leftmost"; that was false, and under leftmost semantics the peer-trust
+  # widening below WOULD have been exploitable.) Pinned by the rightmost-chain
+  # test in router_test.exs.
+  #
+  # `proxies` is deliberately NOT widened alongside the trusted-peer list:
+  # RemoteIp resolves from the header chain and never consults conn.remote_ip,
+  # so the peer-trust guard in :trust_forwarded_ip is the only knob that matters
+  # here. Adding the bridge gateway to `proxies` would only start DISCARDING a
+  # legitimately-appended hop.
   @remote_ip_opts RemoteIp.init(
                     headers: ["x-forwarded-for"],
                     proxies: ["127.0.0.0/8", "::1/128"]
                   )
 
   # Rewrite conn.remote_ip to the real client IP from X-Forwarded-For, but ONLY
-  # when the immediate peer is a trusted loopback proxy (the Caddy front, which
-  # is the ONLY thing that can reach the loopback-bound :410x listener in prod).
-  # A request whose actual peer is NOT loopback is left untouched: its
-  # X-Forwarded-For is attacker-controlled and must never move remote_ip, or a
-  # directly-reachable client could forge its rate-limit bucket / session IP.
+  # when the immediate peer is a trusted front (loopback, or the docker bridge
+  # gateway — see trusted_peer?/1). A request whose actual peer is NOT trusted is
+  # left untouched: its X-Forwarded-For is attacker-controlled and must never
+  # move remote_ip, or a directly-reachable client could forge its rate-limit
+  # bucket / session IP.
   defp trust_forwarded_ip(conn, _opts) do
-    if loopback_peer?(conn.remote_ip) do
+    if trusted_peer?(conn.remote_ip) do
       RemoteIp.call(conn, @remote_ip_opts)
     else
       conn
     end
   end
 
-  # IPv4 loopback (127.0.0.0/8) or IPv6 loopback (::1). conn.remote_ip is an
-  # :inet address tuple; anything else (nil / malformed) is treated as untrusted.
-  defp loopback_peer?({127, _, _, _}), do: true
-  defp loopback_peer?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  defp loopback_peer?(_), do: false
+  # cch-w1-peer-ip-pin. Loopback alone was a PERMANENT NO-OP in production, and
+  # it was measured as one: 48 of 49 user_tokens rows carried 172.18.0.1 and
+  # exactly one carried a real client IP.
+  #
+  # Why: Caddy is a HOST systemd service whose Caddyfile is a bare
+  # `reverse_proxy localhost:4100`, and the app container publishes
+  # 127.0.0.1:4100 only. Caddy dials loopback, but Docker's hairpin NAT rewrites
+  # the source address the CONTAINER sees to the bridge GATEWAY. So the peer is
+  # never 127.0.0.1 in prod, the guard never fired, and both consumers of
+  # remote_ip degraded: the session ip_address the account modal shows, and the
+  # device-auth `start:<ip>` bucket (the only IP-keyed limiter in cloud/), which
+  # collapsed into ONE GLOBAL bucket.
+  #
+  # The gateway is PINNED to a single address, never a CIDR range (charter D5).
+  # With a 172.16.0.0/12 widening applied, peer {172,18,0,77} successfully forged
+  # 203.0.113.5 — and cloud-postfix-1 sits on 172.18.0.2 publishing 0.0.0.0:587
+  # to the internet, so the wide version would hand an internet-facing SMTP
+  # container the ability to forge any client's session IP and rate bucket.
+  # Pinning excludes .2/.3/.4 by construction.
+  #
+  # The list is config-driven (charter D6) so it shares ONE source of truth with
+  # the pinned `networks:` subnet in cloud/docker-compose.yml: an operator who
+  # moves the bridge sets TRUSTED_PROXY_PEERS and the compose subnet together.
+  # A bare hardcoded tuple would rot into a silent no-op the next time the stack
+  # is recreated onto a different auto-allocated subnet — with a test still
+  # asserting it works.
+  #
+  # conn.remote_ip is an :inet address tuple; anything else (nil / malformed) is
+  # treated as untrusted.
+  defp trusted_peer?({127, _, _, _}), do: true
+  defp trusted_peer?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+
+  defp trusted_peer?(peer) when is_tuple(peer) do
+    peer in Application.get_env(:barkpark_cloud, :trusted_proxy_peers, [])
+  end
+
+  defp trusted_peer?(_), do: false
 
   # Front-door canonicalization: 308 www.<dashboard-host> -> the apex dashboard
   # origin, carrying the path AND query string through (the device-link `?code=`
