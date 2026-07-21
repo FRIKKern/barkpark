@@ -372,8 +372,17 @@ cmd_stamp() {
   if [ "$rc" -ne 0 ]; then
     warn ""
     warn "STAMP REJECTED (exit $rc). Nothing was written — this server is fail-closed on stamps."
-    warn "If the message says criteria_mismatch, the text sent did not match the stored row at"
-    warn "index $idx. Do NOT retype it inline; re-run this script (the file path is the fix)."
+    warn ""
+    warn "  fenced_off / stale epoch — THE LIKELY ONE ACROSS A LONG CLIMB."
+    warn "    \`bp task pulse\` BUMPS THE CLAIM EPOCH. The epoch you were handed at claim time"
+    warn "    is dead the moment you pulse, so a stamp run later in the climb with that"
+    warn "    original number is fenced out. Nothing is wrong with your text. Re-read the"
+    warn "    CURRENT epoch and pass that:"
+    warn "        bp task get $task_id -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"doc\"][\"claim\"][\"epoch\"])'"
+    warn "    Re-read it after EVERY pulse, not once at the start."
+    warn ""
+    warn "  criteria_mismatch — the text sent did not match the stored row at index $idx."
+    warn "    Do NOT retype it inline; re-run this script (the file path is the fix)."
     exit "$EX_FAILED"
   fi
 
