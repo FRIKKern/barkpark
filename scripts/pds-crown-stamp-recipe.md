@@ -31,6 +31,50 @@ scripts/pds-crown-stamp.sh census pds-w1-crown-proof
 
 ---
 
+## Step zero — CLAIM THE CROWN. It is unclaimed, and nothing else says so.
+
+`pds-w1-crown-proof` sits `lifecycle: open`, `claim.worker: null` (released
+2026-07-20T04:47:25Z by `reopen-prober`, epoch 15). **A stamp against an
+unclaimed task is rejected.** Do this first, before the first criterion:
+
+```sh
+bp task claim pds-w1-crown-proof <worker>     # → epoch resets to 1
+```
+
+There is no D139 catch-22 to work around: `claim.worker` is already null and
+`execution_class` is `executable`, so a plain claim works.
+
+**Measured**, on throwaway `pds-w15-throwaway-a`:
+
+| | command | result |
+|---|---|---|
+| **unclaimed** | `bp task stamp …` | stderr `bp: not_in_progress:open`, **exit 2** |
+| **unclaimed** | the same through this script | **exit 2**, nothing written — `criteria_progress` unchanged |
+| **claimed first** | the *identical* script stamp | **exit 0**, read-back `CONFIRMED … now at 2/2` |
+
+### Why this one strands you rather than stopping you
+
+The script's rejection block does not name `not_in_progress:open`. It names
+`fenced_off` — labelled *"THE LIKELY ONE"* — and tells you to go re-read the
+current epoch. Follow that advice against an unclaimed task and you get `15`
+back, re-stamp with `15`, and fail **identically**. The advice is correct for
+the failure it was written for and actively misleading for this one. **If the
+reason string is `not_in_progress:open`, the epoch is not your problem — the
+claim is. Stop reading epochs.**
+
+### Claiming is also what re-arms the auto-close (PDS-D140)
+
+The crown has **TWELVE** criteria, `0..11` — not eleven. (PDS-D140's prose is
+written in the older 11-criterion numbering; read it as 11/12 and *all twelve*.)
+Once the twelfth reads `met`, the cmux Stop hook **closes the task with nobody
+typing it**. Claiming is what puts that hook back in the loop, so:
+
+- claim before the first stamp, not after the eleventh;
+- never stamp a criterion speculatively ahead of a green rung — the last met-flip
+  is a live trigger, not a bookkeeping entry.
+
+---
+
 ## Why fetch-to-file, and why for all twelve
 
 Both halves of this were proven live before the script existed.
@@ -134,6 +178,64 @@ nothing), so recovery is always *retry shorter*, never *reconcile a half-write*.
 
 ---
 
+## Re-stamping a criterion that ALREADY reads met
+
+Nine of the crown's twelve (`0,1,2,3,4,5,7,8,9`) already read `met: true`, and
+`pds-w14-crown-collect-stamp` orders criterion 0 **re-evidenced** because its
+stored evidence is stale in substance. Every rehearsal before this one only ever
+flipped `false → true`, so `true → true` was unmeasured.
+
+**Measured: it LANDS. The evidence field is overwritten. There is no silent
+no-op and no error, so no workaround is needed.**
+
+| | before | after |
+|---|---|---|
+| draft `pds-w15-throwaway-a` c1 | `met=True`, `'STALE-EVIDENCE-ORIGINAL-do-not-keep'` | exit 0, new rev `28cf73bf` → `'CASE2-NEW-EVIDENCE-should-replace-the-stale-one'` |
+| **published** `pds-w15-throwaway-b` c0 | `met=True`, `'STALE-B-ORIGINAL-do-not-keep'` | exit 0 → `'CASE2b-NEW-EVIDENCE-published-shape'` |
+
+The published case matters because the crown is published and boards read the
+published ledger. `GET /v1/data/query/production/task` returned the new evidence
+with `_draft: false` and **no re-publish step**. Stamping writes through.
+
+### But the read-back does not prove it. Diff the evidence yourself.
+
+The script confirms on `met == true` (`pds-crown-stamp.sh:408`). On a `met → met`
+re-stamp that was **already true before the write**, so `CONFIRMED: criterion N
+reads met` would print identically whether the evidence landed or was dropped on
+the floor. It is a true statement that answers the wrong question.
+
+For any criterion already reading `met`, verify the **string**, not the flag:
+
+```sh
+bp task get pds-w1-crown-proof -o json 2>/dev/null | python3 -c '
+import json,sys; print(repr(json.load(sys.stdin)["doc"]["content"]["acceptance_criteria"][0]["evidence"]))'
+```
+
+(The document `rev` changing is a second, weaker signal — weaker because a
+concurrent pulse also moves it.)
+
+---
+
+## Before you collect: drop stray control databases
+
+`scripts/pds-secret-scan.sh control` creates `pds_secret_scan_ctl_$$` and drops
+it from a `trap cleanup EXIT` (`:469`). A trap does not run on `SIGKILL`, and
+`--keep` skips the drop deliberately, so a control killed mid-run leaves the
+database behind. One is harmless; PDS-D250 expects the climb to be **re-armed
+repeatedly**, and they accumulate.
+
+Check and drop on the collect path:
+
+```sh
+psql postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'pds_secret_scan_ctl_%'" \
+  | while read -r db; do [ -n "$db" ] && psql postgres -q -c "DROP DATABASE IF EXISTS \"$db\""; done
+```
+
+Empty output is the healthy state. Never drop one while a control run is live —
+the suffix is the owning process's PID, so `ps -p <pid>` settles it.
+
+---
+
 ## Rehearsing
 
 Rehearse against a **disposable scratch task**, never against
@@ -165,6 +267,20 @@ neither of which writes.
 
 A `2` on a stamp means nothing was written. **Do not retype the criterion
 inline** to "work around" it — re-run the script. The file path is the fix.
+
+### Reading a `2`: the reason string tells you which fix applies
+
+The script prints two candidate causes. There are three, and picking the wrong
+one costs you the night. **Read the `bp:` line above the block, not the block.**
+
+| reason string | what is actually wrong | the fix |
+|---|---|---|
+| `not_in_progress:open` | the task is **unclaimed** — the epoch is irrelevant | `bp task claim <task> <worker>`, then re-run with the epoch it returns. **This is the crown's state today.** |
+| `fenced_off` | your epoch is stale — a `pulse` bumped it | re-read the current epoch and pass that. Re-read after **every** pulse. |
+| `criteria_mismatch` | the text sent did not match the stored row | re-run the script; never retype inline |
+
+Chasing epochs on a `not_in_progress:open` is an infinite loop: every re-read
+returns the same number and every re-stamp fails the same way.
 
 ---
 
