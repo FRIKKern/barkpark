@@ -10,6 +10,7 @@
 import {
   evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
+  readManifest, attribute, lostLines, MANIFEST_PATH,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
 import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
@@ -32,11 +33,42 @@ function firstDiff(a, b) {
   return "    (files differ in length only)";
 }
 
-console.log("design/check.mjs — Part A: per-surface byte parity");
+// Part A also carries the emitter's MEMORY. Without it this gate is a tautology
+// on the far side of a write: `expected` is build() and `current` is whatever
+// build() last wrote, so once emit --write has run, current === expected BY
+// CONSTRUCTION and the gate prints a clean PASS over content the write destroyed.
+// design/emit-manifest.json breaks the tautology — it records what the emitter
+// last emitted, so a region holding bytes the emitter never produced is named as
+// UNATTRIBUTED whether or not it also drifts. Crucially the remedy printed for
+// that case is NOT "run --write" (which is the very command that deletes it).
+let manifestRegions = {};
+let manifestErr = null;
+try { manifestRegions = readManifest() ?? {}; }
+catch (e) { manifestErr = e.message; }
+if (manifestErr) fail(`  FAIL ${MANIFEST_PATH}: ${manifestErr}`);
+
+let unattributedSeen = false;
+function reportUnattributed(r) {
+  unattributedSeen = true;
+  const lost = lostLines(r.currentRegion, r.expectedRegion);
+  fail(`  UNATTRIBUTED ${r.name} (${r.path}) — the generated region holds bytes design/emit.mjs never wrote`);
+  if (lost.length) {
+    console.error(`    ${lost.length} line(s) present on disk and absent from the regenerated output:`);
+    for (const l of lost.slice(0, 8)) console.error(`      - ${l}`);
+    if (lost.length > 8) console.error(`      … and ${lost.length - 8} more`);
+  }
+  console.error(`    Do NOT "fix" this with --write: that DELETES the lines above (see commit 1d928b3bf).`);
+  console.error(`    Hand-written? move it outside the BEGIN/END GENERATED marker. Genuinely generated? node design/emit.mjs --adopt`);
+}
+
+console.log("design/check.mjs — Part A: per-surface byte parity + generated-region attribution");
 for (const r of evaluateAll()) {
   if (r.error) { fail(`  FAIL ${r.name}: ${r.error}`); continue; }
   if (r.current == null) { fail(`  FAIL ${r.name}: committed file ${r.path} is missing`); continue; }
-  if (r.current !== r.expected) {
+  const attributed = !manifestErr && attribute(r, manifestRegions) === "attributed";
+  if (!attributed) {
+    reportUnattributed(r);
+  } else if (r.current !== r.expected) {
     fail(`  DRIFT ${r.name} (${r.path}) — committed output is STALE vs design/tokens.json`);
     console.error(firstDiff(r.current, r.expected));
   } else {
@@ -49,8 +81,10 @@ for (const r of evaluateAll()) {
 // a stale committed mirror trips HERE the same way a stale surface trips above.
 {
   const mr = evaluateMirror(repoRoot);
+  const mu = mr.error ? mr : { ...mr, currentRegion: mr.currentBlock, expectedRegion: mr.generatedBlock };
   if (mr.error) fail(`  FAIL ${mr.name}: ${mr.error}`);
   else if (mr.current == null) fail(`  FAIL ${mr.name}: committed file ${mr.path} is missing`);
+  else if (manifestErr || attribute(mu, manifestRegions) !== "attributed") reportUnattributed(mu);
   else if (mr.current !== mr.expected) {
     fail(`  DRIFT ${mr.name} (${mr.path}) — the paper-editor mirror is STALE vs api/assets/paper-surface/paper-surface.css`);
     console.error(firstDiff(mr.current, mr.expected));
@@ -58,7 +92,10 @@ for (const r of evaluateAll()) {
     console.log(`  ok   ${mr.name} (${mr.path})`);
   }
 }
-if (failed) console.error("\n  Fix: node design/emit.mjs --write\n");
+// The blanket "Fix: --write" is safe ONLY where nothing is unattributed; where a
+// region holds hand-written bytes, --write is the destructive act, not the fix.
+if (failed && !unattributedSeen) console.error("\n  Fix: node design/emit.mjs --write\n");
+else if (unattributedSeen) console.error("\n  Fix: relocate hand-written content outside the marker (--write would DELETE it), or --adopt if it is genuinely generated.\n");
 
 // ── Part B (§6): cross-surface lifecycle parity ──────────────────────────────
 // Source of truth = tokens.lifecycle. Two independent EMITTED artifacts must
@@ -849,7 +886,9 @@ if (failed === failedBeforeH)
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {
-  console.error("\ndesign/check.mjs: FAILED — a surface has drifted from design/tokens.json.");
+  console.error(unattributedSeen
+    ? "\ndesign/check.mjs: FAILED — a generated region holds content design/emit.mjs never wrote (or a surface has drifted from design/tokens.json)."
+    : "\ndesign/check.mjs: FAILED — a surface has drifted from design/tokens.json.");
   process.exit(1);
 }
-console.log(`\ndesign/check.mjs: PASS — ${ARTIFACTS.length} surfaces in lockstep + §6 lifecycle parity holds.`);
+console.log(`\ndesign/check.mjs: PASS — ${ARTIFACTS.length} surfaces in lockstep + §6 lifecycle parity holds, every generated region attributed to design/emit.mjs.`);
